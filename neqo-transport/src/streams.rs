@@ -183,7 +183,7 @@ impl Streams {
             }
             Frame::DataBlocked { data_limit } => {
                 // Should never happen since we set data limit to max
-                qwarn!("Received DataBlocked with data limit {}", data_limit);
+                qwarn!("Received DataBlocked with data limit {data_limit}");
                 stats.data_blocked += 1;
                 self.handle_data_blocked();
             }
@@ -205,7 +205,7 @@ impl Streams {
                 // We send an update every time we retire a stream. There is no need to
                 // trigger flow updates here.
             }
-            _ => unreachable!("This is not a stream Frame"),
+            _ => return Err(Error::InternalError), // This is not a stream frame.
         }
         Ok(())
     }
@@ -405,15 +405,22 @@ impl Streams {
     /// indicated by its stream id.
     /// # Errors
     /// When the stream cannot be created due to stream limits.
+    /// When the stream is locally-initiated and has not existed.
     pub fn obtain_stream(
         &mut self,
         stream_id: StreamId,
     ) -> Res<(Option<&mut SendStream>, Option<&mut RecvStream>)> {
         self.ensure_created_if_remote(stream_id)?;
-        Ok((
-            self.send.get_mut(stream_id).ok(),
-            self.recv.get_mut(stream_id).ok(),
-        ))
+        // Has this local stream existed in the past, i.e., is its index lower than the number of
+        // used streams?
+        let existed = !stream_id.is_remote_initiated(self.role)
+            && self.local_stream_limits[stream_id.stream_type()].used() > stream_id.index();
+        let ss = self.send.get_mut(stream_id).ok();
+        let rs = self.recv.get_mut(stream_id).ok();
+        if ss.is_none() && rs.is_none() && !existed {
+            return Err(Error::StreamStateError);
+        }
+        Ok((ss, rs))
     }
 
     /// # Errors

@@ -16,10 +16,7 @@ use std::{
 
 use neqo_common::qwarn;
 
-use crate::{
-    ecn::{EcnCount, EcnValidationCount},
-    packet::PacketNumber,
-};
+use crate::{ecn, packet::PacketNumber};
 
 pub const MAX_PTO_COUNTS: usize = 16;
 
@@ -171,6 +168,10 @@ pub struct Stats {
     pub pmtud_lost: usize,
     /// Number of times a path MTU changed unexpectedly.
     pub pmtud_change: usize,
+    /// MTU of the local interface used for the most recent path.
+    pub pmtud_iface_mtu: usize,
+    /// Probed PMTU of the current path.
+    pub pmtud_pmtu: usize,
 
     /// Whether the connection was resumed successfully.
     pub resumed: bool,
@@ -198,7 +199,7 @@ pub struct Stats {
     pub datagram_tx: DatagramStats,
 
     /// ECN path validation count, indexed by validation outcome.
-    pub ecn_path_validation: EcnValidationCount,
+    pub ecn_path_validation: ecn::ValidationCount,
     /// ECN counts for outgoing UDP datagrams, returned by remote through QUIC ACKs.
     ///
     /// Note: Given that QUIC ACKs only carry [`Ect0`], [`Ect1`] and [`Ce`], but
@@ -210,9 +211,9 @@ pub struct Stats {
     /// [`Ect1`]: neqo_common::tos::IpTosEcn::Ect1
     /// [`Ce`]: neqo_common::tos::IpTosEcn::Ce
     /// [`NotEct`]: neqo_common::tos::IpTosEcn::NotEct
-    pub ecn_tx: EcnCount,
+    pub ecn_tx: ecn::Count,
     /// ECN counts for incoming UDP datagrams, read from IP TOS header.
-    pub ecn_rx: EcnCount,
+    pub ecn_rx: ecn::Count,
 }
 
 impl Stats {
@@ -223,8 +224,8 @@ impl Stats {
     pub fn pkt_dropped(&mut self, reason: impl AsRef<str>) {
         self.dropped_rx += 1;
         qwarn!(
-            [self.info],
-            "Dropped received packet: {}; Total: {}",
+            "[{}] Dropped received packet: {}; Total: {}",
+            self.info,
             reason.as_ref(),
             self.dropped_rx
         );
@@ -262,8 +263,13 @@ impl Debug for Stats {
         )?;
         writeln!(
             f,
-            "  pmtud: {} sent {} acked {} lost {} change",
-            self.pmtud_tx, self.pmtud_ack, self.pmtud_lost, self.pmtud_change
+            "  pmtud: {} sent {} acked {} lost {} change {} iface_mtu {} pmtu",
+            self.pmtud_tx,
+            self.pmtud_ack,
+            self.pmtud_lost,
+            self.pmtud_change,
+            self.pmtud_iface_mtu,
+            self.pmtud_pmtu
         )?;
         writeln!(f, "  resumed: {}", self.resumed)?;
         writeln!(f, "  frames rx:")?;
