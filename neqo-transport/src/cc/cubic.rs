@@ -29,7 +29,7 @@ pub const CUBIC_C: f64 = 0.4;
 /// <https://datatracker.ietf.org/doc/html/rfc8312#section-4.2>
 pub const CUBIC_ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7);
 
-/// CUBIC_BETA = 0.7;
+/// [`CUBIC_BETA`] = 0.7;
 ///
 /// > Principle 4: To balance between the scalability and convergence speed,
 /// > CUBIC sets the multiplicative window decrease factor to 0.7 while Standard
