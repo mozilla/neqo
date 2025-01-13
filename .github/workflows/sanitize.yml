@@ -29,7 +29,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest] # No Windows support for sanitizers.
+        # TODO: Unpin ubuntu when https://github.com/rust-lang/rust/issues/111073#issuecomment-2561607617 is fixed.
+        os: [ubuntu-22.04, macos-latest] # No Windows support for sanitizers.
         sanitizer: [address, thread, leak] # TODO: memory
         exclude:
           # Memory and leak sanitizers are not supported on macOS.
@@ -62,7 +63,7 @@ jobs:
           RUSTDOCFLAGS: "-Z sanitizer=${{ matrix.sanitizer }}"
           ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
         run: |
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+          if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
             sudo apt-get install -y --no-install-recommends llvm
             TARGET="x86_64-unknown-linux-gnu"
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
