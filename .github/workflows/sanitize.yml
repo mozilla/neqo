@@ -29,6 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # TODO: Unpin ubuntu when https://github.com/rust-lang/rust/issues/111073#issuecomment-2561607617 is fixed.
         os: [ubuntu-22.04, macos-latest] # No Windows support for sanitizers.
         sanitizer: [address, thread, leak] # TODO: memory
         exclude:
