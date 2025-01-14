@@ -247,7 +247,7 @@ impl PacketBuilder {
         pmtud: &Pmtud,
     ) -> bool {
         if pmtud.needs_probe() {
-            debug_assert!(pmtud.probe_size() > profile.limit());
+            debug_assert!(pmtud.probe_size() >= profile.limit());
             self.limit = pmtud.probe_size() - aead_expansion;
             true
         } else {
