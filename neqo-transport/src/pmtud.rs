@@ -272,27 +272,21 @@ impl Pmtud {
             "PMTUD Packet of size > {largest_ok_mtu} lost >= {MAX_PROBES} times, state {:?}",
             self.probe_state
         );
-        match self.probe_state {
-            Probe::NotNeeded => {
-                if largest_ok_mtu < self.mtu {
-                    // We saw multiple losses of packets <= the current MTU outside of PMTU
-                    // discovery, so we need to probe again. To limit connectivity disruptions, we
-                    // start the PMTU discovery from the smallest packet up, rather than the failed
-                    // packet size down.
-                    //
-                    // TODO: If we are declaring losses, that means that we're getting packets
-                    // through. The size of those will put a floor on the MTU. We're currently
-                    // conservative and start from scratch, but we don't strictly need to do that.
-                    self.reset(stats);
-                    qdebug!("PMTUD reset and restarting, PLPMTU is now {}", self.mtu);
-                    self.start(now, stats);
-                }
-            }
-            Probe::Needed | Probe::Sent => {
-                // We saw multiple losses of packets > the current MTU during PMTU discovery, so
-                // we're done.
-                self.stop(largest_ok_idx, now, stats);
-            }
+        if largest_ok_mtu < self.mtu {
+            // We saw multiple losses of packets <= the current MTU discovery,
+            // so we need to probe again. To limit connectivity disruptions, we
+            // start the PMTU discovery from the smallest packet up, rather than
+            // the failed packet size down.
+            //
+            // TODO: If we are declaring losses, that means that we're getting
+            // packets through. The size of those will put a floor on the MTU.
+            // We're currently conservative and start from scratch, but we don't
+            // strictly need to do that.
+            self.reset(stats);
+            qdebug!("PMTUD reset and restarting, PLPMTU is now {}", self.mtu);
+            self.start(now, stats);
+        } else {
+            self.stop(largest_ok_idx, now, stats);
         }
     }
 
@@ -336,12 +330,13 @@ impl Pmtud {
 #[cfg(all(not(feature = "disable-encryption"), test))]
 mod tests {
     use std::{
+        cmp::min,
         iter::zip,
         net::{IpAddr, Ipv4Addr, Ipv6Addr},
         time::Instant,
     };
 
-    use neqo_common::{qdebug, Encoder, IpTosEcn};
+    use neqo_common::{qdebug, qinfo, Encoder, IpTosEcn};
     use test_fixture::{fixture_init, now};
 
     use crate::{
@@ -354,6 +349,13 @@ mod tests {
 
     const V4: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
     const V6: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+    const IFACE_MTUS: &[Option<usize>] = &[
+        None,
+        Some(1300),
+        Some(1500),
+        Some(5000),
+        Some(u16::MAX as usize),
+    ];
 
     fn make_sentpacket(pn: u64, now: Instant, len: usize) -> SentPacket {
         SentPacket::new(
@@ -367,16 +369,19 @@ mod tests {
         )
     }
 
+    /// Asserts that the PMTUD process has stopped at the given MTU.
     fn assert_mtu(pmtud: &Pmtud, mtu: usize) {
         let idx = pmtud
             .search_table
             .iter()
             .position(|mtu| *mtu == pmtud.mtu)
             .unwrap();
-        assert!(mtu >= pmtud.search_table[idx]);
+        assert!((idx == 0 && mtu <= pmtud.search_table[idx]) || (mtu >= pmtud.search_table[idx]));
         if idx < SEARCH_TABLE_LEN - 1 {
             assert!(mtu < pmtud.search_table[idx + 1]);
         }
+        assert_eq!(Probe::NotNeeded, pmtud.probe_state);
+        assert_eq!([0; SEARCH_TABLE_LEN], pmtud.loss_counts);
     }
 
     fn pmtud_step(
@@ -412,103 +417,55 @@ mod tests {
         }
     }
 
-    fn find_pmtu(addr: IpAddr, mtu: usize) {
+    fn find_pmtu(
+        addr: IpAddr,
+        mtu: usize,
+        iface_mtu: Option<usize>,
+    ) -> (Pmtud, Stats, CryptoDxState, Instant) {
         fixture_init();
         let now = now();
-        let mut pmtud = Pmtud::new(addr, Some(mtu));
+        let mut pmtud = Pmtud::new(addr, iface_mtu);
         let mut stats = Stats::default();
         let mut prot = CryptoDxState::test_default();
 
         pmtud.start(now, &mut stats);
-        assert!(pmtud.needs_probe());
+
+        if let Some(iface_mtu) = iface_mtu {
+            assert!(iface_mtu <= pmtud.search_table[1] || pmtud.needs_probe());
+        } else {
+            assert!(pmtud.needs_probe());
+        }
 
         while pmtud.needs_probe() {
             pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, mtu, now);
         }
-        assert_mtu(&pmtud, mtu);
-    }
 
-    #[test]
-    fn pmtud_v4_max() {
-        find_pmtu(V4, u16::MAX.into());
-    }
+        let final_mtu = iface_mtu.map_or(mtu, |iface_mtu| min(mtu, iface_mtu));
+        assert_mtu(&pmtud, final_mtu);
+        // assert_mtu(&pmtud, final_mtu);
 
-    #[test]
-    fn pmtud_v6_max() {
-        find_pmtu(V6, u16::MAX.into());
-    }
-
-    #[test]
-    fn pmtud_v4_1500() {
-        find_pmtu(V4, 1500);
-    }
-
-    #[test]
-    fn pmtud_v6_1500() {
-        find_pmtu(V6, 1500);
+        (pmtud, stats, prot, now)
     }
 
     fn find_pmtu_with_reduction(addr: IpAddr, mtu: usize, smaller_mtu: usize) {
         assert!(mtu > smaller_mtu);
-
-        fixture_init();
-        let now = now();
-        let mut pmtud = Pmtud::new(addr, Some(mtu));
-        let mut stats = Stats::default();
-        let mut prot = CryptoDxState::test_default();
-
-        assert!(smaller_mtu >= pmtud.search_table[0]);
-        pmtud.start(now, &mut stats);
-        assert!(pmtud.needs_probe());
-
-        while pmtud.needs_probe() {
-            pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, mtu, now);
-        }
-        assert_mtu(&pmtud, mtu);
+        let (mut pmtud, mut stats, mut prot, now) = find_pmtu(addr, mtu, None);
 
         qdebug!("Reducing MTU to {smaller_mtu}");
-        // Drop packets > smaller_mtu until we need a probe again.
         while !pmtud.needs_probe() {
-            let pn = prot.next_pn();
-            let packet = make_sentpacket(pn, now, pmtud.mtu - pmtud.header_size);
-            pmtud.on_packets_lost(&[packet], &mut stats, now);
+            pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, smaller_mtu, now);
         }
 
         // Drive second PMTUD process to completion.
         while pmtud.needs_probe() {
-            pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, mtu, now);
+            pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, smaller_mtu, now);
         }
-        assert_mtu(&pmtud, mtu);
-    }
-
-    #[test]
-    fn pmtud_v4_max_1300() {
-        find_pmtu_with_reduction(V4, u16::MAX.into(), 1300);
-    }
-
-    #[test]
-    fn pmtud_v6_max_1280() {
-        find_pmtu_with_reduction(V6, u16::MAX.into(), 1300);
-    }
-
-    #[test]
-    fn pmtud_v4_1500_1300() {
-        find_pmtu_with_reduction(V4, 1500, 1300);
-    }
-
-    #[test]
-    fn pmtud_v6_1500_1280() {
-        find_pmtu_with_reduction(V6, 1500, 1280);
+        assert_mtu(&pmtud, smaller_mtu);
     }
 
     fn find_pmtu_with_increase(addr: IpAddr, mtu: usize, larger_mtu: usize) {
         assert!(mtu < larger_mtu);
-
-        fixture_init();
-        let now = now();
-        let mut pmtud = Pmtud::new(addr, Some(larger_mtu));
-        let mut stats = Stats::default();
-        let mut prot = CryptoDxState::test_default();
+        let (mut pmtud, mut stats, mut prot, now) = find_pmtu(addr, mtu, None);
 
         assert!(larger_mtu >= pmtud.search_table[0]);
         pmtud.start(now, &mut stats);
@@ -528,24 +485,48 @@ mod tests {
         assert_mtu(&pmtud, larger_mtu);
     }
 
-    #[test]
-    fn pmtud_v4_1300_max() {
-        find_pmtu_with_increase(V4, 1300, u16::MAX.into());
+    fn path_mtus() -> Vec<usize> {
+        IFACE_MTUS.iter().flatten().copied().collect()
     }
 
     #[test]
-    fn pmtud_v6_1280_max() {
-        find_pmtu_with_increase(V6, 1280, u16::MAX.into());
+    fn pmtud() {
+        for &addr in &[V4, V6] {
+            for path_mtu in path_mtus() {
+                for &iface_mtu in IFACE_MTUS {
+                    qinfo!("PMTUD for {addr}, path MTU {path_mtu}, iface MTU {iface_mtu:?}");
+                    find_pmtu(addr, path_mtu, iface_mtu);
+                }
+            }
+        }
     }
 
     #[test]
-    fn pmtud_v4_1300_1500() {
-        find_pmtu_with_increase(V4, 1300, 1500);
+    fn pmtud_with_reduction() {
+        for &addr in &[V4, V6] {
+            for path_mtu in path_mtus() {
+                let path_mtus = path_mtus();
+                let smaller_mtus = path_mtus.iter().filter(|&mtu| *mtu < path_mtu);
+                for &smaller_mtu in smaller_mtus {
+                    qinfo!("PMTUD for {addr}, path MTU {path_mtu}, smaller path MTU {smaller_mtu}");
+                    find_pmtu_with_reduction(addr, path_mtu, smaller_mtu);
+                }
+            }
+        }
     }
 
     #[test]
-    fn pmtud_v6_1280_1500() {
-        find_pmtu_with_increase(V6, 1280, 1500);
+    fn pmtud_with_increase() {
+        for &addr in &[V4, V6] {
+            for path_mtu in path_mtus() {
+                let path_mtus = path_mtus();
+                let larger_mtus = path_mtus.iter().filter(|&mtu| *mtu > path_mtu);
+                for &larger_mtu in larger_mtus {
+                    qinfo!("PMTUD for {addr}, path MTU {path_mtu}, larger path MTU {larger_mtu}");
+                    find_pmtu_with_increase(addr, path_mtu, larger_mtu);
+                }
+            }
+        }
     }
 
     /// Increments the loss counts for the given search table, based on the given packet size.
@@ -568,13 +549,6 @@ mod tests {
         assert_eq!([0; SEARCH_TABLE_LEN], pmtud.loss_counts);
     }
 
-    /// Asserts that the PMTUD process has stopped at the given MTU.
-    fn assert_pmtud_stopped(pmtud: &Pmtud, mtu: usize) {
-        // assert_eq!(Probe::NotNeeded, pmtud.probe_state);
-        assert_eq!(pmtud.mtu, mtu);
-        assert_eq!([0; SEARCH_TABLE_LEN], pmtud.loss_counts);
-    }
-
     #[test]
     fn pmtud_on_packets_lost() {
         const MTU: usize = 1500;
@@ -591,7 +565,7 @@ mod tests {
             now,
             &mut stats,
         );
-        assert_pmtud_stopped(&pmtud, MTU);
+        assert_mtu(&pmtud, MTU);
 
         // No packets lost, nothing should change.
         pmtud.on_packets_lost(&[], &mut stats, now);
@@ -621,46 +595,35 @@ mod tests {
         assert_eq!(expected_lc, pmtud.loss_counts);
 
         // A packet of size 5000 was lost, which should increase loss counts >= 5000 by one. There
-        // have now been MAX_PROBES losses of packets >= 5000. That is larger than the current
-        // MTU, so nothing will happen.
+        // have now been MAX_PROBES losses of packets >= 5000. That should stop PMTUD.
         expected_lc = search_table_inc(&pmtud, &expected_lc, 5000);
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 5000)], &mut stats, now);
-        assert_eq!(expected_lc, pmtud.loss_counts);
+        assert_mtu(&pmtud, 4095);
+        expected_lc.fill(0); // Reset the loss counts.
 
         // Two packets of size 4000 were lost, which should increase loss counts >= 4000 by one.
         expected_lc = search_table_inc(&pmtud, &expected_lc, 4000);
-        expected_lc = search_table_inc(&pmtud, &expected_lc, 4000);
         pmtud.on_packets_lost(
-            &[make_sentpacket(0, now, 4000), make_sentpacket(0, now, 4000)],
+            &[make_sentpacket(0, now, 4000), make_sentpacket(1, now, 4000)],
             &mut stats,
             now,
         );
         assert_eq!(expected_lc, pmtud.loss_counts);
 
-        // Two packets of size 2000 were lost, which should increase loss counts >= 2000 by two.
-        expected_lc = search_table_inc(&pmtud, &expected_lc, 2000);
+        // Two packets of size 2000 were lost, which should increase loss counts >= 2000 by one.
         expected_lc = search_table_inc(&pmtud, &expected_lc, 2000);
         pmtud.on_packets_lost(
-            &[make_sentpacket(0, now, 2000), make_sentpacket(0, now, 2000)],
+            &[make_sentpacket(0, now, 2000), make_sentpacket(1, now, 2000)],
             &mut stats,
             now,
         );
         assert_eq!(expected_lc, pmtud.loss_counts);
 
-        // Two more packet of size 1500 were lost. These are <= the current MTU, so the loss counts
-        // only increase by one.
+        // Two more packet of size 1500 were lost. There have now been MAX_PROBES losses of packets
+        // >= 1500. That should restart PMTUD.
         let plen = MTU - pmtud.header_size;
-        expected_lc = search_table_inc(&pmtud, &expected_lc, plen);
         pmtud.on_packets_lost(
-            &[make_sentpacket(0, now, plen), make_sentpacket(0, now, plen)],
-            &mut stats,
-            now,
-        );
-        assert_eq!(expected_lc, pmtud.loss_counts);
-
-        // Now lose another 1500-byte packet. This should trigger a PMTUD restart.
-        pmtud.on_packets_lost(
-            &[make_sentpacket(0, now, plen), make_sentpacket(0, now, plen)],
+            &[make_sentpacket(0, now, plen), make_sentpacket(1, now, plen)],
             &mut stats,
             now,
         );
@@ -690,7 +653,7 @@ mod tests {
             now,
             &mut stats,
         );
-        assert_pmtud_stopped(&pmtud, MTU);
+        assert_mtu(&pmtud, MTU);
 
         // A packet of size 100 was ACKed, which is smaller than all probe sizes.
         // Loss counts should be unchanged.
