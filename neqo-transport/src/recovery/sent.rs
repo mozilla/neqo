@@ -16,7 +16,7 @@ use neqo_common::IpTosEcn;
 
 use crate::{
     packet::{PacketNumber, PacketType},
-    recovery::RecoveryToken,
+    recovery::{RecoveryToken, RecoveryTokenVec},
 };
 
 #[derive(Debug, Clone)]
@@ -27,7 +27,7 @@ pub struct SentPacket {
     ack_eliciting: bool,
     time_sent: Instant,
     primary_path: bool,
-    tokens: Vec<RecoveryToken>,
+    tokens: RecoveryTokenVec,
 
     time_declared_lost: Option<Instant>,
     /// After a PTO, this is true when the packet has been released.
@@ -44,7 +44,7 @@ impl SentPacket {
         ecn_mark: IpTosEcn,
         time_sent: Instant,
         ack_eliciting: bool,
-        tokens: Vec<RecoveryToken>,
+        tokens: RecoveryTokenVec,
         len: usize,
     ) -> Self {
         Self {
@@ -311,7 +311,10 @@ mod tests {
     use neqo_common::IpTosEcn;
 
     use super::{SentPacket, SentPackets};
-    use crate::packet::{PacketNumber, PacketType};
+    use crate::{
+        packet::{PacketNumber, PacketType},
+        recovery::RecoveryTokenVec,
+    };
 
     const PACKET_GAP: Duration = Duration::from_secs(1);
     fn start_time() -> Instant {
@@ -326,7 +329,7 @@ mod tests {
             IpTosEcn::default(),
             start_time() + (PACKET_GAP * n),
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             100,
         )
     }
