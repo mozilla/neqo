@@ -22,7 +22,6 @@ pub const MAX_PTO_COUNTS: usize = 16;
 
 #[derive(Default, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-#[allow(clippy::module_name_repetitions)]
 pub struct FrameStats {
     pub ack: usize,
     pub largest_acknowledged: PacketNumber,
@@ -126,7 +125,6 @@ impl FrameStats {
 
 /// Datagram stats
 #[derive(Default, Clone)]
-#[allow(clippy::module_name_repetitions)]
 pub struct DatagramStats {
     /// The number of datagrams declared lost.
     pub lost: usize,
@@ -285,7 +283,6 @@ impl Debug for Stats {
 }
 
 #[derive(Default, Clone)]
-#[allow(clippy::module_name_repetitions)]
 pub struct StatsCell {
     stats: Rc<RefCell<Stats>>,
 }

@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::unwrap_used)] // This is example code.
+
 //! An [HTTP 0.9](https://www.w3.org/Protocols/HTTP/AsImplemented.html) client implementation.
 
 use std::{
@@ -159,7 +161,11 @@ pub fn create_client(
         client.set_ciphers(&ciphers)?;
     }
 
-    client.set_qlog(qlog_new(args, hostname, client.odcid().unwrap())?);
+    client.set_qlog(qlog_new(
+        args,
+        hostname,
+        client.odcid().ok_or(Error::InternalError)?,
+    )?);
 
     Ok(client)
 }
@@ -302,7 +308,7 @@ impl<'b> Handler<'b> {
             } else {
                 qdebug!(
                     "READ[{stream_id}]: {}",
-                    std::str::from_utf8(read_buffer).unwrap()
+                    std::str::from_utf8(read_buffer).map_err(|_| Error::InvalidInput)?
                 );
             }
             if fin {

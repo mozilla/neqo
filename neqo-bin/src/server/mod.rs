@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![allow(clippy::future_not_send)]
+#![allow(clippy::unwrap_used)] // This is example code.
 
 use std::{
     cell::RefCell,
