@@ -21,6 +21,7 @@ use crate::{
     stream_id::{StreamId, StreamType},
     tparams::{self, TransportParameter},
     tracking::PacketNumberSpace,
+    INITIAL_RTT,
 };
 
 fn default_timeout() -> Duration {
@@ -48,6 +49,13 @@ fn test_idle_timeout(client: &mut Connection, server: &mut Connection, timeout: 
 
     // Not connected after timeout.
     assert!(matches!(client.state(), State::Closed(_)));
+}
+
+#[test]
+fn init_rtt_configuration() {
+    let custom_init_rtt = INITIAL_RTT * 2;
+    let client = new_client(ConnectionParameters::default().initial_rtt(custom_init_rtt));
+    assert_eq!(client.conn_params.get_initial_rtt(), custom_init_rtt);
 }
 
 #[test]
