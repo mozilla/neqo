@@ -539,23 +539,23 @@ fn do_not_accept_data_after_stop_sending() {
     );
 }
 
+struct Writer(Vec<u64>);
+
+impl crate::connection::test_internal::FrameWriter for Writer {
+    fn write_frames(&mut self, builder: &mut PacketBuilder) {
+        builder.write_varint_frame(&self.0);
+    }
+}
+
 #[test]
 /// Server sends a number of stream-related frames for a client-initiated stream that is not yet
 /// created. This should cause the client to close the connection.
 fn illegal_stream_related_frames() {
-    struct IllegalWriter(Vec<u64>);
-
-    impl crate::connection::test_internal::FrameWriter for IllegalWriter {
-        fn write_frames(&mut self, builder: &mut PacketBuilder) {
-            builder.write_varint_frame(&self.0);
-        }
-    }
-
     fn test_with_illegal_frame(frame: &[u64]) {
         let mut client = default_client();
         let mut server = default_server();
         connect(&mut client, &mut server);
-        let dgram = send_with_extra(&mut server, IllegalWriter(frame.to_vec()), now());
+        let dgram = send_with_extra(&mut server, Writer(frame.to_vec()), now());
         client.process_input(dgram, now());
         assert!(client.state().closed());
     }
@@ -574,6 +574,47 @@ fn illegal_stream_related_frames() {
             test_with_illegal_frame(&[frame_type, stream_id, 0, 0]);
         }
     }
+}
+
+#[test]
+/// Regression <https://github.com/mozilla/neqo/pull/2358>.
+fn legal_out_of_order_frame_on_remote_initiated_closed_stream() {
+    const REQUEST: &[u8] = b"ping";
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    // Client sends request and closes stream.
+    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    _ = client.stream_send(stream_id, REQUEST).unwrap();
+    client.stream_close_send(stream_id).unwrap();
+    let dgram = client.process_output(now()).dgram();
+
+    // Server reads request and closes stream.
+    server.process_input(dgram.unwrap(), now());
+    let mut buf = [0; REQUEST.len()];
+    server.stream_recv(stream_id, &mut buf).unwrap();
+    server.stream_close_send(stream_id).unwrap();
+    let dgram = server.process_output(now()).dgram();
+    client.process_input(dgram.unwrap(), now());
+
+    // Client ACKs server's close stream, thus server forgetting about stream.
+    let dgram = send_something(&mut client, now());
+    let dgram = server.process(Some(dgram), now()).dgram();
+    client.process_input(dgram.unwrap(), now());
+
+    // Deliver an out-of-order `FRAME_TYPE_MAX_STREAM_DATA` on forgotten stream.
+    let dgram = send_with_extra(
+        &mut client,
+        Writer(vec![FRAME_TYPE_MAX_STREAM_DATA, stream_id.as_u64(), 0, 0]),
+        now(),
+    );
+    server.process_input(dgram, now());
+
+    assert!(
+        !server.state().closed(),
+        "expect server to ignore out-of-order frame on forgotten stream"
+    );
 }
 
 #[test]
