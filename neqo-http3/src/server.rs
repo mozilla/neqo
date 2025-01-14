@@ -8,7 +8,6 @@
 
 use std::{
     cell::{RefCell, RefMut},
-    collections::HashMap,
     path::PathBuf,
     rc::Rc,
     time::Instant,
@@ -20,6 +19,7 @@ use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
     ConnectionIdGenerator, Output,
 };
+use rustc_hash::FxHashMap;
 
 use crate::{
     connection::Http3State,
@@ -39,7 +39,7 @@ const MAX_EVENT_DATA_SIZE: usize = 1024;
 pub struct Http3Server {
     server: Server,
     http3_parameters: Http3Parameters,
-    http3_handlers: HashMap<ConnectionRef, HandlerRef>,
+    http3_handlers: FxHashMap<ConnectionRef, HandlerRef>,
     events: Http3ServerEvents,
 }
 
@@ -75,7 +75,7 @@ impl Http3Server {
                 http3_parameters.get_connection_parameters().clone(),
             )?,
             http3_parameters,
-            http3_handlers: HashMap::new(),
+            http3_handlers: FxHashMap::default(),
             events: Http3ServerEvents::default(),
         })
     }
@@ -318,10 +318,7 @@ fn prepare_data(
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::HashMap,
-        ops::{Deref, DerefMut},
-    };
+    use std::ops::{Deref, DerefMut};
 
     use neqo_common::{event::Provider as _, Encoder};
     use neqo_crypto::{AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker};
@@ -329,6 +326,7 @@ mod tests {
     use neqo_transport::{
         CloseReason, Connection, ConnectionEvent, State, StreamId, StreamType, ZeroRttState,
     };
+    use rustc_hash::FxHashMap;
     use test_fixture::{
         anti_replay, default_client, fixture_init, now, CountingConnectionIdGenerator,
         DEFAULT_ALPN, DEFAULT_KEYS,
@@ -1267,7 +1265,7 @@ mod tests {
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
 
-        let mut requests = HashMap::new();
+        let mut requests = FxHashMap::default();
         while let Some(event) = hconn.next_event() {
             match event {
                 Http3ServerEvent::Headers { stream, .. } => {

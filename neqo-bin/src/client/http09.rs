@@ -8,7 +8,7 @@
 
 use std::{
     cell::RefCell,
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     fs::File,
     io::{BufWriter, Write as _},
     net::SocketAddr,
@@ -23,13 +23,14 @@ use neqo_transport::{
     CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator, EmptyConnectionIdGenerator,
     Error, Output, RandomConnectionIdGenerator, State, StreamId, StreamType,
 };
+use rustc_hash::FxHashMap;
 use url::Url;
 
 use super::{get_output_file, qlog_new, Args, CloseState, Res};
 use crate::STREAM_IO_BUFFER_SIZE;
 
 pub struct Handler<'a> {
-    streams: HashMap<StreamId, Option<BufWriter<File>>>,
+    streams: FxHashMap<StreamId, Option<BufWriter<File>>>,
     url_queue: VecDeque<Url>,
     handled_urls: Vec<Url>,
     all_paths: Vec<PathBuf>,
@@ -220,7 +221,7 @@ impl super::Client for Connection {
 impl<'b> Handler<'b> {
     pub fn new(url_queue: VecDeque<Url>, args: &'b Args) -> Self {
         Self {
-            streams: HashMap::new(),
+            streams: FxHashMap::default(),
             url_queue,
             handled_urls: Vec::new(),
             all_paths: Vec::new(),
