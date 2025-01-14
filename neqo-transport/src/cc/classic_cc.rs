@@ -185,7 +185,6 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         &mut self.pmtud
     }
 
-    // Multi-packet version of OnPacketAckedCC
     fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], rtt_est: &RttEstimate, now: Instant) {
         let mut is_app_limited = true;
         let mut new_acked = 0;
