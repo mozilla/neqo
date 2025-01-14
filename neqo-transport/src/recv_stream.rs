@@ -132,7 +132,7 @@ impl RxStreamOrderer {
     /// Only when `u64` values cannot be converted to `usize`, which only
     /// happens on 32-bit machines that hold far too much data at the same time.
     pub fn inbound_frame(&mut self, mut new_start: u64, mut new_data: &[u8]) {
-        qtrace!("Inbound data offset={} len={}", new_start, new_data.len());
+        qtrace!("Inbound data offset={new_start} len={}", new_data.len());
 
         // Get entry before where new entry would go, so we can see if we already
         // have the new bytes.
@@ -165,12 +165,7 @@ impl RxStreamOrderer {
                 // Add a range containing only new data
                 // (In-order frames will take this path, with no overlap)
                 let overlap = prev_end.saturating_sub(new_start);
-                qtrace!(
-                    "New frame {}-{} received, overlap: {}",
-                    new_start,
-                    new_end,
-                    overlap
-                );
+                qtrace!("New frame {new_start}-{new_end} received, overlap: {overlap}");
                 new_start += overlap;
                 new_data = &new_data[usize::try_from(overlap).unwrap()..];
                 // If it is small enough, extend the previous buffer.
@@ -182,15 +177,11 @@ impl RxStreamOrderer {
                 //   NNNN
                 // NNNN
                 // Do nothing
-                qtrace!(
-                    "Dropping frame with already-received range {}-{}",
-                    new_start,
-                    new_end
-                );
+                qtrace!("Dropping frame with already-received range {new_start}-{new_end}");
                 return;
             }
         } else {
-            qtrace!("New frame {}-{} received", new_start, new_end);
+            qtrace!("New frame {new_start}-{new_end} received");
             false
         };
 
@@ -228,21 +219,14 @@ impl RxStreamOrderer {
                     break;
                 } else if next_end >= new_end {
                     qtrace!(
-                        "New frame {}-{} overlaps with next frame by {}, truncating",
-                        new_start,
-                        new_end,
-                        overlap
+                        "New frame {new_start}-{new_end} overlaps with next frame by {overlap}, truncating"
                     );
                     let truncate_to = new_data.len() - usize::try_from(overlap).unwrap();
                     to_add = &new_data[..truncate_to];
                     break;
                 }
                 qtrace!(
-                    "New frame {}-{} spans entire next frame {}-{}, replacing",
-                    new_start,
-                    new_end,
-                    next_start,
-                    next_end
+                    "New frame {new_start}-{new_end} spans entire next frame {next_start}-{next_end}, replacing"
                 );
                 to_remove.push(next_start);
                 // Continue, since we may have more overlaps
@@ -1015,7 +999,7 @@ mod tests {
 
     fn recv_ranges(ranges: &[Range<u64>], available: usize) {
         const ZEROES: &[u8] = &[0; 100];
-        qtrace!("recv_ranges {:?}", ranges);
+        qtrace!("recv_ranges {ranges:?}");
 
         let mut s = RxStreamOrderer::default();
         for r in ranges {
@@ -1027,7 +1011,7 @@ mod tests {
         let mut total_recvd = 0;
         loop {
             let recvd = s.read(&mut buf[..]);
-            qtrace!("recv_ranges read {}", recvd);
+            qtrace!("recv_ranges read {recvd}");
             total_recvd += recvd;
             if recvd == 0 {
                 assert_eq!(total_recvd, available);

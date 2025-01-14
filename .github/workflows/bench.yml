@@ -8,8 +8,6 @@ on:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
   TOOLCHAIN: stable
   RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
   PERF_OPT: record -F997 --call-graph fp -g
@@ -276,7 +274,7 @@ jobs:
 
       - name: Export perf data
         id: export
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: ${{ github.event.repository.name }}-${{ github.sha }}
           path: |

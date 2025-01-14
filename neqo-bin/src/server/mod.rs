@@ -10,7 +10,7 @@ use std::{
     cell::RefCell,
     fmt::{self, Display},
     fs, io,
-    net::{SocketAddr, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     pin::Pin,
     process::exit,
@@ -21,7 +21,7 @@ use std::{
 use clap::Parser;
 use futures::{
     future::{select, select_all, Either},
-    FutureExt,
+    FutureExt as _,
 };
 use neqo_common::{qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{
@@ -29,6 +29,7 @@ use neqo_crypto::{
     init_db, AntiReplay, Cipher,
 };
 use neqo_transport::{Output, RandomConnectionIdGenerator, Version};
+use neqo_udp::RecvBuf;
 use tokio::time::Sleep;
 
 use crate::SharedArgs;
@@ -121,9 +122,9 @@ pub struct Args {
 #[cfg(any(test, feature = "bench"))]
 impl Default for Args {
     fn default() -> Self {
-        use std::str::FromStr;
+        use std::str::FromStr as _;
         Self {
-            shared: crate::SharedArgs::default(),
+            shared: SharedArgs::default(),
             hosts: vec!["[::]:12345".to_string()],
             db: PathBuf::from_str("../test-fixture/db").unwrap(),
             key: "key".to_string(),
@@ -202,7 +203,7 @@ pub struct ServerRunner {
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<(SocketAddr, crate::udp::Socket)>,
-    recv_buf: Vec<u8>,
+    recv_buf: RecvBuf,
 }
 
 impl ServerRunner {
@@ -217,7 +218,7 @@ impl ServerRunner {
             server,
             timeout: None,
             sockets,
-            recv_buf: vec![0; neqo_udp::RECV_BUF_SIZE],
+            recv_buf: RecvBuf::new(),
         }
     }
 
@@ -251,7 +252,7 @@ impl ServerRunner {
                     socket.send(&dgram)?;
                 }
                 Output::Callback(new_timeout) => {
-                    qdebug!("Setting timeout of {:?}", new_timeout);
+                    qdebug!("Setting timeout of {new_timeout:?}");
                     *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
@@ -360,7 +361,7 @@ pub async fn server(mut args: Args) -> Res<()> {
                 args.shared.quic_parameters.quic_version = vec![Version::Version1];
             }
         } else {
-            qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions.");
+            qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions");
         }
 
         // These are the default for all tests except http3.
@@ -392,7 +393,7 @@ pub async fn server(mut args: Args) -> Res<()> {
     let hosts = args.listen_addresses();
     if hosts.is_empty() {
         qerror!("No valid hosts defined");
-        Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"))?;
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts").into());
     }
     let sockets = hosts
         .into_iter()

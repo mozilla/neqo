@@ -112,18 +112,18 @@ impl Sub<Self> for Count {
     type Output = Self;
 
     /// Subtract the ECN counts in `other` from `self`.
-    fn sub(self, other: Self) -> Self {
+    fn sub(self, rhs: Self) -> Self {
         let mut diff = Self::default();
         for (ecn, count) in &mut *diff {
-            *count = self[ecn].saturating_sub(other[ecn]);
+            *count = self[ecn].saturating_sub(rhs[ecn]);
         }
         diff
     }
 }
 
 impl AddAssign<IpTosEcn> for Count {
-    fn add_assign(&mut self, ecn: IpTosEcn) {
-        self[ecn] += 1;
+    fn add_assign(&mut self, rhs: IpTosEcn) {
+        self[rhs] += 1;
     }
 }
 
@@ -187,9 +187,9 @@ impl Info {
     pub fn on_packet_sent(&mut self, stats: &mut Stats) {
         if let ValidationState::Testing { probes_sent, .. } = &mut self.state {
             *probes_sent += 1;
-            qdebug!("ECN probing: sent {} probes", probes_sent);
+            qdebug!("ECN probing: sent {probes_sent} probes");
             if *probes_sent == TEST_COUNT {
-                qdebug!("ECN probing concluded with {} probes sent", probes_sent);
+                qdebug!("ECN probing concluded with {probes_sent} probes sent");
                 self.state.set(ValidationState::Unknown, stats);
             }
         }
@@ -231,8 +231,7 @@ impl Info {
             // is not ECN capable and likely drops all ECN marked packets.
             if probes_sent == probes_lost && *probes_lost == TEST_COUNT_INITIAL_PHASE {
                 qdebug!(
-                    "ECN validation failed, all {} initial marked packets were lost",
-                    probes_lost
+                    "ECN validation failed, all {probes_lost} initial marked packets were lost"
                 );
                 self.disable_ecn(stats, ValidationError::BlackHole);
             }
@@ -301,9 +300,7 @@ impl Info {
         let sum_inc = ecn_diff[IpTosEcn::Ect0] + ecn_diff[IpTosEcn::Ce];
         if sum_inc < newly_acked_sent_with_ect0 {
             qwarn!(
-                "ECN validation failed, ACK counted {} new marks, but {} of newly acked packets were sent with ECT(0)",
-                sum_inc,
-                newly_acked_sent_with_ect0
+                "ECN validation failed, ACK counted {sum_inc} new marks, but {newly_acked_sent_with_ect0} of newly acked packets were sent with ECT(0)"
             );
             self.disable_ecn(stats, ValidationError::Bleaching);
         } else if ecn_diff[IpTosEcn::Ect1] > 0 {

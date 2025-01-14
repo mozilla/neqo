@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use enumset::{enum_set, EnumSet, EnumSetType};
-use neqo_common::{header::HeadersExt, Header};
+use neqo_common::{header::HeadersExt as _, Header};
 
 use crate::{Error, MessageType, Res};
 

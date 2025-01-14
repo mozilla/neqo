@@ -20,7 +20,7 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider,
+    event::Provider as _,
     hex,
     qlog::{new_trace, NeqoQlog},
     qtrace, Datagram, Decoder, IpTosEcn, Role,
@@ -403,7 +403,7 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
         None,
         None,
         None,
-        std::time::Instant::now(),
+        Instant::now(),
         trace,
         EventImportance::Base,
         Box::new(buf),
