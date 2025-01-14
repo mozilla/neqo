@@ -35,7 +35,7 @@ runs:
 
     - name: Install dependencies
       run: |
-        sudo add-apt-repository ppa:wireshark-dev/stable
+        sudo add-apt-repository ppa:wireshark-dev/nightly
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends tshark
       shell: bash
