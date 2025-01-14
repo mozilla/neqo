@@ -33,6 +33,7 @@ toml = { version = "0.5", default-features = false }
 test-fixture = { path = "../test-fixture" }
 
 [features]
+bench = []
 disable-encryption = []
 disable-random = []
 gecko = ["mozbuild"]

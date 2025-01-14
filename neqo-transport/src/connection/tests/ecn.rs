@@ -89,7 +89,7 @@ fn handshake_delay_with_ecn_blackhole() {
     assert_eq!(
         (finish - start).as_millis() / DEFAULT_RTT.as_millis(),
         15,
-        "expected 6 RTT for client to detect blackhole, 6 RTT for server to detect blackhole and 3 RTT for handshake to be confirmed.",
+        "expected 6 RTT for client to detect blackhole, 6 RTT for server to detect blackhole and 3 RTT for handshake to be confirmed",
     );
 }
 

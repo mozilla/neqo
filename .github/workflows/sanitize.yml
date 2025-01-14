@@ -9,8 +9,6 @@ on:
   merge_group:
   workflow_dispatch:
 env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
   DUMP_SIMULATION_SEEDS: /tmp/simulation-seeds
 
 concurrency:
@@ -29,7 +27,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest] # No Windows support for sanitizers.
+        # TODO: Unpin ubuntu when https://github.com/rust-lang/rust/issues/111073#issuecomment-2561607617 is fixed.
+        os: [ubuntu-22.04, macos-latest] # No Windows support for sanitizers.
         sanitizer: [address, thread, leak] # TODO: memory
         exclude:
           # Memory and leak sanitizers are not supported on macOS.
@@ -61,8 +60,9 @@ jobs:
           RUSTFLAGS: "-Z sanitizer=${{ matrix.sanitizer }}"
           RUSTDOCFLAGS: "-Z sanitizer=${{ matrix.sanitizer }}"
           ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
+          RUST_BACKTRACE: 1
         run: |
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+          if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
             sudo apt-get install -y --no-install-recommends llvm
             TARGET="x86_64-unknown-linux-gnu"
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
@@ -81,7 +81,7 @@ jobs:
 
       - name: Save simulation seeds artifact
         if: env.DUMP_SIMULATION_SEEDS
-        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: simulation-seeds-${{ matrix.os }}-sanitizer-${{ matrix.sanitizer }}
           path: ${{ env.DUMP_SIMULATION_SEEDS }}

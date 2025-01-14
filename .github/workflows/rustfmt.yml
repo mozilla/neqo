@@ -8,9 +8,6 @@ on:
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   merge_group:
   workflow_dispatch:
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}

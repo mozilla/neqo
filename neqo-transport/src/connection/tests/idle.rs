@@ -6,7 +6,7 @@
 
 use std::time::{Duration, Instant};
 
-use neqo_common::{qtrace, Encoder};
+use neqo_common::{qtrace, qwarn, Encoder};
 use test_fixture::{now, split_datagram};
 
 use super::{
@@ -335,7 +335,7 @@ fn idle_caching() {
     // Now let the server Initial through, with the CRYPTO frame.
     let dgram = server.process_output(end).dgram();
     let (initial, _) = split_datagram(&dgram.unwrap());
-    neqo_common::qwarn!("client ingests initial, finally");
+    qwarn!("client ingests initial, finally");
     drop(client.process(Some(initial), end));
     maybe_authenticate(&mut client);
     let dgram = client.process_output(end).dgram();
@@ -356,7 +356,7 @@ fn create_stream_idle_rtt(
 ) -> (Instant, StreamId) {
     let check_idle = |endpoint: &mut Connection, now: Instant| {
         let delay = endpoint.process_output(now).callback();
-        qtrace!([endpoint], "idle timeout {:?}", delay);
+        qtrace!("[{endpoint}] idle timeout {delay:?}");
         if rtt < default_timeout() / 4 {
             assert_eq!(default_timeout(), delay);
         } else {
@@ -637,7 +637,7 @@ fn keep_alive_large_rtt() {
     for endpoint in &mut [client, server] {
         endpoint.stream_keep_alive(stream, true).unwrap();
         let delay = endpoint.process_output(now).callback();
-        qtrace!([endpoint], "new delay {:?}", delay);
+        qtrace!("[{endpoint}] new delay {delay:?}");
         assert!(delay > keep_alive_timeout());
         assert!(delay > rtt);
     }

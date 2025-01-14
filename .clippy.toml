@@ -1,3 +1,4 @@
 disallowed-methods = [
     { path = "std::slice::from_raw_parts", reason = "see null_safe_slice" }
 ]
+allow-mixed-uninlined-format-args = false

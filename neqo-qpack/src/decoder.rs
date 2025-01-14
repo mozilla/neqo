@@ -40,7 +40,7 @@ impl QPackDecoder {
     /// If settings include invalid values.
     #[must_use]
     pub fn new(qpack_settings: &QpackSettings) -> Self {
-        qdebug!("Decoder: creating a new qpack decoder.");
+        qdebug!("Decoder: creating a new qpack decoder");
         let mut send_buf = QpackData::default();
         send_buf.encode_varint(QPACK_UNI_STREAM_TYPE_DECODER);
         Self {
@@ -139,14 +139,14 @@ impl QPackDecoder {
                 self.stats.dynamic_table_inserts += 1;
             }
             DecodedEncoderInstruction::NoInstruction => {
-                unreachable!("This can be call only with an instruction.");
+                unreachable!("This can be call only with an instruction");
             }
         }
         Ok(())
     }
 
     fn set_capacity(&mut self, cap: u64) -> Res<()> {
-        qdebug!([self], "received instruction capacity cap={}", cap);
+        qdebug!("[{self}] received instruction capacity cap={cap}");
         if cap > self.max_table_size {
             return Err(Error::EncoderStream);
         }
@@ -182,11 +182,11 @@ impl QPackDecoder {
             DecoderInstruction::InsertCountIncrement { increment }.marshal(&mut self.send_buf);
             self.acked_inserts = self.table.base();
         }
-        if self.send_buf.len() != 0 && self.local_stream_id.is_some() {
+        if !self.send_buf.is_empty() && self.local_stream_id.is_some() {
             let r = conn
                 .stream_send(self.local_stream_id.unwrap(), &self.send_buf[..])
                 .map_err(|_| Error::DecoderStream)?;
-            qdebug!([self], "{} bytes sent.", r);
+            qdebug!("[{self}] {r} bytes sent");
             self.send_buf.read(r);
         }
         Ok(())
@@ -214,7 +214,7 @@ impl QPackDecoder {
         buf: &[u8],
         stream_id: StreamId,
     ) -> Res<Option<Vec<Header>>> {
-        qdebug!([self], "decode header block.");
+        qdebug!("[{self}] decode header block");
         let mut decoder = HeaderDecoder::new(buf);
 
         match decoder.decode_header_block(&self.table, self.max_entries, self.table.base()) {

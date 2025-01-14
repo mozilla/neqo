@@ -184,10 +184,7 @@ impl PushController {
         new_headers: Vec<Header>,
     ) -> Res<()> {
         qtrace!(
-            [self],
-            "New push promise push_id={} headers={:?} max_push={}",
-            push_id,
-            new_headers,
+            "[{self}] New push promise push_id={push_id} headers={new_headers:?} max_push={}",
             self.max_concurent_push
         );
 
@@ -195,7 +192,7 @@ impl PushController {
 
         match self.push_streams.get_mut(push_id) {
             None => {
-                qtrace!("Push has been closed already {}.", push_id);
+                qtrace!("Push has been closed already {push_id}");
                 Ok(())
             }
             Some(push_state) => match push_state {
@@ -235,17 +232,12 @@ impl PushController {
     }
 
     pub fn add_new_push_stream(&mut self, push_id: PushId, stream_id: StreamId) -> Res<bool> {
-        qtrace!(
-            "A new push stream with push_id={} stream_id={}",
-            push_id,
-            stream_id
-        );
-
+        qtrace!("A new push stream with push_id={push_id} stream_id={stream_id}");
         self.check_push_id(push_id)?;
 
         self.push_streams.get_mut(push_id).map_or_else(
             || {
-                qinfo!("Push has been closed already.");
+                qinfo!("Push has been closed already");
                 Ok(false)
             },
             |push_state| match push_state {
@@ -267,7 +259,7 @@ impl PushController {
                 // The following state have already have a push stream:
                 // PushState::OnlyPushStream | PushState::Active
                 _ => {
-                    qerror!("Duplicate push stream.");
+                    qerror!("Duplicate push stream");
                     Err(Error::HttpId)
                 }
             },
@@ -277,7 +269,7 @@ impl PushController {
     fn check_push_id(&self, push_id: PushId) -> Res<()> {
         // Check if push id is greater than what we allow.
         if push_id > self.current_max_push_id {
-            qerror!("Push id is greater than current_max_push_id.");
+            qerror!("Push id is greater than current_max_push_id");
             Err(Error::HttpId)
         } else {
             Ok(())
@@ -290,13 +282,13 @@ impl PushController {
         conn: &mut Connection,
         base_handler: &mut Http3Connection,
     ) -> Res<()> {
-        qtrace!("CANCEL_PUSH frame has been received, push_id={}", push_id);
+        qtrace!("CANCEL_PUSH frame has been received, push_id={push_id}");
 
         self.check_push_id(push_id)?;
 
         match self.push_streams.close(push_id) {
             None => {
-                qtrace!("Push has already been closed (push_id={}).", push_id);
+                qtrace!("Push has already been closed (push_id={push_id})");
                 Ok(())
             }
             Some(ps) => match ps {
@@ -323,7 +315,7 @@ impl PushController {
     }
 
     pub fn close(&mut self, push_id: PushId) {
-        qtrace!("Push stream has been closed.");
+        qtrace!("Push stream has been closed");
         if let Some(push_state) = self.push_streams.close(push_id) {
             debug_assert!(matches!(push_state, PushState::Active { .. }));
         } else {
@@ -337,13 +329,13 @@ impl PushController {
         conn: &mut Connection,
         base_handler: &mut Http3Connection,
     ) -> Res<()> {
-        qtrace!("Cancel push_id={}", push_id);
+        qtrace!("Cancel push_id={push_id}");
 
         self.check_push_id(push_id)?;
 
         match self.push_streams.get(push_id) {
             None => {
-                qtrace!("Push has already been closed.");
+                qtrace!("Push has already been closed");
                 // If we have some events for the push_id in the event queue, the caller still does
                 // not not know that the push has been closed. Otherwise return
                 // InvalidStreamId.
@@ -376,8 +368,7 @@ impl PushController {
     }
 
     pub fn push_stream_reset(&mut self, push_id: PushId, close_type: CloseType) {
-        qtrace!("Push stream has been reset, push_id={}", push_id);
-
+        qtrace!("Push stream has been reset, push_id={push_id}");
         if let Some(push_state) = self.push_streams.get(push_id) {
             match push_state {
                 PushState::OnlyPushStream { .. } => {
@@ -395,7 +386,7 @@ impl PushController {
                 _ => {
                     debug_assert!(
                         false,
-                        "Reset cannot actually happen because we do not have a stream."
+                        "Reset cannot actually happen because we do not have a stream"
                     );
                 }
             }
@@ -436,7 +427,7 @@ impl PushController {
     pub fn new_stream_event(&mut self, push_id: PushId, event: Http3ClientEvent) {
         match self.push_streams.get_mut(push_id) {
             None => {
-                debug_assert!(false, "Push has been closed already.");
+                debug_assert!(false, "Push has been closed already");
             }
             Some(PushState::OnlyPushStream { events, .. }) => {
                 events.push(event);

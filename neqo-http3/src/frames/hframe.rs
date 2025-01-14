@@ -174,7 +174,7 @@ impl FrameDecoder<Self> for HFrame {
         } else if let Some(payload) = data {
             let mut dec = Decoder::from(payload);
             Ok(match frame_type {
-                H3_FRAME_TYPE_DATA => unreachable!("DATA frame has been handled already."),
+                H3_FRAME_TYPE_DATA => unreachable!("DATA frame has been handled already"),
                 H3_FRAME_TYPE_HEADERS => Some(Self::Headers {
                     header_block: dec.decode_remainder().to_vec(),
                 }),

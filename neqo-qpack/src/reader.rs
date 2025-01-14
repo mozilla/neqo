@@ -164,7 +164,7 @@ impl IntReader {
     /// When `prefix_len` is 8 or larger.
     #[must_use]
     pub fn new(first_byte: u8, prefix_len: u8) -> Self {
-        debug_assert!(prefix_len < 8, "prefix cannot larger than 7.");
+        debug_assert!(prefix_len < 8, "prefix cannot larger than 7");
         let mask = if prefix_len == 0 {
             0xff
         } else {
@@ -315,7 +315,7 @@ impl LiteralReader {
                     break Err(Error::NeedMoreData);
                 }
                 LiteralReaderState::Done => {
-                    panic!("Should not call read() in this state.");
+                    panic!("Should not call read() in this state");
                 }
             }
         }
