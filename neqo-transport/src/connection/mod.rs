@@ -278,6 +278,10 @@ pub struct Connection {
     release_resumption_token_timer: Option<Instant>,
     conn_params: ConnectionParameters,
     hrtime: hrtime::Handle,
+    /// The "sock puppet" to use for this connection, i.e., a set of bytes making up an invalid CH
+    /// with an innocuous SNI that is prepended to the actual CH. Empty when a connection is only
+    /// used to generate a sock puppet for another (real) one.
+    sock_puppet: Vec<u8>,
 
     /// For testing purposes it is sometimes necessary to inject frames that wouldn't
     /// otherwise be sent, just to see how a connection handles them.  Inserting them
@@ -315,13 +319,65 @@ impl Connection {
         conn_params: ConnectionParameters,
         now: Instant,
     ) -> Res<Self> {
+        // Create a "sock puppet", i.e., an invalid CH with an innoccuous SNI.
+        // The sock puppet and the real connection need to use the same DCID.
         let dcid = ConnectionId::generate_initial();
+        let sock_puppet = Self::new_client_internal(
+            "github.com",
+            protocols,
+            Rc::clone(&cid_generator),
+            dcid.clone(),
+            local_addr,
+            remote_addr,
+            conn_params.clone(),
+            now,
+            Vec::new(),
+        )
+        .map_or(Vec::new(), |mut sock_puppet| {
+            sock_puppet
+                .process_output(now)
+                .dgram()
+                .map_or_else(Vec::new, |sp| {
+                    // Invalidate the CH.
+                    let mut sp = sp.to_vec();
+                    let pos = sp.len() - 1;
+                    sp[pos] = sp[pos].wrapping_add(1);
+                    qdebug!("Created sock puppet {:?}", sp);
+                    sp
+                })
+        });
+        Self::new_client_internal(
+            server_name,
+            protocols,
+            cid_generator,
+            dcid,
+            local_addr,
+            remote_addr,
+            conn_params,
+            now,
+            sock_puppet,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)] // Yes, but we need them all.
+    fn new_client_internal(
+        server_name: impl Into<String>,
+        protocols: &[impl AsRef<str>],
+        cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
+        dcid: ConnectionId,
+        local_addr: SocketAddr,
+        remote_addr: SocketAddr,
+        conn_params: ConnectionParameters,
+        now: Instant,
+        sock_puppet: Vec<u8>,
+    ) -> Res<Self> {
         let mut c = Self::new(
             Role::Client,
             Agent::from(Client::new(server_name.into(), conn_params.is_greasing())?),
             cid_generator,
             protocols,
             conn_params,
+            sock_puppet,
         )?;
         c.crypto.states.init(
             c.conn_params.get_versions().compatible(),
@@ -357,6 +413,7 @@ impl Connection {
             cid_generator,
             protocols,
             conn_params,
+            Vec::new(),
         )
     }
 
@@ -366,6 +423,7 @@ impl Connection {
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
         protocols: &[P],
         conn_params: ConnectionParameters,
+        sock_puppet: Vec<u8>,
     ) -> Res<Self> {
         // Setup the local connection ID.
         let local_initial_source_cid = cid_generator
@@ -426,6 +484,7 @@ impl Connection {
             conn_params,
             hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
             quic_datagrams,
+            sock_puppet,
             #[cfg(test)]
             test_frame_writer: None,
         };
@@ -2480,7 +2539,8 @@ impl Connection {
                 // Packets containing Initial packets might need padding, and we want to
                 // track that padding along with the Initial packet.  So defer tracking.
                 initial_sent = Some(sent);
-                needs_padding = true;
+                // The sock puppet CH must not be padded, since it's being used as padding itself.
+                needs_padding = !self.sock_puppet.is_empty();
             } else {
                 if pt == PacketType::Handshake && self.role == Role::Client {
                     needs_padding = false;
@@ -2511,7 +2571,20 @@ impl Connection {
                         packets.len(),
                         profile.limit()
                     );
-                    initial.track_padding(profile.limit() - packets.len());
+                    let padding_len = profile.limit() - packets.len();
+                    initial.track_padding(padding_len);
+                    if !self.sock_puppet.is_empty() {
+                        if self.sock_puppet.len() <= padding_len {
+                            qdebug!("Prepending sock puppet CH, len={}", self.sock_puppet.len());
+                            packets.splice(0..0, self.sock_puppet.clone());
+                        } else {
+                            qwarn!(
+                                "Sock puppet CH too long ({} > {}), not prepending",
+                                self.sock_puppet.len(),
+                                padding_len
+                            );
+                        }
+                    }
                     // These zeros aren't padding frames, they are an invalid all-zero coalesced
                     // packet, which is why we don't increase `frame_tx.padding` count here.
                     packets.resize(profile.limit(), 0);
