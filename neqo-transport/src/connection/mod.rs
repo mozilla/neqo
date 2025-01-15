@@ -322,7 +322,7 @@ impl Connection {
         // Create a "sock puppet", i.e., an invalid CH with an innoccuous SNI.
         // The sock puppet and the real connection need to use the same DCID.
         let dcid = ConnectionId::generate_initial();
-        let sock_puppet = Self::new_client_internal(
+        let sock_puppet = Self::new_client_common(
             "github.com",
             protocols,
             Rc::clone(&cid_generator),
@@ -338,7 +338,9 @@ impl Connection {
                 .process_output(now)
                 .dgram()
                 .map_or_else(Vec::new, |sp| {
-                    // Invalidate the CH.
+                    // Invalidate the CH by incrementing the last byte, which breaks the checksum on
+                    // the blob. TODO: Find a clever way to invalidate the CH, ideally based on
+                    // something within the TLS data.
                     let mut sp = sp.to_vec();
                     let pos = sp.len() - 1;
                     sp[pos] = sp[pos].wrapping_add(1);
@@ -346,7 +348,7 @@ impl Connection {
                     sp
                 })
         });
-        Self::new_client_internal(
+        Self::new_client_common(
             server_name,
             protocols,
             cid_generator,
@@ -360,7 +362,7 @@ impl Connection {
     }
 
     #[allow(clippy::too_many_arguments)] // Yes, but we need them all.
-    fn new_client_internal(
+    fn new_client_common(
         server_name: impl Into<String>,
         protocols: &[impl AsRef<str>],
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
@@ -2583,6 +2585,7 @@ impl Connection {
                                 self.sock_puppet.len(),
                                 padding_len
                             );
+                            // TODO: Is there a way to trim the size of the sock puppet CH?
                         }
                     }
                     // These zeros aren't padding frames, they are an invalid all-zero coalesced
