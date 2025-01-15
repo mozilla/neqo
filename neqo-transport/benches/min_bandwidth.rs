@@ -38,7 +38,7 @@ pub fn main() {
     const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.5;
 
     let gbit_link = || {
-        let rate_byte = GBIT / 8;
+        let rate_byte = LINK_BANDWIDTH / 8;
         // Router buffer set to bandwidth-delay product.
         let capacity_byte = rate_byte * LINK_RTT_MS / 1_000;
         TailDrop::new(rate_byte, capacity_byte, Duration::ZERO)
