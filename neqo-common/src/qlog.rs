@@ -229,7 +229,7 @@ mod test {
         let (log, contents) = test_fixture::new_neqo_qlog();
         log.add_event_with_instant(|| Some(Event::with_time(0.0, EV_DATA)), Instant::now());
         assert_eq!(
-            Regex::new("\"time\":[0-9].[0-9]*,")
+            Regex::new("\"time\":[0-9]+.[0-9]+,")
                 .unwrap()
                 .replace(&contents.to_string(), "\"time\":0.0,"),
             format!("{EXPECTED_LOG_HEADER}{EXPECTED_LOG_EVENT}"),
