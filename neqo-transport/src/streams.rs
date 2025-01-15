@@ -188,7 +188,7 @@ impl Streams {
             }
             Frame::DataBlocked { data_limit } => {
                 // Should never happen since we set data limit to max
-                qwarn!("Received DataBlocked with data limit {}", data_limit);
+                qwarn!("Received DataBlocked with data limit {data_limit}");
                 stats.data_blocked += 1;
                 self.handle_data_blocked();
             }
@@ -420,13 +420,18 @@ impl Streams {
         stream_id: StreamId,
     ) -> Res<(Option<&mut SendStream>, Option<&mut RecvStream>)> {
         self.ensure_created_if_remote(stream_id)?;
-        // Has this local stream existed in the past, i.e., is its index lower than the number of
-        // used streams?
-        let existed = !stream_id.is_remote_initiated(self.role)
-            && self.local_stream_limits[stream_id.stream_type()].used() > stream_id.index();
         let ss = self.send.get_mut(stream_id).ok();
         let rs = self.recv.get_mut(stream_id).ok();
-        if ss.is_none() && rs.is_none() && !existed {
+        // If it is:
+        // - neither a known send nor receive stream,
+        // - and it must be locally initiated,
+        // - and its index is larger than the local used stream limit,
+        // then it is an illegal stream.
+        if ss.is_none()
+            && rs.is_none()
+            && !stream_id.is_remote_initiated(self.role)
+            && self.local_stream_limits[stream_id.stream_type()].used() <= stream_id.index()
+        {
             return Err(Error::StreamStateError);
         }
         Ok((ss, rs))

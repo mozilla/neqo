@@ -9,7 +9,7 @@
 
 use std::{
     fmt::{self, Display},
-    net::{SocketAddr, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     time::Duration,
 };
@@ -163,9 +163,8 @@ impl QuicParameters {
         assert_eq!(
             opt.is_some(),
             addr.is_some(),
-            "unable to resolve '{}' to an {} address",
+            "unable to resolve '{}' to an {v} address",
             opt.as_ref().unwrap(),
-            v,
         );
         addr
     }
@@ -266,7 +265,7 @@ impl std::error::Error for Error {}
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf, str::FromStr, time::SystemTime};
+    use std::{fs, path::PathBuf, str::FromStr as _, time::SystemTime};
 
     use crate::{client, server};
 
@@ -276,15 +275,14 @@ mod tests {
 
     impl TempDir {
         fn new() -> Self {
-            let mut dir = std::env::temp_dir();
-            dir.push(format!(
+            let dir = std::env::temp_dir().join(format!(
                 "neqo-bin-test-{}",
                 SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
                     .as_secs()
             ));
-            fs::create_dir(&dir).unwrap();
+            fs::create_dir_all(&dir).unwrap();
             Self { path: dir }
         }
 

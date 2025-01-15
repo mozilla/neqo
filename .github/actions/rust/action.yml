@@ -24,7 +24,7 @@ runs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
       with:
-        toolchain: ${{ inputs.version }}
+        toolchain: ${{ inputs.version  }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
 
@@ -67,11 +67,11 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
       # TODO: Unpin cargo-quickinstall once our MSRV is > 1.76
-      run: cargo +${{ inputs.version }} install --locked cargo-quickinstall@0.3.5
+      run: cargo install --locked cargo-quickinstall@0.3.5
 
     - name: Install Rust tools
       shell: bash
       if: inputs.tools != ''
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
-      run: cargo +${{ inputs.version }} quickinstall $(echo ${{ inputs.tools }} | tr -d ",")
+      run: cargo quickinstall $(echo ${{ inputs.tools }} | tr -d ",")

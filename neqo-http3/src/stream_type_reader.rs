@@ -137,7 +137,7 @@ impl NewStreamHeadReader {
                 return Ok(None);
             };
 
-            qtrace!("Decoded uint {}", output);
+            qtrace!("Decoded uint {output}");
             match self {
                 Self::ReadType {
                     role, stream_id, ..
@@ -178,7 +178,7 @@ impl NewStreamHeadReader {
                 Self::ReadId { stream_type, .. } => {
                     let is_push = *stream_type == HTTP3_UNI_STREAM_TYPE_PUSH;
                     *self = Self::Done;
-                    qtrace!("New Stream stream push_id={}", output);
+                    qtrace!("New Stream stream push_id={output}");
                     if fin {
                         return Err(Error::HttpGeneralProtocol);
                     }
@@ -204,7 +204,7 @@ impl NewStreamHeadReader {
             Some(NewStreamType::Http(_)) => Err(Error::HttpFrame),
             Some(NewStreamType::Unknown) => Ok(decoded),
             Some(NewStreamType::Push(_) | NewStreamType::WebTransportStream(_)) => {
-                unreachable!("PushStream and WebTransport are mapped to None at this stage.")
+                unreachable!("PushStream and WebTransport are mapped to None at this stage")
             }
         }
     }
@@ -237,8 +237,6 @@ impl RecvStream for NewStreamHeadReader {
 
 #[cfg(test)]
 mod tests {
-    use std::mem;
-
     use neqo_common::{Encoder, Role};
     use neqo_qpack::{
         decoder::QPACK_UNI_STREAM_TYPE_DECODER, encoder::QPACK_UNI_STREAM_TYPE_ENCODER,
@@ -253,7 +251,7 @@ mod tests {
     use crate::{
         control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL,
         frames::{H3_FRAME_TYPE_HEADERS, H3_FRAME_TYPE_SETTINGS},
-        CloseType, Error, NewStreamType, PushId, ReceiveOutput, RecvStream, Res,
+        CloseType, Error, NewStreamType, PushId, ReceiveOutput, RecvStream as _, Res,
     };
 
     struct Test {
@@ -269,7 +267,7 @@ mod tests {
             // create a stream
             let stream_id = conn_s.stream_create(stream_type).unwrap();
             let out = conn_s.process_output(now());
-            mem::drop(conn_c.process(out.dgram(), now()));
+            drop(conn_c.process(out.dgram(), now()));
 
             Self {
                 conn_c,
@@ -292,7 +290,7 @@ mod tests {
                     .stream_send(self.stream_id, &enc[i..=i])
                     .unwrap();
                 let out = self.conn_s.process_output(now());
-                mem::drop(self.conn_c.process(out.dgram(), now()));
+                drop(self.conn_c.process(out.dgram(), now()));
                 assert_eq!(
                     self.decoder.receive(&mut self.conn_c).unwrap(),
                     (ReceiveOutput::NoOutput, false)
@@ -306,7 +304,7 @@ mod tests {
                 self.conn_s.stream_close_send(self.stream_id).unwrap();
             }
             let out = self.conn_s.process_output(now());
-            mem::drop(self.conn_c.process(out.dgram(), now()));
+            drop(self.conn_c.process(out.dgram(), now()));
             assert_eq!(&self.decoder.receive(&mut self.conn_c), outcome);
             assert_eq!(self.decoder.done(), done);
         }
