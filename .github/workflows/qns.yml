@@ -148,11 +148,11 @@ jobs:
 
       # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
       - uses: ./.github/actions/quic-interop-runner
+        timeout-minutes: 20
         with:
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
-          timeout: 20
 
   report:
     name: Report results
