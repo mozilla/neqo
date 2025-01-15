@@ -23,7 +23,6 @@ permissions:
 env:
   LATEST: neqo-latest
   DELIM: ' vs. '
-  TIMEOUT: 30
 
 jobs:
   docker-image:
@@ -149,11 +148,11 @@ jobs:
 
       # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
       - uses: ./.github/actions/quic-interop-runner
-        timeout-minutes: ${{ fromJSON(env.TIMEOUT) }}
         with:
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
+          timeout: 20
 
   report:
     name: Report results

@@ -19,6 +19,10 @@ inputs:
     description: 'Modified "implementations.json" data'
     required: false
     default: ''
+  timeout:
+    description: 'Timeout for the test run in minutes'
+    required: false
+    default: 20
 
 runs:
   using: "composite"
@@ -54,6 +58,7 @@ runs:
       shell: bash
 
     - name: Run tests
+      timeout-minutes: ${{ inputs.timeout }}
       run: |
         cd quic-interop-runner
         if [ -n "${{ inputs.implementations }}" ]; then
