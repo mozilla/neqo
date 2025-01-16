@@ -421,7 +421,8 @@ fn new_token_different_port() {
 
 #[test]
 fn bad_client_initial() {
-    let mut client = default_client();
+    // Sock puppets don't work with the decryption this test uses.
+    let mut client = new_client(ConnectionParameters::default().sock_puppet(false));
     let mut server = default_server();
 
     let dgram = client.process_output(now()).dgram().expect("a datagram");

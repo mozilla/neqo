@@ -330,10 +330,10 @@ fn invalid_server_version() {
     let dgram = client.process_output(now()).dgram();
     server.process_input(dgram.unwrap(), now());
 
-    // One packet received.
-    assert_eq!(server.stats().packets_rx, 1);
-    // None dropped; the server will have decrypted it successfully.
-    assert_eq!(server.stats().dropped_rx, 0);
+    // Two packets received, one is the sock puppet CH.
+    assert_eq!(server.stats().packets_rx, 2);
+    // Sock puppet CH was dropped.
+    assert_eq!(server.stats().dropped_rx, 1);
     assert_eq!(server.stats().saved_datagrams, 0);
     // The server effectively hasn't reacted here.
     match server.state() {

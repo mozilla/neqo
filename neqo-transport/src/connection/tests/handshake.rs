@@ -572,18 +572,19 @@ fn reorder_1rtt() {
         server.process_input(d, now + RTT / 2);
     }
     // The server has now received those packets, and saved them.
-    // The two extra received are Initial + the junk we use for padding.
-    assert_eq!(server.stats().packets_rx, PACKETS + 2);
+    // The three extra received are sock puppet CH + Initial + the junk we use for padding.
+    assert_eq!(server.stats().packets_rx, PACKETS + 3);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
-    assert_eq!(server.stats().dropped_rx, 1);
+    assert_eq!(server.stats().dropped_rx, 2);
 
     now += RTT / 2;
     let s2 = server.process(c2, now).dgram();
     // The server has now received those packets, and saved them.
-    // The two additional are a Handshake and a 1-RTT (w/ NEW_CONNECTION_ID).
-    assert_eq!(server.stats().packets_rx, PACKETS * 2 + 4);
+    // The three additional are a Handshake and a 1-RTT (w/ NEW_CONNECTION_ID) and its sock puppet
+    // CH.
+    assert_eq!(server.stats().packets_rx, PACKETS * 2 + 5);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
-    assert_eq!(server.stats().dropped_rx, 1);
+    assert_eq!(server.stats().dropped_rx, 2);
     assert_eq!(*server.state(), State::Confirmed);
     assert_eq!(server.paths.rtt(), RTT);
 
@@ -630,8 +631,8 @@ fn corrupted_initial() {
     server.process_input(dgram, now());
     // The server should have received two packets,
     // the first should be dropped, the second saved.
-    assert_eq!(server.stats().packets_rx, 2);
-    assert_eq!(server.stats().dropped_rx, 2);
+    assert_eq!(server.stats().packets_rx, 3);
+    assert_eq!(server.stats().dropped_rx, 3);
     assert_eq!(server.stats().saved_datagrams, 0);
 }
 

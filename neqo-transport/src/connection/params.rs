@@ -83,6 +83,8 @@ pub struct ConnectionParameters {
     pacing: bool,
     /// Whether the connection performs PLPMTUD.
     pmtud: bool,
+    /// Whether the connection should use sock puppet CHs.
+    sock_puppet: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -107,6 +109,7 @@ impl Default for ConnectionParameters {
             disable_migration: false,
             pacing: true,
             pmtud: false,
+            sock_puppet: true,
         }
     }
 }
@@ -364,6 +367,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn pmtud(mut self, pmtud: bool) -> Self {
         self.pmtud = pmtud;
+        self
+    }
+
+    #[must_use]
+    pub const fn sock_puppet_enabled(&self) -> bool {
+        self.sock_puppet
+    }
+
+    #[must_use]
+    pub const fn sock_puppet(mut self, sock_puppet: bool) -> Self {
+        self.sock_puppet = sock_puppet;
         self
     }
 

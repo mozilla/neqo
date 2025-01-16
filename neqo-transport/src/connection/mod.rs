@@ -281,7 +281,8 @@ pub struct Connection {
     /// The "sock puppet" to use for this connection, i.e., a set of bytes making up an invalid CH
     /// with an innocuous SNI that is prepended to the actual CH. Empty when a connection is only
     /// used to generate a sock puppet for another (real) one.
-    sock_puppet: Vec<u8>,
+    sock_puppet: Vec<u8>, /* TODO: Should this be an Option<Vec<u8>>? Could it be a &[u8] or an
+                           * Option<&[u8]>? */
 
     /// For testing purposes it is sometimes necessary to inject frames that wouldn't
     /// otherwise be sent, just to see how a connection handles them.  Inserting them
@@ -322,32 +323,37 @@ impl Connection {
         // Create a "sock puppet", i.e., an invalid CH with an innoccuous SNI.
         // The sock puppet and the real connection need to use the same DCID.
         let dcid = ConnectionId::generate_initial();
-        let sock_puppet = Self::new_client_common(
-            "github.com",
-            protocols,
-            Rc::clone(&cid_generator),
-            dcid.clone(),
-            local_addr,
-            remote_addr,
-            conn_params.clone(),
-            now,
-            Vec::new(),
-        )
-        .map_or(Vec::new(), |mut sock_puppet| {
-            sock_puppet
-                .process_output(now)
-                .dgram()
-                .map_or_else(Vec::new, |sp| {
-                    // Invalidate the CH by incrementing the last byte, which breaks the checksum on
-                    // the blob. TODO: Find a clever way to invalidate the CH, ideally based on
-                    // something within the TLS data.
-                    let mut sp = sp.to_vec();
-                    let pos = sp.len() - 1;
-                    sp[pos] = sp[pos].wrapping_add(1);
-                    qdebug!("Created sock puppet {:?}", sp);
-                    sp
-                })
-        });
+        let sock_puppet = if conn_params.sock_puppet_enabled() {
+            Self::new_client_common(
+                "github.com",
+                protocols,
+                Rc::clone(&cid_generator),
+                dcid.clone(),
+                local_addr,
+                remote_addr,
+                conn_params.clone(),
+                now,
+                Vec::new(),
+            )
+            .map_or(Vec::new(), |mut sock_puppet| {
+                sock_puppet
+                    .process_output(now)
+                    .dgram()
+                    .map_or_else(Vec::new, |sp| {
+                        // Invalidate the CH by incrementing the last byte, which breaks the
+                        // checksum on the blob. TODO: Find a clever way to
+                        // invalidate the CH, ideally based on
+                        // something within the TLS data.
+                        let mut sp = sp.to_vec();
+                        let pos = sp.len() - 1;
+                        sp[pos] = sp[pos].wrapping_add(1);
+                        qdebug!("Created sock puppet CH of len {}", sp.len());
+                        sp
+                    })
+            })
+        } else {
+            Vec::new()
+        };
         Self::new_client_common(
             server_name,
             protocols,
@@ -2542,7 +2548,7 @@ impl Connection {
                 // track that padding along with the Initial packet.  So defer tracking.
                 initial_sent = Some(sent);
                 // The sock puppet CH must not be padded, since it's being used as padding itself.
-                needs_padding = !self.sock_puppet.is_empty();
+                needs_padding = self.role == Role::Server || !self.sock_puppet.is_empty();
             } else {
                 if pt == PacketType::Handshake && self.role == Role::Client {
                     needs_padding = false;
