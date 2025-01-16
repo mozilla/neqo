@@ -30,6 +30,7 @@ use neqo_crypto::{
     Server, ZeroRttChecker,
 };
 use smallvec::SmallVec;
+use sockpuppet::sock_puppet;
 
 use crate::{
     addr_valid::{AddressValidation, NewTokenState},
@@ -65,6 +66,7 @@ mod dump;
 mod idle;
 pub mod params;
 mod saved;
+mod sockpuppet;
 mod state;
 #[cfg(test)]
 pub mod test_internal;
@@ -278,11 +280,6 @@ pub struct Connection {
     release_resumption_token_timer: Option<Instant>,
     conn_params: ConnectionParameters,
     hrtime: hrtime::Handle,
-    /// The "sock puppet" to use for this connection, i.e., a set of bytes making up an invalid CH
-    /// with an innocuous SNI that is prepended to the actual CH. Empty when a connection is only
-    /// used to generate a sock puppet for another (real) one.
-    sock_puppet: Vec<u8>, /* TODO: Should this be an Option<Vec<u8>>? Could it be a &[u8] or an
-                           * Option<&[u8]>? */
 
     /// For testing purposes it is sometimes necessary to inject frames that wouldn't
     /// otherwise be sent, just to see how a connection handles them.  Inserting them
@@ -320,74 +317,13 @@ impl Connection {
         conn_params: ConnectionParameters,
         now: Instant,
     ) -> Res<Self> {
-        // Create a "sock puppet", i.e., an invalid CH with an innoccuous SNI.
-        // The sock puppet and the real connection need to use the same DCID.
         let dcid = ConnectionId::generate_initial();
-        let sock_puppet = if conn_params.sock_puppet_enabled() {
-            Self::new_client_common(
-                "github.com",
-                protocols,
-                Rc::clone(&cid_generator),
-                dcid.clone(),
-                local_addr,
-                remote_addr,
-                conn_params
-                    .clone()
-                    .sni_slicing(false) // We want this SNI to be easily findable.
-                    .grease(false), // We also don't need grease here.
-                now,
-                Vec::new(),
-            )
-            .map_or(Vec::new(), |mut sock_puppet| {
-                sock_puppet
-                    .process_output(now)
-                    .dgram()
-                    .map_or_else(Vec::new, |sp| {
-                        // Invalidate the CH by incrementing the last byte, which breaks the
-                        // checksum on the blob. TODO: Find a clever way to invalidate the CH,
-                        // ideally based on something within the TLS data.
-                        let mut sp = sp.to_vec();
-                        let pos = sp.len() - 1;
-                        sp[pos] = sp[pos].wrapping_add(1);
-                        qdebug!("Created sock puppet CH of len {}", sp.len());
-                        sp
-                    })
-            })
-        } else {
-            Vec::new()
-        };
-        Self::new_client_common(
-            server_name,
-            protocols,
-            cid_generator,
-            dcid,
-            local_addr,
-            remote_addr,
-            conn_params,
-            now,
-            sock_puppet,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)] // Yes, but we need them all.
-    fn new_client_common(
-        server_name: impl Into<String>,
-        protocols: &[impl AsRef<str>],
-        cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
-        dcid: ConnectionId,
-        local_addr: SocketAddr,
-        remote_addr: SocketAddr,
-        conn_params: ConnectionParameters,
-        now: Instant,
-        sock_puppet: Vec<u8>,
-    ) -> Res<Self> {
         let mut c = Self::new(
             Role::Client,
             Agent::from(Client::new(server_name.into(), conn_params.is_greasing())?),
             cid_generator,
             protocols,
             conn_params,
-            sock_puppet,
         )?;
         c.crypto.states.init(
             c.conn_params.get_versions().compatible(),
@@ -423,7 +359,6 @@ impl Connection {
             cid_generator,
             protocols,
             conn_params,
-            Vec::new(),
         )
     }
 
@@ -433,7 +368,6 @@ impl Connection {
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
         protocols: &[P],
         conn_params: ConnectionParameters,
-        sock_puppet: Vec<u8>,
     ) -> Res<Self> {
         // Setup the local connection ID.
         let local_initial_source_cid = cid_generator
@@ -494,7 +428,6 @@ impl Connection {
             conn_params,
             hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
             quic_datagrams,
-            sock_puppet,
             #[cfg(test)]
             test_frame_writer: None,
         };
@@ -2447,9 +2380,26 @@ impl Connection {
         let profile = self.loss_recovery.send_profile(&path.borrow(), now);
         qdebug!("[{self}] output_path send_profile {profile:?}");
 
+        let sock_puppet = if let Some((_, tx)) = self
+            .crypto
+            .states
+            .select_tx_mut(self.version, PacketNumberSpace::Initial)
+        {
+            sock_puppet(
+                tx,
+                path,
+                &self.address_validation,
+                version,
+                &self.loss_recovery,
+            )
+        } else {
+            Vec::new()
+        };
+
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         let mut encoder = Encoder::with_capacity(profile.limit());
+        let mut reserved = 0;
         for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
             let Some((cspace, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
@@ -2479,9 +2429,14 @@ impl Connection {
 
             // Configure the limits and padding for this packet.
             let aead_expansion = tx.expansion();
+            if pt == PacketType::Initial && self.role == Role::Client && pn == 0 {
+                qdebug!("Reserving {} space for sock puppet CH", sock_puppet.len());
+                reserved += sock_puppet.len();
+            };
+
             needs_padding |= builder.set_initial_limit(
                 &profile,
-                aead_expansion,
+                aead_expansion + reserved,
                 self.paths
                     .primary()
                     .ok_or(Error::InternalError)?
@@ -2556,8 +2511,7 @@ impl Connection {
                 // Packets containing Initial packets might need padding, and we want to
                 // track that padding along with the Initial packet.  So defer tracking.
                 initial_sent = Some(sent);
-                // The sock puppet CH must not be padded, since it's being used as padding itself.
-                needs_padding = self.role == Role::Server || !self.sock_puppet.is_empty();
+                needs_padding = true;
             } else {
                 if pt == PacketType::Handshake && self.role == Role::Client {
                     needs_padding = false;
@@ -2590,18 +2544,16 @@ impl Connection {
                     );
                     let padding_len = profile.limit() - packets.len();
                     initial.track_padding(padding_len);
-                    if !self.sock_puppet.is_empty() {
-                        if self.sock_puppet.len() <= padding_len {
-                            qdebug!("Prepending sock puppet CH, len={}", self.sock_puppet.len());
-                            packets.splice(0..0, self.sock_puppet.clone());
-                        } else {
-                            qwarn!(
-                                "Sock puppet CH too long ({} > {}), not prepending",
-                                self.sock_puppet.len(),
-                                padding_len
-                            );
-                            // TODO: Is there a way to trim the size of the sock puppet CH?
-                        }
+                    if sock_puppet.len() <= padding_len {
+                        qdebug!("Prepending sock puppet CH, len={}", sock_puppet.len());
+                        packets.splice(0..0, sock_puppet);
+                    } else {
+                        qwarn!(
+                            "Sock puppet CH too long ({} > {}), not prepending",
+                            sock_puppet.len(),
+                            padding_len
+                        );
+                        // TODO: Is there a way to trim the size of the sock puppet CH?
                     }
                     // These zeros aren't padding frames, they are an invalid all-zero coalesced
                     // packet, which is why we don't increase `frame_tx.padding` count here.
