@@ -442,7 +442,6 @@ mod tests {
 
         let final_mtu = iface_mtu.map_or(mtu, |iface_mtu| min(mtu, iface_mtu));
         assert_mtu(&pmtud, final_mtu);
-        // assert_mtu(&pmtud, final_mtu);
 
         (pmtud, stats, prot, now)
     }
@@ -698,10 +697,10 @@ mod tests {
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 9000)], &mut stats, now);
 
         for _ in 0..2 {
-          // One packet of size 1400 was lost, which should increase loss counts >= 1400 by one.
-          expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 1400);
-          pmtud.on_packets_lost(&[make_sentpacket(0, now, 1400)], &mut stats, now);
-          assert_eq!(expected_lc, pmtud.loss_counts);
+            // One packet of size 1400 was lost, which should increase loss counts >= 1400 by one.
+            expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 1400);
+            pmtud.on_packets_lost(&[make_sentpacket(0, now, 1400)], &mut stats, now);
+            assert_eq!(expected_lc, pmtud.loss_counts);
         }
 
         // One packet of size 1400 was lost, which should increase loss counts >= 1400 by one.
