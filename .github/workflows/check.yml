@@ -63,7 +63,9 @@ jobs:
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'nightly' && 'llvm-tools' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'nightly' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
+          # nextest v0.9.88 requires rustc v1.81. Use nextest v0.9.87 for now.
+          # See <https://github.com/mozilla/neqo/issues/2365> for details.
+          tools: ${{ matrix.rust-toolchain == 'nightly' && 'cargo-llvm-cov, ' || '' }} cargo-nextest@0.9.87
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version

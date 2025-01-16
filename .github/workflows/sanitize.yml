@@ -44,7 +44,9 @@ jobs:
         with:
           version: nightly
           components: rust-src
-          tools: cargo-nextest
+          # nextest v0.9.88 requires rustc v1.81. Use nextest v0.9.87 for now.
+          # See <https://github.com/mozilla/neqo/issues/2365> for details.
+          tools: cargo-nextest@0.9.87
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
