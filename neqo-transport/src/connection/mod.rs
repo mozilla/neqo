@@ -331,7 +331,10 @@ impl Connection {
                 dcid.clone(),
                 local_addr,
                 remote_addr,
-                conn_params.clone(),
+                conn_params
+                    .clone()
+                    .sni_slicing(false) // We want this SNI to be easily findable.
+                    .grease(false), // We also don't need grease here.
                 now,
                 Vec::new(),
             )
@@ -341,9 +344,8 @@ impl Connection {
                     .dgram()
                     .map_or_else(Vec::new, |sp| {
                         // Invalidate the CH by incrementing the last byte, which breaks the
-                        // checksum on the blob. TODO: Find a clever way to
-                        // invalidate the CH, ideally based on
-                        // something within the TLS data.
+                        // checksum on the blob. TODO: Find a clever way to invalidate the CH,
+                        // ideally based on something within the TLS data.
                         let mut sp = sp.to_vec();
                         let pos = sp.len() - 1;
                         sp[pos] = sp[pos].wrapping_add(1);
@@ -2227,6 +2229,7 @@ impl Connection {
         let frame_stats = &mut stats.frame_tx;
         self.crypto.write_frame(
             PacketNumberSpace::ApplicationData,
+            self.conn_params.sni_slicing_enabled(),
             builder,
             tokens,
             frame_stats,
@@ -2361,7 +2364,13 @@ impl Connection {
                 self.write_appdata_frames(builder, &mut tokens);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
-                self.crypto.write_frame(space, builder, &mut tokens, stats);
+                self.crypto.write_frame(
+                    space,
+                    self.conn_params.sni_slicing_enabled(),
+                    builder,
+                    &mut tokens,
+                    stats,
+                );
             }
         }
 
