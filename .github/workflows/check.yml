@@ -63,7 +63,7 @@ jobs:
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'nightly' && 'llvm-tools' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'nightly' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
+          tools: ${{ matrix.rust-toolchain == 'nightly' && 'cargo-llvm-cov, ' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -87,9 +87,9 @@ jobs:
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "${{ matrix.rust-toolchain }}" == "nightly" ]; then
-            cargo llvm-cov nextest $BUILD_TYPE --mcdc --include-ffi --features ci --profile ci --codecov --output-path codecov.json
+            cargo llvm-cov $BUILD_TYPE --mcdc --include-ffi --features ci --codecov --output-path codecov.json
           else
-            cargo nextest run $BUILD_TYPE --features ci --profile ci
+            cargo test $BUILD_TYPE --features ci
           fi
 
       - name: Run client/server transfer
