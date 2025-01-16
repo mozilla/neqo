@@ -697,15 +697,12 @@ mod tests {
         // the current MTU, so nothing will happen.
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 9000)], &mut stats, now);
 
-        // One packet of size 1400 was lost, which should increase loss counts >= 1400 by one.
-        expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 1400);
-        pmtud.on_packets_lost(&[make_sentpacket(0, now, 1400)], &mut stats, now);
-        assert_eq!(expected_lc, pmtud.loss_counts);
-
-        // One packet of size 1400 was lost, which should increase loss counts >= 1400 by one.
-        expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 1400);
-        pmtud.on_packets_lost(&[make_sentpacket(0, now, 1400)], &mut stats, now);
-        assert_eq!(expected_lc, pmtud.loss_counts);
+        for _ in 0..2 {
+          // One packet of size 1400 was lost, which should increase loss counts >= 1400 by one.
+          expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 1400);
+          pmtud.on_packets_lost(&[make_sentpacket(0, now, 1400)], &mut stats, now);
+          assert_eq!(expected_lc, pmtud.loss_counts);
+        }
 
         // One packet of size 1400 was lost, which should increase loss counts >= 1400 by one.
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 1400)], &mut stats, now);
