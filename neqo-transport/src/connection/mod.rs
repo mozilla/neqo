@@ -2399,7 +2399,6 @@ impl Connection {
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         let mut encoder = Encoder::with_capacity(profile.limit());
-        let mut reserved = 0;
         for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
             let Some((cspace, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
@@ -2428,7 +2427,7 @@ impl Connection {
             }
 
             // Configure the limits and padding for this packet.
-            let aead_expansion = tx.expansion();
+            let mut reserved = tx.expansion();
             if pt == PacketType::Initial && self.role == Role::Client && pn == 0 {
                 qdebug!("Reserving {} space for sock puppet CH", sock_puppet.len());
                 reserved += sock_puppet.len();
@@ -2436,7 +2435,7 @@ impl Connection {
 
             needs_padding |= builder.set_initial_limit(
                 &profile,
-                aead_expansion + reserved,
+                reserved,
                 self.paths
                     .primary()
                     .ok_or(Error::InternalError)?
@@ -2472,13 +2471,13 @@ impl Connection {
                 pn,
                 &builder.as_ref()[payload_start..],
                 path.borrow().tos(),
-                builder.len() + aead_expansion,
+                builder.len() + reserved,
             );
             qlog::packet_sent(
                 &self.qlog,
                 pt,
                 pn,
-                builder.len() - header_start + aead_expansion,
+                builder.len() - header_start + reserved,
                 &builder.as_ref()[payload_start..],
                 now,
             );

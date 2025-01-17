@@ -1326,8 +1326,8 @@ impl std::fmt::Display for CryptoStates {
 
 #[derive(Debug, Default)]
 pub struct CryptoStream {
-    pub tx: TxBuffer,
-    pub rx: RxStreamOrderer,
+    tx: TxBuffer,
+    rx: RxStreamOrderer,
 }
 
 #[derive(Debug)]

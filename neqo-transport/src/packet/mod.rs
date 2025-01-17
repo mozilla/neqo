@@ -243,15 +243,15 @@ impl PacketBuilder {
     pub fn set_initial_limit(
         &mut self,
         profile: &SendProfile,
-        aead_expansion: usize,
+        reserved: usize,
         pmtud: &Pmtud,
     ) -> bool {
         if pmtud.needs_probe() {
             debug_assert!(pmtud.probe_size() > profile.limit());
-            self.limit = pmtud.probe_size() - aead_expansion;
+            self.limit = pmtud.probe_size() - reserved;
             true
         } else {
-            self.limit = profile.limit() - aead_expansion;
+            self.limit = profile.limit() - reserved;
             false
         }
     }
