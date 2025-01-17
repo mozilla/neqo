@@ -16,7 +16,7 @@ cargo build --bin neqo-client --bin neqo-server
 addr=localhost
 port=4433
 path=/20000
-flags="--verbose --verbose --verbose --qlog-dir $tmp --alpn hq-interop --quic-version 1"
+flags="--verbose --verbose --verbose --verbose --qlog-dir $tmp --alpn hq-interop --quic-version 1"
 if [ "$(uname -s)" != "Linux" ]; then
         iface=lo0
 else
@@ -35,12 +35,17 @@ tcpdump -U -i "$iface" -w "$tmp/test.pcap" host $addr and port $port >/dev/null 
 tcpdump_pid=$!
 trap 'kill $tcpdump_pid; rm -rf "$tmp"' EXIT
 
+export SSLDEBUG=1
+export SSLTRACE=1
 tmux -CC \
         set-option -g default-shell "$(which bash)" \; \
         new-session "$client; kill -USR2 $tcpdump_pid; touch $tmp/done" \; \
         split-window -h "$server" \; \
         split-window -v -f "\
+                echo $tmp; \
                 until [ -e $tmp/done ]; do sleep 1; done; \
-                echo $tmp; ls -l $tmp; echo; \
-                tshark -r $tmp/test.pcap -o tls.keylog_file:$tmp/test.tlskey" \; \
+                editcap --inject-secrets tls,$tmp/test.tlskey $tmp/test.pcap $tmp/test.pcap.injected; \
+                mv $tmp/test.pcap.injected $tmp/test.pcap; \
+                ls -l $tmp; echo; \
+                tshark -r $tmp/test.pcap" \; \
         set remain-on-exit on

@@ -112,7 +112,7 @@ impl Default for ConnectionParameters {
             pacing: true,
             pmtud: false,
             sock_puppet: true,
-            sni_slicing: true,
+            sni_slicing: false, // FIXME: This should be true by default.
         }
     }
 }

@@ -30,7 +30,6 @@ use neqo_crypto::{
     Server, ZeroRttChecker,
 };
 use smallvec::SmallVec;
-use sockpuppet::sock_puppet;
 
 use crate::{
     addr_valid::{AddressValidation, NewTokenState},
@@ -2375,26 +2374,10 @@ impl Connection {
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
-
+        let mut sock_puppet = None;
         // Determine how we are sending packets (PTO, etc..).
         let profile = self.loss_recovery.send_profile(&path.borrow(), now);
         qdebug!("[{self}] output_path send_profile {profile:?}");
-
-        let sock_puppet = if let Some((_, tx)) = self
-            .crypto
-            .states
-            .select_tx_mut(self.version, PacketNumberSpace::Initial)
-        {
-            sock_puppet(
-                tx,
-                path,
-                &self.address_validation,
-                version,
-                &self.loss_recovery,
-            )
-        } else {
-            Vec::new()
-        };
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
@@ -2404,6 +2387,12 @@ impl Connection {
             let Some((cspace, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
                 continue;
             };
+
+            sock_puppet =
+                (cspace == CryptoSpace::Initial && self.role == Role::Client).then(|| {
+                    qdebug!("Creating sock puppet");
+                    sockpuppet::sock_puppet(tx, path, &self.loss_recovery, &self.tps.borrow().local)
+                });
 
             let header_start = encoder.len();
             let (pt, mut builder) = Self::build_packet_header(
@@ -2428,10 +2417,12 @@ impl Connection {
 
             // Configure the limits and padding for this packet.
             let mut reserved = tx.expansion();
-            if pt == PacketType::Initial && self.role == Role::Client && pn == 0 {
+            if pn > 1 {
+                sock_puppet = None;
+            } else if let Some(sock_puppet) = &sock_puppet {
                 qdebug!("Reserving {} space for sock puppet CH", sock_puppet.len());
                 reserved += sock_puppet.len();
-            };
+            }
 
             needs_padding |= builder.set_initial_limit(
                 &profile,
@@ -2543,16 +2534,17 @@ impl Connection {
                     );
                     let padding_len = profile.limit() - packets.len();
                     initial.track_padding(padding_len);
-                    if sock_puppet.len() <= padding_len {
-                        qdebug!("Prepending sock puppet CH, len={}", sock_puppet.len());
-                        packets.splice(0..0, sock_puppet);
-                    } else {
-                        qwarn!(
-                            "Sock puppet CH too long ({} > {}), not prepending",
-                            sock_puppet.len(),
-                            padding_len
-                        );
-                        // TODO: Is there a way to trim the size of the sock puppet CH?
+                    if let Some(sock_puppet) = sock_puppet {
+                        if sock_puppet.len() <= padding_len {
+                            qdebug!("Prepending sock puppet CH, len={}", sock_puppet.len());
+                            packets.splice(0..0, sock_puppet);
+                        } else {
+                            qwarn!(
+                                "Sock puppet CH too long ({} > {}), not prepending",
+                                sock_puppet.len(),
+                                padding_len
+                            );
+                        }
                     }
                     // These zeros aren't padding frames, they are an invalid all-zero coalesced
                     // packet, which is why we don't increase `frame_tx.padding` count here.
