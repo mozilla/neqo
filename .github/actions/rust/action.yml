@@ -24,9 +24,7 @@ runs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
       with:
-        # Nightly pinned due to <https://github.com/mozilla/neqo/issues/2369>
-        # for now.
-        toolchain: ${{ inputs.version == 'nightly' && 'nightly-2025-01-15' || inputs.version }}
+        toolchain: ${{ inputs.version  }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
 
