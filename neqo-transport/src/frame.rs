@@ -48,8 +48,14 @@ pub const FRAME_TYPE_PATH_RESPONSE: FrameType = 0x1b;
 pub const FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT: FrameType = 0x1c;
 pub const FRAME_TYPE_CONNECTION_CLOSE_APPLICATION: FrameType = 0x1d;
 pub const FRAME_TYPE_HANDSHAKE_DONE: FrameType = 0x1e;
-// draft-ietf-quic-ack-delay
+/// > A data sender signals the conditions under which it wants to receive ACK
+/// > frames using an ACK_FREQUENCY frame
+///
+/// <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-4>
 pub const FRAME_TYPE_ACK_FREQUENCY: FrameType = 0xaf;
+// TODO: Use
+/// <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-4>
+pub const FRAME_IMMEDIATE_ACK: FrameType = 0x1f;
 // draft-ietf-quic-datagram
 pub const FRAME_TYPE_DATAGRAM: FrameType = 0x30;
 pub const FRAME_TYPE_DATAGRAM_WITH_LEN: FrameType = 0x31;
@@ -189,18 +195,30 @@ pub enum Frame<'a> {
         reason_phrase: String,
     },
     HandshakeDone,
+    /// > A data sender signals the conditions under which it wants to receive
+    /// > ACK frames using an ACK_FREQUENCY frame
+    ///
+    /// <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-4>
     AckFrequency {
-        /// The current ACK frequency sequence number.
+        /// > the sequence number assigned to the ACK_FREQUENCY frame by the
+        /// > sender so receivers ignore obsolete frames.
         seqno: u64,
-        /// The number of contiguous packets that can be received without
-        /// acknowledging immediately.
-        tolerance: u64,
-        /// The time to delay after receiving the first packet that is
-        /// not immediately acknowledged.
+        /// > the maximum number of ack-eliciting packets the recipient of this
+        /// > frame receives before sending an acknowledgment.
+        ack_eliciting_threshold: u64,
+        /// > the value to which the data sender requests the data receiver
+        /// > update its max_ack_delay
         delay: u64,
-        /// Ignore reordering when deciding to immediately acknowledge.
-        ignore_order: bool,
+        /// > the maximum packet reordering before eliciting an immediate ACK, as
+        /// > specified in Section 6.2. If no ACK_FREQUENCY frames have been
+        /// > received, the data receiver immediately acknowledges any subsequent
+        /// > packets that are received out-of-order, as specified in Section 13.2
+        /// > of [QUIC-TRANSPORT], corresponding to a default value of 1. A value
+        /// > of 0 indicates out-of-order packets do not elicit an immediate ACK.
+        reordering_threshold: u64,
     },
+    /// <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-5>
+    ImmediateAck,
     Datagram {
         data: &'a [u8],
         fill: bool,
@@ -255,6 +273,7 @@ impl<'a> Frame<'a> {
             }
             Self::HandshakeDone => FRAME_TYPE_HANDSHAKE_DONE,
             Self::AckFrequency { .. } => FRAME_TYPE_ACK_FREQUENCY,
+            Self::ImmediateAck {} => FRAME_IMMEDIATE_ACK,
             Self::Datagram { fill, .. } => {
                 if *fill {
                     FRAME_TYPE_DATAGRAM
@@ -622,6 +641,7 @@ impl<'a> Frame<'a> {
                 })
             }
             FRAME_TYPE_HANDSHAKE_DONE => Ok(Self::HandshakeDone),
+            // <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-4>
             FRAME_TYPE_ACK_FREQUENCY => {
                 let seqno = dv(dec)?;
                 let tolerance = dv(dec)?;
@@ -629,18 +649,16 @@ impl<'a> Frame<'a> {
                     return Err(Error::FrameEncodingError);
                 }
                 let delay = dv(dec)?;
-                let ignore_order = match d(dec.decode_uint::<u8>())? {
-                    0 => false,
-                    1 => true,
-                    _ => return Err(Error::FrameEncodingError),
-                };
+                let reordering_threshold = dv(dec)?;
                 Ok(Self::AckFrequency {
                     seqno,
-                    tolerance,
+                    ack_eliciting_threshold: tolerance,
                     delay,
-                    ignore_order,
+                    reordering_threshold,
                 })
             }
+            // <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-5>
+            FRAME_IMMEDIATE_ACK => Ok(Self::ImmediateAck {}),
             FRAME_TYPE_DATAGRAM | FRAME_TYPE_DATAGRAM_WITH_LEN => {
                 let fill = (t & DATAGRAM_FRAME_BIT_LEN) == 0;
                 let data = if fill {
@@ -981,9 +999,9 @@ mod tests {
     fn ack_frequency() {
         let f = Frame::AckFrequency {
             seqno: 10,
-            tolerance: 5,
+            ack_eliciting_threshold: 5,
             delay: 2000,
-            ignore_order: true,
+            reordering_threshold: 1,
         };
         just_dec(&f, "40af0a0547d001");
     }

@@ -266,10 +266,11 @@ pub struct RecvdPackets {
     unacknowledged_count: PacketNumber,
     /// The number of contiguous packets that can be received without
     /// acknowledging immediately.
-    unacknowledged_tolerance: PacketNumber,
-    /// Whether we are ignoring packets that arrive out of order
-    /// for the purposes of generating immediate acknowledgment.
-    ignore_order: bool,
+    ack_eliciting_threshold: PacketNumber,
+    /// > the maximum packet reordering before eliciting an immediate ACK
+    ///
+    /// <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-4>
+    reordering_threshold: u64,
     // The counts of different ECN marks that have been received.
     ecn_count: ecn::Count,
 }
@@ -287,13 +288,19 @@ impl RecvdPackets {
             ack_frequency_seqno: 0,
             ack_delay: DEFAULT_ACK_DELAY,
             unacknowledged_count: 0,
-            unacknowledged_tolerance: if space == PacketNumberSpace::ApplicationData {
+            ack_eliciting_threshold: if space == PacketNumberSpace::ApplicationData {
                 DEFAULT_ACK_PACKET_TOLERANCE
             } else {
                 // ACK more aggressively
                 0
             },
-            ignore_order: false,
+            // > If no ACK_FREQUENCY frames have been received, the data receiver
+            // > immediately acknowledges any subsequent packets that are received
+            // > out-of-order, as specified in Section 13.2 of [QUIC-TRANSPORT],
+            // > corresponding to a default value of 1.
+            //
+            // <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-4>
+            reordering_threshold: 1,
             ecn_count: ecn::Count::default(),
         }
     }
@@ -312,18 +319,18 @@ impl RecvdPackets {
     pub fn ack_freq(
         &mut self,
         seqno: u64,
-        tolerance: PacketNumber,
+        ack_eliciting_threshold: PacketNumber,
         delay: Duration,
-        ignore_order: bool,
+        reordering_threshold: u64,
     ) {
         // Yes, this means that we will overwrite values if a sequence number is
         // reused, but that is better than using an `Option<PacketNumber>`
         // when it will always be `Some`.
         if seqno >= self.ack_frequency_seqno {
             self.ack_frequency_seqno = seqno;
-            self.unacknowledged_tolerance = tolerance;
+            self.ack_eliciting_threshold = ack_eliciting_threshold;
             self.ack_delay = delay;
-            self.ignore_order = ignore_order;
+            self.reordering_threshold = reordering_threshold;
         }
     }
 
@@ -378,6 +385,8 @@ impl RecvdPackets {
         }
     }
 
+    // TODO: Do we need to handle "long idle timeouts"? https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-6.1
+    //
     /// Add the packet to the tracked set.
     /// Return true if the packet was the largest received so far.
     pub fn set_received(&mut self, now: Instant, pn: PacketNumber, ack_eliciting: bool) -> bool {
@@ -399,8 +408,20 @@ impl RecvdPackets {
             self.unacknowledged_count += 1;
 
             let immediate_ack = self.space != PacketNumberSpace::ApplicationData
-                || (pn != next_in_order_pn && !self.ignore_order)
-                || self.unacknowledged_count > self.unacknowledged_tolerance;
+            // > If no ACK_FREQUENCY frames have been received, the data
+            // > receiver immediately acknowledges any subsequent packets that are
+            // > received out-of-order, as specified in Section 13.2 of
+            // > [QUIC-TRANSPORT], corresponding to a default value of 1. A value
+            // > of 0 indicates out-of-order packets do not elicit an immediate
+            // > ACK.
+            //
+            // <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-4>
+            //
+            // TODO: Does not correspond to https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-6.2.1
+            // TODO: Re-ordering also applies to non-ack eliciting packets.
+            // TODO: Implement the tables as tests. The sending of 10 and 7 is tricky!
+                || (self.reordering_threshold != 0 && dbg!(pn).saturating_sub(dbg!(next_in_order_pn)) >= dbg!(self.reordering_threshold))
+                || self.unacknowledged_count > self.ack_eliciting_threshold;
 
             let ack_time = if immediate_ack {
                 now
@@ -579,13 +600,13 @@ impl AckTracker {
     pub fn ack_freq(
         &mut self,
         seqno: u64,
-        tolerance: PacketNumber,
+        ack_eliciting_threshold: PacketNumber,
         delay: Duration,
-        ignore_order: bool,
+        reordering_threshold: u64,
     ) {
         // Only ApplicationData ever delays ACK.
         if let Some(space) = self.get_mut(PacketNumberSpace::ApplicationData) {
-            space.ack_freq(seqno, tolerance, delay, ignore_order);
+            space.ack_freq(seqno, ack_eliciting_threshold, delay, reordering_threshold);
         }
     }
 
@@ -758,7 +779,7 @@ mod tests {
         assert!(rp.ack_time().is_none());
         assert!(!rp.ack_now(now(), RTT));
 
-        rp.ack_freq(0, COUNT, DELAY, false);
+        rp.ack_freq(0, COUNT, DELAY, 1);
 
         // Some packets won't cause an ACK to be needed.
         for i in 0..COUNT {
@@ -848,7 +869,7 @@ mod tests {
         let mut rp = RecvdPackets::new(PacketNumberSpace::ApplicationData);
 
         // Set tolerance to 2 and then it takes three packets.
-        rp.ack_freq(0, 2, Duration::from_millis(10), true);
+        rp.ack_freq(0, 2, Duration::from_millis(10), 0);
 
         rp.set_received(now(), 1, true);
         assert_ne!(Some(now()), rp.ack_time());
@@ -865,7 +886,7 @@ mod tests {
         write_frame(&mut rp);
 
         // Set tolerance to 2 and then it takes three packets.
-        rp.ack_freq(0, 2, Duration::from_millis(10), true);
+        rp.ack_freq(0, 2, Duration::from_millis(10), 0);
 
         rp.set_received(now(), 3, true);
         assert_ne!(Some(now()), rp.ack_time());
@@ -880,7 +901,7 @@ mod tests {
     #[test]
     fn non_ack_eliciting_skip() {
         let mut rp = RecvdPackets::new(PacketNumberSpace::ApplicationData);
-        rp.ack_freq(0, 1, Duration::from_millis(10), true);
+        rp.ack_freq(0, 1, Duration::from_millis(10), 0);
 
         // This should be ignored.
         rp.set_received(now(), 0, false);
@@ -896,7 +917,7 @@ mod tests {
     #[test]
     fn non_ack_eliciting_reorder() {
         let mut rp = RecvdPackets::new(PacketNumberSpace::ApplicationData);
-        rp.ack_freq(0, 1, Duration::from_millis(10), false);
+        rp.ack_freq(0, 1, Duration::from_millis(10), 1);
 
         // These are out of order, but they are not ack-eliciting.
         rp.set_received(now(), 1, false);
@@ -915,7 +936,7 @@ mod tests {
     fn aggregate_ack_time() {
         const DELAY: Duration = Duration::from_millis(17);
         let mut tracker = AckTracker::default();
-        tracker.ack_freq(0, 1, DELAY, false);
+        tracker.ack_freq(0, 1, DELAY, 1);
         // This packet won't trigger an ACK.
         tracker
             .get_mut(PacketNumberSpace::Handshake)
