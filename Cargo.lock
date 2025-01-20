@@ -368,10 +368,7 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85cdab6a89accf66733ad5a1693a4dcced6aeff64602b634530dd73c1f3ee9f0"
 dependencies = [
- "is-terminal",
  "log",
- "regex",
- "termcolor",
 ]
 
 [[package]]
@@ -458,7 +455,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -814,7 +811,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "clap",
  "clap-verbosity-flag",
@@ -837,7 +834,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-common"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "criterion",
  "enum-map",
@@ -853,7 +850,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-crypto"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "bindgen",
  "log",
@@ -868,7 +865,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-http3"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "enumset",
  "log",
@@ -885,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-qpack"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "log",
  "neqo-common",
@@ -897,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-transport"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "criterion",
  "enum-map",
@@ -915,7 +912,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-udp"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "cfg_aliases",
  "log",
@@ -1229,17 +1226,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "termcolor"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
-dependencies = [
- "winapi-util",
-]
-
-[[package]]
 name = "test-fixture"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "log",
  "neqo-common",
