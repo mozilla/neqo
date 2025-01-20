@@ -25,7 +25,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [freebsd, openbsd, netbsd, solaris]
+        os: [
+              freebsd,
+              # openbsd, # FIXME: Re-enable once their NSS package is new enough.
+              # netbsd, # FIXME: NSS package is new enough, but test_fixture::fixture_init dies with `NssError { name: "SEC_ERROR_LEGACY_DATABASE", code: -8015, desc: "The certificate/key database is in an old, unsupported format." }`
+              # solaris # FIXME: Re-enable once their NSS package is new enough.
+            ]
     runs-on: ubuntu-latest
 
     steps:
