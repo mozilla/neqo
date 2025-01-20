@@ -65,7 +65,7 @@ mod dump;
 mod idle;
 pub mod params;
 mod saved;
-mod sockpuppet;
+mod sock_puppet;
 mod state;
 #[cfg(test)]
 pub mod test_internal;
@@ -279,6 +279,7 @@ pub struct Connection {
     release_resumption_token_timer: Option<Instant>,
     conn_params: ConnectionParameters,
     hrtime: hrtime::Handle,
+    protocols: Vec<String>,
 
     /// For testing purposes it is sometimes necessary to inject frames that wouldn't
     /// otherwise be sent, just to see how a connection handles them.  Inserting them
@@ -382,10 +383,15 @@ impl Connection {
         );
 
         let tphandler = Rc::new(RefCell::new(tps));
+        let protocols = protocols
+            .iter()
+            .map(P::as_ref)
+            .map(String::from)
+            .collect::<Vec<_>>();
         let crypto = Crypto::new(
             conn_params.get_versions().initial(),
             agent,
-            protocols.iter().map(P::as_ref).map(String::from).collect(),
+            protocols.clone(),
             Rc::clone(&tphandler),
         )?;
 
@@ -427,6 +433,7 @@ impl Connection {
             conn_params,
             hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
             quic_datagrams,
+            protocols,
             #[cfg(test)]
             test_frame_writer: None,
         };
@@ -2391,7 +2398,13 @@ impl Connection {
             sock_puppet =
                 (cspace == CryptoSpace::Initial && self.role == Role::Client).then(|| {
                     qdebug!("Creating sock puppet");
-                    sockpuppet::sock_puppet(tx, path, &self.loss_recovery, &self.tps.borrow().local)
+                    sock_puppet::sock_puppet(
+                        tx,
+                        path,
+                        &self.loss_recovery,
+                        &self.tps.borrow().local,
+                        &self.protocols,
+                    )
                 });
 
             let header_start = encoder.len();

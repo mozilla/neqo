@@ -19,7 +19,7 @@ use crate::{
 };
 
 /// See <https://tls13.xargs.org/#client-hello/annotated>
-fn generate_ch(sni: &[u8], tps: &TransportParameters) -> Vec<u8> {
+fn generate_ch(sni: &[u8], protocols: &[String], tps: &TransportParameters) -> Vec<u8> {
     // Extensions
     let mut extensions = Encoder::new();
 
@@ -87,7 +87,7 @@ fn generate_ch(sni: &[u8], tps: &TransportParameters) -> Vec<u8> {
     key_share.encode_uint::<u8>(2, 0x1d); // assigned value for x25519 (key exchange via curve25519)
     key_share.encode_vec(2, &random::<32>()); // 32 bytes of public key
     key_share.encode_uint::<u8>(2, 0x17); // assigned value for secp256r1 (key exchange via NIST P-256)
-    key_share.encode_vec(2, &random::<65>()); // 32 bytes of public key
+    key_share.encode_vec(2, &random::<65>()); // 65 bytes of public key
 
     let mut key_share_list = Encoder::new();
     key_share_list.encode_vec(2, key_share.as_ref()); // first (and only) key share entry
@@ -102,7 +102,9 @@ fn generate_ch(sni: &[u8], tps: &TransportParameters) -> Vec<u8> {
     extensions.encode_vec(2, transport_parameters.as_ref());
 
     let mut alpn = Encoder::new();
-    alpn.encode_vec(1, b"h3");
+    for protocol in protocols {
+        alpn.encode_vec(1, protocol.as_bytes());
+    }
     let mut alpn_list = Encoder::new();
     alpn_list.encode_vec(2, alpn.as_ref());
 
@@ -112,7 +114,7 @@ fn generate_ch(sni: &[u8], tps: &TransportParameters) -> Vec<u8> {
     extensions.encode_uint::<u8>(2, 0x1c); // record size limit
     extensions.encode_vec(2, &[0x40, 0x01]);
 
-    extensions.encode_uint(2, 0xff01_u16); // renegotiation info
+    extensions.encode_uint::<u16>(2, 0xff01); // renegotiation info
     extensions.encode_vec(2, &[0x00]);
 
     extensions.encode_uint::<u8>(2, 0x05); // status request
@@ -122,7 +124,7 @@ fn generate_ch(sni: &[u8], tps: &TransportParameters) -> Vec<u8> {
     let mut handshake_data = Encoder::new();
     handshake_data.encode(&[0x03, 0x03]); // Client Version
     handshake_data.encode(&random::<32>()); // Client Random
-    handshake_data.encode_vec(1, &random::<32>()); // 32 bytes of session ID
+    handshake_data.encode_uint::<u8>(1, 0); // 0 bytes of session ID
     handshake_data.encode_vec(
         2,
         &[
@@ -148,6 +150,7 @@ pub fn sock_puppet(
     path: &PathRef,
     loss_recovery: &LossRecovery,
     tps: &TransportParameters,
+    protocols: &[String],
 ) -> Vec<u8> {
     let encoder = Encoder::new();
     let (_pt, mut builder) = Connection::build_packet_header(
@@ -166,7 +169,10 @@ pub fn sock_puppet(
     );
     let mut cstreams = CryptoStreams::default();
     cstreams
-        .send(PacketNumberSpace::Initial, &generate_ch(b"github.com", tps))
+        .send(
+            PacketNumberSpace::Initial,
+            &generate_ch(b"github.com", protocols, tps),
+        )
         .unwrap();
     cstreams.write_frame(
         PacketNumberSpace::Initial,
