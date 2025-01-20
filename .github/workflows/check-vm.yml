@@ -94,7 +94,7 @@ jobs:
             rm -rf target # Don't sync this back to host
 
       - if: matrix.os == 'netbsd'
-        uses: vmactions/netbsd-vm@7c9086fdb4cc1aa814cda6e305390c2b966551a9
+        uses: vmactions/netbsd-vm@46a58bbf03682b4cb24142b97fa315ae52bed573
         with:
           usesh: true
           envs: "CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG GITHUB_ACTIONS"
