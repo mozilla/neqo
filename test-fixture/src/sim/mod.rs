@@ -188,7 +188,7 @@ impl Simulator {
         let mut next = None;
         for n in &self.nodes {
             match n.state {
-                Idle => continue,
+                Idle => (),
                 Active => return now,
                 Waiting(a) => next = Some(next.map_or(a, |b| min(a, b))),
             }

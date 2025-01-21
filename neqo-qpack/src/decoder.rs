@@ -179,7 +179,7 @@ impl QPackDecoder {
             DecoderInstruction::InsertCountIncrement { increment }.marshal(&mut self.send_buf);
             self.acked_inserts = self.table.base();
         }
-        if self.send_buf.len() != 0 && self.local_stream_id.is_some() {
+        if !self.send_buf.is_empty() && self.local_stream_id.is_some() {
             let r = conn
                 .stream_send(
                     self.local_stream_id.ok_or(Error::Internal)?,
