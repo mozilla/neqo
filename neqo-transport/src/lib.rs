@@ -13,7 +13,7 @@ mod cc;
 mod cid;
 mod connection;
 mod crypto;
-mod ecn;
+pub mod ecn;
 mod events;
 mod fc;
 #[cfg(fuzzing)]
