@@ -137,3 +137,12 @@ debug = true
 
 [patch.crates-io]
 backtrace = { git = "https://github.com/erichdongubler-contrib/backtrace-rs", branch = "windows-targets-0.53" }
+# Consume <https://github.com/tokio-rs/mio/pull/1857> for its `windows-sys` 0.59 update.
+# TODO: Use Crates.io when released.
+mio = { git = "https://github.com/tokio-rs/mio", rev = "9a9d691" }
+# Consume <https://github.com/rust-lang/socket2/pull/545> for its `windows-sys` 0.59 update.
+# TODO: Use Crates.io when released.
+socket2 = { git = "https://github.com/erichdongubler-contrib/socket2", branch = "windows-sys-0.59" }
+# Consume <https://github.com/tokio-rs/tokio/pull/7117> for its `windows-sys` 0.59 update.
+# TODO: Use Crates.io when released.
+tokio = { git = "https://github.com/erichdongubler-contrib/tokio", branch = "windows-sys-0.59" }
