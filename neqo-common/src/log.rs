@@ -33,18 +33,12 @@ pub fn init(level_filter: Option<log::LevelFilter>) {
         }
         builder.format(|buf, record| {
             let elapsed = since_start();
-            let level_style = buf.default_level_style(record.level());
-            let mut bold = buf.style();
-            bold.set_bold(true);
             writeln!(
                 buf,
-                "{} {} {}",
-                bold.value(format!(
-                    "{}.{:03}",
-                    elapsed.as_secs(),
-                    elapsed.as_millis() % 1000
-                )),
-                level_style.value(record.level()),
+                "{}.{:03} {} {}",
+                elapsed.as_secs(),
+                elapsed.as_millis() % 1000,
+                record.level(),
                 record.args()
             )
         });
