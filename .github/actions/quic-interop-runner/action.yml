@@ -37,7 +37,7 @@ runs:
       run: |
         sudo add-apt-repository ppa:wireshark-dev/nightly
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends wireshark
+        sudo apt-get install -y --no-install-recommends tshark
       shell: bash
 
     - uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
