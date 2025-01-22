@@ -87,7 +87,7 @@ jobs:
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "${{ matrix.rust-toolchain }}" == "nightly" ]; then
-            cargo llvm-cov nextest $BUILD_TYPE --mcdc --include-ffi --features ci --profile ci --codecov --output-path codecov.json
+            cargo llvm-cov nextest $BUILD_TYPE --features ci --profile ci --codecov --output-path codecov.json
           else
             cargo nextest run $BUILD_TYPE --features ci --profile ci
           fi
