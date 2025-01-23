@@ -240,6 +240,9 @@ impl Args {
         self.shared.quic_parameters.quic_version = vec![Version::Version1];
         // This is the default for all tests except http3.
         self.shared.alpn = String::from("hq-interop");
+        // Wireshark can't reassemble sliced CRYPTO frames, which causes tests to fail.
+        // So let's turn that off.
+        self.shared.quic_parameters.sni_slicing = false;
         match testcase.as_str() {
             "http3" => {
                 self.shared.alpn = String::from("h3");
