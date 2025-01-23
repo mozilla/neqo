@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt;
+use std::{fmt, ops::Range};
 
 use crate::{
     constants::{Cipher, Version},
@@ -44,6 +44,17 @@ impl AeadNull {
         output[..l].copy_from_slice(input);
         output[l..l + 16].copy_from_slice(AEAD_NULL_TAG);
         Ok(&output[..l + 16])
+    }
+
+    #[allow(clippy::missing_errors_doc)]
+    pub fn encrypt_in_place(
+        &self,
+        _count: u64,
+        _aad: Range<usize>,
+        input: Range<usize>,
+        _data: &mut [u8],
+    ) -> Res<usize> {
+        Ok(input.len() + 16)
     }
 
     #[allow(clippy::missing_errors_doc)]
