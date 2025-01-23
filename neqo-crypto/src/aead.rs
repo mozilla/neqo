@@ -6,7 +6,7 @@
 
 use std::{
     fmt,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, Range},
     os::raw::{c_char, c_uint},
     ptr::null_mut,
 };
@@ -124,6 +124,39 @@ impl RealAead {
             )
         }?;
         Ok(&output[0..(l.try_into()?)])
+    }
+
+    /// Encrypt a plaintext in place.
+    ///
+    /// The space provided in `data` needs to allow `Aead::expansion` more bytes to be appended.
+    ///
+    /// # Errors
+    ///
+    /// If the input can't be protected or any input is too large for NSS.
+    pub fn encrypt_in_place(
+        &self,
+        count: u64,
+        aad: Range<usize>,
+        input: Range<usize>,
+        data: &mut [u8],
+    ) -> Res<usize> {
+        let aad = &data[aad];
+        let input = &data[input];
+        let mut l: c_uint = 0;
+        unsafe {
+            SSL_AeadEncrypt(
+                *self.ctx,
+                count,
+                aad.as_ptr(),
+                c_uint::try_from(aad.len())?,
+                input.as_ptr(),
+                c_uint::try_from(input.len())?,
+                input.as_ptr(),
+                &mut l,
+                c_uint::try_from(input.len() + self.expansion())?,
+            )
+        }?;
+        Ok(l.try_into()?)
     }
 
     /// Decrypt a ciphertext.

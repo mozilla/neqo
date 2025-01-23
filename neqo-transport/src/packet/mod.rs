@@ -418,9 +418,22 @@ impl PacketBuilder {
             hex(hdr),
             hex(body)
         );
-        let ciphertext = crypto.encrypt(self.pn, hdr, body)?;
+
+        // Add space for crypto expansion.
+        let data_end = self.encoder.len();
+        for _i in 0..crypto.expansion() {
+            self.encode_byte(123);
+        }
+
+        let ciphertext_len = crypto.encrypt(
+            self.pn,
+            self.header.clone(),
+            self.header.end..data_end,
+            self.encoder.as_mut(),
+        )?;
 
         // Calculate the mask.
+        let ciphertext = &self.encoder.as_mut()[self.header.end..self.header.end + ciphertext_len];
         let offset = SAMPLE_OFFSET - self.offsets.pn.len();
         if offset + SAMPLE_SIZE > ciphertext.len() {
             return Err(Error::InternalError);
@@ -434,9 +447,6 @@ impl PacketBuilder {
             self.encoder.as_mut()[j] ^= mask[i];
         }
 
-        // Finally, cut off the plaintext and add back the ciphertext.
-        self.encoder.truncate(self.header.end);
-        self.encoder.encode(&ciphertext);
         qtrace!("Packet built {}", hex(&self.encoder));
         Ok(self.encoder)
     }
@@ -998,7 +1008,8 @@ mod tests {
 
         // The spec uses PN=1, but our crypto refuses to skip packet numbers.
         // So burn an encryption:
-        let burn = prot.encrypt(0, &[], &[]).expect("burn OK");
+        let mut burn = [0; 16];
+        prot.encrypt(0, 0..0, 0..0, &mut burn).expect("burn OK");
         assert_eq!(burn.len(), prot.expansion());
 
         let mut builder = PacketBuilder::long(

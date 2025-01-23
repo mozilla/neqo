@@ -40,7 +40,6 @@ use crate::{
     Error, Res,
 };
 
-const MAX_AUTH_TAG: usize = 32;
 /// The number of invocations remaining on a write cipher before we try
 /// to update keys.  This has to be much smaller than the number returned
 /// by `CryptoDxState::limit` or updates will happen too often.  As we don't
@@ -634,12 +633,18 @@ impl CryptoDxState {
         self.used_pn.end
     }
 
-    pub fn encrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+    pub fn encrypt(
+        &mut self,
+        pn: PacketNumber,
+        hdr: Range<usize>,
+        body: Range<usize>,
+        data: &mut [u8],
+    ) -> Res<usize> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
         qtrace!(
-            "[{self}] encrypt pn={pn} hdr={} body={}",
-            hex(hdr),
-            hex(body)
+            "[{self}] encrypt_in_place pn={pn} hdr={} body={}",
+            hex(data[hdr.clone()].as_ref()),
+            hex(data[body.clone()].as_ref())
         );
 
         // The numbers in `Self::limit` assume a maximum packet size of `LIMIT`.
@@ -653,14 +658,12 @@ impl CryptoDxState {
         }
         self.invoked()?;
 
-        let size = body.len() + MAX_AUTH_TAG;
-        let mut out = vec![0; size];
-        let res = self.aead.encrypt(pn, hdr, body, &mut out)?;
+        let len = self.aead.encrypt_in_place(pn, hdr, body, data)?;
 
-        qtrace!("[{self}] encrypt ct={}", hex(res));
+        qtrace!("[{self}] encrypt ct={}", hex(data));
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
-        Ok(res.to_vec())
+        Ok(len)
     }
 
     #[must_use]
