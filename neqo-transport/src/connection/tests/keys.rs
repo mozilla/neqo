@@ -80,8 +80,8 @@ fn discarded_initial_keys() {
     // The server has not removed the Initial keys yet, because it has not yet received a Handshake
     // packet from the client.
     // We will check this by processing init_pkt_c a second time.
-    // The dropped packet is padding. The Initial packet has been mark dup.
-    check_discarded(&mut server, &init_pkt_c.clone().unwrap(), false, 1, 1);
+    // The dropped packets are the sock puppet CH and padding. The Initial packet has been mark dup.
+    check_discarded(&mut server, &init_pkt_c.clone().unwrap(), false, 2, 1);
 
     qdebug!("---- client: SH..FIN -> FIN");
     let out = client.process_output(now()).dgram();

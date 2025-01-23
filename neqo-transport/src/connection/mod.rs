@@ -65,6 +65,7 @@ mod dump;
 mod idle;
 pub mod params;
 mod saved;
+mod sock_puppet;
 mod state;
 #[cfg(test)]
 pub mod test_internal;
@@ -278,6 +279,7 @@ pub struct Connection {
     release_resumption_token_timer: Option<Instant>,
     conn_params: ConnectionParameters,
     hrtime: hrtime::Handle,
+    protocols: Vec<String>,
 
     /// For testing purposes it is sometimes necessary to inject frames that wouldn't
     /// otherwise be sent, just to see how a connection handles them.  Inserting them
@@ -381,10 +383,15 @@ impl Connection {
         );
 
         let tphandler = Rc::new(RefCell::new(tps));
+        let protocols = protocols
+            .iter()
+            .map(P::as_ref)
+            .map(String::from)
+            .collect::<Vec<_>>();
         let crypto = Crypto::new(
             conn_params.get_versions().initial(),
             agent,
-            protocols.iter().map(P::as_ref).map(String::from).collect(),
+            protocols.clone(),
             Rc::clone(&tphandler),
         )?;
 
@@ -426,6 +433,7 @@ impl Connection {
             conn_params,
             hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
             quic_datagrams,
+            protocols,
             #[cfg(test)]
             test_frame_writer: None,
         };
@@ -2160,6 +2168,7 @@ impl Connection {
         let frame_stats = &mut stats.frame_tx;
         self.crypto.write_frame(
             PacketNumberSpace::ApplicationData,
+            self.conn_params.sni_slicing_enabled(),
             builder,
             tokens,
             frame_stats,
@@ -2294,7 +2303,13 @@ impl Connection {
                 self.write_appdata_frames(builder, &mut tokens);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
-                self.crypto.write_frame(space, builder, &mut tokens, stats);
+                self.crypto.write_frame(
+                    space,
+                    self.conn_params.sni_slicing_enabled(),
+                    builder,
+                    &mut tokens,
+                    stats,
+                );
             }
         }
 
@@ -2366,7 +2381,7 @@ impl Connection {
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
-
+        let mut sock_puppet = None;
         // Determine how we are sending packets (PTO, etc..).
         let profile = self.loss_recovery.send_profile(&path.borrow(), now);
         qdebug!("[{self}] output_path send_profile {profile:?}");
@@ -2379,6 +2394,18 @@ impl Connection {
             let Some((cspace, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
                 continue;
             };
+
+            sock_puppet =
+                (cspace == CryptoSpace::Initial && self.role == Role::Client).then(|| {
+                    qdebug!("Creating sock puppet");
+                    sock_puppet::sock_puppet(
+                        tx,
+                        path,
+                        &self.loss_recovery,
+                        &self.tps.borrow().local,
+                        &self.protocols,
+                    )
+                });
 
             let header_start = encoder.len();
             let (pt, mut builder) = Self::build_packet_header(
@@ -2402,10 +2429,17 @@ impl Connection {
             }
 
             // Configure the limits and padding for this packet.
-            let aead_expansion = tx.expansion();
+            let mut reserved = tx.expansion();
+            if pn > 1 {
+                sock_puppet = None;
+            } else if let Some(sock_puppet) = &sock_puppet {
+                qdebug!("Reserving {} space for sock puppet CH", sock_puppet.len());
+                reserved += sock_puppet.len();
+            }
+
             needs_padding |= builder.set_initial_limit(
                 &profile,
-                aead_expansion,
+                reserved,
                 self.paths
                     .primary()
                     .ok_or(Error::InternalError)?
@@ -2441,13 +2475,13 @@ impl Connection {
                 pn,
                 &builder.as_ref()[payload_start..],
                 path.borrow().tos(),
-                builder.len() + aead_expansion,
+                builder.len() + reserved,
             );
             qlog::packet_sent(
                 &self.qlog,
                 pt,
                 pn,
-                builder.len() - header_start + aead_expansion,
+                builder.len() - header_start + reserved,
                 &builder.as_ref()[payload_start..],
                 now,
             );
@@ -2511,7 +2545,20 @@ impl Connection {
                         packets.len(),
                         profile.limit()
                     );
-                    initial.track_padding(profile.limit() - packets.len());
+                    let padding_len = profile.limit() - packets.len();
+                    initial.track_padding(padding_len);
+                    if let Some(sock_puppet) = sock_puppet {
+                        if sock_puppet.len() <= padding_len {
+                            qdebug!("Prepending sock puppet CH, len={}", sock_puppet.len());
+                            packets.splice(0..0, sock_puppet);
+                        } else {
+                            qwarn!(
+                                "Sock puppet CH too long ({} > {}), not prepending",
+                                sock_puppet.len(),
+                                padding_len
+                            );
+                        }
+                    }
                     // These zeros aren't padding frames, they are an invalid all-zero coalesced
                     // packet, which is why we don't increase `frame_tx.padding` count here.
                     packets.resize(profile.limit(), 0);

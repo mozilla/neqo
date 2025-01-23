@@ -37,10 +37,13 @@ trap 'kill $tcpdump_pid; rm -rf "$tmp"' EXIT
 
 tmux -CC \
         set-option -g default-shell "$(which bash)" \; \
-        new-session "$client; kill -USR2 $tcpdump_pid; touch $tmp/done" \; \
+        new-session "sleep 1; $client; kill -USR2 $tcpdump_pid; touch $tmp/done" \; \
         split-window -h "$server" \; \
         split-window -v -f "\
+                echo $tmp; \
                 until [ -e $tmp/done ]; do sleep 1; done; \
-                echo $tmp; ls -l $tmp; echo; \
-                tshark -r $tmp/test.pcap -o tls.keylog_file:$tmp/test.tlskey" \; \
+                editcap --inject-secrets tls,$tmp/test.tlskey $tmp/test.pcap $tmp/test.pcap.injected; \
+                mv $tmp/test.pcap.injected $tmp/test.pcap; \
+                ls -l $tmp; echo; \
+                tshark -r $tmp/test.pcap" \; \
         set remain-on-exit on
