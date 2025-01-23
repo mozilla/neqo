@@ -126,7 +126,7 @@ impl RealAead {
         Ok(&output[0..(l.try_into()?)])
     }
 
-    /// Encrypt a plaintext in place.
+    /// Encrypt `data` consisting of `aad` and plaintext `input` in place.
     ///
     /// The space provided in `data` needs to allow `Aead::expansion` more bytes to be appended.
     ///
@@ -190,6 +190,41 @@ impl RealAead {
             )
         }?;
         Ok(&output[0..(l.try_into()?)])
+    }
+
+    /// Decrypt a ciphertext in place.
+    ///
+    /// Note that NSS insists upon having extra space available for decryption, so
+    /// the buffer for `output` should be the same length as `input`, even though
+    /// the final result will be shorter.
+    ///
+    /// # Errors
+    ///
+    /// If the input isn't authenticated or any input is too large for NSS.
+    pub fn decrypt_in_place(
+        &self,
+        count: u64,
+        aad: Range<usize>,
+        input: Range<usize>,
+        data: &mut [u8],
+    ) -> Res<usize> {
+        let aad = &data[aad];
+        let input = &data[input];
+        let mut l: c_uint = 0;
+        unsafe {
+            SSL_AeadDecrypt(
+                *self.ctx,
+                count,
+                aad.as_ptr(),
+                c_uint::try_from(aad.len())?,
+                input.as_ptr(),
+                c_uint::try_from(input.len())?,
+                input.as_ptr(),
+                &mut l,
+                c_uint::try_from(input.len())?,
+            )
+        }?;
+        Ok(l.try_into()?)
     }
 }
 

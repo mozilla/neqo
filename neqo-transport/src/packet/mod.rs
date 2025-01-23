@@ -574,7 +574,7 @@ pub struct PublicPacket<'a> {
     /// Protocol version, if present in header.
     version: Option<WireVersion>,
     /// A reference to the entire packet, including the header.
-    data: &'a [u8],
+    data: &'a mut [u8],
 }
 
 impl<'a> PublicPacket<'a> {
@@ -621,7 +621,10 @@ impl<'a> PublicPacket<'a> {
     ///
     /// This will return an error if the packet could not be decoded.
     #[allow(clippy::similar_names)]
-    pub fn decode(data: &'a [u8], dcid_decoder: &dyn ConnectionIdDecoder) -> Res<(Self, &'a [u8])> {
+    pub fn decode(
+        data: &'a mut [u8],
+        dcid_decoder: &dyn ConnectionIdDecoder,
+    ) -> Res<(Self, &'a mut [u8])> {
         let mut decoder = Decoder::new(data);
         let first = Self::opt(decoder.decode_uint::<u8>())?;
 
@@ -646,7 +649,7 @@ impl<'a> PublicPacket<'a> {
                     version: None,
                     data,
                 },
-                &[],
+                &mut [],
             ));
         }
 
@@ -667,7 +670,7 @@ impl<'a> PublicPacket<'a> {
                     version: None,
                     data,
                 },
-                &[],
+                &mut [],
             ));
         }
 
@@ -683,7 +686,7 @@ impl<'a> PublicPacket<'a> {
                     version: Some(version),
                     data,
                 },
-                &[],
+                &mut [],
             ));
         };
 
@@ -695,7 +698,7 @@ impl<'a> PublicPacket<'a> {
         // The type-specific code includes a token.  This consumes the remainder of the packet.
         let (token, header_len) = Self::decode_long(&mut decoder, packet_type, version)?;
         let end = data.len() - decoder.remaining();
-        let (data, remainder) = data.split_at(end);
+        let (data, remainder) = data.split_at_mut(end);
         Ok((
             Self {
                 packet_type,
@@ -800,9 +803,9 @@ impl<'a> PublicPacket<'a> {
 
     /// Decrypt the header of the packet.
     fn decrypt_header(
-        &self,
+        &mut self,
         crypto: &CryptoDxState,
-    ) -> Res<(bool, PacketNumber, Vec<u8>, &'a [u8])> {
+    ) -> Res<(bool, PacketNumber, Range<usize>, Range<usize>)> {
         assert_ne!(self.packet_type, PacketType::Retry);
         assert_ne!(self.packet_type, PacketType::VersionNegotiation);
 
@@ -824,23 +827,23 @@ impl<'a> PublicPacket<'a> {
         let first_byte = self.data[0] ^ (mask[0] & bits);
 
         // Make a copy of the header to work on.
-        let mut hdrbytes = self.data[..self.header_len + 4].to_vec();
-        hdrbytes[0] = first_byte;
+        let mut hdrbytes = 0..self.header_len + 4;
+        self.data[0] = first_byte;
 
         // Unmask the PN.
         let mut pn_encoded: u64 = 0;
         for i in 0..MAX_PACKET_NUMBER_LEN {
-            hdrbytes[self.header_len + i] ^= mask[1 + i];
+            self.data[self.header_len + i] ^= mask[1 + i];
             pn_encoded <<= 8;
-            pn_encoded += u64::from(hdrbytes[self.header_len + i]);
+            pn_encoded += u64::from(self.data[self.header_len + i]);
         }
 
         // Now decode the packet number length and apply it, hopefully in constant time.
         let pn_len = usize::from((first_byte & 0x3) + 1);
-        hdrbytes.truncate(self.header_len + pn_len);
+        hdrbytes.end = self.header_len + pn_len;
         pn_encoded >>= 8 * (MAX_PACKET_NUMBER_LEN - pn_len);
 
-        qtrace!("unmasked hdr={}", hex(&hdrbytes));
+        qtrace!("unmasked hdr={}", hex(&self.data[hdrbytes.clone()]));
 
         let key_phase = self.packet_type == PacketType::Short
             && (first_byte & PACKET_BIT_KEY_PHASE) == PACKET_BIT_KEY_PHASE;
@@ -849,14 +852,18 @@ impl<'a> PublicPacket<'a> {
             key_phase,
             pn,
             hdrbytes,
-            &self.data[self.header_len + pn_len..],
+            self.header_len + pn_len..self.data.len(),
         ))
     }
 
     /// # Errors
     ///
     /// This will return an error if the packet cannot be decrypted.
-    pub fn decrypt(&self, crypto: &mut CryptoStates, release_at: Instant) -> Res<DecryptedPacket> {
+    pub fn decrypt(
+        &mut self,
+        crypto: &mut CryptoStates,
+        release_at: Instant,
+    ) -> Res<DecryptedPacket> {
         let cspace: CryptoSpace = self.packet_type.into();
         // When we don't have a version, the crypto code doesn't need a version
         // for lookup, so use the default, but fix it up if decryption succeeds.
@@ -874,7 +881,7 @@ impl<'a> PublicPacket<'a> {
                 return Err(Error::DecryptError);
             };
             let version = rx.version(); // Version fixup; see above.
-            let d = rx.decrypt(pn, &header, body)?;
+            let len = rx.decrypt_in_place(pn, header, body, &mut self.data)?;
             // If this is the first packet ever successfully decrypted
             // using `rx`, make sure to initiate a key update.
             if rx.needs_update() {
@@ -885,7 +892,7 @@ impl<'a> PublicPacket<'a> {
                 version,
                 pt: self.packet_type,
                 pn,
-                data: d,
+                data: &self.data[..len],
             })
         } else if crypto.rx_pending(cspace) {
             Err(Error::KeysPending(cspace))
@@ -925,14 +932,14 @@ impl fmt::Debug for PublicPacket<'_> {
     }
 }
 
-pub struct DecryptedPacket {
+pub struct DecryptedPacket<'a> {
     version: Version,
     pt: PacketType,
     pn: PacketNumber,
-    data: Vec<u8>,
+    data: &'a [u8],
 }
 
-impl DecryptedPacket {
+impl DecryptedPacket<'_> {
     #[must_use]
     pub const fn version(&self) -> Version {
         self.version
@@ -949,7 +956,7 @@ impl DecryptedPacket {
     }
 }
 
-impl Deref for DecryptedPacket {
+impl Deref for DecryptedPacket<'_> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -1031,9 +1038,9 @@ mod tests {
         const EXTRA: &[u8] = &[0xce; 33];
 
         fixture_init();
-        let mut padded = SAMPLE_INITIAL.to_vec();
+        let mut padded = SAMPLE_INITIAL;
         padded.extend_from_slice(EXTRA);
-        let (packet, remainder) = PublicPacket::decode(&padded, &cid_mgr()).unwrap();
+        let (packet, remainder) = PublicPacket::decode(&mut padded, &cid_mgr()).unwrap();
         assert_eq!(packet.packet_type(), PacketType::Initial);
         assert_eq!(&packet.dcid()[..], &[] as &[u8]);
         assert_eq!(&packet.scid()[..], SERVER_CID);
@@ -1055,7 +1062,7 @@ mod tests {
         enc.encode_vec(1, &[]);
         enc.encode(&[0xff; 40]); // junk
 
-        assert!(PublicPacket::decode(enc.as_ref(), &cid_mgr()).is_err());
+        assert!(PublicPacket::decode(enc.as_mut(), &cid_mgr()).is_err());
     }
 
     #[test]
@@ -1067,7 +1074,7 @@ mod tests {
         enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 2]);
         enc.encode(&[0xff; 40]); // junk
 
-        assert!(PublicPacket::decode(enc.as_ref(), &cid_mgr()).is_err());
+        assert!(PublicPacket::decode(enc.as_mut(), &cid_mgr()).is_err());
     }
 
     const SAMPLE_SHORT: &[u8] = &[
@@ -1114,7 +1121,7 @@ mod tests {
     #[test]
     fn decode_short() {
         fixture_init();
-        let (packet, remainder) = PublicPacket::decode(SAMPLE_SHORT, &cid_mgr()).unwrap();
+        let (packet, remainder) = PublicPacket::decode(&mut SAMPLE_SHORT, &cid_mgr()).unwrap();
         assert_eq!(packet.packet_type(), PacketType::Short);
         assert!(remainder.is_empty());
         let decrypted = packet
@@ -1129,7 +1136,7 @@ mod tests {
     fn decode_short_bad_cid() {
         fixture_init();
         let (packet, remainder) = PublicPacket::decode(
-            SAMPLE_SHORT,
+            &mut SAMPLE_SHORT,
             &RandomConnectionIdGenerator::new(SERVER_CID.len() - 1),
         )
         .unwrap();
@@ -1144,7 +1151,7 @@ mod tests {
     #[test]
     fn decode_short_long_cid() {
         assert!(PublicPacket::decode(
-            SAMPLE_SHORT,
+            &mut SAMPLE_SHORT,
             &RandomConnectionIdGenerator::new(SERVER_CID.len() + 1)
         )
         .is_err());
@@ -1299,7 +1306,7 @@ mod tests {
         let retry =
             PacketBuilder::retry(version, &[], SERVER_CID, RETRY_TOKEN, CLIENT_CID).unwrap();
 
-        let (packet, remainder) = PublicPacket::decode(&retry, &cid_mgr()).unwrap();
+        let (packet, remainder) = PublicPacket::decode(&mut &retry, &cid_mgr()).unwrap();
         assert!(packet.is_valid_retry(&ConnectionId::from(CLIENT_CID)));
         assert!(remainder.is_empty());
 
@@ -1348,7 +1355,7 @@ mod tests {
     fn decode_retry(version: Version, sample_retry: &[u8]) {
         fixture_init();
         let (packet, remainder) =
-            PublicPacket::decode(sample_retry, &RandomConnectionIdGenerator::new(5)).unwrap();
+            PublicPacket::decode(&mut sample_retry, &RandomConnectionIdGenerator::new(5)).unwrap();
         assert!(packet.is_valid_retry(&ConnectionId::from(CLIENT_CID)));
         assert_eq!(Some(version), packet.version());
         assert!(packet.dcid().is_empty());
@@ -1381,28 +1388,28 @@ mod tests {
 
         assert!(PublicPacket::decode(&[], &cid_mgr).is_err());
 
-        let (packet, remainder) = PublicPacket::decode(SAMPLE_RETRY_V1, &cid_mgr).unwrap();
+        let (packet, remainder) = PublicPacket::decode(&mut SAMPLE_RETRY_V1, &cid_mgr).unwrap();
         assert!(remainder.is_empty());
         assert!(packet.is_valid_retry(&odcid));
 
         let mut damaged_retry = SAMPLE_RETRY_V1.to_vec();
         let last = damaged_retry.len() - 1;
         damaged_retry[last] ^= 66;
-        let (packet, remainder) = PublicPacket::decode(&damaged_retry, &cid_mgr).unwrap();
+        let (packet, remainder) = PublicPacket::decode(&mut &damaged_retry, &cid_mgr).unwrap();
         assert!(remainder.is_empty());
         assert!(!packet.is_valid_retry(&odcid));
 
         damaged_retry.truncate(last);
-        let (packet, remainder) = PublicPacket::decode(&damaged_retry, &cid_mgr).unwrap();
+        let (packet, remainder) = PublicPacket::decode(&mut &damaged_retry, &cid_mgr).unwrap();
         assert!(remainder.is_empty());
         assert!(!packet.is_valid_retry(&odcid));
 
         // An invalid token should be rejected sooner.
         damaged_retry.truncate(last - 4);
-        assert!(PublicPacket::decode(&damaged_retry, &cid_mgr).is_err());
+        assert!(PublicPacket::decode(&mut &damaged_retry, &cid_mgr).is_err());
 
         damaged_retry.truncate(last - 1);
-        assert!(PublicPacket::decode(&damaged_retry, &cid_mgr).is_err());
+        assert!(PublicPacket::decode(&mut &damaged_retry, &cid_mgr).is_err());
     }
 
     const SAMPLE_VN: &[u8] = &[
@@ -1444,7 +1451,7 @@ mod tests {
     #[test]
     fn parse_vn() {
         let (packet, remainder) =
-            PublicPacket::decode(SAMPLE_VN, &EmptyConnectionIdGenerator::default()).unwrap();
+            PublicPacket::decode(&mut SAMPLE_VN, &EmptyConnectionIdGenerator::default()).unwrap();
         assert!(remainder.is_empty());
         assert_eq!(&packet.dcid[..], SERVER_CID);
         assert!(packet.scid.is_some());
@@ -1465,7 +1472,7 @@ mod tests {
         enc.encode_uint(4, 0x5a6a_7a8a_u64);
 
         let (packet, remainder) =
-            PublicPacket::decode(enc.as_ref(), &EmptyConnectionIdGenerator::default()).unwrap();
+            PublicPacket::decode(enc.as_mut(), &EmptyConnectionIdGenerator::default()).unwrap();
         assert!(remainder.is_empty());
         assert_eq!(&packet.dcid[..], BIG_DCID);
         assert!(packet.scid.is_some());
@@ -1501,7 +1508,7 @@ mod tests {
         ];
         fixture_init();
         let (packet, slice) =
-            PublicPacket::decode(PACKET, &EmptyConnectionIdGenerator::default()).unwrap();
+            PublicPacket::decode(&mut PACKET, &EmptyConnectionIdGenerator::default()).unwrap();
         assert!(slice.is_empty());
         let decrypted = packet
             .decrypt(&mut CryptoStates::test_chacha(), now())

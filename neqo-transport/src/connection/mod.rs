@@ -22,7 +22,7 @@ use std::{
 
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
+    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, Role,
 };
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
@@ -1020,14 +1020,14 @@ impl Connection {
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_input(&mut self, d: Datagram<impl AsRef<[u8]>>, now: Instant) {
+    pub fn process_input(&mut self, d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>, now: Instant) {
         self.process_multiple_input(iter::once(d), now);
     }
 
     /// Process new input datagrams on the connection.
     pub fn process_multiple_input(
         &mut self,
-        dgrams: impl IntoIterator<Item = Datagram<impl AsRef<[u8]>>>,
+        dgrams: impl IntoIterator<Item = Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
         now: Instant,
     ) {
         let mut dgrams = dgrams.into_iter().peekable();
@@ -1160,7 +1160,11 @@ impl Connection {
 
     /// Process input and generate output.
     #[must_use = "Output of the process function must be handled"]
-    pub fn process(&mut self, dgram: Option<Datagram<impl AsRef<[u8]>>>, now: Instant) -> Output {
+    pub fn process(
+        &mut self,
+        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        now: Instant,
+    ) -> Output {
         if let Some(d) = dgram {
             self.input(d, now, now);
             self.process_saved(now);
@@ -1502,7 +1506,8 @@ impl Connection {
     fn postprocess_packet(
         &mut self,
         path: &PathRef,
-        d: &Datagram<impl AsRef<[u8]>>,
+        tos: IpTos,
+        remote: SocketAddr,
         packet: &PublicPacket,
         migrate: bool,
         now: Instant,
@@ -1510,7 +1515,7 @@ impl Connection {
         let space = PacketNumberSpace::from(packet.packet_type());
         if let Some(space) = self.acks.get_mut(space) {
             let space_ecn_marks = space.ecn_marks();
-            *space_ecn_marks += d.tos().into();
+            *space_ecn_marks += tos.into();
             self.stats.borrow_mut().ecn_rx = *space_ecn_marks;
         } else {
             qtrace!("Not tracking ECN for dropped packet number space");
@@ -1521,7 +1526,7 @@ impl Connection {
         }
 
         if self.state.connected() {
-            self.handle_migration(path, d, migrate, now);
+            self.handle_migration(path, remote, migrate, now);
         } else if self.role != Role::Client
             && (packet.packet_type() == PacketType::Handshake
                 || (packet.dcid().len() >= 8 && packet.dcid() == self.local_initial_source_cid))
@@ -1534,7 +1539,12 @@ impl Connection {
 
     /// Take a datagram as input.  This reports an error if the packet was bad.
     /// This takes two times: when the datagram was received, and the current time.
-    fn input(&mut self, d: Datagram<impl AsRef<[u8]>>, received: Instant, now: Instant) {
+    fn input(
+        &mut self,
+        d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
+        received: Instant,
+        now: Instant,
+    ) {
         // First determine the path.
         let path = self.paths.find_path(
             d.destination(),
@@ -1552,19 +1562,22 @@ impl Connection {
     fn input_path(
         &mut self,
         path: &PathRef,
-        d: Datagram<impl AsRef<[u8]>>,
+        mut d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
     ) -> Res<()> {
-        let mut slc = d.as_ref();
-        let mut dcid = None;
-
         qtrace!("[{self}] {} input {}", path.borrow(), hex(&d));
+        let tos = d.tos();
+        let remote = d.source();
+        let len = d.len();
+        let mut slc = d.as_mut();
+        let mut dcid = None;
         let pto = path.borrow().rtt().pto(self.confirmed());
 
         // Handle each packet in the datagram.
         while !slc.is_empty() {
             self.stats.borrow_mut().packets_rx += 1;
-            let (packet, remainder) =
+            let slc_len = slc.len();
+            let (mut packet, remainder) =
                 match PublicPacket::decode(slc, self.cid_manager.decoder().as_ref()) {
                     Ok((packet, remainder)) => (packet, remainder),
                     Err(e) => {
@@ -1592,9 +1605,9 @@ impl Connection {
                         "-> RX",
                         payload.packet_type(),
                         payload.pn(),
-                        &payload[..],
-                        d.tos(),
-                        d.len(),
+                        payload.as_ref(),
+                        tos,
+                        len,
                     );
 
                     #[cfg(feature = "build-fuzzing-corpus")]
@@ -1607,7 +1620,7 @@ impl Connection {
                         neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
                     }
 
-                    qlog::packet_received(&self.qlog, &packet, &payload, now);
+                    // qlog::packet_received(&self.qlog, &packet, &payload, now);
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if let Some(space) = self.acks.get_mut(space) {
                         if space.is_duplicate(payload.pn()) {
@@ -1616,7 +1629,9 @@ impl Connection {
                         } else {
                             match self.process_packet(path, &payload, now) {
                                 Ok(migrate) => {
-                                    self.postprocess_packet(path, &d, &packet, migrate, now);
+                                    self.postprocess_packet(
+                                        path, tos, remote, &packet, migrate, now,
+                                    );
                                 }
                                 Err(e) => {
                                     self.ensure_error_path(path, &packet, now);
@@ -1637,7 +1652,7 @@ impl Connection {
                         Error::KeysPending(cspace) => {
                             // This packet can't be decrypted because we don't have the keys yet.
                             // Don't check this packet for a stateless reset, just return.
-                            let remaining = slc.len();
+                            let remaining = slc_len;
                             self.save_datagram(cspace, d, remaining, now);
                             return Ok(());
                         }
@@ -1980,7 +1995,7 @@ impl Connection {
     fn handle_migration(
         &mut self,
         path: &PathRef,
-        d: &Datagram<impl AsRef<[u8]>>,
+        remote: SocketAddr,
         migrate: bool,
         now: Instant,
     ) {
@@ -1993,7 +2008,7 @@ impl Connection {
 
         if self.ensure_permanent(path, now).is_ok() {
             self.paths
-                .handle_migration(path, d.source(), now, &mut self.stats.borrow_mut());
+                .handle_migration(path, remote, now, &mut self.stats.borrow_mut());
         } else {
             qinfo!(
                 "[{self}] {} Peer migrated, but no connection ID available",

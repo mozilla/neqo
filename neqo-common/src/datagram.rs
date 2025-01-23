@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{net::SocketAddr, ops::Deref};
+use std::{
+    net::SocketAddr,
+    ops::{Deref, DerefMut},
+};
 
 use crate::{hex_with_len, IpTos};
 
@@ -47,7 +50,6 @@ impl<D: AsRef<[u8]>> Datagram<D> {
     }
 }
 
-#[cfg(test)]
 impl<D: AsMut<[u8]> + AsRef<[u8]>> AsMut<[u8]> for Datagram<D> {
     fn as_mut(&mut self) -> &mut [u8] {
         self.d.as_mut()
@@ -62,6 +64,12 @@ impl Datagram<Vec<u8>> {
             tos,
             d: d.into(),
         }
+    }
+}
+
+impl<D: AsRef<[u8]> + AsMut<[u8]>> DerefMut for Datagram<D> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        AsMut::<[u8]>::as_mut(self)
     }
 }
 

@@ -685,6 +685,25 @@ impl CryptoDxState {
         Ok(res.to_vec())
     }
 
+    pub fn decrypt_in_place(
+        &mut self,
+        pn: PacketNumber,
+        hdr: Range<usize>,
+        body: Range<usize>,
+        data: &mut [u8],
+    ) -> Res<usize> {
+        debug_assert_eq!(self.direction, CryptoDxDirection::Read);
+        qtrace!(
+            "[{self}] decrypt pn={pn} hdr={} body={}",
+            hex(data[hdr.clone()].as_ref()),
+            hex(data[body.clone()].as_ref())
+        );
+        self.invoked()?;
+        let len = self.aead.decrypt_in_place(pn, hdr, body, data)?;
+        self.used(pn)?;
+        Ok(len)
+    }
+
     #[cfg(all(test, not(feature = "disable-encryption")))]
     pub(crate) fn test_default() -> Self {
         // This matches the value in packet.rs
