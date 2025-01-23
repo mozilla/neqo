@@ -143,7 +143,5 @@ jobs:
 
   bench:
     needs: [check]
-    if: >
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_benchmarks) ||
-      (github.event_name != 'workflow_dispatch' && github.event_name != 'pull_request')
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks
     uses: ./.github/workflows/bench.yml
