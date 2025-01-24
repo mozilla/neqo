@@ -83,6 +83,8 @@ pub struct ConnectionParameters {
     pacing: bool,
     /// Whether the connection performs PLPMTUD.
     pmtud: bool,
+    /// Whether the connection should use SNI slicing.
+    sni_slicing: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -107,6 +109,7 @@ impl Default for ConnectionParameters {
             disable_migration: false,
             pacing: true,
             pmtud: false,
+            sni_slicing: true,
         }
     }
 }
@@ -364,6 +367,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn pmtud(mut self, pmtud: bool) -> Self {
         self.pmtud = pmtud;
+        self
+    }
+
+    #[must_use]
+    pub const fn sni_slicing_enabled(&self) -> bool {
+        self.sni_slicing
+    }
+
+    #[must_use]
+    pub const fn sni_slicing(mut self, sni_slicing: bool) -> Self {
+        self.sni_slicing = sni_slicing;
         self
     }
 

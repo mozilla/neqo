@@ -124,6 +124,10 @@ pub struct QuicParameters {
     /// Whether to disable path MTU discovery.
     pub no_pmtud: bool,
 
+    #[arg(long)]
+    /// Whether to slice the SNI.
+    pub no_sni_slicing: bool,
+
     #[arg(name = "preferred-address-v4", long)]
     /// An IPv4 address for the server preferred address.
     pub preferred_address_v4: Option<String>,
@@ -146,6 +150,7 @@ impl Default for QuicParameters {
             no_pmtud: false,
             preferred_address_v4: None,
             preferred_address_v6: None,
+            no_sni_slicing: false,
         }
     }
 }
@@ -218,7 +223,8 @@ impl QuicParameters {
             .idle_timeout(Duration::from_secs(self.idle_timeout))
             .cc_algorithm(self.congestion_control)
             .pacing(!self.no_pacing)
-            .pmtud(!self.no_pmtud);
+            .pmtud(!self.no_pmtud)
+            .sni_slicing(!self.no_sni_slicing);
         params = if let Some(pa) = self.preferred_address() {
             params.preferred_address(pa)
         } else {

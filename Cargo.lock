@@ -258,36 +258,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam-deque"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "715e8152b692bba2d374b53d4875445368fdf21a94751410af607a5ac677d1fc"
-dependencies = [
- "cfg-if",
- "crossbeam-epoch",
- "crossbeam-utils",
-]
-
-[[package]]
-name = "crossbeam-epoch"
-version = "0.9.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46bd5f3f85273295a9d14aedfb86f6aadbff6d8f5295c4a9edb08e819dcf5695"
-dependencies = [
- "autocfg",
- "cfg-if",
- "crossbeam-utils",
- "memoffset",
- "scopeguard",
-]
-
-[[package]]
-name = "crossbeam-utils"
-version = "0.8.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22ec99545bb0ed0ea7bb9b8e1e9122ea386ff8a48c0922e43f36d45ab09e0e80"
-
-[[package]]
 name = "crunchy"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -398,10 +368,7 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85cdab6a89accf66733ad5a1693a4dcced6aeff64602b634530dd73c1f3ee9f0"
 dependencies = [
- "is-terminal",
  "log",
- "regex",
- "termcolor",
 ]
 
 [[package]]
@@ -488,7 +455,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.11.0"
+version = "0.12.1"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -796,15 +763,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
-name = "memoffset"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d61c719bcfbcf5d62b3a09efa6088de8c54bc0bfcd3ea7ae39fcc186108b8de1"
-dependencies = [
- "autocfg",
-]
-
-[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -839,23 +797,21 @@ checksum = "903970ae2f248d7275214cf8f387f8ba0c4ea7e3d87a320e85493db60ce28616"
 
 [[package]]
 name = "mtu"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8e76af2be1c20282d2b7290590552a58bcfad00937fa8ac6f240202e76a0dae"
+checksum = "df6f72a335d87c273d0f1db95778aef6826175556538a72747e1213f9995c16a"
 dependencies = [
  "bindgen",
  "cfg_aliases",
  "libc",
  "mozbuild",
  "static_assertions",
- "windows-bindgen",
- "windows-core",
- "windows-targets",
+ "windows",
 ]
 
 [[package]]
 name = "neqo-bin"
-version = "0.11.0"
+version = "0.12.1"
 dependencies = [
  "clap",
  "clap-verbosity-flag",
@@ -878,7 +834,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-common"
-version = "0.11.0"
+version = "0.12.1"
 dependencies = [
  "criterion",
  "enum-map",
@@ -894,7 +850,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-crypto"
-version = "0.11.0"
+version = "0.12.1"
 dependencies = [
  "bindgen",
  "log",
@@ -909,7 +865,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-http3"
-version = "0.11.0"
+version = "0.12.1"
 dependencies = [
  "enumset",
  "log",
@@ -926,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-qpack"
-version = "0.11.0"
+version = "0.12.1"
 dependencies = [
  "log",
  "neqo-common",
@@ -938,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-transport"
-version = "0.11.0"
+version = "0.12.1"
 dependencies = [
  "criterion",
  "enum-map",
@@ -956,7 +912,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-udp"
-version = "0.11.0"
+version = "0.12.1"
 dependencies = [
  "cfg_aliases",
  "log",
@@ -1068,26 +1024,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rayon"
-version = "1.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b418a60154510ca1a002a752ca9714984e21e4241e804d32555251faf8b78ffa"
-dependencies = [
- "either",
- "rayon-core",
-]
-
-[[package]]
-name = "rayon-core"
-version = "1.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1465873a3dfdaa8ae7cb14b4383657caab0b3e8a0aa9ae8e04b044854c8dfce2"
-dependencies = [
- "crossbeam-deque",
- "crossbeam-utils",
-]
-
-[[package]]
 name = "regex"
 version = "1.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1152,12 +1088,6 @@ checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
 ]
-
-[[package]]
-name = "scopeguard"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
 
 [[package]]
 name = "semver"
@@ -1296,17 +1226,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "termcolor"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
-dependencies = [
- "winapi-util",
-]
-
-[[package]]
 name = "test-fixture"
-version = "0.11.0"
+version = "0.12.1"
 dependencies = [
  "log",
  "neqo-common",
@@ -1459,20 +1380,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "windows-bindgen"
-version = "0.58.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91cd28d93c692351f3a6e5615567c56756e330bee1c99c6bdd57bfc5ab15f589"
-dependencies = [
- "proc-macro2",
- "rayon",
- "serde",
- "serde_json",
- "syn",
- "windows-metadata",
-]
-
-[[package]]
 name = "windows-core"
 version = "0.58.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1506,12 +1413,6 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[package]]
-name = "windows-metadata"
-version = "0.58.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e837f3c3012cfe9e7086302a93f441a7999439be1ad4c530d55d2f6d2921809"
 
 [[package]]
 name = "windows-result"
