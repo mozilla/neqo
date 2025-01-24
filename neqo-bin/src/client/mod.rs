@@ -241,10 +241,11 @@ impl Args {
         // This is the default for all tests except http3.
         self.shared.alpn = String::from("hq-interop");
         // Wireshark can't reassemble sliced CRYPTO frames, which causes tests to fail.
-        // So let's turn that off.
+        // So let's turn that off by default, and only enable for some known-good QNS tests.
         self.shared.quic_parameters.sni_slicing = false;
         match testcase.as_str() {
             "http3" => {
+                self.shared.quic_parameters.sni_slicing = true;
                 self.shared.alpn = String::from("h3");
                 if let Some(testcase) = &self.test {
                     if testcase.as_str() != "upload" {
@@ -268,6 +269,7 @@ impl Args {
                     qerror!("Warning: zerortt test won't work without >1 URL");
                     exit(127);
                 }
+                self.shared.quic_parameters.sni_slicing = true;
                 self.resume = true;
                 // PMTUD probes inflate what we sent in 1-RTT, causing QNS to fail the test.
                 self.shared.quic_parameters.no_pmtud = true;
@@ -288,6 +290,7 @@ impl Args {
                 self.key_update = true;
             }
             "v2" => {
+                self.shared.quic_parameters.sni_slicing = true;
                 // Use default version set for this test (which allows compatible vneg.)
                 self.shared.quic_parameters.quic_version.clear();
             }
