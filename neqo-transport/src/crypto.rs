@@ -79,34 +79,21 @@ impl Crypto {
             TLS_AES_256_GCM_SHA384,
             TLS_CHACHA20_POLY1305_SHA256,
         ])?;
-        match &mut agent {
-            Agent::Server(c) => {
-                // Clients do not send mlkem768x25519 shares by default, but servers should accept
-                // them.
-                c.set_groups(&[
-                    TLS_GRP_KEM_MLKEM768X25519,
-                    TLS_GRP_EC_X25519,
-                    TLS_GRP_EC_SECP256R1,
-                    TLS_GRP_EC_SECP384R1,
-                    TLS_GRP_EC_SECP521R1,
-                ])?;
-            }
-            Agent::Client(c) => {
-                c.set_groups(&[
-                    TLS_GRP_EC_X25519,
-                    TLS_GRP_EC_SECP256R1,
-                    TLS_GRP_EC_SECP384R1,
-                    TLS_GRP_EC_SECP521R1,
-                ])?;
+        agent.set_groups(&[
+            TLS_GRP_KEM_MLKEM768X25519,
+            TLS_GRP_EC_X25519,
+            TLS_GRP_EC_SECP256R1,
+            TLS_GRP_EC_SECP384R1,
+            TLS_GRP_EC_SECP521R1,
+        ])?;
+        if let Agent::Client(c) = &mut agent {
+            // Configure clients to send MLKEM768X25519, X25519 and P256 to
+            // reduce the rate of HRRs.
+            c.send_additional_key_shares(2)?;
 
-                // Configure clients to send both X25519 and P256 to reduce
-                // the rate of HRRs.
-                c.send_additional_key_shares(1)?;
-
-                // Always enable 0-RTT on the client, but the server needs
-                // more configuration passed to server_enable_0rtt.
-                c.enable_0rtt()?;
-            }
+            // Always enable 0-RTT on the client, but the server needs
+            // more configuration passed to server_enable_0rtt.
+            c.enable_0rtt()?;
         }
         agent.set_alpn(&protocols)?;
         agent.disable_end_of_early_data()?;
