@@ -1494,13 +1494,43 @@ impl CryptoStreams {
             Some((offset, length))
         }
 
+        fn mark_as_sent(
+            cs: &mut CryptoStream,
+            space: PacketNumberSpace,
+            tokens: &mut Vec<RecoveryToken>,
+            chunk: (u64, usize),
+            stats: &mut FrameStats,
+        ) {
+            let (offset, len) = chunk;
+            cs.tx.mark_as_sent(offset, len);
+            qdebug!("CRYPTO for {space} offset={offset}, len={len}");
+            tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
+                space,
+                offset,
+                length: len,
+            }));
+            stats.crypto += 1;
+        }
+
         let cs = self.get_mut(space).unwrap();
-        if let Some((offset, data)) = cs.tx.next_bytes() {
+        // Because the TLS extensions in the CRYPTO data are randomly ordered, if the CH is
+        // larger than fits into a single packet, depending on where the SNI is located, slicing and
+        // reordering it can cause the generation of discontiguous chunks. We need to loop here to
+        // make sure we fill the packets, and not send superfluous packets that are mostly padding.
+        while let Some((offset, data)) = cs.tx.next_bytes() {
             let written = if sni_slicing && offset == 0 {
                 if let Some(sni) = find_sni(data) {
                     // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
                     let mid = sni.start + (sni.end - sni.start) / 2;
                     let (left, right) = data.split_at(mid);
+                    // Figure out how many `limit`-sized packets the entire data
+                    // would need. Then, set the per-packet limit so the data is
+                    // spread over that number of packets and all of them end up
+                    // zero-padded, which apparently helps with traversal of
+                    // some middleboxes. This is ignores CRYPTO frame headers so
+                    // undercounts a little, but that's fine.
+                    let packets_needed = data.len() / builder.limit() + 1;
+                    builder.set_limit(data.len() / packets_needed);
                     [
                         write_chunk(offset + mid as u64, right, builder),
                         write_chunk(offset, left, builder),
@@ -1513,15 +1543,16 @@ impl CryptoStreams {
                 // Not at the start of the crypto stream, write the entire data.
                 [write_chunk(offset, data, builder), None]
             };
-            for (offset, length) in written.into_iter().flatten() {
-                cs.tx.mark_as_sent(offset, length);
-                qdebug!("CRYPTO for {space} offset={offset}, len={length}");
-                tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
-                    space,
-                    offset,
-                    length,
-                }));
-                stats.crypto += 1;
+
+            match written {
+                [None, None] => break,
+                [None, Some(chunk)] | [Some(chunk), None] => {
+                    mark_as_sent(cs, space, tokens, chunk, stats);
+                }
+                [Some(chunk1), Some(chunk2)] => {
+                    mark_as_sent(cs, space, tokens, chunk1, stats);
+                    mark_as_sent(cs, space, tokens, chunk2, stats);
+                }
             }
         }
     }
