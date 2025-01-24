@@ -786,6 +786,10 @@ impl<'a> PublicPacket<'a> {
         self.data.len()
     }
 
+    pub fn data(&self) -> &[u8] {
+        self.data
+    }
+
     const fn decode_pn(expected: PacketNumber, pn: u64, w: usize) -> PacketNumber {
         let window = 1_u64 << (w * 8);
         let candidate = (expected & !(window - 1)) | pn;

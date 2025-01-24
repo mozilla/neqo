@@ -1242,7 +1242,12 @@ impl Connection {
         }
     }
 
-    fn is_stateless_reset(&self, path: &PathRef, d: &Datagram<impl AsRef<[u8]>>) -> bool {
+    fn is_stateless_reset(
+        &self,
+        path: &PathRef,
+        d: &[u8],
+        // d: &Datagram<impl AsRef<[u8]>>
+    ) -> bool {
         // If the datagram is too small, don't try.
         // If the connection is connected, then the reset token will be invalid.
         if d.len() < 16 || !self.state.connected() {
@@ -1255,7 +1260,8 @@ impl Connection {
     fn check_stateless_reset(
         &mut self,
         path: &PathRef,
-        d: &Datagram<impl AsRef<[u8]>>,
+        d: &[u8],
+        // d: &Datagram<impl AsRef<[u8]>>,
         first: bool,
         now: Instant,
     ) -> Res<()> {
@@ -1582,7 +1588,7 @@ impl Connection {
                     Ok((packet, remainder)) => (packet, remainder),
                     Err(e) => {
                         qinfo!("[{self}] Garbage packet: {e}");
-                        qtrace!("[{self}] Garbage packet contents: {}", hex(slc));
+                        // qtrace!("[{self}] Garbage packet contents: {}", hex(slc));
                         self.stats.borrow_mut().pkt_dropped("Garbage packet");
                         break;
                     }
@@ -1671,9 +1677,10 @@ impl Connection {
                     // Decryption failure, or not having keys is not fatal.
                     // If the state isn't available, or we can't decrypt the packet, drop
                     // the rest of the datagram on the floor, but don't generate an error.
-                    self.check_stateless_reset(path, &d, dcid.is_none(), now)?;
+                    self.check_stateless_reset(path, packet.data(), dcid.is_none(), now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
                     qlog::packet_dropped(&self.qlog, &packet, now);
+                    break;
                 }
             }
             slc = remainder;
