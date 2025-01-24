@@ -307,6 +307,7 @@ fn idle_caching() {
     let mut tokens = Vec::new();
     server.crypto.streams.write_frame(
         PacketNumberSpace::Initial,
+        server.conn_params.sni_slicing_enabled(),
         &mut builder,
         &mut tokens,
         &mut FrameStats::default(),
@@ -315,6 +316,7 @@ fn idle_caching() {
     tokens.clear();
     server.crypto.streams.write_frame(
         PacketNumberSpace::Initial,
+        server.conn_params.sni_slicing_enabled(),
         &mut builder,
         &mut tokens,
         &mut FrameStats::default(),

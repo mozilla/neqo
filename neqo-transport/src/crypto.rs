@@ -326,11 +326,13 @@ impl Crypto {
     pub fn write_frame(
         &mut self,
         space: PacketNumberSpace,
+        sni_slicing: bool,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        self.streams.write_frame(space, builder, tokens, stats);
+        self.streams
+            .write_frame(space, sni_slicing, builder, tokens, stats);
     }
 
     pub fn acked(&mut self, token: &CryptoRecoveryToken) {
@@ -1497,6 +1499,7 @@ impl CryptoStreams {
     pub fn write_frame(
         &mut self,
         space: PacketNumberSpace,
+        sni_slicing: bool,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
@@ -1528,7 +1531,7 @@ impl CryptoStreams {
 
         let cs = self.get_mut(space).unwrap();
         if let Some((offset, data)) = cs.tx.next_bytes() {
-            let written = if offset == 0 {
+            let written = if sni_slicing && offset == 0 {
                 if let Some(sni) = find_sni(data) {
                     // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
                     let mid = sni.start + (sni.end - sni.start) / 2;
