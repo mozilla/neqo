@@ -2160,6 +2160,7 @@ impl Connection {
         let frame_stats = &mut stats.frame_tx;
         self.crypto.write_frame(
             PacketNumberSpace::ApplicationData,
+            self.conn_params.sni_slicing_enabled(),
             builder,
             tokens,
             frame_stats,
@@ -2294,7 +2295,13 @@ impl Connection {
                 self.write_appdata_frames(builder, &mut tokens);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
-                self.crypto.write_frame(space, builder, &mut tokens, stats);
+                self.crypto.write_frame(
+                    space,
+                    self.conn_params.sni_slicing_enabled(),
+                    builder,
+                    &mut tokens,
+                    stats,
+                );
             }
         }
 

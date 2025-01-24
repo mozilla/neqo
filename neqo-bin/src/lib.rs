@@ -131,6 +131,10 @@ pub struct QuicParameters {
     #[arg(name = "preferred-address-v6", long)]
     /// An IPv6 address for the server preferred address.
     pub preferred_address_v6: Option<String>,
+
+    #[arg(long, default_value = "true")]
+    /// Whether to slice the SNI.
+    pub sni_slicing: bool,
 }
 
 #[cfg(any(test, feature = "bench"))]
@@ -146,6 +150,7 @@ impl Default for QuicParameters {
             no_pmtud: false,
             preferred_address_v4: None,
             preferred_address_v6: None,
+            sni_slicing: true,
         }
     }
 }
@@ -218,7 +223,8 @@ impl QuicParameters {
             .idle_timeout(Duration::from_secs(self.idle_timeout))
             .cc_algorithm(self.congestion_control)
             .pacing(!self.no_pacing)
-            .pmtud(!self.no_pmtud);
+            .pmtud(!self.no_pmtud)
+            .sni_slicing(self.sni_slicing);
         params = if let Some(pa) = self.preferred_address() {
             params.preferred_address(pa)
         } else {
