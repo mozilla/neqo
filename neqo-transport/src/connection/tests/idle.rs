@@ -289,7 +289,11 @@ fn idle_caching() {
 
     // Perform the first round trip, but drop the Initial from the server.
     // The client then caches the Handshake packet.
-    let dgram = client.process_output(start).dgram();
+    let dgram1 = client.process_output(start).dgram();
+    let dgram2 = client.process_output(start).dgram();
+    _ = server.process(dgram1, start).dgram();
+    let dgram = server.process(dgram2, start).dgram();
+    let dgram = client.process(dgram, start).dgram();
     let dgram = server.process(dgram, start).dgram();
     let (_, handshake) = split_datagram(&dgram.unwrap());
     client.process_input(handshake.unwrap(), start);
@@ -679,7 +683,13 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     //  - Idle time out  will trigger (at the timeout + IDLE_TIMEOUT)
     const IDLE_TIMEOUT: Duration = Duration::from_millis(6000);
 
-    let mut client = new_client(ConnectionParameters::default().idle_timeout(IDLE_TIMEOUT));
+    // This tests makes too many assumptions about single-packet flights and PTOs for multi-packet
+    // MLKEM flights to work.
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .idle_timeout(IDLE_TIMEOUT)
+            .mlkem(false),
+    );
     let mut server = default_server();
     let mut now = connect_rtt_idle(&mut client, &mut server, RTT);
     // connect_rtt_idle increase now by RTT / 2;

@@ -58,14 +58,18 @@ pub fn connect(client: &mut Connection, server: &mut Server) -> ConnectionRef {
     server.set_validation(ValidateAddress::Never);
 
     assert_eq!(*client.state(), State::Init);
-    let out = client.process_output(now()); // ClientHello
-    assert!(out.as_dgram_ref().is_some());
-    let out = server.process(out.dgram(), now()); // ServerHello...
+    let out1 = client.process_output(now()); // ClientHello
+    let out2 = client.process_output(now()); // ClientHello
+    assert!(out1.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
+    _ = server.process(out1.dgram(), now()); // ACK
+    let out = server.process(out2.dgram(), now()); // ServerHello...
     assert!(out.as_dgram_ref().is_some());
 
     // Ingest the server Certificate.
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some()); // This should just be an ACK.
+    let out = server.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now());
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_none()); // So the server should have nothing to say.
 

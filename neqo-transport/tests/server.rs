@@ -311,6 +311,7 @@ fn zero_rtt() {
     };
 
     // Now generate a bunch of 0-RTT packets...
+    let c0 = client_send();
     let c1 = client_send();
     assertions::assert_coalesced_0rtt(&c1);
     let c2 = client_send();
@@ -322,9 +323,10 @@ fn zero_rtt() {
     assert!(server.active_connections().is_empty());
 
     // Now handshake and let another 0-RTT packet in.
+    _ = server.process(Some(c0), now);
     let shs = server.process(Some(c1), now);
     drop(server.process(Some(c3), now));
-    // The server will have received two STREAM frames now if it processed both packets.
+    // The server will have received three STREAM frames now if it processed both packets.
     // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
     #[allow(clippy::mutable_key_type)]
     let active = server.active_connections();
@@ -338,7 +340,7 @@ fn zero_rtt() {
             .stats()
             .frame_rx
             .stream,
-        2
+        3
     );
 
     // Complete the handshake.  As the client was pacing 0-RTT packets, extend the time
@@ -362,7 +364,7 @@ fn zero_rtt() {
             .stats()
             .frame_rx
             .stream,
-        2
+        4
     );
 }
 
@@ -378,15 +380,19 @@ fn new_token_0rtt() {
     let client_stream = client.stream_create(StreamType::UniDi).unwrap();
     client.stream_send(client_stream, &[1, 2, 3]).unwrap();
 
-    let out = client.process_output(now()); // Initial w/0-RTT
-    assert!(out.as_dgram_ref().is_some());
-    assertions::assert_initial(out.as_dgram_ref().unwrap(), true);
-    assertions::assert_coalesced_0rtt(out.as_dgram_ref().unwrap());
-    let out = server.process(out.dgram(), now()); // Initial
+    let out1 = client.process_output(now());
+    let out2 = client.process_output(now()); // Initial w/0-RTT
+    assert!(out1.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
+    assertions::assert_initial(out1.as_dgram_ref().unwrap(), true);
+    assertions::assert_coalesced_0rtt(out2.as_dgram_ref().unwrap());
+    _ = server.process(out1.dgram(), now()); // Initial
+    let out = server.process(out2.dgram(), now()); // Initial
     assert!(out.as_dgram_ref().is_some());
     assertions::assert_initial(out.as_dgram_ref().unwrap(), false);
 
     let dgram = client.process(out.as_dgram_ref().cloned(), now());
+    let dgram = server.process(dgram.as_dgram_ref().cloned(), now());
+    let dgram = client.process(dgram.as_dgram_ref().cloned(), now());
     // Note: the client doesn't need to authenticate the server here
     // as there is no certificate; authentication is based on the ticket.
     assert!(out.as_dgram_ref().is_some());
@@ -421,7 +427,8 @@ fn new_token_different_port() {
 
 #[test]
 fn bad_client_initial() {
-    let mut client = default_client();
+    // This test needs to decrypt the CI, so turn off MLKEM.
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let mut server = default_server();
 
     let dgram = client.process_output(now()).dgram().expect("a datagram");
@@ -567,6 +574,7 @@ fn version_negotiation_ignored() {
 
     // Any packet will do, but let's make something that looks real.
     let dgram = client.process_output(now()).dgram().expect("a datagram");
+    _ = client.process_output(now()).dgram().expect("a datagram");
     let mut input = dgram.to_vec();
     input[1] ^= 0x12;
     let damaged = Datagram::new(
@@ -649,18 +657,24 @@ fn version_negotiation_and_compatible() {
     // Run the full exchange so that we can observe the versions in use.
 
     // Version Negotiation
-    let dgram = client.process_output(now()).dgram();
-    assert!(dgram.is_some());
-    assertions::assert_version(dgram.as_ref().unwrap(), ORIG_VERSION.wire_version());
-    let dgram = server.process(dgram, now()).dgram();
+    let dgram1 = client.process_output(now()).dgram();
+    let dgram2 = client.process_output(now()).dgram();
+    assert!(dgram1.is_some() && dgram2.is_some());
+    assertions::assert_version(dgram1.as_ref().unwrap(), ORIG_VERSION.wire_version());
+    _ = server.process(dgram1, now()).dgram();
+    let dgram = server.process(dgram2, now()).dgram();
     assertions::assert_vn(dgram.as_ref().unwrap());
     client.process_input(dgram.unwrap(), now());
 
-    let dgram = client.process_output(now()).dgram(); // ClientHello
-    assertions::assert_version(dgram.as_ref().unwrap(), VN_VERSION.wire_version());
-    let dgram = server.process(dgram, now()).dgram(); // ServerHello...
+    let dgram1 = client.process_output(now()).dgram(); // ClientHello
+    let dgram2 = client.process_output(now()).dgram(); // ClientHello
+    assertions::assert_version(dgram1.as_ref().unwrap(), VN_VERSION.wire_version());
+    _ = server.process(dgram1, now()).dgram(); // ServerHello...
+    let dgram = server.process(dgram2, now()).dgram(); // ServerHello...
     assertions::assert_version(dgram.as_ref().unwrap(), COMPAT_VERSION.wire_version());
-    client.process_input(dgram.unwrap(), now());
+    let dgram = client.process(dgram, now()).dgram();
+    let dgram = server.process(dgram, now()).dgram();
+    _ = client.process(dgram, now()).dgram();
 
     client.authenticated(AuthenticationStatus::Ok, now());
     let dgram = client.process_output(now()).dgram();
@@ -825,7 +839,11 @@ fn max_streams_after_0rtt_rejection() {
     let mut client = default_client();
     client.enable_resumption(now(), &token).unwrap();
     _ = client.stream_create(StreamType::BiDi).unwrap();
-    let dgram = client.process_output(now()).dgram();
+    let dgram1 = client.process_output(now()).dgram();
+    let dgram2 = client.process_output(now()).dgram();
+    _ = server.process(dgram1, now()).dgram();
+    let dgram = server.process(dgram2, now()).dgram();
+    let dgram = client.process(dgram, now()).dgram();
     let dgram = server.process(dgram, now()).dgram();
     let dgram = client.process(dgram, now()).dgram();
     assert!(dgram.is_some()); // We're far enough along to complete the test now.

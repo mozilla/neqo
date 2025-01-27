@@ -91,9 +91,13 @@ fn process_client_events(conn: &mut Http3Client) {
 
 fn connect_peers(hconn_c: &mut Http3Client, hconn_s: &mut Http3Server) -> Option<Datagram> {
     assert_eq!(hconn_c.state(), Http3State::Initializing);
-    let out = hconn_c.process_output(now()); // Initial
-    let out = hconn_s.process(out.dgram(), now()); // Initial + Handshake
-    let out = hconn_c.process(out.dgram(), now()); // ACK
+    let out1 = hconn_c.process_output(now()); // Initial
+    let out2 = hconn_c.process_output(now()); // Initial
+    _ = hconn_s.process(out1.dgram(), now()); // ACK
+    let out = hconn_s.process(out2.dgram(), now()); // Initial + Handshake
+    let out = hconn_c.process(out.dgram(), now());
+    let out = hconn_s.process(out.dgram(), now());
+    let out = hconn_c.process(out.dgram(), now());
     drop(hconn_s.process(out.dgram(), now())); // consume ACK
     let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
     assert!(hconn_c.events().any(authentication_needed));
@@ -118,9 +122,15 @@ fn connect_peers_with_network_propagation_delay(
     let net_delay = Duration::from_millis(net_delay);
     assert_eq!(hconn_c.state(), Http3State::Initializing);
     let mut now = now();
-    let out = hconn_c.process_output(now); // Initial
+    let out1 = hconn_c.process_output(now); // Initial
+    let out2 = hconn_c.process_output(now); // Initial
     now += net_delay;
-    let out = hconn_s.process(out.dgram(), now); // Initial + Handshake
+    _ = hconn_s.process(out1.dgram(), now); // ACK
+    let out = hconn_s.process(out2.dgram(), now);
+    now += net_delay;
+    let out = hconn_c.process(out.dgram(), now);
+    now += net_delay;
+    let out = hconn_s.process(out.dgram(), now);
     now += net_delay;
     let out = hconn_c.process(out.dgram(), now); // ACK
     now += net_delay;
@@ -445,7 +455,12 @@ fn zerortt() {
         .unwrap();
     hconn_c.stream_close_send(req).unwrap();
 
-    let out = hconn_c.process(dgram, now());
+    let out1 = hconn_c.process(dgram, now());
+    let out2 = hconn_c.process_output(now());
+    _ = hconn_s.process(out1.dgram(), now());
+    let out = hconn_s.process(out2.dgram(), now());
+
+    let out = hconn_c.process(out.dgram(), now());
     let out = hconn_s.process(out.dgram(), now());
 
     let mut request_stream = None;

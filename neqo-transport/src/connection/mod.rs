@@ -383,6 +383,7 @@ impl Connection {
         let tphandler = Rc::new(RefCell::new(tps));
         let crypto = Crypto::new(
             conn_params.get_versions().initial(),
+            &conn_params,
             agent,
             protocols.iter().map(P::as_ref).map(String::from).collect(),
             Rc::clone(&tphandler),
@@ -915,7 +916,7 @@ impl Connection {
                     // error. This may happen when client_start fails.
                     self.set_state(State::Closed(error), now);
                 }
-                State::WaitInitial => {
+                State::WaitInitial | State::WaitVersion => {
                     // We don't have any state yet, so don't bother with
                     // the closing state, just send one CONNECTION_CLOSE.
                     if let Some(path) = path.or_else(|| self.paths.primary()) {
@@ -1448,6 +1449,7 @@ impl Connection {
                 {
                     self.crypto.resend_unacked(PacketNumberSpace::Initial);
                     self.resend_0rtt(now);
+                    qdebug!("XXX resend done");
                 }
             }
             (PacketType::VersionNegotiation | PacketType::Retry | PacketType::OtherVersion, ..) => {
@@ -1518,6 +1520,26 @@ impl Connection {
 
         if self.state == State::WaitInitial {
             self.start_handshake(path, packet, now);
+        }
+
+        if matches!(self.state, State::WaitInitial | State::WaitVersion) {
+            self.set_state(
+                if self.has_version() {
+                    State::Handshaking
+                } else {
+                    State::WaitVersion
+                },
+                now,
+            );
+            if self.role == Role::Server {
+                self.zero_rtt_state =
+                    if self.crypto.enable_0rtt(self.version, self.role) == Ok(true) {
+                        qdebug!("[{self}] Accepted 0-RTT");
+                        ZeroRttState::AcceptedServer
+                    } else {
+                        ZeroRttState::Rejected
+                    };
+            }
         }
 
         if self.state.connected() {
@@ -1817,34 +1839,25 @@ impl Connection {
         debug_assert_eq!(packet.packet_type(), PacketType::Initial);
         self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
 
-        let got_version = if self.role == Role::Server {
+        if self.role == Role::Server {
             self.cid_manager
                 .add_odcid(self.original_destination_cid.as_ref().unwrap().clone());
             // Make a path on which to run the handshake.
             self.setup_handshake_path(path, now);
-
-            self.zero_rtt_state = if self.crypto.enable_0rtt(self.version, self.role) == Ok(true) {
-                qdebug!("[{self}] Accepted 0-RTT");
-                ZeroRttState::AcceptedServer
-            } else {
-                qtrace!("[{self}] Rejected 0-RTT");
-                ZeroRttState::Rejected
-            };
-
-            // The server knows the final version if it has remote transport parameters.
-            self.tps.borrow().remote.is_some()
         } else {
             qdebug!("[{self}] Changing to use Server CID={}", packet.scid());
             debug_assert!(path.borrow().is_primary());
             path.borrow_mut().set_remote_cid(packet.scid());
+        };
+    }
 
+    fn has_version(&self) -> bool {
+        if self.role == Role::Server {
+            // The server knows the final version if it has remote transport parameters.
+            self.tps.borrow().remote.is_some()
+        } else {
             // The client knows the final version if it processed a CRYPTO frame.
             self.stats.borrow().frame_rx.crypto > 0
-        };
-        if got_version {
-            self.set_state(State::Handshaking, now);
-        } else {
-            self.set_state(State::WaitVersion, now);
         }
     }
 
@@ -2483,7 +2496,7 @@ impl Connection {
             if padded {
                 needs_padding = false;
                 self.loss_recovery.on_packet_sent(path, sent, now);
-            } else if pt == PacketType::Initial && (self.role == Role::Client || ack_eliciting) {
+            } else if pt == PacketType::Initial {
                 // Packets containing Initial packets might need padding, and we want to
                 // track that padding along with the Initial packet.  So defer tracking.
                 initial_sent = Some(sent);
@@ -2503,6 +2516,14 @@ impl Connection {
                 // but wait until after sending an ACK.
                 self.discard_keys(PacketNumberSpace::Handshake, now);
             }
+
+            // If the client has more Initial CRYPTO data queued up, do not coalesce.
+            if self.role == Role::Client
+                && *space == PacketNumberSpace::Initial
+                && !self.crypto.streams.is_empty(*space)
+            {
+                break;
+            }
         }
 
         if encoder.is_empty() {
@@ -2512,7 +2533,7 @@ impl Connection {
             // Perform additional padding for Initial packets as necessary.
             let mut packets: Vec<u8> = encoder.into();
             if let Some(mut initial) = initial_sent.take() {
-                if needs_padding {
+                if needs_padding && packets.len() < profile.limit() {
                     qdebug!(
                         "[{self}] pad Initial from {} to PLPMTU {}",
                         packets.len(),

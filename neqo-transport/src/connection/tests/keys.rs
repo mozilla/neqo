@@ -55,25 +55,31 @@ fn overwrite_invocations(n: PacketNumber) {
 fn discarded_initial_keys() {
     qdebug!("---- client: generate CH");
     let mut client = default_client();
-    let init_pkt_c = client.process_output(now()).dgram();
-    assert!(init_pkt_c.is_some());
-    assert_eq!(init_pkt_c.as_ref().unwrap().len(), client.plpmtu());
+    let init_pkt_c1 = client.process_output(now()).dgram();
+    let init_pkt_c2 = client.process_output(now()).dgram();
+    assert!(init_pkt_c1.is_some() && init_pkt_c2.is_some());
+    assert_eq!(init_pkt_c1.as_ref().unwrap().len(), client.plpmtu());
+    assert_eq!(init_pkt_c2.as_ref().unwrap().len(), client.plpmtu());
 
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
-    let init_pkt_s = server.process(init_pkt_c.clone(), now()).dgram();
+    server.process_input(init_pkt_c1.clone().unwrap(), now());
+    let init_pkt_s = server.process(init_pkt_c2, now()).dgram();
     assert!(init_pkt_s.is_some());
 
     qdebug!("---- client: cert verification");
     let out = client.process(init_pkt_s.clone(), now()).dgram();
     assert!(out.is_some());
 
+    let out = server.process(out, now()).dgram();
+    client.process_input(out.unwrap(), now());
+
     // The client has received a handshake packet. It will remove the Initial keys.
     // We will check this by processing init_pkt_s a second time.
     // The initial packet should be dropped. The packet contains a Handshake packet as well, which
     // will be marked as dup.  And it will contain padding, which will be "dropped".
     // The client will generate a Handshake packet here to avoid stalling.
-    check_discarded(&mut client, &init_pkt_s.unwrap(), true, 2, 1);
+    check_discarded(&mut client, &init_pkt_s.unwrap(), true, 1, 0);
 
     assert!(maybe_authenticate(&mut client));
 
@@ -81,7 +87,7 @@ fn discarded_initial_keys() {
     // packet from the client.
     // We will check this by processing init_pkt_c a second time.
     // The dropped packet is padding. The Initial packet has been mark dup.
-    check_discarded(&mut server, &init_pkt_c.clone().unwrap(), false, 1, 1);
+    check_discarded(&mut server, &init_pkt_c1.clone().unwrap(), false, 1, 1);
 
     qdebug!("---- client: SH..FIN -> FIN");
     let out = client.process_output(now()).dgram();
@@ -96,7 +102,7 @@ fn discarded_initial_keys() {
     // We will check this by processing init_pkt_c a third time.
     // The Initial packet has been dropped and padding that follows it.
     // There is no dups, everything has been dropped.
-    check_discarded(&mut server, &init_pkt_c.unwrap(), false, 1, 0);
+    check_discarded(&mut server, &init_pkt_c1.unwrap(), false, 1, 0);
 }
 
 #[test]
@@ -222,11 +228,21 @@ fn key_update_before_confirmed() {
     assert_update_blocked(&mut server);
 
     // Client Initial
-    let dgram = client.process_output(now()).dgram();
-    assert!(dgram.is_some());
+    let dgram1 = client.process_output(now()).dgram();
+    let dgram2 = client.process_output(now()).dgram();
+    assert!(dgram1.is_some() && dgram2.is_some());
     assert_update_blocked(&mut client);
 
     // Server Initial + Handshake
+    server.process_input(dgram1.unwrap(), now());
+    let dgram = server.process(dgram2, now()).dgram();
+    assert!(dgram.is_some());
+    assert_update_blocked(&mut server);
+
+    let dgram = client.process(dgram, now()).dgram();
+    assert!(dgram.is_some());
+    assert_update_blocked(&mut client);
+
     let dgram = server.process(dgram, now()).dgram();
     assert!(dgram.is_some());
     assert_update_blocked(&mut server);

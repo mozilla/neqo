@@ -37,7 +37,7 @@ use crate::{
     tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler},
     tracking::PacketNumberSpace,
     version::Version,
-    Error, Res,
+    ConnectionParameters, Error, Res,
 };
 
 const MAX_AUTH_TAG: usize = 32;
@@ -69,6 +69,7 @@ type TpHandler = Rc<RefCell<TransportParametersHandler>>;
 impl Crypto {
     pub fn new(
         version: Version,
+        conn_params: &ConnectionParameters,
         mut agent: Agent,
         protocols: Vec<String>,
         tphandler: TpHandler,
@@ -79,17 +80,25 @@ impl Crypto {
             TLS_AES_256_GCM_SHA384,
             TLS_CHACHA20_POLY1305_SHA256,
         ])?;
-        agent.set_groups(&[
-            TLS_GRP_KEM_MLKEM768X25519,
-            TLS_GRP_EC_X25519,
-            TLS_GRP_EC_SECP256R1,
-            TLS_GRP_EC_SECP384R1,
-            TLS_GRP_EC_SECP521R1,
-        ])?;
+        agent.set_groups(if conn_params.mlkem_enabled() {
+            &[
+                TLS_GRP_KEM_MLKEM768X25519,
+                TLS_GRP_EC_X25519,
+                TLS_GRP_EC_SECP256R1,
+                TLS_GRP_EC_SECP384R1,
+                TLS_GRP_EC_SECP521R1,
+            ]
+        } else {
+            &[
+                TLS_GRP_EC_X25519,
+                TLS_GRP_EC_SECP256R1,
+                TLS_GRP_EC_SECP384R1,
+                TLS_GRP_EC_SECP521R1,
+            ]
+        })?;
         if let Agent::Client(c) = &mut agent {
-            // Configure clients to send MLKEM768X25519, X25519 and P256 to
-            // reduce the rate of HRRs.
-            c.send_additional_key_shares(2)?;
+            // Configure clients to send additional key shares to reduce the rate of HRRs.
+            c.send_additional_key_shares(1)?;
 
             // Always enable 0-RTT on the client, but the server needs
             // more configuration passed to server_enable_0rtt.
@@ -1421,6 +1430,10 @@ impl CryptoStreams {
         }
     }
 
+    pub fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
+        self.get_mut(space).map_or(true, |cs| cs.tx.is_empty())
+    }
+
     const fn get(&self, space: PacketNumberSpace) -> Option<&CryptoStream> {
         let (initial, hs, app) = match self {
             Self::Initial {
@@ -1518,7 +1531,7 @@ impl CryptoStreams {
         // reordering it can cause the generation of discontiguous chunks. We need to loop here to
         // make sure we fill the packets, and not send superfluous packets that are mostly padding.
         while let Some((offset, data)) = cs.tx.next_bytes() {
-            let written = if sni_slicing && offset == 0 {
+            let written = if sni_slicing {
                 if let Some(sni) = find_sni(data) {
                     // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
                     let mid = sni.start + (sni.end - sni.start) / 2;
@@ -1529,8 +1542,15 @@ impl CryptoStreams {
                     // zero-padded, which apparently helps with traversal of
                     // some middleboxes. This is ignores CRYPTO frame headers so
                     // undercounts a little, but that's fine.
+                    //
+                    // TODO: It would be slightly better if we managed to pad
+                    // the first Initial with the minimum amount of zeros to
+                    // help middlebox traversal, so the second packets had more
+                    // space for coalescing.
                     let packets_needed = data.len() / builder.limit() + 1;
-                    builder.set_limit(data.len() / packets_needed);
+                    if packets_needed > 1 {
+                        builder.set_limit(data.len() / packets_needed);
+                    }
                     [
                         write_chunk(offset + mid as u64, right, builder),
                         write_chunk(offset, left, builder),
