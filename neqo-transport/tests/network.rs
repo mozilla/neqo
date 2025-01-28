@@ -32,12 +32,12 @@ simulate!(
     connect_direct,
     [
         ConnectionNode::new_client(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
         ConnectionNode::new_server(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
@@ -96,13 +96,13 @@ simulate!(
     connect_fixed_rtt,
     [
         ConnectionNode::new_client(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
         Delay::new(DELAY..DELAY),
         ConnectionNode::new_server(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
@@ -114,14 +114,14 @@ simulate!(
     connect_taildrop_jitter,
     [
         ConnectionNode::new_client(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
         TailDrop::dsl_downlink(),
         Delay::new(ZERO..JITTER),
         ConnectionNode::new_server(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
@@ -134,13 +134,13 @@ simulate!(
     connect_taildrop,
     [
         ConnectionNode::new_client(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
         TailDrop::dsl_downlink(),
         ConnectionNode::new_server(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
