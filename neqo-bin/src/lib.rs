@@ -112,7 +112,7 @@ pub struct QuicParameters {
     /// The idle timeout for connections, in seconds.
     pub idle_timeout: u64,
 
-    #[arg(long = "cc", default_value = "newreno")]
+    #[arg(long = "cc", default_value = "cubic")]
     /// The congestion controller to use.
     pub congestion_control: CongestionControlAlgorithm,
 
@@ -124,6 +124,10 @@ pub struct QuicParameters {
     /// Whether to disable path MTU discovery.
     pub no_pmtud: bool,
 
+    #[arg(long)]
+    /// Whether to slice the SNI.
+    pub no_sni_slicing: bool,
+
     #[arg(name = "preferred-address-v4", long)]
     /// An IPv4 address for the server preferred address.
     pub preferred_address_v4: Option<String>,
@@ -131,10 +135,6 @@ pub struct QuicParameters {
     #[arg(name = "preferred-address-v6", long)]
     /// An IPv6 address for the server preferred address.
     pub preferred_address_v6: Option<String>,
-
-    #[arg(long, default_value = "true")]
-    /// Whether to slice the SNI.
-    pub sni_slicing: bool,
 }
 
 #[cfg(any(test, feature = "bench"))]
@@ -145,12 +145,12 @@ impl Default for QuicParameters {
             max_streams_bidi: 16,
             max_streams_uni: 16,
             idle_timeout: 30,
-            congestion_control: CongestionControlAlgorithm::NewReno,
+            congestion_control: CongestionControlAlgorithm::Cubic,
             no_pacing: false,
             no_pmtud: false,
             preferred_address_v4: None,
             preferred_address_v6: None,
-            sni_slicing: true,
+            no_sni_slicing: false,
         }
     }
 }
@@ -224,7 +224,7 @@ impl QuicParameters {
             .cc_algorithm(self.congestion_control)
             .pacing(!self.no_pacing)
             .pmtud(!self.no_pmtud)
-            .sni_slicing(self.sni_slicing);
+            .sni_slicing(!self.no_sni_slicing);
         params = if let Some(pa) = self.preferred_address() {
             params.preferred_address(pa)
         } else {
