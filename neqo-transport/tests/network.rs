@@ -60,7 +60,9 @@ simulate!(
     idle_timeout_crazy_rtt,
     [
         ConnectionNode::new_client(
-            ConnectionParameters::default().idle_timeout(weeks(1000)),
+            ConnectionParameters::default()
+                .idle_timeout(weeks(1000))
+                .mlkem(false),
             boxed![ReachState::new(State::Confirmed),],
             boxed![ReachState::new(State::Closed(CloseReason::Transport(
                 Error::IdleTimeout
@@ -69,7 +71,9 @@ simulate!(
         Delay::new(weeks(6)..weeks(6)),
         Drop::percentage(10),
         ConnectionNode::new_server(
-            ConnectionParameters::default().idle_timeout(weeks(1000)),
+            ConnectionParameters::default()
+                .idle_timeout(weeks(1000))
+                .mlkem(false),
             boxed![ReachState::new(State::Confirmed),],
             boxed![ReachState::new(State::Closed(CloseReason::Transport(
                 Error::IdleTimeout
