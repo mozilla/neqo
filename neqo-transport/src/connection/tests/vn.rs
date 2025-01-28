@@ -248,10 +248,10 @@ fn compatible_upgrade_large_initial() {
 
     // Client Initial should take 2 packets.
     // Each should elicit a Version 1 ACK from the server.
-    let dgram1 = client.process_output(now()).dgram();
+    let dgram = client.process_output(now()).dgram();
     let dgram2 = client.process_output(now()).dgram();
-    assert!(dgram1.is_some() && dgram2.is_some());
-    _ = server.process(dgram1, now()).dgram();
+    assert!(dgram.is_some() && dgram2.is_some());
+    server.process_input(dgram.unwrap(), now());
     let dgram = server.process(dgram2, now()).dgram();
     assert!(dgram.is_some());
     // The following uses the Version from *outside* this crate.
@@ -262,7 +262,7 @@ fn compatible_upgrade_large_initial() {
     assert_eq!(client.version(), Version::Version2);
     assert_eq!(server.version(), Version::Version2);
     // Only handshake padding is "dropped".
-    assert_eq!(client.stats().dropped_rx, 3);
+    assert_eq!(client.stats().dropped_rx, 1);
     assert_eq!(server.stats().dropped_rx, 3);
 }
 
@@ -339,9 +339,9 @@ fn invalid_server_version() {
     let mut server =
         new_server(ConnectionParameters::default().versions(Version::Version2, Version::all()));
 
-    let dgram1 = client.process_output(now()).dgram();
+    let dgram = client.process_output(now()).dgram();
     let dgram2 = client.process_output(now()).dgram();
-    server.process_input(dgram1.unwrap(), now());
+    server.process_input(dgram.unwrap(), now());
     server.process_input(dgram2.unwrap(), now());
 
     // Three packets received (one is zero padding).
@@ -470,11 +470,11 @@ fn compatible_upgrade_0rtt_rejected() {
     client.enable_resumption(now(), token).unwrap();
 
     // Create a packet with 0-RTT from the client.
-    let initial1 = send_something(&mut client, now());
+    let initial = send_something(&mut client, now());
     let initial2 = send_something(&mut client, now());
-    assertions::assert_version(&initial1, Version::Version1.wire_version());
+    assertions::assert_version(&initial, Version::Version1.wire_version());
     assertions::assert_coalesced_0rtt(&initial2);
-    server.process_input(initial1, now());
+    server.process_input(initial, now());
     server.process_input(initial2, now());
     assert!(!server
         .events()

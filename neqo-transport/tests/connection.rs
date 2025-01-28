@@ -29,10 +29,10 @@ fn truncate_long_packet() {
     let mut client = default_client();
     let mut server = default_server();
 
-    let out1 = client.process_output(now());
+    let out = client.process_output(now());
     let out2 = client.process_output(now());
-    assert!(out1.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
-    _ = server.process(out1.dgram(), now());
+    assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
+    server.process_input(out.dgram().unwrap(), now());
     let out = server.process(out2.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     let out = client.process(out.dgram(), now());

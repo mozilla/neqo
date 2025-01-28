@@ -289,9 +289,9 @@ fn idle_caching() {
 
     // Perform the first round trip, but drop the Initial from the server.
     // The client then caches the Handshake packet.
-    let dgram1 = client.process_output(start).dgram();
+    let dgram = client.process_output(start).dgram();
     let dgram2 = client.process_output(start).dgram();
-    _ = server.process(dgram1, start).dgram();
+    server.process_input(dgram.unwrap(), start);
     let dgram = server.process(dgram2, start).dgram();
     let dgram = client.process(dgram, start).dgram();
     let dgram = server.process(dgram, start).dgram();

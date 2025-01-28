@@ -32,10 +32,10 @@ use crate::{
 fn stream_create() {
     let mut client = default_client();
 
-    let out1 = client.process_output(now());
+    let out = client.process_output(now());
     let out2 = client.process_output(now());
     let mut server = default_server();
-    _ = server.process(out1.dgram(), now());
+    server.process_input(out.dgram().unwrap(), now());
     let out = server.process(out2.dgram(), now());
 
     let out = client.process(out.dgram(), now());
@@ -756,11 +756,11 @@ fn client_fin_reorder() {
     let mut server = default_server();
 
     // Send ClientHello.
-    let client_hs1 = client.process_output(now());
+    let client_hs = client.process_output(now());
     let client_hs2 = client.process_output(now());
-    assert!(client_hs1.as_dgram_ref().is_some() && client_hs2.as_dgram_ref().is_some());
+    assert!(client_hs.as_dgram_ref().is_some() && client_hs2.as_dgram_ref().is_some());
 
-    _ = server.process(client_hs1.dgram(), now());
+    server.process_input(client_hs.dgram().unwrap(), now());
     let server_hs = server.process(client_hs2.dgram(), now());
     assert!(server_hs.as_dgram_ref().is_some()); // ServerHello, etc...
 
@@ -1281,14 +1281,14 @@ fn session_flow_control_affects_all_streams() {
 
 fn connect_w_different_limit(bidi_limit: u64, unidi_limit: u64) {
     let mut client = default_client();
-    let out1 = client.process_output(now());
+    let out = client.process_output(now());
     let out2 = client.process_output(now());
     let mut server = new_server(
         ConnectionParameters::default()
             .max_streams(StreamType::BiDi, bidi_limit)
             .max_streams(StreamType::UniDi, unidi_limit),
     );
-    _ = server.process(out1.dgram(), now());
+    server.process_input(out.dgram().unwrap(), now());
     let out = server.process(out2.dgram(), now());
 
     let out = client.process(out.dgram(), now());

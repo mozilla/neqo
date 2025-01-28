@@ -52,9 +52,9 @@ fn zero_rtt_send_recv() {
     let mut server = resumed_server(&client);
 
     // Send ClientHello.
-    let client_hs1 = client.process_output(now());
+    let client_hs = client.process_output(now());
     let client_hs2 = client.process_output(now());
-    assert!(client_hs1.as_dgram_ref().is_some() && client_hs2.as_dgram_ref().is_some());
+    assert!(client_hs.as_dgram_ref().is_some() && client_hs2.as_dgram_ref().is_some());
 
     // Wait
     let delay = client.process_output(now()).callback();
@@ -67,7 +67,7 @@ fn zero_rtt_send_recv() {
     // 0-RTT packets on their own shouldn't be padded to MIN_INITIAL_PACKET_SIZE.
     assert!(client_0rtt.as_dgram_ref().unwrap().len() < MIN_INITIAL_PACKET_SIZE);
 
-    _ = server.process(client_hs1.dgram(), now());
+    server.process_input(client_hs.dgram().unwrap(), now());
     let server_hs = server.process(client_hs2.dgram(), now());
     assert!(server_hs.as_dgram_ref().is_some()); // ServerHello, etc...
 
@@ -75,7 +75,7 @@ fn zero_rtt_send_recv() {
     let ack_frames = server.stats().frame_tx.ack;
     let server_process_0rtt = server.process(client_0rtt.dgram(), now());
     assert!(server_process_0rtt.dgram().is_some());
-    assert_eq!(server.stats().frame_tx.all(), all_frames + 1);
+    assert_eq!(server.stats().frame_tx.all(), all_frames + 3);
     assert_eq!(server.stats().frame_tx.ack, ack_frames + 1);
 
     let server_stream_id = server
@@ -239,7 +239,7 @@ fn zero_rtt_update_flow_control() {
     );
 
     // Stream limits should be low for 0-RTT.
-    let client_hs1 = client.process_output(now()).dgram();
+    let client_hs = client.process_output(now()).dgram();
     let client_hs2 = client.process_output(now()).dgram();
     let uni_stream = client.stream_create(StreamType::UniDi).unwrap();
     assert!(!client.stream_send_atomic(uni_stream, MESSAGE).unwrap());
@@ -247,7 +247,7 @@ fn zero_rtt_update_flow_control() {
     assert!(!client.stream_send_atomic(bidi_stream, MESSAGE).unwrap());
 
     // Now get the server transport parameters.
-    _ = server.process(client_hs1, now()).dgram();
+    server.process_input(client_hs.unwrap(), now());
     let server_hs = server.process(client_hs2, now()).dgram();
     let client_hs3 = client.process(server_hs, now()).dgram();
     let server_hs2 = server.process(client_hs3, now()).dgram();
@@ -319,7 +319,7 @@ fn zero_rtt_loss_accepted() {
         }
 
         // Process CI/0-RTT
-        _ = server.process(ci.dgram(), now);
+        server.process_input(ci.dgram().unwrap(), now);
         let si = server.process(c0rtt.dgram(), now);
         assert!(si.as_dgram_ref().is_some());
 

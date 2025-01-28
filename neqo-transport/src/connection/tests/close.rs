@@ -109,10 +109,10 @@ fn bad_tls_version() {
         .unwrap();
     let mut server = default_server();
 
-    let dgram1 = client.process_output(now()).dgram();
+    let dgram = client.process_output(now()).dgram();
     let dgram2 = client.process_output(now()).dgram();
-    assert!(dgram1.is_some() && dgram2.is_some());
-    _ = server.process(dgram1, now()).dgram();
+    assert!(dgram.is_some() && dgram2.is_some());
+    server.process_input(dgram.unwrap(), now());
     let dgram = server.process(dgram2, now()).dgram();
     assert_eq!(
         *server.state(),

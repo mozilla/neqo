@@ -20,9 +20,9 @@ pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T
 
     let mut conn_c = default_client();
     let mut conn_s = default_server();
-    let out1 = conn_c.process_output(now());
+    let out = conn_c.process_output(now());
     let out2 = conn_c.process_output(now());
-    _ = conn_s.process(out1.dgram(), now());
+    _ = conn_s.process(out.dgram(), now());
     let out = conn_s.process(out2.dgram(), now());
     let out = conn_c.process(out.dgram(), now());
     let out = conn_s.process(out.dgram(), now());

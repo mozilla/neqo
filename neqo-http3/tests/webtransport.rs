@@ -41,11 +41,11 @@ fn connect() -> (Http3Client, Http3Server) {
     )
     .expect("create a server");
     assert_eq!(client.state(), Http3State::Initializing);
-    let out1 = client.process_output(now());
+    let out = client.process_output(now());
     let out2 = client.process_output(now());
     assert_eq!(client.state(), Http3State::Initializing);
 
-    _ = server.process(out1.dgram(), now());
+    _ = server.process(out.dgram(), now());
     let out = server.process(out2.dgram(), now());
     let out = client.process(out.dgram(), now());
     let out = server.process(out.dgram(), now());

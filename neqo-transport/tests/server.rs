@@ -380,12 +380,12 @@ fn new_token_0rtt() {
     let client_stream = client.stream_create(StreamType::UniDi).unwrap();
     client.stream_send(client_stream, &[1, 2, 3]).unwrap();
 
-    let out1 = client.process_output(now());
+    let out = client.process_output(now());
     let out2 = client.process_output(now()); // Initial w/0-RTT
-    assert!(out1.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
-    assertions::assert_initial(out1.as_dgram_ref().unwrap(), true);
+    assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
+    assertions::assert_initial(out.as_dgram_ref().unwrap(), true);
     assertions::assert_coalesced_0rtt(out2.as_dgram_ref().unwrap());
-    _ = server.process(out1.dgram(), now()); // Initial
+    _ = server.process(out.dgram(), now()); // Initial
     let out = server.process(out2.dgram(), now()); // Initial
     assert!(out.as_dgram_ref().is_some());
     assertions::assert_initial(out.as_dgram_ref().unwrap(), false);
@@ -657,24 +657,24 @@ fn version_negotiation_and_compatible() {
     // Run the full exchange so that we can observe the versions in use.
 
     // Version Negotiation
-    let dgram1 = client.process_output(now()).dgram();
+    let dgram = client.process_output(now()).dgram();
     let dgram2 = client.process_output(now()).dgram();
-    assert!(dgram1.is_some() && dgram2.is_some());
-    assertions::assert_version(dgram1.as_ref().unwrap(), ORIG_VERSION.wire_version());
-    _ = server.process(dgram1, now()).dgram();
+    assert!(dgram.is_some() && dgram2.is_some());
+    assertions::assert_version(dgram.as_ref().unwrap(), ORIG_VERSION.wire_version());
+    _ = server.process(dgram, now()).dgram();
     let dgram = server.process(dgram2, now()).dgram();
     assertions::assert_vn(dgram.as_ref().unwrap());
     client.process_input(dgram.unwrap(), now());
 
-    let dgram1 = client.process_output(now()).dgram(); // ClientHello
+    let dgram = client.process_output(now()).dgram(); // ClientHello
     let dgram2 = client.process_output(now()).dgram(); // ClientHello
-    assertions::assert_version(dgram1.as_ref().unwrap(), VN_VERSION.wire_version());
-    _ = server.process(dgram1, now()).dgram(); // ServerHello...
+    assertions::assert_version(dgram.as_ref().unwrap(), VN_VERSION.wire_version());
+    _ = server.process(dgram, now()).dgram(); // ServerHello...
     let dgram = server.process(dgram2, now()).dgram(); // ServerHello...
     assertions::assert_version(dgram.as_ref().unwrap(), COMPAT_VERSION.wire_version());
     let dgram = client.process(dgram, now()).dgram();
     let dgram = server.process(dgram, now()).dgram();
-    _ = client.process(dgram, now()).dgram();
+    client.process_input(dgram.unwrap(), now());
 
     client.authenticated(AuthenticationStatus::Ok, now());
     let dgram = client.process_output(now()).dgram();
@@ -839,9 +839,9 @@ fn max_streams_after_0rtt_rejection() {
     let mut client = default_client();
     client.enable_resumption(now(), &token).unwrap();
     _ = client.stream_create(StreamType::BiDi).unwrap();
-    let dgram1 = client.process_output(now()).dgram();
+    let dgram = client.process_output(now()).dgram();
     let dgram2 = client.process_output(now()).dgram();
-    _ = server.process(dgram1, now()).dgram();
+    _ = server.process(dgram, now()).dgram();
     let dgram = server.process(dgram2, now()).dgram();
     let dgram = client.process(dgram, now()).dgram();
     let dgram = server.process(dgram, now()).dgram();

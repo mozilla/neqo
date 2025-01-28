@@ -1449,7 +1449,6 @@ impl Connection {
                 {
                     self.crypto.resend_unacked(PacketNumberSpace::Initial);
                     self.resend_0rtt(now);
-                    qdebug!("XXX resend done");
                 }
             }
             (PacketType::VersionNegotiation | PacketType::Retry | PacketType::OtherVersion, ..) => {
@@ -2496,7 +2495,7 @@ impl Connection {
             if padded {
                 needs_padding = false;
                 self.loss_recovery.on_packet_sent(path, sent, now);
-            } else if pt == PacketType::Initial {
+            } else if pt == PacketType::Initial && (self.role == Role::Client || ack_eliciting) {
                 // Packets containing Initial packets might need padding, and we want to
                 // track that padding along with the Initial packet.  So defer tracking.
                 initial_sent = Some(sent);

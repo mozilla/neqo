@@ -163,24 +163,21 @@ fn pto_initial() {
     const INITIAL_PTO: Duration = Duration::from_millis(300);
     let mut now = now();
 
+    // This tests makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
     qdebug!("---- client: generate CH");
-    let mut client = default_client();
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let pkt1 = client.process_output(now).dgram();
-    let pkt2 = client.process_output(now).dgram();
-    assert!(pkt1.is_some() && pkt2.is_some());
-    assert_eq!(pkt1.unwrap().len(), client.plpmtu());
-    assert_eq!(pkt2.unwrap().len(), client.plpmtu());
+    assert!(pkt1.is_some());
+    assert_eq!(pkt1.clone().unwrap().len(), client.plpmtu());
 
     let delay = client.process_output(now).callback();
     assert_eq!(delay, INITIAL_PTO);
 
     // Resend initial after PTO.
     now += delay;
-    let pkt1 = client.process_output(now).dgram();
     let pkt2 = client.process_output(now).dgram();
-    assert!(pkt1.is_some() && pkt2.is_some());
-    assert_eq!(pkt1.clone().unwrap().len(), client.plpmtu());
-    assert_eq!(pkt2.clone().unwrap().len(), client.plpmtu());
+    assert!(pkt2.is_some());
+    assert_eq!(pkt2.unwrap().len(), client.plpmtu());
 
     let delay = client.process_output(now).callback();
     // PTO has doubled.
@@ -188,8 +185,7 @@ fn pto_initial() {
 
     // Server process the first initial pkt.
     let mut server = default_server();
-    _ = server.process(pkt1, now).dgram();
-    let out = server.process(pkt2, now).dgram();
+    let out = server.process(pkt1, now).dgram();
     assert!(out.is_some());
 
     // Client receives ack for the first initial packet as well a Handshake packet.
@@ -217,16 +213,24 @@ fn pto_handshake_complete() {
     let mut client = default_client();
     let mut server = default_server();
 
-    let pkt1 = client.process_output(now).dgram();
+    let pkt = client.process_output(now).dgram();
     let pkt2 = client.process_output(now).dgram();
-    assert_initial(pkt1.as_ref().unwrap(), false);
+    assert_initial(pkt.as_ref().unwrap(), false);
     assert_initial(pkt2.as_ref().unwrap(), false);
     let cb = client.process_output(now).callback();
-    assert_eq!(cb, Duration::from_millis(300));
+    assert_eq!(cb, Duration::from_millis(5)); // Pacing delay
 
     now += HALF_RTT;
-    _ = server.process(pkt1, now).dgram();
+    server.process_input(pkt.unwrap(), now);
     let pkt = server.process(pkt2, now).dgram();
+    assert_initial(pkt.as_ref().unwrap(), false);
+
+    now += HALF_RTT;
+    let pkt = client.process(pkt, now).dgram();
+    assert_initial(pkt.as_ref().unwrap(), false);
+
+    now += HALF_RTT;
+    let pkt = server.process(pkt, now).dgram();
     assert_initial(pkt.as_ref().unwrap(), false);
 
     now += HALF_RTT;
@@ -339,17 +343,22 @@ fn pto_handshake_frames() {
     let mut now = now();
     qdebug!("---- client: generate CH");
     let mut client = default_client();
-    let pkt1 = client.process_output(now);
+    let pkt = client.process_output(now);
     let pkt2 = client.process_output(now);
 
     now += Duration::from_millis(10);
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
-    _ = server.process(pkt1.dgram(), now);
+    server.process_input(pkt.dgram().unwrap(), now);
     let pkt = server.process(pkt2.dgram(), now);
 
     now += Duration::from_millis(10);
     qdebug!("---- client: cert verification");
+    let pkt = client.process(pkt.dgram(), now);
+
+    now += Duration::from_millis(10);
+    let pkt = server.process(pkt.dgram(), now);
+    now += Duration::from_millis(10);
     let pkt = client.process(pkt.dgram(), now);
 
     now += Duration::from_millis(10);
@@ -388,7 +397,9 @@ fn pto_handshake_frames() {
 fn handshake_ack_pto() {
     const RTT: Duration = Duration::from_millis(10);
     let mut now = now();
-    let mut client = default_client();
+    // This tests makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
+    // to work.
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let mut server = default_server();
     // This is a greasing transport parameter, and large enough that the
     // server needs to send two Handshake packets.
@@ -570,7 +581,9 @@ fn lost_but_kept_and_lr_timer() {
 fn loss_time_past_largest_acked() {
     const RTT: Duration = Duration::from_secs(10);
     const INCR: Duration = Duration::from_millis(1);
-    let mut client = default_client();
+    // This tests makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
+    // to work.
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let mut server = default_server();
 
     let mut now = now();
@@ -747,7 +760,13 @@ fn expected_pto(rtt: Duration) -> Duration {
 
 #[test]
 fn fast_pto() {
-    let mut client = new_client(ConnectionParameters::default().fast_pto(FAST_PTO_SCALE / 2));
+    // This tests makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
+    // to work.
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .fast_pto(FAST_PTO_SCALE / 2)
+            .mlkem(false),
+    );
     let mut server = default_server();
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 

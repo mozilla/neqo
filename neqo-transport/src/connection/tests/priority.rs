@@ -207,9 +207,9 @@ fn connect_for_0rtt() -> (Connection, Connection) {
 
     // Rather than connect, send stream data in 0.5-RTT.
     // That allows this to test that critical streams preempt most frame types.
-    let dgram1 = client.process_output(now()).dgram();
+    let dgram = client.process_output(now()).dgram();
     let dgram2 = client.process_output(now()).dgram();
-    server.process_input(dgram1.unwrap(), now());
+    server.process_input(dgram.unwrap(), now());
     let dgram = server.process(dgram2, now()).dgram();
     client.process_input(dgram.unwrap(), now());
     (client, server)
