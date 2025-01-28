@@ -498,6 +498,7 @@ impl TxBuffer {
         can_buffer
     }
 
+    #[allow(clippy::missing_panics_doc)] // These are not possible.
     pub fn is_empty(&mut self) -> bool {
         let (start, _) = self.ranges.first_unmarked_range();
         start == self.retired() + u64::try_from(self.buffered()).unwrap()
