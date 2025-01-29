@@ -18,6 +18,7 @@ use crate::{
     p11::{PK11SymKey, SymKey},
     scoped_ptr,
     ssl::{PRUint16, PRUint64, PRUint8, SSLAeadContext},
+    Error,
 };
 
 experimental_api!(SSL_MakeAead(
@@ -132,7 +133,8 @@ impl RealAead {
     ///
     /// # Errors
     ///
-    /// If the input can't be protected or any input is too large for NSS.
+    /// If the input can't be protected or any input is too large for NSS, or `aad` or `input` are
+    /// not valid ranges into `data`
     pub fn encrypt_in_place(
         &self,
         count: u64,
@@ -140,8 +142,8 @@ impl RealAead {
         input: Range<usize>,
         data: &mut [u8],
     ) -> Res<usize> {
-        let aad = &data[aad];
-        let input = &data[input];
+        let aad = data.get(aad).ok_or(Error::AeadError)?;
+        let input = data.get(input).ok_or(Error::AeadError)?;
         let mut l: c_uint = 0;
         unsafe {
             SSL_AeadEncrypt(
@@ -194,37 +196,37 @@ impl RealAead {
 
     /// Decrypt a ciphertext in place.
     ///
-    /// Note that NSS insists upon having extra space available for decryption, so
-    /// the buffer for `output` should be the same length as `input`, even though
-    /// the final result will be shorter.
-    ///
     /// # Errors
     ///
-    /// If the input isn't authenticated or any input is too large for NSS.
-    pub fn decrypt_in_place(
+    /// If the input isn't authenticated or any input is too large for NSS, or `aad` or `input` are
+    /// not valid ranges into `data`
+    pub fn decrypt_in_place<'a>(
         &self,
         count: u64,
         aad: Range<usize>,
         input: Range<usize>,
-        data: &mut [u8],
-    ) -> Res<usize> {
-        let aad = &data[aad];
-        let input = &data[input];
+        data: &'a mut [u8],
+    ) -> Res<&'a mut [u8]> {
+        let aad = data.get(aad).ok_or(Error::AeadError)?;
+        let inp = data.get(input.clone()).ok_or(Error::AeadError)?;
         let mut l: c_uint = 0;
         unsafe {
+            // Note that NSS insists upon having extra space available for decryption, so
+            // the buffer for `output` should be the same length as `input`, even though
+            // the final result will be shorter.
             SSL_AeadDecrypt(
                 *self.ctx,
                 count,
                 aad.as_ptr(),
                 c_uint::try_from(aad.len())?,
-                input.as_ptr(),
-                c_uint::try_from(input.len())?,
-                input.as_ptr(),
+                inp.as_ptr(),
+                c_uint::try_from(inp.len())?,
+                inp.as_ptr(),
                 &mut l,
-                c_uint::try_from(input.len())?,
+                c_uint::try_from(inp.len())?,
             )
         }?;
-        Ok(l.try_into()?)
+        Ok(&mut data[input.start..input.start + usize::try_from(l)?])
     }
 }
 

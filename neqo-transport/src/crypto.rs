@@ -673,13 +673,13 @@ impl CryptoDxState {
         self.aead.expansion()
     }
 
-    pub fn decrypt(
+    pub fn decrypt<'a>(
         &mut self,
         pn: PacketNumber,
         hdr: Range<usize>,
         body: Range<usize>,
-        data: &mut [u8],
-    ) -> Res<usize> {
+        data: &'a mut [u8],
+    ) -> Res<&'a mut [u8]> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
         qtrace!(
             "[{self}] decrypt_in_place pn={pn} hdr={} body={}",
@@ -687,9 +687,9 @@ impl CryptoDxState {
             hex(data[body.clone()].as_ref())
         );
         self.invoked()?;
-        let len = self.aead.decrypt_in_place(pn, hdr, body, data)?;
+        let data = self.aead.decrypt_in_place(pn, hdr, body, data)?;
         self.used(pn)?;
-        Ok(len)
+        Ok(data)
     }
 
     #[cfg(all(test, not(feature = "disable-encryption")))]
