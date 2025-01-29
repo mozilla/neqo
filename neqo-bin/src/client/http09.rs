@@ -189,7 +189,7 @@ impl super::Client for Connection {
 
     fn process_multiple_input<'a>(
         &mut self,
-        dgrams: impl IntoIterator<Item = Datagram<&'a [u8]>>,
+        dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
         now: Instant,
     ) {
         self.process_multiple_input(dgrams, now);

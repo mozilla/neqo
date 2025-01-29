@@ -1253,7 +1253,7 @@ impl Connection {
         if d.len() < 16 || !self.state.connected() {
             return false;
         }
-        <&[u8; 16]>::try_from(&d.as_ref()[d.len() - 16..])
+        <&[u8; 16]>::try_from(&d[d.len() - 16..])
             .is_ok_and(|token| path.borrow().is_stateless_reset(token))
     }
 
@@ -1626,7 +1626,7 @@ impl Connection {
                         neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
                     }
 
-                    // qlog::packet_received(&self.qlog, &packet, &payload, now);
+                    // FIXME: add back: qlog::packet_received(&self.qlog, &packet, &payload, now);
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if let Some(space) = self.acks.get_mut(space) {
                         if space.is_duplicate(payload.pn()) {

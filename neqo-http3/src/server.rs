@@ -118,7 +118,11 @@ impl Http3Server {
         self.process(None::<Datagram>, now)
     }
 
-    pub fn process(&mut self, dgram: Option<Datagram<impl AsRef<[u8]>>>, now: Instant) -> Output {
+    pub fn process(
+        &mut self,
+        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        now: Instant,
+    ) -> Output {
         qtrace!("[{self}] Process");
         let out = self.server.process(dgram, now);
         self.process_http3(now);

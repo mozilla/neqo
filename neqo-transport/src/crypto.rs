@@ -696,7 +696,7 @@ impl CryptoDxState {
     ) -> Res<usize> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
         qtrace!(
-            "[{self}] decrypt pn={pn} hdr={} body={}",
+            "[{self}] decrypt_in_place pn={pn} hdr={} body={}",
             hex(data[hdr.clone()].as_ref()),
             hex(data[body.clone()].as_ref())
         );
