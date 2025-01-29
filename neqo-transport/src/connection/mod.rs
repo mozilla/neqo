@@ -69,7 +69,10 @@ mod state;
 #[cfg(test)]
 pub mod test_internal;
 
-use dump::{log_packet, Direction};
+use dump::{
+    log_packet,
+    Direction::{Rx, Tx},
+};
 use idle::IdleTimeout;
 pub use params::ConnectionParameters;
 use params::PreferredAddressConfig;
@@ -1585,21 +1588,13 @@ impl Connection {
             match packet.decrypt(&mut self.crypto.states, now + pto) {
                 Ok(payload) => {
                     // OK, we have a valid packet.
+                    let pt = packet.packet_type();
+                    let pn = payload.pn();
                     self.idle_timeout.on_packet_received(now);
-                    log_packet(
-                        self,
-                        path,
-                        &Direction::Rx,
-                        payload.packet_type(),
-                        payload.pn(),
-                        d.tos(),
-                        &payload,
-                        d.len(),
-                        now,
-                    );
+                    log_packet(self, path, &Rx, pt, pn, d.tos(), &payload, d.len(), now);
 
                     #[cfg(feature = "build-fuzzing-corpus")]
-                    if packet.packet_type() == PacketType::Initial {
+                    if pt == PacketType::Initial {
                         let target = if self.role == Role::Client {
                             "server_initial"
                         } else {
@@ -1610,8 +1605,8 @@ impl Connection {
 
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if let Some(space) = self.acks.get_mut(space) {
-                        if space.is_duplicate(payload.pn()) {
-                            qdebug!("Duplicate packet {space}-{}", payload.pn());
+                        if space.is_duplicate(pn) {
+                            qdebug!("Duplicate packet {space}-{pn}");
                             self.stats.borrow_mut().dups_rx += 1;
                         } else {
                             match self.process_packet(path, &payload, now) {
@@ -1625,10 +1620,7 @@ impl Connection {
                             }
                         }
                     } else {
-                        qdebug!(
-                            "[{self}] Received packet {space} for untracked space {}",
-                            payload.pn()
-                        );
+                        qdebug!("[{self}] Received packet {space} for untracked space {pn}");
                         return Err(Error::ProtocolViolation);
                     }
                 }
@@ -2443,7 +2435,7 @@ impl Connection {
             log_packet(
                 self,
                 path,
-                &Direction::Tx,
+                &Tx,
                 pt,
                 pn,
                 path.borrow().tos(),

@@ -68,19 +68,11 @@ pub fn log_packet(
     plen: usize,
     now: Instant,
 ) {
-    dump_packet(
-        conn,
-        path,
-        match dir {
-            Direction::Tx => "TX ->",
-            Direction::Rx => "-> RX",
-        },
-        pt,
-        pn,
-        payload,
-        tos,
-        plen,
-    );
+    let dir_str = match dir {
+        Direction::Tx => "TX ->",
+        Direction::Rx => "-> RX",
+    };
+    dump_packet(conn, path, dir_str, pt, pn, payload, tos, plen);
     match dir {
         Direction::Tx => qlog::packet_sent(&conn.qlog, pt, pn, plen, payload, now),
         Direction::Rx => qlog::packet_received(&conn.qlog, pt, pn, plen, payload, now),
