@@ -890,7 +890,7 @@ impl<'a> PublicPacket<'a> {
                 return Err(Error::DecryptError);
             };
             let version = rx.version(); // Version fixup; see above.
-            let len = rx.decrypt_in_place(pn, header, body, self.data)?;
+            let len = rx.decrypt_in_place(pn, header.clone(), body, self.data)?;
             // If this is the first packet ever successfully decrypted
             // using `rx`, make sure to initiate a key update.
             if rx.needs_update() {
@@ -901,7 +901,7 @@ impl<'a> PublicPacket<'a> {
                 version,
                 pt: self.packet_type,
                 pn,
-                data: &self.data[self.header_len + 1..self.header_len + 1 + len],
+                data: &self.data[header.end..header.end + len],
             })
         } else if crypto.rx_pending(cspace) {
             Err(Error::KeysPending(cspace))

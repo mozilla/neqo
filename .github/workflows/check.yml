@@ -120,6 +120,7 @@ jobs:
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'nightly'
 
       - uses: codecov/test-results-action@4e79e65778be1cecd5df25e14af1eafb6df80ea9 # v1.0.2
+        if: always()
         with:
           files: target/nextest/ci/junit.xml
           fail_ci_if_error: false

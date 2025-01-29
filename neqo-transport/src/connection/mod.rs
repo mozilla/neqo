@@ -1680,7 +1680,6 @@ impl Connection {
                     self.check_stateless_reset(path, packet.data(), dcid.is_none(), now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
                     qlog::packet_dropped(&self.qlog, &packet, now);
-                    break;
                 }
             }
             slc = remainder;
