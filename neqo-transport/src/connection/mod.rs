@@ -1591,7 +1591,7 @@ impl Connection {
                     let pt = packet.packet_type();
                     let pn = payload.pn();
                     self.idle_timeout.on_packet_received(now);
-                    log_packet(self, path, &Rx, pt, pn, d.tos(), &payload, d.len(), now);
+                    log_packet(self, path, d.tos(), &Rx, pt, pn, d.len(), &payload, now);
 
                     #[cfg(feature = "build-fuzzing-corpus")]
                     if pt == PacketType::Initial {
@@ -2435,12 +2435,12 @@ impl Connection {
             log_packet(
                 self,
                 path,
+                path.borrow().tos(),
                 &Tx,
                 pt,
                 pn,
-                path.borrow().tos(),
+                builder.len() - header_start + aead_expansion,
                 &builder.as_ref()[payload_start..],
-                builder.len() + aead_expansion,
                 now,
             );
 

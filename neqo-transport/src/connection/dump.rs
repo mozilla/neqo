@@ -60,12 +60,12 @@ fn dump_packet(
 pub fn log_packet(
     conn: &Connection,
     path: &PathRef,
+    tos: IpTos,
     dir: &Direction,
     pt: PacketType,
     pn: PacketNumber,
-    tos: IpTos,
-    payload: &[u8],
     plen: usize,
+    payload: &[u8],
     now: Instant,
 ) {
     let dir_str = match dir {
