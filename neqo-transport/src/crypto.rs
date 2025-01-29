@@ -1527,10 +1527,9 @@ impl CryptoStreams {
         }
 
         let cs = self.get_mut(space).unwrap();
-        // Because the TLS extensions in the CRYPTO data are randomly ordered, if the CH is
-        // larger than fits into a single packet, depending on where the SNI is located, slicing and
-        // reordering it can cause the generation of discontiguous chunks. We need to loop here to
-        // make sure we fill the packets, and not send superfluous packets that are mostly padding.
+        // Sending fresh data will always fill a packet. However, when there are
+        // lost packets, the outstanding CRYPTO chunks might not be contiguous
+        // and packet-filling. So we need to loop.
         while let Some((offset, data)) = cs.tx.next_bytes() {
             let written = if sni_slicing {
                 if let Some(sni) = find_sni(data) {
@@ -1548,7 +1547,7 @@ impl CryptoStreams {
                     // the first Initial with the minimum amount of zeros to
                     // help middlebox traversal, so the second packets had more
                     // space for coalescing.
-                    let packets_needed = data.len() / builder.limit() + 1;
+                    let packets_needed = data.len().div_ceil(builder.limit());
                     if packets_needed > 1 {
                         builder.set_limit(data.len() / packets_needed);
                     }

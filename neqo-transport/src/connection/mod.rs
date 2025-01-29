@@ -1528,7 +1528,7 @@ impl Connection {
                 State::WaitVersion
             };
             self.set_state(new_state, now);
-            if self.role == Role::Server && new_state == State::Handshaking {
+            if self.role == Role::Server && self.state == State::Handshaking {
                 self.zero_rtt_state =
                     if self.crypto.enable_0rtt(self.version, self.role) == Ok(true) {
                         qdebug!("[{self}] Accepted 0-RTT");
@@ -2515,6 +2515,7 @@ impl Connection {
             }
 
             // If the client has more Initial CRYPTO data queued up, do not coalesce.
+            // FIXME: This is a temporary hack to avoid coalescing 0-RTT packets too early.
             if self.role == Role::Client
                 && *space == PacketNumberSpace::Initial
                 && !self.crypto.streams.is_empty(*space)
