@@ -69,7 +69,7 @@ mod state;
 #[cfg(test)]
 pub mod test_internal;
 
-use dump::dump_packet;
+use dump::{log_packet, Direction};
 use idle::IdleTimeout;
 pub use params::ConnectionParameters;
 use params::PreferredAddressConfig;
@@ -1586,15 +1586,15 @@ impl Connection {
                 Ok(payload) => {
                     // OK, we have a valid packet.
                     self.idle_timeout.on_packet_received(now);
-                    dump_packet(
+                    log_packet(
                         self,
                         path,
-                        "-> RX",
+                        &Direction::Rx,
                         payload.packet_type(),
                         payload.pn(),
                         &payload[..],
-                        d.tos(),
                         d.len(),
+                        now,
                     );
 
                     #[cfg(feature = "build-fuzzing-corpus")]
@@ -1607,7 +1607,6 @@ impl Connection {
                         neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
                     }
 
-                    qlog::packet_received(&self.qlog, &packet, &payload, now);
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if let Some(space) = self.acks.get_mut(space) {
                         if space.is_duplicate(payload.pn()) {
@@ -2440,22 +2439,14 @@ impl Connection {
                 continue;
             }
 
-            dump_packet(
+            log_packet(
                 self,
                 path,
-                "TX ->",
+                &Direction::Tx,
                 pt,
                 pn,
                 &builder.as_ref()[payload_start..],
-                path.borrow().tos(),
                 builder.len() + aead_expansion,
-            );
-            qlog::packet_sent(
-                &self.qlog,
-                pt,
-                pn,
-                builder.len() - header_start + aead_expansion,
-                &builder.as_ref()[payload_start..],
                 now,
             );
 

@@ -27,7 +27,7 @@ use smallvec::SmallVec;
 use crate::{
     connection::State,
     frame::{CloseError, Frame},
-    packet::{DecryptedPacket, PacketNumber, PacketType, PublicPacket},
+    packet::{PacketNumber, PacketType, PublicPacket},
     path::PathRef,
     recovery::SentPacket,
     stream_id::StreamType as NeqoStreamType,
@@ -296,23 +296,18 @@ pub fn packets_lost(qlog: &NeqoQlog, pkts: &[SentPacket], now: Instant) {
 
 pub fn packet_received(
     qlog: &NeqoQlog,
-    public_packet: &PublicPacket,
-    payload: &DecryptedPacket,
+    pt: PacketType,
+    pn: PacketNumber,
+    plen: usize,
+    body: &[u8],
     now: Instant,
 ) {
     qlog.add_event_data_with_instant(
         || {
-            let mut d = Decoder::from(&payload[..]);
-
-            let header = PacketHeader::with_type(
-                public_packet.packet_type().into(),
-                Some(payload.pn()),
-                None,
-                None,
-                None,
-            );
+            let mut d = Decoder::from(body);
+            let header = PacketHeader::with_type(pt.into(), Some(pn), None, None, None);
             let raw = RawInfo {
-                length: Some(public_packet.len() as u64),
+                length: Some(plen as u64),
                 payload_length: None,
                 data: None,
             };

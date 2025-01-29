@@ -7,7 +7,7 @@
 // Enable just this file for logging to just see packets.
 // e.g. "RUST_LOG=neqo_transport::dump neqo-client ..."
 
-use std::fmt::Write as _;
+use std::{fmt::Write as _, time::Instant};
 
 use neqo_common::{qdebug, Decoder, IpTos};
 
@@ -16,10 +16,15 @@ use crate::{
     frame::Frame,
     packet::{PacketNumber, PacketType},
     path::PathRef,
+    qlog,
 };
 
+pub enum Direction {
+    Tx,
+    Rx,
+}
 #[allow(clippy::too_many_arguments)]
-pub fn dump_packet(
+fn dump_packet(
     conn: &Connection,
     path: &PathRef,
     dir: &str,
@@ -49,4 +54,34 @@ pub fn dump_packet(
         "[{conn}] pn={pn} type={pt:?} {} {tos:?} len {len}{s}",
         path.borrow()
     );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn log_packet(
+    conn: &Connection,
+    path: &PathRef,
+    dir: &Direction,
+    pt: PacketType,
+    pn: PacketNumber,
+    payload: &[u8],
+    plen: usize,
+    now: Instant,
+) {
+    dump_packet(
+        conn,
+        path,
+        match dir {
+            Direction::Tx => "TX ->",
+            Direction::Rx => "-> RX",
+        },
+        pt,
+        pn,
+        payload,
+        path.borrow().tos(),
+        plen,
+    );
+    match dir {
+        Direction::Tx => qlog::packet_sent(&conn.qlog, pt, pn, plen, payload, now),
+        Direction::Rx => qlog::packet_received(&conn.qlog, pt, pn, plen, payload, now),
+    }
 }
