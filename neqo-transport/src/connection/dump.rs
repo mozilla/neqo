@@ -63,6 +63,7 @@ pub fn log_packet(
     dir: &Direction,
     pt: PacketType,
     pn: PacketNumber,
+    tos: IpTos,
     payload: &[u8],
     plen: usize,
     now: Instant,
@@ -77,7 +78,7 @@ pub fn log_packet(
         pt,
         pn,
         payload,
-        path.borrow().tos(),
+        tos,
         plen,
     );
     match dir {

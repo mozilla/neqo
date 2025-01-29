@@ -1592,7 +1592,8 @@ impl Connection {
                         &Direction::Rx,
                         payload.packet_type(),
                         payload.pn(),
-                        &payload[..],
+                        d.tos(),
+                        &payload,
                         d.len(),
                         now,
                     );
@@ -2445,6 +2446,7 @@ impl Connection {
                 &Direction::Tx,
                 pt,
                 pn,
+                path.borrow().tos(),
                 &builder.as_ref()[payload_start..],
                 builder.len() + aead_expansion,
                 now,
