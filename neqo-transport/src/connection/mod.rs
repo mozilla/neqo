@@ -1528,7 +1528,7 @@ impl Connection {
                 State::WaitVersion
             };
             self.set_state(new_state, now);
-            if self.role == Role::Server {
+            if self.role == Role::Server && new_state == State::Handshaking {
                 self.zero_rtt_state =
                     if self.crypto.enable_0rtt(self.version, self.role) == Ok(true) {
                         qdebug!("[{self}] Accepted 0-RTT");
