@@ -294,6 +294,7 @@ pub fn packets_lost(qlog: &NeqoQlog, pkts: &[SentPacket], now: Instant) {
     });
 }
 
+#[allow(dead_code)] // FIXME
 pub fn packet_received(
     qlog: &NeqoQlog,
     public_packet: &PublicPacket,
