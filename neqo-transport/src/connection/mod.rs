@@ -1242,12 +1242,7 @@ impl Connection {
         }
     }
 
-    fn is_stateless_reset(
-        &self,
-        path: &PathRef,
-        d: &[u8],
-        // d: &Datagram<impl AsRef<[u8]>>
-    ) -> bool {
+    fn is_stateless_reset(&self, path: &PathRef, d: &[u8]) -> bool {
         // If the datagram is too small, don't try.
         // If the connection is connected, then the reset token will be invalid.
         if d.len() < 16 || !self.state.connected() {
@@ -1261,7 +1256,6 @@ impl Connection {
         &mut self,
         path: &PathRef,
         d: &[u8],
-        // d: &Datagram<impl AsRef<[u8]>>,
         first: bool,
         now: Instant,
     ) -> Res<()> {
@@ -1588,7 +1582,6 @@ impl Connection {
                     Ok((packet, remainder)) => (packet, remainder),
                     Err(e) => {
                         qinfo!("[{self}] Garbage packet: {e}");
-                        // qtrace!("[{self}] Garbage packet contents: {}", hex(slc));
                         self.stats.borrow_mut().pkt_dropped("Garbage packet");
                         break;
                     }

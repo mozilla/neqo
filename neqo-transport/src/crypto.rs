@@ -673,21 +673,7 @@ impl CryptoDxState {
         self.aead.expansion()
     }
 
-    pub fn decrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
-        debug_assert_eq!(self.direction, CryptoDxDirection::Read);
-        qtrace!(
-            "[{self}] decrypt pn={pn} hdr={} body={}",
-            hex(hdr),
-            hex(body)
-        );
-        self.invoked()?;
-        let mut out = vec![0; body.len()];
-        let res = self.aead.decrypt(pn, hdr, body, &mut out)?;
-        self.used(pn)?;
-        Ok(res.to_vec())
-    }
-
-    pub fn decrypt_in_place(
+    pub fn decrypt(
         &mut self,
         pn: PacketNumber,
         hdr: Range<usize>,
