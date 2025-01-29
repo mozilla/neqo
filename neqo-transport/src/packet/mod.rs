@@ -421,9 +421,7 @@ impl PacketBuilder {
 
         // Add space for crypto expansion.
         let data_end = self.encoder.len();
-        for _i in 0..crypto.expansion() {
-            self.encode_byte(123);
-        }
+        self.pad_to(data_end + crypto.expansion(), 0);
 
         let ciphertext_len = crypto.encrypt(
             self.pn,

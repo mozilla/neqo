@@ -96,7 +96,7 @@ impl<D: AsRef<[u8]>> std::fmt::Debug for Datagram<D> {
 
 impl<'a> Datagram<&'a mut [u8]> {
     #[must_use]
-    pub const fn from_slice(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: &'a mut [u8]) -> Self {
+    pub fn from_slice(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: &'a mut [u8]) -> Self {
         Self { src, dst, tos, d }
     }
 

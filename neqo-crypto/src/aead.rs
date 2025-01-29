@@ -140,7 +140,7 @@ impl RealAead {
         count: u64,
         aad: Range<usize>,
         input: Range<usize>,
-        data: &mut [u8],
+        data: &[u8],
     ) -> Res<usize> {
         let aad = data.get(aad).ok_or(Error::AeadError)?;
         let input = data.get(input).ok_or(Error::AeadError)?;
