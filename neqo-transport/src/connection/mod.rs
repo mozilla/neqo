@@ -1522,14 +1522,12 @@ impl Connection {
         }
 
         if matches!(self.state, State::WaitInitial | State::WaitVersion) {
-            self.set_state(
-                if self.has_version() {
-                    State::Handshaking
-                } else {
-                    State::WaitVersion
-                },
-                now,
-            );
+            let new_state = if self.has_version() {
+                State::Handshaking
+            } else {
+                State::WaitVersion
+            };
+            self.set_state(new_state, now);
             if self.role == Role::Server {
                 self.zero_rtt_state =
                     if self.crypto.enable_0rtt(self.version, self.role) == Ok(true) {
