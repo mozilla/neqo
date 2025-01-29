@@ -97,8 +97,9 @@ impl Crypto {
             ]
         })?;
         if let Agent::Client(c) = &mut agent {
-            // Configure clients to send additional key shares to reduce the rate of HRRs.
-            c.send_additional_key_shares(1)?;
+            // Configure clients to send additional key shares to reduce the rate of HRRs
+            // when enabling MLKEM.
+            c.send_additional_key_shares(usize::from(conn_params.mlkem_enabled()))?;
 
             // Always enable 0-RTT on the client, but the server needs
             // more configuration passed to server_enable_0rtt.
