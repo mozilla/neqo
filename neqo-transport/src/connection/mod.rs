@@ -1559,6 +1559,7 @@ impl Connection {
         _ = self.capture_error(Some(path), now, 0, res);
     }
 
+    #[allow(clippy::too_many_lines)] // Will be addressed as part of https://github.com/mozilla/neqo/pull/2396
     fn input_path(
         &mut self,
         path: &PathRef,
@@ -1594,6 +1595,7 @@ impl Connection {
 
             qtrace!("[{self}] Received unverified packet {packet:?}");
 
+            let packet_len = packet.len();
             match packet.decrypt(&mut self.crypto.states, now + pto) {
                 Ok(payload) => {
                     // OK, we have a valid packet.
@@ -1619,7 +1621,7 @@ impl Connection {
                         neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
                     }
 
-                    // FIXME: add back: qlog::packet_received(&self.qlog, &packet, &payload, now);
+                    qlog::packet_received(&self.qlog, &payload, packet_len, now);
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if let Some(space) = self.acks.get_mut(space) {
                         if space.is_duplicate(payload.pn()) {

@@ -294,26 +294,20 @@ pub fn packets_lost(qlog: &NeqoQlog, pkts: &[SentPacket], now: Instant) {
     });
 }
 
-#[allow(dead_code)] // FIXME
-pub fn packet_received(
-    qlog: &NeqoQlog,
-    public_packet: &PublicPacket,
-    payload: &DecryptedPacket,
-    now: Instant,
-) {
+pub fn packet_received(qlog: &NeqoQlog, payload: &DecryptedPacket, len: usize, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
             let mut d = Decoder::from(&payload[..]);
 
             let header = PacketHeader::with_type(
-                public_packet.packet_type().into(),
+                payload.packet_type().into(),
                 Some(payload.pn()),
                 None,
                 None,
                 None,
             );
             let raw = RawInfo {
-                length: Some(public_packet.len() as u64),
+                length: Some(len as u64),
                 payload_length: None,
                 data: None,
             };
