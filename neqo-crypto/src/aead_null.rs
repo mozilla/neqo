@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{fmt, ops::Range};
+use std::fmt;
 
 use crate::{
     constants::{Cipher, Version},
@@ -47,15 +47,10 @@ impl AeadNull {
     }
 
     #[allow(clippy::missing_errors_doc)]
-    pub fn encrypt_in_place(
-        &self,
-        _count: u64,
-        _aad: Range<usize>,
-        input: Range<usize>,
-        data: &mut [u8],
-    ) -> Res<usize> {
-        data[input.end..input.end + self.expansion()].copy_from_slice(AEAD_NULL_TAG);
-        Ok(input.len() + self.expansion())
+    pub fn encrypt_in_place(&self, _count: u64, _aad: &[u8], data: &mut [u8]) -> Res<usize> {
+        let pos = data.len() - self.expansion();
+        data[pos..].copy_from_slice(AEAD_NULL_TAG);
+        Ok(data.len())
     }
 
     fn decrypt_check(&self, _count: u64, _aad: &[u8], input: &[u8]) -> Res<usize> {
@@ -95,18 +90,11 @@ impl AeadNull {
     pub fn decrypt_in_place<'a>(
         &self,
         count: u64,
-        aad: Range<usize>,
-        input: Range<usize>,
+        aad: &[u8],
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
-        let aad = data
-            .get(aad)
-            .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
-        let inp = data
-            .get(input.clone())
-            .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
-        self.decrypt_check(count, aad, inp)
-            .map(move |len| &mut data[input.start..input.start + len])
+        self.decrypt_check(count, aad, data)
+            .map(move |len| &mut data[..len])
     }
 }
 

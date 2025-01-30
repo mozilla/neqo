@@ -423,12 +423,7 @@ impl PacketBuilder {
         let data_end = self.encoder.len();
         self.pad_to(data_end + crypto.expansion(), 0);
 
-        let ciphertext_len = crypto.encrypt(
-            self.pn,
-            self.header.clone(),
-            self.header.end..data_end,
-            self.encoder.as_mut(),
-        )?;
+        let ciphertext_len = crypto.encrypt(self.pn, self.header.clone(), self.encoder.as_mut())?;
 
         // Calculate the mask.
         let ciphertext = &self.encoder.as_mut()[self.header.end..self.header.end + ciphertext_len];
@@ -812,7 +807,7 @@ impl<'a> PublicPacket<'a> {
     fn decrypt_header(
         &mut self,
         crypto: &CryptoDxState,
-    ) -> Res<(bool, PacketNumber, Range<usize>, Range<usize>)> {
+    ) -> Res<(bool, PacketNumber, Range<usize>)> {
         assert_ne!(self.packet_type, PacketType::Retry);
         assert_ne!(self.packet_type, PacketType::VersionNegotiation);
 
@@ -856,12 +851,7 @@ impl<'a> PublicPacket<'a> {
         let key_phase = self.packet_type == PacketType::Short
             && (first_byte & PACKET_BIT_KEY_PHASE) == PACKET_BIT_KEY_PHASE;
         let pn = Self::decode_pn(crypto.next_pn(), pn_encoded, pn_len);
-        Ok((
-            key_phase,
-            pn,
-            hdrbytes,
-            self.header_len + pn_len..self.data.len(),
-        ))
+        Ok((key_phase, pn, hdrbytes))
     }
 
     /// # Errors
@@ -883,13 +873,13 @@ impl<'a> PublicPacket<'a> {
             // This is OK in this case because we the only reason this can
             // fail is if the cryptographic module is bad or the packet is
             // too small (which is public information).
-            let (key_phase, pn, header, body) = self.decrypt_header(rx)?;
+            let (key_phase, pn, header) = self.decrypt_header(rx)?;
             qtrace!("[{rx}] decoded header: {header:?}");
             let Some(rx) = crypto.rx(version, cspace, key_phase) else {
                 return Err(Error::DecryptError);
             };
             let version = rx.version(); // Version fixup; see above.
-            let d = rx.decrypt(pn, header, body, self.data)?;
+            let d = rx.decrypt(pn, header, self.data)?;
             // If this is the first packet ever successfully decrypted
             // using `rx`, make sure to initiate a key update.
             if rx.needs_update() {
@@ -1024,7 +1014,7 @@ mod tests {
         // The spec uses PN=1, but our crypto refuses to skip packet numbers.
         // So burn an encryption:
         let mut burn = [0; 16];
-        prot.encrypt(0, 0..0, 0..0, &mut burn).expect("burn OK");
+        prot.encrypt(0, 0..0, &mut burn).expect("burn OK");
         assert_eq!(burn.len(), prot.expansion());
 
         let mut builder = PacketBuilder::long(

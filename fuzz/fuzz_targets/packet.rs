@@ -14,8 +14,7 @@ fuzz_target!(|data: &[u8]| {
     neqo_crypto::init().unwrap();
 
     // Run the fuzzer
-    let mut d = data.to_vec();
-    _ = PublicPacket::decode(&mut d, decoder);
+    _ = PublicPacket::decode(&mut data.to_vec(), decoder);
 });
 
 #[cfg(any(not(fuzzing), windows))]

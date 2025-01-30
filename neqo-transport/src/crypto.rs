@@ -635,32 +635,30 @@ impl CryptoDxState {
         self.used_pn.end
     }
 
-    pub fn encrypt(
-        &mut self,
-        pn: PacketNumber,
-        hdr: Range<usize>,
-        body: Range<usize>,
-        data: &mut [u8],
-    ) -> Res<usize> {
+    pub fn encrypt(&mut self, pn: PacketNumber, hdr: Range<usize>, data: &mut [u8]) -> Res<usize> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
         qtrace!(
             "[{self}] encrypt_in_place pn={pn} hdr={} body={}",
             hex(data[hdr.clone()].as_ref()),
-            hex(data[body.clone()].as_ref())
+            hex(data[hdr.end..].as_ref())
         );
 
         // The numbers in `Self::limit` assume a maximum packet size of `LIMIT`.
         // Adjust them as we encounter larger packets.
-        debug_assert!(body.len() < 65536);
-        if body.len() > self.largest_packet_len {
+        let body_len = data.len() - hdr.len() - self.aead.expansion();
+        debug_assert!(body_len <= u16::MAX.into());
+        if body_len > self.largest_packet_len {
             let new_bits = usize::leading_zeros(self.largest_packet_len - 1)
-                - usize::leading_zeros(body.len() - 1);
+                - usize::leading_zeros(body_len - 1);
             self.invocations >>= new_bits;
-            self.largest_packet_len = body.len();
+            self.largest_packet_len = body_len;
         }
         self.invoked()?;
 
-        let len = self.aead.encrypt_in_place(pn, hdr, body, data)?;
+        let (prev, data) = data.split_at_mut(hdr.end);
+        // `prev` may have already-encrypted packets this one is being coalesced with.
+        // Use only the actual current header for AAD.
+        let len = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
 
         qtrace!("[{self}] encrypt ct={}", hex(data));
         debug_assert_eq!(pn, self.next_pn());
@@ -677,17 +675,17 @@ impl CryptoDxState {
         &mut self,
         pn: PacketNumber,
         hdr: Range<usize>,
-        body: Range<usize>,
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
         qtrace!(
             "[{self}] decrypt_in_place pn={pn} hdr={} body={}",
             hex(data[hdr.clone()].as_ref()),
-            hex(data[body.clone()].as_ref())
+            hex(data[hdr.end..].as_ref())
         );
         self.invoked()?;
-        let data = self.aead.decrypt_in_place(pn, hdr, body, data)?;
+        let (hdr, data) = data.split_at_mut(hdr.end);
+        let data = self.aead.decrypt_in_place(pn, hdr, data)?;
         self.used(pn)?;
         Ok(data)
     }

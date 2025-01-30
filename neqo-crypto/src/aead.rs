@@ -6,7 +6,7 @@
 
 use std::{
     fmt,
-    ops::{Deref, DerefMut, Range},
+    ops::{Deref, DerefMut},
     os::raw::{c_char, c_uint},
     ptr::null_mut,
 };
@@ -18,7 +18,6 @@ use crate::{
     p11::{PK11SymKey, SymKey},
     scoped_ptr,
     ssl::{PRUint16, PRUint64, PRUint8, SSLAeadContext},
-    Error,
 };
 
 experimental_api!(SSL_MakeAead(
@@ -124,26 +123,17 @@ impl RealAead {
                 c_uint::try_from(output.len())?,
             )
         }?;
-        Ok(&output[0..(l.try_into()?)])
+        Ok(&output[..l.try_into()?])
     }
 
-    /// Encrypt `data` consisting of `aad` and plaintext `input` in place.
+    /// Encrypt `data` consisting of `aad` and plaintext `data` in place.
     ///
     /// The space provided in `data` needs to allow `Aead::expansion` more bytes to be appended.
     ///
     /// # Errors
     ///
-    /// If the input can't be protected or any input is too large for NSS, or `aad` or `input` are
-    /// not valid ranges into `data`
-    pub fn encrypt_in_place(
-        &self,
-        count: u64,
-        aad: Range<usize>,
-        input: Range<usize>,
-        data: &[u8],
-    ) -> Res<usize> {
-        let aad = data.get(aad).ok_or(Error::AeadError)?;
-        let input = data.get(input).ok_or(Error::AeadError)?;
+    /// If the input can't be protected or any input is too large for NSS.
+    pub fn encrypt_in_place(&self, count: u64, aad: &[u8], data: &[u8]) -> Res<usize> {
         let mut l: c_uint = 0;
         unsafe {
             SSL_AeadEncrypt(
@@ -151,21 +141,17 @@ impl RealAead {
                 count,
                 aad.as_ptr(),
                 c_uint::try_from(aad.len())?,
-                input.as_ptr(),
-                c_uint::try_from(input.len())?,
-                input.as_ptr(),
+                data.as_ptr(),
+                c_uint::try_from(data.len() - self.expansion())?,
+                data.as_ptr(),
                 &mut l,
-                c_uint::try_from(input.len() + self.expansion())?,
+                c_uint::try_from(data.len())?,
             )
         }?;
         Ok(l.try_into()?)
     }
 
     /// Decrypt a ciphertext.
-    ///
-    /// Note that NSS insists upon having extra space available for decryption, so
-    /// the buffer for `output` should be the same length as `input`, even though
-    /// the final result will be shorter.
     ///
     /// # Errors
     ///
@@ -179,6 +165,9 @@ impl RealAead {
     ) -> Res<&'a [u8]> {
         let mut l: c_uint = 0;
         unsafe {
+            // Note that NSS insists upon having extra space available for decryption, so
+            // the buffer for `output` should be the same length as `input`, even though
+            // the final result will be shorter.
             SSL_AeadDecrypt(
                 *self.ctx,
                 count,
@@ -191,24 +180,20 @@ impl RealAead {
                 c_uint::try_from(output.len())?,
             )
         }?;
-        Ok(&output[0..(l.try_into()?)])
+        Ok(&output[..l.try_into()?])
     }
 
     /// Decrypt a ciphertext in place.
     ///
     /// # Errors
     ///
-    /// If the input isn't authenticated or any input is too large for NSS, or `aad` or `input` are
-    /// not valid ranges into `data`
+    /// If the input isn't authenticated or any input is too large for NSS.
     pub fn decrypt_in_place<'a>(
         &self,
         count: u64,
-        aad: Range<usize>,
-        input: Range<usize>,
+        aad: &[u8],
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
-        let aad = data.get(aad).ok_or(Error::AeadError)?;
-        let inp = data.get(input.clone()).ok_or(Error::AeadError)?;
         let mut l: c_uint = 0;
         unsafe {
             // Note that NSS insists upon having extra space available for decryption, so
@@ -219,14 +204,14 @@ impl RealAead {
                 count,
                 aad.as_ptr(),
                 c_uint::try_from(aad.len())?,
-                inp.as_ptr(),
-                c_uint::try_from(inp.len())?,
-                inp.as_ptr(),
+                data.as_ptr(),
+                c_uint::try_from(data.len())?,
+                data.as_ptr(),
                 &mut l,
-                c_uint::try_from(inp.len())?,
+                c_uint::try_from(data.len())?,
             )
         }?;
-        Ok(&mut data[input.start..input.start + usize::try_from(l)?])
+        Ok(&mut data[..l.try_into()?])
     }
 }
 
