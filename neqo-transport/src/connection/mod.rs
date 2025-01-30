@@ -1610,7 +1610,7 @@ impl Connection {
                     );
 
                     #[cfg(feature = "build-fuzzing-corpus")]
-                    if packet.packet_type() == PacketType::Initial {
+                    if payload.packet_type() == PacketType::Initial {
                         let target = if self.role == Role::Client {
                             "server_initial"
                         } else {
