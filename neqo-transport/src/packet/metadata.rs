@@ -44,23 +44,27 @@ pub struct MetaData<'a> {
 }
 
 impl MetaData<'_> {
-    pub fn new_in<'a>(path: &'a PathRef, decrypted: &'a DecryptedPacket) -> MetaData<'a> {
+    pub fn new_in<'a>(
+        path: &'a PathRef,
+        tos: IpTos,
+        len: usize,
+        decrypted: &'a DecryptedPacket,
+    ) -> MetaData<'a> {
         MetaData {
             path,
             direction: Direction::Rx,
             packet_type: decrypted.packet_type(),
             packet_number: decrypted.pn(),
-            tos: IpTos::default(),
-            len: 0,
+            tos,
+            len,
             payload: decrypted,
         }
     }
 
-    pub const fn new_out<'a>(
+    pub fn new_out<'a>(
         path: &'a PathRef,
         packet_type: PacketType,
         packet_number: PacketNumber,
-        tos: IpTos,
         length: usize,
         payload: &'a [u8],
     ) -> MetaData<'a> {
@@ -69,7 +73,7 @@ impl MetaData<'_> {
             direction: Direction::Tx,
             packet_type,
             packet_number,
-            tos,
+            tos: path.borrow().tos(),
             len: length,
             payload,
         }

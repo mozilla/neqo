@@ -1584,7 +1584,10 @@ impl Connection {
                 Ok(payload) => {
                     // OK, we have a valid packet.
                     self.idle_timeout.on_packet_received(now);
-                    self.log_packet(packet::MetaData::new_in(path, &payload), now);
+                    self.log_packet(
+                        packet::MetaData::new_in(path, d.tos(), packet.len(), &payload),
+                        now,
+                    );
 
                     #[cfg(feature = "build-fuzzing-corpus")]
                     if packet.packet_type() == PacketType::Initial {
@@ -2433,8 +2436,7 @@ impl Connection {
                     path,
                     pt,
                     pn,
-                    path.borrow().tos(),
-                    builder.len() - header_start + aead_expansion,
+                    builder.len() + aead_expansion,
                     &builder.as_ref()[payload_start..],
                 ),
                 now,
