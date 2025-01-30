@@ -788,6 +788,7 @@ impl<'a> PublicPacket<'a> {
         self.data.len()
     }
 
+    #[must_use]
     pub fn data(&self) -> &[u8] {
         self.data
     }
