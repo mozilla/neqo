@@ -27,7 +27,7 @@ use smallvec::SmallVec;
 use crate::{
     connection::State,
     frame::{CloseError, Frame},
-    packet::{PacketNumber, PacketType, PublicPacket},
+    packet::{self, metadata::Direction, PacketType, PublicPacket},
     path::PathRef,
     recovery::SentPacket,
     stream_id::StreamType as NeqoStreamType,
@@ -206,20 +206,12 @@ pub fn server_version_information_failed(
     );
 }
 
-pub fn packet_sent(
-    qlog: &NeqoQlog,
-    pt: PacketType,
-    pn: PacketNumber,
-    plen: usize,
-    body: &[u8],
-    now: Instant,
-) {
+pub fn packet_io(qlog: &NeqoQlog, meta: packet::MetaData, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
-            let mut d = Decoder::from(body);
-            let header = PacketHeader::with_type(pt.into(), Some(pn), None, None, None);
+            let mut d = Decoder::from(meta.payload());
             let raw = RawInfo {
-                length: Some(plen as u64),
+                length: Some(meta.length() as u64),
                 payload_length: None,
                 data: None,
             };
@@ -234,18 +226,31 @@ pub fn packet_sent(
                 }
             }
 
-            Some(EventData::PacketSent(PacketSent {
-                header,
-                frames: Some(frames),
-                is_coalesced: None,
-                retry_token: None,
-                stateless_reset_token: None,
-                supported_versions: None,
-                raw: Some(raw),
-                datagram_id: None,
-                send_at_time: None,
-                trigger: None,
-            }))
+            match meta.direction() {
+                Direction::Tx => Some(EventData::PacketSent(PacketSent {
+                    header: meta.into(),
+                    frames: Some(frames),
+                    is_coalesced: None,
+                    retry_token: None,
+                    stateless_reset_token: None,
+                    supported_versions: None,
+                    raw: Some(raw),
+                    datagram_id: None,
+                    send_at_time: None,
+                    trigger: None,
+                })),
+                Direction::Rx => Some(EventData::PacketReceived(PacketReceived {
+                    header: meta.into(),
+                    frames: Some(frames.to_vec()),
+                    is_coalesced: None,
+                    retry_token: None,
+                    stateless_reset_token: None,
+                    supported_versions: None,
+                    raw: Some(raw),
+                    datagram_id: None,
+                    trigger: None,
+                })),
+            }
         },
         now,
     );
@@ -292,51 +297,6 @@ pub fn packets_lost(qlog: &NeqoQlog, pkts: &[SentPacket], now: Instant) {
         }
         Ok(())
     });
-}
-
-pub fn packet_received(
-    qlog: &NeqoQlog,
-    pt: PacketType,
-    pn: PacketNumber,
-    plen: usize,
-    body: &[u8],
-    now: Instant,
-) {
-    qlog.add_event_data_with_instant(
-        || {
-            let mut d = Decoder::from(body);
-            let header = PacketHeader::with_type(pt.into(), Some(pn), None, None, None);
-            let raw = RawInfo {
-                length: Some(plen as u64),
-                payload_length: None,
-                data: None,
-            };
-
-            let mut frames = Vec::new();
-
-            while d.remaining() > 0 {
-                if let Ok(f) = Frame::decode(&mut d) {
-                    frames.push(QuicFrame::from(f));
-                } else {
-                    qinfo!("qlog: invalid frame");
-                    break;
-                }
-            }
-
-            Some(EventData::PacketReceived(PacketReceived {
-                header,
-                frames: Some(frames),
-                is_coalesced: None,
-                retry_token: None,
-                stateless_reset_token: None,
-                supported_versions: None,
-                raw: Some(raw),
-                datagram_id: None,
-                trigger: None,
-            }))
-        },
-        now,
-    );
 }
 
 #[allow(dead_code)]

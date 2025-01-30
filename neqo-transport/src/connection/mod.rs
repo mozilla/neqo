@@ -11,7 +11,7 @@
 use std::{
     cell::RefCell,
     cmp::{max, min},
-    fmt::{self, Debug},
+    fmt::{self, Debug, Write as _},
     iter, mem,
     net::{IpAddr, SocketAddr},
     num::NonZeroUsize,
@@ -44,7 +44,7 @@ use crate::{
         CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
         FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
     },
-    packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket},
+    packet::{self, DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket},
     path::{Path, PathRef, Paths},
     qlog,
     quic_datagrams::{DatagramTracking, QuicDatagrams},
@@ -61,7 +61,6 @@ use crate::{
     AppError, CloseReason, Error, Res, StreamId,
 };
 
-mod dump;
 mod idle;
 pub mod params;
 mod saved;
@@ -69,10 +68,6 @@ mod state;
 #[cfg(test)]
 pub mod test_internal;
 
-use dump::{
-    log_packet,
-    Direction::{Rx, Tx},
-};
 use idle::IdleTimeout;
 pub use params::ConnectionParameters;
 use params::PreferredAddressConfig;
@@ -1588,13 +1583,11 @@ impl Connection {
             match packet.decrypt(&mut self.crypto.states, now + pto) {
                 Ok(payload) => {
                     // OK, we have a valid packet.
-                    let pt = packet.packet_type();
-                    let pn = payload.pn();
                     self.idle_timeout.on_packet_received(now);
-                    log_packet(self, path, d.tos(), &Rx, pt, pn, d.len(), &payload, now);
+                    self.log_packet(packet::MetaData::new_in(path, &payload), now);
 
                     #[cfg(feature = "build-fuzzing-corpus")]
-                    if pt == PacketType::Initial {
+                    if packet.packet_type() == PacketType::Initial {
                         let target = if self.role == Role::Client {
                             "server_initial"
                         } else {
@@ -1605,8 +1598,8 @@ impl Connection {
 
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if let Some(space) = self.acks.get_mut(space) {
-                        if space.is_duplicate(pn) {
-                            qdebug!("Duplicate packet {space}-{pn}");
+                        if space.is_duplicate(payload.pn()) {
+                            qdebug!("Duplicate packet {space}-{}", payload.pn());
                             self.stats.borrow_mut().dups_rx += 1;
                         } else {
                             match self.process_packet(path, &payload, now) {
@@ -1620,7 +1613,10 @@ impl Connection {
                             }
                         }
                     } else {
-                        qdebug!("[{self}] Received packet {space} for untracked space {pn}");
+                        qdebug!(
+                            "[{self}] Received packet {space} for untracked space {}",
+                            payload.pn()
+                        );
                         return Err(Error::ProtocolViolation);
                     }
                 }
@@ -2432,15 +2428,15 @@ impl Connection {
                 continue;
             }
 
-            log_packet(
-                self,
-                path,
-                path.borrow().tos(),
-                &Tx,
-                pt,
-                pn,
-                builder.len() - header_start + aead_expansion,
-                &builder.as_ref()[payload_start..],
+            self.log_packet(
+                packet::MetaData::new_out(
+                    path,
+                    pt,
+                    pn,
+                    path.borrow().tos(),
+                    builder.len() - header_start + aead_expansion,
+                    &builder.as_ref()[payload_start..],
+                ),
                 now,
             );
 
@@ -3529,6 +3525,27 @@ impl Connection {
     #[must_use]
     pub fn plpmtu(&self) -> usize {
         self.paths.primary().unwrap().borrow().plpmtu()
+    }
+
+    fn log_packet(&self, meta: packet::MetaData, now: Instant) {
+        if log::STATIC_MAX_LEVEL == log::LevelFilter::Off || !log::log_enabled!(log::Level::Debug) {
+            return;
+        }
+
+        let mut s = String::new();
+        let mut d = Decoder::from(meta.payload());
+        while d.remaining() > 0 {
+            let Ok(f) = Frame::decode(&mut d) else {
+                s.push_str(" [broken]...");
+                break;
+            };
+            let x = f.dump();
+            if !x.is_empty() {
+                _ = write!(&mut s, "\n  {} {}", meta.direction(), &x);
+            }
+        }
+        qdebug!("[{self}] {meta}{s}");
+        qlog::packet_io(&self.qlog, meta, now);
     }
 }
 
