@@ -79,14 +79,17 @@ impl MetaData<'_> {
         }
     }
 
+    #[must_use]
     pub const fn direction(&self) -> Direction {
         self.direction
     }
 
+    #[must_use]
     pub const fn length(&self) -> usize {
         self.len
     }
 
+    #[must_use]
     pub const fn payload(&self) -> &[u8] {
         self.payload
     }
