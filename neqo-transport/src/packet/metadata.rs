@@ -75,24 +75,8 @@ impl MetaData<'_> {
         }
     }
 
-    pub const fn path(&self) -> &PathRef {
-        self.path
-    }
-
     pub const fn direction(&self) -> Direction {
         self.direction
-    }
-
-    pub const fn packet_type(&self) -> PacketType {
-        self.packet_type
-    }
-
-    pub const fn packet_number(&self) -> PacketNumber {
-        self.packet_number
-    }
-
-    pub const fn tos(&self) -> IpTos {
-        self.tos
     }
 
     pub const fn length(&self) -> usize {
@@ -107,8 +91,8 @@ impl MetaData<'_> {
 impl From<MetaData<'_>> for PacketHeader {
     fn from(val: MetaData<'_>) -> Self {
         Self::with_type(
-            val.packet_type().into(),
-            Some(val.packet_number()),
+            val.packet_type.into(),
+            Some(val.packet_number),
             None,
             None,
             None,
@@ -121,11 +105,11 @@ impl Display for MetaData<'_> {
         write!(
             f,
             "pn={} type={:?} {} {:?} len {}",
-            self.packet_number(),
-            self.packet_type(),
-            self.path().borrow(),
-            self.tos(),
-            self.length(),
+            self.packet_number,
+            self.packet_type,
+            self.path.borrow(),
+            self.tos,
+            self.len,
         )
     }
 }
