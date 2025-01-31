@@ -226,6 +226,7 @@ pub fn packet_io(qlog: &NeqoQlog, meta: packet::MetaData, now: Instant) {
                 }
             }
 
+            // TODO: Use `default` for these initializations once https://github.com/cloudflare/quiche/pull/1931 has shipped.
             match meta.direction() {
                 Direction::Tx => Some(EventData::PacketSent(PacketSent {
                     header: meta.into(),
