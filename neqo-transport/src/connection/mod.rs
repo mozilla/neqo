@@ -3530,7 +3530,7 @@ impl Connection {
     }
 
     fn log_packet(&self, meta: packet::MetaData, now: Instant) {
-        if log::STATIC_MAX_LEVEL == log::LevelFilter::Off || !log::log_enabled!(log::Level::Debug) {
+        if !log::log_enabled!(log::Level::Debug) {
             return;
         }
 
