@@ -426,10 +426,8 @@ impl PacketBuilder {
         let data_end = self.encoder.len();
         self.pad_to(data_end + crypto.expansion(), 0);
 
-        let ciphertext_len = crypto.encrypt(self.pn, self.header.clone(), self.encoder.as_mut())?;
-
         // Calculate the mask.
-        let ciphertext = &self.encoder.as_mut()[self.header.end..self.header.end + ciphertext_len];
+        let ciphertext = crypto.encrypt(self.pn, self.header.clone(), self.encoder.as_mut())?;
         let offset = SAMPLE_OFFSET - self.offsets.pn.len();
         if offset + SAMPLE_SIZE > ciphertext.len() {
             return Err(Error::InternalError);
@@ -622,7 +620,7 @@ impl<'a> PublicPacket<'a> {
         dcid_decoder: &dyn ConnectionIdDecoder,
     ) -> Res<(Self, &'a mut [u8])> {
         let mut decoder = Decoder::new(data);
-        let first = PublicPacket::opt(decoder.decode_uint::<u8>())?;
+        let first = Self::opt(decoder.decode_uint::<u8>())?;
 
         if first & 0x80 == PACKET_BIT_SHORT {
             // Conveniently, this also guarantees that there is enough space
@@ -630,14 +628,14 @@ impl<'a> PublicPacket<'a> {
             if decoder.remaining() < SAMPLE_OFFSET + SAMPLE_SIZE {
                 return Err(Error::InvalidPacket);
             }
-            let dcid = PublicPacket::opt(dcid_decoder.decode_cid(&mut decoder))?.into();
+            let dcid = Self::opt(dcid_decoder.decode_cid(&mut decoder))?.into();
             if decoder.remaining() < SAMPLE_OFFSET + SAMPLE_SIZE {
                 return Err(Error::InvalidPacket);
             }
             let header_len = decoder.offset();
 
             return Ok((
-                PublicPacket {
+                Self {
                     packet_type: PacketType::Short,
                     dcid,
                     scid: None,
@@ -651,14 +649,14 @@ impl<'a> PublicPacket<'a> {
         }
 
         // Generic long header.
-        let version = PublicPacket::opt(decoder.decode_uint())?;
-        let dcid = ConnectionIdRef::from(PublicPacket::opt(decoder.decode_vec(1))?).into();
-        let scid = ConnectionIdRef::from(PublicPacket::opt(decoder.decode_vec(1))?).into();
+        let version = Self::opt(decoder.decode_uint())?;
+        let dcid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?).into();
+        let scid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?).into();
 
         // Version negotiation.
         if version == 0 {
             return Ok((
-                PublicPacket {
+                Self {
                     packet_type: PacketType::VersionNegotiation,
                     dcid,
                     scid: Some(scid),
@@ -674,7 +672,7 @@ impl<'a> PublicPacket<'a> {
         // Check that this is a long header from a supported version.
         let Ok(version) = Version::try_from(version) else {
             return Ok((
-                PublicPacket {
+                Self {
                     packet_type: PacketType::OtherVersion,
                     dcid,
                     scid: Some(scid),
@@ -698,7 +696,7 @@ impl<'a> PublicPacket<'a> {
         let end = data.len() - decoder.remaining();
         let (data, remainder) = data.split_at_mut(end);
         Ok((
-            PublicPacket {
+            Self {
                 packet_type,
                 dcid,
                 scid: Some(scid),

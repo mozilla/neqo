@@ -138,7 +138,12 @@ impl RealAead {
     /// # Errors
     ///
     /// If the input can't be protected or any input is too large for NSS.
-    pub fn encrypt_in_place(&self, count: u64, aad: &[u8], data: &[u8]) -> Res<usize> {
+    pub fn encrypt_in_place<'a>(
+        &self,
+        count: u64,
+        aad: &[u8],
+        data: &'a mut [u8],
+    ) -> Res<&'a mut [u8]> {
         let mut l: c_uint = 0;
         unsafe {
             SSL_AeadEncrypt(
@@ -153,7 +158,7 @@ impl RealAead {
                 c_uint::try_from(data.len())?,
             )
         }?;
-        Ok(l.try_into()?)
+        Ok(&mut data[..l.try_into()?])
     }
 
     /// Decrypt a ciphertext.
@@ -218,7 +223,7 @@ impl RealAead {
                 c_uint::try_from(data.len())?,
             )
         }?;
-        debug_assert_eq!(usize::try_from(l), data.len() - self.expansion());
+        debug_assert_eq!(usize::try_from(l)?, data.len() - self.expansion());
         Ok(&mut data[..l.try_into()?])
     }
 }

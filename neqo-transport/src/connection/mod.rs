@@ -1567,7 +1567,6 @@ impl Connection {
         qtrace!("[{self}] {} input {}", path.borrow(), hex(&d));
         let tos = d.tos();
         let remote = d.source();
-        let len = d.len();
         let mut slc = d.as_mut();
         let mut dcid = None;
         let pto = path.borrow().rtt().pto(self.confirmed());
@@ -1598,7 +1597,10 @@ impl Connection {
                 Ok(payload) => {
                     // OK, we have a valid packet.
                     self.idle_timeout.on_packet_received(now);
-                    self.log_packet(packet::MetaData::new_in(path, tos, packet_len, &payload), now);
+                    self.log_packet(
+                        packet::MetaData::new_in(path, tos, packet_len, &payload),
+                        now,
+                    );
 
                     #[cfg(feature = "build-fuzzing-corpus")]
                     if payload.packet_type() == PacketType::Initial {

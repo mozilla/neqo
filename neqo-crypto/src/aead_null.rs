@@ -47,10 +47,15 @@ impl AeadNull {
     }
 
     #[allow(clippy::missing_errors_doc)]
-    pub fn encrypt_in_place(&self, _count: u64, _aad: &[u8], data: &mut [u8]) -> Res<usize> {
+    pub fn encrypt_in_place<'a>(
+        &self,
+        _count: u64,
+        _aad: &[u8],
+        data: &'a mut [u8],
+    ) -> Res<&'a mut [u8]> {
         let pos = data.len() - self.expansion();
         data[pos..].copy_from_slice(AEAD_NULL_TAG);
-        Ok(data.len())
+        Ok(data)
     }
 
     fn decrypt_check(&self, _count: u64, _aad: &[u8], input: &[u8]) -> Res<usize> {
@@ -58,8 +63,10 @@ impl AeadNull {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
 
-        let len_encrypted = input.len().checked_sub(self.expansion())
-          .ok_or(Error::from(SEC_ERROR_BAD_DATA))?;
+        let len_encrypted = input
+            .len()
+            .checked_sub(self.expansion())
+            .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
         // Check that:
         // 1) expansion is all zeros and
         // 2) if the encrypted data is also supplied that at least some values are no zero

@@ -635,7 +635,12 @@ impl CryptoDxState {
         self.used_pn.end
     }
 
-    pub fn encrypt(&mut self, pn: PacketNumber, hdr: Range<usize>, data: &mut [u8]) -> Res<usize> {
+    pub fn encrypt<'a>(
+        &mut self,
+        pn: PacketNumber,
+        hdr: Range<usize>,
+        data: &'a mut [u8],
+    ) -> Res<&'a mut [u8]> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
         qtrace!(
             "[{self}] encrypt_in_place pn={pn} hdr={} body={}",
@@ -658,12 +663,12 @@ impl CryptoDxState {
         let (prev, data) = data.split_at_mut(hdr.end);
         // `prev` may have already-encrypted packets this one is being coalesced with.
         // Use only the actual current header for AAD.
-        let len = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
+        let data = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
 
-        qtrace!("[{self}] encrypt ct={}", hex(data));
+        qtrace!("[{self}] encrypt ct={}", hex(&data));
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
-        Ok(len)
+        Ok(data)
     }
 
     #[must_use]
