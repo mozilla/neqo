@@ -11,7 +11,7 @@
 use std::{
     cell::RefCell,
     cmp::{max, min},
-    fmt::{self, Debug},
+    fmt::{self, Debug, Write as _},
     iter, mem,
     net::{IpAddr, SocketAddr},
     num::NonZeroUsize,
@@ -44,7 +44,7 @@ use crate::{
         CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
         FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
     },
-    packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket},
+    packet::{self, DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket},
     path::{Path, PathRef, Paths},
     qlog,
     quic_datagrams::{DatagramTracking, QuicDatagrams},
@@ -61,7 +61,6 @@ use crate::{
     AppError, CloseReason, Error, Res, StreamId,
 };
 
-mod dump;
 mod idle;
 pub mod params;
 mod saved;
@@ -69,7 +68,6 @@ mod state;
 #[cfg(test)]
 pub mod test_internal;
 
-use dump::dump_packet;
 use idle::IdleTimeout;
 pub use params::ConnectionParameters;
 use params::PreferredAddressConfig;
@@ -1600,16 +1598,7 @@ impl Connection {
                 Ok(payload) => {
                     // OK, we have a valid packet.
                     self.idle_timeout.on_packet_received(now);
-                    dump_packet(
-                        self,
-                        path,
-                        "-> RX",
-                        payload.packet_type(),
-                        payload.pn(),
-                        payload.as_ref(),
-                        tos,
-                        len,
-                    );
+                    self.log_packet(packet::MetaData::new_in(path, tos, packet_len, &payload), now);
 
                     #[cfg(feature = "build-fuzzing-corpus")]
                     if payload.packet_type() == PacketType::Initial {
@@ -1621,7 +1610,6 @@ impl Connection {
                         neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
                     }
 
-                    qlog::packet_received(&self.qlog, &payload, packet_len, now);
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if let Some(space) = self.acks.get_mut(space) {
                         if space.is_duplicate(payload.pn()) {
@@ -2456,22 +2444,14 @@ impl Connection {
                 continue;
             }
 
-            dump_packet(
-                self,
-                path,
-                "TX ->",
-                pt,
-                pn,
-                &builder.as_ref()[payload_start..],
-                path.borrow().tos(),
-                builder.len() + aead_expansion,
-            );
-            qlog::packet_sent(
-                &self.qlog,
-                pt,
-                pn,
-                builder.len() - header_start + aead_expansion,
-                &builder.as_ref()[payload_start..],
+            self.log_packet(
+                packet::MetaData::new_out(
+                    path,
+                    pt,
+                    pn,
+                    builder.len() + aead_expansion,
+                    &builder.as_ref()[payload_start..],
+                ),
                 now,
             );
 
@@ -3560,6 +3540,27 @@ impl Connection {
     #[must_use]
     pub fn plpmtu(&self) -> usize {
         self.paths.primary().unwrap().borrow().plpmtu()
+    }
+
+    fn log_packet(&self, meta: packet::MetaData, now: Instant) {
+        if !log::log_enabled!(log::Level::Debug) {
+            return;
+        }
+
+        let mut s = String::new();
+        let mut d = Decoder::from(meta.payload());
+        while d.remaining() > 0 {
+            let Ok(f) = Frame::decode(&mut d) else {
+                s.push_str(" [broken]...");
+                break;
+            };
+            let x = f.dump();
+            if !x.is_empty() {
+                _ = write!(&mut s, "\n  {} {}", meta.direction(), &x);
+            }
+        }
+        qdebug!("[{self}] {meta}{s}");
+        qlog::packet_io(&self.qlog, meta, now);
     }
 }
 
