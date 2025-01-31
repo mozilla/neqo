@@ -58,7 +58,8 @@ impl AeadNull {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
 
-        let len_encrypted = input.len() - self.expansion();
+        let len_encrypted = input.len().checked_sub(self.expansion())
+          .ok_or(Error::from(SEC_ERROR_BAD_DATA))?;
         // Check that:
         // 1) expansion is all zeros and
         // 2) if the encrypted data is also supplied that at least some values are no zero
