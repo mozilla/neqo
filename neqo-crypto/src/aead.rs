@@ -218,6 +218,7 @@ impl RealAead {
                 c_uint::try_from(data.len())?,
             )
         }?;
+        debug_assert_eq!(usize::try_from(l), data.len() - self.expansion());
         Ok(&mut data[..l.try_into()?])
     }
 }
