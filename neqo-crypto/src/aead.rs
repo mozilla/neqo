@@ -189,6 +189,8 @@ impl RealAead {
     }
 
     /// Decrypt a ciphertext in place.
+    /// Returns a subslice of `data` (without the last `<self as Aead>::expansion()` bytes),
+    /// that has been decrypted in place.
     ///
     /// # Errors
     ///
