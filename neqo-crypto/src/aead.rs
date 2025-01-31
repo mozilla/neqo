@@ -128,7 +128,12 @@ impl RealAead {
 
     /// Encrypt `data` consisting of `aad` and plaintext `data` in place.
     ///
-    /// The space provided in `data` needs to allow `Aead::expansion` more bytes to be appended.
+    /// The last `Aead::expansion` of `data` is overwritten by the AEAD tag by this function.
+    /// Therefore, a buffer should be provided that is that much larger than the plaintext.
+    ///
+    /// # Panics
+    ///
+    /// If `data` is shorter than `<self as Aead>::expansion()`.
     ///
     /// # Errors
     ///
