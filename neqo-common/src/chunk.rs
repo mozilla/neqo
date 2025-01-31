@@ -42,7 +42,7 @@ impl Chunk<'_> {
         )
     }
 
-    pub const fn limit_to(&mut self, limit: usize) {
+    pub fn limit_to(&mut self, limit: usize) {
         let (left, _) = self.data.split_at(limit);
         self.data = left;
     }
