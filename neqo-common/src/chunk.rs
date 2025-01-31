@@ -48,12 +48,6 @@ impl Chunk<'_> {
     }
 }
 
-impl<'a> From<Chunk<'a>> for (u64, usize) {
-    fn from(val: Chunk<'a>) -> Self {
-        (val.offset, val.data.len())
-    }
-}
-
 impl<'a> From<(u64, &'a [u8])> for Chunk<'a> {
     fn from(value: (u64, &'a [u8])) -> Self {
         Chunk {
