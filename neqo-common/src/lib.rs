@@ -6,6 +6,7 @@
 
 #![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
 
+pub mod chunk;
 mod codec;
 mod datagram;
 pub mod event;

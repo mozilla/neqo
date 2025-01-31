@@ -16,7 +16,10 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
+use neqo_common::{
+    chunk::{Chunk, ChunkRange},
+    hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role,
+};
 use neqo_crypto::{
     hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Epoch, Error as CryptoError, HandshakeState,
     PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker,
@@ -1475,6 +1478,7 @@ impl CryptoStreams {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn write_frame(
         &mut self,
         space: PacketNumberSpace,
@@ -1484,38 +1488,37 @@ impl CryptoStreams {
         stats: &mut FrameStats,
     ) {
         fn write_chunk(
-            offset: u64,
-            data: &[u8],
+            chunk: &Chunk,
             builder: &mut PacketBuilder,
-        ) -> Option<(u64, usize)> {
-            let mut header_len = 1 + Encoder::varint_len(offset) + 1;
+        ) -> (Option<ChunkRange>, Option<ChunkRange>) {
+            let mut header_len = 1 + Encoder::varint_len(chunk.offset()) + 1;
 
             // Don't bother if there isn't room for the header and some data.
             if builder.remaining() < header_len + 1 {
-                return None;
+                return (None, Some(chunk.into()));
             }
             // Calculate length of data based on the minimum of:
             // - available data
             // - remaining space, less the header, which counts only one byte for the length at
             //   first to avoid underestimating length
-            let length = min(data.len(), builder.remaining() - header_len);
+            let length = min(chunk.len(), builder.remaining() - header_len);
             header_len += Encoder::varint_len(u64::try_from(length).unwrap()) - 1;
-            let length = min(data.len(), builder.remaining() - header_len);
+            let length = min(chunk.len(), builder.remaining() - header_len);
 
             builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
-            builder.encode_varint(offset);
-            builder.encode_vvec(&data[..length]);
-            Some((offset, length))
+            builder.encode_varint(chunk.offset());
+            builder.encode_vvec(&chunk.data()[..length]);
+            (Some(ChunkRange::new(chunk.offset(), length)), None)
         }
 
         fn mark_as_sent(
             cs: &mut CryptoStream,
             space: PacketNumberSpace,
             tokens: &mut Vec<RecoveryToken>,
-            chunk: (u64, usize),
+            chunk: ChunkRange,
             stats: &mut FrameStats,
         ) {
-            let (offset, len) = chunk;
+            let (offset, len) = chunk.into();
             cs.tx.mark_as_sent(offset, len);
             qdebug!("CRYPTO for {space} offset={offset}, len={len}");
             tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
@@ -1526,50 +1529,67 @@ impl CryptoStreams {
             stats.crypto += 1;
         }
 
+        fn limit_chunks<'a>(
+            mut left: Chunk<'a>,
+            mut right: Chunk<'a>,
+            limit: usize,
+        ) -> (Chunk<'a>, Chunk<'a>) {
+            if left.len() + right.len() <= limit {
+                // Nothing to do.
+            } else if left.len() <= limit {
+                // `left` is short enough to fit into this packet entirely. So send the *end* of
+                // `right`, so that the second half of the SNI is in another packet.
+                (_, right) = right.split_at(right.len() + left.len() - limit);
+            } else if right.len() <= limit {
+                left.limit_to(limit - right.len());
+            } else {
+                left.limit_to(limit / 2);
+                right.limit_to(limit / 2);
+            }
+            (left, right)
+        }
+
         let cs = self.get_mut(space).unwrap();
-        // Sending fresh data will always fill a packet. However, when there are
-        // lost packets, the outstanding CRYPTO chunks might not be contiguous
-        // and packet-filling. So we need to loop.
-        while let Some((offset, data)) = cs.tx.next_bytes() {
-            let written = if sni_slicing {
-                if let Some(sni) = find_sni(data) {
-                    // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
+        if let Some(chunk) = cs.tx.next_bytes() {
+            let chunk: Chunk = chunk.into();
+            let packets_needed = chunk.len().div_ceil(builder.limit());
+            let limit = chunk.len() / packets_needed;
+            let (written, skipped) = if sni_slicing {
+                // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
+                if let Some(sni) = find_sni(chunk.data()) {
                     let mid = sni.start + (sni.end - sni.start) / 2;
-                    let (left, right) = data.split_at(mid);
-                    // Figure out how many `limit`-sized packets the entire data
-                    // would need. Then, set the per-packet limit so the data is
-                    // spread over that number of packets and all of them end up
-                    // zero-padded, which apparently helps with traversal of
-                    // some middleboxes. This is ignores CRYPTO frame headers so
-                    // undercounts a little, but that's fine.
-                    //
-                    // TODO: It would be slightly better if we managed to pad
-                    // the first Initial with the minimum amount of zeros to
-                    // help middlebox traversal, so the second packets had more
-                    // space for coalescing.
-                    let packets_needed = data.len().div_ceil(builder.limit());
-                    if packets_needed > 1 {
-                        builder.set_limit(data.len() / packets_needed);
-                    }
-                    [
-                        write_chunk(offset + mid as u64, right, builder),
-                        write_chunk(offset, left, builder),
-                    ]
+                    let (left, right) = chunk.split_at(mid);
+                    let (left, right) = limit_chunks(left, right, limit);
+                    let (written_right, skipped_right) = write_chunk(&right, builder);
+                    let (written_left, skipped_left) = write_chunk(&left, builder);
+                    ((written_left, written_right), (skipped_left, skipped_right))
                 } else {
-                    // No SNI found, write the entire data.
-                    [write_chunk(offset, data, builder), None]
+                    // No SNI found.
+                    let (written, skipped) = write_chunk(&chunk, builder);
+                    ((written, None), (skipped, None))
                 }
             } else {
-                // Not at the start of the crypto stream, write the entire data.
-                [write_chunk(offset, data, builder), None]
+                // SNI slicing disabled.
+                let (written, skipped) = write_chunk(&chunk, builder);
+                ((written, None), (skipped, None))
             };
 
+            match skipped {
+                (None, None) => (),
+                (None, Some(chunk)) | (Some(chunk), None) => {
+                    cs.tx.mark_as_lost(chunk.offset(), chunk.len());
+                }
+                (Some(chunk1), Some(chunk2)) => {
+                    cs.tx.mark_as_lost(chunk1.offset(), chunk1.len());
+                    cs.tx.mark_as_lost(chunk2.offset(), chunk2.len());
+                }
+            }
             match written {
-                [None, None] => break,
-                [None, Some(chunk)] | [Some(chunk), None] => {
+                (None, None) => (),
+                (None, Some(chunk)) | (Some(chunk), None) => {
                     mark_as_sent(cs, space, tokens, chunk, stats);
                 }
-                [Some(chunk1), Some(chunk2)] => {
+                (Some(chunk1), Some(chunk2)) => {
                     mark_as_sent(cs, space, tokens, chunk1, stats);
                     mark_as_sent(cs, space, tokens, chunk2, stats);
                 }
