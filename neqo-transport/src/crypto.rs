@@ -1475,7 +1475,6 @@ impl CryptoStreams {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
     pub fn write_frame(
         &mut self,
         space: PacketNumberSpace,
