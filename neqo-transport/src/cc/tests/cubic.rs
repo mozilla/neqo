@@ -180,7 +180,7 @@ fn tcp_phase() {
     assert!(num_acks2 < expected_ack_tcp_increase2);
 
     // The time needed to increase cwnd by MAX_DATAGRAM_SIZE using the cubic equation will be
-    // calculates from: W_cubic(elapsed_time + t_to_increase) - W_cubic(elapsed_time) =
+    // calculated from: W_cubic(elapsed_time + t_to_increase) - W_cubic(elapsed_time) =
     // MAX_DATAGRAM_SIZE => CUBIC_C * (elapsed_time + t_to_increase)^3 * MAX_DATAGRAM_SIZE +
     // CWND_INITIAL - CUBIC_C * elapsed_time^3 * MAX_DATAGRAM_SIZE + CWND_INITIAL =
     // MAX_DATAGRAM_SIZE => t_to_increase = cbrt((1 + CUBIC_C * elapsed_time^3) / CUBIC_C) -

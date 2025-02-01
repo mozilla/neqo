@@ -292,7 +292,7 @@ impl RecvMessage {
                                 break self.set_state_to_close_pending(post_readable_event);
                             }
                         }
-                    };
+                    }
                 }
                 RecvMessageState::DecodingHeaders { header_block, fin } => {
                     if self
@@ -338,7 +338,7 @@ impl RecvMessage {
                     // WebTransportSession
                     break Ok(());
                 }
-            };
+            }
         }
     }
 

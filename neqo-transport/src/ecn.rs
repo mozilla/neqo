@@ -16,7 +16,7 @@ use crate::{
 };
 
 /// The number of packets to use for testing a path for ECN capability.
-pub const TEST_COUNT: usize = 10;
+pub(crate) const TEST_COUNT: usize = 10;
 
 /// The number of packets to use for testing a path for ECN capability when exchanging
 /// Initials during the handshake. This is a lower number than [`TEST_COUNT`] to avoid
@@ -97,12 +97,14 @@ impl DerefMut for Count {
 }
 
 impl Count {
+    #[must_use]
     pub const fn new(not_ect: u64, ect0: u64, ect1: u64, ce: u64) -> Self {
         // Yes, the enum array order is different from the argument order.
         Self(EnumMap::from_array([not_ect, ect1, ect0, ce]))
     }
 
     /// Whether any of the ECN counts are non-zero.
+    #[must_use]
     pub fn is_some(&self) -> bool {
         self[IpTosEcn::Ect0] > 0 || self[IpTosEcn::Ect1] > 0 || self[IpTosEcn::Ce] > 0
     }
@@ -158,7 +160,7 @@ pub enum ValidationOutcome {
 }
 
 #[derive(Debug, Default)]
-pub struct Info {
+pub(crate) struct Info {
     /// The current state of ECN validation on this path.
     state: ValidationState,
 
@@ -171,12 +173,12 @@ pub struct Info {
 
 impl Info {
     /// Set the baseline (= the ECN counts from the last ACK Frame).
-    pub fn set_baseline(&mut self, baseline: Count) {
+    pub(crate) fn set_baseline(&mut self, baseline: Count) {
         self.baseline = baseline;
     }
 
     /// Expose the current baseline.
-    pub const fn baseline(&self) -> Count {
+    pub(crate) const fn baseline(&self) -> Count {
         self.baseline
     }
 
@@ -184,7 +186,7 @@ impl Info {
     /// Exit ECN validation if the number of packets sent exceeds `TEST_COUNT`.
     /// We do not implement the part of the RFC that says to exit ECN validation if the time since
     /// the start of ECN validation exceeds 3 * PTO, since this seems to happen much too quickly.
-    pub fn on_packet_sent(&mut self, stats: &mut Stats) {
+    pub(crate) fn on_packet_sent(&mut self, stats: &mut Stats) {
         if let ValidationState::Testing { probes_sent, .. } = &mut self.state {
             *probes_sent += 1;
             qdebug!("ECN probing: sent {probes_sent} probes");
@@ -196,14 +198,14 @@ impl Info {
     }
 
     /// Disable ECN.
-    pub fn disable_ecn(&mut self, stats: &mut Stats, reason: ValidationError) {
+    pub(crate) fn disable_ecn(&mut self, stats: &mut Stats, reason: ValidationError) {
         self.state.set(ValidationState::Failed(reason), stats);
     }
 
     /// Process ECN counts from an ACK frame.
     ///
     /// Returns whether ECN counts contain new valid ECN CE marks.
-    pub fn on_packets_acked(
+    pub(crate) fn on_packets_acked(
         &mut self,
         acked_packets: &[SentPacket],
         ack_ecn: Option<Count>,
@@ -217,7 +219,7 @@ impl Info {
             && (self.baseline - prev_baseline)[IpTosEcn::Ce] > 0
     }
 
-    pub fn on_packets_lost(&mut self, lost_packets: &[SentPacket], stats: &mut Stats) {
+    pub(crate) fn on_packets_lost(&mut self, lost_packets: &[SentPacket], stats: &mut Stats) {
         if let ValidationState::Testing {
             probes_sent,
             initial_probes_lost: probes_lost,
@@ -239,7 +241,7 @@ impl Info {
     }
 
     /// After the ECN validation test has ended, check if the path is ECN capable.
-    pub fn validate_ack_ecn_and_update(
+    pub(crate) fn validate_ack_ecn_and_update(
         &mut self,
         acked_packets: &[SentPacket],
         ack_ecn: Option<Count>,
@@ -316,7 +318,7 @@ impl Info {
     }
 
     /// The ECN mark to use for packets sent on this path.
-    pub const fn ecn_mark(&self) -> IpTosEcn {
+    pub(crate) const fn ecn_mark(&self) -> IpTosEcn {
         match self.state {
             ValidationState::Testing { .. } | ValidationState::Capable => IpTosEcn::Ect0,
             ValidationState::Failed(_) | ValidationState::Unknown => IpTosEcn::NotEct,

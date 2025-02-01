@@ -43,7 +43,10 @@ const SAMPLE_SIZE: usize = 16;
 const SAMPLE_OFFSET: usize = 4;
 const MAX_PACKET_NUMBER_LEN: usize = 4;
 
+pub mod metadata;
 mod retry;
+
+pub use metadata::MetaData;
 
 pub type PacketNumber = u64;
 

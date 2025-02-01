@@ -1305,7 +1305,7 @@ mod tests {
                 assert_eq!(err, CloseReason::Application(expected.code()));
             }
             _ => panic!("Wrong state {:?}", client.state()),
-        };
+        }
     }
 
     /// Create a http3 client with default configuration.
@@ -3676,7 +3676,7 @@ mod tests {
                     panic!("We should not receive a DataGeadable event!");
                 }
                 _ => {}
-            };
+            }
         }
 
         // ok NOW send fin
@@ -3700,7 +3700,7 @@ mod tests {
                     assert!(fin);
                 }
                 _ => {}
-            };
+            }
         }
 
         // Stream should now be closed and gone
@@ -3752,7 +3752,7 @@ mod tests {
                     assert_eq!(Ok((0, true)), client.read_data(now(), stream_id, &mut buf));
                 }
                 _ => {}
-            };
+            }
         }
 
         // Stream should now be closed and gone
@@ -3801,7 +3801,7 @@ mod tests {
                     panic!("We should not receive a DataGeadable event!");
                 }
                 _ => {}
-            };
+            }
         }
 
         // ok NOW send fin
@@ -3825,7 +3825,7 @@ mod tests {
                     assert!(fin);
                 }
                 _ => {}
-            };
+            }
         }
 
         // Stream should now be closed and gone
@@ -3872,7 +3872,7 @@ mod tests {
                     assert!(!fin);
                 }
                 _ => {}
-            };
+            }
         }
 
         // ok NOW send fin

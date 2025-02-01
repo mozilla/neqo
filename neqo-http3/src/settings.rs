@@ -179,7 +179,7 @@ impl HSettings {
                 // other supported settings here
                 (Some(_), Some(_)) => {} // ignore unknown setting, it is fine.
                 _ => return Err(Error::NotEnoughData),
-            };
+            }
         }
         Ok(())
     }

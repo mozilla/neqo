@@ -726,13 +726,13 @@ impl Http3Connection {
                 match conn.stream_fairness(stream_id, true) {
                     Ok(()) | Err(neqo_transport::Error::InvalidStreamId) => (),
                     Err(e) => return Err(Error::from(e)),
-                };
+                }
                 qinfo!("[{self}] A new WebTransport stream {stream_id} for session {session_id}");
             }
             NewStreamType::Unknown => {
                 conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
             }
-        };
+        }
 
         match stream_type {
             NewStreamType::Control | NewStreamType::Decoder | NewStreamType::Encoder => {

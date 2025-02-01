@@ -83,13 +83,15 @@ pub struct ConnectionParameters {
     pacing: bool,
     /// Whether the connection performs PLPMTUD.
     pmtud: bool,
+    /// Whether the connection should use SNI slicing.
+    sni_slicing: bool,
 }
 
 impl Default for ConnectionParameters {
     fn default() -> Self {
         Self {
             versions: VersionConfig::default(),
-            cc_algorithm: CongestionControlAlgorithm::NewReno,
+            cc_algorithm: CongestionControlAlgorithm::Cubic,
             max_data: LOCAL_MAX_DATA,
             max_stream_data_bidi_remote: u64::try_from(RECV_BUFFER_SIZE)
                 .expect("usize fits in u64"),
@@ -108,6 +110,7 @@ impl Default for ConnectionParameters {
             disable_migration: false,
             pacing: true,
             pmtud: false,
+            sni_slicing: true,
         }
     }
 }
@@ -365,6 +368,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn pmtud(mut self, pmtud: bool) -> Self {
         self.pmtud = pmtud;
+        self
+    }
+
+    #[must_use]
+    pub const fn sni_slicing_enabled(&self) -> bool {
+        self.sni_slicing
+    }
+
+    #[must_use]
+    pub const fn sni_slicing(mut self, sni_slicing: bool) -> Self {
+        self.sni_slicing = sni_slicing;
         self
     }
 

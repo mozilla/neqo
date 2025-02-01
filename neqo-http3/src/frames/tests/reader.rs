@@ -264,7 +264,7 @@ fn test_reading_frame<T: FrameDecoder<T> + PartialEq + Debug>(
             assert!(fin);
             assert!(f.is_none());
         }
-    };
+    }
 }
 
 #[test]
