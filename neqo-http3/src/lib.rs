@@ -333,7 +333,7 @@ impl Error {
             _ => {
                 debug_assert!(false, "Unexpected error");
             }
-        };
+        }
         Self::TransportStreamDoesNotExist
     }
 

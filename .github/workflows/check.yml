@@ -109,7 +109,7 @@ jobs:
           RUST_LOG: warn
           BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
-      - uses: codecov/codecov-action@1e68e06f1dbfde0e4cefc87efeba9e4643565303 # v5.1.2
+      - uses: codecov/codecov-action@13ce06bfc6bbe3ecf90edbbf1bc32fe5978ca1d3 # v5.3.1
         with:
           files: codecov.json
           fail_ci_if_error: false
@@ -118,6 +118,14 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'nightly'
+
+      - uses: codecov/test-results-action@4e79e65778be1cecd5df25e14af1eafb6df80ea9 # v1.0.2
+        if: always()
+        with:
+          files: target/nextest/ci/junit.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
       - name: Save simulation seeds artifact
         if: always()
@@ -136,7 +144,5 @@ jobs:
 
   bench:
     needs: [check]
-    if: >
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_benchmarks) ||
-      (github.event_name != 'workflow_dispatch' && github.event_name != 'pull_request')
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks
     uses: ./.github/workflows/bench.yml
