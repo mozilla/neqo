@@ -16,10 +16,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{
-    chunk::{Chunk, ChunkRange},
-    hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role,
-};
+use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
 use neqo_crypto::{
     hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Epoch, Error as CryptoError, HandshakeState,
     PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker,
@@ -1488,37 +1485,38 @@ impl CryptoStreams {
         stats: &mut FrameStats,
     ) {
         fn write_chunk(
-            chunk: &Chunk,
+            offset: u64,
+            data: &[u8],
             builder: &mut PacketBuilder,
-        ) -> (Option<ChunkRange>, Option<ChunkRange>) {
-            let mut header_len = 1 + Encoder::varint_len(chunk.offset()) + 1;
+        ) -> Option<(u64, usize)> {
+            let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 
             // Don't bother if there isn't room for the header and some data.
             if builder.remaining() < header_len + 1 {
-                return (None, Some(chunk.into()));
+                return None;
             }
             // Calculate length of data based on the minimum of:
             // - available data
             // - remaining space, less the header, which counts only one byte for the length at
             //   first to avoid underestimating length
-            let length = min(chunk.len(), builder.remaining() - header_len);
+            let length = min(data.len(), builder.remaining() - header_len);
             header_len += Encoder::varint_len(u64::try_from(length).unwrap()) - 1;
-            let length = min(chunk.len(), builder.remaining() - header_len);
+            let length = min(data.len(), builder.remaining() - header_len);
 
             builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
-            builder.encode_varint(chunk.offset());
-            builder.encode_vvec(&chunk.data()[..length]);
-            (Some(ChunkRange::new(chunk.offset(), length)), None)
+            builder.encode_varint(offset);
+            builder.encode_vvec(&data[..length]);
+            Some((offset, length))
         }
 
         fn mark_as_sent(
             cs: &mut CryptoStream,
             space: PacketNumberSpace,
             tokens: &mut Vec<RecoveryToken>,
-            chunk: ChunkRange,
+            offset: u64,
+            len: usize,
             stats: &mut FrameStats,
         ) {
-            let (offset, len) = chunk.into();
             cs.tx.mark_as_sent(offset, len);
             qdebug!("CRYPTO for {space} offset={offset}, len={len}");
             tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
@@ -1529,69 +1527,70 @@ impl CryptoStreams {
             stats.crypto += 1;
         }
 
-        fn limit_chunks<'a>(
-            mut left: Chunk<'a>,
-            mut right: Chunk<'a>,
+        #[allow(clippy::type_complexity)]
+        const fn limit_chunks<'a>(
+            left: (u64, &'a [u8]),
+            right: (u64, &'a [u8]),
             limit: usize,
-        ) -> (Chunk<'a>, Chunk<'a>) {
+        ) -> ((u64, &'a [u8]), (u64, &'a [u8])) {
+            let (left_offset, mut left) = left;
+            let (mut right_offset, mut right) = right;
             if left.len() + right.len() <= limit {
-                // Nothing to do.
+                // Nothing to do. Both chunks will fit into one packet, meaning the SNI isn't spread
+                // over multiple packets. But at least it's in two unordered CRYPTO frames.
             } else if left.len() <= limit {
-                // `left` is short enough to fit into this packet entirely. So send the *end* of
-                // `right`, so that the second half of the SNI is in another packet.
-                (_, right) = right.split_at(right.len() + left.len() - limit);
+                // `left` is short enough to fit into this packet. So send from the *end*
+                // of `right`, so that the second half of the SNI is in another packet.
+                let right_len = right.len() + left.len() - limit;
+                right_offset += right_len as u64;
+                (_, right) = right.split_at(right_len);
             } else if right.len() <= limit {
-                left.limit_to(limit - right.len());
+                // `right` is short enough to fit into this packet. So only send a part of `left`.
+                // The SNI begins at the end of `left`, so sent the beginnig of it in this packet.
+                (left, _) = left.split_at(limit - right.len());
             } else {
-                left.limit_to(limit / 2);
-                right.limit_to(limit / 2);
+                // Both chunks are too long to fit into one packet. Just send a part of each.
+                let half_limit = limit / 2;
+                (left, _) = left.split_at(half_limit);
+                (right, _) = right.split_at(half_limit);
             }
-            (left, right)
+            ((left_offset, left), (right_offset, right))
         }
 
         let cs = self.get_mut(space).unwrap();
-        if let Some(chunk) = cs.tx.next_bytes() {
-            let chunk: Chunk = chunk.into();
-            let packets_needed = chunk.len().div_ceil(builder.limit());
-            let limit = chunk.len() / packets_needed;
-            let (written, skipped) = if sni_slicing {
-                // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
-                if let Some(sni) = find_sni(chunk.data()) {
+        if let Some((offset, data)) = cs.tx.next_bytes() {
+            let written = if sni_slicing {
+                if let Some(sni) = find_sni(data) {
+                    // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
                     let mid = sni.start + (sni.end - sni.start) / 2;
-                    let (left, right) = chunk.split_at(mid);
-                    let (left, right) = limit_chunks(left, right, limit);
-                    let (written_right, skipped_right) = write_chunk(&right, builder);
-                    let (written_left, skipped_left) = write_chunk(&left, builder);
-                    ((written_left, written_right), (skipped_left, skipped_right))
+                    let (left, right) = data.split_at(mid);
+
+                    // Truncate the chunks so we can fit them into roughly evenly-filled packets.
+                    let packets_needed = data.len().div_ceil(builder.limit());
+                    let limit = data.len() / packets_needed;
+                    let ((left_offset, left), (right_offset, right)) =
+                        limit_chunks((offset, left), (offset + mid as u64, right), limit);
+                    (
+                        write_chunk(right_offset, right, builder),
+                        write_chunk(left_offset, left, builder),
+                    )
                 } else {
-                    // No SNI found.
-                    let (written, skipped) = write_chunk(&chunk, builder);
-                    ((written, None), (skipped, None))
+                    // No SNI found, write the entire data.
+                    (write_chunk(offset, data, builder), None)
                 }
             } else {
-                // SNI slicing disabled.
-                let (written, skipped) = write_chunk(&chunk, builder);
-                ((written, None), (skipped, None))
+                // SNI slicing disabled, write the entire data.
+                (write_chunk(offset, data, builder), None)
             };
 
-            match skipped {
-                (None, None) => (),
-                (None, Some(chunk)) | (Some(chunk), None) => {
-                    cs.tx.mark_as_lost(chunk.offset(), chunk.len());
-                }
-                (Some(chunk1), Some(chunk2)) => {
-                    cs.tx.mark_as_lost(chunk1.offset(), chunk1.len());
-                    cs.tx.mark_as_lost(chunk2.offset(), chunk2.len());
-                }
-            }
             match written {
                 (None, None) => (),
-                (None, Some(chunk)) | (Some(chunk), None) => {
-                    mark_as_sent(cs, space, tokens, chunk, stats);
+                (None, Some((offset, len))) | (Some((offset, len)), None) => {
+                    mark_as_sent(cs, space, tokens, offset, len, stats);
                 }
-                (Some(chunk1), Some(chunk2)) => {
-                    mark_as_sent(cs, space, tokens, chunk1, stats);
-                    mark_as_sent(cs, space, tokens, chunk2, stats);
+                (Some((offset1, len1)), Some((offset2, len2))) => {
+                    mark_as_sent(cs, space, tokens, offset1, len1, stats);
+                    mark_as_sent(cs, space, tokens, offset2, len2, stats);
                 }
             }
         }
