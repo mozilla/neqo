@@ -2497,8 +2497,11 @@ impl Connection {
                 self.discard_keys(PacketNumberSpace::Handshake, now);
             }
 
-            // If the client has more Initial CRYPTO data queued up, do not coalesce.
-            // FIXME: This is a temporary hack to avoid coalescing 0-RTT packets too early.
+            // If the client has more CRYPTO data queued up, do not coalesce if
+            // this packet is an Initial. Without this, 0-RTT packets could be
+            // coalesced with the first Initial, which some server (e.g., ours)
+            // do not support, because may do not save packets they can't
+            // decrypt yet.
             if self.role == Role::Client
                 && *space == PacketNumberSpace::Initial
                 && !self.crypto.streams.is_empty(*space)

@@ -1545,7 +1545,7 @@ impl CryptoStreams {
                 (_, right) = right.split_at(right_len);
             } else if right.len() <= limit {
                 // `right` is short enough to fit into this packet. So only send a part of `left`.
-                // The SNI begins at the end of `left`, so sent the beginnig of it in this packet.
+                // The SNI begins at the end of `left`, so send the beginnig of it in this packet.
                 (left, _) = left.split_at(limit - right.len());
             } else {
                 // Both chunks are too long to fit into one packet. Just send a part of each.
