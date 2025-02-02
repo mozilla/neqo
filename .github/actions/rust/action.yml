@@ -38,16 +38,29 @@ runs:
       if: env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted'
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
+    # See https://corrode.dev/blog/tips-for-faster-ci-builds/
+    - name: Set up build environment
+      shell: bash
+      run: |
+        {
+          echo "CARGO_PROFILE_RELEASE_LTO=true"
+          echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
+        } >> "$GITHUB_ENV"
+
     - name: Enable sscache
       if: runner.environment != 'github-hosted'
       shell: bash
       run: |
         echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
         echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
         if [ "${{ runner.environment }}" == "github-hosted" ]; then
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
+
+    - name: Enable Rust cache
+      uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+      with:
+        cache-bin: ${{ runner.environment == 'github-hosted' }}
 
     - name: Set up MSVC (Windows)
       if: runner.os == 'Windows'
@@ -74,4 +87,5 @@ runs:
       if: inputs.tools != ''
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
-      run: cargo quickinstall $(echo ${{ inputs.tools }} | tr -d ",")
+      # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
+      run: cargo quickinstall --force $(echo ${{ inputs.tools }} | tr -d ",")
