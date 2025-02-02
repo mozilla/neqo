@@ -53,6 +53,7 @@ pub struct FrameStats {
     pub new_token: usize,
 
     pub ack_frequency: usize,
+    pub immediate_ack: usize,
     pub datagram: usize,
 }
 
@@ -92,7 +93,11 @@ impl Debug for FrameStats {
             self.path_challenge,
             self.path_response,
         )?;
-        writeln!(f, "    ack_frequency {}", self.ack_frequency)
+        writeln!(
+            f,
+            "    ack_frequency {}, immediate_ack {}",
+            self.ack_frequency, self.immediate_ack
+        )
     }
 }
 

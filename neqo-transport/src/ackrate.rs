@@ -4,7 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// Management of the peer's ack rate.
+//! Local node (i.e. data sender and ack receiver) managing the remote node's
+//! (i.e.  data receiver and ack sender) ack rate.
+//!
+//! Implementation of QUIC Acknowledgment Frequency draft 10.
+//!
+//! <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html>
+//!
+//! See [`crate::tracking::RecvdPackets`] for data receiver side.
 
 use std::{cmp::max, time::Duration};
 
@@ -47,7 +54,14 @@ impl AckRate {
             seqno,
             u64::try_from(self.packets + 1).unwrap(),
             u64::try_from(self.delay.as_micros()).unwrap(),
-            0,
+            // > If no ACK_FREQUENCY frames have been received, the data receiver
+            // > immediately acknowledges any subsequent packets that are received
+            // > out-of-order, as specified in Section 13.2 of [QUIC-TRANSPORT],
+            // > corresponding to a default value of 1. A value of 0 indicates
+            // > out-of-order packets do not elicit an immediate ACK.
+            //
+            // <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-4>
+            1,
         ])
     }
 
@@ -134,6 +148,7 @@ impl FlexibleAckRate {
     }
 }
 
+// TODO: Rename to PeerAckFrequency
 #[derive(Debug, Clone)]
 pub enum PeerAckDelay {
     Fixed(Duration),

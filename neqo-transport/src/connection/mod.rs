@@ -2886,6 +2886,13 @@ impl Connection {
                 self.stats.borrow_mut().frame_rx.ping += 1;
                 self.crypto.resend_unacked(space);
                 // Send an ACK immediately if we might not otherwise do so.
+                //
+                // TODO: Ackording to ack frequency draft, only
+                // IMMEDIATE_ACK_FRAME will send immediate ack, not ping frame.
+                // Maybe do so anyways? Or only if peer did not advertise
+                // support via transport parameter?
+                //
+                // <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-5>
                 self.acks.immediate_ack(space, now);
             }
             Frame::Ack {
@@ -3019,17 +3026,31 @@ impl Connection {
             }
             Frame::AckFrequency {
                 seqno,
-                tolerance,
+                ack_eliciting_threshold: tolerance,
                 delay,
-                ignore_order,
+                reordering_threshold,
             } => {
                 self.stats.borrow_mut().frame_rx.ack_frequency += 1;
+                // > The value of this field is in microseconds, unlike the
+                // > max_ack_delay transport parameter, which is in milliseconds.
+                //
+                // <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-4>
                 let delay = Duration::from_micros(delay);
                 if delay < GRANULARITY {
+                    // > A value smaller than the min_ack_delay advertised by
+                    // > the peer is also invalid. Receipt of an invalid value
+                    // > MUST be treated as a connection error of type
+                    // > PROTOCOL_VIOLATION.
+                    //
+                    // <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-4>
                     return Err(Error::ProtocolViolation);
                 }
                 self.acks
-                    .ack_freq(seqno, tolerance - 1, delay, ignore_order);
+                    .ack_freq(seqno, tolerance - 1, delay, reordering_threshold);
+            }
+            Frame::ImmediateAck {} => {
+                self.stats.borrow_mut().frame_rx.immediate_ack += 1;
+                self.acks.immediate_ack(space, now);
             }
             Frame::Datagram { data, .. } => {
                 self.stats.borrow_mut().frame_rx.datagram += 1;

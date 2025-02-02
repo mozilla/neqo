@@ -47,7 +47,17 @@ pub const INITIAL_SOURCE_CONNECTION_ID: TransportParameterId = 0x0f;
 pub const RETRY_SOURCE_CONNECTION_ID: TransportParameterId = 0x10;
 pub const VERSION_INFORMATION: TransportParameterId = 0x11;
 pub const GREASE_QUIC_BIT: TransportParameterId = 0x2ab2;
-pub const MIN_ACK_DELAY: TransportParameterId = 0xff02_de1a;
+/// QUIC Ack Frequency draft 10
+///
+/// > A variable-length integer representing the minimum amount of time, in
+/// > microseconds, that the endpoint sending this value is willing to delay an
+/// > acknowledgment. This limit could be based on the data receiver's clock or
+/// > timer granularity. min_ack_delay is used by the data sender to avoid
+/// > requesting too small a value in the Requested Max Ack Delay field of the
+/// > ACK_FREQUENCY frame.
+///
+/// <https://www.ietf.org/archive/id/draft-ietf-quic-ack-frequency-10.html#section-3>
+pub const MIN_ACK_DELAY: TransportParameterId = 0xff04_de1b;
 pub const MAX_DATAGRAM_FRAME_SIZE: TransportParameterId = 0x0020;
 
 #[derive(Clone, Debug)]
