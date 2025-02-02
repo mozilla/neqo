@@ -45,9 +45,6 @@ runs:
         {
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
-          # Create different cache entries for different installed tool combinations.
-          # A "RUST"-prefixed environment variable will be picked up by Swatinem/rust-cache automatically.
-          echo "RUST_TOOLS='${{ inputs.tools }}'"
         } >> "$GITHUB_ENV"
 
     - name: Enable sscache
@@ -90,4 +87,5 @@ runs:
       if: inputs.tools != ''
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
-      run: cargo quickinstall $(echo ${{ inputs.tools }} | tr -d ",")
+      # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
+      run: cargo quickinstall --force $(echo ${{ inputs.tools }} | tr -d ",")
