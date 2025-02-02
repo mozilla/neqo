@@ -2628,9 +2628,12 @@ impl Connection {
 
             let reset_token = remote
                 .get_bytes(tparams::STATELESS_RESET_TOKEN)
-                .map_or_else(ConnectionIdEntry::random_srt, |token| {
-                    <[u8; 16]>::try_from(token).unwrap_or_else(|_| ConnectionIdEntry::random_srt())
-                });
+                .map_or_else(
+                    || Ok(ConnectionIdEntry::random_srt()),
+                    |token| {
+                        <[u8; 16]>::try_from(token).map_or(Err(Error::TransportParameterError), Ok)
+                    },
+                )?;
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
 
@@ -3084,11 +3087,12 @@ impl Connection {
         self.tps.borrow().remote.as_ref().map_or_else(
             || Ok(Duration::default()),
             |r| {
+                // let exponent = u32::try_from(r.get_integer(tparams::ACK_DELAY_EXPONENT))
+                // .expect("already checked in TransportParams::decode");
+                // Ok(Duration::from_micros(v.checked_shl(exponent).unwrap_or(u64::MAX))
                 let exponent = u32::try_from(r.get_integer(tparams::ACK_DELAY_EXPONENT))?;
-                if exponent > 20 {
-                    // ACK_DELAY_EXPONENT > 20 is invalid per RFC9000
-                    return Err(Error::TransportParameterError);
-                }
+                // ACK_DELAY_EXPONENT > 20 is invalid per RFC9000. We already checked that in
+                // TransportParameter::decode.
                 let corrected = if v.leading_zeros() >= exponent {
                     v << exponent
                 } else {

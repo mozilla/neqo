@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![cfg(not(feature = "disable-encryption"))]
+#![cfg(test)]
 
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
@@ -22,7 +23,6 @@ fn se_create() {
 const PLAINTEXT: &[u8] = b"PLAINTEXT";
 const AAD: &[u8] = b"AAD";
 
-#[cfg(test)]
 fn sealed() -> (SelfEncrypt, Vec<u8>) {
     init().unwrap();
     let se = SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256).unwrap();

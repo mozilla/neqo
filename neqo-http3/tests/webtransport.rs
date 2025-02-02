@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg(test)]
+
 use std::{cell::RefCell, rc::Rc};
 
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
@@ -82,7 +84,6 @@ fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
     }
 }
 
-#[cfg(test)]
 fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebTransportRequest {
     let wt_session_id = client
         .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
@@ -135,7 +136,6 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
     wt_server_session
 }
 
-#[cfg(test)]
 fn send_data_client(
     client: &mut Http3Client,
     server: &mut Http3Server,
@@ -146,7 +146,6 @@ fn send_data_client(
     exchange_packets(client, server);
 }
 
-#[cfg(test)]
 fn send_data_server(
     client: &mut Http3Client,
     server: &mut Http3Server,
@@ -157,7 +156,6 @@ fn send_data_server(
     exchange_packets(client, server);
 }
 
-#[cfg(test)]
 fn receive_data_client(
     client: &mut Http3Client,
     expected_stream_id: StreamId,
@@ -189,7 +187,6 @@ fn receive_data_client(
     assert_eq!(new_stream, new_stream_received);
 }
 
-#[cfg(test)]
 fn receive_data_server(
     client: &mut Http3Client,
     server: &mut Http3Server,

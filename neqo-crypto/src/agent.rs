@@ -164,7 +164,7 @@ impl SecretAgentPreInfo {
     ///
     /// If `usize` is less than 32 bits and the value is too large.
     pub fn max_early_data(&self) -> Res<usize> {
-        usize::try_from(self.info.maxEarlyDataSize).map_err(|_| Error::InternalError)
+        Ok(usize::try_from(self.info.maxEarlyDataSize)?)
     }
 
     /// Was ECH accepted.

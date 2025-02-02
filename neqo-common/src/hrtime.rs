@@ -407,7 +407,6 @@ mod test {
 
     /// Validate the delays twice.  Sometimes the first run can stall.
     /// Reliability in CI is more important than reliable timers.
-    #[cfg(test)]
     fn check_delays(max_lag: Duration) {
         if validate_delays(max_lag).is_err() {
             sleep(Duration::from_millis(50));
