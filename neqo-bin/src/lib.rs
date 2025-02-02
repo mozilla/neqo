@@ -168,8 +168,8 @@ impl QuicParameters {
         assert_eq!(
             opt.is_some(),
             addr.is_some(),
-            "unable to resolve '{}' to an {v} address",
-            opt.as_ref().unwrap(),
+            "unable to resolve '{:?}' to an {v} address",
+            opt.as_ref()?,
         );
         addr
     }

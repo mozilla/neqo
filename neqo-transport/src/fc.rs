@@ -77,7 +77,7 @@ where
 
     /// Consume flow control.
     pub fn consume(&mut self, count: usize) {
-        let amt = u64::try_from(count).unwrap();
+        let amt = u64::try_from(count).expect("usize fits into u64");
         debug_assert!(self.used + amt <= self.limit);
         self.used += amt;
     }

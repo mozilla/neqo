@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg(test)]
+
 use std::{cell::RefCell, rc::Rc};
 
 use neqo_common::{event::Provider as _, header::HeadersExt as _};

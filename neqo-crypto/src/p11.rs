@@ -4,10 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(dead_code)]
-#![allow(non_upper_case_globals)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
+#![allow(
+    dead_code,
+    non_upper_case_globals,
+    non_camel_case_types,
+    non_snake_case,
+    clippy::unwrap_used
+)]
 
 use std::{
     cell::RefCell,
@@ -247,25 +250,25 @@ impl Item {
     /// Creating this object is technically safe, but using it is extremely dangerous.
     /// Minimally, it can only be passed as a `const SECItem*` argument to functions,
     /// or those that treat their argument as `const`.
-    pub fn wrap(buf: &[u8]) -> SECItem {
-        SECItem {
+    pub fn wrap(buf: &[u8]) -> Res<SECItem> {
+        Ok(SECItem {
             type_: SECItemType::siBuffer,
             data: buf.as_ptr().cast_mut(),
-            len: c_uint::try_from(buf.len()).unwrap(),
-        }
+            len: c_uint::try_from(buf.len())?,
+        })
     }
 
     /// Create a wrapper for a struct.
     /// Creating this object is technically safe, but using it is extremely dangerous.
     /// Minimally, it can only be passed as a `const SECItem*` argument to functions,
     /// or those that treat their argument as `const`.
-    pub fn wrap_struct<T>(v: &T) -> SECItem {
+    pub fn wrap_struct<T>(v: &T) -> Res<SECItem> {
         let data: *const T = v;
-        SECItem {
+        Ok(SECItem {
             type_: SECItemType::siBuffer,
             data: data.cast_mut().cast(),
-            len: c_uint::try_from(std::mem::size_of::<T>()).unwrap(),
-        }
+            len: c_uint::try_from(std::mem::size_of::<T>())?,
+        })
     }
 
     /// Make an empty `SECItem` for passing as a mutable `SECItem*` argument.
@@ -348,7 +351,7 @@ pub fn randomize<B: AsMut<[u8]>>(mut buf: B) -> B {
 #[cfg(not(feature = "disable-random"))]
 pub fn randomize<B: AsMut<[u8]>>(mut buf: B) -> B {
     let m_buf = buf.as_mut();
-    let len = std::os::raw::c_int::try_from(m_buf.len()).unwrap();
+    let len = std::os::raw::c_int::try_from(m_buf.len()).expect("usize fits into c_int");
     secstatus_to_res(unsafe { PK11_GenerateRandom(m_buf.as_mut_ptr(), len) }).unwrap();
     buf
 }
