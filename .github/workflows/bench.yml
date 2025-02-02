@@ -68,7 +68,7 @@ jobs:
       - name: Build neqo
         run: |
           cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
-          cargo "+$TOOLCHAIN" build --release --bin neqo-client --bin neqo-server
+          cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
         run: |
