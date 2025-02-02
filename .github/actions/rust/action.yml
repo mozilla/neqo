@@ -43,9 +43,11 @@ runs:
       shell: bash
       run: |
         {
-          echo "CARGO_INCREMENTAL=0"
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
+          # Create different cache entries for different installed tool combinations.
+          # A "RUST"-prefixed environment variable will be picked up by Swatinem/rust-cache automatically.
+          echo "RUST_TOOLS='${{ inputs.tools }}'"
         } >> "$GITHUB_ENV"
 
     - name: Enable sscache
