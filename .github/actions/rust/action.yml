@@ -43,7 +43,6 @@ runs:
       shell: bash
       run: |
         {
-          echo "CARGO_INCREMENTAL=0"
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
         } >> "$GITHUB_ENV"
@@ -88,4 +87,5 @@ runs:
       if: inputs.tools != ''
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
-      run: cargo quickinstall $(echo ${{ inputs.tools }} | tr -d ",")
+      # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
+      run: cargo quickinstall --force $(echo ${{ inputs.tools }} | tr -d ",")
