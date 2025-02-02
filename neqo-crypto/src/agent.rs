@@ -124,7 +124,11 @@ macro_rules! preinfo_arg {
         pub fn $v(&self) -> Option<$t> {
             match self.info.valuesSet & ssl::$m {
                 0 => None,
-                _ => Some(<$t>::try_from(self.info.$f).ok()?),
+                _ => Some(
+                    <$t>::try_from(self.info.$f)
+                        .inspect_err(|e| qdebug!("Invalid value in preinfo: {e:?}"))
+                        .ok()?,
+                ),
             }
         }
     };
