@@ -516,20 +516,19 @@ impl LossRecovery {
 
     /// Drop all 0rtt packets.
     pub fn drop_0rtt(&mut self, primary_path: &PathRef, now: Instant) -> Vec<SentPacket> {
-        if let Some(sp) = self.spaces.get_mut(PacketNumberSpace::ApplicationData) {
-            if sp.largest_acked.is_some() {
-                qwarn!("0-RTT packets already acknowledged, not dropping");
-                return Vec::new();
-            }
-            let mut dropped = sp.remove_ignored().collect::<Vec<_>>();
-            let mut path = primary_path.borrow_mut();
-            for p in &mut dropped {
-                path.discard_packet(p, now, &mut self.stats.borrow_mut());
-            }
-            dropped
-        } else {
-            Vec::new()
+        let Some(sp) = self.spaces.get_mut(PacketNumberSpace::ApplicationData) else {
+            return Vec::new();
+        };
+        if sp.largest_acked.is_some() {
+            qwarn!("0-RTT packets already acknowledged, not dropping");
+            return Vec::new();
         }
+        let mut dropped = sp.remove_ignored().collect::<Vec<_>>();
+        let mut path = primary_path.borrow_mut();
+        for p in &mut dropped {
+            path.discard_packet(p, now, &mut self.stats.borrow_mut());
+        }
+        dropped
     }
 
     pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: SentPacket, now: Instant) {

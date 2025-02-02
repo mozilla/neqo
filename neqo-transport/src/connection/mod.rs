@@ -3087,9 +3087,6 @@ impl Connection {
         self.tps.borrow().remote.as_ref().map_or_else(
             || Ok(Duration::default()),
             |r| {
-                // let exponent = u32::try_from(r.get_integer(tparams::ACK_DELAY_EXPONENT))
-                // .expect("already checked in TransportParams::decode");
-                // Ok(Duration::from_micros(v.checked_shl(exponent).unwrap_or(u64::MAX))
                 let exponent = u32::try_from(r.get_integer(tparams::ACK_DELAY_EXPONENT))?;
                 // ACK_DELAY_EXPONENT > 20 is invalid per RFC9000. We already checked that in
                 // TransportParameter::decode.
