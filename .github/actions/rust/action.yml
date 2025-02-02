@@ -59,7 +59,7 @@ runs:
         fi
 
     - name: Enable Rust cache
-      uses: Swatinem/rust-cache@@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+      uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
       with:
         cache-bin: ${{ runner.environment == 'github-hosted' }}
 
