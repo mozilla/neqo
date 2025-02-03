@@ -49,7 +49,7 @@ jobs:
         run: |
           echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
           # Append to RUSTFLAGS, which may already be set by the Rust action.
-          echo "RUSTFLAGS=$RUSTFLAGS -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes" >> "$GITHUB_ENV"
+          echo "RUSTFLAGS=-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS" >> "$GITHUB_ENV"
 
       - name: Install Rust
         uses: ./.github/actions/rust
