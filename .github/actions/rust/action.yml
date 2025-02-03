@@ -47,6 +47,15 @@ runs:
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
         } >> "$GITHUB_ENV"
 
+    - name: Install build dependencies (Linux)
+      shell: bash
+      if: runner.os == 'Linux'
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo apt-get install -y --no-install-recommends mold
+        echo "RUSTFLAGS='$RUSTFLAGS -C linker=clang -C link-arg=-fuse-ld=mold'" >> "$GITHUB_ENV"
+
     - name: Enable sscache
       if: runner.environment != 'github-hosted'
       shell: bash
