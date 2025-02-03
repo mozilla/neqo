@@ -965,6 +965,7 @@ impl Deref for DecryptedPacket<'_> {
 }
 
 #[cfg(all(test, not(feature = "disable-encryption")))]
+#[cfg(test)]
 mod tests {
     use neqo_common::Encoder;
     use test_fixture::{fixture_init, now};
