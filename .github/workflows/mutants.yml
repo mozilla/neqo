@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   mutants:
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -41,7 +41,7 @@ jobs:
         id: mutants
         env:
           BASE_REF: ${{ github.base_ref }}
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' }}
         run: |
           git diff "origin/$BASE_REF".. > pr.diff
           set -o pipefail
@@ -49,7 +49,7 @@ jobs:
           echo 'title=Incremental Mutants' >> "$GITHUB_OUTPUT"
 
       - name: Find mutants
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
           set -o pipefail
           cargo mutants --test-tool=nextest -vV --in-place | tee results.txt || true

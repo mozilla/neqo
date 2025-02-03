@@ -100,7 +100,7 @@ runs:
       shell: bash
 
     - uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
-      if: always()
+      if: ${{ always() }}
       id: upload-logs
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
@@ -108,7 +108,7 @@ runs:
         compression-level: 9
 
     - name: Store log URL
-      if: always()
+      if: ${{ always() }}
       env:
         ARTIFACT_URL: ${{ steps.upload-logs.outputs.artifact-url }}
       run: |
@@ -118,7 +118,7 @@ runs:
       shell: bash
 
     - uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
-      if: always()
+      if: ${{ always() }}
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
         path: |

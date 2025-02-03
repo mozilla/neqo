@@ -231,7 +231,7 @@ jobs:
           sudo /root/bin/unprep.sh
           # In case the previous test failed:
           sudo ip link set dev lo mtu 65536
-        if: success() || failure() || cancelled()
+        if: ${{ success() || failure() || cancelled() }}
 
       - name: Post-process perf data
         run: |
@@ -275,17 +275,17 @@ jobs:
           cat results.md > "$GITHUB_STEP_SUMMARY"
 
       - name: Remember main-branch push URL
-        if: github.ref == 'refs/heads/main'
+        if: ${{ github.ref == 'refs/heads/main' }}
         run: echo "${{ github.sha }}" > target/criterion/baseline-sha.txt
 
       - name: Store history
-        if: github.ref == 'refs/heads/main'
+        if: ${{ github.ref == 'refs/heads/main' }}
         run: |
           mkdir -p target/criterion-history
           cp -r target/criterion "target/criterion-history/$(date +%s)-${{ github.sha }}"
 
       - name: Cache main-branch results
-        if: github.ref == 'refs/heads/main'
+        if: ${{ github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
           path: ./target/criterion

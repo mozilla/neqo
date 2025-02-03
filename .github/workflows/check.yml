@@ -123,10 +123,10 @@ jobs:
           verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        if: matrix.type == 'debug' && matrix.rust-toolchain == 'nightly'
+        if: ${{ matrix.type == 'debug' && matrix.rust-toolchain == 'nightly' }}
 
       - uses: codecov/test-results-action@4e79e65778be1cecd5df25e14af1eafb6df80ea9 # v1.0.2
-        if: always()
+        if: ${{ always() }}
         with:
           files: target/nextest/ci/junit.xml
           fail_ci_if_error: false
@@ -134,7 +134,7 @@ jobs:
           verbose: true
 
       - name: Save simulation seeds artifact
-        if: always()
+        if: ${{ always() }}
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
@@ -152,5 +152,5 @@ jobs:
 
   bench:
     needs: [check]
-    if: github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks }}
     uses: ./.github/workflows/bench.yml

@@ -20,7 +20,7 @@ env:
 jobs:
   firefox:
     name: Build Firefox
-    # if: github.event.pull_request.draft == false
+    # if: ${{ github.event.pull_request.draft == false }}
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +41,7 @@ jobs:
           persist-credentials: false
 
       - name: Maximize build space
-        if: runner.os == 'Linux'
+        if: ${{ runner.os == 'Linux' }}
         run: |
           sudo rm -rf /usr/local/lib/android || true
           sudo rm -rf /usr/share/dotnet || true
@@ -64,7 +64,7 @@ jobs:
           persist-credentials: false
 
       - name: Install deps (Windows)
-        if: runner.os == 'Windows'
+        if: ${{ runner.os == 'Windows' }}
         run: choco install -y mozillabuild --version 4.0.2
 
       - name: Install Rust
@@ -163,7 +163,7 @@ jobs:
 
   comment:
     name: Comment on PR
-    # if: github.event.pull_request.draft == false
+    # if: ${{ github.event.pull_request.draft == false }}
     needs: firefox
     runs-on: ubuntu-latest
     steps:

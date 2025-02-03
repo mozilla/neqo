@@ -35,7 +35,7 @@ runs:
       #
       # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
       # is too small for this to be effective there.
-      if: env.SCCACHE_ENABLED != '1' && env.RUNNER_ENVIRONMENT != 'github-hosted'
+      if: ${{ env.SCCACHE_ENABLED != '1' && env.RUNNER_ENVIRONMENT != 'github-hosted' }}
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
     - name: Install build dependencies (Linux)
