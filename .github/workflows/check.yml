@@ -45,7 +45,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # TODO: Switch to ubuntu-latest-arm when available as a tag.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
         rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
         type: [debug]
         include:
