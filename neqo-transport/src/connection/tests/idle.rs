@@ -683,7 +683,7 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     //  - Idle time out  will trigger (at the timeout + IDLE_TIMEOUT)
     const IDLE_TIMEOUT: Duration = Duration::from_millis(6000);
 
-    // This tests makes too many assumptions about single-packet flights and PTOs for multi-packet
+    // This test makes too many assumptions about single-packet flights and PTOs for multi-packet
     // MLKEM flights to work.
     let mut client = new_client(
         ConnectionParameters::default()

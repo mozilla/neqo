@@ -2502,7 +2502,7 @@ impl Connection {
             // If the client has more CRYPTO data queued up, do not coalesce if
             // this packet is an Initial. Without this, 0-RTT packets could be
             // coalesced with the first Initial, which some server (e.g., ours)
-            // do not support, because may do not save packets they can't
+            // do not support, because they may not save packets they can't
             // decrypt yet.
             if self.role == Role::Client
                 && *space == PacketNumberSpace::Initial
