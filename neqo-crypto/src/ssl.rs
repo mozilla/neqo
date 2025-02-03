@@ -4,13 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    dead_code,
-    non_upper_case_globals,
-    non_snake_case,
-    clippy::too_many_lines,
-    clippy::cognitive_complexity
-)]
+#![allow(dead_code, non_upper_case_globals, non_snake_case)]
+#![allow(clippy::too_many_lines, clippy::cognitive_complexity)] // For included code
 
 use std::os::raw::{c_uint, c_void};
 

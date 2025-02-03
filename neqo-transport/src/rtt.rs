@@ -41,7 +41,6 @@ pub enum RttSource {
 }
 
 #[derive(Debug)]
-#[allow(clippy::module_name_repetitions)]
 pub struct RttEstimate {
     first_sample_time: Option<Instant>,
     latest_rtt: Duration,

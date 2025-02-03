@@ -333,20 +333,23 @@ pub fn metrics_updated(qlog: &NeqoQlog, updated_metrics: &[QlogMetric], now: Ins
             let mut pacing_rate: Option<u64> = None;
 
             for metric in updated_metrics {
-                #[allow(clippy::cast_precision_loss)] // Nought to do here.
                 match metric {
                     QlogMetric::MinRtt(v) => min_rtt = Some(v.as_secs_f32() * 1000.0),
                     QlogMetric::SmoothedRtt(v) => smoothed_rtt = Some(v.as_secs_f32() * 1000.0),
                     QlogMetric::LatestRtt(v) => latest_rtt = Some(v.as_secs_f32() * 1000.0),
                     QlogMetric::RttVariance(v) => rtt_variance = Some(v.as_secs_f32() * 1000.0),
-                    QlogMetric::PtoCount(v) => pto_count = Some(u16::try_from(*v).unwrap()),
+                    QlogMetric::PtoCount(v) => {
+                        pto_count = Some(u16::try_from(*v).expect("fits in u16"));
+                    }
                     QlogMetric::CongestionWindow(v) => {
-                        congestion_window = Some(u64::try_from(*v).unwrap());
+                        congestion_window = Some(u64::try_from(*v).expect("fits in u64"));
                     }
                     QlogMetric::BytesInFlight(v) => {
-                        bytes_in_flight = Some(u64::try_from(*v).unwrap());
+                        bytes_in_flight = Some(u64::try_from(*v).expect("fits in u64"));
                     }
-                    QlogMetric::SsThresh(v) => ssthresh = Some(u64::try_from(*v).unwrap()),
+                    QlogMetric::SsThresh(v) => {
+                        ssthresh = Some(u64::try_from(*v).expect("fits in u64"));
+                    }
                     QlogMetric::PacketsInFlight(v) => packets_in_flight = Some(*v),
                     QlogMetric::PacingRate(v) => pacing_rate = Some(*v),
                     _ => (),

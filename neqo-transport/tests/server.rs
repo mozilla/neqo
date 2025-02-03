@@ -742,6 +742,7 @@ fn closed() {
     assert_eq!(res, Output::None);
 }
 
+#[cfg(test)]
 fn can_create_streams(c: &mut Connection, t: StreamType, n: u64) {
     for _ in 0..n {
         c.stream_create(t).unwrap();

@@ -189,7 +189,6 @@ impl PacketBuilder {
     /// even if the token is empty.
     ///
     /// See `short()` for more on how to handle this in cases where there is no space.
-    #[allow(clippy::similar_names)]
     pub fn long(
         mut encoder: Encoder,
         pt: PacketType,
@@ -297,8 +296,12 @@ impl PacketBuilder {
     /// Cannot happen.
     pub fn pad(&mut self) -> bool {
         if self.padding && !self.is_long() {
-            self.encoder
-                .pad_to(self.limit, FRAME_TYPE_PADDING.try_into().unwrap());
+            self.encoder.pad_to(
+                self.limit,
+                FRAME_TYPE_PADDING
+                    .try_into()
+                    .expect("FRAME_TYPE_PADDING < 256"),
+            );
             true
         } else {
             false
@@ -354,7 +357,8 @@ impl PacketBuilder {
         self.offsets.pn = pn_offset..self.encoder.len();
 
         // Now encode the packet number length and save the header length.
-        self.encoder.as_mut()[self.header.start] |= u8::try_from(pn_len - 1).unwrap();
+        self.encoder.as_mut()[self.header.start] |=
+            u8::try_from(pn_len - 1).expect("packet number length fits in u8");
         self.header.end = self.encoder.len();
         self.pn = pn;
     }
@@ -466,7 +470,6 @@ impl PacketBuilder {
     /// # Errors
     ///
     /// This will return an error if AEAD encrypt fails.
-    #[allow(clippy::similar_names)]
     pub fn retry(
         version: Version,
         dcid: &[u8],
@@ -499,7 +502,6 @@ impl PacketBuilder {
 
     /// Make a Version Negotiation packet.
     #[must_use]
-    #[allow(clippy::similar_names)]
     pub fn version_negotiation(
         dcid: &[u8],
         scid: &[u8],
@@ -614,7 +616,6 @@ impl<'a> PublicPacket<'a> {
     /// # Errors
     ///
     /// This will return an error if the packet could not be decoded.
-    #[allow(clippy::similar_names)]
     pub fn decode(
         data: &'a mut [u8],
         dcid_decoder: &dyn ConnectionIdDecoder,
@@ -1303,6 +1304,7 @@ mod tests {
 
     const RETRY_TOKEN: &[u8] = b"token";
 
+    #[cfg(test)]
     fn build_retry_single(version: Version, sample_retry: &[u8]) {
         fixture_init();
         let mut retry =
