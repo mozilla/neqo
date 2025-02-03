@@ -28,6 +28,8 @@ jobs:
     steps:
       - name: Checkout neqo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Checkout msquic
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -36,6 +38,7 @@ jobs:
           ref: main
           path: msquic
           submodules: true
+          persist-credentials: false
 
       - name: Checkout gquiche
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -44,6 +47,7 @@ jobs:
           ref: main
           path: gquiche
           submodules: true
+          persist-credentials: false
 
       - name: Set PATH and environment
         run: |
@@ -63,9 +67,20 @@ jobs:
         run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Install NSS
+        id: nss
         uses: ./.github/actions/nss
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
+
+      - name: Set up NSS environment
+        env:
+          NSS_TARGET: ${{ steps.nss.outputs.nss-target }}
+          NSS_DIR: ${{ steps.nss.outputs.nss-dir }}
+          NSS_PREBUILT: ${{ steps.nss.outputs.nss-prebuilt }}
+        run: |
+          echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
+          echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
+          echo "NSS_PREBUILT=$NSS_PREBUILT" >> "$GITHUB_ENV"
 
       - name: Build neqo
         run: |

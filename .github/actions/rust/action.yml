@@ -35,12 +35,12 @@ runs:
       #
       # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
       # is too small for this to be effective there.
-      if: env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted'
+      if: env.SCCACHE_ENABLED != '1' && env.RUNNER_ENVIRONMENT != 'github-hosted'
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
     - name: Install build dependencies (Linux)
       shell: bash
-      if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+      if: runner.os == 'Linux' && env.RUNNER_ENVIRONMENT == 'github-hosted'
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -65,23 +65,23 @@ runs:
         } >> "$GITHUB_ENV"
 
     - name: Enable sscache
-      if: runner.environment != 'github-hosted'
+      if: env.RUNNER_ENVIRONMENT != 'github-hosted'
       shell: bash
       run: |
         echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
         echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-        if [ "${{ runner.environment }}" == "github-hosted" ]; then
+        if [ "$RUNNER_ENVIRONMENT" == "github-hosted" ]; then
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
 
     - name: Enable Rust cache
       uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
       with:
-        cache-bin: ${{ runner.environment == 'github-hosted' }}
+        cache-bin: ${{ env.RUNNER_ENVIRONMENT == 'github-hosted' }}
 
     - name: Set up MSVC (Windows)
       if: runner.os == 'Windows'
-      uses: ilammy/msvc-dev-cmd@v1
+      uses: ilammy/msvc-dev-cmd@v1 # zizmor: ignore[unpinned-uses]
       # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
       # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
@@ -104,5 +104,6 @@ runs:
       if: inputs.tools != ''
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
+        TOOLS: ${{ inputs.tools }}
       # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
-      run: cargo quickinstall --force $(echo ${{ inputs.tools }} | tr -d ",")
+      run: cargo quickinstall --force $(echo $TOOLS | tr -d ",")

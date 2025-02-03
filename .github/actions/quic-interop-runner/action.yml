@@ -54,20 +54,25 @@ runs:
       shell: bash
 
     - name: Run tests
+      env:
+        CLIENT: ${{ inputs.client }}
+        SERVER: ${{ inputs.server }}
+        TEST: ${{ inputs.test }}
+        IMPLEMENTATIONS: ${{ inputs.implementations }}
       run: |
         cd quic-interop-runner
-        if [ -n "${{ inputs.implementations }}" ]; then
-          echo '${{ inputs.implementations }}' > implementations.json
+        if [ -n "$IMPLEMENTATIONS" ]; then
+          echo '$IMPLEMENTATIONS' > implementations.json
         fi
         ARGS="--log-dir ../logs --json ../result.json"
-        if [ -n "${{ inputs.client }}" ]; then
-          ARGS="$ARGS --client ${{ inputs.client }}"
+        if [ -n "$CLIENT" ]; then
+          ARGS="$ARGS --client $CLIENT"
         fi
-        if [ -n "${{ inputs.server }}" ]; then
-          ARGS="$ARGS --server ${{ inputs.server }}"
+        if [ -n "$SERVER" ]; then
+          ARGS="$ARGS --server $SERVER"
         fi
-        if [ -n "${{ inputs.test }}" ]; then
-          ARGS="$ARGS --test ${{ inputs.test }}"
+        if [ -n "$TEST" ]; then
+          ARGS="$ARGS --test $TEST"
         fi
         # Don't fail CI if the interop test fails
         set -o pipefail
@@ -104,8 +109,10 @@ runs:
 
     - name: Store log URL
       if: always()
+      env:
+        ARTIFACT_URL: ${{ steps.upload-logs.outputs.artifact-url }}
       run: |
-        jq '. + {log_url: "${{ steps.upload-logs.outputs.artifact-url }}"}' \
+        jq '. + {log_url: "$ARTIFACT_URL"}'
           < result.json  > result.json.tmp && \
           mv result.json.tmp result.json
       shell: bash
