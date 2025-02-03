@@ -18,7 +18,6 @@ use crate::{
     AppError, CloseReason, Error, Res, TransportError,
 };
 
-#[allow(clippy::module_name_repetitions)]
 pub type FrameType = u64;
 
 pub const FRAME_TYPE_PADDING: FrameType = 0x0;

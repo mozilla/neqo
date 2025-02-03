@@ -681,7 +681,8 @@ impl CryptoDxState {
         Ok(res.to_vec())
     }
 
-    #[cfg(all(test, not(feature = "disable-encryption")))]
+    #[cfg(not(feature = "disable-encryption"))]
+    #[cfg(test)]
     pub(crate) fn test_default() -> Self {
         // This matches the value in packet.rs
         const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
@@ -1268,6 +1269,7 @@ impl CryptoStates {
     }
 
     #[cfg(all(not(feature = "disable-encryption"), test))]
+    #[cfg(test)]
     pub(crate) fn test_chacha() -> Self {
         const SECRET: &[u8] = &[
             0x9a, 0xc3, 0x12, 0xa7, 0xf8, 0x77, 0x46, 0x8e, 0xbe, 0x69, 0x42, 0x27, 0x48, 0xad,
@@ -1408,10 +1410,9 @@ impl CryptoStreams {
     }
 
     pub fn acked(&mut self, token: &CryptoRecoveryToken) {
-        self.get_mut(token.space)
-            .unwrap()
-            .tx
-            .mark_as_acked(token.offset, token.length);
+        if let Some(cs) = self.get_mut(token.space) {
+            cs.tx.mark_as_acked(token.offset, token.length);
+        }
     }
 
     pub fn lost(&mut self, token: &CryptoRecoveryToken) {
@@ -1499,7 +1500,8 @@ impl CryptoStreams {
             // - remaining space, less the header, which counts only one byte for the length at
             //   first to avoid underestimating length
             let length = min(data.len(), builder.remaining() - header_len);
-            header_len += Encoder::varint_len(u64::try_from(length).unwrap()) - 1;
+            header_len +=
+                Encoder::varint_len(u64::try_from(length).expect("usize fits in u64")) - 1;
             let length = min(data.len(), builder.remaining() - header_len);
 
             builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
@@ -1556,42 +1558,59 @@ impl CryptoStreams {
             ((left_offset, left), (right_offset, right))
         }
 
-        let cs = self.get_mut(space).unwrap();
-        if let Some((offset, data)) = cs.tx.next_bytes() {
-            let written = if sni_slicing {
-                if let Some(sni) = find_sni(data) {
-                    // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
-                    let mid = sni.start + (sni.end - sni.start) / 2;
-                    let (left, right) = data.split_at(mid);
+        let Some(cs) = self.get_mut(space) else {
+            return;
+        };
+        let Some((offset, data)) = cs.tx.next_bytes() else {
+            return;
+        };
+        let written = if sni_slicing {
+            if let Some(sni) = find_sni(data) {
+                // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
+                let mid = sni.start + (sni.end - sni.start) / 2;
+                let (left, right) = data.split_at(mid);
 
-                    // Truncate the chunks so we can fit them into roughly evenly-filled packets.
-                    let packets_needed = data.len().div_ceil(builder.limit());
-                    let limit = data.len() / packets_needed;
-                    let ((left_offset, left), (right_offset, right)) =
-                        limit_chunks((offset, left), (offset + mid as u64, right), limit);
-                    (
-                        write_chunk(right_offset, right, builder),
-                        write_chunk(left_offset, left, builder),
-                    )
-                } else {
-                    // No SNI found, write the entire data.
-                    (write_chunk(offset, data, builder), None)
-                }
+                // Truncate the chunks so we can fit them into roughly evenly-filled packets.
+                let packets_needed = data.len().div_ceil(builder.limit());
+                let limit = data.len() / packets_needed;
+                let ((left_offset, left), (right_offset, right)) =
+                    limit_chunks((offset, left), (offset + mid as u64, right), limit);
+                (
+                    write_chunk(right_offset, right, builder),
+                    write_chunk(left_offset, left, builder),
+                )
             } else {
-                // SNI slicing disabled, write the entire data.
+                // No SNI found, write the entire data.
                 (write_chunk(offset, data, builder), None)
-            };
-
-            match written {
-                (None, None) => (),
-                (None, Some((offset, len))) | (Some((offset, len)), None) => {
-                    mark_as_sent(cs, space, tokens, offset, len, stats);
-                }
-                (Some((offset1, len1)), Some((offset2, len2))) => {
-                    mark_as_sent(cs, space, tokens, offset1, len1, stats);
-                    mark_as_sent(cs, space, tokens, offset2, len2, stats);
-                }
             }
+        } else {
+            // SNI slicing disabled, write the entire data.
+            (write_chunk(offset, data, builder), None)
+        };
+
+        match written {
+            (None, None) => (),
+            (None, Some((offset, len))) | (Some((offset, len)), None) => {
+                mark_as_sent(cs, space, tokens, offset, len, stats);
+            }
+            (Some((offset1, len1)), Some((offset2, len2))) => {
+                mark_as_sent(cs, space, tokens, offset1, len1, stats);
+                mark_as_sent(cs, space, tokens, offset2, len2, stats);
+            }
+            }
+        } else {
+            // Not at the start of the crypto stream, write the entire data.
+            [write_chunk(offset, data, builder), None]
+        };
+        for (offset, length) in written.into_iter().flatten() {
+            cs.tx.mark_as_sent(offset, length);
+            qdebug!("CRYPTO for {} offset={}, len={}", space, offset, length);
+            tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
+                space,
+                offset,
+                length,
+            }));
+            stats.crypto += 1;
         }
     }
 }

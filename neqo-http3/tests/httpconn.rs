@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg(test)]
+
 use std::time::{Duration, Instant};
 
 use neqo_common::{event::Provider as _, qtrace, Datagram};

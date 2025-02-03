@@ -620,7 +620,7 @@ impl Connection {
                 self.version,
                 u64::try_from(rtt.as_millis()).unwrap_or(0),
             )
-            .unwrap()
+            .expect("caller checked if a resumption token existed")
     }
 
     fn confirmed(&self) -> bool {
@@ -1101,7 +1101,7 @@ impl Connection {
         // timeout for it  It is expected that other activities will
         // drive it.
 
-        let earliest = delays.into_iter().min().unwrap();
+        let earliest = delays.into_iter().min().expect("at least one delay");
         // TODO(agrover, mt) - need to analyze and fix #47
         // rather than just clamping to zero here.
         debug_assert!(earliest > now);
@@ -1164,7 +1164,6 @@ impl Connection {
             self.input(d, now, now);
             self.process_saved(now);
         }
-        #[allow(clippy::let_and_return)]
         let output = self.process_output(now);
         #[cfg(all(feature = "build-fuzzing-corpus", test))]
         if self.test_frame_writer.is_none() {
@@ -1733,7 +1732,7 @@ impl Connection {
             .acks
             .get_mut(PacketNumberSpace::from(packet.packet_type()))
         {
-            space.set_received(now, packet.pn(), ack_eliciting)
+            space.set_received(now, packet.pn(), ack_eliciting)?
         } else {
             qdebug!(
                 "[{self}] processed a {:?} packet without tracking it",
@@ -1764,7 +1763,7 @@ impl Connection {
                 self.remote_initial_source_cid
                     .as_ref()
                     .or(self.original_destination_cid.as_ref())
-                    .unwrap()
+                    .expect("have either remote_initial_source_cid or original_destination_cid")
                     .clone(),
             ),
             now,
@@ -1828,6 +1827,10 @@ impl Connection {
         self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
 
         if self.role == Role::Server {
+            let Some(original_destination_cid) = self.original_destination_cid.as_ref() else {
+                qdebug!("[{self}] No original destination DCID");
+                return false;
+            }
             self.cid_manager
                 .add_odcid(self.original_destination_cid.as_ref().unwrap().clone());
             // Make a path on which to run the handshake.
@@ -2083,7 +2086,7 @@ impl Connection {
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
         let pn_len = std::mem::size_of::<PacketNumber>()
-            - usize::try_from(unacked_range.leading_zeros() / 8).unwrap();
+            - usize::try_from(unacked_range.leading_zeros() / 8).expect("u32 fits in usize");
         assert!(
             pn_len > 0,
             "pn_len can't be zero as unacked_range should be > 0, pn {pn}, largest_acknowledged {largest_acknowledged:?}, tx {tx}"
@@ -2646,9 +2649,12 @@ impl Connection {
 
             let reset_token = remote
                 .get_bytes(tparams::STATELESS_RESET_TOKEN)
-                .map_or_else(ConnectionIdEntry::random_srt, |token| {
-                    <[u8; 16]>::try_from(token).unwrap()
-                });
+                .map_or_else(
+                    || Ok(ConnectionIdEntry::random_srt()),
+                    |token| {
+                        <[u8; 16]>::try_from(token).map_or(Err(Error::TransportParameterError), Ok)
+                    },
+                )?;
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
 
@@ -2927,7 +2933,7 @@ impl Connection {
 
                 let ranges =
                     Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
-                self.handle_ack(space, ranges, ecn_count, ack_delay, now);
+                self.handle_ack(space, ranges, ecn_count, ack_delay, now)?;
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
@@ -3096,14 +3102,21 @@ impl Connection {
         }
     }
 
-    fn decode_ack_delay(&self, v: u64) -> Duration {
+    fn decode_ack_delay(&self, v: u64) -> Res<Duration> {
         // If we have remote transport parameters, use them.
         // Otherwise, ack delay should be zero (because it's the handshake).
         self.tps.borrow().remote.as_ref().map_or_else(
-            || Duration::new(0, 0),
+            || Ok(Duration::default()),
             |r| {
-                let exponent = u32::try_from(r.get_integer(tparams::ACK_DELAY_EXPONENT)).unwrap();
-                Duration::from_micros(v.checked_shl(exponent).unwrap_or(u64::MAX))
+                let exponent = u32::try_from(r.get_integer(tparams::ACK_DELAY_EXPONENT))?;
+                // ACK_DELAY_EXPONENT > 20 is invalid per RFC9000. We already checked that in
+                // TransportParameter::decode.
+                let corrected = if v.leading_zeros() >= exponent {
+                    v << exponent
+                } else {
+                    u64::MAX
+                };
+                Ok(Duration::from_micros(corrected))
             },
         )
     }
@@ -3115,21 +3128,22 @@ impl Connection {
         ack_ecn: Option<ecn::Count>,
         ack_delay: u64,
         now: Instant,
-    ) where
+    ) -> Res<()>
+    where
         R: IntoIterator<Item = RangeInclusive<PacketNumber>> + Debug,
         R::IntoIter: ExactSizeIterator,
     {
         qdebug!("[{self}] Rx ACK space={space}, ranges={ack_ranges:?}");
 
         let Some(path) = self.paths.primary() else {
-            return;
+            return Ok(());
         };
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
             &path,
             space,
             ack_ranges,
             ack_ecn,
-            self.decode_ack_delay(ack_delay),
+            self.decode_ack_delay(ack_delay)?,
             now,
         );
         let largest_acknowledged = acked_packets.first().map(SentPacket::pn);
@@ -3159,6 +3173,7 @@ impl Connection {
         if let Some(largest_acknowledged) = largest_acknowledged {
             stats.largest_acknowledged = max(stats.largest_acknowledged, largest_acknowledged);
         }
+        Ok(())
     }
 
     /// Tell 0-RTT packets that they were "lost".
