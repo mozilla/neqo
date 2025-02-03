@@ -128,7 +128,7 @@ runs:
       run: |
         if [ "$RUNNER_ENVIRONMENT" != "github-hosted" ] || [ ! "$CACHE_HIT" ]; then
           echo "Building NSS from source"
-          echo "build_nss=${{ true }}" >> "$GITHUB_OUTPUT"
+          echo "build_nss=1" >> "$GITHUB_OUTPUT"
         else
           echo "Using cached prebuilt NSS"
         fi
