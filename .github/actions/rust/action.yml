@@ -54,7 +54,7 @@ runs:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo apt-get install -y --no-install-recommends mold
-        echo "RUSTFLAGS='$RUSTFLAGS -C linker=clang -C link-arg=-fuse-ld=mold'" >> "$GITHUB_ENV"
+        echo "RUSTFLAGS=\"$RUSTFLAGS -C linker=clang -C link-arg=-fuse-ld=mold\"" >> "$GITHUB_ENV"
 
     - name: Enable sscache
       if: runner.environment != 'github-hosted'
