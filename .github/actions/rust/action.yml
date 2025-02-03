@@ -40,7 +40,7 @@ runs:
 
     - name: Install build dependencies (Linux)
       shell: bash
-      if: runner.os == 'Linux' && env.RUNNER_ENVIRONMENT == 'github-hosted'
+      if: ${{ runner.os == 'Linux' && env.RUNNER_ENVIRONMENT == 'github-hosted' }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -65,7 +65,7 @@ runs:
         } >> "$GITHUB_ENV"
 
     - name: Enable sscache
-      if: env.RUNNER_ENVIRONMENT != 'github-hosted'
+      if: ${{ env.RUNNER_ENVIRONMENT != 'github-hosted' }}
       shell: bash
       run: |
         echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
@@ -80,7 +80,7 @@ runs:
         cache-bin: ${{ env.RUNNER_ENVIRONMENT == 'github-hosted' }}
 
     - name: Set up MSVC (Windows)
-      if: runner.os == 'Windows'
+      if: ${{ runner.os == 'Windows' }}
       uses: ilammy/msvc-dev-cmd@v1 # zizmor: ignore[unpinned-uses]
       # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
       # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
@@ -88,12 +88,12 @@ runs:
     # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
     - name: Set up build environment (Windows)
       shell: bash
-      if: runner.os == 'Windows'
+      if: ${{ runner.os == 'Windows' }}
       run: rm /usr/bin/link.exe || true
 
     - name: Install cargo-quickinstall
       shell: bash
-      if: inputs.tools != ''
+      if: ${{ inputs.tools != '' }}
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
       # TODO: Unpin cargo-quickinstall once our MSRV is > 1.76
@@ -101,7 +101,7 @@ runs:
 
     - name: Install Rust tools
       shell: bash
-      if: inputs.tools != ''
+      if: ${{ inputs.tools != '' }}
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
         TOOLS: ${{ inputs.tools }}
