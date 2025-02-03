@@ -78,9 +78,11 @@ jobs:
           NSS_DIR: ${{ steps.nss.outputs.nss-dir }}
           NSS_PREBUILT: ${{ steps.nss.outputs.nss-prebuilt }}
         run: |
-          echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
-          echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
-          echo "NSS_PREBUILT=$NSS_PREBUILT" >> "$GITHUB_ENV"
+          {
+          echo "NSS_TARGET=$NSS_TARGET"
+          echo "NSS_DIR=$NSS_DIR"
+          echo "NSS_PREBUILT=$NSS_PREBUILT"
+          } >> "$GITHUB_ENV"
 
       - name: Build neqo
         run: |

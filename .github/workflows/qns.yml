@@ -146,7 +146,7 @@ jobs:
         env:
           PAIR: ${{ matrix.pair }}
         run: |
-          PAIR=$(echo $PAIR | sed "s/$DELIM/%/g")
+          PAIR="${PAIR/$DELIM/%}"
           echo "client=$(echo "$PAIR" | cut -d% -f1)" >> "$GITHUB_OUTPUT"
           echo "server=$(echo "$PAIR" | cut -d% -f2)" >> "$GITHUB_OUTPUT"
 
@@ -186,6 +186,7 @@ jobs:
       - env:
           PAIRS: ${{ needs.implementations.outputs.pairs }}
         run: |
+          # shellcheck disable=SC2153
           mapfile -t LIST < <(echo "$PAIRS" | jq '.[]' | sort)
           for PREFIX in "${LIST[@]}"; do
             PREFIX=$(echo "$PREFIX" | tr -d '"')

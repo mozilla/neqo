@@ -43,7 +43,7 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         if: github.event_name == 'pull_request'
         run: |
-          git diff origin/$BASE_REF.. > pr.diff
+          git diff "origin/$BASE_REF".. > pr.diff
           set -o pipefail
           cargo mutants --test-tool=nextest --no-shuffle -j 2 -vV --in-diff pr.diff | tee results.txt || true
           echo 'title=Incremental Mutants' >> "$GITHUB_OUTPUT"
