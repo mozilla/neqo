@@ -1287,4 +1287,48 @@ mod tests {
         cwnd_is_halved(&cc);
         assert_eq!(cc.state, State::RecoveryStart);
     }
+
+    // See <https://github.com/mozilla/neqo/issues/2408>.
+    #[test]
+    fn dont_reenter_recovery() {
+        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
+        let mut now = now();
+
+        // Start in SlowStart.
+        let p1 = SentPacket::new(
+            PacketType::Short,
+            1,
+            IpTosEcn::default(),
+            now,
+            true,
+            Vec::new(),
+            cc.max_datagram_size(),
+        );
+        cc.on_packet_sent(&p1, now);
+
+        // Enter RecoveryStart, i.e. start loss epoch.
+        now += PTO;
+        cc.on_packets_lost(Some(now), None, PTO, &[p1], now);
+        // Expect cwnd to half.
+        cwnd_is_halved(&cc);
+
+        // Transition from RecoveryStart to Recovery, same loss epoch.
+        let p2 = SentPacket::new(
+            PacketType::Short,
+            2,
+            IpTosEcn::default(),
+            now,
+            true,
+            Vec::new(),
+            cc.max_datagram_size(),
+        );
+        cc.on_packet_sent(&p2, now);
+        // Expect cwnd to stay at half the initial cwnd.
+        cwnd_is_halved(&cc);
+
+        // New loss in same loss epoch.
+        cc.on_packets_lost(Some(now), None, PTO, &[p2], now);
+        // Expect cwnd to stay at half the initial cwnd.
+        cwnd_is_halved(&cc);
+    }
 }
