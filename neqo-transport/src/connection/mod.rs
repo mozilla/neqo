@@ -1829,10 +1829,9 @@ impl Connection {
         if self.role == Role::Server {
             let Some(original_destination_cid) = self.original_destination_cid.as_ref() else {
                 qdebug!("[{self}] No original destination DCID");
-                return false;
-            }
-            self.cid_manager
-                .add_odcid(self.original_destination_cid.as_ref().unwrap().clone());
+                return;
+            };
+            self.cid_manager.add_odcid(original_destination_cid.clone());
             // Make a path on which to run the handshake.
             self.setup_handshake_path(path, now);
         } else {

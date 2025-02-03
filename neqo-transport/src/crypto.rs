@@ -1597,20 +1597,6 @@ impl CryptoStreams {
                 mark_as_sent(cs, space, tokens, offset1, len1, stats);
                 mark_as_sent(cs, space, tokens, offset2, len2, stats);
             }
-            }
-        } else {
-            // Not at the start of the crypto stream, write the entire data.
-            [write_chunk(offset, data, builder), None]
-        };
-        for (offset, length) in written.into_iter().flatten() {
-            cs.tx.mark_as_sent(offset, length);
-            qdebug!("CRYPTO for {} offset={}, len={}", space, offset, length);
-            tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
-                space,
-                offset,
-                length,
-            }));
-            stats.crypto += 1;
         }
     }
 }

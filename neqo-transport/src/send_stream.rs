@@ -502,19 +502,18 @@ impl TxBuffer {
         can_buffer
     }
 
-    #[allow(clippy::missing_panics_doc)] // These are not possible.
-    pub fn is_empty(&mut self) -> bool {
-        let (start, _) = self.ranges.first_unmarked_range();
-        start == self.retired() + u64::try_from(self.buffered()).unwrap()
+    fn first_unmarked_range(&mut self) -> Option<(u64, Option<u64>)> {
+        let (start, maybe_len) = self.ranges.first_unmarked_range();
+        let buffered = u64::try_from(self.buffered()).ok()?;
+        (start != self.retired() + buffered).then_some((start, maybe_len))
     }
 
-    #[allow(clippy::missing_panics_doc)] // These are not possible.
-    pub fn next_bytes(&mut self) -> Option<(u64, &[u8])> {
-        let (start, maybe_len) = self.ranges.first_unmarked_range();
+    pub fn is_empty(&mut self) -> bool {
+        self.first_unmarked_range().is_none()
+    }
 
-        if start == self.retired() + u64::try_from(self.buffered()).ok()? {
-            return None;
-        }
+    pub fn next_bytes(&mut self) -> Option<(u64, &[u8])> {
+        let (start, maybe_len) = self.first_unmarked_range()?;
 
         // Convert from ranges-relative-to-zero to
         // ranges-relative-to-buffer-start
