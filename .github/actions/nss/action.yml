@@ -25,7 +25,7 @@ runs:
   steps:
     - name: Install system NSS (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && env.RUNNER_ENVIRONMENT == 'github-hosted' }}
+      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -34,7 +34,7 @@ runs:
 
     - name: Install system NSS (MacOS)
       shell: bash
-      if: ${{ runner.os == 'MacOS' && env.RUNNER_ENVIRONMENT == 'github-hosted' }}
+      if: ${{ runner.os == 'MacOS' && runner.environment == 'github-hosted' }}
       run: |
         [ "$BREW_UPDATED" ] || brew update && echo "BREW_UPDATED=1" >> "$GITHUB_ENV"
         brew install nss
@@ -76,11 +76,13 @@ runs:
       #
       # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
       # is too small for this to be effective there.
-      if: ${{ env.SCCACHE_ENABLED != '1' && !steps.nss.outputs.use_system_nss && env.RUNNER_ENVIRONMENT != 'github-hosted' }}
+      if: ${{ env.SCCACHE_ENABLED != '1' && !steps.nss.outputs.use_system_nss && runner.environment != 'github-hosted' }}
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
     - name: Enable sscache
-      if: ${{ !steps.nss.outputs.use_system_nss && env.RUNNER_ENVIRONMENT != 'github-hosted' }}
+      if: ${{ !steps.nss.outputs.use_system_nss && runner.environment != 'github-hosted' }}
+      env:
+        RUNNER_ENVIRONMENT: ${{ runner.environment }}
       shell: bash
       run: |
         echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
@@ -121,7 +123,7 @@ runs:
 
     - name: Cache NSS
       id: cache
-      if: ${{ !steps.nss.outputs.use_system_nss && env.RUNNER_ENVIRONMENT == 'github-hosted' }}
+      if: ${{ !steps.nss.outputs.use_system_nss && runner.environment == 'github-hosted' }}
       uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
       with:
         path: dist
@@ -132,6 +134,7 @@ runs:
       if: ${{ !steps.nss.outputs.use_system_nss }}
       env:
         CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        RUNNER_ENVIRONMENT: ${{ runner.environment }}
       shell: bash
       run: |
         if [ "$RUNNER_ENVIRONMENT" != "github-hosted" ] || [ "$CACHE_HIT" == "" ]; then
@@ -143,7 +146,7 @@ runs:
 
     - name: Install build dependencies (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && steps.check_build.build_nss && env.RUNNER_ENVIRONMENT == 'github-hosted' }}
+      if: ${{ runner.os == 'Linux' && steps.check_build.build_nss && runner.environment == 'github-hosted' }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: sudo apt-get install -y --no-install-recommends gyp ninja-build
