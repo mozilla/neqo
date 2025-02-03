@@ -9,7 +9,6 @@ env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   TOOLCHAIN: stable
-  RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
   PERF_OPT: record -F997 --call-graph fp -g
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
@@ -46,8 +45,11 @@ jobs:
           path: gquiche
           submodules: true
 
-      - name: Set PATH
-        run: echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
+      - name: Set PATH and environment
+        run: |
+          echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
+          # Append to RUSTFLAGS, which may already be set by the Rust action.
+          echo "RUSTFLAGS=-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS" >> "$GITHUB_ENV"
 
       - name: Install Rust
         uses: ./.github/actions/rust
