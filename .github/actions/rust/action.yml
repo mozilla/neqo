@@ -54,8 +54,9 @@ runs:
         {
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
-          echo "RUSTFLAGS=$RUSTFLAGS -C linker=clang -C link-arg=-fuse-ld=mold"
         } >> "$GITHUB_ENV"
+        [ "${{ runner.os }}" == "Linux" ] && echo "RUSTFLAGS=$RUSTFLAGS -C linker=clang -C link-arg=-fuse-ld=mold" >> "$GITHUB_ENV"
+        [ "${{ runner.os }}" == "Windows" ] && echo "RUSTFLAGS=$RUSTFLAGS -C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
     - name: Enable sscache
       if: runner.environment != 'github-hosted'
