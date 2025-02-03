@@ -135,14 +135,14 @@ runs:
 
     - name: Install build dependencies (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && steps.check_build.build_nss == '1' && runner.environment == 'github-hosted' }}
+      if: ${{ runner.os == 'Linux' && steps.check_build.outputs.build_nss && runner.environment == 'github-hosted' }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: sudo apt-get install -y --no-install-recommends gyp ninja-build
 
     - name: Install build dependencies (MacOS)
       shell: bash
-      if: ${{ runner.os == 'MacOS' && steps.check_build.build_nss == '1' }}
+      if: ${{ runner.os == 'MacOS' && steps.check_build.outputs.build_nss }}
       run: |
         brew install ninja
         echo "gyp-next>=0.18.1" > req.txt
@@ -150,7 +150,7 @@ runs:
 
     - name: Install build dependencies (Windows)
       shell: bash
-      if: ${{ runner.os == 'Windows' && steps.check_build.build_nss == '1' }}
+      if: ${{ runner.os == 'Windows' && steps.check_build.outputs.build_nss }}
       run: |
         # shellcheck disable=SC2028
         {
@@ -162,14 +162,14 @@ runs:
         python3 -m pip install -r req.txt
 
     - name: Set up MSVC (Windows)
-      if: ${{ runner.os == 'Windows' && steps.check_build.build_nss == '1' }}
+      if: ${{ runner.os == 'Windows' && steps.check_build.outputs.build_nss }}
       uses: ilammy/msvc-dev-cmd@v1 # zizmor: ignore[unpinned-uses]
       # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
       # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
     - name: Set up build environment (Windows)
       shell: bash
-      if: ${{ runner.os == 'Windows' && steps.check_build.build_nss == '1' }}
+      if: ${{ runner.os == 'Windows' && steps.check_build.outputs.build_nss }}
       run: |
         {
           echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
@@ -200,7 +200,7 @@ runs:
 
     - name: Build
       shell: bash
-      if: ${{ steps.check_build.build_nss == '1' }}
+      if: ${{ steps.check_build.outputs.build_nss }}
       env:
         NSS_TARGET: ${{ inputs.type }}
       run: |
