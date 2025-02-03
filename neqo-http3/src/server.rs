@@ -409,8 +409,12 @@ mod tests {
 
     fn connect_transport(server: &mut Http3Server, client: &mut Connection, resume: bool) {
         let c1 = client.process_output(now());
-        let s1 = server.process(c1.dgram(), now());
+        let c11 = client.process_output(now());
+        _ = server.process(c1.dgram(), now());
+        let s1 = server.process(c11.dgram(), now());
         let c2 = client.process(s1.dgram(), now());
+        let s2 = server.process(c2.dgram(), now());
+        let c2 = client.process(s2.dgram(), now());
         let needs_auth = client
             .events()
             .any(|e| e == ConnectionEvent::AuthenticationNeeded);
@@ -429,8 +433,7 @@ mod tests {
         assert!(client.state().connected());
         let s2 = server.process(c2.dgram(), now());
         assert_connected(server);
-        let c3 = client.process(s2.dgram(), now());
-        assert!(c3.dgram().is_none());
+        _ = client.process(s2.dgram(), now());
     }
 
     // Start a client/server and check setting frame.

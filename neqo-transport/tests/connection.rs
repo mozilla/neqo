@@ -30,9 +30,13 @@ fn truncate_long_packet() {
     let mut server = default_server();
 
     let out = client.process_output(now());
+    let out2 = client.process_output(now());
+    assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
+    server.process_input(out.dgram().unwrap(), now());
+    let out = server.process(out2.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
+    let out = client.process(out.dgram(), now());
     let out = server.process(out.dgram(), now());
-    assert!(out.as_dgram_ref().is_some());
 
     // This will truncate the Handshake packet from the server.
     let dupe = out.as_dgram_ref().unwrap().clone();
@@ -66,8 +70,11 @@ fn reorder_server_initial() {
     // A simple ACK_ECN frame for a single packet with packet number 0 with a single ECT(0) mark.
     const ACK_FRAME: &[u8] = &[0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00];
 
+    // This test needs to decrypt the CI, so turn off MLKEM.
     let mut client = new_client(
-        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
+        ConnectionParameters::default()
+            .versions(Version::Version1, vec![Version::Version1])
+            .mlkem(false),
     );
     let mut server = default_server();
 

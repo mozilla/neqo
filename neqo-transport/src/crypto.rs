@@ -37,7 +37,7 @@ use crate::{
     tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler},
     tracking::PacketNumberSpace,
     version::Version,
-    Error, Res,
+    ConnectionParameters, Error, Res,
 };
 
 const MAX_AUTH_TAG: usize = 32;
@@ -69,6 +69,7 @@ type TpHandler = Rc<RefCell<TransportParametersHandler>>;
 impl Crypto {
     pub fn new(
         version: Version,
+        conn_params: &ConnectionParameters,
         mut agent: Agent,
         protocols: Vec<String>,
         tphandler: TpHandler,
@@ -79,34 +80,30 @@ impl Crypto {
             TLS_AES_256_GCM_SHA384,
             TLS_CHACHA20_POLY1305_SHA256,
         ])?;
-        match &mut agent {
-            Agent::Server(c) => {
-                // Clients do not send mlkem768x25519 shares by default, but servers should accept
-                // them.
-                c.set_groups(&[
-                    TLS_GRP_KEM_MLKEM768X25519,
-                    TLS_GRP_EC_X25519,
-                    TLS_GRP_EC_SECP256R1,
-                    TLS_GRP_EC_SECP384R1,
-                    TLS_GRP_EC_SECP521R1,
-                ])?;
-            }
-            Agent::Client(c) => {
-                c.set_groups(&[
-                    TLS_GRP_EC_X25519,
-                    TLS_GRP_EC_SECP256R1,
-                    TLS_GRP_EC_SECP384R1,
-                    TLS_GRP_EC_SECP521R1,
-                ])?;
+        agent.set_groups(if conn_params.mlkem_enabled() {
+            &[
+                TLS_GRP_KEM_MLKEM768X25519,
+                TLS_GRP_EC_X25519,
+                TLS_GRP_EC_SECP256R1,
+                TLS_GRP_EC_SECP384R1,
+                TLS_GRP_EC_SECP521R1,
+            ]
+        } else {
+            &[
+                TLS_GRP_EC_X25519,
+                TLS_GRP_EC_SECP256R1,
+                TLS_GRP_EC_SECP384R1,
+                TLS_GRP_EC_SECP521R1,
+            ]
+        })?;
+        if let Agent::Client(c) = &mut agent {
+            // Configure clients to send additional key shares to reduce the rate of HRRs
+            // when enabling MLKEM.
+            c.send_additional_key_shares(usize::from(conn_params.mlkem_enabled()))?;
 
-                // Configure clients to send both X25519 and P256 to reduce
-                // the rate of HRRs.
-                c.send_additional_key_shares(1)?;
-
-                // Always enable 0-RTT on the client, but the server needs
-                // more configuration passed to server_enable_0rtt.
-                c.enable_0rtt()?;
-            }
+            // Always enable 0-RTT on the client, but the server needs
+            // more configuration passed to server_enable_0rtt.
+            c.enable_0rtt()?;
         }
         agent.set_alpn(&protocols)?;
         agent.disable_end_of_early_data()?;
@@ -1435,6 +1432,10 @@ impl CryptoStreams {
         }
     }
 
+    pub fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
+        self.get_mut(space).map_or(true, |cs| cs.tx.is_empty())
+    }
+
     const fn get(&self, space: PacketNumberSpace) -> Option<&CryptoStream> {
         let (initial, hs, app) = match self {
             Self::Initial {
@@ -1509,39 +1510,93 @@ impl CryptoStreams {
             Some((offset, length))
         }
 
+        fn mark_as_sent(
+            cs: &mut CryptoStream,
+            space: PacketNumberSpace,
+            tokens: &mut Vec<RecoveryToken>,
+            offset: u64,
+            len: usize,
+            stats: &mut FrameStats,
+        ) {
+            cs.tx.mark_as_sent(offset, len);
+            qdebug!("CRYPTO for {space} offset={offset}, len={len}");
+            tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
+                space,
+                offset,
+                length: len,
+            }));
+            stats.crypto += 1;
+        }
+
+        #[allow(clippy::type_complexity)]
+        const fn limit_chunks<'a>(
+            left: (u64, &'a [u8]),
+            right: (u64, &'a [u8]),
+            limit: usize,
+        ) -> ((u64, &'a [u8]), (u64, &'a [u8])) {
+            let (left_offset, mut left) = left;
+            let (mut right_offset, mut right) = right;
+            if left.len() + right.len() <= limit {
+                // Nothing to do. Both chunks will fit into one packet, meaning the SNI isn't spread
+                // over multiple packets. But at least it's in two unordered CRYPTO frames.
+            } else if left.len() <= limit {
+                // `left` is short enough to fit into this packet. So send from the *end*
+                // of `right`, so that the second half of the SNI is in another packet.
+                let right_len = right.len() + left.len() - limit;
+                right_offset += right_len as u64;
+                (_, right) = right.split_at(right_len);
+            } else if right.len() <= limit {
+                // `right` is short enough to fit into this packet. So only send a part of `left`.
+                // The SNI begins at the end of `left`, so send the beginnig of it in this packet.
+                (left, _) = left.split_at(limit - right.len());
+            } else {
+                // Both chunks are too long to fit into one packet. Just send a part of each.
+                let half_limit = limit / 2;
+                (left, _) = left.split_at(half_limit);
+                (right, _) = right.split_at(half_limit);
+            }
+            ((left_offset, left), (right_offset, right))
+        }
+
         let Some(cs) = self.get_mut(space) else {
             return;
         };
         let Some((offset, data)) = cs.tx.next_bytes() else {
             return;
         };
-        let written = if sni_slicing && offset == 0 {
+        let written = if sni_slicing {
             if let Some(sni) = find_sni(data) {
-                // Cut the crypto data in two at the midpoint of the SNI and swap the
-                // chunks.
+                // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
                 let mid = sni.start + (sni.end - sni.start) / 2;
                 let (left, right) = data.split_at(mid);
-                [
-                    write_chunk(offset + mid as u64, right, builder),
-                    write_chunk(offset, left, builder),
-                ]
+
+                // Truncate the chunks so we can fit them into roughly evenly-filled packets.
+                let packets_needed = data.len().div_ceil(builder.limit());
+                let limit = data.len() / packets_needed;
+                let ((left_offset, left), (right_offset, right)) =
+                    limit_chunks((offset, left), (offset + mid as u64, right), limit);
+                (
+                    write_chunk(right_offset, right, builder),
+                    write_chunk(left_offset, left, builder),
+                )
             } else {
                 // No SNI found, write the entire data.
-                [write_chunk(offset, data, builder), None]
+                (write_chunk(offset, data, builder), None)
             }
         } else {
-            // Not at the start of the crypto stream, write the entire data.
-            [write_chunk(offset, data, builder), None]
+            // SNI slicing disabled, write the entire data.
+            (write_chunk(offset, data, builder), None)
         };
-        for (offset, length) in written.into_iter().flatten() {
-            cs.tx.mark_as_sent(offset, length);
-            qdebug!("CRYPTO for {} offset={}, len={}", space, offset, length);
-            tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
-                space,
-                offset,
-                length,
-            }));
-            stats.crypto += 1;
+
+        match written {
+            (None, None) => (),
+            (None, Some((offset, len))) | (Some((offset, len)), None) => {
+                mark_as_sent(cs, space, tokens, offset, len, stats);
+            }
+            (Some((offset1, len1)), Some((offset2, len2))) => {
+                mark_as_sent(cs, space, tokens, offset1, len1, stats);
+                mark_as_sent(cs, space, tokens, offset2, len2, stats);
+            }
         }
     }
 }
