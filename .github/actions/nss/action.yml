@@ -205,9 +205,9 @@ runs:
           echo "NSS_DIR=$NSS_DIR"
           echo "NSS_PREBUILT=$NSS_PREBUILT"
         } >> "$GITHUB_ENV"
-        # if [ "${{ runner.os }}" != "Windows" ]; then
-        #   echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
-        # fi
+        if [ "${{ runner.os }}" == "Windows" ]; then
+          echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
+        fi
 
     - name: Build
       shell: bash
