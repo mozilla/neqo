@@ -66,6 +66,8 @@ runs:
 
     - name: Enable sscache
       if: ${{ runner.environment != 'github-hosted' }}
+      env:
+        RUNNER_ENVIRONMENT: ${{ runner.environment }}
       shell: bash
       run: |
         echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"

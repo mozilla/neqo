@@ -72,18 +72,6 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-      - name: Set up NSS environment
-        env:
-          NSS_TARGET: ${{ steps.nss.outputs.nss-target }}
-          NSS_DIR: ${{ steps.nss.outputs.nss-dir }}
-          NSS_PREBUILT: ${{ steps.nss.outputs.nss-prebuilt }}
-        run: |
-          {
-          echo "NSS_TARGET=$NSS_TARGET"
-          echo "NSS_DIR=$NSS_DIR"
-          echo "NSS_PREBUILT=$NSS_PREBUILT"
-          } >> "$GITHUB_ENV"
-
       - name: Build neqo
         run: |
           cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
