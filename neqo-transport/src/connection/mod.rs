@@ -2650,9 +2650,7 @@ impl Connection {
                 .get_bytes(tparams::STATELESS_RESET_TOKEN)
                 .map_or_else(
                     || Ok(ConnectionIdEntry::random_srt()),
-                    |token| {
-                        <[u8; 16]>::try_from(token).map_or(Err(Error::TransportParameterError), Ok)
-                    },
+                    |token| <[u8; 16]>::try_from(token).map_err(|_| Error::TransportParameterError),
                 )?;
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
