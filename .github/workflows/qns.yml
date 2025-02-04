@@ -100,12 +100,12 @@ jobs:
         run: |
           # Add neqo-latest to implementations.json
           curl https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json | \
-            jq --arg key "$LATEST" --argjson newEntry '
+            jq --arg key "$LATEST" --argjson newEntry "
               {
-                "image": "$IMAGE",
-                "url": "$URL",
-                "role": "$ROLE"
-              }' '.[$key] = $newEntry' > implementations.json
+                \"image\": \"$IMAGE\",
+                \"url\": \"$URL\",
+                \"role\": \"$ROLE\"
+              }" '.[$key] = $newEntry' > implementations.json
           {
             echo "implementations<<EOF"
             cat implementations.json
