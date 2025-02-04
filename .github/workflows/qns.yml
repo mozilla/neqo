@@ -110,7 +110,7 @@ jobs:
             echo "implementations<<EOF"
             cat implementations.json
             echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          } | tee "$GITHUB_OUTPUT"
           # Determine valid interop pairs that contain $LATEST
           jq < implementations.json "[
               [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers |
@@ -124,7 +124,7 @@ jobs:
             echo "pairs<<EOF"
             cat pairs.json
             echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          } | tee "$GITHUB_OUTPUT"
 
   run-qns:
     name: Run QNS
