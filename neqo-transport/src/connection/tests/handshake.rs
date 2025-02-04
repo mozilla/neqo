@@ -333,7 +333,7 @@ fn send_05rtt() {
 /// Test that a client buffers 0.5-RTT data when it arrives early.
 #[test]
 fn reorder_05rtt() {
-    // This tests makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
+    // This test makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
     let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let mut server = default_server();
 
@@ -392,7 +392,7 @@ fn reorder_05rtt_with_0rtt() {
     client.process_input(ticket, now);
 
     let token = get_tokens(&mut client).pop().unwrap();
-    // This tests makes too many assumptions about what's in the packets to work with multi-packet
+    // This test makes too many assumptions about what's in the packets to work with multi-packet
     // MLKEM flights.
     let mut client = new_client(ConnectionParameters::default().mlkem(false));
     client.enable_resumption(now, token).unwrap();

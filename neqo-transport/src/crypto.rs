@@ -40,7 +40,6 @@ use crate::{
     ConnectionParameters, Error, Res,
 };
 
-const MAX_AUTH_TAG: usize = 32;
 /// The number of invocations remaining on a write cipher before we try
 /// to update keys.  This has to be much smaller than the number returned
 /// by `CryptoDxState::limit` or updates will happen too often.  As we don't
@@ -633,33 +632,40 @@ impl CryptoDxState {
         self.used_pn.end
     }
 
-    pub fn encrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+    pub fn encrypt<'a>(
+        &mut self,
+        pn: PacketNumber,
+        hdr: Range<usize>,
+        data: &'a mut [u8],
+    ) -> Res<&'a mut [u8]> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
         qtrace!(
-            "[{self}] encrypt pn={pn} hdr={} body={}",
-            hex(hdr),
-            hex(body)
+            "[{self}] encrypt_in_place pn={pn} hdr={} body={}",
+            hex(data[hdr.clone()].as_ref()),
+            hex(data[hdr.end..].as_ref())
         );
 
         // The numbers in `Self::limit` assume a maximum packet size of `LIMIT`.
         // Adjust them as we encounter larger packets.
-        debug_assert!(body.len() < 65536);
-        if body.len() > self.largest_packet_len {
+        let body_len = data.len() - hdr.len() - self.aead.expansion();
+        debug_assert!(body_len <= u16::MAX.into());
+        if body_len > self.largest_packet_len {
             let new_bits = usize::leading_zeros(self.largest_packet_len - 1)
-                - usize::leading_zeros(body.len() - 1);
+                - usize::leading_zeros(body_len - 1);
             self.invocations >>= new_bits;
-            self.largest_packet_len = body.len();
+            self.largest_packet_len = body_len;
         }
         self.invoked()?;
 
-        let size = body.len() + MAX_AUTH_TAG;
-        let mut out = vec![0; size];
-        let res = self.aead.encrypt(pn, hdr, body, &mut out)?;
+        let (prev, data) = data.split_at_mut(hdr.end);
+        // `prev` may have already-encrypted packets this one is being coalesced with.
+        // Use only the actual current header for AAD.
+        let data = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
 
-        qtrace!("[{self}] encrypt ct={}", hex(res));
+        qtrace!("[{self}] encrypt ct={}", hex(&data));
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
-        Ok(res.to_vec())
+        Ok(data)
     }
 
     #[must_use]
@@ -667,18 +673,23 @@ impl CryptoDxState {
         self.aead.expansion()
     }
 
-    pub fn decrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+    pub fn decrypt<'a>(
+        &mut self,
+        pn: PacketNumber,
+        hdr: Range<usize>,
+        data: &'a mut [u8],
+    ) -> Res<&'a mut [u8]> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
         qtrace!(
-            "[{self}] decrypt pn={pn} hdr={} body={}",
-            hex(hdr),
-            hex(body)
+            "[{self}] decrypt_in_place pn={pn} hdr={} body={}",
+            hex(data[hdr.clone()].as_ref()),
+            hex(data[hdr.end..].as_ref())
         );
         self.invoked()?;
-        let mut out = vec![0; body.len()];
-        let res = self.aead.decrypt(pn, hdr, body, &mut out)?;
+        let (hdr, data) = data.split_at_mut(hdr.end);
+        let data = self.aead.decrypt_in_place(pn, hdr, data)?;
         self.used(pn)?;
-        Ok(res.to_vec())
+        Ok(data)
     }
 
     #[cfg(not(feature = "disable-encryption"))]
