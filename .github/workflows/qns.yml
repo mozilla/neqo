@@ -66,7 +66,9 @@ jobs:
           build-args: RUST_VERSION=stable
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: 'linux/amd64, linux/arm64'
+          # FIXME: gcc for arm64 currently segmentation faults :-( recheck periodically
+          # platforms: 'linux/amd64, linux/arm64'
+          platforms: 'linux/amd64'
 
       - uses: docker/build-push-action@ca877d9245402d1537745e0e356eab47c3520991 # v6.13.0
         id: docker_build_and_push
@@ -86,6 +88,7 @@ jobs:
 
   implementations:
     name: Determine interop pairs
+    if: ${{ github.event_name != 'push' }}
     needs: docker-image
     runs-on: ubuntu-latest
     outputs:
@@ -128,6 +131,7 @@ jobs:
 
   run-qns:
     name: Run QNS
+    if: ${{ github.event_name != 'push' }}
     needs: implementations
     strategy:
       fail-fast: false
@@ -164,9 +168,9 @@ jobs:
 
   report:
     name: Report results
+    if: ${{ !cancelled() && github.event_name != 'push' }}
     needs: [run-qns, implementations]
     runs-on: ubuntu-latest
-    if: ${{ always() }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
