@@ -90,12 +90,18 @@ jobs:
           bazel build -c opt --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
 
       - name: Download cached main-branch results
-        id: criterion-cache
         uses: actions/cache/restore@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
-          path: ./target/criterion
-          key: criterion-${{ runner.name }}-${{ github.sha }}
-          restore-keys: criterion-${{ runner.name }}-
+          path: |
+            target/criterion
+            hyperfine
+          key: bench-results-${{ runner.name }}-${{ github.sha }}
+          restore-keys: bench-results-${{ runner.name }}-
+
+      - name: Move cached hyperfine results
+        run: |
+          mv hyperfine hyperfine-main
+          mkdir -p hyperfine
 
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
@@ -194,11 +200,14 @@ jobs:
                   # shellcheck disable=SC2086
                   taskset -c 1 nice -n -20 \
                     perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
-                      hyperfine --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
+                      hyperfine \
+                        --export-json "hyperfine/$client-$server$EXT.json" \
+                        --export-markdown "hyperfine/$client-$server$EXT.md" \
+                        --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond "$CMD" |
                       tee -a comparison.txt
                   echo >> comparison.txt
                   kill $PID
-                  cat step.md >> steps.md
+                  cat "hyperfine/$client-$server$EXT.md" >> steps.md
                   # Sanity check the size of the last retrieved file.
                   # google-quiche outputs the HTTP header, too, so we can't just check for -eq.
                   [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
@@ -266,18 +275,14 @@ jobs:
         if: ${{ github.ref == 'refs/heads/main' }}
         run: echo "${{ github.sha }}" > target/criterion/baseline-sha.txt
 
-      - name: Store history
-        if: ${{ github.ref == 'refs/heads/main' }}
-        run: |
-          mkdir -p target/criterion-history
-          cp -r target/criterion "target/criterion-history/$(date +%s)-${{ github.sha }}"
-
       - name: Cache main-branch results
         if: ${{ github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
-          path: ./target/criterion
-          key: criterion-${{ runner.name }}-${{ github.sha }}
+          path: |
+            target/criterion
+            hyperfine
+          key: bench-results-${{ runner.name }}-${{ github.sha }}
 
       - name: Export perf data
         id: export
@@ -291,6 +296,7 @@ jobs:
             *.txt
             results.*
             target/criterion*
+            hyperfine
           compression-level: 9
 
       - name: Export PR comment data
