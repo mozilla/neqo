@@ -11,7 +11,7 @@ use std::{
     io::{self, IoSliceMut},
     iter,
     net::SocketAddr,
-    slice::{self, Chunks},
+    slice::{self, ChunksMut},
 };
 
 use log::{log_enabled, Level};
@@ -120,7 +120,7 @@ pub fn recv_inner<'a>(
 
     Ok(DatagramIter {
         current_buffer: None,
-        remaining_buffers: metas.into_iter().zip(recv_buf.0.iter()).take(n),
+        remaining_buffers: metas.into_iter().zip(recv_buf.0.iter_mut()).take(n),
         local_address,
     })
 }
@@ -128,17 +128,17 @@ pub fn recv_inner<'a>(
 pub struct DatagramIter<'a> {
     /// The current buffer, containing zero or more datagrams, each sharing the
     /// same [`RecvMeta`].
-    current_buffer: Option<(RecvMeta, Chunks<'a, u8>)>,
+    current_buffer: Option<(RecvMeta, ChunksMut<'a, u8>)>,
     /// Remaining buffers, each containing zero or more datagrams, one
     /// [`RecvMeta`] per buffer.
     remaining_buffers:
-        iter::Take<iter::Zip<array::IntoIter<RecvMeta, NUM_BUFS>, slice::Iter<'a, Vec<u8>>>>,
+        iter::Take<iter::Zip<array::IntoIter<RecvMeta, NUM_BUFS>, slice::IterMut<'a, Vec<u8>>>>,
     /// The local address of the UDP socket used to receive the datagrams.
     local_address: SocketAddr,
 }
 
 impl<'a> Iterator for DatagramIter<'a> {
-    type Item = Datagram<&'a [u8]>;
+    type Item = Datagram<&'a mut [u8]>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -177,7 +177,7 @@ impl<'a> Iterator for DatagramIter<'a> {
 
             // Got another buffer. Let's chunk it into datagrams and return the
             // first datagram in the next loop iteration.
-            self.current_buffer = Some((meta, buf[0..meta.len].chunks(meta.stride)));
+            self.current_buffer = Some((meta, buf[0..meta.len].chunks_mut(meta.stride)));
         }
     }
 }

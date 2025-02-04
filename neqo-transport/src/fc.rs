@@ -105,12 +105,8 @@ where
     /// This is `Some` with the active limit if `blocked` has been called,
     /// if a blocking frame has not been sent (or it has been lost), and
     /// if the blocking condition remains.
-    const fn blocked_needed(&self) -> Option<u64> {
-        if self.blocked_frame && self.limit < self.blocked_at {
-            Some(self.blocked_at - 1)
-        } else {
-            None
-        }
+    fn blocked_needed(&self) -> Option<u64> {
+        (self.blocked_frame && self.limit < self.blocked_at).then(|| self.blocked_at - 1)
     }
 
     /// Clear the need to send a blocked frame.

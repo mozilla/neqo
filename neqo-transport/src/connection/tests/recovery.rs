@@ -163,7 +163,7 @@ fn pto_initial() {
     const INITIAL_PTO: Duration = Duration::from_millis(300);
     let mut now = now();
 
-    // This tests makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
+    // This test makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
     qdebug!("---- client: generate CH");
     let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let pkt1 = client.process_output(now).dgram();
@@ -397,7 +397,7 @@ fn pto_handshake_frames() {
 fn handshake_ack_pto() {
     const RTT: Duration = Duration::from_millis(10);
     let mut now = now();
-    // This tests makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
+    // This test makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
     // to work.
     let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let mut server = default_server();
@@ -581,7 +581,7 @@ fn lost_but_kept_and_lr_timer() {
 fn loss_time_past_largest_acked() {
     const RTT: Duration = Duration::from_secs(10);
     const INCR: Duration = Duration::from_millis(1);
-    // This tests makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
+    // This test makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
     // to work.
     let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let mut server = default_server();
@@ -760,7 +760,7 @@ fn expected_pto(rtt: Duration) -> Duration {
 
 #[test]
 fn fast_pto() {
-    // This tests makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
+    // This test makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
     // to work.
     let mut client = new_client(
         ConnectionParameters::default()
@@ -803,7 +803,7 @@ fn fast_pto() {
 /// based on the "true" value of the timer.
 #[test]
 fn fast_pto_persistent_congestion() {
-    // This tests makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
+    // This test makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
     // to work.
     let mut client = new_client(
         ConnectionParameters::default()
