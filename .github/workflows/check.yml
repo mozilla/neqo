@@ -35,6 +35,8 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           sparse-checkout: Cargo.toml
+          persist-credentials: false
+
       - id: toolchains
         run: |
           msrv="$(grep rust-version Cargo.toml | tr -d '"' | cut -f3 -d\ )"
@@ -59,6 +61,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/rust
         with:
@@ -83,11 +87,12 @@ jobs:
         env:
           RUST_LOG: trace
           RUST_BACKTRACE: 1
+          TOOLCHAIN: ${{ matrix.rust-toolchain }}
         run: |
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
-          if [ "${{ matrix.rust-toolchain }}" == "nightly" ]; then
+          if [ "$TOOLCHAIN" == "nightly" ]; then
             cargo llvm-cov nextest $BUILD_TYPE --locked --mcdc --include-ffi --features ci --profile ci --codecov --output-path codecov.json
           else
             cargo nextest run $BUILD_TYPE --locked --features ci --profile ci
@@ -118,10 +123,10 @@ jobs:
           verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        if: matrix.type == 'debug' && matrix.rust-toolchain == 'nightly'
+        if: ${{ matrix.type == 'debug' && matrix.rust-toolchain == 'nightly' }}
 
       - uses: codecov/test-results-action@4e79e65778be1cecd5df25e14af1eafb6df80ea9 # v1.0.2
-        if: always()
+        if: ${{ always() }}
         with:
           files: target/nextest/ci/junit.xml
           fail_ci_if_error: false
@@ -129,7 +134,7 @@ jobs:
           verbose: true
 
       - name: Save simulation seeds artifact
-        if: always()
+        if: ${{ always() }}
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
@@ -141,9 +146,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
       - run: cargo update -w --locked
 
   bench:
     needs: [check]
-    if: github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks }}
     uses: ./.github/workflows/bench.yml
