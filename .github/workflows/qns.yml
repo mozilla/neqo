@@ -168,7 +168,7 @@ jobs:
 
   report:
     name: Report results
-    if: ${{ github.event_name != 'push' }}
+    if: ${{ !cancelled() && github.event_name != 'push' }}
     needs: [run-qns, implementations]
     runs-on: ubuntu-latest
     steps:
