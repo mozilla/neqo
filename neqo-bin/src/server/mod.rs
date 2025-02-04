@@ -193,7 +193,7 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
 
 #[allow(clippy::module_name_repetitions)]
 pub trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<Datagram<&[u8]>>, now: Instant) -> Output;
+    fn process(&mut self, dgram: Option<Datagram<&mut [u8]>>, now: Instant) -> Output;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }
@@ -243,7 +243,7 @@ impl ServerRunner {
         timeout: &mut Option<Pin<Box<Sleep>>>,
         sockets: &mut [(SocketAddr, crate::udp::Socket)],
         now: &dyn Fn() -> Instant,
-        mut input_dgram: Option<Datagram<&[u8]>>,
+        mut input_dgram: Option<Datagram<&mut [u8]>>,
     ) -> Result<(), io::Error> {
         loop {
             match server.process(input_dgram.take(), now()) {
