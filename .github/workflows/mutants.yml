@@ -17,12 +17,13 @@ permissions:
 
 jobs:
   mutants:
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - id: nss-version
         run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
@@ -37,21 +38,26 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Find incremental mutants
-        if: github.event_name == 'pull_request'
+        id: mutants
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        if: ${{ github.event_name == 'pull_request' }}
         run: |
-          git diff origin/${{ github.base_ref }}.. > pr.diff
+          git diff "origin/$BASE_REF".. > pr.diff
           set -o pipefail
           cargo mutants --test-tool=nextest --no-shuffle -j 2 -vV --in-diff pr.diff | tee results.txt || true
-          echo 'TITLE=Incremental Mutants' >> "$GITHUB_ENV"
+          echo 'title=Incremental Mutants' >> "$GITHUB_OUTPUT"
 
       - name: Find mutants
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
           set -o pipefail
           cargo mutants --test-tool=nextest -vV --in-place | tee results.txt || true
-          echo 'TITLE=All Mutants' >> "$GITHUB_ENV"
+          echo 'title=All Mutants' >> "$GITHUB_OUTPUT"
 
       - name: Post step summary
+        env:
+          TITLE: ${{ steps.mutants.outputs.title }}
         run: |
           {
             echo "### $TITLE"

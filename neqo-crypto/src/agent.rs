@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::unwrap_used)] // Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed.
+
 use std::{
     cell::RefCell,
     ffi::{CStr, CString},
@@ -122,7 +124,11 @@ macro_rules! preinfo_arg {
         pub fn $v(&self) -> Option<$t> {
             match self.info.valuesSet & ssl::$m {
                 0 => None,
-                _ => Some(<$t>::try_from(self.info.$f).unwrap()),
+                _ => Some(
+                    <$t>::try_from(self.info.$f)
+                        .inspect_err(|e| qdebug!("Invalid value in preinfo: {e:?}"))
+                        .ok()?,
+                ),
             }
         }
     };
@@ -158,12 +164,11 @@ impl SecretAgentPreInfo {
         self.info.canSendEarlyData != 0
     }
 
-    /// # Panics
+    /// # Errors
     ///
     /// If `usize` is less than 32 bits and the value is too large.
-    #[must_use]
-    pub fn max_early_data(&self) -> usize {
-        usize::try_from(self.info.maxEarlyDataSize).unwrap()
+    pub fn max_early_data(&self) -> Res<usize> {
+        Ok(usize::try_from(self.info.maxEarlyDataSize)?)
     }
 
     /// Was ECH accepted.
@@ -345,7 +350,6 @@ impl SecretAgent {
         Ok(fd)
     }
 
-    #[allow(clippy::missing_const_for_fn)]
     unsafe extern "C" fn auth_complete_hook(
         arg: *mut c_void,
         _fd: *mut ssl::PRFileDesc,
@@ -544,9 +548,7 @@ impl SecretAgent {
 
         // NSS inherited an idiosyncratic API as a result of having implemented NPN
         // before ALPN.  For that reason, we need to put the "best" option last.
-        let (first, rest) = protocols
-            .split_first()
-            .expect("at least one ALPN value needed");
+        let (first, rest) = protocols.split_first().ok_or(Error::InternalError)?;
         for v in rest {
             add(v.as_ref());
         }
@@ -585,14 +587,16 @@ impl SecretAgent {
     // This function tracks whether handshake() or handshake_raw() was used
     // and prevents the other from being used.
     fn set_raw(&mut self, r: bool) -> Res<()> {
-        if self.raw.is_none() {
+        if let Some(raw) = self.raw {
+            if raw == r {
+                Ok(())
+            } else {
+                Err(Error::MixedHandshakeMethod)
+            }
+        } else {
             self.secrets.register(self.fd)?;
             self.raw = Some(r);
             Ok(())
-        } else if self.raw.unwrap() == r {
-            Ok(())
-        } else {
-            Err(Error::MixedHandshakeMethod)
         }
     }
 
@@ -878,12 +882,11 @@ impl Client {
         arg: *mut c_void,
     ) -> ssl::SECStatus {
         let mut info: MaybeUninit<ssl::SSLResumptionTokenInfo> = MaybeUninit::uninit();
-        let info_res = &ssl::SSL_GetResumptionTokenInfo(
-            token,
-            len,
-            info.as_mut_ptr(),
-            c_uint::try_from(std::mem::size_of::<ssl::SSLResumptionTokenInfo>()).unwrap(),
-        );
+        let Ok(info_len) = c_uint::try_from(std::mem::size_of::<ssl::SSLResumptionTokenInfo>())
+        else {
+            return ssl::SECFailure;
+        };
+        let info_res = &ssl::SSL_GetResumptionTokenInfo(token, len, info.as_mut_ptr(), info_len);
         if info_res.is_err() {
             // Ignore the token.
             return ssl::SECSuccess;
@@ -893,8 +896,12 @@ impl Client {
             // Ignore the token.
             return ssl::SECSuccess;
         }
-        let resumption = arg.cast::<Vec<ResumptionToken>>().as_mut().unwrap();
-        let len = usize::try_from(len).unwrap();
+        let Some(resumption) = arg.cast::<Vec<ResumptionToken>>().as_mut() else {
+            return ssl::SECFailure;
+        };
+        let Ok(len) = usize::try_from(len) else {
+            return ssl::SECFailure;
+        };
         let mut v = Vec::with_capacity(len);
         v.extend_from_slice(null_safe_slice(token, len));
         qdebug!("[{fd:p}] Got resumption token {}", hex_snip_middle(&v));

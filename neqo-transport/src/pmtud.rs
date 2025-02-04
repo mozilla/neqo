@@ -199,7 +199,7 @@ impl Pmtud {
         qinfo!(
             "PMTUD stopped, PLPMTU is now {}, raise timer {:?}",
             self.mtu,
-            self.raise_timer.unwrap()
+            self.raise_timer
         );
     }
 
@@ -361,6 +361,7 @@ mod tests {
         )
     }
 
+    #[cfg(test)]
     fn assert_mtu(pmtud: &Pmtud, mtu: usize) {
         let idx = pmtud
             .search_table
@@ -373,6 +374,7 @@ mod tests {
         }
     }
 
+    #[cfg(test)]
     fn pmtud_step(
         pmtud: &mut Pmtud,
         stats: &mut Stats,

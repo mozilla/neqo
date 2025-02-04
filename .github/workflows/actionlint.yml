@@ -23,10 +23,35 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
       - name: Download actionlint
         id: get_actionlint
         run: bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+
       - name: Check workflow files
+        env:
+          ACTIONLINT: ${{ steps.get_actionlint.outputs.executable }}
         run: |
           echo "::add-matcher::.github/actionlint-matcher.json"
-          ${{ steps.get_actionlint.outputs.executable }} -color
+          $ACTIONLINT -color
+
+  zizmor:
+    name: zizmor 🌈
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@4db96194c378173c656ce18a155ffc14a9fc4355 # v5.2.2
+
+      - run: uvx zizmor --persona auditor --format sarif . > results.sarif
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: github/codeql-action/upload-sarif@dd746615b3b9d728a6a37ca2045b68ca76d4841a # v3.28.8
+        with:
+          sarif_file: results.sarif
+          category: zizmor

@@ -32,12 +32,12 @@ simulate!(
     connect_direct,
     [
         ConnectionNode::new_client(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
         ConnectionNode::new_server(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
@@ -60,7 +60,9 @@ simulate!(
     idle_timeout_crazy_rtt,
     [
         ConnectionNode::new_client(
-            ConnectionParameters::default().idle_timeout(weeks(1000)),
+            ConnectionParameters::default()
+                .idle_timeout(weeks(1000))
+                .mlkem(false),
             boxed![ReachState::new(State::Confirmed),],
             boxed![ReachState::new(State::Closed(CloseReason::Transport(
                 Error::IdleTimeout
@@ -69,7 +71,9 @@ simulate!(
         Delay::new(weeks(6)..weeks(6)),
         Drop::percentage(10),
         ConnectionNode::new_server(
-            ConnectionParameters::default().idle_timeout(weeks(1000)),
+            ConnectionParameters::default()
+                .idle_timeout(weeks(1000))
+                .mlkem(false),
             boxed![ReachState::new(State::Confirmed),],
             boxed![ReachState::new(State::Closed(CloseReason::Transport(
                 Error::IdleTimeout
@@ -92,13 +96,13 @@ simulate!(
     connect_fixed_rtt,
     [
         ConnectionNode::new_client(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
         Delay::new(DELAY..DELAY),
         ConnectionNode::new_server(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
@@ -110,14 +114,14 @@ simulate!(
     connect_taildrop_jitter,
     [
         ConnectionNode::new_client(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
         TailDrop::dsl_downlink(),
         Delay::new(ZERO..JITTER),
         ConnectionNode::new_server(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
@@ -130,13 +134,13 @@ simulate!(
     connect_taildrop,
     [
         ConnectionNode::new_client(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),
         TailDrop::dsl_downlink(),
         ConnectionNode::new_server(
-            ConnectionParameters::default(),
+            ConnectionParameters::default().mlkem(false),
             [],
             boxed![ReachState::new(State::Confirmed)]
         ),

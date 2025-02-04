@@ -291,6 +291,7 @@ The call to function `receive` may produce `Http3ClientEvent::DataReadable`. Act
 data is done in the `read_data` function.
 */
 #[derive(Debug)]
+#[allow(clippy::module_name_repetitions)]
 pub struct Http3Connection {
     role: Role,
     pub state: Http3State,
@@ -722,13 +723,13 @@ impl Http3Connection {
                 match conn.stream_fairness(stream_id, true) {
                     Ok(()) | Err(neqo_transport::Error::InvalidStreamId) => (),
                     Err(e) => return Err(Error::from(e)),
-                };
+                }
                 qinfo!("[{self}] A new WebTransport stream {stream_id} for session {session_id}");
             }
             NewStreamType::Unknown => {
                 conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
             }
-        };
+        }
 
         match stream_type {
             NewStreamType::Control | NewStreamType::Decoder | NewStreamType::Encoder => {
@@ -886,7 +887,7 @@ impl Http3Connection {
 
         send_message
             .http_stream()
-            .unwrap()
+            .ok_or(Error::Internal)?
             .send_headers(&final_headers, conn)?;
 
         self.add_streams(
@@ -1177,9 +1178,13 @@ impl Http3Connection {
                             stream_id,
                             events,
                             self.role,
-                            self.recv_streams.remove(&stream_id).unwrap(),
-                            self.send_streams.remove(&stream_id).unwrap(),
-                        )));
+                            self.recv_streams
+                                .remove(&stream_id)
+                                .ok_or(Error::Internal)?,
+                            self.send_streams
+                                .remove(&stream_id)
+                                .ok_or(Error::Internal)?,
+                        )?));
                     self.add_streams(
                         stream_id,
                         Box::new(Rc::clone(&extended_conn)),
@@ -1253,7 +1258,7 @@ impl Http3Connection {
             send_events,
             recv_events,
             true,
-        );
+        )?;
         Ok(stream_id)
     }
 
@@ -1280,7 +1285,7 @@ impl Http3Connection {
             send_events,
             recv_events,
             false,
-        );
+        )?;
         Ok(())
     }
 
@@ -1292,8 +1297,8 @@ impl Http3Connection {
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
         local: bool,
-    ) {
-        webtransport_session.borrow_mut().add_stream(stream_id);
+    ) -> Res<()> {
+        webtransport_session.borrow_mut().add_stream(stream_id)?;
         if stream_id.stream_type() == StreamType::UniDi {
             if local {
                 self.send_streams.insert(
@@ -1335,6 +1340,7 @@ impl Http3Connection {
                 )),
             );
         }
+        Ok(())
     }
 
     pub fn webtransport_send_datagram(
@@ -1476,7 +1482,7 @@ impl Http3Connection {
             .http_stream()
             .ok_or(Error::InvalidStreamId)?;
 
-        if stream.maybe_update_priority(priority) {
+        if stream.maybe_update_priority(priority)? {
             self.control_stream_local.queue_update_priority(stream_id);
             Ok(true)
         } else {
@@ -1554,7 +1560,7 @@ impl Http3Connection {
         let stream = self.recv_streams.remove(&stream_id);
         if let Some(s) = &stream {
             if s.stream_type() == Http3StreamType::ExtendedConnect {
-                self.send_streams.remove(&stream_id).unwrap();
+                self.send_streams.remove(&stream_id)?;
                 if let Some(wt) = s.webtransport() {
                     self.remove_extended_connect(&wt, conn);
                 }
@@ -1571,7 +1577,7 @@ impl Http3Connection {
         let stream = self.send_streams.remove(&stream_id);
         if let Some(s) = &stream {
             if s.stream_type() == Http3StreamType::ExtendedConnect {
-                if let Some(wt) = self.recv_streams.remove(&stream_id).unwrap().webtransport() {
+                if let Some(wt) = self.recv_streams.remove(&stream_id)?.webtransport() {
                     self.remove_extended_connect(&wt, conn);
                 }
             }

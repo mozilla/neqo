@@ -110,8 +110,10 @@ fn bad_tls_version() {
     let mut server = default_server();
 
     let dgram = client.process_output(now()).dgram();
-    assert!(dgram.is_some());
-    let dgram = server.process(dgram, now()).dgram();
+    let dgram2 = client.process_output(now()).dgram();
+    assert!(dgram.is_some() && dgram2.is_some());
+    server.process_input(dgram.unwrap(), now());
+    let dgram = server.process(dgram2, now()).dgram();
     assert_eq!(
         *server.state(),
         State::Closed(CloseReason::Transport(Error::ProtocolViolation))

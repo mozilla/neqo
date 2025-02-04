@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::unwrap_used)] // Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed.
+
 use std::{os::raw::c_void, pin::Pin};
 
 use neqo_common::qdebug;
@@ -40,7 +42,6 @@ impl From<SSLSecretDirection::Type> for SecretDirection {
 }
 
 #[derive(Debug, Default)]
-#[allow(clippy::module_name_repetitions)]
 pub struct DirectionalSecrets {
     // We only need to maintain 3 secrets for the epochs used during the handshake.
     secrets: [Option<SymKey>; 3],

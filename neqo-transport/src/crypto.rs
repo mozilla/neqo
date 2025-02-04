@@ -37,10 +37,9 @@ use crate::{
     tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler},
     tracking::PacketNumberSpace,
     version::Version,
-    Error, Res,
+    ConnectionParameters, Error, Res,
 };
 
-const MAX_AUTH_TAG: usize = 32;
 /// The number of invocations remaining on a write cipher before we try
 /// to update keys.  This has to be much smaller than the number returned
 /// by `CryptoDxState::limit` or updates will happen too often.  As we don't
@@ -69,6 +68,7 @@ type TpHandler = Rc<RefCell<TransportParametersHandler>>;
 impl Crypto {
     pub fn new(
         version: Version,
+        conn_params: &ConnectionParameters,
         mut agent: Agent,
         protocols: Vec<String>,
         tphandler: TpHandler,
@@ -79,34 +79,30 @@ impl Crypto {
             TLS_AES_256_GCM_SHA384,
             TLS_CHACHA20_POLY1305_SHA256,
         ])?;
-        match &mut agent {
-            Agent::Server(c) => {
-                // Clients do not send mlkem768x25519 shares by default, but servers should accept
-                // them.
-                c.set_groups(&[
-                    TLS_GRP_KEM_MLKEM768X25519,
-                    TLS_GRP_EC_X25519,
-                    TLS_GRP_EC_SECP256R1,
-                    TLS_GRP_EC_SECP384R1,
-                    TLS_GRP_EC_SECP521R1,
-                ])?;
-            }
-            Agent::Client(c) => {
-                c.set_groups(&[
-                    TLS_GRP_EC_X25519,
-                    TLS_GRP_EC_SECP256R1,
-                    TLS_GRP_EC_SECP384R1,
-                    TLS_GRP_EC_SECP521R1,
-                ])?;
+        agent.set_groups(if conn_params.mlkem_enabled() {
+            &[
+                TLS_GRP_KEM_MLKEM768X25519,
+                TLS_GRP_EC_X25519,
+                TLS_GRP_EC_SECP256R1,
+                TLS_GRP_EC_SECP384R1,
+                TLS_GRP_EC_SECP521R1,
+            ]
+        } else {
+            &[
+                TLS_GRP_EC_X25519,
+                TLS_GRP_EC_SECP256R1,
+                TLS_GRP_EC_SECP384R1,
+                TLS_GRP_EC_SECP521R1,
+            ]
+        })?;
+        if let Agent::Client(c) = &mut agent {
+            // Configure clients to send additional key shares to reduce the rate of HRRs
+            // when enabling MLKEM.
+            c.send_additional_key_shares(usize::from(conn_params.mlkem_enabled()))?;
 
-                // Configure clients to send both X25519 and P256 to reduce
-                // the rate of HRRs.
-                c.send_additional_key_shares(1)?;
-
-                // Always enable 0-RTT on the client, but the server needs
-                // more configuration passed to server_enable_0rtt.
-                c.enable_0rtt()?;
-            }
+            // Always enable 0-RTT on the client, but the server needs
+            // more configuration passed to server_enable_0rtt.
+            c.enable_0rtt()?;
         }
         agent.set_alpn(&protocols)?;
         agent.disable_end_of_early_data()?;
@@ -636,33 +632,40 @@ impl CryptoDxState {
         self.used_pn.end
     }
 
-    pub fn encrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+    pub fn encrypt<'a>(
+        &mut self,
+        pn: PacketNumber,
+        hdr: Range<usize>,
+        data: &'a mut [u8],
+    ) -> Res<&'a mut [u8]> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
         qtrace!(
-            "[{self}] encrypt pn={pn} hdr={} body={}",
-            hex(hdr),
-            hex(body)
+            "[{self}] encrypt_in_place pn={pn} hdr={} body={}",
+            hex(data[hdr.clone()].as_ref()),
+            hex(data[hdr.end..].as_ref())
         );
 
         // The numbers in `Self::limit` assume a maximum packet size of `LIMIT`.
         // Adjust them as we encounter larger packets.
-        debug_assert!(body.len() < 65536);
-        if body.len() > self.largest_packet_len {
+        let body_len = data.len() - hdr.len() - self.aead.expansion();
+        debug_assert!(body_len <= u16::MAX.into());
+        if body_len > self.largest_packet_len {
             let new_bits = usize::leading_zeros(self.largest_packet_len - 1)
-                - usize::leading_zeros(body.len() - 1);
+                - usize::leading_zeros(body_len - 1);
             self.invocations >>= new_bits;
-            self.largest_packet_len = body.len();
+            self.largest_packet_len = body_len;
         }
         self.invoked()?;
 
-        let size = body.len() + MAX_AUTH_TAG;
-        let mut out = vec![0; size];
-        let res = self.aead.encrypt(pn, hdr, body, &mut out)?;
+        let (prev, data) = data.split_at_mut(hdr.end);
+        // `prev` may have already-encrypted packets this one is being coalesced with.
+        // Use only the actual current header for AAD.
+        let data = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
 
-        qtrace!("[{self}] encrypt ct={}", hex(res));
+        qtrace!("[{self}] encrypt ct={}", hex(&data));
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
-        Ok(res.to_vec())
+        Ok(data)
     }
 
     #[must_use]
@@ -670,21 +673,27 @@ impl CryptoDxState {
         self.aead.expansion()
     }
 
-    pub fn decrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+    pub fn decrypt<'a>(
+        &mut self,
+        pn: PacketNumber,
+        hdr: Range<usize>,
+        data: &'a mut [u8],
+    ) -> Res<&'a mut [u8]> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
         qtrace!(
-            "[{self}] decrypt pn={pn} hdr={} body={}",
-            hex(hdr),
-            hex(body)
+            "[{self}] decrypt_in_place pn={pn} hdr={} body={}",
+            hex(data[hdr.clone()].as_ref()),
+            hex(data[hdr.end..].as_ref())
         );
         self.invoked()?;
-        let mut out = vec![0; body.len()];
-        let res = self.aead.decrypt(pn, hdr, body, &mut out)?;
+        let (hdr, data) = data.split_at_mut(hdr.end);
+        let data = self.aead.decrypt_in_place(pn, hdr, data)?;
         self.used(pn)?;
-        Ok(res.to_vec())
+        Ok(data)
     }
 
-    #[cfg(all(test, not(feature = "disable-encryption")))]
+    #[cfg(not(feature = "disable-encryption"))]
+    #[cfg(test)]
     pub(crate) fn test_default() -> Self {
         // This matches the value in packet.rs
         const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
@@ -1271,6 +1280,7 @@ impl CryptoStates {
     }
 
     #[cfg(all(not(feature = "disable-encryption"), test))]
+    #[cfg(test)]
     pub(crate) fn test_chacha() -> Self {
         const SECRET: &[u8] = &[
             0x9a, 0xc3, 0x12, 0xa7, 0xf8, 0x77, 0x46, 0x8e, 0xbe, 0x69, 0x42, 0x27, 0x48, 0xad,
@@ -1411,10 +1421,9 @@ impl CryptoStreams {
     }
 
     pub fn acked(&mut self, token: &CryptoRecoveryToken) {
-        self.get_mut(token.space)
-            .unwrap()
-            .tx
-            .mark_as_acked(token.offset, token.length);
+        if let Some(cs) = self.get_mut(token.space) {
+            cs.tx.mark_as_acked(token.offset, token.length);
+        }
     }
 
     pub fn lost(&mut self, token: &CryptoRecoveryToken) {
@@ -1432,6 +1441,10 @@ impl CryptoStreams {
                 cs.tx.unmark_sent();
             }
         }
+    }
+
+    pub fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
+        self.get_mut(space).map_or(true, |cs| cs.tx.is_empty())
     }
 
     const fn get(&self, space: PacketNumberSpace) -> Option<&CryptoStream> {
@@ -1498,7 +1511,8 @@ impl CryptoStreams {
             // - remaining space, less the header, which counts only one byte for the length at
             //   first to avoid underestimating length
             let length = min(data.len(), builder.remaining() - header_len);
-            header_len += Encoder::varint_len(u64::try_from(length).unwrap()) - 1;
+            header_len +=
+                Encoder::varint_len(u64::try_from(length).expect("usize fits in u64")) - 1;
             let length = min(data.len(), builder.remaining() - header_len);
 
             builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
@@ -1507,34 +1521,92 @@ impl CryptoStreams {
             Some((offset, length))
         }
 
-        let cs = self.get_mut(space).unwrap();
-        if let Some((offset, data)) = cs.tx.next_bytes() {
-            let written = if sni_slicing && offset == 0 {
-                if let Some(sni) = find_sni(data) {
-                    // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
-                    let mid = sni.start + (sni.end - sni.start) / 2;
-                    let (left, right) = data.split_at(mid);
-                    [
-                        write_chunk(offset + mid as u64, right, builder),
-                        write_chunk(offset, left, builder),
-                    ]
-                } else {
-                    // No SNI found, write the entire data.
-                    [write_chunk(offset, data, builder), None]
-                }
+        fn mark_as_sent(
+            cs: &mut CryptoStream,
+            space: PacketNumberSpace,
+            tokens: &mut Vec<RecoveryToken>,
+            offset: u64,
+            len: usize,
+            stats: &mut FrameStats,
+        ) {
+            cs.tx.mark_as_sent(offset, len);
+            qdebug!("CRYPTO for {space} offset={offset}, len={len}");
+            tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
+                space,
+                offset,
+                length: len,
+            }));
+            stats.crypto += 1;
+        }
+
+        #[allow(clippy::type_complexity)]
+        const fn limit_chunks<'a>(
+            left: (u64, &'a [u8]),
+            right: (u64, &'a [u8]),
+            limit: usize,
+        ) -> ((u64, &'a [u8]), (u64, &'a [u8])) {
+            let (left_offset, mut left) = left;
+            let (mut right_offset, mut right) = right;
+            if left.len() + right.len() <= limit {
+                // Nothing to do. Both chunks will fit into one packet, meaning the SNI isn't spread
+                // over multiple packets. But at least it's in two unordered CRYPTO frames.
+            } else if left.len() <= limit {
+                // `left` is short enough to fit into this packet. So send from the *end*
+                // of `right`, so that the second half of the SNI is in another packet.
+                let right_len = right.len() + left.len() - limit;
+                right_offset += right_len as u64;
+                (_, right) = right.split_at(right_len);
+            } else if right.len() <= limit {
+                // `right` is short enough to fit into this packet. So only send a part of `left`.
+                // The SNI begins at the end of `left`, so send the beginnig of it in this packet.
+                (left, _) = left.split_at(limit - right.len());
             } else {
-                // Not at the start of the crypto stream, write the entire data.
-                [write_chunk(offset, data, builder), None]
-            };
-            for (offset, length) in written.into_iter().flatten() {
-                cs.tx.mark_as_sent(offset, length);
-                qdebug!("CRYPTO for {space} offset={offset}, len={length}");
-                tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
-                    space,
-                    offset,
-                    length,
-                }));
-                stats.crypto += 1;
+                // Both chunks are too long to fit into one packet. Just send a part of each.
+                let half_limit = limit / 2;
+                (left, _) = left.split_at(half_limit);
+                (right, _) = right.split_at(half_limit);
+            }
+            ((left_offset, left), (right_offset, right))
+        }
+
+        let Some(cs) = self.get_mut(space) else {
+            return;
+        };
+        let Some((offset, data)) = cs.tx.next_bytes() else {
+            return;
+        };
+        let written = if sni_slicing {
+            if let Some(sni) = find_sni(data) {
+                // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
+                let mid = sni.start + (sni.end - sni.start) / 2;
+                let (left, right) = data.split_at(mid);
+
+                // Truncate the chunks so we can fit them into roughly evenly-filled packets.
+                let packets_needed = data.len().div_ceil(builder.limit());
+                let limit = data.len() / packets_needed;
+                let ((left_offset, left), (right_offset, right)) =
+                    limit_chunks((offset, left), (offset + mid as u64, right), limit);
+                (
+                    write_chunk(right_offset, right, builder),
+                    write_chunk(left_offset, left, builder),
+                )
+            } else {
+                // No SNI found, write the entire data.
+                (write_chunk(offset, data, builder), None)
+            }
+        } else {
+            // SNI slicing disabled, write the entire data.
+            (write_chunk(offset, data, builder), None)
+        };
+
+        match written {
+            (None, None) => (),
+            (None, Some((offset, len))) | (Some((offset, len)), None) => {
+                mark_as_sent(cs, space, tokens, offset, len, stats);
+            }
+            (Some((offset1, len1)), Some((offset2, len2))) => {
+                mark_as_sent(cs, space, tokens, offset1, len1, stats);
+                mark_as_sent(cs, space, tokens, offset2, len2, stats);
             }
         }
     }

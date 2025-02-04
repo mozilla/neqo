@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::unwrap_used)] // Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed.
+
 use std::{
     cmp::min,
     fmt, mem,
@@ -95,10 +97,15 @@ impl RecordList {
         len: c_uint,
         arg: *mut c_void,
     ) -> ssl::SECStatus {
-        let records = arg.cast::<Self>().as_mut().unwrap();
+        let Some(records) = arg.cast::<Self>().as_mut() else {
+            return ssl::SECFailure;
+        };
 
         let slice = null_safe_slice(data, len);
-        records.append(epoch, ContentType::try_from(ct).unwrap(), slice);
+        let Ok(ct) = ContentType::try_from(ct) else {
+            return ssl::SECFailure;
+        };
+        records.append(epoch, ct, slice);
         ssl::SECSuccess
     }
 
@@ -331,7 +338,9 @@ unsafe extern "C" fn agent_available64(mut fd: PrFd) -> prio::PRInt64 {
 
 #[allow(clippy::cast_possible_truncation)]
 unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrStatus {
-    let a = addr.as_mut().unwrap();
+    let Some(a) = addr.as_mut() else {
+        return PR_FAILURE;
+    };
     // Cast is safe because prio::PR_AF_INET is 2
     a.inet.family = prio::PR_AF_INET as prio::PRUint16;
     a.inet.port = 0;
@@ -340,10 +349,11 @@ unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrS
 }
 
 unsafe extern "C" fn agent_getsockopt(_fd: PrFd, opt: *mut prio::PRSocketOptionData) -> PrStatus {
-    let o = opt.as_mut().unwrap();
-    if o.option == prio::PRSockOption::PR_SockOpt_Nonblocking {
-        o.value.non_blocking = 1;
-        return PR_SUCCESS;
+    if let Some(o) = opt.as_mut() {
+        if o.option == prio::PRSockOption::PR_SockOpt_Nonblocking {
+            o.value.non_blocking = 1;
+            return PR_SUCCESS;
+        }
     }
     PR_FAILURE
 }

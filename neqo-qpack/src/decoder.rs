@@ -67,12 +67,9 @@ impl QPackDecoder {
         self.max_table_size
     }
 
-    /// # Panics
-    ///
-    /// If the number of blocked streams is too large.
     #[must_use]
-    pub fn get_blocked_streams(&self) -> u16 {
-        u16::try_from(self.max_blocked_streams).unwrap()
+    pub const fn get_blocked_streams(&self) -> usize {
+        self.max_blocked_streams
     }
 
     /// returns a list of unblocked streams
@@ -184,7 +181,10 @@ impl QPackDecoder {
         }
         if !self.send_buf.is_empty() && self.local_stream_id.is_some() {
             let r = conn
-                .stream_send(self.local_stream_id.unwrap(), &self.send_buf[..])
+                .stream_send(
+                    self.local_stream_id.ok_or(Error::Internal)?,
+                    &self.send_buf[..],
+                )
                 .map_err(|_| Error::DecoderStream)?;
             qdebug!("[{self}] {r} bytes sent");
             self.send_buf.read(r);

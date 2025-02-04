@@ -9,7 +9,6 @@ env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   TOOLCHAIN: stable
-  RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
   PERF_OPT: record -F997 --call-graph fp -g
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
@@ -21,7 +20,7 @@ permissions:
 jobs:
   bench:
     name: Benchmark
-    runs-on: self-hosted
+    runs-on: self-hosted # zizmor: ignore[self-hosted-runner]
     defaults:
       run:
         shell: bash
@@ -29,6 +28,8 @@ jobs:
     steps:
       - name: Checkout neqo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Checkout msquic
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -37,6 +38,7 @@ jobs:
           ref: main
           path: msquic
           submodules: true
+          persist-credentials: false
 
       - name: Checkout gquiche
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -45,9 +47,13 @@ jobs:
           ref: main
           path: gquiche
           submodules: true
+          persist-credentials: false
 
-      - name: Set PATH
-        run: echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
+      - name: Set PATH and environment
+        run: |
+          echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
+          # Append to RUSTFLAGS, which may already be set by the Rust action.
+          echo "RUSTFLAGS=-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS" >> "$GITHUB_ENV"
 
       - name: Install Rust
         uses: ./.github/actions/rust
@@ -61,6 +67,7 @@ jobs:
         run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Install NSS
+        id: nss
         uses: ./.github/actions/nss
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
@@ -68,7 +75,7 @@ jobs:
       - name: Build neqo
         run: |
           cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
-          cargo "+$TOOLCHAIN" build --release --bin neqo-client --bin neqo-server
+          cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
         run: |
@@ -212,7 +219,7 @@ jobs:
           sudo /root/bin/unprep.sh
           # In case the previous test failed:
           sudo ip link set dev lo mtu 65536
-        if: success() || failure() || cancelled()
+        if: ${{ success() || failure() || cancelled() }}
 
       - name: Post-process perf data
         run: |
@@ -256,17 +263,17 @@ jobs:
           cat results.md > "$GITHUB_STEP_SUMMARY"
 
       - name: Remember main-branch push URL
-        if: github.ref == 'refs/heads/main'
+        if: ${{ github.ref == 'refs/heads/main' }}
         run: echo "${{ github.sha }}" > target/criterion/baseline-sha.txt
 
       - name: Store history
-        if: github.ref == 'refs/heads/main'
+        if: ${{ github.ref == 'refs/heads/main' }}
         run: |
           mkdir -p target/criterion-history
           cp -r target/criterion "target/criterion-history/$(date +%s)-${{ github.sha }}"
 
       - name: Cache main-branch results
-        if: github.ref == 'refs/heads/main'
+        if: ${{ github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
           path: ./target/criterion
