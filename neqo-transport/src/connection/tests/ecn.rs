@@ -76,7 +76,9 @@ fn drop_ecn_marked_datagrams() -> fn(Datagram) -> Option<Datagram> {
 #[test]
 fn handshake_delay_with_ecn_blackhole() {
     let start = now();
-    let mut client = default_client();
+    // `handshake_with_modifier` with-multi packet Intial flights will throw off the RTT calculation
+    // below.
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let mut server = default_server();
     let finish = handshake_with_modifier(
         &mut client,

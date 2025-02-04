@@ -17,7 +17,7 @@ use crate::{
     client_events::Http3ClientEvents,
     features::NegotiationState,
     settings::{HSettingType, HSettings},
-    CloseType, Http3StreamInfo, Http3StreamType,
+    CloseType, Http3StreamInfo, Http3StreamType, Res,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -56,7 +56,7 @@ pub(crate) trait ExtendedConnectEvents: Debug {
         reason: SessionCloseReason,
         headers: Option<Vec<Header>>,
     );
-    fn extended_connect_new_stream(&self, stream_info: Http3StreamInfo);
+    fn extended_connect_new_stream(&self, stream_info: Http3StreamInfo) -> Res<()>;
     fn new_datagram(&self, session_id: StreamId, datagram: Vec<u8>);
 }
 

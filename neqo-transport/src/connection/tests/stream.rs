@@ -33,9 +33,13 @@ fn stream_create() {
     let mut client = default_client();
 
     let out = client.process_output(now());
+    let out2 = client.process_output(now());
     let mut server = default_server();
-    let out = server.process(out.dgram(), now());
+    server.process_input(out.dgram().unwrap(), now());
+    let out = server.process(out2.dgram(), now());
 
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
     let out = client.process(out.dgram(), now());
     drop(server.process(out.dgram(), now()));
     assert!(maybe_authenticate(&mut client));
@@ -753,15 +757,20 @@ fn client_fin_reorder() {
 
     // Send ClientHello.
     let client_hs = client.process_output(now());
-    assert!(client_hs.as_dgram_ref().is_some());
+    let client_hs2 = client.process_output(now());
+    assert!(client_hs.as_dgram_ref().is_some() && client_hs2.as_dgram_ref().is_some());
 
-    let server_hs = server.process(client_hs.dgram(), now());
+    server.process_input(client_hs.dgram().unwrap(), now());
+    let server_hs = server.process(client_hs2.dgram(), now());
     assert!(server_hs.as_dgram_ref().is_some()); // ServerHello, etc...
 
     let client_ack = client.process(server_hs.dgram(), now());
     assert!(client_ack.as_dgram_ref().is_some());
 
-    let server_out = server.process(client_ack.dgram(), now());
+    let dgram = server.process(client_ack.dgram(), now());
+    let dgram = client.process(dgram.dgram(), now());
+
+    let server_out = server.process(dgram.dgram(), now());
     assert!(server_out.as_dgram_ref().is_none());
 
     assert!(maybe_authenticate(&mut client));
@@ -1273,13 +1282,17 @@ fn session_flow_control_affects_all_streams() {
 fn connect_w_different_limit(bidi_limit: u64, unidi_limit: u64) {
     let mut client = default_client();
     let out = client.process_output(now());
+    let out2 = client.process_output(now());
     let mut server = new_server(
         ConnectionParameters::default()
             .max_streams(StreamType::BiDi, bidi_limit)
             .max_streams(StreamType::UniDi, unidi_limit),
     );
-    let out = server.process(out.dgram(), now());
+    server.process_input(out.dgram().unwrap(), now());
+    let out = server.process(out2.dgram(), now());
 
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
     let out = client.process(out.dgram(), now());
     drop(server.process(out.dgram(), now()));
 

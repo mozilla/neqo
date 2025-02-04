@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef@sha256:8d7418b380e6a13210a0eee2a672c648cd358aebfc3bfeaa93272e3ba28245aa AS chef
+FROM lukemathwalker/cargo-chef@sha256:ca7d16daba13bfc84d947cb16f54cdaf547c830b4292e58618ccb4747202ef23 AS chef
 
 WORKDIR /app
 
@@ -17,6 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # not compiled with support for SSLKEYLOGFILE.
 # See https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=842292
 ENV NSS_DIR=/nss \
+    NSS_TARGET=Release \
+    NSS_PREBUILT=1 \
     NSPR_DIR=/nspr \
     LD_LIBRARY_PATH=/dist/Release/lib
 
@@ -33,7 +35,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 ADD . /neqo
 RUN set -eux; \
     cd /neqo; \
-    CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release --bin neqo-client --bin neqo-server
+    CARGO_PROFILE_RELEASE_DEBUG=true cargo build --locked --release --bin neqo-client --bin neqo-server
 
 # Copy only binaries to the final image to keep it small.
 

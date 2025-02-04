@@ -106,7 +106,7 @@ impl HpKey {
                         mech,
                         CK_ATTRIBUTE_TYPE::from(CKA_ENCRYPT),
                         *key,
-                        &Item::wrap(&ZERO[..0]), // Borrow a zero-length slice of ZERO.
+                        &Item::wrap(&ZERO[..0])?, // Borrow a zero-length slice of ZERO.
                     )
                 };
                 let context = Context::from_ptr(context_ptr).or(Err(Error::CipherInitFailure))?;
@@ -169,7 +169,7 @@ impl HpKey {
                     ulNonceBits: 96,
                 };
                 let mut output_len: c_uint = 0;
-                let mut param_item = Item::wrap_struct(&params);
+                let mut param_item = Item::wrap_struct(&params)?;
                 secstatus_to_res(unsafe {
                     PK11_Encrypt(
                         **key,

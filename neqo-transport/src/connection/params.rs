@@ -85,6 +85,8 @@ pub struct ConnectionParameters {
     pmtud: bool,
     /// Whether the connection should use SNI slicing.
     sni_slicing: bool,
+    /// Whether to enable mlkem768nistp256-sha256.
+    mlkem: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -93,9 +95,10 @@ impl Default for ConnectionParameters {
             versions: VersionConfig::default(),
             cc_algorithm: CongestionControlAlgorithm::Cubic,
             max_data: LOCAL_MAX_DATA,
-            max_stream_data_bidi_remote: u64::try_from(RECV_BUFFER_SIZE).unwrap(),
-            max_stream_data_bidi_local: u64::try_from(RECV_BUFFER_SIZE).unwrap(),
-            max_stream_data_uni: u64::try_from(RECV_BUFFER_SIZE).unwrap(),
+            max_stream_data_bidi_remote: u64::try_from(RECV_BUFFER_SIZE)
+                .expect("usize fits in u64"),
+            max_stream_data_bidi_local: u64::try_from(RECV_BUFFER_SIZE).expect("usize fits in u64"),
+            max_stream_data_uni: u64::try_from(RECV_BUFFER_SIZE).expect("usize fits in u64"),
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
             ack_ratio: DEFAULT_ACK_RATIO,
@@ -110,6 +113,7 @@ impl Default for ConnectionParameters {
             pacing: true,
             pmtud: false,
             sni_slicing: true,
+            mlkem: true,
         }
     }
 }
@@ -378,6 +382,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn sni_slicing(mut self, sni_slicing: bool) -> Self {
         self.sni_slicing = sni_slicing;
+        self
+    }
+
+    #[must_use]
+    pub const fn mlkem_enabled(&self) -> bool {
+        self.mlkem
+    }
+
+    #[must_use]
+    pub const fn mlkem(mut self, mlkem: bool) -> Self {
+        self.mlkem = mlkem;
         self
     }
 

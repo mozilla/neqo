@@ -381,7 +381,7 @@ impl LossRecoverySpaces {
             PacketNumberSpace::ApplicationData,
             "discarding application space"
         );
-        sp.unwrap().remove_ignored()
+        sp.expect("has not been removed").remove_ignored()
     }
 
     #[must_use]
@@ -515,25 +515,15 @@ impl LossRecovery {
     }
 
     /// Drop all 0rtt packets.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the largest acknowledged or `loss_time` is already set.
-    /// The client should not have received any ACK frames in the
-    /// application data packet number space when it drops 0-RTT.
     pub fn drop_0rtt(&mut self, primary_path: &PathRef, now: Instant) -> Vec<SentPacket> {
-        assert!(self
-            .spaces
-            .get(PacketNumberSpace::ApplicationData)
-            .unwrap()
-            .largest_acked
-            .is_none());
-        let mut dropped = self
-            .spaces
-            .get_mut(PacketNumberSpace::ApplicationData)
-            .unwrap()
-            .remove_ignored()
-            .collect::<Vec<_>>();
+        let Some(sp) = self.spaces.get_mut(PacketNumberSpace::ApplicationData) else {
+            return Vec::new();
+        };
+        if sp.largest_acked.is_some() {
+            qwarn!("0-RTT packets already acknowledged, not dropping");
+            return Vec::new();
+        }
+        let mut dropped = sp.remove_ignored().collect::<Vec<_>>();
         let mut path = primary_path.borrow_mut();
         for p in &mut dropped {
             path.discard_packet(p, now, &mut self.stats.borrow_mut());
@@ -556,16 +546,11 @@ impl LossRecovery {
     }
 
     /// Whether to probe the path.
-    ///
-    /// # Panics
-    ///
-    /// Assumes application data packet number space to be present.
     #[must_use]
     pub fn should_probe(&self, pto: Duration, now: Instant) -> bool {
         self.spaces
             .get(PacketNumberSpace::ApplicationData)
-            .unwrap()
-            .should_probe(pto, now)
+            .is_some_and(|sp| sp.should_probe(pto, now))
     }
 
     /// Record an RTT sample.
@@ -591,8 +576,6 @@ impl LossRecovery {
     }
 
     /// Returns (acked packets, lost packets)
-    #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::missing_panics_doc)]
     pub fn on_ack_received<R>(
         &mut self,
         primary_path: &PathRef,
@@ -646,15 +629,13 @@ impl LossRecovery {
         // We need to ensure that we have sent any PTO probes before they are removed
         // as we rely on the count of in-flight packets to determine whether to send
         // another probe.  Removing them too soon would result in not sending on PTO.
-        let loss_delay = primary_path.borrow().rtt().loss_delay();
         let cleanup_delay = self.pto_period(primary_path.borrow().rtt());
+        let Some(sp) = self.spaces.get_mut(pn_space) else {
+            return (Vec::new(), Vec::new());
+        };
+        let loss_delay = primary_path.borrow().rtt().loss_delay();
         let mut lost = Vec::new();
-        self.spaces.get_mut(pn_space).unwrap().detect_lost_packets(
-            now,
-            loss_delay,
-            cleanup_delay,
-            &mut lost,
-        );
+        sp.detect_lost_packets(now, loss_delay, cleanup_delay, &mut lost);
         self.stats.borrow_mut().lost += lost.len();
 
         // Tell the congestion controller about any lost packets.
@@ -829,18 +810,10 @@ impl LossRecovery {
             self.pto_state = Some(PtoState::new(pn_space, allow_probes));
         }
 
-        self.pto_state
-            .as_mut()
-            .unwrap()
-            .count_pto(&mut self.stats.borrow_mut());
-
-        qlog::metrics_updated(
-            &self.qlog,
-            &[QlogMetric::PtoCount(
-                self.pto_state.as_ref().unwrap().count(),
-            )],
-            now,
-        );
+        if let Some(st) = &mut self.pto_state {
+            st.count_pto(&mut self.stats.borrow_mut());
+            qlog::metrics_updated(&self.qlog, &[QlogMetric::PtoCount(st.count())], now);
+        }
     }
 
     /// This checks whether the PTO timer has fired and fires it if needed.
@@ -856,14 +829,14 @@ impl LossRecovery {
                 allow_probes[*pn_space] = true;
                 if t <= now {
                     qdebug!("[{self}] PTO timer fired for {pn_space}");
-                    let space = self.spaces.get_mut(*pn_space).unwrap();
-                    lost.extend(
-                        space
-                            .pto_packets(PtoState::pto_packet_count(*pn_space))
-                            .cloned(),
-                    );
-
-                    pto_space = pto_space.or(Some(*pn_space));
+                    if let Some(space) = self.spaces.get_mut(*pn_space) {
+                        lost.extend(
+                            space
+                                .pto_packets(PtoState::pto_packet_count(*pn_space))
+                                .cloned(),
+                        );
+                        pto_space = pto_space.or(Some(*pn_space));
+                    }
                 }
             }
         }

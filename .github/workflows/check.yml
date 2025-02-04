@@ -45,7 +45,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # TODO: Switch to ubuntu-latest-arm when available as a tag.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
         rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
         type: [debug]
         include:
@@ -76,7 +77,7 @@ jobs:
       - name: Check
         run: |
           # shellcheck disable=SC2086
-          cargo check $BUILD_TYPE --all-targets --features ci
+          cargo check $BUILD_TYPE --locked --all-targets --features ci
 
       - name: Run tests and determine coverage
         env:
@@ -87,9 +88,9 @@ jobs:
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "${{ matrix.rust-toolchain }}" == "nightly" ]; then
-            cargo llvm-cov nextest $BUILD_TYPE --mcdc --include-ffi --features ci --profile ci --codecov --output-path codecov.json
+            cargo llvm-cov nextest $BUILD_TYPE --locked --mcdc --include-ffi --features ci --profile ci --codecov --output-path codecov.json
           else
-            cargo nextest run $BUILD_TYPE --features ci --profile ci
+            cargo nextest run $BUILD_TYPE --locked --features ci --profile ci
           fi
 
       - name: Run client/server transfer

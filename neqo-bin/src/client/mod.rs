@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![allow(clippy::future_not_send)]
+#![allow(clippy::unwrap_used)] // This is example code.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -383,7 +384,7 @@ trait Client {
     fn process_output(&mut self, now: Instant) -> Output;
     fn process_multiple_input<'a>(
         &mut self,
-        dgrams: impl IntoIterator<Item = Datagram<&'a [u8]>>,
+        dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
         now: Instant,
     );
     fn has_events(&self) -> bool;
