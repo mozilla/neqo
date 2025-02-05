@@ -155,11 +155,11 @@ jobs:
             local cc=$2
             local pacing=$3
             local flags=$4
-            if [ "$cc" != "" ]; then
+            if [[ "$cc" != "" ]]; then
               CMD=${CMD//_cc/--cc $cc}
               EXT="-$cc"
             fi
-            if [ "$pacing" == "on" ]; then
+            if [[ "$pacing" == "on" ]]; then
               CMD=${CMD//_pacing/}
               EXT="$EXT-pacing"
             else
@@ -174,7 +174,7 @@ jobs:
           for server in neqo google msquic; do
             for client in neqo google msquic; do
               # We are not interested in google as the server, or msquic as the client, except against themselves.
-              if [[ "$client" != "google" && "$server" == "google" || "$client" == "msquic" && "$server" != "msquic" ]]; then
+              if [[ "$client" != "google" && "$server" == "google" ]] || [[ "$client" == "msquic" && "$server" != "msquic" ]]; then
                 continue
               fi
               # google and msquic don't let us configure the congestion control or pacing.
@@ -188,9 +188,9 @@ jobs:
               for cc in "${cc_opt[@]}"; do
                 for pacing in "${pacing_opt[@]}"; do
                   # Make a tag string for this test, for the results. Highlight lines we care about.
-                  if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
-                       "$client" == "msquic" && "$server" == "msquic" ||
-                       "$client" == "google" && "$server" == "google" ]]; then
+                  if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ]] ||
+                     [[ "$client" == "msquic" && "$server" == "msquic" ]] ||
+                     [[ "$client" == "google" && "$server" == "google" ]]; then
                     TAG="**$client**,**$server**,**$cc**,**$pacing**"
                   else
                     TAG="$client,$server,$cc,$pacing"
