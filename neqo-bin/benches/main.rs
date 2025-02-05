@@ -29,13 +29,13 @@ fn transfer(c: &mut Criterion) {
         upload,
     } in [
         Benchmark {
-            name: format!("1-conn/1-100mb-resp{mtu} (aka. Download)"),
-            requests: vec![100 * 1024 * 1024],
+            name: format!("1-conn/1-64mb-resp{mtu} (aka. Download)"),
+            requests: vec![64 * 1024 * 1024],
             upload: false,
         },
         Benchmark {
-            name: format!("1-conn/10_000-parallel-1b-resp{mtu} (aka. RPS)"),
-            requests: vec![1; 10_000],
+            name: format!("1-conn/8192-parallel-1b-resp{mtu} (aka. RPS)"),
+            requests: vec![1; 8192],
             upload: false,
         },
         Benchmark {
@@ -44,8 +44,8 @@ fn transfer(c: &mut Criterion) {
             upload: false,
         },
         Benchmark {
-            name: format!("1-conn/1-100mb-resp{mtu} (aka. Upload)"),
-            requests: vec![100 * 1024 * 1024],
+            name: format!("1-conn/1-64mb-resp{mtu} (aka. Upload)"),
+            requests: vec![64 * 1024 * 1024],
             upload: true,
         },
     ] {
