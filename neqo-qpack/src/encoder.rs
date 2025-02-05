@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 
 use neqo_common::{qdebug, qerror, qlog::NeqoQlog, qtrace, Header};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use crate::{
     decoder_instructions::{DecoderInstruction, DecoderInstructionReader},
@@ -52,7 +52,7 @@ pub struct QPackEncoder {
     // There can be multiple header blocks in one stream, headers, trailer, push stream request,
     // etc. This HashMap maps a stream ID to a list of header blocks. Each header block is a
     // list of referenced dynamic table entries.
-    unacked_header_blocks: FxHashMap<StreamId, VecDeque<FxHashSet<u64>>>,
+    unacked_header_blocks: HashMap<StreamId, VecDeque<HashSet<u64>>>,
     blocked_stream_cnt: u16,
     use_huffman: bool,
     next_capacity: Option<u64>,
@@ -69,7 +69,7 @@ impl QPackEncoder {
             instruction_reader: DecoderInstructionReader::new(),
             local_stream: LocalStreamState::NoStream,
             max_blocked_streams: 0,
-            unacked_header_blocks: FxHashMap::default(),
+            unacked_header_blocks: HashMap::default(),
             blocked_stream_cnt: 0,
             use_huffman,
             next_capacity: None,
@@ -387,7 +387,7 @@ impl QPackEncoder {
         let stream_is_blocker = self.is_stream_blocker(stream_id);
         let can_block = self.blocked_stream_cnt < self.max_blocked_streams || stream_is_blocker;
 
-        let mut ref_entries = FxHashSet::default();
+        let mut ref_entries = HashSet::default();
 
         for iter in h {
             let name = iter.name().as_bytes().to_vec();

@@ -24,7 +24,7 @@ use neqo_crypto::{
     TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519,
     TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     cid::ConnectionIdRef,
@@ -808,7 +808,7 @@ pub enum CryptoSpace {
 /// get other keys, so those have fixed versions.
 #[derive(Debug, Default)]
 pub struct CryptoStates {
-    initials: FxHashMap<Version, CryptoState>,
+    initials: HashMap<Version, CryptoState>,
     handshake: Option<CryptoState>,
     zero_rtt: Option<CryptoDxState>, // One direction only!
     cipher: Cipher,
@@ -1258,7 +1258,7 @@ impl CryptoStates {
             cipher: TLS_AES_128_GCM_SHA256,
             next_secret: hkdf::import_key(TLS_VERSION_1_3, &[0xaa; 32]).unwrap(),
         };
-        let mut initials = FxHashMap::default();
+        let mut initials = HashMap::default();
         initials.insert(
             Version::Version1,
             CryptoState {
@@ -1316,7 +1316,7 @@ impl CryptoStates {
             next_secret: secret.clone(),
         };
         Self {
-            initials: FxHashMap::default(),
+            initials: HashMap::default(),
             handshake: None,
             zero_rtt: None,
             cipher: TLS_CHACHA20_POLY1305_SHA256,

@@ -18,7 +18,7 @@ use neqo_crypto::{
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
     random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
@@ -305,7 +305,7 @@ impl TransportParameter {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TransportParameters {
-    params: FxHashMap<TransportParameterId, TransportParameter>,
+    params: HashMap<TransportParameterId, TransportParameter>,
 }
 
 impl TransportParameters {

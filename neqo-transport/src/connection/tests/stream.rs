@@ -7,7 +7,7 @@
 use std::cmp::max;
 
 use neqo_common::{event::Provider as _, qdebug};
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHashMap as HashMap;
 use test_fixture::now;
 
 use super::{
@@ -169,7 +169,7 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
         })
         .enumerate()
         .map(|(a, b)| (b, a))
-        .collect::<FxHashMap<_, _>>();
+        .collect::<HashMap<_, _>>();
 
     // streams should arrive in priority order, not order of creation, if sendorder prioritization
     // is working correctly

@@ -16,7 +16,7 @@ use neqo_transport::{
     ConnectionEvent, ConnectionIdGenerator, Output, State, StreamId,
 };
 use regex::Regex;
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use super::{qns_read_response, Args};
 use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};
@@ -29,8 +29,8 @@ struct HttpStreamState {
 
 pub struct HttpServer {
     server: Server,
-    write_state: FxHashMap<StreamId, HttpStreamState>,
-    read_state: FxHashMap<StreamId, Vec<u8>>,
+    write_state: HashMap<StreamId, HttpStreamState>,
+    read_state: HashMap<StreamId, Vec<u8>>,
     is_qns_test: bool,
     regex: Regex,
     read_buffer: Vec<u8>,
@@ -69,8 +69,8 @@ impl HttpServer {
         let is_qns_test = args.shared.qns_test.is_some();
         Ok(Self {
             server,
-            write_state: FxHashMap::default(),
-            read_state: FxHashMap::default(),
+            write_state: HashMap::default(),
+            read_state: HashMap::default(),
             is_qns_test,
             regex: if is_qns_test {
                 Regex::new(r"GET +/(\S+)(?:\r)?\n").map_err(|_| Error::Internal)?

@@ -14,7 +14,7 @@ use neqo_transport::{
     streams::SendOrder, AppError, CloseReason, Connection, DatagramTracking, State, StreamId,
     StreamType, ZeroRttState,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     client_events::Http3ClientEvents,
@@ -301,8 +301,8 @@ pub struct Http3Connection {
     pub qpack_decoder: Rc<RefCell<QPackDecoder>>,
     settings_state: Http3RemoteSettingsState,
     streams_with_pending_data: BTreeSet<StreamId>,
-    pub send_streams: FxHashMap<StreamId, Box<dyn SendStream>>,
-    pub recv_streams: FxHashMap<StreamId, Box<dyn RecvStream>>,
+    pub send_streams: HashMap<StreamId, Box<dyn SendStream>>,
+    pub recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
     webtransport: ExtendedConnectFeature,
 }
 
@@ -332,8 +332,8 @@ impl Http3Connection {
             local_params: conn_params,
             settings_state: Http3RemoteSettingsState::NotReceived,
             streams_with_pending_data: BTreeSet::new(),
-            send_streams: FxHashMap::default(),
-            recv_streams: FxHashMap::default(),
+            send_streams: HashMap::default(),
+            recv_streams: HashMap::default(),
             role,
         }
     }

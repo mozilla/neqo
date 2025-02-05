@@ -27,7 +27,7 @@ use neqo_transport::{
     AppError, CloseReason, Connection, EmptyConnectionIdGenerator, Error as TransportError, Output,
     RandomConnectionIdGenerator, StreamId,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHashMap as HashMap;
 use url::Url;
 
 use super::{get_output_file, qlog_new, Args, CloseState, Res};
@@ -46,7 +46,7 @@ impl<'a> Handler<'a> {
         let url_handler = UrlHandler {
             url_queue,
             handled_urls: Vec::new(),
-            stream_handlers: FxHashMap::default(),
+            stream_handlers: HashMap::default(),
             all_paths: Vec::new(),
             args,
         };
@@ -368,7 +368,7 @@ impl StreamHandler for UploadStreamHandler {
 struct UrlHandler<'a> {
     url_queue: VecDeque<Url>,
     handled_urls: Vec<Url>,
-    stream_handlers: FxHashMap<StreamId, Box<dyn StreamHandler>>,
+    stream_handlers: HashMap<StreamId, Box<dyn StreamHandler>>,
     all_paths: Vec<PathBuf>,
     args: &'a Args,
 }

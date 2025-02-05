@@ -23,7 +23,7 @@ use neqo_crypto::{
     encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
     ZeroRttChecker,
 };
-use rustc_hash::FxHashSet;
+use rustc_hash::FxHashSet as HashSet;
 
 pub use crate::addr_valid::ValidateAddress;
 use crate::{
@@ -498,7 +498,7 @@ impl Server {
     // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
     #[allow(clippy::mutable_key_type)]
     #[must_use]
-    pub fn active_connections(&self) -> FxHashSet<ConnectionRef> {
+    pub fn active_connections(&self) -> HashSet<ConnectionRef> {
         self.connections
             .iter()
             .filter(|c| c.borrow().has_events())

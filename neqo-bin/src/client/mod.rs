@@ -32,7 +32,7 @@ use neqo_crypto::{
 use neqo_http3::Output;
 use neqo_transport::{AppError, CloseReason, ConnectionId, Version};
 use neqo_udp::RecvBuf;
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHashMap as HashMap;
 use tokio::time::Sleep;
 use url::{Host, Origin, Url};
 
@@ -531,7 +531,7 @@ const fn local_addr_for(remote_addr: &SocketAddr, local_port: u16) -> SocketAddr
 fn urls_by_origin(urls: &[Url]) -> impl Iterator<Item = ((Host, u16), VecDeque<Url>)> {
     urls.iter()
         .fold(
-            FxHashMap::<Origin, VecDeque<Url>>::default(),
+            HashMap::<Origin, VecDeque<Url>>::default(),
             |mut urls, url| {
                 urls.entry(url.origin()).or_default().push_back(url.clone());
                 urls
