@@ -178,7 +178,7 @@ jobs:
               if [[ "$client" == "google" && "$server" == "msquic" ||
                     "$client" == "msquic" && "$server" == "google" ||
                     "$client" != "google" && "$server" == "google" ||
-                    "$client" == "msquic" && "$server" != "msquic"]]; then
+                    "$client" == "msquic" && "$server" != "msquic" ]]; then
                 continue
               fi
               # google and msquic don't let us configure the congestion control or pacing.
