@@ -56,7 +56,7 @@ runs:
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
           case "${{ runner.os }}" in
             Linux)
-              echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold $RUSTFLAGS"
+              # echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold $RUSTFLAGS"
               ;;
             Windows)
               echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld $RUSTFLAGS"
