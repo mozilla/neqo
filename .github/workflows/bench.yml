@@ -196,7 +196,7 @@ jobs:
                   if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
                         "$client" == "msquic" && "$server" == "msquic" ||
                         "$client" == "google" && "$server" == "google" ]]; then
-                    TAG="**$client**,**$server**,${cc:**}$cc${cc:**},${pacing:**}$pacing${pacing:**}"
+                    TAG="**$client**,**$server**,${cc:+**}$cc${cc:+**},${pacing:+**}$pacing${pacing:+**}"
                   else
                     TAG="$client,$server,$cc,$pacing"
                   fi
