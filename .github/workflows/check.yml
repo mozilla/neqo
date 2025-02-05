@@ -151,6 +151,6 @@ jobs:
       - run: cargo update -w --locked
 
   bench:
-    needs: [check]
+    # needs: [check] FIXME
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks }}
     uses: ./.github/workflows/bench.yml
