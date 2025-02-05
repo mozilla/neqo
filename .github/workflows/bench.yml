@@ -100,7 +100,7 @@ jobs:
 
       - name: Move cached hyperfine results
         run: |
-          mv hyperfine hyperfine-main
+          mv hyperfine hyperfine-main || true
           mkdir -p hyperfine
 
       # Disable turboboost, hyperthreading and use performance governor.
