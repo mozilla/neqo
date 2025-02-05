@@ -40,7 +40,7 @@ jobs:
           submodules: true
           persist-credentials: false
 
-      - name: Checkout gquiche
+      - name: Checkout google/quiche
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: google/quiche
@@ -59,7 +59,7 @@ jobs:
         uses: ./.github/actions/rust
         with:
           version: $TOOLCHAIN
-          tools: hyperfine
+          tools: hyperfine, flamegraph
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get minimum NSS version
@@ -84,18 +84,24 @@ jobs:
           cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
           cmake --build .
 
-      - name: Build gquiche
+      - name: Build google/quiche
         run: |
           cd gquiche
           bazel build -c opt --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
 
       - name: Download cached main-branch results
-        id: criterion-cache
         uses: actions/cache/restore@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
-          path: ./target/criterion
-          key: criterion-${{ runner.name }}-${{ github.sha }}
-          restore-keys: criterion-${{ runner.name }}-
+          path: |
+            target/criterion
+            hyperfine
+          key: bench-results-${{ runner.name }}-${{ github.sha }}
+          restore-keys: bench-results-${{ runner.name }}-
+
+      - name: Move cached hyperfine results
+        run: |
+          mv hyperfine hyperfine-main || true
+          mkdir -p hyperfine
 
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
@@ -113,14 +119,15 @@ jobs:
 
       # Compare various configurations of neqo against msquic, and gather perf data
       # during the hyperfine runs.
-      - name: Compare neqo, msquic and gquiche
+      - name: Compare neqo, msquic and google/quiche
         env:
           HOST: 127.0.0.1
           PORT: 4433
           SIZE: 33554432 # 32 MB
+          RUNS: 20
         run: |
           TMP=$(mktemp -d)
-          # Make a cert and key for msquic and gquiche.
+          # Make a cert and key for msquic and google.
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
           # Make a test file for msquic to serve.
           truncate -s "$SIZE" "$TMP/$SIZE"
@@ -128,18 +135,18 @@ jobs:
           declare -A client_cmd=(
             ["neqo"]="target/release/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
             ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
-            ["gquiche"]="gquiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
+            ["google"]="gquiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
             ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
-            ["gquiche"]="gquiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
+            ["google"]="gquiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
           )
           # Flags to pass to neqo when it runs against another implementation.
           declare -A neqo_flags=(
             ["neqo"]=""
             ["msquic"]="-a hq-interop"
-            ["gquiche"]=""
+            ["google"]=""
           )
 
           # Replace various placeholders in the commands with the actual values.
@@ -149,11 +156,11 @@ jobs:
             local cc=$2
             local pacing=$3
             local flags=$4
-            if [ "$cc" != "" ]; then
+            if [[ "$cc" != "" ]]; then
               CMD=${CMD//_cc/--cc $cc}
               EXT="-$cc"
             fi
-            if [ "$pacing" == "on" ]; then
+            if [[ "$pacing" == "on" ]]; then
               CMD=${CMD//_pacing/}
               EXT="$EXT-pacing"
             else
@@ -165,15 +172,18 @@ jobs:
 
           # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
           sudo ip link set dev lo mtu "$MTU"
-          for server in gquiche msquic neqo; do
-            for client in gquiche msquic neqo; do
+          for server in neqo google msquic; do
+            for client in neqo google msquic; do
               # Do not run msquic against google-quiche; the latter only supports H3.
-              # Also, we're not really interested in the performance of those combinations.
-              if [[ "$client" == "gquiche" && "$server" == "msquic" || "$client" == "msquic" && "$server" == "gquiche" ]]; then
+              # Also, we are not interested in google as the server, or msquic as the client, except against themselves.
+              if [[ "$client" == "google" && "$server" == "msquic" ||
+                    "$client" == "msquic" && "$server" == "google" ||
+                    "$client" != "google" && "$server" == "google" ||
+                    "$client" == "msquic" && "$server" != "msquic" ]]; then
                 continue
               fi
-              # gquiche and msquic doesn't let us configure the congestion control or pacing.
-              if [ "$client" != "neqo" ] && [ "$server" != "neqo" ]; then
+              # google and msquic don't let us configure the congestion control or pacing.
+              if [[ "$client" != "neqo" && "$server" != "neqo" ]]; then
                 cc_opt=("")
                 pacing_opt=("")
               else
@@ -182,35 +192,44 @@ jobs:
               fi
               for cc in "${cc_opt[@]}"; do
                 for pacing in "${pacing_opt[@]}"; do
-                  # Make a tag string for this test, for the results.
-                  TAG="$client,$server,$cc,$pacing,$MTU"
+                  # Make a tag string for this test, for the results. Highlight lines we care about.
+                  if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
+                        "$client" == "msquic" && "$server" == "msquic" ||
+                        "$client" == "google" && "$server" == "google" ]]; then
+                    TAG="**$client**,**$server**,${cc:+**}$cc${cc:+**},${pacing:+**}$pacing${pacing:+**}"
+                  else
+                    TAG="$client,$server,$cc,$pacing"
+                  fi
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
+                  FILENAME="$client-$server$EXT"
                   # shellcheck disable=SC2086
-                  taskset -c 0 nice -n -20 \
-                    perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
+                  taskset -c 0 nice -n -20 perf $PERF_OPT -o "$FILENAME.server.perf" $CMD &
                   PID=$!
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
                   taskset -c 1 nice -n -20 \
-                    perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
-                      hyperfine --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
+                    perf $PERF_OPT -o "$FILENAME.client.perf" \
+                      hyperfine --command-name "$TAG" --time-unit millisecond  \
+                        --export-json "hyperfine/$FILENAME.json" \
+                        --export-markdown "hyperfine/$FILENAME.md" \
+                        --output null --warmup 3 --runs $RUNS --prepare "sleep 1" "$CMD" |
                       tee -a comparison.txt
                   echo >> comparison.txt
                   kill $PID
-                  cat step.md >> steps.md
+                  cat "hyperfine/$FILENAME.md" >> steps.md
                   # Sanity check the size of the last retrieved file.
-                  # google-quiche outputs the HTTP header, too, so we can't just check for -eq.
+                  # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
                   [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
                 done
               done
             done
           done
           # Merge the results tables generated by hyperfine into a single table.
-          echo "Transfer of $SIZE bytes over loopback." > comparison.md
+          echo "Transfer of $SIZE bytes over loopback, $RUNS runs." > comparison.md
           awk '(!/^\| Command/ || !c++) && (!/^\|:/ || !d++)' < steps.md |\
-            sed -E 's/`//g; s/^\|:/\|:---\|:---\|:---\|:---\|:/g; s/,/ \| /g; s/^\| Command/\| Client \| Server \| CC \| Pacing \| MTU/g' |\
-            cut -f1-9 -d\| | sed -e 's/$/|/' >> comparison.md
+            sed -E 's/`//g; s/^\|:/\|:---\|:---\|:---\|/g; s/,/ \| /g; s/^\| Command/\| Client \| Server \| CC \| Pace/g' |\
+            cut -f1-8 -d\| | sed -e 's/$/|/' >> comparison.md
           rm -r "$TMP"
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
@@ -266,18 +285,14 @@ jobs:
         if: ${{ github.ref == 'refs/heads/main' }}
         run: echo "${{ github.sha }}" > target/criterion/baseline-sha.txt
 
-      - name: Store history
-        if: ${{ github.ref == 'refs/heads/main' }}
-        run: |
-          mkdir -p target/criterion-history
-          cp -r target/criterion "target/criterion-history/$(date +%s)-${{ github.sha }}"
-
       - name: Cache main-branch results
         if: ${{ github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
-          path: ./target/criterion
-          key: criterion-${{ runner.name }}-${{ github.sha }}
+          path: |
+            target/criterion
+            hyperfine
+          key: bench-results-${{ runner.name }}-${{ github.sha }}
 
       - name: Export perf data
         id: export
@@ -289,8 +304,10 @@ jobs:
             *.perf
             *.perf.fx
             *.txt
+            *.md
             results.*
-            target/criterion*
+            target/criterion
+            hyperfine
           compression-level: 9
 
       - name: Export PR comment data
