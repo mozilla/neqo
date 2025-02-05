@@ -674,8 +674,9 @@ impl Default for AckTracker {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use neqo_common::Encoder;
-    use rustc_hash::FxHashSet as HashSet;
     use test_fixture::now;
 
     use super::{
@@ -692,7 +693,7 @@ mod tests {
 
     fn test_ack_range(pns: &[PacketNumber], nranges: usize) {
         let mut rp = RecvdPackets::new(PacketNumberSpace::Initial); // Any space will do.
-        let mut packets = HashSet::default();
+        let mut packets = HashSet::new();
 
         for pn in pns {
             rp.set_received(now(), *pn, true).unwrap();
@@ -715,7 +716,7 @@ mod tests {
         }
 
         // Check that the ranges include the right values.
-        let mut in_ranges = HashSet::default();
+        let mut in_ranges = HashSet::new();
         for range in &rp.ranges {
             for included in range.smallest..=range.largest {
                 in_ranges.insert(included);

@@ -321,7 +321,10 @@ fn prepare_data(
 
 #[cfg(test)]
 mod tests {
-    use std::ops::{Deref, DerefMut};
+    use std::{
+        collections::HashMap,
+        ops::{Deref, DerefMut},
+    };
 
     use neqo_common::{event::Provider as _, Encoder};
     use neqo_crypto::{AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker};
@@ -329,7 +332,6 @@ mod tests {
     use neqo_transport::{
         CloseReason, Connection, ConnectionEvent, State, StreamId, StreamType, ZeroRttState,
     };
-    use rustc_hash::FxHashMap as HashMap;
     use test_fixture::{
         anti_replay, default_client, fixture_init, now, CountingConnectionIdGenerator,
         DEFAULT_ALPN, DEFAULT_KEYS,
@@ -1271,7 +1273,7 @@ mod tests {
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
 
-        let mut requests = HashMap::default();
+        let mut requests = HashMap::new();
         while let Some(event) = hconn.next_event() {
             match event {
                 Http3ServerEvent::Headers { stream, .. } => {
