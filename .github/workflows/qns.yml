@@ -244,9 +244,9 @@ jobs:
               fi
               echo
               echo "#### $LATEST as client"
-              cat client.failed.md
+              cat client.failed.md || echo
               echo "#### $LATEST as server"
-              cat server.failed.md
+              cat server.failed.md || echo
             else
               echo -n "None "
               if [ -e "client.succeeded.md" ] || [ -e "server.succeeded.md" ] || [ -e "client.unsupported.md" ] || [ -e "server.unsupported.md" ]; then
