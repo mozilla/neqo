@@ -112,6 +112,7 @@ runs:
       env:
         ARTIFACT_URL: ${{ steps.upload-logs.outputs.artifact-url }}
       run: |
+        cat result.json
         jq ". + {log_url: \"$ARTIFACT_URL\"}"
           < result.json  > result.json.tmp && \
           mv result.json.tmp result.json

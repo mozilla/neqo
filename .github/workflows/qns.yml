@@ -193,7 +193,9 @@ jobs:
         run: |
           # shellcheck disable=SC2153
           mapfile -t LIST < <(echo "$PAIRS" | jq '.[]' | sort)
+          echo "${LIST[@]}"
           for PREFIX in "${LIST[@]}"; do
+            echo "Processing $PREFIX"
             PREFIX=$(echo "$PREFIX" | tr -d '"')
             CLIENT=$(echo "$PREFIX" | cut -f1 -d " ")
             SERVER=$(echo "$PREFIX" | cut -f3 -d " ")
