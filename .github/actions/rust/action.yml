@@ -47,7 +47,6 @@ runs:
         if [ "$(apt-cache search --names-only '^mold$' | wc -l)" -ge 1 ]; then
           [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
           sudo apt-get install -y --no-install-recommends mold
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=mold $RUSTFLAGS" >> "$GITHUB_ENV"
         fi
 
     # See https://corrode.dev/blog/tips-for-faster-ci-builds/
@@ -57,9 +56,11 @@ runs:
         {
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
-          if [ "${{ runner.os }}" == "Windows"]; then
-              echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld $RUSTFLAGS"
-            fi
+          if [[ "${{ runner.os }}" == "Linux" && "$(command -v mold)" ]]; then
+            echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold $RUSTFLAGS"
+          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld $RUSTFLAGS"
+          fi
         } >> "$GITHUB_ENV"
 
     - name: Enable sscache
