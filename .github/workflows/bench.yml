@@ -175,7 +175,7 @@ jobs:
             baseline <- scan(args[1], what = numeric())
             result <- scan(args[2], what = numeric())
             t_result <- t.test(baseline, result, alternative = "two.sided")
-            p_value <- t_result$p.value
+            p_value <- t_result\$p.value
             alpha <- 0.05
             quit(status = as.integer(p_value < alpha))
           EOF
