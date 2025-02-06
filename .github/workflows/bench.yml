@@ -85,6 +85,7 @@ jobs:
           cmake --build .
 
       - name: Build google/quiche
+        if: 0 # FIXME
         run: |
           cd gquiche
           bazel build -c opt --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
@@ -108,6 +109,7 @@ jobs:
         run: sudo /root/bin/prep.sh
 
       - name: Run cargo bench
+        if: 0 # FIXME
         run: |
           # Pin all but neqo-bin benchmarks to CPU 0. neqo-bin benchmarks run
           # both a client and a server, thus benefiting from multiple CPU cores.
@@ -117,7 +119,7 @@ jobs:
           sudo ip link set dev lo mtu "$MTU"
           nice -n -20 cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
 
-      # Compare various configurations of neqo against msquic, and gather perf data
+      # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
       - name: Compare neqo, msquic and google/quiche
         env:
@@ -172,8 +174,8 @@ jobs:
 
           # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
           sudo ip link set dev lo mtu "$MTU"
-          for server in neqo google msquic; do
-            for client in neqo google msquic; do
+          for server in neqo msquic; do # FIXME google
+            for client in neqo msquic; do # FXIME google
               # Do not run msquic against google-quiche; the latter only supports H3.
               # Also, we are not interested in google as the server, or msquic as the client, except against themselves.
               if [[ "$client" == "google" && "$server" == "msquic" ||
@@ -218,6 +220,12 @@ jobs:
                   echo >> comparison.txt
                   kill $PID
                   cat "hyperfine/$FILENAME.md" >> steps.md
+
+                  ll "hyperfine/$FILENAME.json"
+                  cat "hyperfine/$FILENAME.json"
+                  ll "hyperfine-main/$FILENAME.json"
+                  cat "hyperfine-main/$FILENAME.json"
+
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
                   [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
