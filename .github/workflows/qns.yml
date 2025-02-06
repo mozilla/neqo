@@ -210,6 +210,7 @@ jobs:
           # shellcheck disable=SC2153
           mapfile -t LIST < <(echo "$PAIRS" | jq '.[]' | sort)
           echo "${LIST[@]}"
+          find results -ls
           for PREFIX in "${LIST[@]}"; do
             echo "Processing $PREFIX"
             PREFIX=$(echo "$PREFIX" | tr -d '"')
@@ -223,6 +224,7 @@ jobs:
             RUN="results/${PREFIX} results"
             PAIR="$CLIENT $DELIM $SERVER"
             if [ ! -e "$RUN/result.json" ]; then
+              echo not there
               echo "* $PAIR: run cancelled after $TIMEOUT min" >> "$ROLE.failed.md"
               continue
             fi
