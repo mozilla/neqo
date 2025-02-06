@@ -41,7 +41,6 @@ jobs:
           persist-credentials: false
 
       - name: Checkout google/quiche
-        if: 0 # FIXME
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: google/quiche
@@ -86,7 +85,6 @@ jobs:
           cmake --build .
 
       - name: Build google/quiche
-        if: 0 # FIXME
         run: |
           cd gquiche
           bazel build -c opt --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
@@ -172,6 +170,16 @@ jobs:
             CMD=${CMD//_flags/$flags}
           }
 
+          cat <<EOF > welch.r
+            args <- commandArgs(trailingOnly = TRUE)
+            baseline <- scan(args[1], what = numeric())
+            result <- scan(args[2], what = numeric())
+            t_result <- t.test(baseline, result, alternative = "two.sided")
+            p_value <- t_result$p.value
+            alpha <- 0.05
+            quit(status = as.integer(p_value < alpha))
+          EOF
+
           # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
           sudo ip link set dev lo mtu "$MTU"
           for server in neqo msquic; do # FIXME google
@@ -224,10 +232,15 @@ jobs:
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
                   [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
 
-                  # https://en.wikipedia.org/wiki/Propagation_of_uncertainty#Example_formulae
-                  # Covariance asssumed to be 0, i.e., variables are assumed to be independent.
                   BASELINE="hyperfine-main/$FILENAME.json"
                   RESULT="hyperfine/$FILENAME.json"
+
+                  jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
+                  jq -r '.results[0].times[]' "$RESULT" > result.txt
+                  SIGNIFICANT=$(Rscript welch.r baseline.txt result.txt)
+
+                  # https://en.wikipedia.org/wiki/Propagation_of_uncertainty#Example_formulae
+                  # Covariance asssumed to be 0, i.e., variables are assumed to be independent.
                   BASELINE_MEAN=$(jq -r '.results[0].mean' "$BASELINE")
                   MEAN=$(jq -r '.results[0].mean' "$RESULT")
                   RATIO=$(echo "$MEAN / $BASELINE_MEAN" | bc)
@@ -235,8 +248,8 @@ jobs:
                   STDDEV=$(jq -r '.results[0].stddev' "$RESULT")
                   RATIO_STDDEV=$(echo "$RATIO * sqrt(($STDDEV / $MEAN)^2 + ($BASELINE_STDDEV / $BASELINE_MEAN)^2)" | bc)
                   {
-                    cut -f1-8 -d\| < "hyperfine/$FILENAME.md"
-                    printf "| %f.2 ± %f.2 |\n" "$RATIO" "$RATIO_STDDEV"
+                    grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | cut -f1-8 -d\| | tr -d '\n'
+                    printf "| %d %f.2 ± %f.2 |\n" "$SIGNIFICANT" "$RATIO" "$RATIO_STDDEV"
                   } >> steps.md
                 done
               done
