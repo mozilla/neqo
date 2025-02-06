@@ -102,14 +102,30 @@ jobs:
     steps:
       - id: config
         run: |
-          # Add neqo-latest to implementations.json
-          curl https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json | \
-            jq --arg key "$LATEST" --argjson newEntry "
-              {
-                \"image\": \"$IMAGE\",
-                \"url\": \"$URL\",
-                \"role\": \"$ROLE\"
-              }" '.[$key] = $newEntry' > implementations.json
+          # Add neqo-latest and some non-default implementations.
+          # tquic: https://github.com/quic-interop/quic-interop-runner/pull/385/files
+          # openssl: https://github.com/quic-interop/quic-interop-runner/pull/402/files
+          cat <<EOF > additional.json
+          {
+            "neqo-latest": {
+              "image": "$IMAGE",
+              "url": "$URL",
+              "role": "$ROLE"
+            },
+            "tquic": {
+              "image": "tquicgroup/tquic:latest",
+              "url": "https://github.com/Tencent/tquic/",
+              "role": "both"
+            },
+            "openssl": {
+              "image": "quay.io/openssl-ci/openssl-quic-interop",
+              "url": "https://github.com/openssl/openssl",
+              "role": "client"
+            }
+          }
+          EOF
+          curl -o runner.json https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json
+          jq '. += input' runner.json additional.json > implementations.json
           {
             echo "implementations<<EOF"
             cat implementations.json
@@ -230,7 +246,23 @@ jobs:
                 fi
                 [ -n "$RESULT" ] || continue
                 DIFF=$(wdiff -n "$BASELINE" - <<< "$RESULT" || true)
-                RESULT=$(echo "$DIFF" | sed -E "s/\[-/ :rocket:~~/g; s/-\]/~~ /g; s/\{\+/ :warning:\*\*/g; s/\+\}/\*\* /g")
+                if [ "$GROUP" == "failed" ]; then
+                  ADD=":warning:"
+                  ADD_DELIM="\*\*"
+                  DEL=":rocket:"
+                  DEL_DELIM="~~"
+                elif [ "$GROUP" == "succeeded" ]; then
+                  ADD=":rocket:"
+                  ADD_DELIM="~~"
+                  DEL=":warning:"
+                  DEL_DELIM="\*\*"
+                else
+                  ADD=""
+                  ADD_DELIM=""
+                  DEL=""
+                  DEL_DELIM=""
+                fi
+                RESULT=$(echo "$DIFF" | sed -E "s/\[-/ $DEL$DEL_DELIM/g; s/-\]/$DEL_DELIM /g; s/\{\+/ $ADD$ADD_DELIM/g; s/\+\}/$ADD_DELIM /g")
                 echo "* [$PAIR]($LOG): $RESULT" >> "$ROLE.$GROUP.md"
               done
             done
