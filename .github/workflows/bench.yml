@@ -221,9 +221,9 @@ jobs:
                   kill $PID
                   cat "hyperfine/$FILENAME.md" >> steps.md
 
-                  ll "hyperfine/$FILENAME.json"
+                  ls -l "hyperfine/$FILENAME.json"
                   cat "hyperfine/$FILENAME.json"
-                  ll "hyperfine-main/$FILENAME.json"
+                  ls -l "hyperfine-main/$FILENAME.json"
                   cat "hyperfine-main/$FILENAME.json"
 
                   # Sanity check the size of the last retrieved file.
