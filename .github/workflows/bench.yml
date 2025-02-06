@@ -246,12 +246,12 @@ jobs:
                   if Rscript welch.R baseline.txt result.txt; then
                     if echo "$DELTA > 0" | bc -l; then
                       # Performance has regressed
-                      TAG=:broken_heart:
-                      FORMAT='**'
+                      TAG=":broken_heart:"
+                      FORMAT="\*\*"
                     else
                       # Performance has improved
-                      TAG=:green_heart:
-                      FORMAT='**'
+                      TAG=":green_heart:"
+                      FORMAT="\*\*"
                     fi
                   fi
 
