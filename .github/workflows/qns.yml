@@ -248,14 +248,14 @@ jobs:
                 DIFF=$(wdiff -n "$BASELINE" - <<< "$RESULT" || true)
                 if [ "$GROUP" == "failed" ]; then
                   ADD=":warning:"
-                  ADD_DELIM="~~"
+                  ADD_DELIM="\*\*"
                   DEL=":rocket:"
-                  DEL_DELIM="\*\*"
+                  DEL_DELIM="~~"
                 elif [ "$GROUP" == "succeeded" ]; then
                   ADD=":rocket:"
-                  ADD_DELIM="\*\*"
+                  ADD_DELIM="~~"
                   DEL=":warning:"
-                  DEL_DELIM="~~"
+                  DEL_DELIM="\*\*"
                 else
                   ADD=""
                   ADD_DELIM=""
