@@ -170,7 +170,7 @@ jobs:
             CMD=${CMD//_flags/$flags}
           }
 
-          cat <<EOF > welch.r
+          cat <<EOF > welch.R
             args <- commandArgs(trailingOnly = TRUE)
             baseline <- scan(args[1], what = numeric())
             result <- scan(args[2], what = numeric())
@@ -235,21 +235,29 @@ jobs:
                   BASELINE="hyperfine-main/$FILENAME.json"
                   RESULT="hyperfine/$FILENAME.json"
 
-                  jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
-                  jq -r '.results[0].times[]' "$RESULT" > result.txt
-                  SIGNIFICANT=$(Rscript welch.r baseline.txt result.txt)
-
-                  # https://en.wikipedia.org/wiki/Propagation_of_uncertainty#Example_formulae
-                  # Covariance asssumed to be 0, i.e., variables are assumed to be independent.
                   BASELINE_MEAN=$(jq -r '.results[0].mean' "$BASELINE")
                   MEAN=$(jq -r '.results[0].mean' "$RESULT")
-                  RATIO=$(echo "$MEAN / $BASELINE_MEAN" | bc)
-                  BASELINE_STDDEV=$(jq -r '.results[0].stddev' "$BASELINE")
-                  STDDEV=$(jq -r '.results[0].stddev' "$RESULT")
-                  RATIO_STDDEV=$(echo "$RATIO * sqrt(($STDDEV / $MEAN)^2 + ($BASELINE_STDDEV / $BASELINE_MEAN)^2)" | bc)
+                  DELTA_MEAN=$(echo "$BASELINE_MEAN - $MEAN" | bc)
+                  DELTA_PERCENT=$(echo "100 * $DELTA_MEAN / $BASELINE_MEAN" | bc)
+
+                  jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
+                  jq -r '.results[0].times[]' "$RESULT" > result.txt
+
+                  if Rscript welch.R baseline.txt result.txt; then
+                    if [ "$DELTA" -gt 0 ]; then
+                      # Performance has regressed
+                      TAG=:warning:
+                      FORMAT='**'
+                    else
+                      # Performance has improved
+                      TAG=:tada:
+                      FORMAT='**'
+                    fi
+                  fi
+
                   {
                     grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | cut -f1-8 -d\| | tr -d '\n'
-                    printf "| %d %f.2 ± %f.2 |\n" "$SIGNIFICANT" "$RATIO" "$RATIO_STDDEV"
+                    printf "| $FORMAT %.2f ± %.2f $TAG %.2f %.2f% $FORMAT|\n" "$MEAN" "$STDDEV" "$DELTA_MEAN" "$DELTA_PERCENT"
                   } >> steps.md
                 done
               done
