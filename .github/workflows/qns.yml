@@ -102,14 +102,30 @@ jobs:
     steps:
       - id: config
         run: |
-          # Add neqo-latest to implementations.json
-          curl https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json | \
-            jq --arg key "$LATEST" --argjson newEntry "
-              {
-                \"image\": \"$IMAGE\",
-                \"url\": \"$URL\",
-                \"role\": \"$ROLE\"
-              }" '.[$key] = $newEntry' > implementations.json
+          # Add neqo-latest and some non-default implementations.
+          # tquic: https://github.com/quic-interop/quic-interop-runner/pull/385/files
+          # openssl: https://github.com/quic-interop/quic-interop-runner/pull/402/files
+          cat <<EOF > additional.json
+          {
+            "neqo-latest": {
+              "image": "$IMAGE",
+              "url": "$URL",
+              "role": "$ROLE"
+            },
+            "tquic": {
+              "image": "tquicgroup/tquic:latest",
+              "url": "https://github.com/Tencent/tquic/",
+              "role": "both"
+            },
+            "openssl": {
+              "image": "quay.io/openssl-ci/openssl-quic-interop",
+              "url": "https://github.com/openssl/openssl",
+              "role": "client"
+            }
+          }
+          EOF
+          curl -o runner.json https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json
+          jq '. += input' runner.json additional.json > implementations.json
           {
             echo "implementations<<EOF"
             cat implementations.json
@@ -210,6 +226,7 @@ jobs:
               echo "* $PAIR: run cancelled after $TIMEOUT min" >> "$ROLE.failed.md"
               continue
             fi
+            cat "$RUN/result.json"
             jq < "$RUN/result.json" '
                 . as $data |
                 .results[][].result //= "failed" |
@@ -219,6 +236,7 @@ jobs:
                 } |
                 . + {log_url: $data.log_url}
               ' > "$RUN/$ROLE.grouped.json"
+            cat "$RUN/$ROLE.grouped.json"
             for ROLE in client server; do
               [ ! -e "$RUN/$ROLE.grouped.json" ] && continue
               for GROUP in $(jq -r < "$RUN/$ROLE.grouped.json" '.results | keys[]'); do
@@ -234,6 +252,7 @@ jobs:
                 DIFF=$(wdiff -n "$BASELINE" - <<< "$RESULT" || true)
                 RESULT=$(echo "$DIFF" | sed -E "s/\[-/ :rocket:~~/g; s/-\]/~~ /g; s/\{\+/ :warning:\*\*/g; s/\+\}/\*\* /g")
                 echo "* [$PAIR]($LOG): $RESULT" >> "$ROLE.$GROUP.md"
+                cat "$ROLE.$GROUP.md"
               done
             done
           done
@@ -275,6 +294,7 @@ jobs:
             echo
             echo "</details>"
           } >> comment.md
+          cat comment.md
 
       - if: ${{ github.ref == 'refs/heads/main' }}
         run: |
