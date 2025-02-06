@@ -14,7 +14,7 @@ inputs:
   test:
     description: 'test cases (comma-separatated)'
     required: false
-    default: 'handshake,http3' # 'onlyTests'
+    default: 'onlyTests'
   implementations:
     description: 'Modified "implementations.json" data'
     required: false
