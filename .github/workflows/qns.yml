@@ -209,10 +209,7 @@ jobs:
         run: |
           # shellcheck disable=SC2153
           mapfile -t LIST < <(echo "$PAIRS" | jq '.[]' | sort)
-          echo "${LIST[@]}"
-          find results -ls
           for PREFIX in "${LIST[@]}"; do
-            echo "Processing $PREFIX"
             PREFIX=$(echo "$PREFIX" | tr -d '"')
             CLIENT=$(echo "$PREFIX" | cut -f1 -d " ")
             SERVER=$(echo "$PREFIX" | cut -f3 -d " ")
@@ -222,14 +219,11 @@ jobs:
               ROLE=server
             fi
             RUN="results/${PREFIX} results"
-            echo $RUN
             PAIR="$CLIENT $DELIM $SERVER"
             if [ ! -e "$RUN/result.json" ]; then
-              echo not there
               echo "* $PAIR: run cancelled after $TIMEOUT min" >> "$ROLE.failed.md"
               continue
             fi
-            cat "$RUN/result.json"
             jq < "$RUN/result.json" '
                 . as $data |
                 .results[][].result //= "failed" |
@@ -239,7 +233,6 @@ jobs:
                 } |
                 . + {log_url: $data.log_url}
               ' > "$RUN/$ROLE.grouped.json"
-            cat "$RUN/$ROLE.grouped.json"
             for ROLE in client server; do
               [ ! -e "$RUN/$ROLE.grouped.json" ] && continue
               for GROUP in $(jq -r < "$RUN/$ROLE.grouped.json" '.results | keys[]'); do
@@ -253,9 +246,24 @@ jobs:
                 fi
                 [ -n "$RESULT" ] || continue
                 DIFF=$(wdiff -n "$BASELINE" - <<< "$RESULT" || true)
-                RESULT=$(echo "$DIFF" | sed -E "s/\[-/ :rocket:~~/g; s/-\]/~~ /g; s/\{\+/ :warning:\*\*/g; s/\+\}/\*\* /g")
+                if [ "$GROUP" == "failed" ]; then
+                  ADD=":warning:"
+                  ADD_DELIM="~~"
+                  DEL=":rocket:"
+                  DEL_DELIM="\*\*"
+                elif [ "$GROUP" == "succeeded" ]; then
+                  ADD=":rocket:"
+                  ADD_DELIM="\*\*"
+                  DEL=":warning:"
+                  DEL_DELIM="~~"
+                else
+                  ADD=""
+                  ADD_DELIM=""
+                  DEL=""
+                  DEL_DELIM=""
+                fi
+                RESULT=$(echo "$DIFF" | sed -E "s/\[-/ $DEL$DEL_DELIM/g; s/-\]/$DEL_DELIM /g; s/\{\+/ $ADD$ADD_DELIM/g; s/\+\}/$ADD_DELIM /g")
                 echo "* [$PAIR]($LOG): $RESULT" >> "$ROLE.$GROUP.md"
-                cat "$ROLE.$GROUP.md"
               done
             done
           done
@@ -297,7 +305,6 @@ jobs:
             echo
             echo "</details>"
           } >> comment.md
-          cat comment.md
 
       - if: ${{ github.ref == 'refs/heads/main' }}
         run: |
