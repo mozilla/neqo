@@ -110,7 +110,6 @@ jobs:
         run: sudo /root/bin/prep.sh
 
       - name: Run cargo bench
-        if: 0 # FIXME
         run: |
           # Pin all but neqo-bin benchmarks to CPU 0. neqo-bin benchmarks run
           # both a client and a server, thus benefiting from multiple CPU cores.
@@ -251,7 +250,7 @@ jobs:
             echo '| Client | Server | CC | Pacing | Mean [ms] | Min [ms] | Max [ms] | Delta |'
             echo '|:---|:---|:---|---|---:|---:|---:|---:|'
             cat steps.md
-            } > comparison.md
+          } > comparison.md
           rm -r "$TMP"
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
