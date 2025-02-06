@@ -237,27 +237,27 @@ jobs:
 
                   BASELINE_MEAN=$(jq -r '.results[0].mean' "$BASELINE")
                   MEAN=$(jq -r '.results[0].mean' "$RESULT")
-                  DELTA_MEAN=$(echo "$BASELINE_MEAN - $MEAN" | bc)
-                  DELTA_PERCENT=$(echo "100 * $DELTA_MEAN / $BASELINE_MEAN" | bc)
+                  DELTA=$(echo "($BASELINE_MEAN - $MEAN) * 1000" | bc -l)
+                  PERCENT=$(echo "100 * $DELTA / $BASELINE_MEAN" | bc -l)
 
                   jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
                   jq -r '.results[0].times[]' "$RESULT" > result.txt
 
                   if Rscript welch.R baseline.txt result.txt; then
-                    if [ "$DELTA" -gt 0 ]; then
+                    if echo "$DELTA > 0" | bc -l; then
                       # Performance has regressed
-                      TAG=:warning:
+                      TAG=:broken_heart:
                       FORMAT='**'
                     else
                       # Performance has improved
-                      TAG=:tada:
+                      TAG=:green_heart:
                       FORMAT='**'
                     fi
                   fi
 
                   {
                     grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | cut -f1-8 -d\| | tr -d '\n'
-                    printf "| $FORMAT %.2f ± %.2f $TAG %.2f %.2f% $FORMAT|\n" "$MEAN" "$STDDEV" "$DELTA_MEAN" "$DELTA_PERCENT"
+                    printf "| $FORMAT %.2f ± %.2f $TAG %.2f %.2f% $FORMAT|\n" "$MEAN" "$STDDEV" "$DELTA" "$PERCENT"
                   } >> steps.md
                 done
               done
