@@ -222,6 +222,7 @@ jobs:
               ROLE=server
             fi
             RUN="results/${PREFIX} results"
+            echo $RUN
             PAIR="$CLIENT $DELIM $SERVER"
             if [ ! -e "$RUN/result.json" ]; then
               echo not there
