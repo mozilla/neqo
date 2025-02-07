@@ -9,7 +9,7 @@ env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   TOOLCHAIN: stable
-  PERF_OPT: record -F997 --call-graph fp -g
+  PERF_OPT: record -F4999 --call-graph fp -g
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
@@ -170,6 +170,8 @@ jobs:
             CMD=${CMD//_flags/$flags}
           }
 
+          # A Welch's t-test to determine if a performance change is statistically significant.
+          # We use this later to highlight significant changes in the results.
           cat <<EOF > welch.R
             args <- commandArgs(trailingOnly = TRUE)
             baseline <- scan(args[1], what = numeric())
@@ -214,18 +216,24 @@ jobs:
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
                   # shellcheck disable=SC2086
-                  taskset -c 0 nice -n -20 perf $PERF_OPT -o "$FILENAME.server.perf" $CMD &
+                  taskset -c 0 nice -n -20 setarch --addr-no-randomize perf $PERF_OPT -o "$FILENAME.server.perf" $CMD &
                   PID=$!
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
-                  taskset -c 1 nice -n -20 \
-                    perf $PERF_OPT -o "$FILENAME.client.perf" \
-                      hyperfine --command-name "$TAG" --time-unit millisecond  \
-                        --export-json "hyperfine/$FILENAME.json" \
-                        --export-markdown "hyperfine/$FILENAME.md" \
-                        --output null --warmup 3 --runs $RUNS --prepare "sleep 1" "$CMD" |
-                      tee -a comparison.txt
+                  taskset -c 1 nice -n -20 setarch --addr-no-randomize \
+                    hyperfine --command-name "$TAG" --time-unit millisecond  \
+                      --export-json "hyperfine/$FILENAME.json" \
+                      --export-markdown "hyperfine/$FILENAME.md" \
+                      --output null --warmup 3 --runs $RUNS --prepare "sleep 1" "$CMD" |
+                    tee -a comparison.txt
                   echo >> comparison.txt
+                  # Do a longer client run with perf separately. We used to just wrap the hyperfine command above in perf,
+                  # but that uses different processes for the individual runs, and there is apparently no way to merge
+                  # the perf profiles of those different run.
+                  CMD=${CMD//$SIZE/$(echo "$SIZE * 10" | bc -l)}
+                  # shellcheck disable=SC2086
+                  taskset -c 1 nice -n -20 setarch --addr-no-randomize \
+                    perf $PERF_OPT -o "$FILENAME.client.perf" "$CMD"
                   kill $PID
 
                   # Sanity check the size of the last retrieved file.
