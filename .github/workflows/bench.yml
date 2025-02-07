@@ -254,7 +254,7 @@ jobs:
                   STDDEV=$(jq -r '.results[0].stddev' "$RESULT")
                   # Even though we tell hyperfine to use milliseconds, it still outputs in seconds when dumping to JSON.
                   DELTA=$(echo "($MEAN - $BASELINE_MEAN) * 1000" | bc -l)
-                  PERCENT=$(echo "abs($MEAN - $BASELINE_MEAN) / ($BASELINE_MEAN + $MEAN)/2 * 100" | bc -l)
+                  PERCENT=$(echo "(if($MEAN > $BASELINE) {$MEAN - $BASELINE_MEAN} else {($MEAN - $BASELINE_MEAN) * -1}) / ($BASELINE_MEAN + $MEAN)/2 * 100" | bc -l)
                   echo "Baseline: $BASELINE_MEAN, Result: $MEAN, Delta: $DELTA, Percent: $PERCENT"
 
                   # If a performance change is statistically significant, highlight it.
@@ -264,11 +264,11 @@ jobs:
                     if echo "$DELTA > 0" | bc -l; then
                       echo "Performance has regressed: $BASELINE_MEAN -> $MEAN"
                       SYMBOL=":broken_heart:"
-                      FORMAT="\*\*"
+                      FORMAT='**'
                     else
                       echo "Performance has improved: $BASELINE_MEAN -> $MEAN"
                       SYMBOL=":green_heart:"
-                      FORMAT="\*\*"
+                      FORMAT='**'
                     fi
                   else
                     echo "No statistically significant change: $BASELINE_MEAN -> $MEAN"
