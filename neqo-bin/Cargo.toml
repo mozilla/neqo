@@ -38,7 +38,7 @@ neqo-http3 = { path = "./../neqo-http3" }
 neqo-transport = { path = "./../neqo-transport" }
 neqo-udp = { path = "./../neqo-udp" }
 qlog = { workspace = true }
-quinn-udp = { workspace = true }
+quinn-udp = { version = "0.5.6", default-features = false, features = ["direct-log"] }
 regex = { workspace = true }
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
 url = { workspace = true }

@@ -19,7 +19,16 @@ workspace = true
 # Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
-quinn-udp = { workspace = true }
+quinn-udp = { version = "0.5.6", default-features = false, features = ["direct-log"] }
+
+# Only enable `fast-apple-datapath` on aarch64.
+#
+# Old MacOS versions (e.g. 10.15) don't fully support `sendmsg_x` and
+# `recvmsg_x`, both enabled by `fast-apple-datapath`. Instead of feature gating
+# by OS version, simply do so by CPU arch, leveraging the fact that newer MacOS
+# devices use ARM.
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+quinn-udp = { version = "0.5.6", default-features = false, features = ["direct-log", "fast-apple-datapath"] }
 
 [build-dependencies]
 cfg_aliases = "0.2"
