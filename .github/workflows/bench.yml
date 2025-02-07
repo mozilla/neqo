@@ -126,8 +126,8 @@ jobs:
         env:
           HOST: 127.0.0.1
           PORT: 4433
-          SIZE: 67108864 # 64 MB
-          RUNS: 20
+          SIZE: 33554432 # 32 MB
+          RUNS: 30
         run: |
           TMP=$(mktemp -d)
           # Make a cert and key for msquic and google.
@@ -251,29 +251,33 @@ jobs:
 
                   BASELINE_MEAN=$(jq -r '.results[0].mean' "$BASELINE")
                   MEAN=$(jq -r '.results[0].mean' "$RESULT")
-                  DELTA=$(echo "($BASELINE_MEAN - $MEAN) * 1000" | bc -l)
-                  PERCENT=$(echo "($BASELINE_MEAN - $MEAN) / $BASELINE_MEAN * 100" | bc -l)
+                  STDDEV=$(jq -r '.results[0].stddev' "$RESULT")
+                  # Even though we tell hyperfine to use milliseconds, it still outputs in seconds when dumping to JSON.
+                  DELTA=$(echo "($MEAN - $BASELINE_MEAN) * 1000" | bc -l)
+                  PERCENT=$(echo "abs($MEAN - $BASELINE_MEAN) / ($BASELINE_MEAN + $MEAN)/2 * 100" | bc -l)
                   echo "Baseline: $BASELINE_MEAN, Result: $MEAN, Delta: $DELTA, Percent: $PERCENT"
 
                   # If a performance change is statistically significant, highlight it.
                   jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
                   jq -r '.results[0].times[]' "$RESULT" > result.txt
-                  if Rscript welch.R baseline.txt result.txt; then
+                  if Rscript welch.R baseline.txt result.txt > /dev/null; then
                     if echo "$DELTA > 0" | bc -l; then
-                      # Performance has regressed
+                      echo "Performance has regressed: $BASELINE_MEAN -> $MEAN"
                       SYMBOL=":broken_heart:"
                       FORMAT="\*\*"
                     else
-                      # Performance has improved
+                      echo "Performance has improved: $BASELINE_MEAN -> $MEAN"
                       SYMBOL=":green_heart:"
                       FORMAT="\*\*"
                     fi
+                  else
+                    echo "No statistically significant change: $BASELINE_MEAN -> $MEAN"
                   fi
 
                   {
                     grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                       sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n'
-                    printf " %s %.1f ± %.1f %s %.1f %.1f%% %s|\n" \
+                    printf "| %s %.1f ± %.1f %s %.1f %.1f%% %s|\n" \
                       "$FORMAT" "$MEAN" "$STDDEV" "$SYMBOL" "$DELTA" "$PERCENT" "$FORMAT"
                   } >> steps.md
                 done
@@ -285,7 +289,8 @@ jobs:
           {
             echo "Transfer of $SIZE bytes over loopback, $RUNS runs."
             echo
-            echo '| Client | Server | CC | Pacing | Mean [ms] | Min [ms] | Max [ms] | Delta |'
+            # shellcheck disable=SC2016
+            echo '| Client | Server | CC | Pacing | Mean [ms] | Min [ms] | Max [ms] | Delta to `main` |'
             echo '|:---|:---|:---|---|---:|---:|---:|---:|'
             cat steps.md
           } > comparison.md
