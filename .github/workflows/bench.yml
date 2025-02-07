@@ -251,16 +251,15 @@ jobs:
 
                   BASELINE_MEAN=$(jq -r '.results[0].mean' "$BASELINE")
                   MEAN=$(jq -r '.results[0].mean' "$RESULT")
-                  STDDEV=$(jq -r '.results[0].stddev' "$RESULT")
                   # Even though we tell hyperfine to use milliseconds, it still outputs in seconds when dumping to JSON.
                   DELTA=$(echo "($MEAN - $BASELINE_MEAN) * 1000" | bc -l)
-                  PERCENT=$(echo "(if($MEAN > $BASELINE) {$MEAN - $BASELINE_MEAN} else {($MEAN - $BASELINE_MEAN) * -1}) / ($BASELINE_MEAN + $MEAN)/2 * 100" | bc -l)
+                  PERCENT=$(echo "sqrt(($MEAN - $BASELINE_MEAN)^2) / ($BASELINE_MEAN + $MEAN)/2 * 100" | bc -l)
                   echo "Baseline: $BASELINE_MEAN, Result: $MEAN, Delta: $DELTA, Percent: $PERCENT"
 
                   # If a performance change is statistically significant, highlight it.
                   jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
                   jq -r '.results[0].times[]' "$RESULT" > result.txt
-                  if Rscript welch.R baseline.txt result.txt > /dev/null; then
+                  if Rscript welch.R baseline.txt result.txt 2> /dev/null; then
                     if echo "$DELTA > 0" | bc -l; then
                       echo "Performance has regressed: $BASELINE_MEAN -> $MEAN"
                       SYMBOL=":broken_heart:"
@@ -277,8 +276,8 @@ jobs:
                   {
                     grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                       sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n'
-                    printf "| %s %.1f ± %.1f %s %.1f %.1f%% %s|\n" \
-                      "$FORMAT" "$MEAN" "$STDDEV" "$SYMBOL" "$DELTA" "$PERCENT" "$FORMAT"
+                    printf "| %s %.1f %s | %s %.1f%% %s %s |\n" \
+                      "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT" "$SYMBOL"
                   } >> steps.md
                 done
               done
@@ -287,11 +286,11 @@ jobs:
 
           # Make a single results table.
           {
-            echo "Transfer of $SIZE bytes over loopback, $RUNS runs."
+            echo "Transfer of $SIZE bytes over loopback, $RUNS runs. All times in milliseconds."
             echo
             # shellcheck disable=SC2016
-            echo '| Client | Server | CC | Pacing | Mean [ms] | Min [ms] | Max [ms] | Delta to `main` |'
-            echo '|:---|:---|:---|---|---:|---:|---:|---:|'
+            echo '| Client | Server | CC | Pacing | Mean ± σ | Min | Max | Δ `main` | Δ `main` [%] |'
+            echo '|:---|:---|:---|---|---:|---:|---:|---:|---:|'
             cat steps.md
           } > comparison.md
           rm -r "$TMP"
