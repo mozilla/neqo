@@ -237,9 +237,10 @@ jobs:
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
                   # the perf profiles of those different run.
                   CMD=${CMD//$SIZE/$BIGSIZE}
+                  echo perf "$PERF_OPT" -o "$FILENAME.client.perf" "$CMD"
                   # shellcheck disable=SC2086
                   taskset -c 1 nice -n -20 setarch --addr-no-randomize \
-                    perf $PERF_OPT -o "$FILENAME.client.perf" "$CMD"
+                    perf $PERF_OPT -o "$FILENAME.client.perf" $CMD
                   kill $PID
 
                   # Sanity check the size of the last retrieved file.
