@@ -44,8 +44,10 @@ runs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
-        sudo apt-get install -y --no-install-recommends mold
+        if [ "$(apt-cache search --names-only '^mold$' | wc -l)" -ge 1 ]; then
+          [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+          sudo apt-get install -y --no-install-recommends mold
+        fi
 
     # See https://corrode.dev/blog/tips-for-faster-ci-builds/
     - name: Set up build environment
@@ -54,14 +56,11 @@ runs:
         {
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
-          case "${{ runner.os }}" in
-            Linux)
-              echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold $RUSTFLAGS"
-              ;;
-            Windows)
-              echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld $RUSTFLAGS"
-              ;;
-          esac
+          if [[ "${{ runner.os }}" == "Linux" && "$(command -v mold)" ]]; then
+            echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold $RUSTFLAGS"
+          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld $RUSTFLAGS"
+          fi
         } >> "$GITHUB_ENV"
 
     - name: Enable sscache
