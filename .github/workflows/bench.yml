@@ -113,12 +113,11 @@ jobs:
           # both a client and a server, thus benefiting from multiple CPU cores.
           #
           # Run all benchmarks at elevated priority.
-          # taskset -c 0 nice -n -20 setarch --addr-no-randomize \
-          #   cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
-          # sudo ip link set dev lo mtu "$MTU"
-          # nice -n -20 setarch --addr-no-randomize \
-          #   cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
-          touch results.txt
+          taskset -c 0 nice -n -20 setarch --addr-no-randomize \
+            cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
+          sudo ip link set dev lo mtu "$MTU"
+          nice -n -20 setarch --addr-no-randomize \
+            cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -189,8 +188,8 @@ jobs:
 
           # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
           sudo ip link set dev lo mtu "$MTU"
-          for server in neqo msquic; do # FIXME google
-            for client in neqo msquic; do # FXIME google
+          for server in neqo google msquic; do
+            for client in neqo google msquic; do
               # Do not run msquic against google-quiche; the latter only supports H3.
               # Also, we are not interested in google as the server, or msquic as the client, except against themselves.
               if [[ "$client" == "google" && "$server" == "msquic" ||
@@ -233,22 +232,22 @@ jobs:
                       --output null --warmup 5 --runs $RUNS --prepare "sleep 1" "$CMD" |
                     tee -a comparison.txt
                   echo >> comparison.txt
+                  # Sanity check the size of the last retrieved file.
+                  # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
+                  [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
+
                   # Do a longer client run with perf separately. We used to just wrap the hyperfine command above in perf,
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
-                  # the perf profiles of those different run.
+                  # the perf profiles of those different runs.
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
                   taskset -c 1 nice -n -20 setarch --addr-no-randomize \
                     perf $PERF_OPT -o "$FILENAME.client.perf" $CMD > /dev/null 2>&1
                   kill $PID
 
-                  # Sanity check the size of the last retrieved file.
-                  # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
-                  [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
-
+                  # Figure out if any performance difference to `main` is statistically relevant, and indicate that.
                   BASELINE="hyperfine-main/$FILENAME.json"
                   RESULT="hyperfine/$FILENAME.json"
-
                   BASELINE_MEAN=$(jq -r '.results[0].mean' "$BASELINE")
                   MEAN=$(jq -r '.results[0].mean' "$RESULT")
                   # Even though we tell hyperfine to use milliseconds, it still outputs in seconds when dumping to JSON.
@@ -286,10 +285,10 @@ jobs:
 
           # Make a single results table.
           {
-            echo "Transfer of $SIZE bytes over loopback, $RUNS runs. All times in milliseconds."
+            echo "Transfer of $SIZE bytes over loopback, $RUNS runs. All unit-less numbers are in milliseconds."
             echo
             # shellcheck disable=SC2016
-            echo '| Client | Server | CC | Pacing | Mean ± σ | Min | Max | Δ `main` | Δ `main` [%] |'
+            echo '| Client | Server | CC | Pacing | Mean ± σ | Min | Max | Δ `main` | Δ `main` |'
             echo '|:---|:---|:---|---|---:|---:|---:|---:|---:|'
             cat steps.md
           } > comparison.md
