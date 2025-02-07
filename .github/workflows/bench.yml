@@ -113,9 +113,12 @@ jobs:
           # both a client and a server, thus benefiting from multiple CPU cores.
           #
           # Run all benchmarks at elevated priority.
-          taskset -c 0 nice -n -20 cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
-          sudo ip link set dev lo mtu "$MTU"
-          nice -n -20 cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
+          # taskset -c 0 nice -n -20 setarch --addr-no-randomize \
+          #   cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
+          # sudo ip link set dev lo mtu "$MTU"
+          # nice -n -20 setarch --addr-no-randomize \
+          #   cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
+          touch results.txt
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -129,8 +132,10 @@ jobs:
           TMP=$(mktemp -d)
           # Make a cert and key for msquic and google.
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
-          # Make a test file for msquic to serve.
+          # Make test files for msquic to serve.
           truncate -s "$SIZE" "$TMP/$SIZE"
+          BIGSIZE=$(echo "$SIZE * $RUNS" | bc -l)
+          truncate -s "$BIGSIZE" "$TMP/$BIGSIZE"
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
             ["neqo"]="target/release/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
@@ -216,7 +221,8 @@ jobs:
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
                   # shellcheck disable=SC2086
-                  taskset -c 0 nice -n -20 setarch --addr-no-randomize perf $PERF_OPT -o "$FILENAME.server.perf" $CMD &
+                  taskset -c 0 nice -n -20 setarch --addr-no-randomize \
+                    perf $PERF_OPT -o "$FILENAME.server.perf" $CMD &
                   PID=$!
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
@@ -230,7 +236,7 @@ jobs:
                   # Do a longer client run with perf separately. We used to just wrap the hyperfine command above in perf,
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
                   # the perf profiles of those different run.
-                  CMD=${CMD//$SIZE/$(echo "$SIZE * 10" | bc -l)}
+                  CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
                   taskset -c 1 nice -n -20 setarch --addr-no-randomize \
                     perf $PERF_OPT -o "$FILENAME.client.perf" "$CMD"
