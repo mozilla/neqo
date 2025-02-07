@@ -126,7 +126,7 @@ jobs:
         env:
           HOST: 127.0.0.1
           PORT: 4433
-          SIZE: 33554432 # 32 MB
+          SIZE: 67108864 # 64 MB
           RUNS: 20
         run: |
           TMP=$(mktemp -d)
@@ -230,17 +230,16 @@ jobs:
                     hyperfine --command-name "$TAG" --time-unit millisecond  \
                       --export-json "hyperfine/$FILENAME.json" \
                       --export-markdown "hyperfine/$FILENAME.md" \
-                      --output null --warmup 3 --runs $RUNS --prepare "sleep 1" "$CMD" |
+                      --output null --warmup 5 --runs $RUNS --prepare "sleep 1" "$CMD" |
                     tee -a comparison.txt
                   echo >> comparison.txt
                   # Do a longer client run with perf separately. We used to just wrap the hyperfine command above in perf,
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
                   # the perf profiles of those different run.
                   CMD=${CMD//$SIZE/$BIGSIZE}
-                  echo perf "$PERF_OPT" -o "$FILENAME.client.perf" "$CMD"
                   # shellcheck disable=SC2086
                   taskset -c 1 nice -n -20 setarch --addr-no-randomize \
-                    perf $PERF_OPT -o "$FILENAME.client.perf" $CMD
+                    perf $PERF_OPT -o "$FILENAME.client.perf" $CMD > /dev/null 2>&1
                   kill $PID
 
                   # Sanity check the size of the last retrieved file.
@@ -253,7 +252,8 @@ jobs:
                   BASELINE_MEAN=$(jq -r '.results[0].mean' "$BASELINE")
                   MEAN=$(jq -r '.results[0].mean' "$RESULT")
                   DELTA=$(echo "($BASELINE_MEAN - $MEAN) * 1000" | bc -l)
-                  PERCENT=$(echo "100 * $DELTA / $BASELINE_MEAN" | bc -l)
+                  PERCENT=$(echo "($BASELINE_MEAN - $MEAN) / $BASELINE_MEAN * 100" | bc -l)
+                  echo "Baseline: $BASELINE_MEAN, Result: $MEAN, Delta: $DELTA, Percent: $PERCENT"
 
                   # If a performance change is statistically significant, highlight it.
                   jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
@@ -261,19 +261,20 @@ jobs:
                   if Rscript welch.R baseline.txt result.txt; then
                     if echo "$DELTA > 0" | bc -l; then
                       # Performance has regressed
-                      TAG=":broken_heart:"
+                      SYMBOL=":broken_heart:"
                       FORMAT="\*\*"
                     else
                       # Performance has improved
-                      TAG=":green_heart:"
+                      SYMBOL=":green_heart:"
                       FORMAT="\*\*"
                     fi
                   fi
 
                   {
-                    grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | cut -f1-8 -d\| | tr -d '\n'
-                    printf "| %s %.2f ± %.2f %s %.2f %.2f%% %s|\n" \
-                      "$FORMAT" "$MEAN" "$STDDEV" "$TAG" "$DELTA" "$PERCENT" "$FORMAT"
+                    grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
+                      sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n'
+                    printf " %s %.1f ± %.1f %s %.1f %.1f%% %s|\n" \
+                      "$FORMAT" "$MEAN" "$STDDEV" "$SYMBOL" "$DELTA" "$PERCENT" "$FORMAT"
                   } >> steps.md
                 done
               done
