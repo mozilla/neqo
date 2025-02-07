@@ -134,7 +134,7 @@ jobs:
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
           # Make test files for msquic to serve.
           truncate -s "$SIZE" "$TMP/$SIZE"
-          BIGSIZE=$(echo "$SIZE * $RUNS" | bc -l)
+          BIGSIZE=$(bc -l <<< "$SIZE * $RUNS")
           truncate -s "$BIGSIZE" "$TMP/$BIGSIZE"
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
@@ -252,15 +252,15 @@ jobs:
                   BASELINE_MEAN=$(jq -r '.results[0].mean' "$BASELINE")
                   MEAN=$(jq -r '.results[0].mean' "$RESULT")
                   # Even though we tell hyperfine to use milliseconds, it still outputs in seconds when dumping to JSON.
-                  DELTA=$(echo "($MEAN - $BASELINE_MEAN) * 1000" | bc -l)
-                  PERCENT=$(echo "sqrt(($MEAN - $BASELINE_MEAN)^2) / ($BASELINE_MEAN + $MEAN)/2 * 100" | bc -l)
+                  DELTA=$(bc -l <<< "($MEAN - $BASELINE_MEAN) * 1000")
+                  PERCENT=$(bc -l <<< "sqrt(($MEAN - $BASELINE_MEAN)^2) / ($BASELINE_MEAN + $MEAN)/2 * 100")
                   echo "Baseline: $BASELINE_MEAN, Result: $MEAN, Delta: $DELTA, Percent: $PERCENT"
 
                   # If a performance change is statistically significant, highlight it.
                   jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
                   jq -r '.results[0].times[]' "$RESULT" > result.txt
                   if Rscript welch.R baseline.txt result.txt 2> /dev/null; then
-                    if echo "$DELTA > 0" | bc -l; then
+                    if (( $(bc -l <<< "$DELTA > 0") )); then
                       echo "Performance has regressed: $BASELINE_MEAN -> $MEAN"
                       SYMBOL=":broken_heart:"
                       FORMAT='**'
@@ -276,8 +276,8 @@ jobs:
                   {
                     grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                       sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n'
-                    printf "| %s %.1f %s | %s %.1f%% %s %s |\n" \
-                      "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT" "$SYMBOL"
+                    printf "| %s %s%.1f%s | %s%.1f%%%s |\n" \
+                      "$SYMBOL" "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT"
                   } >> steps.md
                 done
               done
