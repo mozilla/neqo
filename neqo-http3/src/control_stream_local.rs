@@ -7,8 +7,7 @@
 use std::collections::VecDeque;
 
 use neqo_common::{qtrace, Encoder};
-use neqo_transport::{Connection, StreamId, StreamType};
-use rustc_hash::FxHashMap as HashMap;
+use neqo_transport::{Connection, IndexMap, StreamId, StreamType};
 
 use crate::{frames::HFrame, BufferedStream, Error, Http3StreamType, RecvStream, Res};
 
@@ -51,7 +50,7 @@ impl ControlStreamLocal {
     pub fn send(
         &mut self,
         conn: &mut Connection,
-        recv_conn: &mut HashMap<StreamId, Box<dyn RecvStream>>,
+        recv_conn: &mut IndexMap<StreamId, Box<dyn RecvStream>>,
     ) -> Res<()> {
         self.stream.send_buffer(conn)?;
         self.send_priority_update(conn, recv_conn)
@@ -60,7 +59,7 @@ impl ControlStreamLocal {
     fn send_priority_update(
         &mut self,
         conn: &mut Connection,
-        recv_conn: &mut HashMap<StreamId, Box<dyn RecvStream>>,
+        recv_conn: &mut IndexMap<StreamId, Box<dyn RecvStream>>,
     ) -> Res<()> {
         // send all necessary priority updates
         while let Some(update_id) = self.outstanding_priority_update.pop_front() {

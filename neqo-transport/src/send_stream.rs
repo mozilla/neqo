@@ -12,7 +12,7 @@ use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
     collections::{btree_map::Entry, BTreeMap, VecDeque},
-    hash::{BuildHasherDefault, Hash, Hasher},
+    hash::{Hash, Hasher},
     mem,
     num::NonZeroUsize,
     ops::Add,
@@ -20,7 +20,6 @@ use std::{
 };
 
 use neqo_common::{qdebug, qerror, qtrace, Encoder, Role};
-use rustc_hash::FxHasher;
 use smallvec::SmallVec;
 
 use crate::{
@@ -33,10 +32,8 @@ use crate::{
     stream_id::StreamId,
     streams::SendOrder,
     tparams::{self, TransportParameters},
-    AppError, Error, Res,
+    AppError, Error, IndexMap, Res,
 };
-
-type IndexMap<K, V> = indexmap::IndexMap<K, V, BuildHasherDefault<FxHasher>>;
 
 pub const SEND_BUFFER_SIZE: usize = 0x10_0000; // 1 MiB
 
