@@ -152,5 +152,5 @@ jobs:
 
   bench:
     needs: [check]
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' }}
     uses: ./.github/workflows/bench.yml
