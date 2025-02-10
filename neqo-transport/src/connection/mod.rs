@@ -6,7 +6,7 @@
 
 // The class implementing a QUIC connection.
 
-// #![allow(clippy::module_name_repetitions)]
+#![allow(clippy::module_name_repetitions)]
 
 use std::{
     cell::RefCell,
