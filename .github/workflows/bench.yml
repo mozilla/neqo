@@ -257,8 +257,7 @@ jobs:
                   # If a performance change is statistically significant, highlight it.
                   jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
                   jq -r '.results[0].times[]' "$RESULT" > result.txt
-                  Rscript welch.R baseline.txt result.txt 2> /dev/null
-                  if [ "$?" -eq "1" ]; then
+                  if ! Rscript welch.R baseline.txt result.txt 2> /dev/null; then
                     if (( $(bc -l <<< "$DELTA > 0") )); then
                       echo "Performance has regressed: $BASELINE_MEAN -> $MEAN"
                       SYMBOL=":warning:"
