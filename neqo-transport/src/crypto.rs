@@ -15,6 +15,7 @@ use std::{
     time::Instant,
 };
 
+#[cfg(not(feature = "disable-encryption"))]
 #[cfg(test)]
 use enum_map::enum_map;
 use enum_map::EnumMap;
