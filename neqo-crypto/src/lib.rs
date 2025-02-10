@@ -5,7 +5,8 @@
 // except according to those terms.
 
 #![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
-#![allow(clippy::unseparated_literal_suffix, clippy::used_underscore_binding)] // For bindgen code.
+#![allow(clippy::unseparated_literal_suffix)] // For bindgen code.
+#![allow(clippy::used_underscore_binding)] // For bindgen code.
 
 mod aead;
 #[cfg(feature = "disable-encryption")]
@@ -70,7 +71,7 @@ mod nss {
 
 // Need to map the types through.
 fn secstatus_to_res(code: nss::SECStatus) -> Res<()> {
-    crate::err::secstatus_to_res(code as crate::ssl::SECStatus)
+    err::secstatus_to_res(code)
 }
 
 enum NssLoaded {
@@ -106,7 +107,7 @@ fn version_check() -> Res<()> {
 /// This allows us to use SSLTRACE in all of our unit tests and programs.
 #[cfg(debug_assertions)]
 fn enable_ssl_trace() -> Res<()> {
-    let opt = ssl::Opt::Locking.as_int();
+    let opt = Opt::Locking.as_int();
     let mut v: ::std::os::raw::c_int = 0;
     secstatus_to_res(unsafe { ssl::SSL_OptionGetDefault(opt, &mut v) })
 }

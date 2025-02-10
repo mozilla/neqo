@@ -37,7 +37,7 @@ impl AckRate {
         let packets = packets.clamp(MIN_PACKETS, MAX_PACKETS) - 1;
         let delay = rtt * RTT_RATIO / u32::from(ratio);
         let delay = delay.clamp(minimum, MAX_DELAY);
-        qtrace!("AckRate inputs: {}/{}/{}, {:?}", cwnd, mtu, ratio, rtt);
+        qtrace!("AckRate inputs: {cwnd}/{mtu}/{ratio}, {rtt:?}");
         Self { packets, delay }
     }
 
@@ -45,8 +45,8 @@ impl AckRate {
         builder.write_varint_frame(&[
             FRAME_TYPE_ACK_FREQUENCY,
             seqno,
-            u64::try_from(self.packets + 1).unwrap(),
-            u64::try_from(self.delay.as_micros()).unwrap(),
+            u64::try_from(self.packets + 1).expect("usize fits in u64"),
+            u64::try_from(self.delay.as_micros()).unwrap_or(u64::MAX),
             0,
         ])
     }
@@ -82,12 +82,7 @@ impl FlexibleAckRate {
         mtu: usize,
         rtt: Duration,
     ) -> Self {
-        qtrace!(
-            "FlexibleAckRate: {:?} {:?} {}",
-            max_ack_delay,
-            min_ack_delay,
-            ratio
-        );
+        qtrace!("FlexibleAckRate: {max_ack_delay:?} {min_ack_delay:?} {ratio}");
         let ratio = max(ACK_RATIO_SCALE, ratio); // clamp it
         Self {
             current: AckRate {

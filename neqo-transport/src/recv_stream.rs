@@ -7,6 +7,8 @@
 // Building a stream of ordered bytes to give the application from a series of
 // incoming STREAM frames.
 
+#![allow(clippy::module_name_repetitions)]
+
 use std::{
     cell::RefCell,
     cmp::max,
@@ -70,15 +72,13 @@ impl RecvStreams {
     pub fn keep_alive(&mut self, id: StreamId, k: bool) -> Res<()> {
         let self_ka = &mut self.keep_alive;
         let s = self.streams.get_mut(&id).ok_or(Error::InvalidStreamId)?;
-        s.keep_alive = if k {
-            Some(self_ka.upgrade().unwrap_or_else(|| {
+        s.keep_alive = k.then(|| {
+            self_ka.upgrade().unwrap_or_else(|| {
                 let r = Rc::new(());
                 *self_ka = Rc::downgrade(&r);
                 r
-            }))
-        } else {
-            None
-        };
+            })
+        });
         Ok(())
     }
 
@@ -132,12 +132,12 @@ impl RxStreamOrderer {
     /// Only when `u64` values cannot be converted to `usize`, which only
     /// happens on 32-bit machines that hold far too much data at the same time.
     pub fn inbound_frame(&mut self, mut new_start: u64, mut new_data: &[u8]) {
-        qtrace!("Inbound data offset={} len={}", new_start, new_data.len());
+        qtrace!("Inbound data offset={new_start} len={}", new_data.len());
 
         // Get entry before where new entry would go, so we can see if we already
         // have the new bytes.
         // Avoid copies and duplicated data.
-        let new_end = new_start + u64::try_from(new_data.len()).unwrap();
+        let new_end = new_start + u64::try_from(new_data.len()).expect("usize fits in u64");
 
         if new_end <= self.retired {
             // Range already read by application, this frame is very late and unneeded.
@@ -145,7 +145,8 @@ impl RxStreamOrderer {
         }
 
         if new_start < self.retired {
-            new_data = &new_data[usize::try_from(self.retired - new_start).unwrap()..];
+            new_data =
+                &new_data[usize::try_from(self.retired - new_start).expect("u64 fits in usize")..];
             new_start = self.retired;
         }
 
@@ -157,7 +158,7 @@ impl RxStreamOrderer {
         let extend = if let Some((&prev_start, prev_vec)) =
             self.data_ranges.range_mut(..=new_start).next_back()
         {
-            let prev_end = prev_start + u64::try_from(prev_vec.len()).unwrap();
+            let prev_end = prev_start + u64::try_from(prev_vec.len()).expect("usize fits in u64");
             if new_end > prev_end {
                 // PPPPPP    ->  PPPPPP
                 //   NNNNNN            NN
@@ -165,14 +166,9 @@ impl RxStreamOrderer {
                 // Add a range containing only new data
                 // (In-order frames will take this path, with no overlap)
                 let overlap = prev_end.saturating_sub(new_start);
-                qtrace!(
-                    "New frame {}-{} received, overlap: {}",
-                    new_start,
-                    new_end,
-                    overlap
-                );
+                qtrace!("New frame {new_start}-{new_end} received, overlap: {overlap}");
                 new_start += overlap;
-                new_data = &new_data[usize::try_from(overlap).unwrap()..];
+                new_data = &new_data[usize::try_from(overlap).expect("u64 fits in usize")..];
                 // If it is small enough, extend the previous buffer.
                 // This can't always extend, because otherwise the buffer could end up
                 // growing indefinitely without being released.
@@ -182,15 +178,11 @@ impl RxStreamOrderer {
                 //   NNNN
                 // NNNN
                 // Do nothing
-                qtrace!(
-                    "Dropping frame with already-received range {}-{}",
-                    new_start,
-                    new_end
-                );
+                qtrace!("Dropping frame with already-received range {new_start}-{new_end}");
                 return;
             }
         } else {
-            qtrace!("New frame {}-{} received", new_start, new_end);
+            qtrace!("New frame {new_start}-{new_end} received");
             false
         };
 
@@ -221,28 +213,23 @@ impl RxStreamOrderer {
             let mut to_remove = SmallVec::<[_; 8]>::new();
 
             for (&next_start, next_data) in self.data_ranges.range_mut(new_start..) {
-                let next_end = next_start + u64::try_from(next_data.len()).unwrap();
+                let next_end =
+                    next_start + u64::try_from(next_data.len()).expect("usize fits in u64");
                 let overlap = new_end.saturating_sub(next_start);
                 if overlap == 0 {
                     // Fills in the hole, exactly (probably common)
                     break;
                 } else if next_end >= new_end {
                     qtrace!(
-                        "New frame {}-{} overlaps with next frame by {}, truncating",
-                        new_start,
-                        new_end,
-                        overlap
+                        "New frame {new_start}-{new_end} overlaps with next frame by {overlap}, truncating"
                     );
-                    let truncate_to = new_data.len() - usize::try_from(overlap).unwrap();
+                    let truncate_to =
+                        new_data.len() - usize::try_from(overlap).expect("u64 fits in usize");
                     to_add = &new_data[..truncate_to];
                     break;
                 }
                 qtrace!(
-                    "New frame {}-{} spans entire next frame {}-{}, replacing",
-                    new_start,
-                    new_end,
-                    next_start,
-                    next_end
+                    "New frame {new_start}-{new_end} spans entire next frame {next_start}-{next_end}, replacing"
                 );
                 to_remove.push(next_start);
                 // Continue, since we may have more overlaps
@@ -254,14 +241,11 @@ impl RxStreamOrderer {
         }
 
         if !to_add.is_empty() {
-            self.received += u64::try_from(to_add.len()).unwrap();
+            self.received += u64::try_from(to_add.len()).expect("usize fits in u64");
             if extend {
-                let (_, buf) = self
-                    .data_ranges
-                    .range_mut(..=new_start)
-                    .next_back()
-                    .unwrap();
-                buf.extend_from_slice(to_add);
+                if let Some((_, buf)) = self.data_ranges.range_mut(..=new_start).next_back() {
+                    buf.extend_from_slice(to_add);
+                }
             } else {
                 self.data_ranges.insert(new_start, to_add.to_vec());
             }
@@ -331,8 +315,8 @@ impl RxStreamOrderer {
             let mut keep = false;
             if self.retired >= range_start {
                 // Frame data has new contiguous bytes.
-                let copy_offset =
-                    usize::try_from(max(range_start, self.retired) - range_start).unwrap();
+                let copy_offset = usize::try_from(max(range_start, self.retired) - range_start)
+                    .expect("u64 fits in usize");
                 assert!(range_data.len() >= copy_offset);
                 let available = range_data.len() - copy_offset;
                 let space = buf.len() - copied;
@@ -347,7 +331,7 @@ impl RxStreamOrderer {
                     let copy_slc = &range_data[copy_offset..copy_offset + copy_bytes];
                     buf[copied..copied + copy_bytes].copy_from_slice(copy_slc);
                     copied += copy_bytes;
-                    self.retired += u64::try_from(copy_bytes).unwrap();
+                    self.retired += u64::try_from(copy_bytes).expect("usize fits in u64");
                 }
             } else {
                 // The data in the buffer isn't contiguous.
@@ -799,7 +783,6 @@ impl RecvStream {
 
     /// # Errors
     /// `NoMoreData` if data and fin bit were previously read by the application.
-    #[allow(clippy::missing_panics_doc)] // with a >16 exabyte packet on a 128-bit machine, maybe
     pub fn read(&mut self, buf: &mut [u8]) -> Res<(usize, bool)> {
         let data_recvd_state = matches!(self.state, RecvStreamState::DataRecvd { .. });
         match &mut self.state {
@@ -820,7 +803,7 @@ impl RecvStream {
                 session_fc,
             } => {
                 let bytes_read = recv_buf.read(buf);
-                Self::flow_control_retire_data(u64::try_from(bytes_read).unwrap(), fc, session_fc);
+                Self::flow_control_retire_data(u64::try_from(bytes_read)?, fc, session_fc);
                 let fin_read = if data_recvd_state {
                     if recv_buf.buffered() == 0 {
                         let received = recv_buf.received();
@@ -1015,7 +998,7 @@ mod tests {
 
     fn recv_ranges(ranges: &[Range<u64>], available: usize) {
         const ZEROES: &[u8] = &[0; 100];
-        qtrace!("recv_ranges {:?}", ranges);
+        qtrace!("recv_ranges {ranges:?}");
 
         let mut s = RxStreamOrderer::default();
         for r in ranges {
@@ -1027,7 +1010,7 @@ mod tests {
         let mut total_recvd = 0;
         loop {
             let recvd = s.read(&mut buf[..]);
-            qtrace!("recv_ranges read {}", recvd);
+            qtrace!("recv_ranges read {recvd}");
             total_recvd += recvd;
             if recvd == 0 {
                 assert_eq!(total_recvd, available);
@@ -1169,7 +1152,7 @@ mod tests {
 
         // Add a chunk
         s.inbound_frame(0, &[0; 150]);
-        assert_eq!(s.data_ranges.get(&0).unwrap().len(), 150);
+        assert_eq!(s.data_ranges[&0].len(), 150);
         // Read, providing only enough space for the first 100.
         let mut buf = [0; 100];
         let count = s.read(&mut buf[..]);
@@ -1180,7 +1163,7 @@ mod tests {
         // This shouldn't truncate the first frame, as we're already
         // Reading from it.
         s.inbound_frame(120, &[0; 60]);
-        assert_eq!(s.data_ranges.get(&0).unwrap().len(), 180);
+        assert_eq!(s.data_ranges[&0].len(), 180);
         // Read second part of first frame and all of the second frame
         let count = s.read(&mut buf[..]);
         assert_eq!(count, 80);

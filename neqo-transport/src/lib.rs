@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
-
 use neqo_common::qwarn;
 use neqo_crypto::Error as CryptoError;
 
@@ -15,7 +13,7 @@ mod cc;
 mod cid;
 mod connection;
 mod crypto;
-mod ecn;
+pub mod ecn;
 mod events;
 mod fc;
 #[cfg(fuzzing)]
@@ -179,7 +177,7 @@ impl Error {
 
 impl From<CryptoError> for Error {
     fn from(err: CryptoError) -> Self {
-        qwarn!("Crypto operation failed {:?}", err);
+        qwarn!("Crypto operation failed {err:?}");
         match err {
             CryptoError::EchRetry(config) => Self::EchRetry(config),
             _ => Self::CryptoError(err),
@@ -252,4 +250,4 @@ impl From<CloseError> for CloseReason {
     }
 }
 
-pub type Res<T> = std::result::Result<T, Error>;
+pub type Res<T> = Result<T, Error>;

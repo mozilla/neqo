@@ -6,8 +6,6 @@
 
 // Congestion control
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     fmt::{self, Display},
     time::{Duration, Instant},
@@ -93,9 +91,8 @@ impl PacketSender {
         let current_mtu = self.pmtud().plpmtu();
         if current_mtu != self.pacer.mtu() {
             qdebug!(
-                "PLPMTU changed from {} to {}, updating pacer",
-                self.pacer.mtu(),
-                current_mtu
+                "PLPMTU changed from {} to {current_mtu}, updating pacer",
+                self.pacer.mtu()
             );
             self.pacer.set_mtu(current_mtu);
         }
@@ -161,11 +158,7 @@ impl PacketSender {
     #[must_use]
     pub fn next_paced(&self, rtt: Duration) -> Option<Instant> {
         // Only pace if there are bytes in flight.
-        if self.cc.bytes_in_flight() > 0 {
-            Some(self.pacer.next(rtt, self.cc.cwnd()))
-        } else {
-            None
-        }
+        (self.cc.bytes_in_flight() > 0).then(|| self.pacer.next(rtt, self.cc.cwnd()))
     }
 
     #[must_use]

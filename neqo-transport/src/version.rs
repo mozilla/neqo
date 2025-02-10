@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::module_name_repetitions)]
+
 use neqo_common::qdebug;
 
 use crate::{Error, Res};
@@ -86,7 +88,6 @@ impl Version {
         }
     }
 
-    #[allow(clippy::unused_self)] // `self` only used in feature-gated code
     pub(crate) const fn is_draft(self) -> bool {
         #[cfg(feature = "draft-29")]
         return matches!(self, Self::Draft29);
@@ -189,9 +190,8 @@ impl VersionConfig {
     /// and by the client on resumption.
     pub(crate) fn set_initial(&mut self, initial: Version) {
         qdebug!(
-            "Overwrite initial version {:?} ==> {:?}",
-            self.initial,
-            initial
+            "Overwrite initial version {:?} ==> {initial:?}",
+            self.initial
         );
         assert!(self.all.contains(&initial));
         self.initial = initial;

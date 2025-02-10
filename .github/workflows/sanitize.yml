@@ -9,8 +9,6 @@ on:
   merge_group:
   workflow_dispatch:
 env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
   DUMP_SIMULATION_SEEDS: /tmp/simulation-seeds
 
 concurrency:
@@ -41,6 +39,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
       - uses: ./.github/actions/rust
         with:
           version: nightly
@@ -58,10 +59,12 @@ jobs:
       - name: Run tests with sanitizers
         env:
           RUST_LOG: trace
-          RUSTFLAGS: "-Z sanitizer=${{ matrix.sanitizer }}"
           RUSTDOCFLAGS: "-Z sanitizer=${{ matrix.sanitizer }}"
           ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
+          RUST_BACKTRACE: 1
         run: |
+          # Append to RUSTFLAGS, which may already be set by the Rust action.
+          export RUSTFLAGS="-Z sanitizer=${{ matrix.sanitizer }} $RUSTFLAGS"
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             sudo apt-get install -y --no-install-recommends llvm
             TARGET="x86_64-unknown-linux-gnu"
@@ -77,11 +80,11 @@ jobs:
             PWD=$(pwd)
             export LSAN_OPTIONS="suppressions=$PWD/suppressions.txt"
           fi
-          cargo nextest run -Z build-std --features ci --profile ci --target "$TARGET"
+          cargo nextest run --locked -Z build-std --features ci --profile ci --target "$TARGET"
 
       - name: Save simulation seeds artifact
-        if: env.DUMP_SIMULATION_SEEDS
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: ${{ env.DUMP_SIMULATION_SEEDS }}
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: simulation-seeds-${{ matrix.os }}-sanitizer-${{ matrix.sanitizer }}
           path: ${{ env.DUMP_SIMULATION_SEEDS }}

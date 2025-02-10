@@ -4,13 +4,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::unwrap_used)] // This is example code.
+
 //! An [HTTP 0.9](https://www.w3.org/Protocols/HTTP/AsImplemented.html) client implementation.
 
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
     fs::File,
-    io::{BufWriter, Write},
+    io::{BufWriter, Write as _},
     net::SocketAddr,
     path::PathBuf,
     rc::Rc,
@@ -61,7 +63,7 @@ impl super::Handler for Handler<'_> {
                         self.needs_key_update = false;
                         self.download_urls(client);
                     }
-                    Err(neqo_transport::Error::KeyUpdateBlocked) => (),
+                    Err(Error::KeyUpdateBlocked) => (),
                     Err(e) => return Err(e.into()),
                 }
             }
@@ -159,7 +161,11 @@ pub fn create_client(
         client.set_ciphers(&ciphers)?;
     }
 
-    client.set_qlog(qlog_new(args, hostname, client.odcid().unwrap())?);
+    client.set_qlog(qlog_new(
+        args,
+        hostname,
+        client.odcid().ok_or(Error::InternalError)?,
+    )?);
 
     Ok(client)
 }
@@ -189,7 +195,7 @@ impl super::Client for Connection {
 
     fn process_multiple_input<'a>(
         &mut self,
-        dgrams: impl IntoIterator<Item = Datagram<&'a [u8]>>,
+        dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
         now: Instant,
     ) {
         self.process_multiple_input(dgrams, now);
@@ -213,7 +219,7 @@ impl super::Client for Connection {
     }
 
     fn has_events(&self) -> bool {
-        neqo_common::event::Provider::has_events(self)
+        Provider::has_events(self)
     }
 }
 
@@ -301,9 +307,8 @@ impl<'b> Handler<'b> {
                 qdebug!("READ[{stream_id}]: {} bytes", read_buffer.len());
             } else {
                 qdebug!(
-                    "READ[{}]: {}",
-                    stream_id,
-                    std::str::from_utf8(read_buffer).unwrap()
+                    "READ[{stream_id}]: {}",
+                    std::str::from_utf8(read_buffer).map_err(|_| Error::InvalidInput)?
                 );
             }
             if fin {

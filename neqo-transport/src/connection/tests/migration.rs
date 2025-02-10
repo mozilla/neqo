@@ -6,7 +6,6 @@
 
 use std::{
     cell::RefCell,
-    mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     rc::Rc,
     time::{Duration, Instant},
@@ -35,7 +34,7 @@ use crate::{
     pmtud::Pmtud,
     stats::FrameStats,
     tparams::{self, PreferredAddress, TransportParameter},
-    CloseReason, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
+    CloseReason, ConnectionId, ConnectionIdDecoder as _, ConnectionIdGenerator, ConnectionIdRef,
     ConnectionParameters, EmptyConnectionIdGenerator, Error, MIN_INITIAL_PACKET_SIZE,
 };
 
@@ -168,8 +167,7 @@ fn rebind(
         .borrow()
         .local_cid()
         .unwrap()
-        .len()
-        == 0;
+        .is_empty();
     let mut total_delay = Duration::new(0, 0);
     loop {
         let before = server.stats().frame_tx;
@@ -574,7 +572,7 @@ fn migrate_same_fail() {
     assert_path_challenge_min_len(&client, &probe, now);
 
     // -1 because first PATH_CHALLENGE already sent above
-    for _ in 0..MAX_PATH_PROBES * 2 - 1 {
+    for _ in 0..MAX_PATH_PROBES - 1 {
         let cb = client.process_output(now).callback();
         assert_ne!(cb, Duration::new(0, 0));
         now += cb;
@@ -706,6 +704,10 @@ fn migration_client_empty_cid() {
 /// Returns the packet containing `HANDSHAKE_DONE` from the server.
 fn fast_handshake(client: &mut Connection, server: &mut Connection) -> Option<Datagram> {
     let dgram = client.process_output(now()).dgram();
+    let dgram2 = client.process_output(now()).dgram();
+    server.process_input(dgram.unwrap(), now());
+    let dgram = server.process(dgram2, now()).dgram();
+    let dgram = client.process(dgram, now()).dgram();
     let dgram = server.process(dgram, now()).dgram();
     client.process_input(dgram.unwrap(), now());
     assert!(maybe_authenticate(client));
@@ -1229,7 +1231,7 @@ fn error_on_new_path_with_no_connection_id() {
     // See issue #1697. We had a crash when the client had a temporary path and
     // process_output is called.
     let closing_frames = client.stats().frame_tx.connection_close;
-    mem::drop(client.process_output(now()));
+    drop(client.process_output(now()));
     assert!(matches!(
         client.state(),
         State::Closing {

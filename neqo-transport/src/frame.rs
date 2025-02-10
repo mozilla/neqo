@@ -12,13 +12,12 @@ use neqo_common::{qtrace, Decoder, Encoder};
 
 use crate::{
     cid::MAX_CONNECTION_ID_LEN,
-    ecn::EcnCount,
+    ecn,
     packet::PacketType,
     stream_id::{StreamId, StreamType},
     AppError, CloseReason, Error, Res, TransportError,
 };
 
-#[allow(clippy::module_name_repetitions)]
 pub type FrameType = u64;
 
 pub const FRAME_TYPE_PADDING: FrameType = 0x0;
@@ -119,7 +118,7 @@ pub enum Frame<'a> {
         ack_delay: u64,
         first_ack_range: u64,
         ack_ranges: Vec<AckRange>,
-        ecn_count: Option<EcnCount>,
+        ecn_count: Option<ecn::Count>,
     },
     ResetStream {
         stream_id: StreamId,
@@ -370,7 +369,7 @@ impl<'a> Frame<'a> {
     pub fn dump(&self) -> String {
         match self {
             Self::Crypto { offset, data } => {
-                format!("Crypto {{ offset: {}, len: {} }}", offset, data.len())
+                format!("Crypto {{ offset: {offset}, len: {} }}", data.len())
             }
             Self::Stream {
                 stream_id,
@@ -379,12 +378,10 @@ impl<'a> Frame<'a> {
                 data,
                 fin,
             } => format!(
-                "Stream {{ stream_id: {}, offset: {}, len: {}{}, fin: {} }}",
+                "Stream {{ stream_id: {}, offset: {offset}, len: {}{}, fin: {fin} }}",
                 stream_id.as_u64(),
-                offset,
                 if *fill { ">>" } else { "" },
                 data.len(),
-                fin,
             ),
             Self::Padding(length) => format!("Padding {{ len: {length} }}"),
             Self::Datagram { data, .. } => format!("Datagram {{ len: {} }}", data.len()),
@@ -451,11 +448,11 @@ impl<'a> Frame<'a> {
             }
 
             // Now check for the values for ACK_ECN.
-            let ecn_count = if ecn {
-                Some(EcnCount::new(0, dv(dec)?, dv(dec)?, dv(dec)?))
-            } else {
-                None
-            };
+            let ecn_count = ecn
+                .then(|| -> Res<ecn::Count> {
+                    Ok(ecn::Count::new(0, dv(dec)?, dv(dec)?, dv(dec)?))
+                })
+                .transpose()?;
 
             Ok(Frame::Ack {
                 largest_acknowledged: la,
@@ -665,7 +662,7 @@ mod tests {
 
     use crate::{
         cid::MAX_CONNECTION_ID_LEN,
-        ecn::EcnCount,
+        ecn::Count,
         frame::{AckRange, Frame, FRAME_TYPE_ACK},
         CloseError, Error, StreamId, StreamType,
     };
@@ -710,7 +707,7 @@ mod tests {
         assert_eq!(Frame::decode(&mut dec).unwrap_err(), Error::NoMoreData);
 
         // Try to parse ACK_ECN with ECN values
-        let ecn_count = Some(EcnCount::new(0, 1, 2, 3));
+        let ecn_count = Some(Count::new(0, 1, 2, 3));
         let fe = Frame::Ack {
             largest_acknowledged: 0x1234,
             ack_delay: 0x1235,

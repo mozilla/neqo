@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{fmt::Debug, mem::size_of};
+use std::fmt::Debug;
 
 use crate::hex_with_len;
 
@@ -47,6 +47,7 @@ impl<'a> Decoder<'a> {
     /// Only use this for tests because we panic rather than reporting a result.
     #[cfg(any(test, feature = "test-fixture"))]
     fn skip_inner(&mut self, n: Option<u64>) {
+        #[allow(clippy::unwrap_used)] // Only used in tests.
         self.skip(usize::try_from(n.expect("invalid length")).unwrap());
     }
 
@@ -111,7 +112,7 @@ impl<'a> Decoder<'a> {
     /// unsigned integer types: `u8`, `u16`, `u32`, or `u64`.
     /// Signed types will fail if the high bit is set.
     pub fn decode_uint<T: TryFrom<u64>>(&mut self) -> Option<T> {
-        let v = self.decode_n(size_of::<T>());
+        let v = self.decode_n(std::mem::size_of::<T>());
         v.and_then(|v| T::try_from(v).ok())
     }
 
@@ -227,7 +228,7 @@ impl Encoder {
     /// When `len` doesn't fit in a `u64`.
     #[must_use]
     pub fn vvec_len(len: usize) -> usize {
-        Self::varint_len(u64::try_from(len).unwrap()) + len
+        Self::varint_len(u64::try_from(len).expect("usize should fit into u64")) + len
     }
 
     /// Default construction of an empty buffer.
@@ -286,6 +287,7 @@ impl Encoder {
         let mut enc = Self::with_capacity(cap);
 
         for i in 0..cap {
+            #[allow(clippy::unwrap_used)] // Only used in tests.
             let v = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).unwrap();
             enc.encode_byte(v);
         }
@@ -341,8 +343,11 @@ impl Encoder {
     ///
     /// When `v` is longer than 2^64.
     pub fn encode_vec(&mut self, n: usize, v: &[u8]) -> &mut Self {
-        self.encode_uint(n, u64::try_from(v.as_ref().len()).unwrap())
-            .encode(v)
+        self.encode_uint(
+            n,
+            u64::try_from(v.as_ref().len()).expect("v is longer than 2^64"),
+        )
+        .encode(v)
     }
 
     /// Encode a vector in TLS style using a closure for the contents.
@@ -369,7 +374,7 @@ impl Encoder {
     ///
     /// When `v` is longer than 2^64.
     pub fn encode_vvec(&mut self, v: &[u8]) -> &mut Self {
-        self.encode_varint(u64::try_from(v.as_ref().len()).unwrap())
+        self.encode_varint(u64::try_from(v.as_ref().len()).expect("v is longer than 2^64"))
             .encode(v)
     }
 

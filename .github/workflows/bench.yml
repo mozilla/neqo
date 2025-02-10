@@ -8,14 +8,11 @@ on:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
   TOOLCHAIN: stable
-  RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
-  PERF_OPT: record -F997 --call-graph fp -g
+  PERF_OPT: record -F4999 --call-graph fp -g
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
-  MTU: 1504
+  MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
 
 permissions:
   contents: read
@@ -23,7 +20,7 @@ permissions:
 jobs:
   bench:
     name: Benchmark
-    runs-on: self-hosted
+    runs-on: self-hosted # zizmor: ignore[self-hosted-runner]
     defaults:
       run:
         shell: bash
@@ -31,6 +28,8 @@ jobs:
     steps:
       - name: Checkout neqo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Checkout msquic
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -39,23 +38,26 @@ jobs:
           ref: main
           path: msquic
           submodules: true
+          persist-credentials: false
 
-      - name: Checkout gquiche
+      - name: Checkout google/quiche
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: google/quiche
           ref: main
           path: gquiche
           submodules: true
+          persist-credentials: false
 
-      - name: Set PATH
-        run: echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
+      - name: Set PATH and environment
+        run: |
+          echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
         uses: ./.github/actions/rust
         with:
           version: $TOOLCHAIN
-          tools: hyperfine
+          tools: hyperfine, flamegraph
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get minimum NSS version
@@ -63,6 +65,7 @@ jobs:
         run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Install NSS
+        id: nss
         uses: ./.github/actions/nss
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
@@ -70,7 +73,9 @@ jobs:
       - name: Build neqo
         run: |
           cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
-          cargo "+$TOOLCHAIN" build --release --bin neqo-client --bin neqo-server
+          # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
+          export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
+          cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
         run: |
@@ -79,18 +84,24 @@ jobs:
           cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
           cmake --build .
 
-      - name: Build gquiche
+      - name: Build google/quiche
         run: |
           cd gquiche
           bazel build -c opt --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
 
       - name: Download cached main-branch results
-        id: criterion-cache
         uses: actions/cache/restore@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
-          path: ./target/criterion
-          key: criterion-${{ runner.name }}-${{ github.sha }}
-          restore-keys: criterion-${{ runner.name }}-
+          path: |
+            target/criterion
+            hyperfine
+          key: bench-results-${{ runner.name }}-${{ github.sha }}
+          restore-keys: bench-results-${{ runner.name }}-
+
+      - name: Move cached hyperfine results
+        run: |
+          mv hyperfine hyperfine-main || true
+          mkdir -p hyperfine
 
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
@@ -102,39 +113,44 @@ jobs:
           # both a client and a server, thus benefiting from multiple CPU cores.
           #
           # Run all benchmarks at elevated priority.
-          taskset -c 0 nice -n -20 cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
+          taskset -c 0 nice -n -20 setarch --addr-no-randomize \
+            cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
           sudo ip link set dev lo mtu "$MTU"
-          nice -n -20 cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
+          nice -n -20 setarch --addr-no-randomize \
+            cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
 
-      # Compare various configurations of neqo against msquic, and gather perf data
+      # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
-      - name: Compare neqo, msquic and gquiche
+      - name: Compare neqo, msquic and google/quiche
         env:
           HOST: 127.0.0.1
           PORT: 4433
           SIZE: 33554432 # 32 MB
+          RUNS: 30
         run: |
           TMP=$(mktemp -d)
-          # Make a cert and key for msquic and gquiche.
+          # Make a cert and key for msquic and google.
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
-          # Make a test file for msquic to serve.
+          # Make test files for msquic to serve.
           truncate -s "$SIZE" "$TMP/$SIZE"
+          BIGSIZE=$(bc -l <<< "$SIZE * $RUNS")
+          truncate -s "$BIGSIZE" "$TMP/$BIGSIZE"
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
             ["neqo"]="target/release/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
             ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
-            ["gquiche"]="gquiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
+            ["google"]="gquiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
             ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
-            ["gquiche"]="gquiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
+            ["google"]="gquiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
           )
           # Flags to pass to neqo when it runs against another implementation.
           declare -A neqo_flags=(
             ["neqo"]=""
             ["msquic"]="-a hq-interop"
-            ["gquiche"]=""
+            ["google"]=""
           )
 
           # Replace various placeholders in the commands with the actual values.
@@ -144,11 +160,11 @@ jobs:
             local cc=$2
             local pacing=$3
             local flags=$4
-            if [ "$cc" != "" ]; then
+            if [[ "$cc" != "" ]]; then
               CMD=${CMD//_cc/--cc $cc}
               EXT="-$cc"
             fi
-            if [ "$pacing" == "on" ]; then
+            if [[ "$pacing" == "on" ]]; then
               CMD=${CMD//_pacing/}
               EXT="$EXT-pacing"
             else
@@ -158,17 +174,32 @@ jobs:
             CMD=${CMD//_flags/$flags}
           }
 
+          # A Welch's t-test to determine if a performance change is statistically significant.
+          # We use this later to highlight significant changes in the results.
+          cat <<EOF > welch.R
+            args <- commandArgs(trailingOnly = TRUE)
+            baseline <- scan(args[1], what = numeric())
+            result <- scan(args[2], what = numeric())
+            t_result <- t.test(baseline, result, alternative = "two.sided")
+            p_value <- t_result\$p.value
+            alpha <- 0.05
+            quit(status = as.integer(p_value < alpha))
+          EOF
+
           # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
           sudo ip link set dev lo mtu "$MTU"
-          for server in gquiche msquic neqo; do
-            for client in gquiche msquic neqo; do
+          for server in neqo google msquic; do
+            for client in neqo google msquic; do
               # Do not run msquic against google-quiche; the latter only supports H3.
-              # Also, we're not really interested in the performance of those combinations.
-              if [[ "$client" == "gquiche" && "$server" == "msquic" || "$client" == "msquic" && "$server" == "gquiche" ]]; then
+              # Also, we are not interested in google as the server, or msquic as the client, except against themselves.
+              if [[ "$client" == "google" && "$server" == "msquic" ||
+                    "$client" == "msquic" && "$server" == "google" ||
+                    "$client" != "google" && "$server" == "google" ||
+                    "$client" == "msquic" && "$server" != "msquic" ]]; then
                 continue
               fi
-              # gquiche and msquic doesn't let us configure the congestion control or pacing.
-              if [ "$client" != "neqo" ] && [ "$server" != "neqo" ]; then
+              # google and msquic don't let us configure the congestion control or pacing.
+              if [[ "$client" != "neqo" && "$server" != "neqo" ]]; then
                 cc_opt=("")
                 pacing_opt=("")
               else
@@ -177,35 +208,89 @@ jobs:
               fi
               for cc in "${cc_opt[@]}"; do
                 for pacing in "${pacing_opt[@]}"; do
-                  # Make a tag string for this test, for the results.
-                  TAG="$client,$server,$cc,$pacing,$MTU"
+                  # Make a tag string for this test, for the results. Highlight lines we care about.
+                  if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
+                        "$client" == "msquic" && "$server" == "msquic" ||
+                        "$client" == "google" && "$server" == "google" ]]; then
+                    TAG="**$client**,**$server**,${cc:+**}$cc${cc:+**},${pacing:+**}$pacing${pacing:+**}"
+                  else
+                    TAG="$client,$server,$cc,$pacing"
+                  fi
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
+                  FILENAME="$client-$server$EXT"
                   # shellcheck disable=SC2086
-                  taskset -c 0 nice -n -20 \
-                    perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
+                  taskset -c 0 nice -n -20 setarch --addr-no-randomize \
+                    perf $PERF_OPT -o "$FILENAME.server.perf" $CMD &
                   PID=$!
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
-                  taskset -c 1 nice -n -20 \
-                    perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
-                      hyperfine --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
-                      tee -a comparison.txt
+                  taskset -c 1 nice -n -20 setarch --addr-no-randomize \
+                    hyperfine --command-name "$TAG" --time-unit millisecond  \
+                      --export-json "hyperfine/$FILENAME.json" \
+                      --export-markdown "hyperfine/$FILENAME.md" \
+                      --output null --warmup 5 --runs $RUNS --prepare "sleep 1" "$CMD" |
+                    tee -a comparison.txt
                   echo >> comparison.txt
-                  kill $PID
-                  cat step.md >> steps.md
                   # Sanity check the size of the last retrieved file.
-                  # google-quiche outputs the HTTP header, too, so we can't just check for -eq.
+                  # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
                   [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
+
+                  # Do a longer client run with perf separately. We used to just wrap the hyperfine command above in perf,
+                  # but that uses different processes for the individual runs, and there is apparently no way to merge
+                  # the perf profiles of those different runs.
+                  CMD=${CMD//$SIZE/$BIGSIZE}
+                  # shellcheck disable=SC2086
+                  taskset -c 1 nice -n -20 setarch --addr-no-randomize \
+                    perf $PERF_OPT -o "$FILENAME.client.perf" $CMD > /dev/null 2>&1
+                  kill $PID
+
+                  # Figure out if any performance difference to `main` is statistically relevant, and indicate that.
+                  BASELINE="hyperfine-main/$FILENAME.json"
+                  RESULT="hyperfine/$FILENAME.json"
+                  BASELINE_MEAN=$(jq -r '.results[0].mean' "$BASELINE")
+                  MEAN=$(jq -r '.results[0].mean' "$RESULT")
+                  # Even though we tell hyperfine to use milliseconds, it still outputs in seconds when dumping to JSON.
+                  DELTA=$(bc -l <<< "($MEAN - $BASELINE_MEAN) * 1000")
+                  PERCENT=$(bc -l <<< "($MEAN - $BASELINE_MEAN) / ($BASELINE_MEAN + $MEAN)/2 * 100")
+
+                  # If a performance change is statistically significant, highlight it.
+                  jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
+                  jq -r '.results[0].times[]' "$RESULT" > result.txt
+                  if ! Rscript welch.R baseline.txt result.txt 2> /dev/null; then
+                    if (( $(bc -l <<< "$DELTA > 0") )); then
+                      echo "Performance has regressed: $BASELINE_MEAN -> $MEAN"
+                      SYMBOL=":broken_heart:"
+                      FORMAT='**'
+                    else
+                      echo "Performance has improved: $BASELINE_MEAN -> $MEAN"
+                      SYMBOL=":green_heart:"
+                      FORMAT='**'
+                    fi
+                  else
+                    echo "No statistically significant change: $BASELINE_MEAN -> $MEAN"
+                  fi
+
+                  {
+                    grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
+                      sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n'
+                    printf "| %s %s%.1f%s | %s%.1f%%%s |\n" \
+                      "$SYMBOL" "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT"
+                  } >> steps.md
                 done
               done
             done
           done
-          # Merge the results tables generated by hyperfine into a single table.
-          echo "Transfer of $SIZE bytes over loopback." > comparison.md
-          awk '(!/^\| Command/ || !c++) && (!/^\|:/ || !d++)' < steps.md |\
-            sed -E 's/`//g; s/^\|:/\|:---\|:---\|:---\|:---\|:/g; s/,/ \| /g; s/^\| Command/\| Client \| Server \| CC \| Pacing \| MTU/g' |\
-            cut -f1-9 -d\| | sed -e 's/$/|/' >> comparison.md
+
+          # Make a single results table.
+          {
+            echo "Transfer of $SIZE bytes over loopback, $RUNS runs. All unit-less numbers are in milliseconds."
+            echo
+            # shellcheck disable=SC2016
+            echo '| Client | Server | CC | Pacing | Mean ± σ | Min | Max | Δ `main` | Δ `main` |'
+            echo '|:---|:---|:---|---|---:|---:|---:|---:|---:|'
+            cat steps.md
+          } > comparison.md
           rm -r "$TMP"
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
@@ -214,7 +299,7 @@ jobs:
           sudo /root/bin/unprep.sh
           # In case the previous test failed:
           sudo ip link set dev lo mtu 65536
-        if: success() || failure() || cancelled()
+        if: ${{ success() || failure() || cancelled() }}
 
       - name: Post-process perf data
         run: |
@@ -241,7 +326,7 @@ jobs:
             {
               echo "Performance differences relative to $SHA."
               echo
-            } >> results.md
+            } | tee sha.md >> results.md
           fi
           sed -E -e 's/^                 //gi' \
                  -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
@@ -253,30 +338,30 @@ jobs:
           {
             echo
             echo "### Client/server transfer results"
+            SHA=$(cat target/criterion/baseline-sha.txt || true)
+            if [ -n "$SHA" ]; then
+              cat sha.md >> results.md
+            fi
             cat comparison.md
           } >> results.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
 
       - name: Remember main-branch push URL
-        if: github.ref == 'refs/heads/main'
+        if: ${{ github.ref == 'refs/heads/main' }}
         run: echo "${{ github.sha }}" > target/criterion/baseline-sha.txt
 
-      - name: Store history
-        if: github.ref == 'refs/heads/main'
-        run: |
-          mkdir -p target/criterion-history
-          cp -r target/criterion "target/criterion-history/$(date +%s)-${{ github.sha }}"
-
       - name: Cache main-branch results
-        if: github.ref == 'refs/heads/main'
+        if: ${{ github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
-          path: ./target/criterion
-          key: criterion-${{ runner.name }}-${{ github.sha }}
+          path: |
+            target/criterion
+            hyperfine
+          key: bench-results-${{ runner.name }}-${{ github.sha }}
 
       - name: Export perf data
         id: export
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: ${{ github.event.repository.name }}-${{ github.sha }}
           path: |
@@ -284,8 +369,10 @@ jobs:
             *.perf
             *.perf.fx
             *.txt
+            *.md
             results.*
-            target/criterion*
+            target/criterion
+            hyperfine
           compression-level: 9
 
       - name: Export PR comment data

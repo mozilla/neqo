@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cell::RefCell,
     collections::VecDeque,
@@ -22,7 +20,7 @@ use crate::{
     connection::{Http3State, WebTransportSessionAcceptAction},
     connection_server::Http3ServerHandler,
     features::extended_connect::SessionCloseReason,
-    Http3StreamInfo, Http3StreamType, Priority, Res,
+    Error, Http3StreamInfo, Http3StreamType, Priority, Res,
 };
 
 #[derive(Debug, Clone)]
@@ -35,7 +33,7 @@ pub struct StreamHandler {
 impl ::std::fmt::Display for StreamHandler {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         let conn: &Connection = &self.conn.borrow();
-        write!(f, "conn={} stream_info={:?}", conn, self.stream_info)
+        write!(f, "conn={conn} stream_info={:?}", self.stream_info)
     }
 }
 
@@ -115,10 +113,8 @@ impl StreamHandler {
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn stream_stop_sending(&self, app_error: AppError) -> Res<()> {
         qdebug!(
-            [self],
-            "stop sending stream_id:{} error:{}.",
-            self.stream_info.stream_id(),
-            app_error
+            "[{self}] stop sending stream_id:{} error:{app_error}",
+            self.stream_info.stream_id()
         );
         self.handler.borrow_mut().stream_stop_sending(
             self.stream_info.stream_id(),
@@ -134,10 +130,8 @@ impl StreamHandler {
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn stream_reset_send(&self, app_error: AppError) -> Res<()> {
         qdebug!(
-            [self],
-            "reset send stream_id:{} error:{}.",
-            self.stream_info.stream_id(),
-            app_error
+            "[{self}] reset send stream_id:{} error:{app_error}",
+            self.stream_info.stream_id()
         );
         self.handler.borrow_mut().stream_reset_send(
             self.stream_info.stream_id(),
@@ -152,7 +146,7 @@ impl StreamHandler {
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore
     pub fn cancel_fetch(&self, app_error: AppError) -> Res<()> {
-        qdebug!([self], "reset error:{}.", app_error);
+        qdebug!("[{self}] reset error:{app_error}");
         self.handler.borrow_mut().cancel_fetch(
             self.stream_info.stream_id(),
             app_error,
@@ -202,7 +196,7 @@ impl Http3OrWebTransportStream {
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn send_data(&self, data: &[u8]) -> Res<usize> {
-        qdebug!([self], "Set new response.");
+        qdebug!("[{self}] Set new response");
         self.stream_handler.send_data(data)
     }
 
@@ -212,7 +206,7 @@ impl Http3OrWebTransportStream {
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn stream_close_send(&self) -> Res<()> {
-        qdebug!([self], "Set new response.");
+        qdebug!("[{self}] Set new response");
         self.stream_handler.stream_close_send()
     }
 }
@@ -283,7 +277,7 @@ impl WebTransportRequest {
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn response(&self, accept: &WebTransportSessionAcceptAction) -> Res<()> {
-        qdebug!([self], "Set a response for a WebTransport session.");
+        qdebug!("[{self}] Set a response for a WebTransport session");
         self.stream_handler
             .handler
             .borrow_mut()
@@ -335,7 +329,7 @@ impl WebTransportRequest {
 
         Ok(Http3OrWebTransportStream::new(
             self.stream_handler.conn.clone(),
-            self.stream_handler.handler.clone(),
+            Rc::clone(&self.stream_handler.handler),
             Http3StreamInfo::new(id, Http3StreamType::WebTransport(session_id)),
         ))
     }
@@ -382,7 +376,7 @@ impl WebTransportRequest {
             - u64::try_from(Encoder::varint_len(
                 self.stream_handler.stream_id().as_u64(),
             ))
-            .unwrap())
+            .map_err(|_| Error::Internal)?)
     }
 }
 
@@ -471,6 +465,7 @@ pub enum Http3ServerEvent {
 }
 
 #[derive(Debug, Default, Clone)]
+#[allow(clippy::module_name_repetitions)]
 pub struct Http3ServerEvents {
     events: Rc<RefCell<VecDeque<Http3ServerEvent>>>,
 }

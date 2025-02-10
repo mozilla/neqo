@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::unwrap_used)] // This is test code.
+
 use std::{
     cmp::max,
     collections::VecDeque,
@@ -176,8 +178,7 @@ impl Node for TailDrop {
 
     fn print_summary(&self, test_name: &str) {
         qinfo!(
-            "{}: taildrop: rx {} drop {} tx {} maxq {}",
-            test_name,
+            "{test_name}: taildrop: rx {} drop {} tx {} maxq {}",
             self.received,
             self.dropped,
             self.delivered,

@@ -8,7 +8,7 @@
 
 use std::{cell::RefCell, mem, ops::Range, rc::Rc};
 
-use neqo_common::{event::Provider, hex_with_len, qtrace, Datagram, Decoder, Role};
+use neqo_common::{event::Provider as _, hex_with_len, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     hkdf,
@@ -59,13 +59,17 @@ pub fn connect(client: &mut Connection, server: &mut Server) -> ConnectionRef {
 
     assert_eq!(*client.state(), State::Init);
     let out = client.process_output(now()); // ClientHello
-    assert!(out.as_dgram_ref().is_some());
-    let out = server.process(out.dgram(), now()); // ServerHello...
+    let out2 = client.process_output(now()); // ClientHello
+    assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
+    _ = server.process(out.dgram(), now()); // ACK
+    let out = server.process(out2.dgram(), now()); // ServerHello...
     assert!(out.as_dgram_ref().is_some());
 
     // Ingest the server Certificate.
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some()); // This should just be an ACK.
+    let out = server.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now());
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_none()); // So the server should have nothing to say.
 
@@ -85,6 +89,7 @@ pub fn connect(client: &mut Connection, server: &mut Server) -> ConnectionRef {
     connected_server(server)
 }
 
+#[cfg(test)]
 /// Scrub through client events to find a resumption token.
 pub fn find_ticket(client: &mut Connection) -> ResumptionToken {
     client
@@ -99,6 +104,7 @@ pub fn find_ticket(client: &mut Connection) -> ResumptionToken {
         .unwrap()
 }
 
+#[cfg(test)]
 /// Connect to the server and have it generate a ticket.
 pub fn generate_ticket(server: &mut Server) -> ResumptionToken {
     let mut client = default_client();
@@ -112,7 +118,7 @@ pub fn generate_ticket(server: &mut Server) -> ResumptionToken {
     // Have the client close the connection and then let the server clean up.
     client.close(now(), 0, "got a ticket");
     let out = client.process_output(now());
-    mem::drop(server.process(out.dgram(), now()));
+    drop(server.process(out.dgram(), now()));
     // Calling active_connections clears the set of active connections.
     assert_eq!(server.active_connections().len(), 1);
     ticket

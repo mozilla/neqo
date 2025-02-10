@@ -5,12 +5,13 @@
 // except according to those terms.
 
 #![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
+#![allow(clippy::unwrap_used)] // This is test code.
 
 use std::{
     cell::{OnceCell, RefCell},
     cmp::max,
     fmt::Display,
-    io::{Cursor, Result, Write},
+    io::{self, Cursor, Result, Write},
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
@@ -20,7 +21,7 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider,
+    event::Provider as _,
     hex,
     qlog::{new_trace, NeqoQlog},
     qtrace, Datagram, Decoder, IpTosEcn, Role,
@@ -124,7 +125,7 @@ pub struct CountingConnectionIdGenerator {
 
 impl ConnectionIdDecoder for CountingConnectionIdGenerator {
     fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
-        let len = usize::from(dec.peek_byte().unwrap());
+        let len = usize::from(dec.peek_byte()?);
         dec.decode(len).map(ConnectionIdRef::from)
     }
 }
@@ -135,10 +136,10 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
         // Randomize length, but ensure that the connection ID is long
         // enough to pass for an original destination connection ID.
         r[0] = max(8, 5 + ((r[0] >> 4) & r[0]));
-        r[1] = u8::try_from(self.counter >> 24).unwrap();
-        r[2] = u8::try_from((self.counter >> 16) & 0xff).unwrap();
-        r[3] = u8::try_from((self.counter >> 8) & 0xff).unwrap();
-        r[4] = u8::try_from(self.counter & 0xff).unwrap();
+        r[1] = u8::try_from(self.counter >> 24).ok()?;
+        r[2] = u8::try_from((self.counter >> 16) & 0xff).ok()?;
+        r[3] = u8::try_from((self.counter >> 8) & 0xff).ok()?;
+        r[4] = u8::try_from(self.counter & 0xff).ok()?;
         self.counter += 1;
         Some(ConnectionId::from(&r[..usize::from(r[0])]))
     }
@@ -344,11 +345,7 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
     }
     dec.skip_vvec(); // The rest of the packet.
     let p1 = &buf[..dec.offset()];
-    let p2 = if dec.remaining() > 0 {
-        Some(dec.decode_remainder())
-    } else {
-        None
-    };
+    let p2 = (dec.remaining() > 0).then(|| dec.decode_remainder());
     qtrace!("split packet: {} {:?}", hex(p1), p2.map(hex));
     (p1, p2)
 }
@@ -370,16 +367,31 @@ pub struct SharedVec {
 
 impl Write for SharedVec {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        self.buf.lock().unwrap().write(buf)
+        self.buf
+            .lock()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
+            .write(buf)
     }
     fn flush(&mut self) -> Result<()> {
-        self.buf.lock().unwrap().flush()
+        self.buf
+            .lock()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
+            .flush()
     }
 }
 
 impl Display for SharedVec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&String::from_utf8(self.buf.lock().unwrap().clone().into_inner()).unwrap())
+        f.write_str(
+            &String::from_utf8(
+                self.buf
+                    .lock()
+                    .map_err(|_| std::fmt::Error)?
+                    .clone()
+                    .into_inner(),
+            )
+            .map_err(|_| std::fmt::Error)?,
+        )
     }
 }
 
@@ -407,7 +419,7 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
         None,
         None,
         None,
-        std::time::Instant::now(),
+        Instant::now(),
         trace,
         EventImportance::Base,
         Box::new(buf),

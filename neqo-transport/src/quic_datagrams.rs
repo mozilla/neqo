@@ -111,7 +111,8 @@ impl QuicDatagrams {
             let len = dgram.as_ref().len();
             if builder.remaining() > len {
                 // We need 1 more than `len` for the Frame type.
-                let length_len = Encoder::varint_len(u64::try_from(len).unwrap());
+                let length_len =
+                    Encoder::varint_len(u64::try_from(len).expect("usize fits in u64"));
                 // Include a length if there is space for another frame after this one.
                 if builder.remaining() >= 1 + length_len + len + PacketBuilder::MINIMUM_FRAME_SIZE {
                     builder.encode_varint(FRAME_TYPE_DATAGRAM_WITH_LEN);

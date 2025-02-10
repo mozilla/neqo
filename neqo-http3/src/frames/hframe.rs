@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{fmt::Debug, io::Write};
+use std::{fmt::Debug, io::Write as _};
 
 use neqo_common::{Decoder, Encoder};
 use neqo_crypto::random;
@@ -87,7 +87,7 @@ impl HFrame {
             Self::PriorityUpdateRequest { .. } => H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST,
             Self::PriorityUpdatePush { .. } => H3_FRAME_TYPE_PRIORITY_UPDATE_PUSH,
             Self::Grease => {
-                let r = Decoder::from(&random::<8>()).decode_uint::<u64>().unwrap();
+                let r = u64::from_ne_bytes(random::<8>());
                 // Zero out the top 7 bits: 2 for being a varint; 5 to account for the *0x1f.
                 HFrameType((r >> 7) * 0x1f + 0x21)
             }
@@ -174,7 +174,7 @@ impl FrameDecoder<Self> for HFrame {
         } else if let Some(payload) = data {
             let mut dec = Decoder::from(payload);
             Ok(match frame_type {
-                H3_FRAME_TYPE_DATA => unreachable!("DATA frame has been handled already."),
+                H3_FRAME_TYPE_DATA => unreachable!("DATA frame has been handled already"),
                 H3_FRAME_TYPE_HEADERS => Some(Self::Headers {
                     header_block: dec.decode_remainder().to_vec(),
                 }),

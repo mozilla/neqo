@@ -199,7 +199,7 @@ impl Pmtud {
         qinfo!(
             "PMTUD stopped, PLPMTU is now {}, raise timer {:?}",
             self.mtu,
-            self.raise_timer.unwrap()
+            self.raise_timer
         );
     }
 
@@ -269,9 +269,8 @@ impl Pmtud {
 
         let last_ok = first_failed - 1;
         qdebug!(
-            "Packet of size > {} lost >= {} times",
-            self.search_table[last_ok],
-            MAX_PROBES
+            "Packet of size > {} lost >= {MAX_PROBES} times",
+            self.search_table[last_ok]
         );
         if self.probe_state == Probe::NotNeeded {
             // We saw multiple losses of packets <= the current MTU outside of PMTU discovery,
@@ -362,6 +361,7 @@ mod tests {
         )
     }
 
+    #[cfg(test)]
     fn assert_mtu(pmtud: &Pmtud, mtu: usize) {
         let idx = pmtud
             .search_table
@@ -374,6 +374,7 @@ mod tests {
         }
     }
 
+    #[cfg(test)]
     fn pmtud_step(
         pmtud: &mut Pmtud,
         stats: &mut Stats,
@@ -461,7 +462,7 @@ mod tests {
         }
         assert_mtu(&pmtud, mtu);
 
-        qdebug!("Reducing MTU to {}", smaller_mtu);
+        qdebug!("Reducing MTU to {smaller_mtu}");
         // Drop packets > smaller_mtu until we need a probe again.
         while !pmtud.needs_probe() {
             let pn = prot.next_pn();
@@ -514,7 +515,7 @@ mod tests {
         }
         assert_mtu(&pmtud, mtu);
 
-        qdebug!("Increasing MTU to {}", larger_mtu);
+        qdebug!("Increasing MTU to {larger_mtu}");
         let now = now + PMTU_RAISE_TIMER;
         pmtud.maybe_fire_raise_timer(now, &mut stats);
         while pmtud.needs_probe() {

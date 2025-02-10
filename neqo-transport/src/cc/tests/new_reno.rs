@@ -13,7 +13,7 @@ use test_fixture::now;
 
 use super::{IP_ADDR, MTU, RTT};
 use crate::{
-    cc::{new_reno::NewReno, ClassicCongestionControl, CongestionControl},
+    cc::{new_reno::NewReno, ClassicCongestionControl, CongestionControl as _},
     packet::PacketType,
     pmtud::Pmtud,
     recovery::SentPacket,
@@ -34,7 +34,6 @@ fn cwnd_is_halved(cc: &ClassicCongestionControl<NewReno>) {
 }
 
 #[test]
-#[allow(clippy::too_many_lines)]
 fn issue_876() {
     let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
     let now = now();

@@ -9,7 +9,7 @@
 
 use std::{
     fmt::{self, Display},
-    net::{SocketAddr, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     time::Duration,
 };
@@ -112,7 +112,7 @@ pub struct QuicParameters {
     /// The idle timeout for connections, in seconds.
     pub idle_timeout: u64,
 
-    #[arg(long = "cc", default_value = "newreno")]
+    #[arg(long = "cc", default_value = "cubic")]
     /// The congestion controller to use.
     pub congestion_control: CongestionControlAlgorithm,
 
@@ -123,6 +123,10 @@ pub struct QuicParameters {
     #[arg(long)]
     /// Whether to disable path MTU discovery.
     pub no_pmtud: bool,
+
+    #[arg(long)]
+    /// Whether to slice the SNI.
+    pub no_sni_slicing: bool,
 
     #[arg(name = "preferred-address-v4", long)]
     /// An IPv4 address for the server preferred address.
@@ -141,11 +145,12 @@ impl Default for QuicParameters {
             max_streams_bidi: 16,
             max_streams_uni: 16,
             idle_timeout: 30,
-            congestion_control: CongestionControlAlgorithm::NewReno,
+            congestion_control: CongestionControlAlgorithm::Cubic,
             no_pacing: false,
             no_pmtud: false,
             preferred_address_v4: None,
             preferred_address_v6: None,
+            no_sni_slicing: false,
         }
     }
 }
@@ -163,9 +168,8 @@ impl QuicParameters {
         assert_eq!(
             opt.is_some(),
             addr.is_some(),
-            "unable to resolve '{}' to an {} address",
-            opt.as_ref().unwrap(),
-            v,
+            "unable to resolve '{:?}' to an {v} address",
+            opt.as_ref()?,
         );
         addr
     }
@@ -219,7 +223,8 @@ impl QuicParameters {
             .idle_timeout(Duration::from_secs(self.idle_timeout))
             .cc_algorithm(self.congestion_control)
             .pacing(!self.no_pacing)
-            .pmtud(!self.no_pmtud);
+            .pmtud(!self.no_pmtud)
+            .sni_slicing(!self.no_sni_slicing);
         params = if let Some(pa) = self.preferred_address() {
             params.preferred_address(pa)
         } else {
@@ -266,7 +271,7 @@ impl std::error::Error for Error {}
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf, str::FromStr, time::SystemTime};
+    use std::{fs, path::PathBuf, str::FromStr as _, time::SystemTime};
 
     use crate::{client, server};
 
@@ -276,15 +281,14 @@ mod tests {
 
     impl TempDir {
         fn new() -> Self {
-            let mut dir = std::env::temp_dir();
-            dir.push(format!(
+            let dir = std::env::temp_dir().join(format!(
                 "neqo-bin-test-{}",
                 SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
                     .as_secs()
             ));
-            fs::create_dir(&dir).unwrap();
+            fs::create_dir_all(&dir).unwrap();
             Self { path: dir }
         }
 
