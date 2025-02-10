@@ -4,15 +4,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, fmt::Debug, hash::BuildHasherDefault, mem, rc::Rc};
+use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
 
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, MessageType, Role};
 use neqo_qpack::{decoder::QPackDecoder, encoder::QPackEncoder};
 use neqo_transport::{
-    streams::SendOrder, AppError, CloseReason, Connection, DatagramTracking, State, StreamId,
-    StreamType, ZeroRttState,
+    streams::SendOrder, AppError, CloseReason, Connection, DatagramTracking, IndexMap, State,
+    StreamId, StreamType, ZeroRttState,
 };
-use rustc_hash::{FxHashSet as HashSet, FxHasher};
+use rustc_hash::FxHashSet as HashSet;
 
 use crate::{
     client_events::Http3ClientEvents,
@@ -36,8 +36,6 @@ use crate::{
     Priority, PriorityHandler, ReceiveOutput, RecvStream, RecvStreamEvents, Res, SendStream,
     SendStreamEvents,
 };
-
-type IndexMap<K, V> = indexmap::IndexMap<K, V, BuildHasherDefault<FxHasher>>;
 
 pub struct RequestDescription<'b, 't, T>
 where
