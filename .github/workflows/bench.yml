@@ -252,19 +252,20 @@ jobs:
                   MEAN=$(jq -r '.results[0].mean' "$RESULT")
                   # Even though we tell hyperfine to use milliseconds, it still outputs in seconds when dumping to JSON.
                   DELTA=$(bc -l <<< "($MEAN - $BASELINE_MEAN) * 1000")
-                  PERCENT=$(bc -l <<< "($MEAN - $BASELINE_MEAN) / ($BASELINE_MEAN + $MEAN)/2 * 100")
+                  PERCENT=$(bc -l <<< "sqrt(($MEAN - $BASELINE_MEAN)^2) / ($BASELINE_MEAN + $MEAN)/2 * 100")
+                  echo "Baseline: $BASELINE_MEAN, Result: $MEAN, Delta: $DELTA, Percent: $PERCENT"
 
                   # If a performance change is statistically significant, highlight it.
                   jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
                   jq -r '.results[0].times[]' "$RESULT" > result.txt
-                  if ! Rscript welch.R baseline.txt result.txt 2> /dev/null; then
+                  if Rscript welch.R baseline.txt result.txt 2> /dev/null; then
                     if (( $(bc -l <<< "$DELTA > 0") )); then
                       echo "Performance has regressed: $BASELINE_MEAN -> $MEAN"
-                      SYMBOL=":warning:"
+                      SYMBOL=":broken_heart:"
                       FORMAT='**'
                     else
                       echo "Performance has improved: $BASELINE_MEAN -> $MEAN"
-                      SYMBOL=":tada:"
+                      SYMBOL=":green_heart:"
                       FORMAT='**'
                     fi
                   else
@@ -331,8 +332,8 @@ jobs:
           sed -E -e 's/^                 //gi' \
                  -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
             perl -p -0777 -e 's/(.*?)\n(.*?)(((No change|Change within|Performance has).*?)(\nFound .*?)?)?\n\n/<details><summary>$1: $4<\/summary><pre>\n$2$6<\/pre><\/details>\n/gs' |\
-            sed -E -e 's/(Performance has regressed.)/:warning: <b>\1<\/b>/gi' \
-                   -e 's/(Performance has improved.)/:tada: <b>\1<\/b>/gi' \
+            sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
+                   -e 's/(Performance has improved.)/:green_heart: <b>\1<\/b>/gi' \
                    -e 's/^ +((<\/pre>|Found).*)/\1/gi' \
                    -e 's/^<details>(.*Performance has.*)/<details open>\1/gi' >> results.md
           {
