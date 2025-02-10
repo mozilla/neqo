@@ -89,7 +89,7 @@ impl TryFrom<u64> for TransportParameterId {
             0x0020 => Ok(Self::MaxDatagramFrameSize),
             #[cfg(test)]
             0xce16 => Ok(Self::TestTransportParameter),
-            _ => Err(Error::NoMoreData),
+            _ => Err(Error::UnknownTransportParameter),
         }
     }
 }
@@ -172,7 +172,10 @@ pub enum TransportParameter {
 
 impl TransportParameter {
     fn encode(&self, enc: &mut Encoder, tp: TransportParameterId) {
-        qtrace!("TP encoded; type {tp:?} val {self:?}");
+        qtrace!(
+            "TP encoded; type {tp:?}(0x{:02x}) val {self:?}",
+            u64::from(tp.clone())
+        );
         enc.encode_varint(tp);
         match self {
             Self::Bytes(a) => {
@@ -281,9 +284,14 @@ impl TransportParameter {
     }
 
     fn decode(dec: &mut Decoder) -> Res<Option<(TransportParameterId, Self)>> {
-        let tp = dec.decode_varint().ok_or(Error::NoMoreData)?.try_into()?;
+        let tp = dec.decode_varint().ok_or(Error::NoMoreData)?;
         let content = dec.decode_vvec().ok_or(Error::NoMoreData)?;
-        qtrace!("TP {tp:?} length {}", content.len());
+        qtrace!("TP {tp:x} length {:x}", content.len());
+        let tp = match tp.try_into() {
+            Ok(tp) => tp,
+            Err(Error::UnknownTransportParameter) => return Ok(None), // Skip
+            Err(e) => return Err(e),
+        };
         let mut d = Decoder::from(content);
         let value = match tp {
             TransportParameterId::OriginalDestinationConnectionId
@@ -341,7 +349,10 @@ impl TransportParameter {
         if d.remaining() > 0 {
             return Err(Error::TooMuchData);
         }
-        qtrace!("TP decoded; type {tp:?} val {value:?}");
+        qtrace!(
+            "TP decoded; type {tp:?}(0x{:02x}) val {value:?}",
+            u64::from(tp.clone())
+        );
         Ok(Some((tp, value)))
     }
 }
