@@ -97,8 +97,10 @@ impl Default for ConnectionParameters {
             max_data: LOCAL_MAX_DATA,
             max_stream_data_bidi_remote: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
                 .expect("usize fits in u64"),
-            max_stream_data_bidi_local: u64::try_from(INITIAL_RECV_WINDOW_SIZE).expect("usize fits in u64"),
-            max_stream_data_uni: u64::try_from(INITIAL_RECV_WINDOW_SIZE).expect("usize fits in u64"),
+            max_stream_data_bidi_local: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
+                .expect("usize fits in u64"),
+            max_stream_data_uni: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
+                .expect("usize fits in u64"),
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
             ack_ratio: DEFAULT_ACK_RATIO,

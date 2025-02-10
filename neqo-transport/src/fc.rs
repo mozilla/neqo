@@ -397,7 +397,7 @@ impl ReceiverFlowControl<StreamId> {
                 self.max_active = min(2 * self.max_active, MAX_RECV_WINDOW_SIZE);
                 qdebug!(
                     "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB last update: {:?} rtt: {rtt:?} stream_id: {}",
-                    prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now-self.max_allowed_sent_at.unwrap(), self.subject,
+                    prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now - max_allowed_sent_at, self.subject,
                 );
             }
         }
