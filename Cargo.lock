@@ -869,6 +869,7 @@ name = "neqo-http3"
 version = "0.12.2"
 dependencies = [
  "enumset",
+ "indexmap",
  "log",
  "neqo-common",
  "neqo-crypto",

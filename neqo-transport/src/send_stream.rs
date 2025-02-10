@@ -12,15 +12,15 @@ use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
     collections::{btree_map::Entry, BTreeMap, VecDeque},
-    hash::{Hash, Hasher},
+    hash::{BuildHasherDefault, Hash, Hasher},
     mem,
     num::NonZeroUsize,
     ops::Add,
     rc::Rc,
 };
 
-use indexmap::IndexMap;
 use neqo_common::{qdebug, qerror, qtrace, Encoder, Role};
+use rustc_hash::FxHasher;
 use smallvec::SmallVec;
 
 use crate::{
@@ -35,6 +35,8 @@ use crate::{
     tparams::{self, TransportParameters},
     AppError, Error, Res,
 };
+
+type IndexMap<K, V> = indexmap::IndexMap<K, V, BuildHasherDefault<FxHasher>>;
 
 pub const SEND_BUFFER_SIZE: usize = 0x10_0000; // 1 MiB
 

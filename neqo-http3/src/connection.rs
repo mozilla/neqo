@@ -6,7 +6,9 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use std::{cell::RefCell, collections::BTreeSet, fmt::Debug, mem, rc::Rc};
+use std::{
+    cell::RefCell, collections::BTreeSet, fmt::Debug, hash::BuildHasherDefault, mem, rc::Rc,
+};
 
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, MessageType, Role};
 use neqo_qpack::{decoder::QPackDecoder, encoder::QPackEncoder};
@@ -14,7 +16,7 @@ use neqo_transport::{
     streams::SendOrder, AppError, CloseReason, Connection, DatagramTracking, State, StreamId,
     StreamType, ZeroRttState,
 };
-use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::{FxHashMap as HashMap, FxHasher};
 
 use crate::{
     client_events::Http3ClientEvents,
@@ -38,6 +40,8 @@ use crate::{
     Priority, PriorityHandler, ReceiveOutput, RecvStream, RecvStreamEvents, Res, SendStream,
     SendStreamEvents,
 };
+
+type IndexMap<K, V> = indexmap::IndexMap<K, V, BuildHasherDefault<FxHasher>>;
 
 pub struct RequestDescription<'b, 't, T>
 where
@@ -301,8 +305,8 @@ pub struct Http3Connection {
     pub qpack_decoder: Rc<RefCell<QPackDecoder>>,
     settings_state: Http3RemoteSettingsState,
     streams_with_pending_data: BTreeSet<StreamId>,
-    pub send_streams: HashMap<StreamId, Box<dyn SendStream>>,
-    pub recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
+    pub send_streams: IndexMap<StreamId, Box<dyn SendStream>>,
+    pub recv_streams: IndexMap<StreamId, Box<dyn RecvStream>>,
     webtransport: ExtendedConnectFeature,
 }
 
