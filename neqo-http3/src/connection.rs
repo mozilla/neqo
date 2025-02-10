@@ -6,9 +6,7 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use std::{
-    cell::RefCell, collections::BTreeSet, fmt::Debug, hash::BuildHasherDefault, mem, rc::Rc,
-};
+use std::{cell::RefCell, fmt::Debug, hash::BuildHasherDefault, mem, rc::Rc};
 
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, MessageType, Role};
 use neqo_qpack::{decoder::QPackDecoder, encoder::QPackEncoder};
@@ -16,7 +14,7 @@ use neqo_transport::{
     streams::SendOrder, AppError, CloseReason, Connection, DatagramTracking, State, StreamId,
     StreamType, ZeroRttState,
 };
-use rustc_hash::FxHasher;
+use rustc_hash::{FxHashSet as HashSet, FxHasher};
 
 use crate::{
     client_events::Http3ClientEvents,
@@ -304,7 +302,7 @@ pub struct Http3Connection {
     pub qpack_encoder: Rc<RefCell<QPackEncoder>>,
     pub qpack_decoder: Rc<RefCell<QPackDecoder>>,
     settings_state: Http3RemoteSettingsState,
-    streams_with_pending_data: BTreeSet<StreamId>,
+    streams_with_pending_data: HashSet<StreamId>,
     pub send_streams: IndexMap<StreamId, Box<dyn SendStream>>,
     pub recv_streams: IndexMap<StreamId, Box<dyn RecvStream>>,
     webtransport: ExtendedConnectFeature,
@@ -335,7 +333,7 @@ impl Http3Connection {
             ),
             local_params: conn_params,
             settings_state: Http3RemoteSettingsState::NotReceived,
-            streams_with_pending_data: BTreeSet::new(),
+            streams_with_pending_data: HashSet::default(),
             send_streams: IndexMap::default(),
             recv_streams: IndexMap::default(),
             role,
