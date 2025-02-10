@@ -1183,10 +1183,10 @@ impl Http3Connection {
                             events,
                             self.role,
                             self.recv_streams
-                                .swap_remove(&stream_id)
+                                .shift_remove(&stream_id)
                                 .ok_or(Error::Internal)?,
                             self.send_streams
-                                .swap_remove(&stream_id)
+                                .shift_remove(&stream_id)
                                 .ok_or(Error::Internal)?,
                         )?));
                     self.add_streams(
@@ -1542,14 +1542,14 @@ impl Http3Connection {
             qtrace!("Remove the extended connect sub receiver stream {id}");
             // Use CloseType::ResetRemote so that an event will be sent. CloseType::LocalError would
             // have the same effect.
-            if let Some(mut s) = self.recv_streams.swap_remove(&id) {
+            if let Some(mut s) = self.recv_streams.shift_remove(&id) {
                 drop(s.reset(CloseType::ResetRemote(Error::HttpRequestCancelled.code())));
             }
             drop(conn.stream_stop_sending(id, Error::HttpRequestCancelled.code()));
         }
         for id in send {
             qtrace!("Remove the extended connect sub send stream {id}");
-            if let Some(mut s) = self.send_streams.swap_remove(&id) {
+            if let Some(mut s) = self.send_streams.shift_remove(&id) {
                 s.handle_stop_sending(CloseType::ResetRemote(Error::HttpRequestCancelled.code()));
             }
             drop(conn.stream_reset_send(id, Error::HttpRequestCancelled.code()));
@@ -1561,10 +1561,10 @@ impl Http3Connection {
         stream_id: StreamId,
         conn: &mut Connection,
     ) -> Option<Box<dyn RecvStream>> {
-        let stream = self.recv_streams.swap_remove(&stream_id);
+        let stream = self.recv_streams.shift_remove(&stream_id);
         if let Some(s) = &stream {
             if s.stream_type() == Http3StreamType::ExtendedConnect {
-                self.send_streams.swap_remove(&stream_id)?;
+                self.send_streams.shift_remove(&stream_id)?;
                 if let Some(wt) = s.webtransport() {
                     self.remove_extended_connect(&wt, conn);
                 }
@@ -1578,10 +1578,10 @@ impl Http3Connection {
         stream_id: StreamId,
         conn: &mut Connection,
     ) -> Option<Box<dyn SendStream>> {
-        let stream = self.send_streams.swap_remove(&stream_id);
+        let stream = self.send_streams.shift_remove(&stream_id);
         if let Some(s) = &stream {
             if s.stream_type() == Http3StreamType::ExtendedConnect {
-                if let Some(wt) = self.recv_streams.swap_remove(&stream_id)?.webtransport() {
+                if let Some(wt) = self.recv_streams.shift_remove(&stream_id)?.webtransport() {
                     self.remove_extended_connect(&wt, conn);
                 }
             }
