@@ -252,13 +252,12 @@ jobs:
                   MEAN=$(jq -r '.results[0].mean' "$RESULT")
                   # Even though we tell hyperfine to use milliseconds, it still outputs in seconds when dumping to JSON.
                   DELTA=$(bc -l <<< "($MEAN - $BASELINE_MEAN) * 1000")
-                  PERCENT=$(bc -l <<< "sqrt(($MEAN - $BASELINE_MEAN)^2) / ($BASELINE_MEAN + $MEAN)/2 * 100")
-                  echo "Baseline: $BASELINE_MEAN, Result: $MEAN, Delta: $DELTA, Percent: $PERCENT"
+                  PERCENT=$(bc -l <<< "($MEAN - $BASELINE_MEAN) / ($BASELINE_MEAN + $MEAN)/2 * 100")
 
                   # If a performance change is statistically significant, highlight it.
                   jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
                   jq -r '.results[0].times[]' "$RESULT" > result.txt
-                  if Rscript welch.R baseline.txt result.txt 2> /dev/null; then
+                  if ! Rscript welch.R baseline.txt result.txt 2> /dev/null; then
                     if (( $(bc -l <<< "$DELTA > 0") )); then
                       echo "Performance has regressed: $BASELINE_MEAN -> $MEAN"
                       SYMBOL=":broken_heart:"
