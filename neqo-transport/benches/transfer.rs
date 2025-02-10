@@ -33,14 +33,20 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
                 || {
                     let nodes = boxed![
                         ConnectionNode::new_client(
-                            ConnectionParameters::default().pmtud(true).pacing(pacing),
+                            ConnectionParameters::default()
+                                .pmtud(true)
+                                .pacing(pacing)
+                                .mlkem(false),
                             boxed![ReachState::new(State::Confirmed)],
                             boxed![SendData::new(TRANSFER_AMOUNT)]
                         ),
                         TailDrop::dsl_uplink(),
                         RandomDelay::new(ZERO..JITTER),
                         ConnectionNode::new_server(
-                            ConnectionParameters::default().pmtud(true).pacing(pacing),
+                            ConnectionParameters::default()
+                                .pmtud(true)
+                                .pacing(pacing)
+                                .mlkem(false),
                             boxed![ReachState::new(State::Confirmed)],
                             boxed![ReceiveData::new(TRANSFER_AMOUNT)]
                         ),

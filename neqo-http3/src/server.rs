@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cell::{RefCell, RefMut},
     collections::HashMap,
@@ -36,6 +34,7 @@ type HandlerRef = Rc<RefCell<Http3ServerHandler>>;
 
 const MAX_EVENT_DATA_SIZE: usize = 1024;
 
+#[allow(clippy::module_name_repetitions)]
 pub struct Http3Server {
     server: Server,
     http3_parameters: Http3Parameters,
@@ -118,7 +117,11 @@ impl Http3Server {
         self.process(None::<Datagram>, now)
     }
 
-    pub fn process(&mut self, dgram: Option<Datagram<impl AsRef<[u8]>>>, now: Instant) -> Output {
+    pub fn process(
+        &mut self,
+        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        now: Instant,
+    ) -> Output {
         qtrace!("[{self}] Process");
         let out = self.server.process(dgram, now);
         self.process_http3(now);
@@ -410,8 +413,12 @@ mod tests {
 
     fn connect_transport(server: &mut Http3Server, client: &mut Connection, resume: bool) {
         let c1 = client.process_output(now());
-        let s1 = server.process(c1.dgram(), now());
+        let c11 = client.process_output(now());
+        _ = server.process(c1.dgram(), now());
+        let s1 = server.process(c11.dgram(), now());
         let c2 = client.process(s1.dgram(), now());
+        let s2 = server.process(c2.dgram(), now());
+        let c2 = client.process(s2.dgram(), now());
         let needs_auth = client
             .events()
             .any(|e| e == ConnectionEvent::AuthenticationNeeded);
@@ -430,8 +437,7 @@ mod tests {
         assert!(client.state().connected());
         let s2 = server.process(c2.dgram(), now());
         assert_connected(server);
-        let c3 = client.process(s2.dgram(), now());
-        assert!(c3.dgram().is_none());
+        _ = client.process(s2.dgram(), now());
     }
 
     // Start a client/server and check setting frame.

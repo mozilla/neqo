@@ -785,7 +785,8 @@ impl Http3Client {
     /// This cannot panic. The max varint length is 8.
     pub fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
         Ok(self.conn.max_datagram_size()?
-            - u64::try_from(Encoder::varint_len(session_id.as_u64())).unwrap())
+            - u64::try_from(Encoder::varint_len(session_id.as_u64()))
+                .map_err(|_| Error::Internal)?)
     }
 
     /// Sets the `SendOrder` for a given stream
@@ -841,7 +842,11 @@ impl Http3Client {
     }
 
     /// This function combines  `process_input` and `process_output` function.
-    pub fn process(&mut self, dgram: Option<Datagram<impl AsRef<[u8]>>>, now: Instant) -> Output {
+    pub fn process(
+        &mut self,
+        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        now: Instant,
+    ) -> Output {
         qtrace!("[{self}] Process");
         if let Some(d) = dgram {
             self.process_input(d, now);
@@ -859,13 +864,13 @@ impl Http3Client {
     /// packets need to be sent or if a timer needs to be updated.
     ///
     /// [1]: ../neqo_transport/enum.ConnectionEvent.html
-    pub fn process_input(&mut self, dgram: Datagram<impl AsRef<[u8]>>, now: Instant) {
+    pub fn process_input(&mut self, dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>, now: Instant) {
         self.process_multiple_input(iter::once(dgram), now);
     }
 
     pub fn process_multiple_input(
         &mut self,
-        dgrams: impl IntoIterator<Item = Datagram<impl AsRef<[u8]>>>,
+        dgrams: impl IntoIterator<Item = Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
         now: Instant,
     ) {
         let mut dgrams = dgrams.into_iter().peekable();
@@ -1304,7 +1309,7 @@ mod tests {
                 assert_eq!(err, CloseReason::Application(expected.code()));
             }
             _ => panic!("Wrong state {:?}", client.state()),
-        };
+        }
     }
 
     /// Create a http3 client with default configuration.
@@ -1625,12 +1630,16 @@ mod tests {
     fn handshake_only(client: &mut Http3Client, server: &mut TestServer) -> Output {
         assert_eq!(client.state(), Http3State::Initializing);
         let out = client.process_output(now());
+        let out2 = client.process_output(now());
         assert_eq!(client.state(), Http3State::Initializing);
 
         assert_eq!(*server.conn.state(), State::Init);
-        let out = server.conn.process(out.dgram(), now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let out = server.conn.process(out2.dgram(), now());
         assert_eq!(*server.conn.state(), State::Handshaking);
 
+        let out = client.process(out.dgram(), now());
+        let out = server.conn.process(out.dgram(), now());
         let out = client.process(out.dgram(), now());
         let out = server.conn.process(out.dgram(), now());
         assert!(out.as_dgram_ref().is_none());
@@ -3675,7 +3684,7 @@ mod tests {
                     panic!("We should not receive a DataGeadable event!");
                 }
                 _ => {}
-            };
+            }
         }
 
         // ok NOW send fin
@@ -3699,7 +3708,7 @@ mod tests {
                     assert!(fin);
                 }
                 _ => {}
-            };
+            }
         }
 
         // Stream should now be closed and gone
@@ -3751,7 +3760,7 @@ mod tests {
                     assert_eq!(Ok((0, true)), client.read_data(now(), stream_id, &mut buf));
                 }
                 _ => {}
-            };
+            }
         }
 
         // Stream should now be closed and gone
@@ -3800,7 +3809,7 @@ mod tests {
                     panic!("We should not receive a DataGeadable event!");
                 }
                 _ => {}
-            };
+            }
         }
 
         // ok NOW send fin
@@ -3824,7 +3833,7 @@ mod tests {
                     assert!(fin);
                 }
                 _ => {}
-            };
+            }
         }
 
         // Stream should now be closed and gone
@@ -3871,7 +3880,7 @@ mod tests {
                     assert!(!fin);
                 }
                 _ => {}
-            };
+            }
         }
 
         // ok NOW send fin
@@ -4158,10 +4167,12 @@ mod tests {
         let (mut client, mut server) = start_with_0rtt();
 
         let out = client.process_output(now());
+        let out2 = client.process_output(now());
 
         assert_eq!(client.state(), Http3State::ZeroRtt);
         assert_eq!(*server.conn.state(), State::Init);
-        let out = server.conn.process(out.dgram(), now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let out = server.conn.process(out2.dgram(), now());
 
         // Check that control and qpack streams are received and a
         // SETTINGS frame has been received.
@@ -4174,6 +4185,8 @@ mod tests {
         );
 
         assert_eq!(*server.conn.state(), State::Handshaking);
+        let out = client.process(out.dgram(), now());
+        let out = server.conn.process(out.dgram(), now());
         let out = client.process(out.dgram(), now());
         assert_eq!(client.state(), Http3State::Connected);
 
@@ -4193,10 +4206,12 @@ mod tests {
         assert_eq!(request_stream_id, 0);
 
         let out = client.process_output(now());
+        let out2 = client.process_output(now());
 
         assert_eq!(client.state(), Http3State::ZeroRtt);
         assert_eq!(*server.conn.state(), State::Init);
-        let out = server.conn.process(out.dgram(), now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let out = server.conn.process(out2.dgram(), now());
 
         // Check that control and qpack streams are received and a
         // SETTINGS frame has been received.
@@ -4209,6 +4224,8 @@ mod tests {
         );
 
         assert_eq!(*server.conn.state(), State::Handshaking);
+        let out = client.process(out.dgram(), now());
+        let out = server.conn.process(out.dgram(), now());
         let out = client.process(out.dgram(), now());
         assert_eq!(client.state(), Http3State::Connected);
         let out = server.conn.process(out.dgram(), now());
@@ -4280,17 +4297,19 @@ mod tests {
         let client_0rtt = client.process_output(now());
         assert!(client_0rtt.as_dgram_ref().is_some());
 
-        let server_hs = server.process(client_hs.dgram(), now());
+        server.process_input(client_hs.dgram().unwrap(), now());
+        let server_hs = server.process(client_0rtt.dgram(), now());
         assert!(server_hs.as_dgram_ref().is_some()); // Should produce ServerHello etc...
-        let server_ignored = server.process(client_0rtt.dgram(), now());
-        assert!(server_ignored.as_dgram_ref().is_none());
+
+        let dgram = client.process(server_hs.dgram(), now()).dgram();
+        let dgram = server.process(dgram, now());
 
         // The server shouldn't receive that 0-RTT data.
         let recvd_stream_evt = |e| matches!(e, ConnectionEvent::NewStream { .. });
         assert!(!server.events().any(recvd_stream_evt));
 
         // Client should get a rejection.
-        let client_out = client.process(server_hs.dgram(), now());
+        let client_out = client.process(dgram.dgram(), now());
         assert!(client_out.as_dgram_ref().is_some());
         let recvd_0rtt_reject = |e| e == Http3ClientEvent::ZeroRttRejected;
         assert!(client.events().any(recvd_0rtt_reject));
@@ -4329,10 +4348,12 @@ mod tests {
             .expect("Set resumption token");
         assert_eq!(client.state(), Http3State::ZeroRtt);
         let out = client.process_output(now());
+        let out2 = client.process_output(now());
 
         assert_eq!(client.state(), Http3State::ZeroRtt);
         assert_eq!(*server.conn.state(), State::Init);
-        let out = server.conn.process(out.dgram(), now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let out = server.conn.process(out2.dgram(), now());
 
         // Check that control and qpack streams and a SETTINGS frame are received.
         // Also qpack encoder stream will send "change capacity" instruction because it has
@@ -4344,6 +4365,8 @@ mod tests {
         );
 
         assert_eq!(*server.conn.state(), State::Handshaking);
+        let out = client.process(out.dgram(), now());
+        let out = server.conn.process(out.dgram(), now());
         let out = client.process(out.dgram(), now());
         assert_eq!(client.state(), Http3State::Connected);
 

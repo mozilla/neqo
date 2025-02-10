@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::unwrap_used)] // This is test code.
+
 /// Tests with simulated network components.
 pub mod connection;
 mod delay;

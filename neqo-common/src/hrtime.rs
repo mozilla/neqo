@@ -70,7 +70,7 @@ impl PeriodSet {
     fn min(&self) -> Option<Period> {
         for (i, v) in self.counts.iter().enumerate() {
             if *v > 0 {
-                return Some(Period(u8::try_from(i).unwrap() + Period::MIN.0));
+                return Some(Period(u8::try_from(i).ok()? + Period::MIN.0));
             }
         }
         None
@@ -372,7 +372,8 @@ impl Drop for Time {
 
 // Only run these tests in CI on Linux, where the timer accuracies are OK enough to pass the tests,
 // but only when not running sanitizers.
-#[cfg(all(test, target_os = "linux", not(neqo_sanitize)))]
+#[cfg(all(target_os = "linux", not(neqo_sanitize)))]
+#[cfg(test)]
 mod test {
     use std::{
         thread::{sleep, spawn},
