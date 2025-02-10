@@ -33,7 +33,7 @@ use crate::{
     path::MAX_PATH_PROBES,
     pmtud::Pmtud,
     stats::FrameStats,
-    tparams::{self, PreferredAddress, TransportParameter},
+    tparams::{PreferredAddress, TransportParameter, TransportParameterId},
     CloseReason, ConnectionId, ConnectionIdDecoder as _, ConnectionIdGenerator, ConnectionIdRef,
     ConnectionParameters, EmptyConnectionIdGenerator, Error, MIN_INITIAL_PACKET_SIZE,
 };
@@ -904,7 +904,7 @@ fn preferred_address_server_empty_cid() {
 
     server
         .set_local_tparam(
-            tparams::PREFERRED_ADDRESS,
+            TransportParameterId::PreferredAddress,
             TransportParameter::Bytes(SAMPLE_PREFERRED_ADDRESS.to_vec()),
         )
         .unwrap();
@@ -925,7 +925,7 @@ fn preferred_address_client() {
 
     client
         .set_local_tparam(
-            tparams::PREFERRED_ADDRESS,
+            TransportParameterId::PreferredAddress,
             TransportParameter::Bytes(SAMPLE_PREFERRED_ADDRESS.to_vec()),
         )
         .unwrap();

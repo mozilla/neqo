@@ -6,13 +6,14 @@
 
 #![allow(clippy::module_name_repetitions)]
 
+use enum_map::Enum;
 use neqo_common::qdebug;
 
 use crate::{Error, Res};
 
 pub type WireVersion = u32;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Enum)]
 pub enum Version {
     Version2,
     #[default]

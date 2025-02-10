@@ -9,13 +9,15 @@
 use std::{
     cell::RefCell,
     cmp::{max, min},
-    collections::HashMap,
     mem,
     ops::{Index, IndexMut, Range},
     rc::Rc,
     time::Instant,
 };
 
+#[cfg(test)]
+use enum_map::enum_map;
+use enum_map::EnumMap;
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
 use neqo_crypto::{
     hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Epoch, Error as CryptoError, HandshakeState,
@@ -808,7 +810,7 @@ pub enum CryptoSpace {
 /// get other keys, so those have fixed versions.
 #[derive(Debug, Default)]
 pub struct CryptoStates {
-    initials: HashMap<Version, CryptoState>,
+    initials: EnumMap<Version, Option<CryptoState>>,
     handshake: Option<CryptoState>,
     zero_rtt: Option<CryptoDxState>, // One direction only!
     cipher: Cipher,
@@ -821,6 +823,10 @@ pub struct CryptoStates {
 }
 
 impl CryptoStates {
+    fn initials_is_empty(&self) -> bool {
+        self.initials.iter().all(|(_, v)| v.is_none())
+    }
+
     /// Select a `CryptoDxState` and `CryptoSpace` for the given `PacketNumberSpace`.
     /// This selects 0-RTT keys for `PacketNumberSpace::ApplicationData` if 1-RTT keys are
     /// not yet available.
@@ -853,7 +859,7 @@ impl CryptoStates {
     ) -> Option<&'a mut CryptoDxState> {
         let tx = |k: Option<&'a mut CryptoState>| k.map(|dx| &mut dx.tx);
         match cspace {
-            CryptoSpace::Initial => tx(self.initials.get_mut(&version)),
+            CryptoSpace::Initial => tx(self.initials[version].as_mut()),
             CryptoSpace::ZeroRtt => self
                 .zero_rtt
                 .as_mut()
@@ -866,7 +872,7 @@ impl CryptoStates {
     pub fn tx<'a>(&'a self, version: Version, cspace: CryptoSpace) -> Option<&'a CryptoDxState> {
         let tx = |k: Option<&'a CryptoState>| k.map(|dx| &dx.tx);
         match cspace {
-            CryptoSpace::Initial => tx(self.initials.get(&version)),
+            CryptoSpace::Initial => tx(self.initials[version].as_ref()),
             CryptoSpace::ZeroRtt => self
                 .zero_rtt
                 .as_ref()
@@ -911,7 +917,7 @@ impl CryptoStates {
     ) -> Option<&'a mut CryptoDxState> {
         let rx = |x: Option<&'a mut CryptoState>| x.map(|dx| &mut dx.rx);
         match cspace {
-            CryptoSpace::Initial => rx(self.initials.get_mut(&version)),
+            CryptoSpace::Initial => rx(self.initials[version].as_mut()),
             CryptoSpace::ZeroRtt => self
                 .zero_rtt
                 .as_mut()
@@ -940,7 +946,7 @@ impl CryptoStates {
     pub fn rx_pending(&self, space: CryptoSpace) -> bool {
         match space {
             CryptoSpace::Initial | CryptoSpace::ZeroRtt => false,
-            CryptoSpace::Handshake => self.handshake.is_none() && !self.initials.is_empty(),
+            CryptoSpace::Handshake => self.handshake.is_none() && !self.initials_is_empty(),
             CryptoSpace::ApplicationData => self.app_read.is_none(),
         }
     }
@@ -969,14 +975,14 @@ impl CryptoStates {
                 tx: CryptoDxState::new_initial(*v, CryptoDxDirection::Write, write, dcid)?,
                 rx: CryptoDxState::new_initial(*v, CryptoDxDirection::Read, read, dcid)?,
             };
-            if let Some(prev) = self.initials.get(v) {
+            if let Some(prev) = &self.initials[*v] {
                 qinfo!(
                     "[{self}] Continue packet numbers for initial after retry (write is {:?})",
                     prev.rx.used_pn,
                 );
                 initial.tx.continuation(&prev.tx)?;
             }
-            self.initials.insert(*v, initial);
+            self.initials[*v] = Some(initial);
         }
         Ok(())
     }
@@ -988,7 +994,7 @@ impl CryptoStates {
     /// not need the send keys if the packet is subsequently discarded, but
     /// the overall effort is small enough to write off.
     pub fn init_server(&mut self, version: Version, dcid: &[u8]) -> Res<()> {
-        if !self.initials.contains_key(&version) {
+        if self.initials[version].is_none() {
             self.init(&[version], Role::Server, dcid)?;
         }
         Ok(())
@@ -1000,13 +1006,12 @@ impl CryptoStates {
             // appease the borrow checker.
             // Note that on the server, we might not have initials for |orig| if it
             // was configured for |orig| and only |confirmed| Initial packets arrived.
-            if let Some(prev) = self.initials.remove(&orig) {
-                let next = self
-                    .initials
-                    .get_mut(&confirmed)
+            if let Some(prev) = self.initials[orig].take() {
+                let next = self.initials[confirmed]
+                    .as_mut()
                     .ok_or(Error::VersionNegotiation)?;
                 next.tx.continuation(&prev.tx)?;
-                self.initials.insert(orig, prev);
+                self.initials[orig] = Some(prev);
             }
         }
         Ok(())
@@ -1034,7 +1039,7 @@ impl CryptoStates {
     pub fn discard(&mut self, space: PacketNumberSpace) -> bool {
         match space {
             PacketNumberSpace::Initial => {
-                let empty = self.initials.is_empty();
+                let empty = self.initials_is_empty();
                 self.initials.clear();
                 !empty
             }
@@ -1258,14 +1263,14 @@ impl CryptoStates {
             cipher: TLS_AES_128_GCM_SHA256,
             next_secret: hkdf::import_key(TLS_VERSION_1_3, &[0xaa; 32]).unwrap(),
         };
-        let mut initials = HashMap::new();
-        initials.insert(
-            Version::Version1,
-            CryptoState {
-                tx: CryptoDxState::test_default(),
-                rx: read(0),
-            },
-        );
+        let initials = enum_map! {
+            Version::Version1 => Some(CryptoState {
+                    tx: CryptoDxState::test_default(),
+                    rx: read(0),
+            }),
+            Version::Version2 => None,
+            Version::Draft29 => None,
+        };
         Self {
             initials,
             handshake: None,
@@ -1316,7 +1321,7 @@ impl CryptoStates {
             next_secret: secret.clone(),
         };
         Self {
-            initials: HashMap::new(),
+            initials: EnumMap::default(),
             handshake: None,
             zero_rtt: None,
             cipher: TLS_CHACHA20_POLY1305_SHA256,

@@ -24,7 +24,7 @@ use crate::{
     recv_stream::RECV_BUFFER_SIZE,
     send_stream::{OrderGroup, SendStreamState, SEND_BUFFER_SIZE},
     streams::{SendOrder, StreamOrder},
-    tparams::{self, TransportParameter},
+    tparams::{TransportParameter, TransportParameterId},
     CloseReason, Connection, ConnectionParameters, Error, StreamId, StreamType,
 };
 
@@ -397,7 +397,7 @@ fn max_data() {
 
     server
         .set_local_tparam(
-            tparams::INITIAL_MAX_DATA,
+            TransportParameterId::InitialMaxData,
             TransportParameter::Integer(u64::try_from(SMALL_MAX_DATA).unwrap()),
         )
         .unwrap();

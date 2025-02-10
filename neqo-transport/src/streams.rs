@@ -18,7 +18,7 @@ use crate::{
     send_stream::{SendStream, SendStreams, TransmissionPriority},
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
-    tparams::{self, TransportParametersHandler},
+    tparams::{TransportParameterId, TransportParametersHandler},
     ConnectionEvents, Error, Res,
 };
 
@@ -76,12 +76,15 @@ impl Streams {
         let limit_bidi = tps
             .borrow()
             .local
-            .get_integer(tparams::INITIAL_MAX_STREAMS_BIDI);
+            .get_integer(TransportParameterId::InitialMaxStreamsBidi);
         let limit_uni = tps
             .borrow()
             .local
-            .get_integer(tparams::INITIAL_MAX_STREAMS_UNI);
-        let max_data = tps.borrow().local.get_integer(tparams::INITIAL_MAX_DATA);
+            .get_integer(TransportParameterId::InitialMaxStreamsUni);
+        let max_data = tps
+            .borrow()
+            .local
+            .get_integer(TransportParameterId::InitialMaxData);
         Self {
             role,
             tps,
@@ -107,14 +110,14 @@ impl Streams {
             self.tps
                 .borrow()
                 .local
-                .get_integer(tparams::INITIAL_MAX_STREAMS_BIDI)
+                .get_integer(TransportParameterId::InitialMaxStreamsBidi)
         );
         debug_assert_eq!(
             self.remote_stream_limits[StreamType::UniDi].max_active(),
             self.tps
                 .borrow()
                 .local
-                .get_integer(tparams::INITIAL_MAX_STREAMS_UNI)
+                .get_integer(TransportParameterId::InitialMaxStreamsUni)
         );
         self.local_stream_limits = LocalStreamLimits::new(self.role);
     }
@@ -356,8 +359,8 @@ impl Streams {
             // look at the local transport parameters for the
             // INITIAL_MAX_STREAM_DATA_BIDI_REMOTE value to decide how much this endpoint
             // will allow its peer to send.
-            StreamType::BiDi => tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
-            StreamType::UniDi => tparams::INITIAL_MAX_STREAM_DATA_UNI,
+            StreamType::BiDi => TransportParameterId::InitialMaxStreamDataBidiRemote,
+            StreamType::UniDi => TransportParameterId::InitialMaxStreamDataUni,
         };
         let recv_initial_max_stream_data = self.tps.borrow().local.get_integer(tp);
 
@@ -386,7 +389,7 @@ impl Streams {
                     .tps
                     .borrow()
                     .remote()
-                    .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
+                    .get_integer(TransportParameterId::InitialMaxStreamDataBidiLocal);
                 self.send.insert(
                     next_stream_id,
                     SendStream::new(
@@ -447,8 +450,8 @@ impl Streams {
             None => Err(Error::StreamLimitError),
             Some(new_id) => {
                 let send_limit_tp = match st {
-                    StreamType::UniDi => tparams::INITIAL_MAX_STREAM_DATA_UNI,
-                    StreamType::BiDi => tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
+                    StreamType::UniDi => TransportParameterId::InitialMaxStreamDataUni,
+                    StreamType::BiDi => TransportParameterId::InitialMaxStreamDataBidiRemote,
                 };
                 let send_limit = self.tps.borrow().remote().get_integer(send_limit_tp);
                 let stream = SendStream::new(
@@ -469,7 +472,7 @@ impl Streams {
                         .tps
                         .borrow()
                         .local
-                        .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
+                        .get_integer(TransportParameterId::InitialMaxStreamDataBidiLocal);
 
                     self.recv.insert(
                         new_id,
@@ -506,13 +509,13 @@ impl Streams {
             self.tps
                 .borrow()
                 .remote()
-                .get_integer(tparams::INITIAL_MAX_STREAMS_BIDI),
+                .get_integer(TransportParameterId::InitialMaxStreamsBidi),
         );
         _ = self.local_stream_limits[StreamType::UniDi].update(
             self.tps
                 .borrow()
                 .remote()
-                .get_integer(tparams::INITIAL_MAX_STREAMS_UNI),
+                .get_integer(TransportParameterId::InitialMaxStreamsUni),
         );
 
         // As a client, there are two sets of initial limits for sending stream data.
@@ -526,7 +529,7 @@ impl Streams {
             self.tps
                 .borrow()
                 .remote()
-                .get_integer(tparams::INITIAL_MAX_DATA),
+                .get_integer(TransportParameterId::InitialMaxData),
         );
 
         if self.local_stream_limits[StreamType::BiDi].available() > 0 {

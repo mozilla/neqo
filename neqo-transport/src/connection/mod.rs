@@ -6,7 +6,7 @@
 
 // The class implementing a QUIC connection.
 
-#![allow(clippy::module_name_repetitions)]
+// #![allow(clippy::module_name_repetitions)]
 
 use std::{
     cell::RefCell,
@@ -55,7 +55,7 @@ use crate::{
     stats::{Stats, StatsCell},
     stream_id::StreamType,
     streams::{SendOrder, Streams},
-    tparams::{self, TransportParameters, TransportParametersHandler},
+    tparams::{self, TransportParameterId, TransportParameters, TransportParametersHandler},
     tracking::{AckTracker, PacketNumberSpace, RecvdPackets},
     version::{Version, WireVersion},
     AppError, CloseReason, Error, Res, StreamId,
@@ -374,7 +374,7 @@ impl Connection {
             ConnectionIdManager::new(cid_generator, local_initial_source_cid.clone());
         let mut tps = conn_params.create_transport_parameter(role, &mut cid_manager)?;
         tps.local.set_bytes(
-            tparams::INITIAL_SOURCE_CONNECTION_ID,
+            TransportParameterId::InitialSourceConnectionId,
             local_initial_source_cid.to_vec(),
         );
 
@@ -525,8 +525,14 @@ impl Connection {
         qtrace!("[{self}] Retry CIDs: odcid={odcid} remote={remote_cid} retry={retry_cid}");
         // We advertise "our" choices in transport parameters.
         let local_tps = &mut self.tps.borrow_mut().local;
-        local_tps.set_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID, odcid.to_vec());
-        local_tps.set_bytes(tparams::RETRY_SOURCE_CONNECTION_ID, retry_cid.to_vec());
+        local_tps.set_bytes(
+            TransportParameterId::OriginalDestinationConnectionId,
+            odcid.to_vec(),
+        );
+        local_tps.set_bytes(
+            TransportParameterId::RetrySourceConnectionId,
+            retry_cid.to_vec(),
+        );
 
         // ...and save their choices for later validation.
         self.remote_initial_source_cid = Some(remote_cid);
@@ -536,7 +542,7 @@ impl Connection {
         self.tps
             .borrow()
             .local
-            .get_bytes(tparams::RETRY_SOURCE_CONNECTION_ID)
+            .get_bytes(TransportParameterId::RetrySourceConnectionId)
             .is_some()
     }
 
@@ -1408,7 +1414,7 @@ impl Connection {
                 // the TLS handshake has all it needs.
                 if !self.retry_sent() {
                     self.tps.borrow_mut().local.set_bytes(
-                        tparams::ORIGINAL_DESTINATION_CONNECTION_ID,
+                        TransportParameterId::OriginalDestinationConnectionId,
                         packet.dcid().to_vec(),
                     );
                 }
@@ -1894,7 +1900,7 @@ impl Connection {
             .tps
             .borrow()
             .remote()
-            .get_empty(tparams::DISABLE_MIGRATION)
+            .get_empty(TransportParameterId::DisableMigration)
         {
             return Err(Error::InvalidMigration);
         }
@@ -2113,9 +2119,9 @@ impl Connection {
     fn can_grease_quic_bit(&self) -> bool {
         let tph = self.tps.borrow();
         if let Some(r) = &tph.remote {
-            r.get_empty(tparams::GREASE_QUIC_BIT)
+            r.get_empty(TransportParameterId::GreaseQuicBit)
         } else if let Some(r) = &tph.remote_0rtt {
-            r.get_empty(tparams::GREASE_QUIC_BIT)
+            r.get_empty(TransportParameterId::GreaseQuicBit)
         } else {
             false
         }
@@ -2621,7 +2627,7 @@ impl Connection {
             .tps
             .borrow()
             .remote()
-            .get_integer(tparams::IDLE_TIMEOUT);
+            .get_integer(TransportParameterId::IdleTimeout);
         if peer_timeout > 0 {
             self.idle_timeout
                 .set_peer_timeout(Duration::from_millis(peer_timeout));
@@ -2631,7 +2637,7 @@ impl Connection {
             self.tps
                 .borrow()
                 .remote()
-                .get_integer(tparams::MAX_DATAGRAM_FRAME_SIZE),
+                .get_integer(TransportParameterId::MaxDatagramFrameSize),
         );
     }
 
@@ -2662,7 +2668,7 @@ impl Connection {
             }
 
             let reset_token = remote
-                .get_bytes(tparams::STATELESS_RESET_TOKEN)
+                .get_bytes(TransportParameterId::StatelessResetToken)
                 .map_or_else(
                     || Ok(ConnectionIdEntry::random_srt()),
                     |token| <[u8; 16]>::try_from(token).map_err(|_| Error::TransportParameterError),
@@ -2670,9 +2676,11 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
 
-            let max_ad = Duration::from_millis(remote.get_integer(tparams::MAX_ACK_DELAY));
-            let min_ad = if remote.has_value(tparams::MIN_ACK_DELAY) {
-                let min_ad = Duration::from_micros(remote.get_integer(tparams::MIN_ACK_DELAY));
+            let max_ad =
+                Duration::from_millis(remote.get_integer(TransportParameterId::MaxAckDelay));
+            let min_ad = if remote.has_value(TransportParameterId::MinAckDelay) {
+                let min_ad =
+                    Duration::from_micros(remote.get_integer(TransportParameterId::MinAckDelay));
                 if min_ad > max_ad {
                     return Err(Error::TransportParameterError);
                 }
@@ -2683,7 +2691,7 @@ impl Connection {
             path.borrow_mut()
                 .set_ack_delay(max_ad, min_ad, self.conn_params.get_ack_ratio());
 
-            let max_active_cids = remote.get_integer(tparams::ACTIVE_CONNECTION_ID_LIMIT);
+            let max_active_cids = remote.get_integer(TransportParameterId::ActiveConnectionIdLimit);
             self.cid_manager.set_limit(max_active_cids);
         }
         self.set_initial_limits();
@@ -2695,7 +2703,7 @@ impl Connection {
         let tph = self.tps.borrow();
         let remote_tps = tph.remote.as_ref().ok_or(Error::TransportParameterError)?;
 
-        let tp = remote_tps.get_bytes(tparams::INITIAL_SOURCE_CONNECTION_ID);
+        let tp = remote_tps.get_bytes(TransportParameterId::InitialSourceConnectionId);
         if self
             .remote_initial_source_cid
             .as_ref()
@@ -2711,7 +2719,7 @@ impl Connection {
         }
 
         if self.role == Role::Client {
-            let tp = remote_tps.get_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID);
+            let tp = remote_tps.get_bytes(TransportParameterId::OriginalDestinationConnectionId);
             if self
                 .original_destination_cid
                 .as_ref()
@@ -2726,7 +2734,7 @@ impl Connection {
                 return Err(Error::ProtocolViolation);
             }
 
-            let tp = remote_tps.get_bytes(tparams::RETRY_SOURCE_CONNECTION_ID);
+            let tp = remote_tps.get_bytes(TransportParameterId::RetrySourceConnectionId);
             let expected = if let AddressValidationInfo::Retry {
                 retry_source_cid, ..
             } = &self.address_validation
@@ -3120,7 +3128,8 @@ impl Connection {
         self.tps.borrow().remote.as_ref().map_or_else(
             || Ok(Duration::default()),
             |r| {
-                let exponent = u32::try_from(r.get_integer(tparams::ACK_DELAY_EXPONENT))?;
+                let exponent =
+                    u32::try_from(r.get_integer(TransportParameterId::AckDelayExponent))?;
                 // ACK_DELAY_EXPONENT > 20 is invalid per RFC9000. We already checked that in
                 // TransportParameter::decode.
                 let corrected = if v.leading_zeros() >= exponent {
