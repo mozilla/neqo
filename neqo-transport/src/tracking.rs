@@ -50,7 +50,7 @@ impl From<Epoch> for PacketNumberSpace {
         match epoch {
             Epoch::Initial => Self::Initial,
             Epoch::Handshake => Self::Handshake,
-            _ => Self::ApplicationData,
+            Epoch::ApplicationData | Epoch::ZeroRtt => Self::ApplicationData,
         }
     }
 }
