@@ -31,7 +31,15 @@ use crate::{
     path::PathRef,
     recovery::SentPacket,
     stream_id::StreamType as NeqoStreamType,
-    tparams::{TransportParameterId, TransportParametersHandler},
+    tparams::{
+        TransportParameterId::{
+            self, AckDelayExponent, ActiveConnectionIdLimit, DisableMigration, InitialMaxData,
+            InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni,
+            InitialMaxStreamsBidi, InitialMaxStreamsUni, MaxAckDelay, MaxUdpPayloadSize,
+            OriginalDestinationConnectionId, StatelessResetToken,
+        },
+        TransportParametersHandler,
+    },
     version::{Version, VersionConfig, WireVersion},
 };
 
@@ -48,47 +56,29 @@ pub fn connection_tparams_set(qlog: &NeqoQlog, tph: &TransportParametersHandler,
                     tls_cipher: None,
                     aead_tag_length: None,
                     original_destination_connection_id: remote
-                        .get_bytes(TransportParameterId::OriginalDestinationConnectionId)
+                        .get_bytes(OriginalDestinationConnectionId)
                         .map(hex),
                     initial_source_connection_id: None,
                     retry_source_connection_id: None,
-                    stateless_reset_token: remote
-                        .get_bytes(TransportParameterId::StatelessResetToken)
-                        .map(hex),
-                    disable_active_migration: remote
-                        .get_empty(TransportParameterId::DisableMigration)
-                        .then_some(true),
+                    stateless_reset_token: remote.get_bytes(StatelessResetToken).map(hex),
+                    disable_active_migration: remote.get_empty(DisableMigration).then_some(true),
                     max_idle_timeout: Some(remote.get_integer(TransportParameterId::IdleTimeout)),
-                    max_udp_payload_size: Some(
-                        remote.get_integer(TransportParameterId::MaxUdpPayloadSize) as u32,
-                    ),
-                    ack_delay_exponent: Some(
-                        remote.get_integer(TransportParameterId::AckDelayExponent) as u16,
-                    ),
-                    max_ack_delay: Some(
-                        remote.get_integer(TransportParameterId::MaxAckDelay) as u16
-                    ),
+                    max_udp_payload_size: Some(remote.get_integer(MaxUdpPayloadSize) as u32),
+                    ack_delay_exponent: Some(remote.get_integer(AckDelayExponent) as u16),
+                    max_ack_delay: Some(remote.get_integer(MaxAckDelay) as u16),
                     active_connection_id_limit: Some(
-                        remote.get_integer(TransportParameterId::ActiveConnectionIdLimit) as u32,
+                        remote.get_integer(ActiveConnectionIdLimit) as u32
                     ),
-                    initial_max_data: Some(
-                        remote.get_integer(TransportParameterId::InitialMaxData),
-                    ),
+                    initial_max_data: Some(remote.get_integer(InitialMaxData)),
                     initial_max_stream_data_bidi_local: Some(
-                        remote.get_integer(TransportParameterId::InitialMaxStreamDataBidiLocal),
+                        remote.get_integer(InitialMaxStreamDataBidiLocal),
                     ),
                     initial_max_stream_data_bidi_remote: Some(
-                        remote.get_integer(TransportParameterId::InitialMaxStreamDataBidiRemote),
+                        remote.get_integer(InitialMaxStreamDataBidiRemote),
                     ),
-                    initial_max_stream_data_uni: Some(
-                        remote.get_integer(TransportParameterId::InitialMaxStreamDataUni),
-                    ),
-                    initial_max_streams_bidi: Some(
-                        remote.get_integer(TransportParameterId::InitialMaxStreamsBidi),
-                    ),
-                    initial_max_streams_uni: Some(
-                        remote.get_integer(TransportParameterId::InitialMaxStreamsUni),
-                    ),
+                    initial_max_stream_data_uni: Some(remote.get_integer(InitialMaxStreamDataUni)),
+                    initial_max_streams_bidi: Some(remote.get_integer(InitialMaxStreamsBidi)),
+                    initial_max_streams_uni: Some(remote.get_integer(InitialMaxStreamsUni)),
                     preferred_address: remote.get_preferred_address().and_then(|(paddr, cid)| {
                         Some(qlog::events::quic::PreferredAddress {
                             ip_v4: paddr.ipv4()?.ip().to_string(),

@@ -29,7 +29,7 @@ use crate::{
     },
     rtt::GRANULARITY,
     stats::MAX_PTO_COUNTS,
-    tparams::{TransportParameter, TransportParameterId},
+    tparams::{TransportParameter, TransportParameterId::*},
     tracking::DEFAULT_ACK_DELAY,
     CloseReason, Error, Pmtud, StreamType,
 };
@@ -405,7 +405,7 @@ fn handshake_ack_pto() {
     // server needs to send two Handshake packets.
     let big = TransportParameter::Bytes(vec![0; Pmtud::default_plpmtu(DEFAULT_ADDR.ip())]);
     server
-        .set_local_tparam(TransportParameterId::TestTransportParameter, big)
+        .set_local_tparam(TestTransportParameter, big)
         .unwrap();
 
     let c1 = client.process_output(now).dgram();

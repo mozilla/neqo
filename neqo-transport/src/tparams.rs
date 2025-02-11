@@ -8,6 +8,7 @@
 
 use std::{
     cell::RefCell,
+    fmt::Display,
     net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
     rc::Rc,
 };
@@ -19,6 +20,14 @@ use neqo_crypto::{
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
     random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
 };
+use TransportParameterId::{
+    AckDelayExponent, ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit, IdleTimeout,
+    InitialMaxData, InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote,
+    InitialMaxStreamDataUni, InitialMaxStreamsBidi, InitialMaxStreamsUni,
+    InitialSourceConnectionId, MaxAckDelay, MaxDatagramFrameSize, MaxUdpPayloadSize, MinAckDelay,
+    OriginalDestinationConnectionId, RetrySourceConnectionId, StatelessResetToken,
+    VersionInformation,
+};
 
 use crate::{
     cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
@@ -27,8 +36,8 @@ use crate::{
     Error, Res,
 };
 
-#[allow(clippy::enum_clike_unportable_variant)]
-#[derive(Debug, Clone, Enum, PartialEq, Eq)]
+#[derive(Debug, Clone, Enum, PartialEq, Eq, Copy)]
+#[repr(u64)]
 pub enum TransportParameterId {
     OriginalDestinationConnectionId = 0x00,
     IdleTimeout = 0x01,
@@ -53,6 +62,12 @@ pub enum TransportParameterId {
     MaxDatagramFrameSize = 0x0020,
     #[cfg(test)]
     TestTransportParameter = 0xce16,
+}
+
+impl Display for TransportParameterId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        format!("{self:?}((0x{:02x}))", u64::from(*self)).fmt(f)
+    }
 }
 
 impl From<TransportParameterId> for u64 {
@@ -172,10 +187,7 @@ pub enum TransportParameter {
 
 impl TransportParameter {
     fn encode(&self, enc: &mut Encoder, tp: TransportParameterId) {
-        qtrace!(
-            "TP encoded; type {tp:?}(0x{:02x}) val {self:?}",
-            u64::from(tp.clone())
-        );
+        qtrace!("TP encoded; type {tp}) val {self:?}");
         enc.encode_varint(tp);
         match self {
             Self::Bytes(a) => {
@@ -294,53 +306,48 @@ impl TransportParameter {
         };
         let mut d = Decoder::from(content);
         let value = match tp {
-            TransportParameterId::OriginalDestinationConnectionId
-            | TransportParameterId::InitialSourceConnectionId
-            | TransportParameterId::RetrySourceConnectionId => {
-                Self::Bytes(d.decode_remainder().to_vec())
-            }
-            TransportParameterId::StatelessResetToken => {
+            OriginalDestinationConnectionId
+            | InitialSourceConnectionId
+            | RetrySourceConnectionId => Self::Bytes(d.decode_remainder().to_vec()),
+            StatelessResetToken => {
                 if d.remaining() != 16 {
                     return Err(Error::TransportParameterError);
                 }
                 Self::Bytes(d.decode_remainder().to_vec())
             }
-            TransportParameterId::IdleTimeout
-            | TransportParameterId::InitialMaxData
-            | TransportParameterId::InitialMaxStreamDataBidiLocal
-            | TransportParameterId::InitialMaxStreamDataBidiRemote
-            | TransportParameterId::InitialMaxStreamDataUni
-            | TransportParameterId::MaxAckDelay
-            | TransportParameterId::MaxDatagramFrameSize => match d.decode_varint() {
+            IdleTimeout
+            | InitialMaxData
+            | InitialMaxStreamDataBidiLocal
+            | InitialMaxStreamDataBidiRemote
+            | InitialMaxStreamDataUni
+            | MaxAckDelay
+            | MaxDatagramFrameSize => match d.decode_varint() {
                 Some(v) => Self::Integer(v),
                 None => return Err(Error::TransportParameterError),
             },
-            TransportParameterId::InitialMaxStreamsBidi
-            | TransportParameterId::InitialMaxStreamsUni => match d.decode_varint() {
+            InitialMaxStreamsBidi | InitialMaxStreamsUni => match d.decode_varint() {
                 Some(v) if v <= (1 << 60) => Self::Integer(v),
                 _ => return Err(Error::StreamLimitError),
             },
-            TransportParameterId::MaxUdpPayloadSize => match d.decode_varint() {
+            MaxUdpPayloadSize => match d.decode_varint() {
                 Some(v) if v >= MIN_INITIAL_PACKET_SIZE.try_into()? => Self::Integer(v),
                 _ => return Err(Error::TransportParameterError),
             },
-            TransportParameterId::AckDelayExponent => match d.decode_varint() {
+            AckDelayExponent => match d.decode_varint() {
                 Some(v) if v <= 20 => Self::Integer(v),
                 _ => return Err(Error::TransportParameterError),
             },
-            TransportParameterId::ActiveConnectionIdLimit => match d.decode_varint() {
+            ActiveConnectionIdLimit => match d.decode_varint() {
                 Some(v) if v >= 2 => Self::Integer(v),
                 _ => return Err(Error::TransportParameterError),
             },
-            TransportParameterId::DisableMigration | TransportParameterId::GreaseQuicBit => {
-                Self::Empty
-            }
+            DisableMigration | GreaseQuicBit => Self::Empty,
             TransportParameterId::PreferredAddress => Self::decode_preferred_address(&mut d)?,
-            TransportParameterId::MinAckDelay => match d.decode_varint() {
+            MinAckDelay => match d.decode_varint() {
                 Some(v) if v < (1 << 24) => Self::Integer(v),
                 _ => return Err(Error::TransportParameterError),
             },
-            TransportParameterId::VersionInformation => Self::decode_versions(&mut d)?,
+            VersionInformation => Self::decode_versions(&mut d)?,
             #[cfg(test)]
             TransportParameterId::TestTransportParameter => {
                 Self::Bytes(d.decode_remainder().to_vec())
@@ -349,10 +356,7 @@ impl TransportParameter {
         if d.remaining() > 0 {
             return Err(Error::TooMuchData);
         }
-        qtrace!(
-            "TP decoded; type {tp:?}(0x{:02x}) val {value:?}",
-            u64::from(tp.clone())
-        );
+        qtrace!("TP decoded; type {tp} val {value:?}");
         Ok(Some((tp, value)))
     }
 }
@@ -405,19 +409,19 @@ impl TransportParameters {
     #[must_use]
     pub fn get_integer(&self, tp: TransportParameterId) -> u64 {
         let default = match tp {
-            TransportParameterId::IdleTimeout
-            | TransportParameterId::InitialMaxData
-            | TransportParameterId::InitialMaxStreamDataBidiLocal
-            | TransportParameterId::InitialMaxStreamDataBidiRemote
-            | TransportParameterId::InitialMaxStreamDataUni
-            | TransportParameterId::InitialMaxStreamsBidi
-            | TransportParameterId::InitialMaxStreamsUni
-            | TransportParameterId::MinAckDelay
-            | TransportParameterId::MaxDatagramFrameSize => 0,
-            TransportParameterId::MaxUdpPayloadSize => 65527,
-            TransportParameterId::AckDelayExponent => 3,
-            TransportParameterId::MaxAckDelay => 25,
-            TransportParameterId::ActiveConnectionIdLimit => 2,
+            IdleTimeout
+            | InitialMaxData
+            | InitialMaxStreamDataBidiLocal
+            | InitialMaxStreamDataBidiRemote
+            | InitialMaxStreamDataUni
+            | InitialMaxStreamsBidi
+            | InitialMaxStreamsUni
+            | MinAckDelay
+            | MaxDatagramFrameSize => 0,
+            MaxUdpPayloadSize => 65527,
+            AckDelayExponent => 3,
+            MaxAckDelay => 25,
+            ActiveConnectionIdLimit => 2,
             _ => panic!("Transport parameter not known or not an Integer"),
         };
         match self.params[tp] {
@@ -432,19 +436,19 @@ impl TransportParameters {
     /// When the transport parameter isn't recognized as being an integer.
     pub fn set_integer(&mut self, tp: TransportParameterId, value: u64) {
         match tp {
-            TransportParameterId::IdleTimeout
-            | TransportParameterId::InitialMaxData
-            | TransportParameterId::InitialMaxStreamDataBidiLocal
-            | TransportParameterId::InitialMaxStreamDataBidiRemote
-            | TransportParameterId::InitialMaxStreamDataUni
-            | TransportParameterId::InitialMaxStreamsBidi
-            | TransportParameterId::InitialMaxStreamsUni
-            | TransportParameterId::MaxUdpPayloadSize
-            | TransportParameterId::AckDelayExponent
-            | TransportParameterId::MaxAckDelay
-            | TransportParameterId::ActiveConnectionIdLimit
-            | TransportParameterId::MinAckDelay
-            | TransportParameterId::MaxDatagramFrameSize => {
+            IdleTimeout
+            | InitialMaxData
+            | InitialMaxStreamDataBidiLocal
+            | InitialMaxStreamDataBidiRemote
+            | InitialMaxStreamDataUni
+            | InitialMaxStreamsBidi
+            | InitialMaxStreamsUni
+            | MaxUdpPayloadSize
+            | AckDelayExponent
+            | MaxAckDelay
+            | ActiveConnectionIdLimit
+            | MinAckDelay
+            | MaxDatagramFrameSize => {
                 self.set(tp, TransportParameter::Integer(value));
             }
             _ => panic!("Transport parameter not known"),
@@ -456,10 +460,10 @@ impl TransportParameters {
     #[must_use]
     pub fn get_bytes(&self, tp: TransportParameterId) -> Option<&[u8]> {
         match tp {
-            TransportParameterId::OriginalDestinationConnectionId
-            | TransportParameterId::InitialSourceConnectionId
-            | TransportParameterId::RetrySourceConnectionId
-            | TransportParameterId::StatelessResetToken => {}
+            OriginalDestinationConnectionId
+            | InitialSourceConnectionId
+            | RetrySourceConnectionId
+            | StatelessResetToken => {}
             _ => panic!("Transport parameter not known or not type bytes"),
         }
 
@@ -474,10 +478,10 @@ impl TransportParameters {
     /// When the transport parameter isn't recognized as containing bytes.
     pub fn set_bytes(&mut self, tp: TransportParameterId, value: Vec<u8>) {
         match tp {
-            TransportParameterId::OriginalDestinationConnectionId
-            | TransportParameterId::InitialSourceConnectionId
-            | TransportParameterId::RetrySourceConnectionId
-            | TransportParameterId::StatelessResetToken => {
+            OriginalDestinationConnectionId
+            | InitialSourceConnectionId
+            | RetrySourceConnectionId
+            | StatelessResetToken => {
                 self.set(tp, TransportParameter::Bytes(value));
             }
             _ => panic!("Transport parameter not known or not type bytes"),
@@ -488,7 +492,7 @@ impl TransportParameters {
     /// When the transport parameter isn't recognized as being empty.
     pub fn set_empty(&mut self, tp: TransportParameterId) {
         match tp {
-            TransportParameterId::DisableMigration | TransportParameterId::GreaseQuicBit => {
+            DisableMigration | GreaseQuicBit => {
                 self.set(tp, TransportParameter::Empty);
             }
             _ => panic!("Transport parameter not known or not type empty"),
@@ -508,7 +512,7 @@ impl TransportParameters {
         }
         let current = versions.initial().wire_version();
         self.set(
-            TransportParameterId::VersionInformation,
+            VersionInformation,
             TransportParameter::Versions { current, other },
         );
     }
@@ -516,7 +520,7 @@ impl TransportParameters {
     fn compatible_upgrade(&mut self, v: Version) {
         if let Some(TransportParameter::Versions {
             ref mut current, ..
-        }) = self.params[TransportParameterId::VersionInformation]
+        }) = self.params[VersionInformation]
         {
             *current = v.wire_version();
         } else {
@@ -545,28 +549,28 @@ impl TransportParameters {
             if v_rem.is_none()
                 || matches!(
                     k,
-                    TransportParameterId::OriginalDestinationConnectionId
-                        | TransportParameterId::InitialSourceConnectionId
-                        | TransportParameterId::RetrySourceConnectionId
-                        | TransportParameterId::StatelessResetToken
-                        | TransportParameterId::IdleTimeout
-                        | TransportParameterId::AckDelayExponent
-                        | TransportParameterId::MaxAckDelay
-                        | TransportParameterId::ActiveConnectionIdLimit
+                    OriginalDestinationConnectionId
+                        | InitialSourceConnectionId
+                        | RetrySourceConnectionId
+                        | StatelessResetToken
+                        | IdleTimeout
+                        | AckDelayExponent
+                        | MaxAckDelay
+                        | ActiveConnectionIdLimit
                         | TransportParameterId::PreferredAddress
                 )
             {
                 continue;
             }
 
-            let ok = self.params[k.clone()]
+            let ok = self.params[k]
                 .as_ref()
                 .is_some_and(|v_self| match (v_self, v_rem) {
                     (
                         TransportParameter::Integer(i_self),
                         Some(TransportParameter::Integer(i_rem)),
                     ) => {
-                        if k == TransportParameterId::MinAckDelay {
+                        if k == MinAckDelay {
                             // MIN_ACK_DELAY is backwards:
                             // it can only be reduced safely.
                             *i_self <= *i_rem
@@ -609,7 +613,7 @@ impl TransportParameters {
     #[must_use]
     pub fn get_versions(&self) -> Option<(WireVersion, &[WireVersion])> {
         if let Some(TransportParameter::Versions { current, other }) =
-            &self.params[TransportParameterId::VersionInformation]
+            &self.params[VersionInformation]
         {
             Some((*current, other))
         } else {
@@ -817,6 +821,7 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
     use neqo_common::{qdebug, Decoder, Encoder};
+    use TransportParameterId::*;
 
     use super::PreferredAddress;
     use crate::{
@@ -829,11 +834,10 @@ mod tests {
         const RESET_TOKEN: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8];
         let mut tps = TransportParameters::default();
         tps.set(
-            TransportParameterId::StatelessResetToken,
+            StatelessResetToken,
             TransportParameter::Bytes(RESET_TOKEN.to_vec()),
         );
-        tps.params[TransportParameterId::InitialMaxStreamsBidi] =
-            Some(TransportParameter::Integer(10));
+        tps.params[InitialMaxStreamsBidi] = Some(TransportParameter::Integer(10));
 
         let mut enc = Encoder::default();
         tps.encode(&mut enc);
@@ -842,36 +846,18 @@ mod tests {
         assert_eq!(tps, tps2);
 
         println!("TPS = {tps:?}");
-        assert_eq!(tps2.get_integer(TransportParameterId::IdleTimeout), 0); // Default
-        assert_eq!(tps2.get_integer(TransportParameterId::MaxAckDelay), 25); // Default
-        assert_eq!(
-            tps2.get_integer(TransportParameterId::ActiveConnectionIdLimit),
-            2
-        ); // Default
-        assert_eq!(
-            tps2.get_integer(TransportParameterId::InitialMaxStreamsBidi),
-            10
-        ); // Sent
-        assert_eq!(
-            tps2.get_bytes(TransportParameterId::StatelessResetToken),
-            Some(RESET_TOKEN)
-        );
-        assert_eq!(
-            tps2.get_bytes(TransportParameterId::OriginalDestinationConnectionId),
-            None
-        );
-        assert_eq!(
-            tps2.get_bytes(TransportParameterId::InitialSourceConnectionId),
-            None
-        );
-        assert_eq!(
-            tps2.get_bytes(TransportParameterId::RetrySourceConnectionId),
-            None
-        );
-        assert!(!tps2.has_value(TransportParameterId::OriginalDestinationConnectionId));
-        assert!(!tps2.has_value(TransportParameterId::InitialSourceConnectionId));
-        assert!(!tps2.has_value(TransportParameterId::RetrySourceConnectionId));
-        assert!(tps2.has_value(TransportParameterId::StatelessResetToken));
+        assert_eq!(tps2.get_integer(IdleTimeout), 0); // Default
+        assert_eq!(tps2.get_integer(MaxAckDelay), 25); // Default
+        assert_eq!(tps2.get_integer(ActiveConnectionIdLimit), 2); // Default
+        assert_eq!(tps2.get_integer(InitialMaxStreamsBidi), 10); // Sent
+        assert_eq!(tps2.get_bytes(StatelessResetToken), Some(RESET_TOKEN));
+        assert_eq!(tps2.get_bytes(OriginalDestinationConnectionId), None);
+        assert_eq!(tps2.get_bytes(InitialSourceConnectionId), None);
+        assert_eq!(tps2.get_bytes(RetrySourceConnectionId), None);
+        assert!(!tps2.has_value(OriginalDestinationConnectionId));
+        assert!(!tps2.has_value(InitialSourceConnectionId));
+        assert!(!tps2.has_value(RetrySourceConnectionId));
+        assert!(tps2.has_value(StatelessResetToken));
 
         let mut enc = Encoder::default();
         tps.encode(&mut enc);
@@ -903,12 +889,12 @@ mod tests {
         ];
         let spa = make_spa();
         let mut enc = Encoder::new();
-        spa.encode(&mut enc, TransportParameterId::PreferredAddress);
+        spa.encode(&mut enc, PreferredAddress);
         assert_eq!(enc.as_ref(), ENCODED);
 
         let mut dec = enc.as_decoder();
         let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
-        assert_eq!(id, TransportParameterId::PreferredAddress);
+        assert_eq!(id, PreferredAddress);
         assert_eq!(decoded, spa);
     }
 
@@ -936,7 +922,7 @@ mod tests {
     /// doesn't care about validity, and decodes it.  The result should be failure.
     fn assert_invalid_spa(spa: &TransportParameter) {
         let mut enc = Encoder::new();
-        spa.encode(&mut enc, TransportParameterId::PreferredAddress);
+        spa.encode(&mut enc, PreferredAddress);
         assert_eq!(
             TransportParameter::decode(&mut enc.as_decoder()).unwrap_err(),
             Error::TransportParameterError
@@ -946,10 +932,10 @@ mod tests {
     /// This is for those rare mutations that are acceptable.
     fn assert_valid_spa(spa: &TransportParameter) {
         let mut enc = Encoder::new();
-        spa.encode(&mut enc, TransportParameterId::PreferredAddress);
+        spa.encode(&mut enc, PreferredAddress);
         let mut dec = enc.as_decoder();
         let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
-        assert_eq!(id, TransportParameterId::PreferredAddress);
+        assert_eq!(id, PreferredAddress);
         assert_eq!(&decoded, spa);
     }
 
@@ -997,7 +983,7 @@ mod tests {
     fn preferred_address_truncated() {
         let spa = make_spa();
         let mut enc = Encoder::new();
-        spa.encode(&mut enc, TransportParameterId::PreferredAddress);
+        spa.encode(&mut enc, PreferredAddress);
         let mut dec = Decoder::from(&enc.as_ref()[..enc.len() - 1]);
         assert_eq!(
             TransportParameter::decode(&mut dec).unwrap_err(),
@@ -1042,42 +1028,24 @@ mod tests {
     fn compatible_0rtt_ignored_values() {
         let mut tps_a = TransportParameters::default();
         tps_a.set(
-            TransportParameterId::StatelessResetToken,
+            StatelessResetToken,
             TransportParameter::Bytes(vec![1, 2, 3]),
         );
-        tps_a.set(
-            TransportParameterId::IdleTimeout,
-            TransportParameter::Integer(10),
-        );
-        tps_a.set(
-            TransportParameterId::MaxAckDelay,
-            TransportParameter::Integer(22),
-        );
-        tps_a.set(
-            TransportParameterId::ActiveConnectionIdLimit,
-            TransportParameter::Integer(33),
-        );
+        tps_a.set(IdleTimeout, TransportParameter::Integer(10));
+        tps_a.set(MaxAckDelay, TransportParameter::Integer(22));
+        tps_a.set(ActiveConnectionIdLimit, TransportParameter::Integer(33));
 
         let mut tps_b = TransportParameters::default();
         assert!(tps_a.ok_for_0rtt(&tps_b));
         assert!(tps_b.ok_for_0rtt(&tps_a));
 
         tps_b.set(
-            TransportParameterId::StatelessResetToken,
+            StatelessResetToken,
             TransportParameter::Bytes(vec![8, 9, 10]),
         );
-        tps_b.set(
-            TransportParameterId::IdleTimeout,
-            TransportParameter::Integer(100),
-        );
-        tps_b.set(
-            TransportParameterId::MaxAckDelay,
-            TransportParameter::Integer(2),
-        );
-        tps_b.set(
-            TransportParameterId::ActiveConnectionIdLimit,
-            TransportParameter::Integer(44),
-        );
+        tps_b.set(IdleTimeout, TransportParameter::Integer(100));
+        tps_b.set(MaxAckDelay, TransportParameter::Integer(2));
+        tps_b.set(ActiveConnectionIdLimit, TransportParameter::Integer(44));
         assert!(tps_a.ok_for_0rtt(&tps_b));
         assert!(tps_b.ok_for_0rtt(&tps_a));
     }
@@ -1085,20 +1053,20 @@ mod tests {
     #[test]
     fn compatible_0rtt_integers() {
         const INTEGER_KEYS: &[TransportParameterId] = &[
-            TransportParameterId::InitialMaxData,
-            TransportParameterId::InitialMaxStreamDataBidiLocal,
-            TransportParameterId::InitialMaxStreamDataBidiRemote,
-            TransportParameterId::InitialMaxStreamDataUni,
-            TransportParameterId::InitialMaxStreamsBidi,
-            TransportParameterId::InitialMaxStreamsUni,
-            TransportParameterId::MaxUdpPayloadSize,
-            TransportParameterId::MinAckDelay,
-            TransportParameterId::MaxDatagramFrameSize,
+            InitialMaxData,
+            InitialMaxStreamDataBidiLocal,
+            InitialMaxStreamDataBidiRemote,
+            InitialMaxStreamDataUni,
+            InitialMaxStreamsBidi,
+            InitialMaxStreamsUni,
+            MaxUdpPayloadSize,
+            MinAckDelay,
+            MaxDatagramFrameSize,
         ];
 
         let mut tps_a = TransportParameters::default();
         for i in INTEGER_KEYS {
-            tps_a.set(i.clone(), TransportParameter::Integer(12));
+            tps_a.set(*i, TransportParameter::Integer(12));
         }
 
         let tps_b = tps_a.clone();
@@ -1109,12 +1077,8 @@ mod tests {
         for i in INTEGER_KEYS {
             let mut tps_b = tps_a.clone();
             // Set a safe new value; reducing MIN_ACK_DELAY instead.
-            let safe_value = if *i == TransportParameterId::MinAckDelay {
-                11
-            } else {
-                13
-            };
-            tps_b.set(i.clone(), TransportParameter::Integer(safe_value));
+            let safe_value = if *i == MinAckDelay { 11 } else { 13 };
+            tps_b.set(*i, TransportParameter::Integer(safe_value));
             // If the new value is not safe relative to the remembered value,
             // then we can't attempt 0-RTT with these parameters.
             assert!(!tps_a.ok_for_0rtt(&tps_b));
@@ -1125,7 +1089,7 @@ mod tests {
         // Drop integer values and check that that is OK.
         for i in INTEGER_KEYS {
             let mut tps_b = tps_a.clone();
-            tps_b.remove(i.clone());
+            tps_b.remove(*i);
             // A value that is missing from what is remembered is OK.
             assert!(tps_a.ok_for_0rtt(&tps_b));
             // A value that is remembered, but not current is not OK.
@@ -1140,8 +1104,7 @@ mod tests {
 
         // Intentionally set an invalid value for the ACTIVE_CONNECTION_ID_LIMIT transport
         // parameter.
-        tps.params[TransportParameterId::ActiveConnectionIdLimit] =
-            Some(TransportParameter::Integer(1));
+        tps.params[ActiveConnectionIdLimit] = Some(TransportParameter::Integer(1));
 
         let mut enc = Encoder::default();
         tps.encode(&mut enc);
@@ -1163,12 +1126,12 @@ mod tests {
         };
 
         let mut enc = Encoder::new();
-        vn.encode(&mut enc, TransportParameterId::VersionInformation);
+        vn.encode(&mut enc, VersionInformation);
         assert_eq!(enc.as_ref(), ENCODED);
 
         let mut dec = enc.as_decoder();
         let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
-        assert_eq!(id, TransportParameterId::VersionInformation);
+        assert_eq!(id, VersionInformation);
         assert_eq!(decoded, vn);
     }
 
@@ -1207,7 +1170,7 @@ mod tests {
         let mut current = TransportParameters::default();
         qdebug!("Current = {:?}", current);
         current.set(
-            TransportParameterId::VersionInformation,
+            VersionInformation,
             TransportParameter::Versions {
                 current: Version::Version1.wire_version(),
                 other: vec![0x1a2a_3a4a],
@@ -1222,7 +1185,7 @@ mod tests {
 
         // If the version matches, it's OK to use 0-RTT.
         remembered.set(
-            TransportParameterId::VersionInformation,
+            VersionInformation,
             TransportParameter::Versions {
                 current: Version::Version1.wire_version(),
                 other: vec![0x5a6a_7a8a, 0x9aaa_baca],
@@ -1233,7 +1196,7 @@ mod tests {
 
         // An apparent "upgrade" is still cause to reject 0-RTT.
         remembered.set(
-            TransportParameterId::VersionInformation,
+            VersionInformation,
             TransportParameter::Versions {
                 current: Version::Version1.wire_version() + 1,
                 other: vec![],

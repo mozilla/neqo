@@ -16,7 +16,7 @@ use super::{
 };
 use crate::{
     packet::PACKET_BIT_LONG,
-    tparams::{TransportParameter, TransportParameterId},
+    tparams::{TransportParameter, TransportParameterId::*},
     ConnectionParameters, Error, Version, MIN_INITIAL_PACKET_SIZE,
 };
 
@@ -240,7 +240,7 @@ fn compatible_upgrade_large_initial() {
     let mut client = new_client(params.clone());
     client
         .set_local_tparam(
-            TransportParameterId::TestTransportParameter,
+            TestTransportParameter,
             TransportParameter::Bytes(vec![0; 2048]),
         )
         .unwrap();
@@ -368,7 +368,7 @@ fn invalid_current_version_client() {
     assert_ne!(OTHER_VERSION, client.version());
     client
         .set_local_tparam(
-            TransportParameterId::VersionInformation,
+            VersionInformation,
             TransportParameter::Versions {
                 current: OTHER_VERSION.wire_version(),
                 other: Version::all()
@@ -404,7 +404,7 @@ fn invalid_current_version_server() {
     assert!(!Version::default().is_compatible(OTHER_VERSION));
     server
         .set_local_tparam(
-            TransportParameterId::VersionInformation,
+            VersionInformation,
             TransportParameter::Versions {
                 current: OTHER_VERSION.wire_version(),
                 other: vec![OTHER_VERSION.wire_version()],
@@ -430,7 +430,7 @@ fn no_compatible_version() {
     assert_ne!(OTHER_VERSION, client.version());
     client
         .set_local_tparam(
-            TransportParameterId::VersionInformation,
+            VersionInformation,
             TransportParameter::Versions {
                 current: Version::default().wire_version(),
                 other: vec![OTHER_VERSION.wire_version()],

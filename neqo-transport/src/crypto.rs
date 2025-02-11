@@ -825,7 +825,7 @@ pub struct CryptoStates {
 
 impl CryptoStates {
     fn initials_is_empty(&self) -> bool {
-        self.initials.iter().all(|(_, v)| v.is_none())
+        self.initials.values().flatten().count() == 0
     }
 
     /// Select a `CryptoDxState` and `CryptoSpace` for the given `PacketNumberSpace`.

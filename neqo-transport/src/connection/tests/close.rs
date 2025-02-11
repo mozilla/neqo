@@ -13,7 +13,7 @@ use super::{
     connect, connect_force_idle, default_client, default_server, send_something,
 };
 use crate::{
-    tparams::{TransportParameter, TransportParameterId},
+    tparams::{TransportParameter, TransportParameterId::StatelessResetToken},
     AppError, CloseReason, Error, ERROR_APPLICATION_CLOSE,
 };
 
@@ -213,10 +213,7 @@ fn stateless_reset_client() {
     let mut client = default_client();
     let mut server = default_server();
     server
-        .set_local_tparam(
-            TransportParameterId::StatelessResetToken,
-            TransportParameter::Bytes(vec![77; 16]),
-        )
+        .set_local_tparam(StatelessResetToken, TransportParameter::Bytes(vec![77; 16]))
         .unwrap();
     connect_force_idle(&mut client, &mut server);
 

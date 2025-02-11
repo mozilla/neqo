@@ -13,7 +13,14 @@ use crate::{
     rtt::GRANULARITY,
     stream_id::StreamType,
     tparams::{
-        PreferredAddress, TransportParameter, TransportParameterId, TransportParametersHandler,
+        PreferredAddress, TransportParameter,
+        TransportParameterId::{
+            self, ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit, InitialMaxData,
+            InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni,
+            InitialMaxStreamsBidi, InitialMaxStreamsUni, MaxAckDelay, MaxDatagramFrameSize,
+            MinAckDelay,
+        },
+        TransportParametersHandler,
     },
     tracking::DEFAULT_ACK_DELAY,
     version::{Version, VersionConfig},
@@ -410,47 +417,36 @@ impl ConnectionParameters {
         let mut tps = TransportParametersHandler::new(role, self.versions.clone());
         // default parameters
         tps.local.set_integer(
-            TransportParameterId::ActiveConnectionIdLimit,
+            ActiveConnectionIdLimit,
             u64::try_from(LOCAL_ACTIVE_CID_LIMIT)?,
         );
         if self.disable_migration {
-            tps.local.set_empty(TransportParameterId::DisableMigration);
+            tps.local.set_empty(DisableMigration);
         }
         if self.grease {
-            tps.local.set_empty(TransportParameterId::GreaseQuicBit);
+            tps.local.set_empty(GreaseQuicBit);
         }
-        tps.local.set_integer(
-            TransportParameterId::MaxAckDelay,
-            u64::try_from(DEFAULT_ACK_DELAY.as_millis())?,
-        );
-        tps.local.set_integer(
-            TransportParameterId::MinAckDelay,
-            u64::try_from(GRANULARITY.as_micros())?,
-        );
+        tps.local
+            .set_integer(MaxAckDelay, u64::try_from(DEFAULT_ACK_DELAY.as_millis())?);
+        tps.local
+            .set_integer(MinAckDelay, u64::try_from(GRANULARITY.as_micros())?);
 
         // set configurable parameters
-        tps.local
-            .set_integer(TransportParameterId::InitialMaxData, self.max_data);
+        tps.local.set_integer(InitialMaxData, self.max_data);
         tps.local.set_integer(
-            TransportParameterId::InitialMaxStreamDataBidiLocal,
+            InitialMaxStreamDataBidiLocal,
             self.max_stream_data_bidi_local,
         );
         tps.local.set_integer(
-            TransportParameterId::InitialMaxStreamDataBidiRemote,
+            InitialMaxStreamDataBidiRemote,
             self.max_stream_data_bidi_remote,
         );
-        tps.local.set_integer(
-            TransportParameterId::InitialMaxStreamDataUni,
-            self.max_stream_data_uni,
-        );
-        tps.local.set_integer(
-            TransportParameterId::InitialMaxStreamsBidi,
-            self.max_streams_bidi,
-        );
-        tps.local.set_integer(
-            TransportParameterId::InitialMaxStreamsUni,
-            self.max_streams_uni,
-        );
+        tps.local
+            .set_integer(InitialMaxStreamDataUni, self.max_stream_data_uni);
+        tps.local
+            .set_integer(InitialMaxStreamsBidi, self.max_streams_bidi);
+        tps.local
+            .set_integer(InitialMaxStreamsUni, self.max_streams_uni);
         tps.local.set_integer(
             TransportParameterId::IdleTimeout,
             u64::try_from(self.idle_timeout.as_millis()).unwrap_or(0),
@@ -469,10 +465,8 @@ impl ConnectionParameters {
                 );
             }
         }
-        tps.local.set_integer(
-            TransportParameterId::MaxDatagramFrameSize,
-            self.datagram_size,
-        );
+        tps.local
+            .set_integer(MaxDatagramFrameSize, self.datagram_size);
         Ok(tps)
     }
 }

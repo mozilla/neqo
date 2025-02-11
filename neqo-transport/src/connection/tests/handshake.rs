@@ -35,7 +35,7 @@ use crate::{
     events::ConnectionEvent,
     server::ValidateAddress,
     stats::FrameStats,
-    tparams::{TransportParameter, TransportParameterId},
+    tparams::{TransportParameter, TransportParameterId::*},
     tracking::DEFAULT_ACK_DELAY,
     CloseReason, ConnectionParameters, Error, Pmtud, StreamType, Version,
 };
@@ -841,7 +841,7 @@ fn anti_amplification() {
     // the handshake within the amplification limit.
     let very_big = TransportParameter::Bytes(vec![0; Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) * 3]);
     server
-        .set_local_tparam(TransportParameterId::TestTransportParameter, very_big)
+        .set_local_tparam(TestTransportParameter, very_big)
         .unwrap();
 
     let c_init = client.process_output(now).dgram();
@@ -1091,10 +1091,7 @@ fn bad_min_ack_delay() {
     let mut server = default_server();
     let max_ad = u64::try_from(DEFAULT_ACK_DELAY.as_micros()).unwrap();
     server
-        .set_local_tparam(
-            TransportParameterId::MinAckDelay,
-            TransportParameter::Integer(max_ad + 1),
-        )
+        .set_local_tparam(MinAckDelay, TransportParameter::Integer(max_ad + 1))
         .unwrap();
     let mut client = default_client();
 
@@ -1376,7 +1373,7 @@ fn grease_quic_bit_transport_parameter() {
             .remote
             .as_ref()
             .unwrap()
-            .get_empty(TransportParameterId::GreaseQuicBit)
+            .get_empty(GreaseQuicBit)
     }
 
     for client_grease in [true, false] {
