@@ -20,11 +20,11 @@ use std::{
 use enum_map::enum_map;
 use enum_map::EnumMap;
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
+pub use neqo_crypto::Epoch;
 use neqo_crypto::{
-    hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Epoch, Error as CryptoError, HandshakeState,
+    hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState,
     PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker,
     TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE,
-    TLS_EPOCH_APPLICATION_DATA, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL, TLS_EPOCH_ZERO_RTT,
     TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519,
     TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
 };
@@ -192,15 +192,9 @@ impl Crypto {
     ) -> Res<&HandshakeState> {
         let input = data.map(|d| {
             qtrace!("Handshake record received {d:0x?} ");
-            let epoch = match space {
-                PacketNumberSpace::Initial => TLS_EPOCH_INITIAL,
-                PacketNumberSpace::Handshake => TLS_EPOCH_HANDSHAKE,
-                // Our epoch progresses forward, but the TLS epoch is fixed to 3.
-                PacketNumberSpace::ApplicationData => TLS_EPOCH_APPLICATION_DATA,
-            };
             Record {
                 ct: TLS_CT_HANDSHAKE,
-                epoch,
+                epoch: space.into(),
                 data: d.to_vec(),
             }
         });
@@ -233,11 +227,11 @@ impl Crypto {
         let (dir, secret) = match role {
             Role::Client => (
                 CryptoDxDirection::Write,
-                self.tls.write_secret(TLS_EPOCH_ZERO_RTT),
+                self.tls.write_secret(Epoch::ZeroRtt),
             ),
             Role::Server => (
                 CryptoDxDirection::Read,
-                self.tls.read_secret(TLS_EPOCH_ZERO_RTT),
+                self.tls.read_secret(Epoch::ZeroRtt),
             ),
         };
         let secret = secret.ok_or(Error::InternalError)?;
@@ -267,13 +261,13 @@ impl Crypto {
 
     fn install_handshake_keys(&mut self) -> Res<bool> {
         qtrace!("[{self}] Attempt to install handshake keys");
-        let Some(write_secret) = self.tls.write_secret(TLS_EPOCH_HANDSHAKE) else {
+        let Some(write_secret) = self.tls.write_secret(Epoch::Handshake) else {
             // No keys is fine.
             return Ok(false);
         };
         let read_secret = self
             .tls
-            .read_secret(TLS_EPOCH_HANDSHAKE)
+            .read_secret(Epoch::Handshake)
             .ok_or(Error::InternalError)?;
         let cipher = match self.tls.info() {
             None => self.tls.preinfo()?.cipher_suite(),
@@ -288,7 +282,7 @@ impl Crypto {
 
     fn maybe_install_application_write_key(&mut self, version: Version) -> Res<()> {
         qtrace!("[{self}] Attempt to install application write key");
-        if let Some(secret) = self.tls.write_secret(TLS_EPOCH_APPLICATION_DATA) {
+        if let Some(secret) = self.tls.write_secret(Epoch::ApplicationData) {
             self.states.set_application_write_key(version, &secret)?;
             qdebug!("[{self}] Application write key installed");
         }
@@ -302,7 +296,7 @@ impl Crypto {
         debug_assert!(self.states.app_write.is_some());
         let read_secret = self
             .tls
-            .read_secret(TLS_EPOCH_APPLICATION_DATA)
+            .read_secret(Epoch::ApplicationData)
             .ok_or(Error::InternalError)?;
         self.states
             .set_application_read_key(version, &read_secret, expire_0rtt)?;
@@ -317,8 +311,7 @@ impl Crypto {
                 return Err(Error::ProtocolViolation);
             }
             qtrace!("[{self}] Adding CRYPTO data {r:?}");
-            self.streams
-                .send(PacketNumberSpace::from(r.epoch), &r.data)?;
+            self.streams.send(r.epoch.into(), &r.data)?;
         }
         Ok(())
     }
@@ -451,7 +444,7 @@ impl CryptoDxState {
         secret: &SymKey,
         cipher: Cipher,
     ) -> Res<Self> {
-        qdebug!("Making {direction:?} {epoch} CryptoDxState, v={version:?} cipher={cipher}",);
+        qdebug!("Making {direction:?} {epoch:?} CryptoDxState, v={version:?} cipher={cipher}",);
         let hplabel = String::from(version.label_prefix()) + "hp";
         Ok(Self {
             version,
@@ -484,7 +477,7 @@ impl CryptoDxState {
 
         let secret = hkdf::expand_label(TLS_VERSION_1_3, cipher, &initial_secret, &[], label)?;
 
-        Self::new(version, direction, TLS_EPOCH_INITIAL, &secret, cipher)
+        Self::new(version, direction, Epoch::Initial, &secret, cipher)
     }
 
     /// Determine the confidentiality and integrity limits for the cipher.
@@ -613,13 +606,13 @@ impl CryptoDxState {
         // Only initiate a key update if we have processed exactly one packet
         // and we are in an epoch greater than 3.
         self.used_pn.start + 1 == self.used_pn.end
-            && self.epoch > usize::from(TLS_EPOCH_APPLICATION_DATA)
+            && self.epoch > usize::from(Epoch::ApplicationData)
     }
 
     #[must_use]
     pub fn can_update(&self, largest_acknowledged: Option<PacketNumber>) -> bool {
         largest_acknowledged.map_or_else(
-            || self.epoch == usize::from(TLS_EPOCH_APPLICATION_DATA),
+            || self.epoch == usize::from(Epoch::ApplicationData),
             |la| self.used_pn.contains(&la),
         )
     }
@@ -767,7 +760,7 @@ impl CryptoDxAppData {
         cipher: Cipher,
     ) -> Res<Self> {
         Ok(Self {
-            dx: CryptoDxState::new(version, dir, TLS_EPOCH_APPLICATION_DATA, secret, cipher)?,
+            dx: CryptoDxState::new(version, dir, Epoch::ApplicationData, secret, cipher)?,
             cipher,
             next_secret: Self::update_secret(cipher, secret)?,
         })
@@ -794,14 +787,6 @@ impl CryptoDxAppData {
     pub const fn epoch(&self) -> usize {
         self.dx.epoch
     }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum CryptoSpace {
-    Initial,
-    ZeroRtt,
-    Handshake,
-    ApplicationData,
 }
 
 /// All of the keying material needed for a connection.
@@ -835,19 +820,19 @@ impl CryptoStates {
         &mut self,
         version: Version,
         space: PacketNumberSpace,
-    ) -> Option<(CryptoSpace, &mut CryptoDxState)> {
+    ) -> Option<(Epoch, &mut CryptoDxState)> {
         match space {
             PacketNumberSpace::Initial => self
-                .tx_mut(version, CryptoSpace::Initial)
-                .map(|dx| (CryptoSpace::Initial, dx)),
+                .tx_mut(version, Epoch::Initial)
+                .map(|dx| (Epoch::Initial, dx)),
             PacketNumberSpace::Handshake => self
-                .tx_mut(version, CryptoSpace::Handshake)
-                .map(|dx| (CryptoSpace::Handshake, dx)),
+                .tx_mut(version, Epoch::Handshake)
+                .map(|dx| (Epoch::Handshake, dx)),
             PacketNumberSpace::ApplicationData => {
                 if let Some(app) = self.app_write.as_mut() {
-                    Some((CryptoSpace::ApplicationData, &mut app.dx))
+                    Some((Epoch::ApplicationData, &mut app.dx))
                 } else {
-                    self.zero_rtt.as_mut().map(|dx| (CryptoSpace::ZeroRtt, dx))
+                    self.zero_rtt.as_mut().map(|dx| (Epoch::ZeroRtt, dx))
                 }
             }
         }
@@ -856,30 +841,30 @@ impl CryptoStates {
     pub fn tx_mut<'a>(
         &'a mut self,
         version: Version,
-        cspace: CryptoSpace,
+        epoch: Epoch,
     ) -> Option<&'a mut CryptoDxState> {
         let tx = |k: Option<&'a mut CryptoState>| k.map(|dx| &mut dx.tx);
-        match cspace {
-            CryptoSpace::Initial => tx(self.initials[version].as_mut()),
-            CryptoSpace::ZeroRtt => self
+        match epoch {
+            Epoch::Initial => tx(self.initials[version].as_mut()),
+            Epoch::ZeroRtt => self
                 .zero_rtt
                 .as_mut()
                 .filter(|z| z.direction == CryptoDxDirection::Write),
-            CryptoSpace::Handshake => tx(self.handshake.as_mut()),
-            CryptoSpace::ApplicationData => self.app_write.as_mut().map(|app| &mut app.dx),
+            Epoch::Handshake => tx(self.handshake.as_mut()),
+            Epoch::ApplicationData => self.app_write.as_mut().map(|app| &mut app.dx),
         }
     }
 
-    pub fn tx<'a>(&'a self, version: Version, cspace: CryptoSpace) -> Option<&'a CryptoDxState> {
+    pub fn tx<'a>(&'a self, version: Version, epoch: Epoch) -> Option<&'a CryptoDxState> {
         let tx = |k: Option<&'a CryptoState>| k.map(|dx| &dx.tx);
-        match cspace {
-            CryptoSpace::Initial => tx(self.initials[version].as_ref()),
-            CryptoSpace::ZeroRtt => self
+        match epoch {
+            Epoch::Initial => tx(self.initials[version].as_ref()),
+            Epoch::ZeroRtt => self
                 .zero_rtt
                 .as_ref()
                 .filter(|z| z.direction == CryptoDxDirection::Write),
-            CryptoSpace::Handshake => tx(self.handshake.as_ref()),
-            CryptoSpace::ApplicationData => self.app_write.as_ref().map(|app| &app.dx),
+            Epoch::Handshake => tx(self.handshake.as_ref()),
+            Epoch::ApplicationData => self.app_write.as_ref().map(|app| &app.dx),
         }
     }
 
@@ -887,44 +872,44 @@ impl CryptoStates {
         &self,
         version: Version,
         space: PacketNumberSpace,
-    ) -> Option<(CryptoSpace, &CryptoDxState)> {
+    ) -> Option<(Epoch, &CryptoDxState)> {
         match space {
             PacketNumberSpace::Initial => self
-                .tx(version, CryptoSpace::Initial)
-                .map(|dx| (CryptoSpace::Initial, dx)),
+                .tx(version, Epoch::Initial)
+                .map(|dx| (Epoch::Initial, dx)),
             PacketNumberSpace::Handshake => self
-                .tx(version, CryptoSpace::Handshake)
-                .map(|dx| (CryptoSpace::Handshake, dx)),
+                .tx(version, Epoch::Handshake)
+                .map(|dx| (Epoch::Handshake, dx)),
             PacketNumberSpace::ApplicationData => self.app_write.as_ref().map_or_else(
-                || self.zero_rtt.as_ref().map(|dx| (CryptoSpace::ZeroRtt, dx)),
-                |app| Some((CryptoSpace::ApplicationData, &app.dx)),
+                || self.zero_rtt.as_ref().map(|dx| (Epoch::ZeroRtt, dx)),
+                |app| Some((Epoch::ApplicationData, &app.dx)),
             ),
         }
     }
 
-    pub fn rx_hp(&mut self, version: Version, cspace: CryptoSpace) -> Option<&mut CryptoDxState> {
-        if cspace == CryptoSpace::ApplicationData {
+    pub fn rx_hp(&mut self, version: Version, epoch: Epoch) -> Option<&mut CryptoDxState> {
+        if epoch == Epoch::ApplicationData {
             self.app_read.as_mut().map(|ar| &mut ar.dx)
         } else {
-            self.rx(version, cspace, false)
+            self.rx(version, epoch, false)
         }
     }
 
     pub fn rx<'a>(
         &'a mut self,
         version: Version,
-        cspace: CryptoSpace,
+        epoch: Epoch,
         key_phase: bool,
     ) -> Option<&'a mut CryptoDxState> {
         let rx = |x: Option<&'a mut CryptoState>| x.map(|dx| &mut dx.rx);
-        match cspace {
-            CryptoSpace::Initial => rx(self.initials[version].as_mut()),
-            CryptoSpace::ZeroRtt => self
+        match epoch {
+            Epoch::Initial => rx(self.initials[version].as_mut()),
+            Epoch::ZeroRtt => self
                 .zero_rtt
                 .as_mut()
                 .filter(|z| z.direction == CryptoDxDirection::Read),
-            CryptoSpace::Handshake => rx(self.handshake.as_mut()),
-            CryptoSpace::ApplicationData => {
+            Epoch::Handshake => rx(self.handshake.as_mut()),
+            Epoch::ApplicationData => {
                 let f = |a: Option<&'a mut CryptoDxAppData>| {
                     a.filter(|ar| ar.dx.key_phase() == key_phase)
                 };
@@ -944,11 +929,11 @@ impl CryptoStates {
     /// is possible to attribute 0-RTT packets to an existing connection if there
     /// is a multi-packet Initial, that is an unusual circumstance, so we
     /// don't do caching for that in those places that call this function.
-    pub fn rx_pending(&self, space: CryptoSpace) -> bool {
+    pub fn rx_pending(&self, space: Epoch) -> bool {
         match space {
-            CryptoSpace::Initial | CryptoSpace::ZeroRtt => false,
-            CryptoSpace::Handshake => self.handshake.is_none() && !self.initials_is_empty(),
-            CryptoSpace::ApplicationData => self.app_read.is_none(),
+            Epoch::Initial | Epoch::ZeroRtt => false,
+            Epoch::Handshake => self.handshake.is_none() && !self.initials_is_empty(),
+            Epoch::ApplicationData => self.app_read.is_none(),
         }
     }
 
@@ -1029,7 +1014,7 @@ impl CryptoStates {
         self.zero_rtt = Some(CryptoDxState::new(
             version,
             dir,
-            TLS_EPOCH_ZERO_RTT,
+            Epoch::ZeroRtt,
             secret,
             cipher,
         )?);
@@ -1070,14 +1055,14 @@ impl CryptoStates {
             tx: CryptoDxState::new(
                 version,
                 CryptoDxDirection::Write,
-                TLS_EPOCH_HANDSHAKE,
+                Epoch::Handshake,
                 write_secret,
                 cipher,
             )?,
             rx: CryptoDxState::new(
                 version,
                 CryptoDxDirection::Read,
-                TLS_EPOCH_HANDSHAKE,
+                Epoch::Handshake,
                 read_secret,
                 cipher,
             )?,

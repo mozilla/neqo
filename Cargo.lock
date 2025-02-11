@@ -853,6 +853,7 @@ name = "neqo-crypto"
 version = "0.12.2"
 dependencies = [
  "bindgen",
+ "enum-map",
  "log",
  "mozbuild",
  "neqo-common",
