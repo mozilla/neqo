@@ -8,14 +8,14 @@
 
 use enum_map::Enum;
 
-use crate::ssl;
+use crate::{ssl, Error};
 
 // Ideally all of these would be enums, but size matters and we need to allow
 // for values outside of those that are defined here.
 
 pub type Alert = u8;
 
-#[derive(Default, Debug, Enum)]
+#[derive(Default, Debug, Enum, Clone, Copy, PartialEq, Eq)]
 pub enum Epoch {
     // TLS doesn't really have an "initial" concept that maps to QUIC so directly,
     // but this should be clear enough.
@@ -28,7 +28,7 @@ pub enum Epoch {
 }
 
 impl TryFrom<u16> for Epoch {
-    type Error = ();
+    type Error = Error;
 
     fn try_from(value: u16) -> Result<Self, Self::Error> {
         match value {
@@ -36,7 +36,7 @@ impl TryFrom<u16> for Epoch {
             1 => Ok(Self::ZeroRtt),
             2 => Ok(Self::Handshake),
             3 => Ok(Self::ApplicationData),
-            _ => Err(()),
+            _ => Err(Error::InvalidEpoch),
         }
     }
 }
