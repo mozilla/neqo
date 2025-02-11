@@ -125,7 +125,7 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         if: ${{ matrix.type == 'debug' && matrix.rust-toolchain == 'nightly' }}
 
-      - uses: codecov/test-results-action@4e79e65778be1cecd5df25e14af1eafb6df80ea9 # v1.0.2
+      - uses: codecov/test-results-action@44ecb3a270cd942bdf0fa8f2ce14cb32493e810a # v1.0.3
         if: ${{ always() }}
         with:
           files: target/nextest/ci/junit.xml
@@ -152,5 +152,5 @@ jobs:
 
   bench:
     needs: [check]
-    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' }}
     uses: ./.github/workflows/bench.yml
