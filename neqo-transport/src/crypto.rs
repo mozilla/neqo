@@ -189,15 +189,9 @@ impl Crypto {
     ) -> Res<&HandshakeState> {
         let input = data.map(|d| {
             qtrace!("Handshake record received {d:0x?} ");
-            let epoch = match space {
-                PacketNumberSpace::Initial => Epoch::Initial,
-                PacketNumberSpace::Handshake => Epoch::Handshake,
-                // Our epoch progresses forward, but the TLS epoch is fixed to 3.
-                PacketNumberSpace::ApplicationData => Epoch::ApplicationData,
-            };
             Record {
                 ct: TLS_CT_HANDSHAKE,
-                epoch,
+                epoch: space.into(),
                 data: d.to_vec(),
             }
         });
@@ -314,8 +308,7 @@ impl Crypto {
                 return Err(Error::ProtocolViolation);
             }
             qtrace!("[{self}] Adding CRYPTO data {r:?}");
-            self.streams
-                .send(PacketNumberSpace::from(r.epoch), &r.data)?;
+            self.streams.send(r.epoch.into(), &r.data)?;
         }
         Ok(())
     }

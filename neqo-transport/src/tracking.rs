@@ -33,9 +33,8 @@ pub enum PacketNumberSpace {
     ApplicationData,
 }
 
-#[allow(clippy::use_self)] // https://github.com/rust-lang/rust-clippy/issues/3410
 impl PacketNumberSpace {
-    pub fn iter() -> impl Iterator<Item = &'static PacketNumberSpace> {
+    pub fn iter() -> impl Iterator<Item = &'static Self> {
         const SPACES: &[PacketNumberSpace] = &[
             PacketNumberSpace::Initial,
             PacketNumberSpace::Handshake,
@@ -51,6 +50,16 @@ impl From<Epoch> for PacketNumberSpace {
             Epoch::Initial => Self::Initial,
             Epoch::Handshake => Self::Handshake,
             Epoch::ApplicationData | Epoch::ZeroRtt => Self::ApplicationData,
+        }
+    }
+}
+
+impl From<PacketNumberSpace> for Epoch {
+    fn from(val: PacketNumberSpace) -> Self {
+        match val {
+            PacketNumberSpace::Initial => Self::Initial,
+            PacketNumberSpace::Handshake => Self::Handshake,
+            PacketNumberSpace::ApplicationData => Self::ApplicationData,
         }
     }
 }
