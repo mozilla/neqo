@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(dead_code)]
-
 use enum_map::Enum;
 
 use crate::{ssl, Error};
@@ -15,7 +13,7 @@ use crate::{ssl, Error};
 
 pub type Alert = u8;
 
-#[derive(Default, Debug, Enum, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Enum, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Epoch {
     // TLS doesn't really have an "initial" concept that maps to QUIC so directly,
     // but this should be clear enough.
@@ -74,6 +72,7 @@ remap_enum! {
     }
 }
 
+#[allow(dead_code)]
 mod ciphers {
     include!(concat!(env!("OUT_DIR"), "/nss_ciphers.rs"));
 }

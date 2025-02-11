@@ -37,7 +37,7 @@ use crate::{
         ConnectionId, ConnectionIdEntry, ConnectionIdGenerator, ConnectionIdManager,
         ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
     },
-    crypto::{Crypto, CryptoDxState, CryptoSpace},
+    crypto::{Crypto, CryptoDxState, Epoch},
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{
@@ -1292,7 +1292,7 @@ impl Connection {
     #[allow(clippy::needless_pass_by_value)] // To consume an owned datagram below.
     fn save_datagram(
         &mut self,
-        cspace: CryptoSpace,
+        cspace: Epoch,
         d: Datagram<impl AsRef<[u8]>>,
         remaining: usize,
         now: Instant,
@@ -1673,7 +1673,7 @@ impl Connection {
                             // This was a valid-appearing Initial packet: maybe probe with
                             // a Handshake packet to keep the handshake moving.
                             self.received_untracked |=
-                                self.role == Role::Client && cspace == CryptoSpace::Initial;
+                                self.role == Role::Client && cspace == Epoch::Initial;
                         }
                         _ => (),
                     }
@@ -2060,7 +2060,7 @@ impl Connection {
 
     fn build_packet_header(
         path: &Path,
-        cspace: CryptoSpace,
+        cspace: Epoch,
         encoder: Encoder,
         tx: &CryptoDxState,
         address_validation: &AddressValidationInfo,
@@ -2876,7 +2876,7 @@ impl Connection {
                     // server can rely on implicit acknowledgment.
                     self.discard_keys(PacketNumberSpace::Initial, now);
                 }
-                self.saved_datagrams.make_available(CryptoSpace::Handshake);
+                self.saved_datagrams.make_available(Epoch::Handshake);
             }
         }
 
@@ -3245,8 +3245,7 @@ impl Connection {
         self.process_tps(now)?;
         self.set_state(State::Connected, now);
         self.create_resumption_token(now);
-        self.saved_datagrams
-            .make_available(CryptoSpace::ApplicationData);
+        self.saved_datagrams.make_available(Epoch::ApplicationData);
         self.stats.borrow_mut().resumed = self
             .crypto
             .tls

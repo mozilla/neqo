@@ -17,8 +17,9 @@ use std::{
 };
 
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
+pub use neqo_crypto::Epoch;
 use neqo_crypto::{
-    hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Epoch, Error as CryptoError, HandshakeState,
+    hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState,
     PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker,
     TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE,
     TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519,
@@ -792,14 +793,6 @@ impl CryptoDxAppData {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum CryptoSpace {
-    Initial,
-    ZeroRtt,
-    Handshake,
-    ApplicationData,
-}
-
 /// All of the keying material needed for a connection.
 ///
 /// Note that the methods on this struct take a version but those are only ever
@@ -827,19 +820,19 @@ impl CryptoStates {
         &mut self,
         version: Version,
         space: PacketNumberSpace,
-    ) -> Option<(CryptoSpace, &mut CryptoDxState)> {
+    ) -> Option<(Epoch, &mut CryptoDxState)> {
         match space {
             PacketNumberSpace::Initial => self
-                .tx_mut(version, CryptoSpace::Initial)
-                .map(|dx| (CryptoSpace::Initial, dx)),
+                .tx_mut(version, Epoch::Initial)
+                .map(|dx| (Epoch::Initial, dx)),
             PacketNumberSpace::Handshake => self
-                .tx_mut(version, CryptoSpace::Handshake)
-                .map(|dx| (CryptoSpace::Handshake, dx)),
+                .tx_mut(version, Epoch::Handshake)
+                .map(|dx| (Epoch::Handshake, dx)),
             PacketNumberSpace::ApplicationData => {
                 if let Some(app) = self.app_write.as_mut() {
-                    Some((CryptoSpace::ApplicationData, &mut app.dx))
+                    Some((Epoch::ApplicationData, &mut app.dx))
                 } else {
-                    self.zero_rtt.as_mut().map(|dx| (CryptoSpace::ZeroRtt, dx))
+                    self.zero_rtt.as_mut().map(|dx| (Epoch::ZeroRtt, dx))
                 }
             }
         }
@@ -848,30 +841,30 @@ impl CryptoStates {
     pub fn tx_mut<'a>(
         &'a mut self,
         version: Version,
-        cspace: CryptoSpace,
+        cspace: Epoch,
     ) -> Option<&'a mut CryptoDxState> {
         let tx = |k: Option<&'a mut CryptoState>| k.map(|dx| &mut dx.tx);
         match cspace {
-            CryptoSpace::Initial => tx(self.initials.get_mut(&version)),
-            CryptoSpace::ZeroRtt => self
+            Epoch::Initial => tx(self.initials.get_mut(&version)),
+            Epoch::ZeroRtt => self
                 .zero_rtt
                 .as_mut()
                 .filter(|z| z.direction == CryptoDxDirection::Write),
-            CryptoSpace::Handshake => tx(self.handshake.as_mut()),
-            CryptoSpace::ApplicationData => self.app_write.as_mut().map(|app| &mut app.dx),
+            Epoch::Handshake => tx(self.handshake.as_mut()),
+            Epoch::ApplicationData => self.app_write.as_mut().map(|app| &mut app.dx),
         }
     }
 
-    pub fn tx<'a>(&'a self, version: Version, cspace: CryptoSpace) -> Option<&'a CryptoDxState> {
+    pub fn tx<'a>(&'a self, version: Version, cspace: Epoch) -> Option<&'a CryptoDxState> {
         let tx = |k: Option<&'a CryptoState>| k.map(|dx| &dx.tx);
         match cspace {
-            CryptoSpace::Initial => tx(self.initials.get(&version)),
-            CryptoSpace::ZeroRtt => self
+            Epoch::Initial => tx(self.initials.get(&version)),
+            Epoch::ZeroRtt => self
                 .zero_rtt
                 .as_ref()
                 .filter(|z| z.direction == CryptoDxDirection::Write),
-            CryptoSpace::Handshake => tx(self.handshake.as_ref()),
-            CryptoSpace::ApplicationData => self.app_write.as_ref().map(|app| &app.dx),
+            Epoch::Handshake => tx(self.handshake.as_ref()),
+            Epoch::ApplicationData => self.app_write.as_ref().map(|app| &app.dx),
         }
     }
 
@@ -879,23 +872,23 @@ impl CryptoStates {
         &self,
         version: Version,
         space: PacketNumberSpace,
-    ) -> Option<(CryptoSpace, &CryptoDxState)> {
+    ) -> Option<(Epoch, &CryptoDxState)> {
         match space {
             PacketNumberSpace::Initial => self
-                .tx(version, CryptoSpace::Initial)
-                .map(|dx| (CryptoSpace::Initial, dx)),
+                .tx(version, Epoch::Initial)
+                .map(|dx| (Epoch::Initial, dx)),
             PacketNumberSpace::Handshake => self
-                .tx(version, CryptoSpace::Handshake)
-                .map(|dx| (CryptoSpace::Handshake, dx)),
+                .tx(version, Epoch::Handshake)
+                .map(|dx| (Epoch::Handshake, dx)),
             PacketNumberSpace::ApplicationData => self.app_write.as_ref().map_or_else(
-                || self.zero_rtt.as_ref().map(|dx| (CryptoSpace::ZeroRtt, dx)),
-                |app| Some((CryptoSpace::ApplicationData, &app.dx)),
+                || self.zero_rtt.as_ref().map(|dx| (Epoch::ZeroRtt, dx)),
+                |app| Some((Epoch::ApplicationData, &app.dx)),
             ),
         }
     }
 
-    pub fn rx_hp(&mut self, version: Version, cspace: CryptoSpace) -> Option<&mut CryptoDxState> {
-        if cspace == CryptoSpace::ApplicationData {
+    pub fn rx_hp(&mut self, version: Version, cspace: Epoch) -> Option<&mut CryptoDxState> {
+        if cspace == Epoch::ApplicationData {
             self.app_read.as_mut().map(|ar| &mut ar.dx)
         } else {
             self.rx(version, cspace, false)
@@ -905,18 +898,18 @@ impl CryptoStates {
     pub fn rx<'a>(
         &'a mut self,
         version: Version,
-        cspace: CryptoSpace,
+        cspace: Epoch,
         key_phase: bool,
     ) -> Option<&'a mut CryptoDxState> {
         let rx = |x: Option<&'a mut CryptoState>| x.map(|dx| &mut dx.rx);
         match cspace {
-            CryptoSpace::Initial => rx(self.initials.get_mut(&version)),
-            CryptoSpace::ZeroRtt => self
+            Epoch::Initial => rx(self.initials.get_mut(&version)),
+            Epoch::ZeroRtt => self
                 .zero_rtt
                 .as_mut()
                 .filter(|z| z.direction == CryptoDxDirection::Read),
-            CryptoSpace::Handshake => rx(self.handshake.as_mut()),
-            CryptoSpace::ApplicationData => {
+            Epoch::Handshake => rx(self.handshake.as_mut()),
+            Epoch::ApplicationData => {
                 let f = |a: Option<&'a mut CryptoDxAppData>| {
                     a.filter(|ar| ar.dx.key_phase() == key_phase)
                 };
@@ -936,11 +929,11 @@ impl CryptoStates {
     /// is possible to attribute 0-RTT packets to an existing connection if there
     /// is a multi-packet Initial, that is an unusual circumstance, so we
     /// don't do caching for that in those places that call this function.
-    pub fn rx_pending(&self, space: CryptoSpace) -> bool {
+    pub fn rx_pending(&self, space: Epoch) -> bool {
         match space {
-            CryptoSpace::Initial | CryptoSpace::ZeroRtt => false,
-            CryptoSpace::Handshake => self.handshake.is_none() && !self.initials.is_empty(),
-            CryptoSpace::ApplicationData => self.app_read.is_none(),
+            Epoch::Initial | Epoch::ZeroRtt => false,
+            Epoch::Handshake => self.handshake.is_none() && !self.initials.is_empty(),
+            Epoch::ApplicationData => self.app_read.is_none(),
         }
     }
 

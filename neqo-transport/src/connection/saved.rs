@@ -8,7 +8,7 @@ use std::{mem, time::Instant};
 
 use neqo_common::{qdebug, qinfo, Datagram};
 
-use crate::crypto::CryptoSpace;
+use crate::crypto::Epoch;
 
 /// The number of datagrams that are saved during the handshake when
 /// keys to decrypt them are not yet available.
@@ -25,19 +25,19 @@ pub struct SavedDatagram {
 pub struct SavedDatagrams {
     handshake: Vec<SavedDatagram>,
     application_data: Vec<SavedDatagram>,
-    available: Option<CryptoSpace>,
+    available: Option<Epoch>,
 }
 
 impl SavedDatagrams {
-    fn store(&mut self, cspace: CryptoSpace) -> &mut Vec<SavedDatagram> {
+    fn store(&mut self, cspace: Epoch) -> &mut Vec<SavedDatagram> {
         match cspace {
-            CryptoSpace::Handshake => &mut self.handshake,
-            CryptoSpace::ApplicationData => &mut self.application_data,
+            Epoch::Handshake => &mut self.handshake,
+            Epoch::ApplicationData => &mut self.application_data,
             _ => panic!("unexpected space"),
         }
     }
 
-    pub fn save(&mut self, cspace: CryptoSpace, d: Datagram, t: Instant) {
+    pub fn save(&mut self, cspace: Epoch, d: Datagram, t: Instant) {
         let store = self.store(cspace);
 
         if store.len() < MAX_SAVED_DATAGRAMS {
@@ -48,15 +48,15 @@ impl SavedDatagrams {
         }
     }
 
-    pub fn make_available(&mut self, cspace: CryptoSpace) {
-        debug_assert_ne!(cspace, CryptoSpace::ZeroRtt);
-        debug_assert_ne!(cspace, CryptoSpace::Initial);
+    pub fn make_available(&mut self, cspace: Epoch) {
+        debug_assert_ne!(cspace, Epoch::ZeroRtt);
+        debug_assert_ne!(cspace, Epoch::Initial);
         if !self.store(cspace).is_empty() {
             self.available = Some(cspace);
         }
     }
 
-    pub const fn available(&self) -> Option<CryptoSpace> {
+    pub const fn available(&self) -> Option<Epoch> {
         self.available
     }
 

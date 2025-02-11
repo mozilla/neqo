@@ -19,7 +19,7 @@ use neqo_crypto::random;
 
 use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
-    crypto::{CryptoDxState, CryptoSpace, CryptoStates},
+    crypto::{CryptoDxState, CryptoStates, Epoch},
     frame::FRAME_TYPE_PADDING,
     recovery::SendProfile,
     version::{Version, WireVersion},
@@ -89,7 +89,7 @@ impl PacketType {
 }
 
 #[allow(clippy::fallible_impl_from)]
-impl From<PacketType> for CryptoSpace {
+impl From<PacketType> for Epoch {
     fn from(v: PacketType) -> Self {
         match v {
             PacketType::Initial => Self::Initial,
@@ -101,13 +101,13 @@ impl From<PacketType> for CryptoSpace {
     }
 }
 
-impl From<CryptoSpace> for PacketType {
-    fn from(cs: CryptoSpace) -> Self {
+impl From<Epoch> for PacketType {
+    fn from(cs: Epoch) -> Self {
         match cs {
-            CryptoSpace::Initial => Self::Initial,
-            CryptoSpace::ZeroRtt => Self::ZeroRtt,
-            CryptoSpace::Handshake => Self::Handshake,
-            CryptoSpace::ApplicationData => Self::Short,
+            Epoch::Initial => Self::Initial,
+            Epoch::ZeroRtt => Self::ZeroRtt,
+            Epoch::Handshake => Self::Handshake,
+            Epoch::ApplicationData => Self::Short,
         }
     }
 }
@@ -864,7 +864,7 @@ impl<'a> PublicPacket<'a> {
         crypto: &mut CryptoStates,
         release_at: Instant,
     ) -> Res<DecryptedPacket> {
-        let cspace: CryptoSpace = self.packet_type.into();
+        let cspace: Epoch = self.packet_type.into();
         // When we don't have a version, the crypto code doesn't need a version
         // for lookup, so use the default, but fix it up if decryption succeeds.
         let version = self.version().unwrap_or_default();
