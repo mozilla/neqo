@@ -40,10 +40,7 @@ use crate::{
     crypto::{Crypto, CryptoDxState, CryptoSpace},
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
-    frame::{
-        CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
-        FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
-    },
+    frame::{CloseError, Frame, FrameType},
     packet::{self, DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket},
     path::{Path, PathRef, Paths},
     qlog,
@@ -950,7 +947,7 @@ impl Connection {
     /// For use with `process_input()`. Errors there can be ignored, but this
     /// needs to ensure that the state is updated.
     fn absorb_error<T>(&mut self, now: Instant, res: Res<T>) -> Option<T> {
-        self.capture_error(None, now, 0, res).ok()
+        self.capture_error(None, now, FrameType::Padding, res).ok()
     }
 
     fn process_timer(&mut self, now: Instant) {
@@ -1572,7 +1569,7 @@ impl Connection {
         );
         path.borrow_mut().add_received(d.len());
         let res = self.input_path(&path, d, received);
-        _ = self.capture_error(Some(path), now, 0, res);
+        _ = self.capture_error(Some(path), now, FrameType::Padding, res);
     }
 
     #[allow(clippy::too_many_lines)] // Will be addressed as part of https://github.com/mozilla/neqo/pull/2396
@@ -2032,7 +2029,7 @@ impl Connection {
                 || Ok(SendOption::default()),
                 |path| {
                     let res = self.output_path(&path, now, None);
-                    self.capture_error(Some(path), now, 0, res)
+                    self.capture_error(Some(path), now, FrameType::Padding, res)
                 },
             ),
             State::Closing { .. } | State::Draining { .. } | State::Closed(_) => {
@@ -2050,7 +2047,7 @@ impl Connection {
                         } else {
                             self.output_path(&path, now, Some(&details))
                         };
-                        self.capture_error(Some(path), now, 0, res)
+                        self.capture_error(Some(path), now, FrameType::Padding, res)
                     },
                 )
             }
@@ -2241,7 +2238,7 @@ impl Connection {
         if probe {
             // Nothing ack-eliciting and we need to probe; send PING.
             debug_assert_ne!(builder.remaining(), 0);
-            builder.encode_varint(crate::frame::FRAME_TYPE_PING);
+            builder.encode_varint(FrameType::Ping);
             let stats = &mut self.stats.borrow_mut().frame_tx;
             stats.ping += 1;
         }
@@ -2608,7 +2605,8 @@ impl Connection {
         let error = CloseReason::Application(app_error);
         let timeout = self.get_closing_period_time(now);
         if let Some(path) = self.paths.primary() {
-            self.state_signaling.close(path, error.clone(), 0, msg);
+            self.state_signaling
+                .close(path, error.clone(), FrameType::Padding, msg);
             self.set_state(State::Closing { error, timeout }, now);
         } else {
             self.set_state(State::Closed(error), now);
@@ -3029,12 +3027,12 @@ impl Connection {
                     // NO_ERROR in this case.
                     (
                         Error::PeerApplicationError(error_code.code()),
-                        FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
+                        FrameType::ConnectionCloseApplication,
                     )
                 } else {
                     (
                         Error::PeerError(error_code.code()),
-                        FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
+                        FrameType::ConnectionCloseTransport,
                     )
                 };
                 let error = CloseReason::Transport(detail);

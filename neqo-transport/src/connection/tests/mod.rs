@@ -24,7 +24,7 @@ use crate::{
     cc::CWND_INITIAL_PKTS,
     cid::ConnectionIdRef,
     events::ConnectionEvent,
-    frame::FRAME_TYPE_PING,
+    frame::FrameType,
     packet::PacketBuilder,
     pmtud::Pmtud,
     recovery::ACK_ONLY_SIZE_LIMIT,
@@ -182,7 +182,7 @@ struct PingWriter {}
 
 impl test_internal::FrameWriter for PingWriter {
     fn write_frames(&mut self, builder: &mut PacketBuilder) {
-        builder.encode_varint(FRAME_TYPE_PING);
+        builder.encode_varint(FrameType::Ping);
     }
 }
 

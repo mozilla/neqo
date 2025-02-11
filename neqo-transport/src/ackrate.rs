@@ -11,7 +11,7 @@ use std::{cmp::max, time::Duration};
 use neqo_common::qtrace;
 
 use crate::{
-    connection::params::ACK_RATIO_SCALE, frame::FRAME_TYPE_ACK_FREQUENCY, packet::PacketBuilder,
+    connection::params::ACK_RATIO_SCALE, frame::FrameType, packet::PacketBuilder,
     recovery::RecoveryToken, stats::FrameStats,
 };
 
@@ -43,7 +43,7 @@ impl AckRate {
 
     pub fn write_frame(&self, builder: &mut PacketBuilder, seqno: u64) -> bool {
         builder.write_varint_frame(&[
-            FRAME_TYPE_ACK_FREQUENCY,
+            FrameType::AckFrequency.into(),
             seqno,
             u64::try_from(self.packets + 1).expect("usize fits in u64"),
             u64::try_from(self.delay.as_micros()).unwrap_or(u64::MAX),

@@ -23,7 +23,7 @@ use super::{
 };
 use crate::{
     addr_valid::{AddressValidation, ValidateAddress},
-    frame::FRAME_TYPE_PADDING,
+    frame::FrameType,
     rtt::INITIAL_RTT,
     ConnectionParameters, Error, State, Version, MIN_INITIAL_PACKET_SIZE,
 };
@@ -129,7 +129,7 @@ fn ticket_rtt(rtt: Duration) -> Duration {
     dec.skip_vvec(); // Skip over the payload.
 
     // Replace the ACK frame with PADDING.
-    plaintext[..ACK_FRAME_1.len()].fill(FRAME_TYPE_PADDING.try_into().unwrap());
+    plaintext[..ACK_FRAME_1.len()].fill(FrameType::Padding.into());
 
     // And rebuild a packet.
     let mut packet = header.clone();

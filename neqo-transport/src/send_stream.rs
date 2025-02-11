@@ -26,7 +26,7 @@ use smallvec::SmallVec;
 use crate::{
     events::ConnectionEvents,
     fc::SenderFlowControl,
-    frame::{Frame, FRAME_TYPE_RESET_STREAM},
+    frame::{Frame, FrameType},
     packet::PacketBuilder,
     recovery::{RecoveryToken, StreamRecoveryToken},
     stats::FrameStats,
@@ -1059,7 +1059,7 @@ impl SendStream {
                 return false;
             }
             if builder.write_varint_frame(&[
-                FRAME_TYPE_RESET_STREAM,
+                FrameType::ResetStream.into(),
                 self.stream_id.as_u64(),
                 err,
                 final_size,

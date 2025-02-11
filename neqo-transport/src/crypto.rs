@@ -28,6 +28,7 @@ use neqo_crypto::{
 
 use crate::{
     cid::ConnectionIdRef,
+    frame::FrameType,
     packet::{PacketBuilder, PacketNumber},
     recovery::RecoveryToken,
     recv_stream::RxStreamOrderer,
@@ -1515,7 +1516,7 @@ impl CryptoStreams {
                 Encoder::varint_len(u64::try_from(length).expect("usize fits in u64")) - 1;
             let length = min(data.len(), builder.remaining() - header_len);
 
-            builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
+            builder.encode_varint(FrameType::Crypto);
             builder.encode_varint(offset);
             builder.encode_vvec(&data[..length]);
             Some((offset, length))
