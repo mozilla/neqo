@@ -97,14 +97,16 @@ impl RecordList {
         len: c_uint,
         arg: *mut c_void,
     ) -> ssl::SECStatus {
-        let Some(records) = arg.cast::<Self>().as_mut() else {
+        let Ok(epoch) = Epoch::try_from(epoch) else {
             return ssl::SECFailure;
         };
-
-        let slice = null_safe_slice(data, len);
         let Ok(ct) = ContentType::try_from(ct) else {
             return ssl::SECFailure;
         };
+        let Some(records) = arg.cast::<Self>().as_mut() else {
+            return ssl::SECFailure;
+        };
+        let slice = null_safe_slice(data, len);
         records.append(epoch, ct, slice);
         ssl::SECSuccess
     }

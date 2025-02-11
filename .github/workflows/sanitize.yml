@@ -24,6 +24,7 @@ defaults:
 
 jobs:
   sanitize:
+    if: github.actor != 'dependabot[bot]'
     strategy:
       fail-fast: false
       matrix:

@@ -16,7 +16,7 @@ use std::{
     cell::RefCell,
     ops::{Deref, DerefMut},
     os::raw::c_uint,
-    ptr::null_mut,
+    ptr::{self, null_mut},
     slice::Iter as SliceIter,
 };
 
@@ -225,6 +225,14 @@ impl std::fmt::Debug for SymKey {
             write!(f, "SymKey {}", hex_with_len(b))
         } else {
             write!(f, "Opaque SymKey")
+        }
+    }
+}
+
+impl Default for SymKey {
+    fn default() -> Self {
+        Self {
+            ptr: ptr::null_mut(),
         }
     }
 }
