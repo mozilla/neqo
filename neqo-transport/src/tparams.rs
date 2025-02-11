@@ -27,7 +27,7 @@ use crate::{
     Error, Res,
 };
 
-#[allow(clippy::enum_clike_unportable_variant)]
+#[repr(u64)]
 #[derive(Debug, Clone, Enum, PartialEq, Eq)]
 pub enum TransportParameterId {
     OriginalDestinationConnectionId = 0x00,
