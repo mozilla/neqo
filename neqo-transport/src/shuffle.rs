@@ -48,6 +48,9 @@ pub fn find_sni(buf: &[u8]) -> Option<Range<usize>> {
         if ext_type == 0 {
             // SNI!
             let sni_len: u16 = dec.decode_uint()?;
+            if sni_len < 3 {
+                return None;
+            }
             skip(&mut dec, 3)?; // Skip name_type and host_name length
             let start = dec.offset();
             let end = start + usize::from(sni_len) - 3;

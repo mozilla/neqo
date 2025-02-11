@@ -1575,7 +1575,7 @@ impl CryptoStreams {
         let Some((offset, data)) = cs.tx.next_bytes() else {
             return;
         };
-        let written = if sni_slicing {
+        let written = if sni_slicing && offset == 0 {
             if let Some(sni) = find_sni(data) {
                 // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
                 let mid = sni.start + (sni.end - sni.start) / 2;
