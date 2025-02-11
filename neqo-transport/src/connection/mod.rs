@@ -37,7 +37,7 @@ use crate::{
         ConnectionId, ConnectionIdEntry, ConnectionIdGenerator, ConnectionIdManager,
         ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
     },
-    crypto::{Crypto, CryptoDxState, CryptoSpace},
+    crypto::{Crypto, CryptoDxState, Epoch},
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{
@@ -1277,9 +1277,9 @@ impl Connection {
 
     /// Process any saved datagrams that might be available for processing.
     fn process_saved(&mut self, now: Instant) {
-        while let Some(cspace) = self.saved_datagrams.available() {
-            qdebug!("[{self}] process saved for space {cspace:?}");
-            debug_assert!(self.crypto.states.rx_hp(self.version, cspace).is_some());
+        while let Some(epoch) = self.saved_datagrams.available() {
+            qdebug!("[{self}] process saved for epoch {epoch:?}");
+            debug_assert!(self.crypto.states.rx_hp(self.version, epoch).is_some());
             for saved in self.saved_datagrams.take_saved() {
                 qtrace!("[{self}] input saved @{:?}: {:?}", saved.t, saved.d);
                 self.input(saved.d, saved.t, now);
@@ -1292,7 +1292,7 @@ impl Connection {
     #[allow(clippy::needless_pass_by_value)] // To consume an owned datagram below.
     fn save_datagram(
         &mut self,
-        cspace: CryptoSpace,
+        epoch: Epoch,
         d: Datagram<impl AsRef<[u8]>>,
         remaining: usize,
         now: Instant,
@@ -1303,7 +1303,7 @@ impl Connection {
             d.tos(),
             d[d.len() - remaining..].to_vec(),
         );
-        self.saved_datagrams.save(cspace, d, now);
+        self.saved_datagrams.save(epoch, d, now);
         self.stats.borrow_mut().saved_datagrams += 1;
     }
 
@@ -1658,22 +1658,22 @@ impl Connection {
                 }
                 Err(e) => {
                     match e {
-                        Error::KeysPending(cspace) => {
+                        Error::KeysPending(epoch) => {
                             // This packet can't be decrypted because we don't have the keys yet.
                             // Don't check this packet for a stateless reset, just return.
                             let remaining = slc_len;
-                            self.save_datagram(cspace, d, remaining, now);
+                            self.save_datagram(epoch, d, remaining, now);
                             return Ok(());
                         }
                         Error::KeysExhausted => {
                             // Exhausting read keys is fatal.
                             return Err(e);
                         }
-                        Error::KeysDiscarded(cspace) => {
+                        Error::KeysDiscarded(epoch) => {
                             // This was a valid-appearing Initial packet: maybe probe with
                             // a Handshake packet to keep the handshake moving.
                             self.received_untracked |=
-                                self.role == Role::Client && cspace == CryptoSpace::Initial;
+                                self.role == Role::Client && epoch == Epoch::Initial;
                         }
                         _ => (),
                     }
@@ -2060,14 +2060,14 @@ impl Connection {
 
     fn build_packet_header(
         path: &Path,
-        cspace: CryptoSpace,
+        epoch: Epoch,
         encoder: Encoder,
         tx: &CryptoDxState,
         address_validation: &AddressValidationInfo,
         version: Version,
         grease_quic_bit: bool,
     ) -> (PacketType, PacketBuilder) {
-        let pt = PacketType::from(cspace);
+        let pt = PacketType::from(epoch);
         let mut builder = if pt == PacketType::Short {
             qdebug!("Building Short dcid {:?}", path.remote_cid());
             PacketBuilder::short(encoder, tx.key_phase(), path.remote_cid())
@@ -2401,14 +2401,14 @@ impl Connection {
         let mut encoder = Encoder::with_capacity(profile.limit());
         for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
-            let Some((cspace, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
+            let Some((epoch, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
                 continue;
             };
 
             let header_start = encoder.len();
             let (pt, mut builder) = Self::build_packet_header(
                 &path.borrow(),
-                cspace,
+                epoch,
                 encoder,
                 tx,
                 &self.address_validation,
@@ -2473,7 +2473,7 @@ impl Connection {
             let tx = self
                 .crypto
                 .states
-                .tx_mut(self.version, cspace)
+                .tx_mut(self.version, epoch)
                 .ok_or(Error::InternalError)?;
             encoder = builder.build(tx)?;
             self.crypto.states.auto_update()?;
@@ -2876,7 +2876,7 @@ impl Connection {
                     // server can rely on implicit acknowledgment.
                     self.discard_keys(PacketNumberSpace::Initial, now);
                 }
-                self.saved_datagrams.make_available(CryptoSpace::Handshake);
+                self.saved_datagrams.make_available(Epoch::Handshake);
             }
         }
 
@@ -3245,8 +3245,7 @@ impl Connection {
         self.process_tps(now)?;
         self.set_state(State::Connected, now);
         self.create_resumption_token(now);
-        self.saved_datagrams
-            .make_available(CryptoSpace::ApplicationData);
+        self.saved_datagrams.make_available(Epoch::ApplicationData);
         self.stats.borrow_mut().resumed = self
             .crypto
             .tls
@@ -3518,7 +3517,7 @@ impl Connection {
             return Err(Error::NotAvailable);
         }
         let version = self.version();
-        let Some((cspace, tx)) = self
+        let Some((epoch, tx)) = self
             .crypto
             .states
             .select_tx(self.version, PacketNumberSpace::ApplicationData)
@@ -3531,7 +3530,7 @@ impl Connection {
 
         let (_, mut builder) = Self::build_packet_header(
             &path.borrow(),
-            cspace,
+            epoch,
             encoder,
             tx,
             &self.address_validation,

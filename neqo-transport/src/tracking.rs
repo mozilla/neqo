@@ -15,7 +15,7 @@ use std::{
 
 use enum_map::{enum_map, Enum, EnumMap};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
-use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
+use neqo_crypto::Epoch;
 
 use crate::{
     ecn,
@@ -33,9 +33,8 @@ pub enum PacketNumberSpace {
     ApplicationData,
 }
 
-#[allow(clippy::use_self)] // https://github.com/rust-lang/rust-clippy/issues/3410
 impl PacketNumberSpace {
-    pub fn iter() -> impl Iterator<Item = &'static PacketNumberSpace> {
+    pub fn iter() -> impl Iterator<Item = &'static Self> {
         const SPACES: &[PacketNumberSpace] = &[
             PacketNumberSpace::Initial,
             PacketNumberSpace::Handshake,
@@ -48,9 +47,19 @@ impl PacketNumberSpace {
 impl From<Epoch> for PacketNumberSpace {
     fn from(epoch: Epoch) -> Self {
         match epoch {
-            TLS_EPOCH_INITIAL => Self::Initial,
-            TLS_EPOCH_HANDSHAKE => Self::Handshake,
-            _ => Self::ApplicationData,
+            Epoch::Initial => Self::Initial,
+            Epoch::Handshake => Self::Handshake,
+            Epoch::ApplicationData | Epoch::ZeroRtt => Self::ApplicationData,
+        }
+    }
+}
+
+impl From<PacketNumberSpace> for Epoch {
+    fn from(val: PacketNumberSpace) -> Self {
+        match val {
+            PacketNumberSpace::Initial => Self::Initial,
+            PacketNumberSpace::Handshake => Self::Handshake,
+            PacketNumberSpace::ApplicationData => Self::ApplicationData,
         }
     }
 }
