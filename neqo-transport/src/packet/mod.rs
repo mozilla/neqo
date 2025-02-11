@@ -864,20 +864,20 @@ impl<'a> PublicPacket<'a> {
         crypto: &mut CryptoStates,
         release_at: Instant,
     ) -> Res<DecryptedPacket> {
-        let cspace: Epoch = self.packet_type.into();
+        let epoch: Epoch = self.packet_type.into();
         // When we don't have a version, the crypto code doesn't need a version
         // for lookup, so use the default, but fix it up if decryption succeeds.
         let version = self.version().unwrap_or_default();
         // This has to work in two stages because we need to remove header protection
         // before picking the keys to use.
-        if let Some(rx) = crypto.rx_hp(version, cspace) {
+        if let Some(rx) = crypto.rx_hp(version, epoch) {
             // Note that this will dump early, which creates a side-channel.
             // This is OK in this case because we the only reason this can
             // fail is if the cryptographic module is bad or the packet is
             // too small (which is public information).
             let (key_phase, pn, header) = self.decrypt_header(rx)?;
             qtrace!("[{rx}] decoded header: {header:?}");
-            let Some(rx) = crypto.rx(version, cspace, key_phase) else {
+            let Some(rx) = crypto.rx(version, epoch, key_phase) else {
                 return Err(Error::DecryptError);
             };
             let version = rx.version(); // Version fixup; see above.
@@ -894,11 +894,11 @@ impl<'a> PublicPacket<'a> {
                 pn,
                 data: d,
             })
-        } else if crypto.rx_pending(cspace) {
-            Err(Error::KeysPending(cspace))
+        } else if crypto.rx_pending(epoch) {
+            Err(Error::KeysPending(epoch))
         } else {
-            qtrace!("keys for {cspace:?} already discarded");
-            Err(Error::KeysDiscarded(cspace))
+            qtrace!("keys for {epoch:?} already discarded");
+            Err(Error::KeysDiscarded(epoch))
         }
     }
 

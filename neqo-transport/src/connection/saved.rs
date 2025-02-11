@@ -29,16 +29,16 @@ pub struct SavedDatagrams {
 }
 
 impl SavedDatagrams {
-    fn store(&mut self, cspace: Epoch) -> &mut Vec<SavedDatagram> {
-        match cspace {
+    fn store(&mut self, epoch: Epoch) -> &mut Vec<SavedDatagram> {
+        match epoch {
             Epoch::Handshake => &mut self.handshake,
             Epoch::ApplicationData => &mut self.application_data,
             _ => panic!("unexpected space"),
         }
     }
 
-    pub fn save(&mut self, cspace: Epoch, d: Datagram, t: Instant) {
-        let store = self.store(cspace);
+    pub fn save(&mut self, epoch: Epoch, d: Datagram, t: Instant) {
+        let store = self.store(epoch);
 
         if store.len() < MAX_SAVED_DATAGRAMS {
             qdebug!("saving datagram of {} bytes", d.len());
@@ -48,11 +48,11 @@ impl SavedDatagrams {
         }
     }
 
-    pub fn make_available(&mut self, cspace: Epoch) {
-        debug_assert_ne!(cspace, Epoch::ZeroRtt);
-        debug_assert_ne!(cspace, Epoch::Initial);
-        if !self.store(cspace).is_empty() {
-            self.available = Some(cspace);
+    pub fn make_available(&mut self, epoch: Epoch) {
+        debug_assert_ne!(epoch, Epoch::ZeroRtt);
+        debug_assert_ne!(epoch, Epoch::Initial);
+        if !self.store(epoch).is_empty() {
+            self.available = Some(epoch);
         }
     }
 
@@ -63,6 +63,6 @@ impl SavedDatagrams {
     pub fn take_saved(&mut self) -> Vec<SavedDatagram> {
         self.available
             .take()
-            .map_or_else(Vec::new, |cspace| mem::take(self.store(cspace)))
+            .map_or_else(Vec::new, |epoch| mem::take(self.store(epoch)))
     }
 }

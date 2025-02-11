@@ -841,10 +841,10 @@ impl CryptoStates {
     pub fn tx_mut<'a>(
         &'a mut self,
         version: Version,
-        cspace: Epoch,
+        epoch: Epoch,
     ) -> Option<&'a mut CryptoDxState> {
         let tx = |k: Option<&'a mut CryptoState>| k.map(|dx| &mut dx.tx);
-        match cspace {
+        match epoch {
             Epoch::Initial => tx(self.initials.get_mut(&version)),
             Epoch::ZeroRtt => self
                 .zero_rtt
@@ -855,9 +855,9 @@ impl CryptoStates {
         }
     }
 
-    pub fn tx<'a>(&'a self, version: Version, cspace: Epoch) -> Option<&'a CryptoDxState> {
+    pub fn tx<'a>(&'a self, version: Version, epoch: Epoch) -> Option<&'a CryptoDxState> {
         let tx = |k: Option<&'a CryptoState>| k.map(|dx| &dx.tx);
-        match cspace {
+        match epoch {
             Epoch::Initial => tx(self.initials.get(&version)),
             Epoch::ZeroRtt => self
                 .zero_rtt
@@ -887,22 +887,22 @@ impl CryptoStates {
         }
     }
 
-    pub fn rx_hp(&mut self, version: Version, cspace: Epoch) -> Option<&mut CryptoDxState> {
-        if cspace == Epoch::ApplicationData {
+    pub fn rx_hp(&mut self, version: Version, epoch: Epoch) -> Option<&mut CryptoDxState> {
+        if epoch == Epoch::ApplicationData {
             self.app_read.as_mut().map(|ar| &mut ar.dx)
         } else {
-            self.rx(version, cspace, false)
+            self.rx(version, epoch, false)
         }
     }
 
     pub fn rx<'a>(
         &'a mut self,
         version: Version,
-        cspace: Epoch,
+        epoch: Epoch,
         key_phase: bool,
     ) -> Option<&'a mut CryptoDxState> {
         let rx = |x: Option<&'a mut CryptoState>| x.map(|dx| &mut dx.rx);
-        match cspace {
+        match epoch {
             Epoch::Initial => rx(self.initials.get_mut(&version)),
             Epoch::ZeroRtt => self
                 .zero_rtt
