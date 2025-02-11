@@ -6,8 +6,9 @@
 
 #![allow(clippy::unwrap_used)] // Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed.
 
-use std::{os::raw::c_void, pin::Pin};
+use std::{mem, os::raw::c_void, pin::Pin};
 
+use enum_map::EnumMap;
 use neqo_common::qdebug;
 
 use crate::{
@@ -43,24 +44,21 @@ impl From<SSLSecretDirection::Type> for SecretDirection {
 
 #[derive(Debug, Default)]
 pub struct DirectionalSecrets {
-    // We only need to maintain 3 secrets for the epochs used during the handshake.
-    secrets: [Option<SymKey>; 3],
+    secrets: EnumMap<Epoch, SymKey>,
 }
 
 impl DirectionalSecrets {
     fn put(&mut self, epoch: Epoch, key: SymKey) {
-        assert!(epoch > 0);
-        let i = (epoch - 1) as usize;
-        assert!(i < self.secrets.len());
-        // assert!(self.secrets[i].is_none());
-        self.secrets[i] = Some(key);
+        debug_assert!(epoch != Epoch::Initial);
+        self.secrets[epoch] = key;
     }
 
     pub fn take(&mut self, epoch: Epoch) -> Option<SymKey> {
-        assert!(epoch > 0);
-        let i = (epoch - 1) as usize;
-        assert!(i < self.secrets.len());
-        self.secrets[i].take()
+        if self.secrets[epoch].is_null() {
+            None
+        } else {
+            Some(mem::take(&mut self.secrets[epoch]))
+        }
     }
 }
 
@@ -78,7 +76,15 @@ impl Secrets {
         secret: *mut PK11SymKey,
         arg: *mut c_void,
     ) {
-        let secrets = arg.cast::<Self>().as_mut().unwrap();
+        let Ok(epoch) = Epoch::try_from(epoch) else {
+            debug_assert!(false, "Invalid epoch");
+            // Don't touch secrets.
+            return;
+        };
+        let Some(secrets) = arg.cast::<Self>().as_mut() else {
+            debug_assert!(false, "No secrets");
+            return;
+        };
         secrets.put_raw(epoch, dir, secret);
     }
 

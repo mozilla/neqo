@@ -118,12 +118,12 @@ pub enum Error {
     InvalidResumptionToken,
     InvalidRetry,
     InvalidStreamId,
-    KeysDiscarded(crypto::CryptoSpace),
+    KeysDiscarded(crypto::Epoch),
     /// Packet protection keys are exhausted.
     /// Also used when too many key updates have happened.
     KeysExhausted,
     /// Packet protection keys aren't available yet for the identified space.
-    KeysPending(crypto::CryptoSpace),
+    KeysPending(crypto::Epoch),
     /// An attempt to update keys can be blocked if
     /// a packet sent with the current keys hasn't been acknowledged.
     KeyUpdateBlocked,
