@@ -125,6 +125,19 @@ mod tests {
     }
 
     #[test]
+    fn find_sni_invalid_sni_length() {
+        // ClientHello with an SNI extension with an invalid length
+        let mut buf = Vec::from(BUF_WITH_SNI);
+        let len = buf.len();
+
+        assert!(buf[len - 23] == 0x00 && buf[len - 22] == 0x0c); // Check Server Name List length
+                                                                 // Set Server Name List length to 0
+        buf[len - 23] = 0x00;
+        buf[len - 22] = 0x00;
+        assert!(super::find_sni(&buf).is_none());
+    }
+
+    #[test]
     fn find_sni_no_ci() {
         // Not a ClientHello (msg_type != 1)
         let buf = [0; 1];
