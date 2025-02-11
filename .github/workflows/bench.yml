@@ -3,8 +3,8 @@ on:
   workflow_call:
   workflow_dispatch:
   schedule:
-    # Run at 1 AM each day, so there is a `main`-branch baseline in the cache.
-    - cron: '0 1 * * *'
+    # Run at minute 0 past every 8th hour, so there is a `main`-branch baseline in the cache.
+    - cron: '0 */8 * * *'
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
@@ -245,38 +245,41 @@ jobs:
                     perf $PERF_OPT -o "$FILENAME.client.perf" $CMD > /dev/null 2>&1
                   kill $PID
 
+                  grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
+                    sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n' >> steps.md
+
                   # Figure out if any performance difference to `main` is statistically relevant, and indicate that.
                   BASELINE="hyperfine-main/$FILENAME.json"
-                  RESULT="hyperfine/$FILENAME.json"
-                  BASELINE_MEAN=$(jq -r '.results[0].mean' "$BASELINE")
-                  MEAN=$(jq -r '.results[0].mean' "$RESULT")
-                  # Even though we tell hyperfine to use milliseconds, it still outputs in seconds when dumping to JSON.
-                  DELTA=$(bc -l <<< "($MEAN - $BASELINE_MEAN) * 1000")
-                  PERCENT=$(bc -l <<< "($MEAN - $BASELINE_MEAN) / ($BASELINE_MEAN + $MEAN)/2 * 100")
+                  if [ -e "$BASELINE" ]; then
+                    RESULT="hyperfine/$FILENAME.json"
+                    BASELINE_MEAN=$(jq -r '.results[0].mean' "$BASELINE")
+                    MEAN=$(jq -r '.results[0].mean' "$RESULT")
+                    # Even though we tell hyperfine to use milliseconds, it still outputs in seconds when dumping to JSON.
+                    DELTA=$(bc -l <<< "($MEAN - $BASELINE_MEAN) * 1000")
+                    PERCENT=$(bc -l <<< "($MEAN - $BASELINE_MEAN) / ($BASELINE_MEAN + $MEAN)/2 * 100")
 
-                  # If a performance change is statistically significant, highlight it.
-                  jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
-                  jq -r '.results[0].times[]' "$RESULT" > result.txt
-                  if ! Rscript welch.R baseline.txt result.txt 2> /dev/null; then
-                    if (( $(bc -l <<< "$DELTA > 0") )); then
-                      echo "Performance has regressed: $BASELINE_MEAN -> $MEAN"
-                      SYMBOL=":broken_heart:"
-                      FORMAT='**'
+                    # If a performance change is statistically significant, highlight it.
+                    jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
+                    jq -r '.results[0].times[]' "$RESULT" > result.txt
+                    if ! Rscript welch.R baseline.txt result.txt 2> /dev/null; then
+                      if (( $(bc -l <<< "$DELTA > 0") )); then
+                        echo "Performance has regressed: $BASELINE_MEAN -> $MEAN"
+                        SYMBOL=":broken_heart:"
+                        FORMAT='**'
+                      else
+                        echo "Performance has improved: $BASELINE_MEAN -> $MEAN"
+                        SYMBOL=":green_heart:"
+                        FORMAT='**'
+                      fi
                     else
-                      echo "Performance has improved: $BASELINE_MEAN -> $MEAN"
-                      SYMBOL=":green_heart:"
-                      FORMAT='**'
+                      echo "No statistically significant change: $BASELINE_MEAN -> $MEAN"
                     fi
-                  else
-                    echo "No statistically significant change: $BASELINE_MEAN -> $MEAN"
-                  fi
-
-                  {
-                    grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
-                      sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n'
                     printf "| %s %s%.1f%s | %s%.1f%%%s |\n" \
-                      "$SYMBOL" "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT"
-                  } >> steps.md
+                      "$SYMBOL" "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT" >> steps.md
+                  else
+                    echo No cached baseline from main found.
+                    echo '| :question: | :question: |' >> steps.md
+                  fi
                 done
               done
             done
