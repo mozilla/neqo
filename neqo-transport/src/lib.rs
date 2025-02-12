@@ -107,7 +107,6 @@ pub enum Error {
     ConnectionIdLimitExceeded,
     ConnectionIdsExhausted,
     ConnectionState,
-    DecodingFrame,
     DecryptError,
     DisabledVersion,
     IdleTimeout,

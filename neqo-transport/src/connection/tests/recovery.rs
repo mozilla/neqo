@@ -22,7 +22,7 @@ use super::{
 };
 use crate::{
     connection::{test_internal::FrameWriter, tests::cwnd_min},
-    frame::FRAME_TYPE_ACK,
+    frame::FrameType,
     packet::PacketBuilder,
     recovery::{
         FAST_PTO_SCALE, MAX_OUTSTANDING_UNACK, MAX_PTO_PACKET_COUNT, MIN_OUTSTANDING_UNACK,
@@ -857,7 +857,7 @@ fn ack_for_unsent() {
 
     impl FrameWriter for AckforUnsentWriter {
         fn write_frames(&mut self, builder: &mut PacketBuilder) {
-            builder.encode_varint(FRAME_TYPE_ACK);
+            builder.encode_varint(FrameType::Ack);
             builder.encode_varint(666u16); // Largest ACKed
             builder.encode_varint(0u8); // ACK delay
             builder.encode_varint(0u8); // ACK block count

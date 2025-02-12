@@ -560,7 +560,7 @@ impl From<Frame<'_>> for QuicFrame {
             Frame::HandshakeDone => Self::HandshakeDone,
             Frame::AckFrequency { .. } => Self::Unknown {
                 frame_type_value: None,
-                raw_frame_type: frame.get_type(),
+                raw_frame_type: frame.get_type().into(),
                 raw: None,
             },
             Frame::Datagram { data, .. } => Self::Datagram {

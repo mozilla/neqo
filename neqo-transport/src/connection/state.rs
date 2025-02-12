@@ -14,14 +14,8 @@ use std::{
 use neqo_common::Encoder;
 
 use crate::{
-    frame::{
-        FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION, FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
-        FRAME_TYPE_HANDSHAKE_DONE,
-    },
-    packet::PacketBuilder,
-    path::PathRef,
-    recovery::RecoveryToken,
-    CloseReason, Error,
+    frame::FrameType, packet::PacketBuilder, path::PathRef, recovery::RecoveryToken, CloseReason,
+    Error,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -152,7 +146,7 @@ impl ClosingFrame {
             Some(Self {
                 path: Rc::clone(&self.path),
                 error: CloseReason::Transport(Error::ApplicationError),
-                frame_type: 0,
+                frame_type: FrameType::Padding,
                 reason_phrase: Vec::new(),
             })
         } else {
@@ -171,12 +165,12 @@ impl ClosingFrame {
         }
         match &self.error {
             CloseReason::Transport(e) => {
-                builder.encode_varint(FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT);
+                builder.encode_varint(FrameType::ConnectionCloseTransport);
                 builder.encode_varint(e.code());
                 builder.encode_varint(self.frame_type);
             }
             CloseReason::Application(code) => {
-                builder.encode_varint(FRAME_TYPE_CONNECTION_CLOSE_APPLICATION);
+                builder.encode_varint(FrameType::ConnectionCloseApplication);
                 builder.encode_varint(*code);
             }
         }
@@ -224,7 +218,7 @@ impl StateSignaling {
     pub fn write_done(&mut self, builder: &mut PacketBuilder) -> Option<RecoveryToken> {
         (matches!(self, Self::HandshakeDone) && builder.remaining() >= 1).then(|| {
             *self = Self::Idle;
-            builder.encode_varint(FRAME_TYPE_HANDSHAKE_DONE);
+            builder.encode_varint(FrameType::HandshakeDone);
             RecoveryToken::HandshakeDone
         })
     }
