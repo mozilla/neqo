@@ -132,8 +132,7 @@ mod tests {
 
         assert_eq!(&buf[len-23..len-22], &[0x00, 0x0c], "check SNI length");
                                                                  // Set Server Name List length to 0
-        buf[len - 23] = 0x00;
-        buf[len - 22] = 0x00;
+        buf[len - 22] = 0x02; // leave buf[len-23] unchanged at 0x00
         assert!(super::find_sni(&buf).is_none());
     }
 
