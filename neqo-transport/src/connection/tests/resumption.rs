@@ -129,7 +129,7 @@ fn ticket_rtt(rtt: Duration) -> Duration {
     dec.skip_vvec(); // Skip over the payload.
 
     // Replace the ACK frame with PADDING.
-    plaintext[..ACK_FRAME_1.len()].fill(u64::from(FrameType::Padding));
+    plaintext[..ACK_FRAME_1.len()].fill(u8::from(FrameType::Padding));
 
     // And rebuild a packet.
     let mut packet = header.clone();
