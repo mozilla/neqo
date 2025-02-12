@@ -655,7 +655,7 @@ impl<'a> Frame<'a> {
                 let retire_prior = dv(dec)?;
                 let connection_id = d(dec.decode_vec(1))?;
                 if connection_id.len() > MAX_CONNECTION_ID_LEN {
-                    return Err(Error::DecodingFrame);
+                    return Err(Error::FrameEncodingError);
                 }
                 let srt = d(dec.decode(16))?;
                 let stateless_reset_token = <&[_; 16]>::try_from(srt)?;
@@ -967,7 +967,7 @@ mod tests {
         enc.encode(&[0x11; 16][..]);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
-            Error::DecodingFrame
+            Error::FrameEncodingError
         );
     }
 
