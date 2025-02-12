@@ -31,8 +31,11 @@ use crate::{
     stats::FrameStats,
     stream_id::StreamId,
     streams::SendOrder,
-    tparams::{self, TransportParameters},
-    AppError, Error, IndexMap, Res,
+    tparams::{
+        TransportParameterId::{InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni},
+        TransportParameters,
+    },
+    AppError, Error, Res,
 };
 
 pub const SEND_BUFFER_SIZE: usize = 0x10_0000; // 1 MiB
@@ -1760,9 +1763,9 @@ impl SendStreams {
         for (id, ss) in &mut self.map {
             let limit = if id.is_bidi() {
                 assert!(!id.is_remote_initiated(Role::Client));
-                remote.get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
+                remote.get_integer(InitialMaxStreamDataBidiRemote)
             } else {
-                remote.get_integer(tparams::INITIAL_MAX_STREAM_DATA_UNI)
+                remote.get_integer(InitialMaxStreamDataUni)
             };
             ss.set_max_stream_data(limit);
         }
