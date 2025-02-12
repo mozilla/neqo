@@ -110,10 +110,8 @@ mod tests {
         // ClientHello without SNI extension
         let mut buf = Vec::from(&BUF_WITH_SNI[..BUF_WITH_SNI.len() - 39]);
         let len = buf.len();
-        assert!(buf[len - 2] == 0x01 && buf[len - 1] == 0xcb); // Check extensions length
-                                                               // Set extensions length to 0
-        buf[len - 2] = 0x00;
-        buf[len - 1] = 0x00;
+        assert_eq!(&buf[len - 2..len], &[0x01, 0xcb], "check extensions length");
+        buf[len - 2..len].copy_from_slice(&[0x00, 0x00]); // Set extensions length to 0
         assert!(super::find_sni(&buf).is_none());
     }
 
@@ -129,10 +127,8 @@ mod tests {
         // ClientHello with an SNI extension with an invalid length
         let mut buf = Vec::from(BUF_WITH_SNI);
         let len = buf.len();
-
-        assert_eq!(&buf[len-23..len-22], &[0x00, 0x0c], "check SNI length");
-                                                                 // Set Server Name List length to 0
-        buf[len - 22] = 0x02; // leave buf[len-23] unchanged at 0x00
+        assert_eq!(&buf[len - 23..len - 21], &[0x00, 0x0c], "check SNI length");
+        buf[len - 23..len - 21].copy_from_slice(&[0x00, 0x02]); // Set Server Name List length to 2
         assert!(super::find_sni(&buf).is_none());
     }
 
