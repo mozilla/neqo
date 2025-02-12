@@ -19,7 +19,7 @@ use neqo_crypto::Epoch;
 
 use crate::{
     ecn,
-    frame::{FRAME_TYPE_ACK, FRAME_TYPE_ACK_ECN},
+    frame::FrameType,
     packet::{PacketBuilder, PacketNumber, PacketType},
     recovery::RecoveryToken,
     stats::FrameStats,
@@ -521,9 +521,9 @@ impl RecvdPackets {
         }
 
         builder.encode_varint(if self.ecn_count.is_some() {
-            FRAME_TYPE_ACK_ECN
+            FrameType::AckEcn
         } else {
-            FRAME_TYPE_ACK
+            FrameType::Ack
         });
         let mut iter = ranges.iter();
         let Some(first) = iter.next() else { return };

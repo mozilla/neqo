@@ -20,7 +20,7 @@ use neqo_crypto::random;
 use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
     crypto::{CryptoDxState, CryptoStates, Epoch},
-    frame::FRAME_TYPE_PADDING,
+    frame::FrameType,
     recovery::SendProfile,
     version::{Version, WireVersion},
     Error, Pmtud, Res,
@@ -296,12 +296,7 @@ impl PacketBuilder {
     /// Cannot happen.
     pub fn pad(&mut self) -> bool {
         if self.padding && !self.is_long() {
-            self.encoder.pad_to(
-                self.limit,
-                FRAME_TYPE_PADDING
-                    .try_into()
-                    .expect("FRAME_TYPE_PADDING < 256"),
-            );
+            self.encoder.pad_to(self.limit, FrameType::Padding.into());
             true
         } else {
             false
