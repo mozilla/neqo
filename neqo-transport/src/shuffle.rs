@@ -47,7 +47,7 @@ pub fn find_sni(buf: &[u8]) -> Option<Range<usize>> {
         let ext_len: u16 = dec.decode_uint()?;
         if ext_type == 0 {
             // SNI!
-            let sni_len: u16 = dec.decode_uint()?;
+            let sni_len = dec.decode_uint::<u16>()?;
             if sni_len < 3 {
                 return None;
             }
