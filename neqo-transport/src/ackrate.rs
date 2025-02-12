@@ -43,7 +43,7 @@ impl AckRate {
 
     pub fn write_frame(&self, builder: &mut PacketBuilder, seqno: u64) -> bool {
         builder.write_varint_frame(&[
-            FrameType::AckFrequency.into(),
+            u64::from(FrameType::AckFrequency),
             seqno,
             u64::try_from(self.packets + 1).expect("usize fits in u64"),
             u64::try_from(self.delay.as_micros()).unwrap_or(u64::MAX),
