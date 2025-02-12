@@ -28,7 +28,7 @@ use crate::{
     connection::tests::{
         assert_path_challenge_min_len, connect, send_something_paced, send_with_extra,
     },
-    frame::FRAME_TYPE_NEW_CONNECTION_ID,
+    frame::FrameType,
     packet::PacketBuilder,
     path::MAX_PATH_PROBES,
     pmtud::Pmtud,
@@ -1049,7 +1049,7 @@ impl crate::connection::test_internal::FrameWriter for RetireAll {
         const SEQNO: u64 = 100;
         let cid = self.cid_gen.borrow_mut().generate_cid().unwrap();
         builder
-            .encode_varint(FRAME_TYPE_NEW_CONNECTION_ID)
+            .encode_varint(FrameType::NewConnectionId)
             .encode_varint(SEQNO)
             .encode_varint(SEQNO) // Retire Prior To
             .encode_vec(1, &cid)

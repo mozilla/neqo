@@ -22,7 +22,7 @@ use crate::{
     cc::CongestionControlAlgorithm,
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn,
-    frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
+    frame::FrameType,
     packet::PacketBuilder,
     pmtud::Pmtud,
     recovery::{RecoveryToken, SentPacket},
@@ -381,7 +381,7 @@ impl Paths {
                 self.to_retire.push(seqno);
                 break;
             }
-            builder.encode_varint(FRAME_TYPE_RETIRE_CONNECTION_ID);
+            builder.encode_varint(FrameType::RetireConnectionId);
             builder.encode_varint(seqno);
             tokens.push(RecoveryToken::RetireConnectionId(seqno));
             stats.retire_connection_id += 1;
@@ -768,7 +768,7 @@ impl Path {
         // Send PATH_RESPONSE.
         let resp_sent = if let Some(challenge) = self.challenge.take() {
             qtrace!("[{self}] Responding to path challenge {}", hex(challenge));
-            builder.encode_varint(FRAME_TYPE_PATH_RESPONSE);
+            builder.encode_varint(FrameType::PathResponse);
             builder.encode(&challenge[..]);
 
             // These frames are not retransmitted in the usual fashion.
@@ -786,7 +786,7 @@ impl Path {
         if let ProbeState::ProbeNeeded { probe_count } = self.state {
             qtrace!("[{self}] Initiating path challenge {probe_count}");
             let data = random::<8>();
-            builder.encode_varint(FRAME_TYPE_PATH_CHALLENGE);
+            builder.encode_varint(FrameType::PathChallenge);
             builder.encode(&data);
 
             // As above, no recovery token.

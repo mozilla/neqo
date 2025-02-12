@@ -23,7 +23,15 @@ use neqo_common::{qdebug, qerror, qtrace, Encoder, Role};
 use smallvec::SmallVec;
 
 use crate::{
-    events::ConnectionEvents, fc::SenderFlowControl, frame::{Frame, FRAME_TYPE_RESET_STREAM}, packet::PacketBuilder, recovery::{RecoveryToken, StreamRecoveryToken}, stats::FrameStats, stream_id::StreamId, streams::SendOrder, tparams::{
+    events::ConnectionEvents,
+    fc::SenderFlowControl,
+    frame::{Frame, FrameType},
+    packet::PacketBuilder,
+    recovery::{RecoveryToken, StreamRecoveryToken},
+    stats::FrameStats,
+    stream_id::StreamId,
+    streams::SendOrder,
+    tparams::{
         TransportParameterId::{InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni},
         TransportParameters,
     }, AppError, Error, IndexMap, Res
@@ -1052,7 +1060,7 @@ impl SendStream {
                 return false;
             }
             if builder.write_varint_frame(&[
-                FRAME_TYPE_RESET_STREAM,
+                FrameType::ResetStream.into(),
                 self.stream_id.as_u64(),
                 err,
                 final_size,

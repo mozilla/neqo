@@ -15,11 +15,7 @@ use std::{
 use neqo_common::{qtrace, Role};
 
 use crate::{
-    frame::{
-        FRAME_TYPE_DATA_BLOCKED, FRAME_TYPE_MAX_DATA, FRAME_TYPE_MAX_STREAMS_BIDI,
-        FRAME_TYPE_MAX_STREAMS_UNIDI, FRAME_TYPE_MAX_STREAM_DATA, FRAME_TYPE_STREAMS_BLOCKED_BIDI,
-        FRAME_TYPE_STREAMS_BLOCKED_UNIDI, FRAME_TYPE_STREAM_DATA_BLOCKED,
-    },
+    frame::FrameType,
     packet::PacketBuilder,
     recovery::{RecoveryToken, StreamRecoveryToken},
     stats::FrameStats,
@@ -132,7 +128,7 @@ impl SenderFlowControl<()> {
         stats: &mut FrameStats,
     ) {
         if let Some(limit) = self.blocked_needed() {
-            if builder.write_varint_frame(&[FRAME_TYPE_DATA_BLOCKED, limit]) {
+            if builder.write_varint_frame(&[FrameType::DataBlocked.into(), limit]) {
                 stats.data_blocked += 1;
                 tokens.push(RecoveryToken::Stream(StreamRecoveryToken::DataBlocked(
                     limit,
@@ -152,7 +148,7 @@ impl SenderFlowControl<StreamId> {
     ) {
         if let Some(limit) = self.blocked_needed() {
             if builder.write_varint_frame(&[
-                FRAME_TYPE_STREAM_DATA_BLOCKED,
+                FrameType::StreamDataBlocked.into(),
                 self.subject.as_u64(),
                 limit,
             ]) {
@@ -178,10 +174,10 @@ impl SenderFlowControl<StreamType> {
     ) {
         if let Some(limit) = self.blocked_needed() {
             let frame = match self.subject {
-                StreamType::BiDi => FRAME_TYPE_STREAMS_BLOCKED_BIDI,
-                StreamType::UniDi => FRAME_TYPE_STREAMS_BLOCKED_UNIDI,
+                StreamType::BiDi => FrameType::StreamsBlockedBiDi,
+                StreamType::UniDi => FrameType::StreamsBlockedUniDi,
             };
-            if builder.write_varint_frame(&[frame, limit]) {
+            if builder.write_varint_frame(&[frame.into(), limit]) {
                 stats.streams_blocked += 1;
                 tokens.push(RecoveryToken::Stream(StreamRecoveryToken::StreamsBlocked {
                     stream_type: self.subject,
@@ -300,7 +296,7 @@ impl ReceiverFlowControl<()> {
             return;
         }
         let max_allowed = self.next_limit();
-        if builder.write_varint_frame(&[FRAME_TYPE_MAX_DATA, max_allowed]) {
+        if builder.write_varint_frame(&[FrameType::MaxData.into(), max_allowed]) {
             stats.max_data += 1;
             tokens.push(RecoveryToken::Stream(StreamRecoveryToken::MaxData(
                 max_allowed,
@@ -349,7 +345,7 @@ impl ReceiverFlowControl<StreamId> {
         }
         let max_allowed = self.next_limit();
         if builder.write_varint_frame(&[
-            FRAME_TYPE_MAX_STREAM_DATA,
+            FrameType::MaxStreamData.into(),
             self.subject.as_u64(),
             max_allowed,
         ]) {
@@ -403,10 +399,10 @@ impl ReceiverFlowControl<StreamType> {
         }
         let max_streams = self.next_limit();
         let frame = match self.subject {
-            StreamType::BiDi => FRAME_TYPE_MAX_STREAMS_BIDI,
-            StreamType::UniDi => FRAME_TYPE_MAX_STREAMS_UNIDI,
+            StreamType::BiDi => FrameType::MaxStreamsBiDi,
+            StreamType::UniDi => FrameType::MaxStreamsUniDi,
         };
-        if builder.write_varint_frame(&[frame, max_streams]) {
+        if builder.write_varint_frame(&[frame.into(), max_streams]) {
             stats.max_streams += 1;
             tokens.push(RecoveryToken::Stream(StreamRecoveryToken::MaxStreams {
                 stream_type: self.subject,

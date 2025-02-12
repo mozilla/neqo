@@ -13,7 +13,7 @@ use std::{
 use neqo_common::{qdebug, qinfo};
 use static_assertions::const_assert;
 
-use crate::{frame::FRAME_TYPE_PING, packet::PacketBuilder, recovery::SentPacket, Stats};
+use crate::{frame::FrameType, packet::PacketBuilder, recovery::SentPacket, Stats};
 
 // Values <= 1500 based on: A. Custura, G. Fairhurst and I. Learmonth, "Exploring Usable Path MTU in
 // the Internet," 2018 Network Traffic Measurement and Analysis Conference (TMA), Vienna, Austria,
@@ -120,7 +120,7 @@ impl Pmtud {
     pub fn send_probe(&mut self, builder: &mut PacketBuilder, stats: &mut Stats) {
         // The packet may include ACK-eliciting data already, but rather than check for that, it
         // seems OK to burn one byte here to simply include a PING.
-        builder.encode_varint(FRAME_TYPE_PING);
+        builder.encode_varint(FrameType::Ping);
         stats.frame_tx.ping += 1;
         stats.pmtud_tx += 1;
         self.probe_count += 1;
