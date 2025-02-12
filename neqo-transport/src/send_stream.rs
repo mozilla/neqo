@@ -34,7 +34,8 @@ use crate::{
     tparams::{
         TransportParameterId::{InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni},
         TransportParameters,
-    }, AppError, Error, IndexMap, Res
+    },
+    AppError, Error, IndexMap, Res,
 };
 
 pub const SEND_BUFFER_SIZE: usize = 0x10_0000; // 1 MiB
