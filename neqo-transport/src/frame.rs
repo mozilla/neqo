@@ -18,6 +18,7 @@ use crate::{
     AppError, CloseReason, Error, Res, TransportError,
 };
 
+#[repr(u64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameType {
     Padding = 0x0,
