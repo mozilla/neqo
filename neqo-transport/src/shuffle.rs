@@ -130,7 +130,7 @@ mod tests {
         let mut buf = Vec::from(BUF_WITH_SNI);
         let len = buf.len();
 
-        assert!(buf[len - 23] == 0x00 && buf[len - 22] == 0x0c); // Check Server Name List length
+        assert_eq!(&buf[len-23..len-22], &[0x00, 0x0c], "check SNI length");
                                                                  // Set Server Name List length to 0
         buf[len - 23] = 0x00;
         buf[len - 22] = 0x00;
