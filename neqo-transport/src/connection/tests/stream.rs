@@ -608,7 +608,7 @@ fn legal_out_of_order_frame_on_remote_initiated_closed_stream() {
     let dgram = send_with_extra(
         &mut client,
         Writer(vec![
-            FrameType::MaxStreamData.into(),
+            u64::from(FrameType::MaxStreamData),
             stream_id.as_u64(),
             0,
             0,
