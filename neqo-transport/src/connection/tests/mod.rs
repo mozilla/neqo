@@ -29,7 +29,7 @@ use crate::{
     pmtud::Pmtud,
     recovery::ACK_ONLY_SIZE_LIMIT,
     stats::{FrameStats, Stats, MAX_PTO_COUNTS},
-    tparams::{DISABLE_MIGRATION, GREASE_QUIC_BIT},
+    tparams::TransportParameterId::*,
     ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, EmptyConnectionIdGenerator,
     Error, StreamId, StreamType, Version, MIN_INITIAL_PACKET_SIZE,
 };
@@ -729,7 +729,7 @@ fn create_server() {
 fn tp_grease() {
     for enable in [true, false] {
         let client = new_client(ConnectionParameters::default().grease(enable));
-        let grease = client.tps.borrow_mut().local.get_empty(GREASE_QUIC_BIT);
+        let grease = client.tps.borrow_mut().local.get_empty(GreaseQuicBit);
         assert_eq!(enable, grease);
     }
 }
@@ -738,7 +738,7 @@ fn tp_grease() {
 fn tp_disable_migration() {
     for disable in [true, false] {
         let client = new_client(ConnectionParameters::default().disable_migration(disable));
-        let disable_migration = client.tps.borrow_mut().local.get_empty(DISABLE_MIGRATION);
+        let disable_migration = client.tps.borrow_mut().local.get_empty(DisableMigration);
         assert_eq!(disable, disable_migration);
     }
 }

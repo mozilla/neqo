@@ -141,6 +141,7 @@ pub enum Error {
     UnknownFrameType,
     VersionNegotiation,
     WrongRole,
+    UnknownTransportParameter,
 }
 
 impl Error {
