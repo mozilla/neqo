@@ -1562,9 +1562,8 @@ impl CryptoStreams {
                 (left, _) = left.split_at(limit - right.len());
             } else {
                 // Both chunks are too long to fit into one packet. Just send a part of each.
-                let half_limit = limit / 2;
-                (left, _) = left.split_at(half_limit);
-                (right, _) = right.split_at(half_limit);
+                (left, _) = left.split_at(limit / 2);
+                (right, _) = right.split_at(limit / 2);
             }
             ((left_offset, left), (right_offset, right))
         }
@@ -1572,41 +1571,44 @@ impl CryptoStreams {
         let Some(cs) = self.get_mut(space) else {
             return;
         };
-        let Some((offset, data)) = cs.tx.next_bytes() else {
-            return;
-        };
-        let written = if sni_slicing && offset == 0 {
-            if let Some(sni) = find_sni(data) {
-                // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
-                let mid = sni.start + (sni.end - sni.start) / 2;
-                let (left, right) = data.split_at(mid);
+        while let Some((offset, data)) = cs.tx.next_bytes() {
+            let written = if sni_slicing && offset == 0 {
+                qdebug!("XXX SNI slicing enabled");
+                if let Some(sni) = find_sni(data) {
+                    // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
+                    let mid = sni.start + (sni.end - sni.start) / 2;
+                    let (left, right) = data.split_at(mid);
 
-                // Truncate the chunks so we can fit them into roughly evenly-filled packets.
-                let packets_needed = data.len().div_ceil(builder.limit());
-                let limit = data.len() / packets_needed;
-                let ((left_offset, left), (right_offset, right)) =
-                    limit_chunks((offset, left), (offset + mid as u64, right), limit);
-                (
-                    write_chunk(right_offset, right, builder),
-                    write_chunk(left_offset, left, builder),
-                )
+                    // Truncate the chunks so we can fit them into roughly evenly-filled packets.
+                    let packets_needed = data.len().div_ceil(builder.limit());
+                    let limit = data.len() / packets_needed;
+                    let ((left_offset, left), (right_offset, right)) =
+                        limit_chunks((offset, left), (offset + mid as u64, right), limit);
+                    (
+                        write_chunk(right_offset, right, builder),
+                        write_chunk(left_offset, left, builder),
+                    )
+                } else {
+                    // No SNI found, write the entire data.
+                    (write_chunk(offset, data, builder), None)
+                }
             } else {
-                // No SNI found, write the entire data.
+                // SNI slicing disabled, write the entire data.
                 (write_chunk(offset, data, builder), None)
-            }
-        } else {
-            // SNI slicing disabled, write the entire data.
-            (write_chunk(offset, data, builder), None)
-        };
+            };
 
-        match written {
-            (None, None) => (),
-            (None, Some((offset, len))) | (Some((offset, len)), None) => {
-                mark_as_sent(cs, space, tokens, offset, len, stats);
-            }
-            (Some((offset1, len1)), Some((offset2, len2))) => {
-                mark_as_sent(cs, space, tokens, offset1, len1, stats);
-                mark_as_sent(cs, space, tokens, offset2, len2, stats);
+            match written {
+                (None, None) => break,
+                (None, Some((offset, len))) | (Some((offset, len)), None) => {
+                    mark_as_sent(cs, space, tokens, offset, len, stats);
+                }
+                (Some((offset1, len1)), Some((offset2, len2))) => {
+                    mark_as_sent(cs, space, tokens, offset1, len1, stats);
+                    mark_as_sent(cs, space, tokens, offset2, len2, stats);
+                    // We only end up in this arm if we successfully sliced above. In that case,
+                    // don't try and fit more crypto data into this packet.
+                    break;
+                }
             }
         }
     }
