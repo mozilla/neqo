@@ -525,12 +525,18 @@ impl Path {
     ) -> Self {
         let iface_mtu = match mtu::interface_and_mtu(remote.ip()) {
             Ok((name, mtu)) => {
-                qdebug!("Outbound interface {name} has MTU {mtu}");
+                qdebug!(
+                    "Outbound interface {name} for destination {ip} has MTU {mtu}",
+                    ip = remote.ip()
+                );
                 stats.pmtud_iface_mtu = mtu;
                 Some(mtu)
             }
             Err(e) => {
-                qwarn!("Failed to determine outbound interface: {e}");
+                qwarn!(
+                    "Failed to determine outbound interface for destination {ip}: {e}",
+                    ip = remote.ip()
+                );
                 None
             }
         };
