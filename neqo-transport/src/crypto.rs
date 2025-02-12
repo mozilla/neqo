@@ -28,7 +28,6 @@ use neqo_crypto::{
     TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519,
     TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
 };
-use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     cid::ConnectionIdRef,
