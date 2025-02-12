@@ -48,7 +48,7 @@ use crate::{
     path::{Path, PathRef, Paths},
     qlog,
     quic_datagrams::{DatagramTracking, QuicDatagrams},
-    recovery::{LossRecovery, RecoveryToken, SendProfile, SentPacket},
+    recovery::{LossRecovery, RecoveryToken, RecoveryTokenVec, SendProfile, SentPacket},
     recv_stream::RecvStreamStats,
     rtt::{RttEstimate, GRANULARITY, INITIAL_RTT},
     send_stream::SendStream,
@@ -2123,11 +2123,7 @@ impl Connection {
 
     /// Write the frames that are exchanged in the application data space.
     /// The order of calls here determines the relative priority of frames.
-    fn write_appdata_frames(
-        &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
-    ) {
+    fn write_appdata_frames(&mut self, builder: &mut PacketBuilder, tokens: &mut RecoveryTokenVec) {
         let stats = &mut self.stats.borrow_mut();
         let frame_stats = &mut stats.frame_tx;
         if self.role == Role::Server {
@@ -2208,7 +2204,7 @@ impl Connection {
         force_probe: bool,
         builder: &mut PacketBuilder,
         ack_end: usize,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         now: Instant,
     ) -> bool {
         let untracked = self.received_untracked && !self.state.connected();
@@ -2259,8 +2255,8 @@ impl Connection {
         builder: &mut PacketBuilder,
         coalesced: bool, // Whether this packet is coalesced behind another one.
         now: Instant,
-    ) -> (Vec<RecoveryToken>, bool, bool) {
-        let mut tokens = Vec::new();
+    ) -> (RecoveryTokenVec, bool, bool) {
+        let mut tokens = RecoveryTokenVec::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
 
@@ -2351,7 +2347,7 @@ impl Connection {
         space: PacketNumberSpace,
         now: Instant,
         path: &PathRef,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
     ) {
         if builder.remaining() > ClosingFrame::MIN_LENGTH + RecvdPackets::USEFUL_ACK_LEN {
             // Include an ACK frame with the CONNECTION_CLOSE.
@@ -2445,7 +2441,8 @@ impl Connection {
 
             // Add frames to the packet.
             let payload_start = builder.len();
-            let (mut tokens, mut ack_eliciting, mut padded) = (Vec::new(), false, false);
+            let (mut tokens, mut ack_eliciting, mut padded) = Default::default();
+            // (RecoveryTokenVec::new(), false, false);
             if let Some(close) = closing_frame {
                 self.write_closing_frames(close, &mut builder, *space, now, path, &mut tokens);
             } else {

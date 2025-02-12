@@ -16,7 +16,7 @@ use crate::{
     cc::{new_reno::NewReno, ClassicCongestionControl, CongestionControl as _},
     packet::PacketType,
     pmtud::Pmtud,
-    recovery::SentPacket,
+    recovery::{RecoveryTokenVec, SentPacket},
     rtt::RttEstimate,
 };
 
@@ -47,7 +47,7 @@ fn issue_876() {
             IpTosEcn::default(),
             before,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             cc.max_datagram_size() - 1,
         ),
         SentPacket::new(
@@ -56,7 +56,7 @@ fn issue_876() {
             IpTosEcn::default(),
             before,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             cc.max_datagram_size() - 2,
         ),
         SentPacket::new(
@@ -65,7 +65,7 @@ fn issue_876() {
             IpTosEcn::default(),
             before,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             cc.max_datagram_size(),
         ),
         SentPacket::new(
@@ -74,7 +74,7 @@ fn issue_876() {
             IpTosEcn::default(),
             before,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             cc.max_datagram_size(),
         ),
         SentPacket::new(
@@ -83,7 +83,7 @@ fn issue_876() {
             IpTosEcn::default(),
             before,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             cc.max_datagram_size(),
         ),
         SentPacket::new(
@@ -92,7 +92,7 @@ fn issue_876() {
             IpTosEcn::default(),
             before,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             cc.max_datagram_size(),
         ),
         SentPacket::new(
@@ -101,7 +101,7 @@ fn issue_876() {
             IpTosEcn::default(),
             after,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             cc.max_datagram_size() - 3,
         ),
     ];
@@ -157,7 +157,7 @@ fn issue_1465() {
             IpTosEcn::default(),
             now,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             max_datagram_size,
         );
         pn += 1;

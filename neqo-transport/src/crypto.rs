@@ -29,7 +29,7 @@ use neqo_crypto::{
 use crate::{
     cid::ConnectionIdRef,
     packet::{PacketBuilder, PacketNumber},
-    recovery::RecoveryToken,
+    recovery::{RecoveryToken, RecoveryTokenVec},
     recv_stream::RxStreamOrderer,
     send_stream::TxBuffer,
     shuffle::find_sni,
@@ -318,7 +318,7 @@ impl Crypto {
         space: PacketNumberSpace,
         sni_slicing: bool,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         self.streams
@@ -1477,7 +1477,7 @@ impl CryptoStreams {
         space: PacketNumberSpace,
         sni_slicing: bool,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         fn write_chunk(

@@ -24,7 +24,7 @@ use enum_map::{enum_map, EnumMap};
 use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
 pub use sent::SentPacket;
 use sent::SentPackets;
-pub use token::{RecoveryToken, StreamRecoveryToken};
+pub use token::{RecoveryToken, RecoveryTokenVec, StreamRecoveryToken};
 
 use crate::{
     ecn,
@@ -944,6 +944,7 @@ mod tests {
         ecn,
         packet::{PacketNumber, PacketType},
         path::{Path, PathRef},
+        recovery::RecoveryTokenVec,
         stats::{Stats, StatsCell},
     };
 
@@ -1119,7 +1120,7 @@ mod tests {
                     IpTosEcn::default(),
                     pn_time(pn),
                     true,
-                    Vec::new(),
+                    RecoveryTokenVec::new(),
                     ON_SENT_SIZE,
                 ),
                 Instant::now(),
@@ -1147,7 +1148,7 @@ mod tests {
                 IpTosEcn::default(),
                 pn_time(pn),
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 ON_SENT_SIZE,
             ));
         }
@@ -1272,7 +1273,7 @@ mod tests {
                 IpTosEcn::default(),
                 pn_time(0),
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1284,7 +1285,7 @@ mod tests {
                 IpTosEcn::default(),
                 pn_time(0) + TEST_RTT / 4,
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1383,7 +1384,7 @@ mod tests {
                 IpTosEcn::default(),
                 pn_time(0),
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1395,7 +1396,7 @@ mod tests {
                 IpTosEcn::default(),
                 pn_time(1),
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1407,7 +1408,7 @@ mod tests {
                 IpTosEcn::default(),
                 pn_time(2),
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1425,7 +1426,7 @@ mod tests {
                 IpTosEcn::default(),
                 pn_time(3),
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 ON_SENT_SIZE,
             );
             let pn_space = PacketNumberSpace::from(sent_pkt.packet_type());
@@ -1462,7 +1463,7 @@ mod tests {
                 IpTosEcn::default(),
                 pn_time(3),
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1480,7 +1481,7 @@ mod tests {
                 IpTosEcn::default(),
                 now(),
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1503,7 +1504,7 @@ mod tests {
                 IpTosEcn::default(),
                 now(),
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1515,7 +1516,7 @@ mod tests {
                 IpTosEcn::default(),
                 now(),
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1556,7 +1557,7 @@ mod tests {
                 IpTosEcn::default(),
                 now(),
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),

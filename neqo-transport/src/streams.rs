@@ -13,7 +13,7 @@ use crate::{
     fc::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl},
     frame::Frame,
     packet::PacketBuilder,
-    recovery::{RecoveryToken, StreamRecoveryToken},
+    recovery::{RecoveryTokenVec, StreamRecoveryToken},
     recv_stream::{RecvStream, RecvStreams},
     send_stream::{SendStream, SendStreams, TransmissionPriority},
     stats::FrameStats,
@@ -213,7 +213,7 @@ impl Streams {
     fn write_maintenance_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         // Send `DATA_BLOCKED` as necessary.
@@ -255,7 +255,7 @@ impl Streams {
         &mut self,
         priority: TransmissionPriority,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         if priority == TransmissionPriority::Important {
