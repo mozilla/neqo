@@ -27,9 +27,13 @@ experimental_api!(SSL_SecretCallback(
 ));
 
 #[derive(Clone, Copy, Debug, FromRepr)]
-#[repr(u32)]
+#[cfg_attr(windows, repr(i32))] // Windows has to be different, of coourse.
+#[cfg_attr(not(windows), repr(u32))]
 pub enum SecretDirection {
+    #[allow(trivial_numeric_casts, clippy::unnecessary_cast)]
+    // These cast are neccessary on Windows, where
     Read = SSLSecretDirection::ssl_secret_read,
+    // These cast are neccessary on Windows, wher
     Write = SSLSecretDirection::ssl_secret_write,
 }
 
