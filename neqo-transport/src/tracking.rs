@@ -16,6 +16,8 @@ use std::{
 use enum_map::{enum_map, Enum, EnumMap};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
 use neqo_crypto::Epoch;
+use strum::IntoEnumIterator as _;
+use strum_macros::EnumIter;
 
 use crate::{
     ecn,
@@ -26,22 +28,11 @@ use crate::{
     Error, Res,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq, Enum)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq, Enum, EnumIter)]
 pub enum PacketNumberSpace {
     Initial,
     Handshake,
     ApplicationData,
-}
-
-impl PacketNumberSpace {
-    pub fn iter() -> impl Iterator<Item = &'static Self> {
-        const SPACES: &[PacketNumberSpace] = &[
-            PacketNumberSpace::Initial,
-            PacketNumberSpace::Handshake,
-            PacketNumberSpace::ApplicationData,
-        ];
-        SPACES.iter()
-    }
 }
 
 impl From<Epoch> for PacketNumberSpace {
@@ -122,12 +113,12 @@ impl std::fmt::Debug for PacketNumberSpaceSet {
         let mut first = true;
         f.write_str("(")?;
         for sp in PacketNumberSpace::iter() {
-            if self[*sp] {
+            if self[sp] {
                 if !first {
                     f.write_str("+")?;
                     first = false;
                 }
-                std::fmt::Display::fmt(sp, f)?;
+                std::fmt::Display::fmt(&sp, f)?;
             }
         }
         f.write_str(")")
