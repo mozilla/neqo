@@ -21,6 +21,7 @@ use std::{
 };
 
 use enum_map::{enum_map, EnumMap};
+use enumset::enum_set;
 use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
 pub use sent::SentPacket;
 use sent::SentPackets;
@@ -93,7 +94,7 @@ impl SendProfile {
     #[must_use]
     pub fn new_pto(pn_space: PacketNumberSpace, mtu: usize, probe: PacketNumberSpaceSet) -> Self {
         debug_assert!(mtu > ACK_ONLY_SIZE_LIMIT);
-        debug_assert!(probe[pn_space]);
+        debug_assert!(probe.contains(pn_space));
         Self {
             limit: mtu,
             pto: Some(pn_space),
@@ -107,7 +108,7 @@ impl SendProfile {
     /// that has the PTO timer armed.
     #[must_use]
     pub fn should_probe(&self, space: PacketNumberSpace) -> bool {
-        self.probe[space]
+        self.probe.contains(space)
     }
 
     /// Determine whether an ACK-only packet should be sent for the given packet
@@ -443,7 +444,7 @@ impl PtoState {
     }
 
     pub fn new(space: PacketNumberSpace, probe: PacketNumberSpaceSet) -> Self {
-        debug_assert!(probe[space]);
+        debug_assert!(probe.contains(space));
         Self {
             space,
             count: 1,
@@ -453,7 +454,7 @@ impl PtoState {
     }
 
     pub fn pto(&mut self, space: PacketNumberSpace, probe: PacketNumberSpaceSet) {
-        debug_assert!(probe[space]);
+        debug_assert!(probe.contains(space));
         self.space = space;
         self.count += 1;
         self.packets = Self::pto_packet_count(space);
@@ -687,7 +688,7 @@ impl LossRecovery {
         // So maybe fire a PTO.
         if let Some(pto) = self.pto_time(rtt, PacketNumberSpace::ApplicationData) {
             if pto < now {
-                let probes = PacketNumberSpaceSet::from(&[PacketNumberSpace::ApplicationData]);
+                let probes = enum_set!(PacketNumberSpace::ApplicationData);
                 self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
             }
         }
@@ -826,7 +827,7 @@ impl LossRecovery {
         let mut allow_probes = PacketNumberSpaceSet::default();
         for pn_space in PacketNumberSpace::iter() {
             if let Some(t) = self.pto_time(rtt, *pn_space) {
-                allow_probes[*pn_space] = true;
+                allow_probes.insert(*pn_space);
                 if t <= now {
                     qdebug!("[{self}] PTO timer fired for {pn_space}");
                     if let Some(space) = self.spaces.get_mut(*pn_space) {

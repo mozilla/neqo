@@ -18,6 +18,7 @@ workspace = true
 [dependencies]
 # Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 enum-map = { workspace = true }
+enumset = { workspace = true }
 indexmap = { version = "2.2", default-features = false } # See https://github.com/mozilla/neqo/issues/1858
 log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
