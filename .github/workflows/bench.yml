@@ -273,6 +273,8 @@ jobs:
                       fi
                     else
                       echo "No statistically significant change: $BASELINE_MEAN -> $MEAN"
+                      SYMBOL=""
+                      FORMAT=""
                     fi
                     printf "| %s %s%.1f%s | %s%.1f%%%s |\n" \
                       "$SYMBOL" "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT" >> steps.md
