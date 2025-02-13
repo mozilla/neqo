@@ -910,6 +910,7 @@ dependencies = [
  "qlog",
  "smallvec",
  "static_assertions",
+ "strum_macros",
  "test-fixture",
 ]
 
