@@ -16,8 +16,7 @@ use std::{
 use enum_map::{enum_map, Enum, EnumMap};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
 use neqo_crypto::Epoch;
-use strum::IntoEnumIterator as _;
-use strum_macros::EnumIter;
+use strum::{EnumIter, IntoEnumIterator as _};
 
 use crate::{
     ecn,

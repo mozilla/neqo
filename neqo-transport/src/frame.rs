@@ -9,7 +9,7 @@
 use std::ops::RangeInclusive;
 
 use neqo_common::{qtrace, Decoder, Encoder};
-use strum_macros::FromRepr;
+use strum::FromRepr;
 
 use crate::{
     cid::MAX_CONNECTION_ID_LEN,

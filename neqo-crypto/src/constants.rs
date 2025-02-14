@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use enum_map::Enum;
-use strum_macros::FromRepr;
+use strum::FromRepr;
 
 use crate::{ssl, Error};
 

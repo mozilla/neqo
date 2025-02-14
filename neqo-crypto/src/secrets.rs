@@ -10,7 +10,7 @@ use std::{mem, os::raw::c_void, pin::Pin};
 
 use enum_map::EnumMap;
 use neqo_common::qdebug;
-use strum_macros::FromRepr;
+use strum::FromRepr;
 
 use crate::{
     agentio::as_c_void,

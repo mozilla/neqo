@@ -20,7 +20,7 @@ use neqo_crypto::{
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
     random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
 };
-use strum_macros::FromRepr;
+use strum::FromRepr;
 use TransportParameterId::{
     AckDelayExponent, ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit, IdleTimeout,
     InitialMaxData, InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote,

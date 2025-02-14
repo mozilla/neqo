@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use strum_macros::FromRepr;
+use strum::FromRepr;
 
 use crate::err::{mozpkix, sec, ssl, PRErrorCode};
 
