@@ -4,8 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::hash::BuildHasherDefault;
+
 use neqo_common::qwarn;
 use neqo_crypto::Error as CryptoError;
+use rustc_hash::FxHasher;
 
 mod ackrate;
 mod addr_valid;
@@ -74,6 +77,8 @@ pub use self::{
     stream_id::{StreamId, StreamType},
     version::Version,
 };
+
+pub type IndexMap<K, V> = indexmap::IndexMap<K, V, BuildHasherDefault<FxHasher>>;
 
 pub type TransportError = u64;
 const ERROR_APPLICATION_CLOSE: TransportError = 12;

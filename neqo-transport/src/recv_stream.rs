@@ -18,6 +18,7 @@ use std::{
 };
 
 use neqo_common::{qtrace, Role};
+use rustc_hash::FxHashMap as HashMap;
 use smallvec::SmallVec;
 
 use crate::{
@@ -40,7 +41,7 @@ pub const RECV_BUFFER_SIZE: usize = RX_STREAM_DATA_WINDOW as usize;
 
 #[derive(Debug, Default)]
 pub struct RecvStreams {
-    streams: BTreeMap<StreamId, RecvStream>,
+    streams: HashMap<StreamId, RecvStream>,
     keep_alive: Weak<()>,
 }
 

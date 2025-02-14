@@ -19,7 +19,6 @@ use std::{
     rc::Rc,
 };
 
-use indexmap::IndexMap;
 use neqo_common::{qdebug, qerror, qtrace, Encoder, Role};
 use smallvec::SmallVec;
 
@@ -36,7 +35,7 @@ use crate::{
         TransportParameterId::{InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni},
         TransportParameters,
     },
-    AppError, Error, Res,
+    AppError, Error, IndexMap, Res,
 };
 
 pub const SEND_BUFFER_SIZE: usize = 0x10_0000; // 1 MiB
