@@ -7,7 +7,7 @@
 use std::fmt::Debug;
 
 use enum_map::Enum;
-use strum_macros::FromRepr;
+use strum::FromRepr;
 
 /// ECN (Explicit Congestion Notification) codepoints mapped to the
 /// lower 2 bits of the TOS field.
