@@ -30,6 +30,7 @@ use neqo_crypto::{
     Server, ZeroRttChecker,
 };
 use smallvec::SmallVec;
+use strum::IntoEnumIterator as _;
 
 use crate::{
     addr_valid::{AddressValidation, NewTokenState},
@@ -2399,7 +2400,7 @@ impl Connection {
         let mut encoder = Encoder::with_capacity(profile.limit());
         for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
-            let Some((epoch, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
+            let Some((epoch, tx)) = self.crypto.states.select_tx_mut(self.version, space) else {
                 continue;
             };
 
@@ -2416,7 +2417,7 @@ impl Connection {
             let pn = Self::add_packet_number(
                 &mut builder,
                 tx,
-                self.loss_recovery.largest_acknowledged_pn(*space),
+                self.loss_recovery.largest_acknowledged_pn(space),
             );
             // The builder will set the limit to 0 if there isn't enough space for the header.
             if builder.is_full() {
@@ -2445,10 +2446,10 @@ impl Connection {
             let payload_start = builder.len();
             let (mut tokens, mut ack_eliciting, mut padded) = (Vec::new(), false, false);
             if let Some(close) = closing_frame {
-                self.write_closing_frames(close, &mut builder, *space, now, path, &mut tokens);
+                self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, *space, &profile, &mut builder, header_start != 0, now);
+                    self.write_frames(path, space, &profile, &mut builder, header_start != 0, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
@@ -2503,7 +2504,7 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, sent, now);
             }
 
-            if *space == PacketNumberSpace::Handshake
+            if space == PacketNumberSpace::Handshake
                 && self.role == Role::Server
                 && self.state == State::Confirmed
             {
@@ -2518,8 +2519,8 @@ impl Connection {
             // do not support, because they may not save packets they can't
             // decrypt yet.
             if self.role == Role::Client
-                && *space == PacketNumberSpace::Initial
-                && !self.crypto.streams.is_empty(*space)
+                && space == PacketNumberSpace::Initial
+                && !self.crypto.streams.is_empty(space)
             {
                 break;
             }
