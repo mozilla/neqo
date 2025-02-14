@@ -629,13 +629,12 @@ impl Default for AckTracker {
 mod tests {
     use std::collections::HashSet;
 
-    use enumset::enum_set;
     use neqo_common::Encoder;
     use test_fixture::now;
 
     use super::{
-        AckTracker, Duration, Instant, PacketNumberSpace, PacketNumberSpaceSet, RecoveryToken,
-        RecvdPackets, MAX_TRACKED_RANGES,
+        AckTracker, Duration, Instant, PacketNumberSpace, Recovery Token, RecvdPackets,
+        MAX_TRACKED_RANGES,
     };
     use crate::{
         frame::Frame,
@@ -1067,42 +1066,6 @@ mod tests {
             tracker.ack_time(now() + Duration::from_millis(1)),
             Some(now())
         );
-    }
-
-    #[test]
-    fn pnspaceset_default() {
-        let set = PacketNumberSpaceSet::default();
-        assert!(!set.contains(PacketNumberSpace::Initial));
-        assert!(!set.contains(PacketNumberSpace::Handshake));
-        assert!(!set.contains(PacketNumberSpace::ApplicationData));
-    }
-
-    #[test]
-    fn pnspaceset_from() {
-        let set = enum_set!(PacketNumberSpace::Initial);
-        assert!(set.contains(PacketNumberSpace::Initial));
-        assert!(!set.contains(PacketNumberSpace::Handshake));
-        assert!(!set.contains(PacketNumberSpace::ApplicationData));
-
-        let set = enum_set!(PacketNumberSpace::Handshake | PacketNumberSpace::Initial);
-        assert!(set.contains(PacketNumberSpace::Initial));
-        assert!(set.contains(PacketNumberSpace::Handshake));
-        assert!(!set.contains(PacketNumberSpace::ApplicationData));
-
-        let set =
-            enum_set!(PacketNumberSpace::ApplicationData | PacketNumberSpace::ApplicationData);
-        assert!(!set.contains(PacketNumberSpace::Initial));
-        assert!(!set.contains(PacketNumberSpace::Handshake));
-        assert!(set.contains(PacketNumberSpace::ApplicationData));
-    }
-
-    #[test]
-    fn pnspaceset_copy() {
-        let set = enum_set!(PacketNumberSpace::Handshake | PacketNumberSpace::ApplicationData);
-        let copy = set;
-        assert!(!copy.contains(PacketNumberSpace::Initial));
-        assert!(copy.contains(PacketNumberSpace::Handshake));
-        assert!(copy.contains(PacketNumberSpace::ApplicationData));
     }
 
     #[test]
