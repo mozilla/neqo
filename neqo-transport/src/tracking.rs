@@ -633,7 +633,7 @@ mod tests {
     use test_fixture::now;
 
     use super::{
-        AckTracker, Duration, Instant, PacketNumberSpace, Recovery Token, RecvdPackets,
+        AckTracker, Duration, Instant, PacketNumberSpace, RecoveryToken, RecvdPackets,
         MAX_TRACKED_RANGES,
     };
     use crate::{
