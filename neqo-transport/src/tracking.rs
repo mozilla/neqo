@@ -16,6 +16,7 @@ use enum_map::{enum_map, Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
 use neqo_crypto::Epoch;
+use strum::{EnumIter, IntoEnumIterator as _};
 
 use crate::{
     ecn,
@@ -26,22 +27,11 @@ use crate::{
     Error, Res,
 };
 
-#[derive(Debug, PartialOrd, Ord, EnumSetType, Enum)]
+#[derive(Debug, PartialOrd, Ord, EnumSetType, Enum, EnumIter)]
 pub enum PacketNumberSpace {
     Initial,
     Handshake,
     ApplicationData,
-}
-
-impl PacketNumberSpace {
-    pub fn iter() -> impl Iterator<Item = &'static Self> {
-        const SPACES: &[PacketNumberSpace] = &[
-            PacketNumberSpace::Initial,
-            PacketNumberSpace::Handshake,
-            PacketNumberSpace::ApplicationData,
-        ];
-        SPACES.iter()
-    }
 }
 
 impl From<Epoch> for PacketNumberSpace {

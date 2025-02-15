@@ -9,6 +9,7 @@
 use std::ops::RangeInclusive;
 
 use neqo_common::{qtrace, Decoder, Encoder};
+use strum::FromRepr;
 
 use crate::{
     cid::MAX_CONNECTION_ID_LEN,
@@ -19,7 +20,7 @@ use crate::{
 };
 
 #[repr(u64)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
 pub enum FrameType {
     Padding = 0x0,
     Ping = 0x1,
@@ -75,43 +76,7 @@ impl TryFrom<u64> for FrameType {
     type Error = Error;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        match value {
-            0x0 => Ok(Self::Padding),
-            0x1 => Ok(Self::Ping),
-            0x2 => Ok(Self::Ack),
-            0x3 => Ok(Self::AckEcn),
-            0x4 => Ok(Self::ResetStream),
-            0x5 => Ok(Self::StopSending),
-            0x6 => Ok(Self::Crypto),
-            0x7 => Ok(Self::NewToken),
-            0x8 => Ok(Self::Stream),
-            0x9 => Ok(Self::StreamWithFin),
-            0xa => Ok(Self::StreamWithLen),
-            0xb => Ok(Self::StreamWithLenFin),
-            0xc => Ok(Self::StreamWithOff),
-            0xd => Ok(Self::StreamWithOffFin),
-            0xe => Ok(Self::StreamWithOffLen),
-            0xf => Ok(Self::StreamWithOffLenFin),
-            0x10 => Ok(Self::MaxData),
-            0x11 => Ok(Self::MaxStreamData),
-            0x12 => Ok(Self::MaxStreamsBiDi),
-            0x13 => Ok(Self::MaxStreamsUniDi),
-            0x14 => Ok(Self::DataBlocked),
-            0x15 => Ok(Self::StreamDataBlocked),
-            0x16 => Ok(Self::StreamsBlockedBiDi),
-            0x17 => Ok(Self::StreamsBlockedUniDi),
-            0x18 => Ok(Self::NewConnectionId),
-            0x19 => Ok(Self::RetireConnectionId),
-            0x1a => Ok(Self::PathChallenge),
-            0x1b => Ok(Self::PathResponse),
-            0x1c => Ok(Self::ConnectionCloseTransport),
-            0x1d => Ok(Self::ConnectionCloseApplication),
-            0x1e => Ok(Self::HandshakeDone),
-            0xaf => Ok(Self::AckFrequency),
-            0x30 => Ok(Self::Datagram),
-            0x31 => Ok(Self::DatagramWithLen),
-            _ => Err(Error::UnknownFrameType),
-        }
+        Self::from_repr(value).ok_or(Error::UnknownFrameType)
     }
 }
 

@@ -25,6 +25,7 @@ use enumset::enum_set;
 use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
 pub use sent::SentPacket;
 use sent::SentPackets;
+use strum::IntoEnumIterator as _;
 pub use token::{RecoveryToken, StreamRecoveryToken};
 
 use crate::{
@@ -826,17 +827,17 @@ impl LossRecovery {
         // The spaces in which we will allow probing.
         let mut allow_probes = PacketNumberSpaceSet::default();
         for pn_space in PacketNumberSpace::iter() {
-            if let Some(t) = self.pto_time(rtt, *pn_space) {
-                allow_probes.insert(*pn_space);
+            if let Some(t) = self.pto_time(rtt, pn_space) {
+                allow_probes.insert(pn_space);
                 if t <= now {
                     qdebug!("[{self}] PTO timer fired for {pn_space}");
-                    if let Some(space) = self.spaces.get_mut(*pn_space) {
+                    if let Some(space) = self.spaces.get_mut(pn_space) {
                         lost.extend(
                             space
-                                .pto_packets(PtoState::pto_packet_count(*pn_space))
+                                .pto_packets(PtoState::pto_packet_count(pn_space))
                                 .cloned(),
                         );
-                        pto_space = pto_space.or(Some(*pn_space));
+                        pto_space = pto_space.or(Some(pn_space));
                     }
                 }
             }
