@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::unwrap-used)] // OK in a bench.
+
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server, Priority};
