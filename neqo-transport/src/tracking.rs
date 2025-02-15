@@ -16,7 +16,7 @@ use enum_map::{enum_map, Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
 use neqo_crypto::Epoch;
-use strum::{EnumIter, IntoEnumIterator as _};
+use strum::EnumIter;
 
 use crate::{
     ecn,
