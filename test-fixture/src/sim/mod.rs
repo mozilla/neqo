@@ -10,6 +10,7 @@
 pub mod connection;
 mod delay;
 mod drop;
+mod mtu;
 pub mod rng;
 mod taildrop;
 
@@ -32,7 +33,12 @@ use NodeState::{Active, Idle, Waiting};
 use crate::now;
 
 pub mod network {
-    pub use super::{delay::Delay, drop::Drop, taildrop::TailDrop};
+    pub use super::{
+        delay::{Delay, RandomDelay},
+        drop::Drop,
+        mtu::Mtu,
+        taildrop::TailDrop,
+    };
 }
 
 type Rng = Rc<RefCell<Random>>;
@@ -295,7 +301,8 @@ pub struct ReadySimulator {
 }
 
 impl ReadySimulator {
-    pub fn run(mut self) {
+    #[allow(clippy::must_use_candidate)]
+    pub fn run(mut self) -> Duration {
         let real_start = Instant::now();
         let end = self.sim.process_loop(self.start, self.now);
         let sim_time = end - self.now;
@@ -305,5 +312,6 @@ impl ReadySimulator {
             wall = real_start.elapsed(),
         );
         self.sim.print_summary();
+        sim_time
     }
 }
