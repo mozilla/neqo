@@ -1565,7 +1565,6 @@ impl CryptoStreams {
         };
         while let Some((offset, data)) = cs.tx.next_bytes() {
             let written = if sni_slicing && offset == 0 {
-                qdebug!("XXX SNI slicing enabled");
                 if let Some(sni) = find_sni(data) {
                     // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
                     let mid = sni.start + (sni.end - sni.start) / 2;
@@ -1585,7 +1584,7 @@ impl CryptoStreams {
                     (write_chunk(offset, data, builder), None)
                 }
             } else {
-                // SNI slicing disabled, write the entire data.
+                // SNI slicing disabled or data not at offset 0, write the entire data.
                 (write_chunk(offset, data, builder), None)
             };
 
