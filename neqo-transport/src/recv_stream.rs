@@ -23,7 +23,7 @@ use smallvec::SmallVec;
 use crate::{
     events::ConnectionEvents,
     fc::ReceiverFlowControl,
-    frame::FRAME_TYPE_STOP_SENDING,
+    frame::FrameType,
     packet::PacketBuilder,
     recovery::{RecoveryToken, StreamRecoveryToken},
     send_stream::SendStreams,
@@ -895,7 +895,7 @@ impl RecvStream {
             } => {
                 if *frame_needed
                     && builder.write_varint_frame(&[
-                        FRAME_TYPE_STOP_SENDING,
+                        FrameType::StopSending.into(),
                         self.stream_id.as_u64(),
                         *err,
                     ])

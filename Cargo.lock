@@ -844,6 +844,7 @@ dependencies = [
  "neqo-crypto",
  "qlog",
  "regex",
+ "strum",
  "test-fixture",
  "windows",
 ]
@@ -853,12 +854,14 @@ name = "neqo-crypto"
 version = "0.12.2"
 dependencies = [
  "bindgen",
+ "enum-map",
  "log",
  "mozbuild",
  "neqo-common",
  "semver",
  "serde",
  "serde_derive",
+ "strum",
  "test-fixture",
  "toml",
 ]
@@ -898,6 +901,7 @@ version = "0.12.2"
 dependencies = [
  "criterion",
  "enum-map",
+ "enumset",
  "indexmap",
  "log",
  "mtu",
@@ -907,6 +911,7 @@ dependencies = [
  "qlog",
  "smallvec",
  "static_assertions",
+ "strum",
  "test-fixture",
 ]
 
@@ -1075,6 +1080,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
+name = "rustversion"
+version = "1.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7c45b9784283f1b2e7fb61b42047c2fd678ef0960d4f6f1eba131594cc369d4"
+
+[[package]]
 name = "ryu"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1202,6 +1213,28 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
+name = "strum"
+version = "0.26.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
+dependencies = [
+ "strum_macros",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.26.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn",
+]
 
 [[package]]
 name = "syn"

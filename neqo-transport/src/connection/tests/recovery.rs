@@ -22,14 +22,14 @@ use super::{
 };
 use crate::{
     connection::{test_internal::FrameWriter, tests::cwnd_min},
-    frame::FRAME_TYPE_ACK,
+    frame::FrameType,
     packet::PacketBuilder,
     recovery::{
         FAST_PTO_SCALE, MAX_OUTSTANDING_UNACK, MAX_PTO_PACKET_COUNT, MIN_OUTSTANDING_UNACK,
     },
     rtt::GRANULARITY,
     stats::MAX_PTO_COUNTS,
-    tparams::TransportParameter,
+    tparams::{TransportParameter, TransportParameterId::*},
     tracking::DEFAULT_ACK_DELAY,
     CloseReason, Error, Pmtud, StreamType,
 };
@@ -404,7 +404,9 @@ fn handshake_ack_pto() {
     // This is a greasing transport parameter, and large enough that the
     // server needs to send two Handshake packets.
     let big = TransportParameter::Bytes(vec![0; Pmtud::default_plpmtu(DEFAULT_ADDR.ip())]);
-    server.set_local_tparam(0xce16, big).unwrap();
+    server
+        .set_local_tparam(TestTransportParameter, big)
+        .unwrap();
 
     let c1 = client.process_output(now).dgram();
 
@@ -855,7 +857,7 @@ fn ack_for_unsent() {
 
     impl FrameWriter for AckforUnsentWriter {
         fn write_frames(&mut self, builder: &mut PacketBuilder) {
-            builder.encode_varint(FRAME_TYPE_ACK);
+            builder.encode_varint(FrameType::Ack);
             builder.encode_varint(666u16); // Largest ACKed
             builder.encode_varint(0u8); // ACK delay
             builder.encode_varint(0u8); // ACK block count

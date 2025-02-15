@@ -16,15 +16,12 @@ use super::{
 };
 use crate::{
     events::ConnectionEvent,
-    frame::{
-        FRAME_TYPE_MAX_STREAM_DATA, FRAME_TYPE_RESET_STREAM, FRAME_TYPE_STOP_SENDING,
-        FRAME_TYPE_STREAM_CLIENT_BIDI, FRAME_TYPE_STREAM_DATA_BLOCKED,
-    },
+    frame::FrameType,
     packet::PacketBuilder,
     recv_stream::RECV_BUFFER_SIZE,
     send_stream::{OrderGroup, SendStreamState, SEND_BUFFER_SIZE},
     streams::{SendOrder, StreamOrder},
-    tparams::{self, TransportParameter},
+    tparams::{TransportParameter, TransportParameterId::*},
     CloseReason, Connection, ConnectionParameters, Error, StreamId, StreamType,
 };
 
@@ -397,7 +394,7 @@ fn max_data() {
 
     server
         .set_local_tparam(
-            tparams::INITIAL_MAX_DATA,
+            InitialMaxData,
             TransportParameter::Integer(u64::try_from(SMALL_MAX_DATA).unwrap()),
         )
         .unwrap();
@@ -567,15 +564,15 @@ fn illegal_stream_related_frames() {
     // 0 = Client-Initiated, Bidirectional; 2 = Client-Initiated, Unidirectional
     for stream_id in [0, 2] {
         for frame_type in [
-            FRAME_TYPE_RESET_STREAM,
-            FRAME_TYPE_STOP_SENDING,
-            FRAME_TYPE_MAX_STREAM_DATA,
-            FRAME_TYPE_STREAM_DATA_BLOCKED,
-            FRAME_TYPE_STREAM_CLIENT_BIDI,
+            FrameType::ResetStream,
+            FrameType::StopSending,
+            FrameType::MaxStreamData,
+            FrameType::StreamDataBlocked,
+            FrameType::Stream,
         ] {
             // The slice contains an extra 0 that is only needed for a RESET_STREAM frame.
             // It's ignored for the other frame types as PADDING.
-            test_with_illegal_frame(&[frame_type, stream_id, 0, 0]);
+            test_with_illegal_frame(&[frame_type.into(), stream_id, 0, 0]);
         }
     }
 }
@@ -610,7 +607,12 @@ fn legal_out_of_order_frame_on_remote_initiated_closed_stream() {
     // Deliver an out-of-order `FRAME_TYPE_MAX_STREAM_DATA` on forgotten stream.
     let dgram = send_with_extra(
         &mut client,
-        Writer(vec![FRAME_TYPE_MAX_STREAM_DATA, stream_id.as_u64(), 0, 0]),
+        Writer(vec![
+            u64::from(FrameType::MaxStreamData),
+            stream_id.as_u64(),
+            0,
+            0,
+        ]),
         now(),
     );
     server.process_input(dgram, now());
@@ -667,7 +669,7 @@ fn simultaneous_stop_sending_and_reset() {
 #[test]
 /// Make a stream data or control frame arrive after the stream has been used and cleared.
 fn late_stream_related_frames() {
-    fn late_stream_related_frame(frame_type: u64) {
+    fn late_stream_related_frame(frame_type: FrameType) {
         let mut client = default_client();
         let mut server = default_server();
         connect(&mut client, &mut server);
@@ -681,24 +683,24 @@ fn late_stream_related_frames() {
         // Make the server generate a packet containing the test frame.
         let before = server.stats().frame_tx;
         match frame_type {
-            FRAME_TYPE_RESET_STREAM => {
+            FrameType::ResetStream => {
                 server.stream_reset_send(stream_id, 0).unwrap();
             }
-            FRAME_TYPE_STOP_SENDING => {
+            FrameType::StopSending => {
                 server.stream_stop_sending(stream_id, 0).unwrap();
             }
-            FRAME_TYPE_STREAM_CLIENT_BIDI => {
+            FrameType::Stream => {
                 server.stream_send(stream_id, &[0x00]).unwrap();
                 server.stream_close_send(stream_id).unwrap();
             }
-            FRAME_TYPE_MAX_STREAM_DATA => {
+            FrameType::MaxStreamData => {
                 server
                     .streams
                     .get_recv_stream_mut(stream_id)
                     .unwrap()
                     .set_stream_max_data(u32::MAX.into());
             }
-            FRAME_TYPE_STREAM_DATA_BLOCKED => {
+            FrameType::StreamDataBlocked => {
                 let internal_stream = server.streams.get_send_stream_mut(stream_id).unwrap();
                 if let SendStreamState::Ready { fc, .. } = internal_stream.state() {
                     fc.blocked();
@@ -711,19 +713,19 @@ fn late_stream_related_frames() {
         let tester = server.process_output(now()).dgram();
         let after = server.stats().frame_tx;
         match frame_type {
-            FRAME_TYPE_RESET_STREAM => {
+            FrameType::ResetStream => {
                 assert_eq!(after.reset_stream, before.reset_stream + 1);
             }
-            FRAME_TYPE_STOP_SENDING => {
+            FrameType::StopSending => {
                 assert_eq!(after.stop_sending, before.stop_sending + 1);
             }
-            FRAME_TYPE_STREAM_CLIENT_BIDI => {
+            FrameType::Stream => {
                 assert_eq!(after.stream, before.stream + 1);
             }
-            FRAME_TYPE_MAX_STREAM_DATA => {
+            FrameType::MaxStreamData => {
                 assert_eq!(after.max_stream_data, before.max_stream_data + 1);
             }
-            FRAME_TYPE_STREAM_DATA_BLOCKED => {
+            FrameType::StreamDataBlocked => {
                 assert_eq!(after.stream_data_blocked, before.stream_data_blocked + 1);
             }
             _ => panic!("unexpected frame type"),
@@ -740,11 +742,11 @@ fn late_stream_related_frames() {
     }
 
     for frame_type in [
-        FRAME_TYPE_RESET_STREAM,
-        FRAME_TYPE_STOP_SENDING,
-        FRAME_TYPE_MAX_STREAM_DATA,
-        FRAME_TYPE_STREAM_DATA_BLOCKED,
-        FRAME_TYPE_STREAM_CLIENT_BIDI,
+        FrameType::ResetStream,
+        FrameType::StopSending,
+        FrameType::MaxStreamData,
+        FrameType::StreamDataBlocked,
+        FrameType::Stream,
     ] {
         late_stream_related_frame(frame_type);
     }

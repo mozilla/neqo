@@ -4,23 +4,42 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(dead_code)]
+use enum_map::Enum;
+use strum::FromRepr;
 
-use crate::ssl;
+use crate::{ssl, Error};
 
 // Ideally all of these would be enums, but size matters and we need to allow
 // for values outside of those that are defined here.
 
 pub type Alert = u8;
 
-pub type Epoch = u16;
-// TLS doesn't really have an "initial" concept that maps to QUIC so directly,
-// but this should be clear enough.
-pub const TLS_EPOCH_INITIAL: Epoch = 0_u16;
-pub const TLS_EPOCH_ZERO_RTT: Epoch = 1_u16;
-pub const TLS_EPOCH_HANDSHAKE: Epoch = 2_u16;
-// Also, we don't use TLS epochs > 3.
-pub const TLS_EPOCH_APPLICATION_DATA: Epoch = 3_u16;
+#[derive(Default, Debug, Enum, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr)]
+#[repr(u16)]
+pub enum Epoch {
+    // TLS doesn't really have an "initial" concept that maps to QUIC so directly,
+    // but this should be clear enough.
+    #[default]
+    Initial = 0,
+    ZeroRtt,
+    Handshake,
+    ApplicationData,
+    // Also, we don't use TLS epochs > 3.
+}
+
+impl TryFrom<u16> for Epoch {
+    type Error = Error;
+
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        Self::from_repr(value).ok_or(Error::InvalidEpoch)
+    }
+}
+
+impl From<Epoch> for usize {
+    fn from(e: Epoch) -> Self {
+        e as Self
+    }
+}
 
 /// Rather than defining a type alias and a bunch of constants, which leads to a ton of repetition,
 /// use this macro.
@@ -44,6 +63,7 @@ remap_enum! {
     }
 }
 
+#[allow(dead_code)]
 mod ciphers {
     include!(concat!(env!("OUT_DIR"), "/nss_ciphers.rs"));
 }

@@ -19,7 +19,7 @@ use crate::{
     packet::PacketBuilder,
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
-    tparams::{self, TransportParameter},
+    tparams::{TransportParameter, TransportParameterId},
     tracking::PacketNumberSpace,
 };
 
@@ -97,7 +97,7 @@ fn asymmetric_idle_timeout() {
         .tps
         .borrow_mut()
         .local
-        .set_integer(tparams::IDLE_TIMEOUT, LOWER_TIMEOUT_MS);
+        .set_integer(TransportParameterId::IdleTimeout, LOWER_TIMEOUT_MS);
     server.idle_timeout = IdleTimeout::new(LOWER_TIMEOUT);
 
     // Now connect and force idleness manually.
@@ -135,7 +135,7 @@ fn tiny_idle_timeout() {
     // Overwrite the default at the server.
     server
         .set_local_tparam(
-            tparams::IDLE_TIMEOUT,
+            TransportParameterId::IdleTimeout,
             TransportParameter::Integer(LOWER_TIMEOUT_MS),
         )
         .unwrap();

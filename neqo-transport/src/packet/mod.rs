@@ -19,8 +19,8 @@ use neqo_crypto::random;
 
 use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
-    crypto::{CryptoDxState, CryptoSpace, CryptoStates},
-    frame::FRAME_TYPE_PADDING,
+    crypto::{CryptoDxState, CryptoStates, Epoch},
+    frame::FrameType,
     recovery::SendProfile,
     version::{Version, WireVersion},
     Error, Pmtud, Res,
@@ -89,7 +89,7 @@ impl PacketType {
 }
 
 #[allow(clippy::fallible_impl_from)]
-impl From<PacketType> for CryptoSpace {
+impl From<PacketType> for Epoch {
     fn from(v: PacketType) -> Self {
         match v {
             PacketType::Initial => Self::Initial,
@@ -101,13 +101,13 @@ impl From<PacketType> for CryptoSpace {
     }
 }
 
-impl From<CryptoSpace> for PacketType {
-    fn from(cs: CryptoSpace) -> Self {
+impl From<Epoch> for PacketType {
+    fn from(cs: Epoch) -> Self {
         match cs {
-            CryptoSpace::Initial => Self::Initial,
-            CryptoSpace::ZeroRtt => Self::ZeroRtt,
-            CryptoSpace::Handshake => Self::Handshake,
-            CryptoSpace::ApplicationData => Self::Short,
+            Epoch::Initial => Self::Initial,
+            Epoch::ZeroRtt => Self::ZeroRtt,
+            Epoch::Handshake => Self::Handshake,
+            Epoch::ApplicationData => Self::Short,
         }
     }
 }
@@ -249,7 +249,7 @@ impl PacketBuilder {
         pmtud: &Pmtud,
     ) -> bool {
         if pmtud.needs_probe() {
-            debug_assert!(pmtud.probe_size() > profile.limit());
+            debug_assert!(pmtud.probe_size() >= profile.limit());
             self.limit = pmtud.probe_size() - aead_expansion;
             true
         } else {
@@ -296,12 +296,7 @@ impl PacketBuilder {
     /// Cannot happen.
     pub fn pad(&mut self) -> bool {
         if self.padding && !self.is_long() {
-            self.encoder.pad_to(
-                self.limit,
-                FRAME_TYPE_PADDING
-                    .try_into()
-                    .expect("FRAME_TYPE_PADDING < 256"),
-            );
+            self.encoder.pad_to(self.limit, FrameType::Padding.into());
             true
         } else {
             false
@@ -864,20 +859,20 @@ impl<'a> PublicPacket<'a> {
         crypto: &mut CryptoStates,
         release_at: Instant,
     ) -> Res<DecryptedPacket> {
-        let cspace: CryptoSpace = self.packet_type.into();
+        let epoch: Epoch = self.packet_type.into();
         // When we don't have a version, the crypto code doesn't need a version
         // for lookup, so use the default, but fix it up if decryption succeeds.
         let version = self.version().unwrap_or_default();
         // This has to work in two stages because we need to remove header protection
         // before picking the keys to use.
-        if let Some(rx) = crypto.rx_hp(version, cspace) {
+        if let Some(rx) = crypto.rx_hp(version, epoch) {
             // Note that this will dump early, which creates a side-channel.
             // This is OK in this case because we the only reason this can
             // fail is if the cryptographic module is bad or the packet is
             // too small (which is public information).
             let (key_phase, pn, header) = self.decrypt_header(rx)?;
             qtrace!("[{rx}] decoded header: {header:?}");
-            let Some(rx) = crypto.rx(version, cspace, key_phase) else {
+            let Some(rx) = crypto.rx(version, epoch, key_phase) else {
                 return Err(Error::DecryptError);
             };
             let version = rx.version(); // Version fixup; see above.
@@ -894,11 +889,11 @@ impl<'a> PublicPacket<'a> {
                 pn,
                 data: d,
             })
-        } else if crypto.rx_pending(cspace) {
-            Err(Error::KeysPending(cspace))
+        } else if crypto.rx_pending(epoch) {
+            Err(Error::KeysPending(epoch))
         } else {
-            qtrace!("keys for {cspace:?} already discarded");
-            Err(Error::KeysDiscarded(cspace))
+            qtrace!("keys for {epoch:?} already discarded");
+            Err(Error::KeysDiscarded(epoch))
         }
     }
 
