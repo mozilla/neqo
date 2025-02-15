@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use enum_map::Enum;
+use strum::FromRepr;
 
 use crate::{ssl, Error};
 
@@ -13,7 +14,8 @@ use crate::{ssl, Error};
 
 pub type Alert = u8;
 
-#[derive(Default, Debug, Enum, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Debug, Enum, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr)]
+#[repr(u16)]
 pub enum Epoch {
     // TLS doesn't really have an "initial" concept that maps to QUIC so directly,
     // but this should be clear enough.
@@ -29,24 +31,13 @@ impl TryFrom<u16> for Epoch {
     type Error = Error;
 
     fn try_from(value: u16) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::Initial),
-            1 => Ok(Self::ZeroRtt),
-            2 => Ok(Self::Handshake),
-            3 => Ok(Self::ApplicationData),
-            _ => Err(Error::InvalidEpoch),
-        }
+        Self::from_repr(value).ok_or(Error::InvalidEpoch)
     }
 }
 
 impl From<Epoch> for usize {
     fn from(e: Epoch) -> Self {
-        match e {
-            Epoch::Initial => 0,
-            Epoch::ZeroRtt => 1,
-            Epoch::Handshake => 2,
-            Epoch::ApplicationData => 3,
-        }
+        e as Self
     }
 }
 

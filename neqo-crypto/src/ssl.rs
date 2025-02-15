@@ -28,43 +28,27 @@ pub const SECSuccess: SECStatus = _SECStatus_SECSuccess;
 pub const SECFailure: SECStatus = _SECStatus_SECFailure;
 
 #[derive(Debug, Copy, Clone)]
+#[repr(u32)]
 pub enum Opt {
-    Locking,
-    Tickets,
-    OcspStapling,
-    Alpn,
-    ExtendedMasterSecret,
-    SignedCertificateTimestamps,
-    EarlyData,
-    RecordSizeLimit,
-    Tls13CompatMode,
-    HelloDowngradeCheck,
-    SuppressEndOfEarlyData,
-    Grease,
-    EnableChExtensionPermutation,
+    Locking = SSLOption::SSL_NO_LOCKS,
+    Tickets = SSLOption::SSL_ENABLE_SESSION_TICKETS,
+    OcspStapling = SSLOption::SSL_ENABLE_OCSP_STAPLING,
+    Alpn = SSLOption::SSL_ENABLE_ALPN,
+    ExtendedMasterSecret = SSLOption::SSL_ENABLE_EXTENDED_MASTER_SECRET,
+    SignedCertificateTimestamps = SSLOption::SSL_ENABLE_SIGNED_CERT_TIMESTAMPS,
+    EarlyData = SSLOption::SSL_ENABLE_0RTT_DATA,
+    RecordSizeLimit = SSLOption::SSL_RECORD_SIZE_LIMIT,
+    Tls13CompatMode = SSLOption::SSL_ENABLE_TLS13_COMPAT_MODE,
+    HelloDowngradeCheck = SSLOption::SSL_ENABLE_HELLO_DOWNGRADE_CHECK,
+    SuppressEndOfEarlyData = SSLOption::SSL_SUPPRESS_END_OF_EARLY_DATA,
+    Grease = SSLOption::SSL_ENABLE_GREASE,
+    EnableChExtensionPermutation = SSLOption::SSL_ENABLE_CH_EXTENSION_PERMUTATION,
 }
 
 impl Opt {
-    // Cast is safe here because SSLOptions are within the i32 range
-    #[allow(clippy::cast_possible_wrap)]
     #[must_use]
     pub const fn as_int(self) -> PRInt32 {
-        let i = match self {
-            Self::Locking => SSLOption::SSL_NO_LOCKS,
-            Self::Tickets => SSLOption::SSL_ENABLE_SESSION_TICKETS,
-            Self::OcspStapling => SSLOption::SSL_ENABLE_OCSP_STAPLING,
-            Self::Alpn => SSLOption::SSL_ENABLE_ALPN,
-            Self::ExtendedMasterSecret => SSLOption::SSL_ENABLE_EXTENDED_MASTER_SECRET,
-            Self::SignedCertificateTimestamps => SSLOption::SSL_ENABLE_SIGNED_CERT_TIMESTAMPS,
-            Self::EarlyData => SSLOption::SSL_ENABLE_0RTT_DATA,
-            Self::RecordSizeLimit => SSLOption::SSL_RECORD_SIZE_LIMIT,
-            Self::Tls13CompatMode => SSLOption::SSL_ENABLE_TLS13_COMPAT_MODE,
-            Self::HelloDowngradeCheck => SSLOption::SSL_ENABLE_HELLO_DOWNGRADE_CHECK,
-            Self::SuppressEndOfEarlyData => SSLOption::SSL_SUPPRESS_END_OF_EARLY_DATA,
-            Self::Grease => SSLOption::SSL_ENABLE_GREASE,
-            Self::EnableChExtensionPermutation => SSLOption::SSL_ENABLE_CH_EXTENSION_PERMUTATION,
-        };
-        i as PRInt32
+        self as PRInt32
     }
 
     // Some options are backwards, like SSL_NO_LOCKS, so use this to manage that.
