@@ -44,7 +44,7 @@ pub mod send_stream;
 mod send_stream;
 mod sender;
 pub mod server;
-mod shuffle;
+mod sni;
 mod stats;
 pub mod stream_id;
 pub mod streams;
@@ -69,7 +69,7 @@ pub use self::{
     quic_datagrams::DatagramTracking,
     recv_stream::{RecvStreamStats, RECV_BUFFER_SIZE},
     send_stream::{SendStreamStats, SEND_BUFFER_SIZE},
-    shuffle::find_sni,
+    sni::find_sni,
     stats::Stats,
     stream_id::{StreamId, StreamType},
     version::Version,
