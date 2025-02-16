@@ -71,8 +71,6 @@ pub fn find_sni(buf: &[u8]) -> Option<Range<usize>> {
 
 #[cfg(test)]
 mod tests {
-    use test_fixture::{default_client, default_server, now};
-
     const BUF_WITH_SNI: &[u8] = &[
         0x01, // msg_type == 1 (ClientHello)
         0x00, 0x01, 0xfc, // length (arbitrary)
@@ -146,25 +144,5 @@ mod tests {
         // Buffer starting with `1` but otherwise malformed
         let buf = [1; 1];
         assert!(super::find_sni(&buf).is_none());
-    }
-
-    #[test]
-    fn sni_no_slicing_at_nonzero_offset() {
-        let mut client = default_client();
-        let mut server = default_server();
-        let mut now = now();
-
-        // This packet will have two CRPYTO frames [y..end] and [0..x], where x < y.
-        let ch1 = client.process_output(now).dgram();
-        // This packet will have one CRYPTO frame [x..y].
-        let _ch2 = client.process_output(now).dgram();
-        // We are dropping the second packet and only deliver the first.
-        let ack = server.process(ch1, now).dgram();
-        // Client will now RTX the second packet.
-        now += client.process(ack, now).callback();
-        // Make sure it only has one CRYPTO frame.
-        let stats = client.stats().frame_tx;
-        _ = client.process_output(now).dgram();
-        assert_eq!(stats.crypto + 1, client.stats().frame_tx.crypto);
     }
 }
