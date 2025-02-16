@@ -36,7 +36,7 @@ use crate::{
     recovery::RecoveryToken,
     recv_stream::RxStreamOrderer,
     send_stream::TxBuffer,
-    shuffle::find_sni,
+    sni::find_sni,
     stats::FrameStats,
     tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler},
     tracking::PacketNumberSpace,
