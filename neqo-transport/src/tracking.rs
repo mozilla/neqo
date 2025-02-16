@@ -9,14 +9,14 @@
 use std::{
     cmp::min,
     collections::VecDeque,
-    ops::{Index, IndexMut},
     time::{Duration, Instant},
 };
 
 use enum_map::{enum_map, Enum, EnumMap};
+use enumset::{EnumSet, EnumSetType};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
 use neqo_crypto::Epoch;
-use strum::{EnumIter, IntoEnumIterator as _};
+use strum::EnumIter;
 
 use crate::{
     ecn,
@@ -27,7 +27,7 @@ use crate::{
     Error, Res,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq, Enum, EnumIter)]
+#[derive(Debug, PartialOrd, Ord, EnumSetType, Enum, EnumIter)]
 pub enum PacketNumberSpace {
     Initial,
     Handshake,
@@ -66,63 +66,7 @@ impl From<PacketType> for PacketNumberSpace {
     }
 }
 
-#[derive(Clone, Copy, Default)]
-pub struct PacketNumberSpaceSet {
-    spaces: EnumMap<PacketNumberSpace, bool>,
-}
-
-impl PacketNumberSpaceSet {
-    pub fn all() -> Self {
-        Self {
-            spaces: enum_map! {
-                PacketNumberSpace::Initial => true,
-                PacketNumberSpace::Handshake => true,
-                PacketNumberSpace::ApplicationData => true,
-            },
-        }
-    }
-}
-
-impl Index<PacketNumberSpace> for PacketNumberSpaceSet {
-    type Output = bool;
-
-    fn index(&self, index: PacketNumberSpace) -> &Self::Output {
-        &self.spaces[index]
-    }
-}
-
-impl IndexMut<PacketNumberSpace> for PacketNumberSpaceSet {
-    fn index_mut(&mut self, index: PacketNumberSpace) -> &mut Self::Output {
-        &mut self.spaces[index]
-    }
-}
-
-impl<T: AsRef<[PacketNumberSpace]>> From<T> for PacketNumberSpaceSet {
-    fn from(spaces: T) -> Self {
-        let mut v = Self::default();
-        for sp in spaces.as_ref() {
-            v[*sp] = true;
-        }
-        v
-    }
-}
-
-impl std::fmt::Debug for PacketNumberSpaceSet {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let mut first = true;
-        f.write_str("(")?;
-        for sp in PacketNumberSpace::iter() {
-            if self[sp] {
-                if !first {
-                    f.write_str("+")?;
-                    first = false;
-                }
-                std::fmt::Display::fmt(&sp, f)?;
-            }
-        }
-        f.write_str(")")
-    }
-}
+pub type PacketNumberSpaceSet = EnumSet<PacketNumberSpace>;
 
 impl std::fmt::Display for PacketNumberSpace {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -679,8 +623,8 @@ mod tests {
     use test_fixture::now;
 
     use super::{
-        AckTracker, Duration, Instant, PacketNumberSpace, PacketNumberSpaceSet, RecoveryToken,
-        RecvdPackets, MAX_TRACKED_RANGES,
+        AckTracker, Duration, Instant, PacketNumberSpace, RecoveryToken, RecvdPackets,
+        MAX_TRACKED_RANGES,
     };
     use crate::{
         frame::Frame,
@@ -1112,48 +1056,6 @@ mod tests {
             tracker.ack_time(now() + Duration::from_millis(1)),
             Some(now())
         );
-    }
-
-    #[test]
-    fn pnspaceset_default() {
-        let set = PacketNumberSpaceSet::default();
-        assert!(!set[PacketNumberSpace::Initial]);
-        assert!(!set[PacketNumberSpace::Handshake]);
-        assert!(!set[PacketNumberSpace::ApplicationData]);
-    }
-
-    #[test]
-    fn pnspaceset_from() {
-        let set = PacketNumberSpaceSet::from(&[PacketNumberSpace::Initial]);
-        assert!(set[PacketNumberSpace::Initial]);
-        assert!(!set[PacketNumberSpace::Handshake]);
-        assert!(!set[PacketNumberSpace::ApplicationData]);
-
-        let set =
-            PacketNumberSpaceSet::from(&[PacketNumberSpace::Handshake, PacketNumberSpace::Initial]);
-        assert!(set[PacketNumberSpace::Initial]);
-        assert!(set[PacketNumberSpace::Handshake]);
-        assert!(!set[PacketNumberSpace::ApplicationData]);
-
-        let set = PacketNumberSpaceSet::from(&[
-            PacketNumberSpace::ApplicationData,
-            PacketNumberSpace::ApplicationData,
-        ]);
-        assert!(!set[PacketNumberSpace::Initial]);
-        assert!(!set[PacketNumberSpace::Handshake]);
-        assert!(set[PacketNumberSpace::ApplicationData]);
-    }
-
-    #[test]
-    fn pnspaceset_copy() {
-        let set = PacketNumberSpaceSet::from(&[
-            PacketNumberSpace::Handshake,
-            PacketNumberSpace::ApplicationData,
-        ]);
-        let copy = set;
-        assert!(!copy[PacketNumberSpace::Initial]);
-        assert!(copy[PacketNumberSpace::Handshake]);
-        assert!(copy[PacketNumberSpace::ApplicationData]);
     }
 
     #[test]

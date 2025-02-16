@@ -17,7 +17,7 @@ workspace = true
 
 [dependencies]
 # Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
-enumset = { version = "1.1", default-features = false }
+enumset = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
