@@ -20,6 +20,7 @@ use neqo_crypto::{
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
     random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
 };
+use strum::FromRepr;
 use TransportParameterId::{
     AckDelayExponent, ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit, IdleTimeout,
     InitialMaxData, InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote,
@@ -36,7 +37,7 @@ use crate::{
     Error, Res,
 };
 
-#[derive(Debug, Clone, Enum, PartialEq, Eq, Copy)]
+#[derive(Debug, Clone, Enum, PartialEq, Eq, Copy, FromRepr)]
 #[repr(u64)]
 pub enum TransportParameterId {
     OriginalDestinationConnectionId = 0x00,
@@ -80,32 +81,7 @@ impl TryFrom<u64> for TransportParameterId {
     type Error = Error;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        match value {
-            0x00 => Ok(Self::OriginalDestinationConnectionId),
-            0x01 => Ok(Self::IdleTimeout),
-            0x02 => Ok(Self::StatelessResetToken),
-            0x03 => Ok(Self::MaxUdpPayloadSize),
-            0x04 => Ok(Self::InitialMaxData),
-            0x05 => Ok(Self::InitialMaxStreamDataBidiLocal),
-            0x06 => Ok(Self::InitialMaxStreamDataBidiRemote),
-            0x07 => Ok(Self::InitialMaxStreamDataUni),
-            0x08 => Ok(Self::InitialMaxStreamsBidi),
-            0x09 => Ok(Self::InitialMaxStreamsUni),
-            0x0a => Ok(Self::AckDelayExponent),
-            0x0b => Ok(Self::MaxAckDelay),
-            0x0c => Ok(Self::DisableMigration),
-            0x0d => Ok(Self::PreferredAddress),
-            0x0e => Ok(Self::ActiveConnectionIdLimit),
-            0x0f => Ok(Self::InitialSourceConnectionId),
-            0x10 => Ok(Self::RetrySourceConnectionId),
-            0x11 => Ok(Self::VersionInformation),
-            0x2ab2 => Ok(Self::GreaseQuicBit),
-            0xff02_de1a => Ok(Self::MinAckDelay),
-            0x0020 => Ok(Self::MaxDatagramFrameSize),
-            #[cfg(test)]
-            0xce16 => Ok(Self::TestTransportParameter),
-            _ => Err(Error::UnknownTransportParameter),
-        }
+        Self::from_repr(value).ok_or(Error::UnknownTransportParameter)
     }
 }
 
