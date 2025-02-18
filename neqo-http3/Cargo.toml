@@ -18,12 +18,14 @@ workspace = true
 [dependencies]
 # Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 enumset = { workspace = true }
+indexmap = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
 qlog = { workspace = true }
+rustc-hash = { workspace = true }
 sfv = { version = "0.9", default-features = false }
 url = { workspace = true }
 
