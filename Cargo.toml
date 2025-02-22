@@ -43,7 +43,6 @@ url = { version = "2.5.3", default-features = false, features = ["std"] }
 [workspace.lints.rust]
 absolute_paths_not_starting_with_crate = "warn"
 ambiguous_negative_literals = "warn"
-closure_returning_async_block = "warn"
 explicit_outlives_requirements = "warn"
 macro_use_extern_crate = "warn"
 missing_abi = "warn"
