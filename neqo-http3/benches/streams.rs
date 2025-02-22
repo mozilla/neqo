@@ -84,9 +84,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         (100, 1000),
         (1000, 1000),
     ] {
-        let mut group = c.benchmark_group(format!("{streams} streams of {size} bytes"));
+        let mut group = c.benchmark_group(format!("{streams} streams of {data_size} bytes"));
         group.bench_function("multistream", |b| {
-            let data = vec![0; size];
+            let data = vec![0; data_size];
             b.iter_batched_ref(
                 connect,
                 |(client, server)| use_streams(client, server, streams, &data),
