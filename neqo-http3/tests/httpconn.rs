@@ -155,7 +155,8 @@ fn connect_peers_with_network_propagation_delay(
     (out.dgram(), now)
 }
 
-fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
+#[must_use]
+pub fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
     let mut hconn_c = default_http3_client();
     let mut hconn_s = default_http3_server();
 

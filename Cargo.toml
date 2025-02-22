@@ -43,7 +43,6 @@ url = { version = "2.5.3", default-features = false, features = ["std"] }
 [workspace.lints.rust]
 absolute_paths_not_starting_with_crate = "warn"
 ambiguous_negative_literals = "warn"
-closure_returning_async_block = "warn"
 explicit_outlives_requirements = "warn"
 macro_use_extern_crate = "warn"
 missing_abi = "warn"
@@ -62,6 +61,7 @@ cargo = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 multiple_crate_versions = "allow"
+literal_string_with_formatting_args = "allow" # FIXME: Re-enable "warn" when MRSV is > 1.87. See https://github.com/rust-lang/rust-clippy/pull/13953#issuecomment-2676336899
 cfg_not_test = "warn"
 clone_on_ref_ptr = "warn"
 create_dir = "warn"
