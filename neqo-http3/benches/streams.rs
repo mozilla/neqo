@@ -76,7 +76,7 @@ fn connect() -> (Http3Client, Http3Server) {
 fn criterion_benchmark(c: &mut Criterion) {
     fixture_init();
 
-    for (streams, size) in [
+    for (streams, data_size) in [
         (1, 1),
         (1000, 1),
         (10000, 1),
