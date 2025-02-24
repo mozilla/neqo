@@ -203,7 +203,7 @@ impl TransportParameter {
                     }
                 });
             }
-        };
+        }
     }
 
     fn decode_preferred_address(d: &mut Decoder) -> Res<Self> {

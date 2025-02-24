@@ -355,7 +355,7 @@ impl LossRecoverySpace {
                 }
                 // No more packets can be declared lost after this one.
                 break;
-            };
+            }
 
             if packet.declare_lost(now) {
                 lost_packets.push(packet.clone());
@@ -1034,7 +1034,6 @@ mod tests {
     // but the internal functions need the other bits.
     impl Deref for Fixture {
         type Target = LossRecovery;
-        #[must_use]
         fn deref(&self) -> &Self::Target {
             &self.lr
         }

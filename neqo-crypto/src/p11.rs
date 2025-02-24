@@ -58,7 +58,6 @@ macro_rules! scoped_ptr {
 
         impl Deref for $scoped {
             type Target = *mut $target;
-            #[must_use]
             fn deref(&self) -> &*mut $target {
                 &self.ptr
             }
@@ -108,7 +107,6 @@ impl PublicKey {
 }
 
 impl Clone for PublicKey {
-    #[must_use]
     fn clone(&self) -> Self {
         let ptr = unsafe { SECKEY_CopyPublicKey(self.ptr) };
         assert!(!ptr.is_null());
@@ -163,7 +161,6 @@ impl PrivateKey {
 unsafe impl Send for PrivateKey {}
 
 impl Clone for PrivateKey {
-    #[must_use]
     fn clone(&self) -> Self {
         let ptr = unsafe { SECKEY_CopyPrivateKey(self.ptr) };
         assert!(!ptr.is_null());
@@ -211,7 +208,6 @@ impl SymKey {
 }
 
 impl Clone for SymKey {
-    #[must_use]
     fn clone(&self) -> Self {
         let ptr = unsafe { PK11_ReferenceSymKey(self.ptr) };
         assert!(!ptr.is_null());

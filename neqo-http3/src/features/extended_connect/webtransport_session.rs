@@ -285,7 +285,7 @@ impl WebTransportSession {
                     SessionState::Done
                 };
             }
-        };
+        }
         Ok(())
     }
 

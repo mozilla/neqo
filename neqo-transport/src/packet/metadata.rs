@@ -44,6 +44,7 @@ pub struct MetaData<'a> {
 }
 
 impl MetaData<'_> {
+    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
     pub fn new_in<'a>(
         path: &'a PathRef,
         tos: IpTos,

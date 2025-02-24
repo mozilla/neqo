@@ -162,7 +162,6 @@ impl<'a> Decoder<'a> {
 // Implement `AsRef` for `Decoder` so that values can be examined without
 // moving the cursor.
 impl<'a> AsRef<[u8]> for Decoder<'a> {
-    #[must_use]
     fn as_ref(&self) -> &'a [u8] {
         &self.buf[self.offset..]
     }
@@ -175,7 +174,6 @@ impl Debug for Decoder<'_> {
 }
 
 impl<'a> From<&'a [u8]> for Decoder<'a> {
-    #[must_use]
     fn from(buf: &'a [u8]) -> Self {
         Decoder::new(buf)
     }
@@ -185,14 +183,12 @@ impl<'a, T> From<&'a T> for Decoder<'a>
 where
     T: AsRef<[u8]>,
 {
-    #[must_use]
     fn from(buf: &'a T) -> Self {
         Decoder::new(buf.as_ref())
     }
 }
 
 impl<'b> PartialEq<Decoder<'b>> for Decoder<'_> {
-    #[must_use]
     fn eq(&self, other: &Decoder<'b>) -> bool {
         self.buf == other.buf
     }
@@ -452,14 +448,12 @@ impl AsMut<[u8]> for Encoder {
 }
 
 impl<'a> From<Decoder<'a>> for Encoder {
-    #[must_use]
     fn from(dec: Decoder<'a>) -> Self {
         Self::from(&dec.buf[dec.offset..])
     }
 }
 
 impl From<&[u8]> for Encoder {
-    #[must_use]
     fn from(buf: &[u8]) -> Self {
         Self {
             buf: Vec::from(buf),
@@ -468,7 +462,6 @@ impl From<&[u8]> for Encoder {
 }
 
 impl From<Encoder> for Vec<u8> {
-    #[must_use]
     fn from(buf: Encoder) -> Self {
         buf.buf
     }
