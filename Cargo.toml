@@ -36,6 +36,7 @@ log = { version = "0.4", default-features = false }
 qlog = { version = "0.13", default-features = false }
 quinn-udp = { version = "0.5.6", default-features = false, features = ["direct-log", "fast-apple-datapath"] }
 regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
+rustc-hash = { version = "1.1", default-features = false, features = [ "std" ]}
 static_assertions = { version = "1.1", default-features = false }
 strum = { version = "0.26", default-features = false, features = ["derive"] }
 url = { version = "2.5.3", default-features = false, features = ["std"] }

@@ -4,7 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::collections::{HashMap, VecDeque};
+use rustc_hash::FxHashMap as HashMap;
+use std::collections::VecDeque;
 
 use neqo_common::{qtrace, Encoder};
 use neqo_transport::{Connection, StreamId, StreamType};

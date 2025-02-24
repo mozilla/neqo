@@ -7,18 +7,6 @@
 #![allow(clippy::future_not_send)]
 #![allow(clippy::unwrap_used)] // This is example code.
 
-use std::{
-    collections::{HashMap, VecDeque},
-    fmt::{self, Display},
-    fs::{create_dir_all, File, OpenOptions},
-    io::{self, BufWriter},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _},
-    path::PathBuf,
-    pin::Pin,
-    process::exit,
-    time::Instant,
-};
-
 use clap::Parser;
 use futures::{
     future::{select, Either},
@@ -32,6 +20,18 @@ use neqo_crypto::{
 use neqo_http3::Output;
 use neqo_transport::{AppError, CloseReason, ConnectionId, Version};
 use neqo_udp::RecvBuf;
+use rustc_hash::FxHashMap as HashMap;
+use std::{
+    collections::VecDeque,
+    fmt::{self, Display},
+    fs::{create_dir_all, File, OpenOptions},
+    io::{self, BufWriter},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _},
+    path::PathBuf,
+    pin::Pin,
+    process::exit,
+    time::Instant,
+};
 use tokio::time::Sleep;
 use url::{Host, Origin, Url};
 
@@ -529,10 +529,13 @@ const fn local_addr_for(remote_addr: &SocketAddr, local_port: u16) -> SocketAddr
 
 fn urls_by_origin(urls: &[Url]) -> impl Iterator<Item = ((Host, u16), VecDeque<Url>)> {
     urls.iter()
-        .fold(HashMap::<Origin, VecDeque<Url>>::new(), |mut urls, url| {
-            urls.entry(url.origin()).or_default().push_back(url.clone());
-            urls
-        })
+        .fold(
+            HashMap::<Origin, VecDeque<Url>>::default(),
+            |mut urls, url| {
+                urls.entry(url.origin()).or_default().push_back(url.clone());
+                urls
+            },
+        )
         .into_iter()
         .filter_map(|(origin, urls)| match origin {
             Origin::Tuple(_scheme, h, p) => Some(((h, p), urls)),

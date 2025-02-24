@@ -4,9 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use rustc_hash::FxHashMap as HashMap;
 use std::{
     cell::{RefCell, RefMut},
-    collections::HashMap,
     path::PathBuf,
     rc::Rc,
     time::Instant,
@@ -74,7 +74,7 @@ impl Http3Server {
                 http3_parameters.get_connection_parameters().clone(),
             )?,
             http3_parameters,
-            http3_handlers: HashMap::new(),
+            http3_handlers: HashMap::default(),
             events: Http3ServerEvents::default(),
         })
     }

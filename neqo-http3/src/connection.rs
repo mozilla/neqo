@@ -4,13 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    cell::RefCell,
-    collections::{BTreeSet, HashMap},
-    fmt::Debug,
-    mem,
-    rc::Rc,
-};
+use rustc_hash::FxHashMap as HashMap;
+use std::{cell::RefCell, collections::BTreeSet, fmt::Debug, mem, rc::Rc};
 
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, MessageType, Role};
 use neqo_qpack::{decoder::QPackDecoder, encoder::QPackEncoder};
@@ -335,8 +330,8 @@ impl Http3Connection {
             local_params: conn_params,
             settings_state: Http3RemoteSettingsState::NotReceived,
             streams_with_pending_data: BTreeSet::new(),
-            send_streams: HashMap::new(),
-            recv_streams: HashMap::new(),
+            send_streams: HashMap::default(),
+            recv_streams: HashMap::default(),
             role,
         }
     }

@@ -6,7 +6,8 @@
 
 #![allow(clippy::unwrap_used)] // This is example code.
 
-use std::{borrow::Cow, cell::RefCell, collections::HashMap, fmt::Display, rc::Rc, time::Instant};
+use rustc_hash::FxHashMap as HashMap;
+use std::{borrow::Cow, cell::RefCell, fmt::Display, rc::Rc, time::Instant};
 
 use neqo_common::{event::Provider as _, hex, qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay};
@@ -68,8 +69,8 @@ impl HttpServer {
         let is_qns_test = args.shared.qns_test.is_some();
         Ok(Self {
             server,
-            write_state: HashMap::new(),
-            read_state: HashMap::new(),
+            write_state: HashMap::default(),
+            read_state: HashMap::default(),
             is_qns_test,
             regex: if is_qns_test {
                 Regex::new(r"GET +/(\S+)(?:\r)?\n").map_err(|_| Error::Internal)?

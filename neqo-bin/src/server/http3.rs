@@ -6,9 +6,9 @@
 
 #![allow(clippy::unwrap_used)] // This is example code.
 
+use rustc_hash::FxHashMap as HashMap;
 use std::{
     cell::RefCell,
-    collections::HashMap,
     fmt::{self, Display},
     rc::Rc,
     time::Instant,
@@ -68,8 +68,8 @@ impl HttpServer {
         }
         Self {
             server,
-            remaining_data: HashMap::new(),
-            posts: HashMap::new(),
+            remaining_data: HashMap::default(),
+            posts: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
         }
     }

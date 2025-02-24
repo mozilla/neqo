@@ -8,9 +8,10 @@
 
 //! An [HTTP 0.9](https://www.w3.org/Protocols/HTTP/AsImplemented.html) client implementation.
 
+use rustc_hash::FxHashMap as HashMap;
 use std::{
     cell::RefCell,
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     fs::File,
     io::{BufWriter, Write as _},
     net::SocketAddr,
@@ -226,7 +227,7 @@ impl super::Client for Connection {
 impl<'b> Handler<'b> {
     pub fn new(url_queue: VecDeque<Url>, args: &'b Args) -> Self {
         Self {
-            streams: HashMap::new(),
+            streams: HashMap::default(),
             url_queue,
             handled_urls: Vec::new(),
             all_paths: Vec::new(),

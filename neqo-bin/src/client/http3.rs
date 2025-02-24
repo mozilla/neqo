@@ -8,9 +8,10 @@
 
 //! An HTTP 3 client implementation.
 
+use rustc_hash::FxHashMap as HashMap;
 use std::{
     cell::RefCell,
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     fmt::Display,
     fs::File,
     io::{BufWriter, Write as _},
@@ -45,7 +46,7 @@ impl<'a> Handler<'a> {
         let url_handler = UrlHandler {
             url_queue,
             handled_urls: Vec::new(),
-            stream_handlers: HashMap::new(),
+            stream_handlers: HashMap::default(),
             all_paths: Vec::new(),
             args,
         };

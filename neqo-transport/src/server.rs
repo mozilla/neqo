@@ -6,10 +6,10 @@
 
 // This file implements a server that can handle multiple connections.
 
+use rustc_hash::FxHashSet as HashSet;
 use std::{
     cell::RefCell,
     cmp::min,
-    collections::HashSet,
     ops::{Deref, DerefMut},
     path::PathBuf,
     rc::Rc,

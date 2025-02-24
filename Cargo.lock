@@ -828,6 +828,7 @@ dependencies = [
  "qlog",
  "quinn-udp",
  "regex",
+ "rustc-hash",
  "tokio",
  "url",
 ]
@@ -879,6 +880,7 @@ dependencies = [
  "neqo-qpack",
  "neqo-transport",
  "qlog",
+ "rustc-hash",
  "sfv",
  "test-fixture",
  "url",
@@ -892,6 +894,7 @@ dependencies = [
  "neqo-common",
  "neqo-transport",
  "qlog",
+ "rustc-hash",
  "static_assertions",
  "test-fixture",
 ]
@@ -910,6 +913,7 @@ dependencies = [
  "neqo-crypto",
  "neqo-transport",
  "qlog",
+ "rustc-hash",
  "smallvec",
  "static_assertions",
  "strum",
