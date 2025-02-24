@@ -6,7 +6,6 @@
 
 #![allow(clippy::unwrap_used)] // This is example code.
 
-use rustc_hash::FxHashMap as HashMap;
 use std::{
     cell::RefCell,
     fmt::{self, Display},
@@ -20,6 +19,7 @@ use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
 };
 use neqo_transport::{server::ValidateAddress, ConnectionIdGenerator};
+use rustc_hash::FxHashMap as HashMap;
 
 use super::{qns_read_response, Args};
 use crate::send_data::SendData;

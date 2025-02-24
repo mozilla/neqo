@@ -4,7 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use rustc_hash::FxHashMap as HashMap;
 use std::{
     cell::{RefCell, RefMut},
     path::PathBuf,
@@ -18,6 +17,7 @@ use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
     ConnectionIdGenerator, Output,
 };
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     connection::Http3State,

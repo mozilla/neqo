@@ -4,11 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use rustc_hash::FxHashMap as HashMap;
 use std::collections::VecDeque;
 
 use neqo_common::{qtrace, Encoder};
 use neqo_transport::{Connection, StreamId, StreamType};
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{frames::HFrame, BufferedStream, Error, Http3StreamType, RecvStream, Res};
 

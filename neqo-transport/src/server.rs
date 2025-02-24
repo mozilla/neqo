@@ -6,7 +6,6 @@
 
 // This file implements a server that can handle multiple connections.
 
-use rustc_hash::FxHashSet as HashSet;
 use std::{
     cell::RefCell,
     cmp::min,
@@ -24,6 +23,7 @@ use neqo_crypto::{
     encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
     ZeroRttChecker,
 };
+use rustc_hash::FxHashSet as HashSet;
 
 pub use crate::addr_valid::ValidateAddress;
 use crate::{

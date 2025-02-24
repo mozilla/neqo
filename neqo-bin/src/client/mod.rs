@@ -7,6 +7,18 @@
 #![allow(clippy::future_not_send)]
 #![allow(clippy::unwrap_used)] // This is example code.
 
+use std::{
+    collections::VecDeque,
+    fmt::{self, Display},
+    fs::{create_dir_all, File, OpenOptions},
+    io::{self, BufWriter},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _},
+    path::PathBuf,
+    pin::Pin,
+    process::exit,
+    time::Instant,
+};
+
 use clap::Parser;
 use futures::{
     future::{select, Either},
@@ -21,17 +33,6 @@ use neqo_http3::Output;
 use neqo_transport::{AppError, CloseReason, ConnectionId, Version};
 use neqo_udp::RecvBuf;
 use rustc_hash::FxHashMap as HashMap;
-use std::{
-    collections::VecDeque,
-    fmt::{self, Display},
-    fs::{create_dir_all, File, OpenOptions},
-    io::{self, BufWriter},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _},
-    path::PathBuf,
-    pin::Pin,
-    process::exit,
-    time::Instant,
-};
 use tokio::time::Sleep;
 use url::{Host, Origin, Url};
 

@@ -8,7 +8,6 @@
 
 //! An [HTTP 0.9](https://www.w3.org/Protocols/HTTP/AsImplemented.html) client implementation.
 
-use rustc_hash::FxHashMap as HashMap;
 use std::{
     cell::RefCell,
     collections::VecDeque,
@@ -26,6 +25,7 @@ use neqo_transport::{
     CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator, EmptyConnectionIdGenerator,
     Error, Output, RandomConnectionIdGenerator, State, StreamId, StreamType,
 };
+use rustc_hash::FxHashMap as HashMap;
 use url::Url;
 
 use super::{get_output_file, qlog_new, Args, CloseState, Res};

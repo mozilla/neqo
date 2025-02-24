@@ -6,7 +6,6 @@
 
 #![allow(clippy::unwrap_used)] // This is example code.
 
-use rustc_hash::FxHashMap as HashMap;
 use std::{borrow::Cow, cell::RefCell, fmt::Display, rc::Rc, time::Instant};
 
 use neqo_common::{event::Provider as _, hex, qdebug, qerror, qinfo, qwarn, Datagram};
@@ -17,6 +16,7 @@ use neqo_transport::{
     ConnectionEvent, ConnectionIdGenerator, Output, State, StreamId,
 };
 use regex::Regex;
+use rustc_hash::FxHashMap as HashMap;
 
 use super::{qns_read_response, Args};
 use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};

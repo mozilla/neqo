@@ -4,7 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use rustc_hash::FxHashMap as HashMap;
 use std::{cell::RefCell, collections::BTreeSet, fmt::Debug, mem, rc::Rc};
 
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, MessageType, Role};
@@ -13,6 +12,7 @@ use neqo_transport::{
     streams::SendOrder, AppError, CloseReason, Connection, DatagramTracking, State, StreamId,
     StreamType, ZeroRttState,
 };
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     client_events::Http3ClientEvents,
