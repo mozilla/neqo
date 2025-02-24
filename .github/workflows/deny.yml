@@ -30,6 +30,6 @@ jobs:
       with:
         persist-credentials: false
 
-    - uses: EmbarkStudios/cargo-deny-action@e2f4ede4a4e60ea15ff31bc0647485d80c66cfba # v2.0.4
+    - uses: EmbarkStudios/cargo-deny-action@0484eedcba649433ebd03d9b7c9c002746bbc4b9 # v2.0.6
       with:
         command: check ${{ matrix.checks }}
