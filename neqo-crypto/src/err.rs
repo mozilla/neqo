@@ -83,11 +83,9 @@ impl Error {
 }
 
 impl std::error::Error for Error {
-    #[must_use]
     fn cause(&self) -> Option<&dyn std::error::Error> {
         None
     }
-    #[must_use]
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         None
     }
@@ -100,13 +98,11 @@ impl std::fmt::Display for Error {
 }
 
 impl From<std::num::TryFromIntError> for Error {
-    #[must_use]
     fn from(_: std::num::TryFromIntError) -> Self {
         Self::IntegerOverflow
     }
 }
 impl From<std::ffi::NulError> for Error {
-    #[must_use]
     fn from(_: std::ffi::NulError) -> Self {
         Self::InternalError
     }

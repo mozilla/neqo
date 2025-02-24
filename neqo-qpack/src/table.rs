@@ -49,10 +49,12 @@ impl DynamicTableEntry {
         self.refs -= 1;
     }
 
+    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
     pub fn name(&self) -> &[u8] {
         &self.name
     }
 
+    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
     pub fn value(&self) -> &[u8] {
         &self.value
     }

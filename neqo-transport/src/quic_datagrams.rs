@@ -50,7 +50,6 @@ impl QuicDatagram {
 }
 
 impl AsRef<[u8]> for QuicDatagram {
-    #[must_use]
     fn as_ref(&self) -> &[u8] {
         &self.data[..]
     }

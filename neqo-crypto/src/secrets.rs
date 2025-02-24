@@ -35,7 +35,6 @@ pub enum SecretDirection {
 }
 
 impl From<SSLSecretDirection::Type> for SecretDirection {
-    #[must_use]
     fn from(dir: SSLSecretDirection::Type) -> Self {
         Self::from_repr(dir).expect("Invalid secret direction")
     }

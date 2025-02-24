@@ -141,7 +141,6 @@ impl TryInto<PRTime> for Time {
 }
 
 impl From<Time> for Instant {
-    #[must_use]
     fn from(t: Time) -> Self {
         t.t
     }

@@ -1028,7 +1028,7 @@ impl SendStream {
                 final_written,
             }),
             SendStreamState::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
-        };
+        }
     }
 
     pub fn reset_lost(&mut self) {
@@ -1119,7 +1119,7 @@ impl SendStream {
         if let Some(buf) = self.state.tx_buf_mut() {
             buf.mark_as_sent(offset, len);
             self.send_blocked_if_space_needed(0);
-        };
+        }
 
         if fin {
             if let SendStreamState::DataSent { fin_sent, .. } = &mut self.state {
@@ -1373,7 +1373,7 @@ impl SendStream {
             SendStreamState::DataRecvd { .. } => qtrace!("[{self}] already in DataRecvd state"),
             SendStreamState::ResetSent { .. } => qtrace!("[{self}] already in ResetSent state"),
             SendStreamState::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
-        };
+        }
     }
 
     #[cfg(test)]
@@ -1679,7 +1679,7 @@ impl SendStreams {
                                 group.remove(*stream_id);
                             }
                         }
-                    };
+                    }
                 }
                 // if unfair, we're done
                 return false;
