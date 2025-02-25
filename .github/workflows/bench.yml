@@ -104,19 +104,17 @@ jobs:
           mkdir -p hyperfine
 
       # Disable turboboost, hyperthreading and use performance governor.
+      # Also see https://manuel.bernhardt.io/posts/2023-11-16-core-pinning/.
+      # On the bencher, logical cores 2 and 3 have been isolated for use by the benchmarks.
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
 
       - name: Run cargo bench
         run: |
-          # Pin all but neqo-bin benchmarks to CPU 0. neqo-bin benchmarks run
-          # both a client and a server, thus benefiting from multiple CPU cores.
-          #
-          # Run all benchmarks at elevated priority.
-          taskset -c 0 nice -n -20 setarch --addr-no-randomize \
-            cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
           sudo ip link set dev lo mtu "$MTU"
-          nice -n -20 setarch --addr-no-randomize \
+          taskset -c 2 nice -n -20 setarch --addr-no-randomize \
+            cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
+          taskset -c 2 nice -n -20 setarch --addr-no-randomize \
             cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
@@ -220,12 +218,12 @@ jobs:
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
                   # shellcheck disable=SC2086
-                  taskset -c 0 nice -n -20 setarch --addr-no-randomize \
+                  taskset -c 2 nice -n -20 setarch --addr-no-randomize \
                     perf $PERF_OPT -o "$FILENAME.server.perf" $CMD &
                   PID=$!
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
-                  taskset -c 1 nice -n -20 setarch --addr-no-randomize \
+                  taskset -c 3 nice -n -20 setarch --addr-no-randomize \
                     hyperfine --command-name "$TAG" --time-unit millisecond  \
                       --export-json "hyperfine/$FILENAME.json" \
                       --export-markdown "hyperfine/$FILENAME.md" \
@@ -241,7 +239,7 @@ jobs:
                   # the perf profiles of those different runs.
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
-                  taskset -c 1 nice -n -20 setarch --addr-no-randomize \
+                  taskset -c 3 nice -n -20 setarch --addr-no-randomize \
                     perf $PERF_OPT -o "$FILENAME.client.perf" $CMD > /dev/null 2>&1
                   kill $PID
 
