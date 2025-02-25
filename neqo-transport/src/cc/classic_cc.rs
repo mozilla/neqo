@@ -149,30 +149,25 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         self.qlog = qlog;
     }
 
-    #[must_use]
     fn cwnd(&self) -> usize {
         self.congestion_window
     }
 
-    #[must_use]
     fn bytes_in_flight(&self) -> usize {
         self.bytes_in_flight
     }
 
-    #[must_use]
     fn cwnd_avail(&self) -> usize {
         // BIF can be higher than cwnd due to PTO packets, which are sent even
         // if avail is 0, but still count towards BIF.
         self.congestion_window.saturating_sub(self.bytes_in_flight)
     }
 
-    #[must_use]
     fn cwnd_min(&self) -> usize {
         self.max_datagram_size() * 2
     }
 
     #[cfg(test)]
-    #[must_use]
     fn cwnd_initial(&self) -> usize {
         cwnd_initial(self.pmtud.plpmtu())
     }

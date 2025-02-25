@@ -195,6 +195,7 @@ enum AddressValidationInfo {
 }
 
 impl AddressValidationInfo {
+    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
     pub fn token(&self) -> &[u8] {
         match self {
             Self::NewToken(token) | Self::Retry { token, .. } => token,
@@ -825,6 +826,7 @@ impl Connection {
         }
     }
 
+    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
     #[must_use]
     pub fn tls_info(&self) -> Option<&SecretAgentInfo> {
         self.crypto.tls.info()
@@ -1434,7 +1436,7 @@ impl Connection {
                     }
                 } else {
                     self.stats.borrow_mut().pkt_dropped("VN with no versions");
-                };
+                }
                 return Ok(PreprocessResult::End);
             }
             (PacketType::Retry, State::WaitInitial, Role::Client) => {
@@ -1857,7 +1859,7 @@ impl Connection {
             qdebug!("[{self}] Changing to use Server CID={}", packet.scid());
             debug_assert!(path.borrow().is_primary());
             path.borrow_mut().set_remote_cid(packet.scid());
-        };
+        }
     }
 
     fn has_version(&self) -> bool {
@@ -3071,7 +3073,7 @@ impl Connection {
                     .handle_datagram(data, &mut self.stats.borrow_mut())?;
             }
             _ => unreachable!("All other frames are for streams"),
-        };
+        }
 
         Ok(())
     }

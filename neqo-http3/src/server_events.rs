@@ -213,7 +213,6 @@ impl Http3OrWebTransportStream {
 
 impl Deref for Http3OrWebTransportStream {
     type Target = StreamHandler;
-    #[must_use]
     fn deref(&self) -> &Self::Target {
         &self.stream_handler
     }
@@ -382,7 +381,6 @@ impl WebTransportRequest {
 
 impl Deref for WebTransportRequest {
     type Target = StreamHandler;
-    #[must_use]
     fn deref(&self) -> &Self::Target {
         &self.stream_handler
     }

@@ -75,7 +75,6 @@ impl<D: AsRef<[u8]> + AsMut<[u8]>> DerefMut for Datagram<D> {
 
 impl<D: AsRef<[u8]>> Deref for Datagram<D> {
     type Target = [u8];
-    #[must_use]
     fn deref(&self) -> &Self::Target {
         AsRef::<[u8]>::as_ref(self)
     }

@@ -182,6 +182,7 @@ impl VersionConfig {
         self.initial
     }
 
+    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
     #[must_use]
     pub fn all(&self) -> &[Version] {
         &self.all

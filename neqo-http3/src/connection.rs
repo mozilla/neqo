@@ -120,13 +120,13 @@ The API consists of:
   - `webtransport_session_accept` -  only used by the server-side implementation
   - `webtransport_close_session`
   - `webtransport_create_stream_local` -  this function is called when an application wants to open
-     a new `WebTransport` stream. For example `Http3Client::webtransport_create_stream` will call
-     this function.
+    a new `WebTransport` stream. For example `Http3Client::webtransport_create_stream` will call
+    this function.
   - `webtransport_create_stream_remote` -  this is called when a `WebTransport` stream has been
-     opened by the peer and this function sets up the appropriate handler for the stream.
+    opened by the peer and this function sets up the appropriate handler for the stream.
 - functions that are called by `process_http3`
   - `process_sending` - some send-streams are buffered streams(see the Streams section) and this
-     function is called to trigger sending of the buffer data.
+    function is called to trigger sending of the buffer data.
 - functions that are called to  handle `ConnectionEvent`s:
   - `add_new_stream`
   - `handle_stream_readable`
@@ -166,15 +166,15 @@ There are the following types of streams:
 - `Decoder`: there is only a receiver stream of this type and the handler is `DecoderRecvStream`.
 - `Encoder`: there is only a receiver stream of this type and the handler is `EncoderRecvStream`.
 - `NewStream`: there is only a receiver stream of this type and the handler is
-               `NewStreamHeadReader`.
+  `NewStreamHeadReader`.
 - `Http`: `SendMessage` and `RecvMessage` handlers are responsible for this type of streams.
 - `Push`: `RecvMessage` is responsible for this type of streams.
 - `ExtendedConnect`: `WebTransportSession` is responsible sender and receiver handler.
 - `WebTransport(StreamId)`: `WebTransportSendStream` and `WebTransportRecvStream` are responsible
-                            sender and receiver handler.
+  sender and receiver handler.
 - `Unknown`: These are all other stream types that are not unknown to the current implementation
-             and should be handled properly by the spec, e.g., in our implementation the streams are
-             reset.
+  and should be handled properly by the spec, e.g., in our implementation the streams are
+  reset.
 
 The streams are registered in `send_streams` and `recv_streams` in following ways depending if they
 are local or remote:
