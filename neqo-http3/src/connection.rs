@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, collections::BTreeSet, fmt::Debug, mem, rc::Rc};
+use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
 
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, MessageType, Role};
 use neqo_qpack::{decoder::QPackDecoder, encoder::QPackEncoder};
@@ -12,7 +12,7 @@ use neqo_transport::{
     streams::SendOrder, AppError, CloseReason, Connection, DatagramTracking, State, StreamId,
     StreamType, ZeroRttState,
 };
-use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use crate::{
     client_events::Http3ClientEvents,
@@ -298,7 +298,7 @@ pub struct Http3Connection {
     pub qpack_encoder: Rc<RefCell<QPackEncoder>>,
     pub qpack_decoder: Rc<RefCell<QPackDecoder>>,
     settings_state: Http3RemoteSettingsState,
-    streams_with_pending_data: BTreeSet<StreamId>,
+    streams_with_pending_data: HashSet<StreamId>,
     pub send_streams: HashMap<StreamId, Box<dyn SendStream>>,
     pub recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
     webtransport: ExtendedConnectFeature,
@@ -329,7 +329,7 @@ impl Http3Connection {
             ),
             local_params: conn_params,
             settings_state: Http3RemoteSettingsState::NotReceived,
-            streams_with_pending_data: BTreeSet::new(),
+            streams_with_pending_data: HashSet::default(),
             send_streams: HashMap::default(),
             recv_streams: HashMap::default(),
             role,
