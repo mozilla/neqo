@@ -90,8 +90,10 @@ impl ExtensionTracker {
     ) -> PRBool {
         let d = std::slice::from_raw_parts_mut(data, max_len as usize);
         Self::wrap_handler_call(arg, |handler| {
-            #[expect(
+            #[allow(
+                clippy::allow_attributes,
                 clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
                 reason = "Cast is safe here because the message type is always part of the enum."
             )]
             match handler.write(message as HandshakeMessage, d) {
