@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(clippy::missing_errors_doc, reason = "Passing up tokio errors.")]
+
 use std::{io, net::SocketAddr};
 
 use neqo_common::Datagram;

@@ -4,10 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
-#![allow(clippy::unseparated_literal_suffix)] // For bindgen code.
-#![allow(clippy::used_underscore_binding)] // For bindgen code.
-
 mod aead;
 #[cfg(feature = "disable-encryption")]
 pub mod aead_null;
@@ -64,7 +60,7 @@ mod min_version;
 use min_version::MINIMUM_NSS_VERSION;
 use neqo_common::qerror;
 
-#[allow(non_upper_case_globals)]
+#[expect(non_upper_case_globals, reason = "Code is bindgen-generated.")]
 mod nss {
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
@@ -202,7 +198,7 @@ where
     if data.is_null() || len == 0 {
         &[]
     } else {
-        #[allow(clippy::disallowed_methods)]
+        #[expect(clippy::disallowed_methods, reason = "This is non-null.")]
         std::slice::from_raw_parts(data, len)
     }
 }

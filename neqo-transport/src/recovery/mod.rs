@@ -6,8 +6,6 @@
 
 // Tracking of sent packets and detecting their loss.
 
-#![allow(clippy::module_name_repetitions)]
-
 #[cfg(feature = "bench")]
 pub mod sent;
 #[cfg(not(feature = "bench"))]
@@ -884,7 +882,7 @@ impl LossRecovery {
 
     /// Check how packets should be sent, based on whether there is a PTO,
     /// what the current congestion window is, and what the pacer says.
-    #[allow(clippy::option_if_let_else)]
+    #[expect(clippy::option_if_let_else, reason = "Alternative is less readable.")]
     pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
         qtrace!("[{self}] get send profile {now:?}");
         let sender = path.sender();

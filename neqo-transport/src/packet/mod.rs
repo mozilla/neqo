@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 // Encoding and decoding packets off the wire.
 use std::{
     cmp::min,
@@ -88,7 +86,7 @@ impl PacketType {
     }
 }
 
-#[allow(clippy::fallible_impl_from)]
+#[expect(clippy::fallible_impl_from, reason = "TODO: Use strum.")]
 impl From<PacketType> for Epoch {
     fn from(v: PacketType) -> Self {
         match v {
@@ -358,7 +356,7 @@ impl PacketBuilder {
         self.pn = pn;
     }
 
-    #[allow(clippy::cast_possible_truncation)] // Nope.
+    #[expect(clippy::cast_possible_truncation, reason = "AND'ing makes this safe.")]
     fn write_len(&mut self, expansion: usize) {
         let len = self.encoder.len() - (self.offsets.len + 2) + expansion;
         self.encoder.as_mut()[self.offsets.len] = 0x40 | ((len >> 8) & 0x3f) as u8;
@@ -758,7 +756,10 @@ impl<'a> PublicPacket<'a> {
             .as_cid_ref()
     }
 
-    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     #[must_use]
     pub fn token(&self) -> &[u8] {
         &self.token
@@ -775,7 +776,11 @@ impl<'a> PublicPacket<'a> {
         self.version.unwrap_or(0)
     }
 
-    #[allow(clippy::len_without_is_empty)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::len_without_is_empty,
+        reason = "Is OK here."
+    )]
     #[must_use]
     pub const fn len(&self) -> usize {
         self.data.len()

@@ -46,7 +46,7 @@ impl From<Epoch> for usize {
 macro_rules! remap_enum {
     { $t:ident: $s:ty { $( $n:ident = $v:path ),+ $(,)? } } => {
         pub type $t = $s;
-        $(#[allow(clippy::cast_possible_truncation)] pub const $n: $t = $v as $t; )+
+        $(#[expect(clippy::cast_possible_truncation, reason = "Inherent in macro use.")] pub const $n: $t = $v as $t; )+
     };
     { $t:ident: $s:ty => $e:ident { $( $n:ident = $v:ident ),+ $(,)? } } => {
         remap_enum!{ $t: $s { $( $n = $e::$v ),+ } }
@@ -63,7 +63,7 @@ remap_enum! {
     }
 }
 
-#[allow(dead_code)]
+#[expect(dead_code, reason = "Code is bindgen-generated.")]
 mod ciphers {
     include!(concat!(env!("OUT_DIR"), "/nss_ciphers.rs"));
 }

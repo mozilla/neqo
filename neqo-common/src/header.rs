@@ -36,13 +36,19 @@ impl Header {
         )
     }
 
-    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     #[must_use]
     pub fn value(&self) -> &str {
         &self.value

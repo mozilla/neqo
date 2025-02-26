@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::unwrap_used)] // Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed.
+#![expect(
+    clippy::unwrap_used,
+    reason = "Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed."
+)]
 
 use std::{
     cell::RefCell,
@@ -141,7 +144,7 @@ impl SecretAgentPreInfo {
             ssl::SSL_GetPreliminaryChannelInfo(
                 fd,
                 info.as_mut_ptr(),
-                c_uint::try_from(std::mem::size_of::<ssl::SSLPreliminaryChannelInfo>())?,
+                c_uint::try_from(size_of::<ssl::SSLPreliminaryChannelInfo>())?,
             )
         })?;
 
@@ -227,7 +230,7 @@ impl SecretAgentInfo {
             ssl::SSL_GetChannelInfo(
                 fd,
                 info.as_mut_ptr(),
-                c_uint::try_from(std::mem::size_of::<ssl::SSLChannelInfo>())?,
+                c_uint::try_from(size_of::<ssl::SSLChannelInfo>())?,
             )
         })?;
         let info = unsafe { info.assume_init() };
@@ -278,7 +281,6 @@ impl SecretAgentInfo {
 
 /// `SecretAgent` holds the common parts of client and server.
 #[derive(Debug)]
-#[allow(clippy::module_name_repetitions)]
 pub struct SecretAgent {
     fd: *mut ssl::PRFileDesc,
     secrets: SecretHolder,
@@ -631,7 +633,10 @@ impl SecretAgent {
     }
 
     /// Return any fatal alert that the TLS stack might have sent.
-    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     #[must_use]
     pub fn alert(&self) -> Option<&Alert> {
         (*self.alert).as_ref()
@@ -756,12 +761,15 @@ impl SecretAgent {
     /// # Panics
     ///
     /// If setup fails.
-    #[allow(clippy::branches_sharing_code)]
     pub fn close(&mut self) {
         // It should be safe to close multiple times.
         if self.fd.is_null() {
             return;
         }
+        #[expect(
+            clippy::branches_sharing_code,
+            reason = "Moving the PR_Close call after the conditional crashes things?!"
+        )]
         if self.raw == Some(true) {
             // Need to hold the record list in scope until the close is done.
             let _records = self.setup_raw().expect("Can only close");
@@ -798,7 +806,10 @@ impl SecretAgent {
     }
 
     /// Get the active ECH configuration, which is empty if ECH is disabled.
-    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     #[must_use]
     pub fn ech_config(&self) -> &[u8] {
         &self.ech_config
@@ -846,13 +857,13 @@ impl ResumptionToken {
 
 /// A TLS Client.
 #[derive(Debug)]
-#[allow(clippy::box_collection)] // We need the Box.
 pub struct Client {
     agent: SecretAgent,
 
     /// The name of the server we're attempting a connection to.
     server_name: String,
     /// Records the resumption tokens we've received.
+    #[expect(clippy::box_collection, reason = "We need the Box.")]
     resumption: Pin<Box<Vec<ResumptionToken>>>,
 }
 
@@ -884,8 +895,7 @@ impl Client {
         arg: *mut c_void,
     ) -> ssl::SECStatus {
         let mut info: MaybeUninit<ssl::SSLResumptionTokenInfo> = MaybeUninit::uninit();
-        let Ok(info_len) = c_uint::try_from(std::mem::size_of::<ssl::SSLResumptionTokenInfo>())
-        else {
+        let Ok(info_len) = c_uint::try_from(size_of::<ssl::SSLResumptionTokenInfo>()) else {
             return ssl::SECFailure;
         };
         let info_res = &ssl::SSL_GetResumptionTokenInfo(token, len, info.as_mut_ptr(), info_len);
@@ -917,7 +927,10 @@ impl Client {
         ssl::SECSuccess
     }
 
-    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     #[must_use]
     pub fn server_name(&self) -> &str {
         &self.server_name

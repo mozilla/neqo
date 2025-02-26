@@ -51,7 +51,7 @@ pub type PathRef = Rc<RefCell<Path>>;
 #[derive(Debug, Default)]
 pub struct Paths {
     /// All of the paths.  All of these paths will be permanent.
-    #[allow(clippy::struct_field_names)]
+    #[expect(clippy::struct_field_names, reason = "This is the best name.")]
     paths: Vec<PathRef>,
     /// This is the primary path.  This will only be `None` initially, so
     /// care needs to be taken regarding that only during the handshake.
@@ -229,7 +229,10 @@ impl Paths {
         if primary_failed {
             self.primary = None;
             // Find a valid path to fall back to.
-            #[allow(clippy::option_if_let_else)]
+            #[expect(
+                clippy::option_if_let_else,
+                reason = "The alternative is less readable."
+            )]
             if let Some(fallback) = self
                 .paths
                 .iter()
@@ -738,7 +741,7 @@ impl Path {
                 // The path validation failure may be due to ECN blackholing, try again without ECN.
                 qinfo!("[{self}] Possible ECN blackhole, disabling ECN and re-probing path");
                 self.ecn_info
-                    .disable_ecn(stats, crate::ecn::ValidationError::BlackHole);
+                    .disable_ecn(stats, ecn::ValidationError::BlackHole);
                 ProbeState::ProbeNeeded { probe_count: 0 }
             } else {
                 qinfo!("[{self}] Probing failed");
@@ -853,7 +856,10 @@ impl Path {
     /// This only considers retransmissions of probes, not cleanup of the path.
     /// If there is no other activity, then there is no real need to schedule a
     /// timer to cleanup old paths.
-    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     pub fn next_timeout(&self, pto: Duration) -> Option<Instant> {
         if let ProbeState::Probing { sent, .. } = &self.state {
             Some(*sent + pto)

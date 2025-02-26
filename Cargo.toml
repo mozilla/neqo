@@ -26,7 +26,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 # Don't increase beyond what Firefox is currently using:
 # https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
-rust-version = "1.76.0"
+rust-version = "1.82.0"
 
 [workspace.dependencies]
 # Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
@@ -54,19 +54,21 @@ unit_bindings = "warn"
 unused_import_braces = "warn"
 unused_lifetimes = "warn"
 unused_macro_rules = "warn"
-# unused_qualifications = "warn" // Try to re-enable when MSRV is > 1.76
+unused_qualifications = "warn"
 
 [workspace.lints.clippy]
 cargo = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
-multiple_crate_versions = "allow"
-literal_string_with_formatting_args = "allow" # FIXME: Re-enable "warn" when MRSV is > 1.87. See https://github.com/rust-lang/rust-clippy/pull/13953#issuecomment-2676336899
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
 cfg_not_test = "warn"
 clone_on_ref_ptr = "warn"
 create_dir = "warn"
-if_then_some_else_none = "warn"
 get_unwrap = "warn"
+if_then_some_else_none = "warn"
+literal_string_with_formatting_args = "allow" # FIXME: Re-enable "warn" when MRSV is > 1.87. See https://github.com/rust-lang/rust-clippy/pull/13953#issuecomment-2676336899
+multiple_crate_versions = "allow"
 multiple_inherent_impl = "warn"
 pathbuf_init_then_push = "warn"
 redundant_type_annotations = "warn"
@@ -77,8 +79,8 @@ try_err = "warn"
 unneeded_field_pattern = "warn"
 unused_result_ok = "warn"
 unused_trait_names = "warn"
-unwrap_used = "warn"
 unwrap_in_result = "warn"
+unwrap_used = "warn"
 
 # Optimize build dependencies, because bindgen and proc macros / style
 # compilation take more to run than to build otherwise.

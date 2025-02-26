@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cell::RefCell,
     cmp::{max, min},
@@ -135,7 +133,10 @@ impl Crypto {
     }
 
     /// Get the set of enabled protocols.
-    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     pub fn protocols(&self) -> &[String] {
         &self.protocols
     }
@@ -1437,7 +1438,7 @@ impl CryptoStreams {
     }
 
     pub fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
-        self.get_mut(space).map_or(true, |cs| cs.tx.is_empty())
+        self.get_mut(space).is_none_or(|cs| cs.tx.is_empty())
     }
 
     const fn get(&self, space: PacketNumberSpace) -> Option<&CryptoStream> {
@@ -1532,7 +1533,7 @@ impl CryptoStreams {
             stats.crypto += 1;
         }
 
-        #[allow(clippy::type_complexity)]
+        #[expect(clippy::type_complexity, reason = "Yeah, a bit complex but still OK.")]
         const fn limit_chunks<'a>(
             left: (u64, &'a [u8]),
             right: (u64, &'a [u8]),

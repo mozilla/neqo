@@ -54,7 +54,7 @@ impl From<PacketNumberSpace> for Epoch {
     }
 }
 
-#[allow(clippy::fallible_impl_from)]
+#[expect(clippy::fallible_impl_from, reason = "OK here.")]
 impl From<PacketType> for PacketNumberSpace {
     fn from(pt: PacketType) -> Self {
         match pt {

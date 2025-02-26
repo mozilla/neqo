@@ -6,8 +6,6 @@
 
 // The class implementing a QUIC connection.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cell::RefCell,
     cmp::{max, min},
@@ -195,7 +193,10 @@ enum AddressValidationInfo {
 }
 
 impl AddressValidationInfo {
-    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     pub fn token(&self) -> &[u8] {
         match self {
             Self::NewToken(token) | Self::Retry { token, .. } => token,
@@ -826,7 +827,10 @@ impl Connection {
         }
     }
 
-    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     #[must_use]
     pub fn tls_info(&self) -> Option<&SecretAgentInfo> {
         self.crypto.tls.info()
@@ -1295,7 +1299,10 @@ impl Connection {
 
     /// In case a datagram arrives that we can only partially process, save any
     /// part that we don't have keys for.
-    #[allow(clippy::needless_pass_by_value)] // To consume an owned datagram below.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "To consume an owned datagram below."
+    )]
     fn save_datagram(
         &mut self,
         epoch: Epoch,
@@ -1362,7 +1369,7 @@ impl Connection {
 
     /// Perform any processing that we might have to do on packets prior to
     /// attempting to remove protection.
-    #[allow(clippy::too_many_lines)] // Yeah, it's a work in progress.
+    #[expect(clippy::too_many_lines, reason = "Yeah, it's a work in progress.")]
     fn preprocess_packet(
         &mut self,
         packet: &PublicPacket,
@@ -1581,7 +1588,6 @@ impl Connection {
         _ = self.capture_error(Some(path), now, FrameType::Padding, res);
     }
 
-    #[allow(clippy::too_many_lines)] // Will be addressed as part of https://github.com/mozilla/neqo/pull/2396
     fn input_path(
         &mut self,
         path: &PathRef,
@@ -1804,11 +1810,7 @@ impl Connection {
                 self.paths.make_permanent(path, None, cid, now);
                 Ok(())
             } else if let Some(primary) = self.paths.primary() {
-                if primary
-                    .borrow()
-                    .remote_cid()
-                    .map_or(true, |id| id.is_empty())
-                {
+                if primary.borrow().remote_cid().is_none_or(|id| id.is_empty()) {
                     self.paths
                         .make_permanent(path, None, ConnectionIdEntry::empty_remote(), now);
                     Ok(())
@@ -2100,7 +2102,7 @@ impl Connection {
         let pn = tx.next_pn();
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
-        let pn_len = std::mem::size_of::<PacketNumber>()
+        let pn_len = size_of::<PacketNumber>()
             - usize::try_from(unacked_range.leading_zeros() / 8).expect("u32 fits in usize");
         assert!(
             pn_len > 0,
@@ -2381,7 +2383,7 @@ impl Connection {
 
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
-    #[allow(clippy::too_many_lines)] // Yeah, that's just the way it is.
+    #[expect(clippy::too_many_lines, reason = "Yeah, that's just the way it is.")]
     fn output_path(
         &mut self,
         path: &PathRef,
@@ -2892,7 +2894,7 @@ impl Connection {
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)] // Yep, but it's a nice big match, which is basically lots of little functions.
+    #[expect(clippy::too_many_lines, reason = "Yep, but it's a nice big match.")]
     fn input_frame(
         &mut self,
         path: &PathRef,

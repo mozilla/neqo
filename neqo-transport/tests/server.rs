@@ -327,8 +327,10 @@ fn zero_rtt() {
     let shs = server.process(Some(c1), now);
     drop(server.process(Some(c3), now));
     // The server will have received three STREAM frames now if it processed both packets.
-    // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
-    #[allow(clippy::mutable_key_type)]
+    #[expect(
+        clippy::mutable_key_type,
+        reason = "ActiveConnectionRef::Hash doesn't access any of the interior mutable types."
+    )]
     let active = server.active_connections();
     assert_eq!(active.len(), 1);
     assert_eq!(
@@ -351,8 +353,10 @@ fn zero_rtt() {
 
     // The server will drop this last 0-RTT packet.
     drop(server.process(Some(c4), now));
-    // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
-    #[allow(clippy::mutable_key_type)]
+    #[expect(
+        clippy::mutable_key_type,
+        reason = "ActiveConnectionRef::Hash doesn't access any of the interior mutable types."
+    )]
     let active = server.active_connections();
     assert_eq!(active.len(), 1);
     assert_eq!(

@@ -212,7 +212,7 @@ fn packet_with_only_padding() {
 }
 
 /// Overflow the crypto buffer.
-#[allow(clippy::similar_names)] // For ..._scid and ..._dcid, which are fine.
+#[expect(clippy::similar_names, reason = "scid simiar to dcic.")]
 #[test]
 fn overflow_crypto() {
     let mut client = new_client(

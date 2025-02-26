@@ -21,7 +21,10 @@ const ZERO: Duration = Duration::from_millis(0);
 const JITTER: Duration = Duration::from_millis(10);
 const TRANSFER_AMOUNT: usize = 1 << 22; // 4Mbyte
 
-#[allow(clippy::needless_pass_by_value)] // Passing String where &str would do is fine here.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Passing String where &str would do is fine here."
+)]
 fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<str>>) {
     for pacing in [false, true] {
         let mut group = c.benchmark_group(format!("transfer/pacing-{pacing}"));
