@@ -49,7 +49,8 @@ impl DynamicTableEntry {
         self.refs -= 1;
     }
 
-    #[expect(
+    #[allow(
+        clippy::allow_attributes,
         clippy::missing_const_for_fn,
         reason = "TODO: False positive on nightly."
     )]
@@ -57,7 +58,8 @@ impl DynamicTableEntry {
         &self.name
     }
 
-    #[expect(
+    #[allow(
+        clippy::allow_attributes,
         clippy::missing_const_for_fn,
         reason = "TODO: False positive on nightly."
     )]

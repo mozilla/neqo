@@ -856,7 +856,8 @@ impl Path {
     /// This only considers retransmissions of probes, not cleanup of the path.
     /// If there is no other activity, then there is no real need to schedule a
     /// timer to cleanup old paths.
-    #[expect(
+    #[allow(
+        clippy::allow_attributes,
         clippy::missing_const_for_fn,
         reason = "TODO: False positive on nightly."
     )]

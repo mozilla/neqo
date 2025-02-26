@@ -633,7 +633,8 @@ impl SecretAgent {
     }
 
     /// Return any fatal alert that the TLS stack might have sent.
-    #[expect(
+    #[allow(
+        clippy::allow_attributes,
         clippy::missing_const_for_fn,
         reason = "TODO: False positive on nightly."
     )]
@@ -806,7 +807,8 @@ impl SecretAgent {
     }
 
     /// Get the active ECH configuration, which is empty if ECH is disabled.
-    #[expect(
+    #[allow(
+        clippy::allow_attributes,
         clippy::missing_const_for_fn,
         reason = "TODO: False positive on nightly."
     )]
@@ -927,7 +929,8 @@ impl Client {
         ssl::SECSuccess
     }
 
-    #[expect(
+    #[allow(
+        clippy::allow_attributes,
         clippy::missing_const_for_fn,
         reason = "TODO: False positive on nightly."
     )]

@@ -133,7 +133,8 @@ impl Crypto {
     }
 
     /// Get the set of enabled protocols.
-    #[expect(
+    #[allow(
+        clippy::allow_attributes,
         clippy::missing_const_for_fn,
         reason = "TODO: False positive on nightly."
     )]

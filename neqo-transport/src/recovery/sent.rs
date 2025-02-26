@@ -109,7 +109,8 @@ impl SentPacket {
     }
 
     /// Access the recovery tokens that this holds.
-    #[expect(
+    #[allow(
+        clippy::allow_attributes,
         clippy::missing_const_for_fn,
         reason = "TODO: False positive on nightly."
     )]
