@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use enum_map::{enum_map, Enum, EnumMap};
+use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
 use neqo_crypto::Epoch;
@@ -606,11 +606,11 @@ impl AckTracker {
 impl Default for AckTracker {
     fn default() -> Self {
         Self {
-            spaces: enum_map! {
-                PacketNumberSpace::Initial => Some(RecvdPackets::new(PacketNumberSpace::Initial)),
-                PacketNumberSpace::Handshake => Some(RecvdPackets::new(PacketNumberSpace::Handshake)),
-                PacketNumberSpace::ApplicationData => Some(RecvdPackets::new(PacketNumberSpace::ApplicationData)),
-            },
+            spaces: EnumMap::from_array([
+                Some(RecvdPackets::new(PacketNumberSpace::Initial)),
+                Some(RecvdPackets::new(PacketNumberSpace::Handshake)),
+                Some(RecvdPackets::new(PacketNumberSpace::ApplicationData)),
+            ]),
         }
     }
 }

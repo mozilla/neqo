@@ -13,9 +13,6 @@ use std::{
     time::Instant,
 };
 
-#[cfg(not(feature = "disable-encryption"))]
-#[cfg(test)]
-use enum_map::enum_map;
 use enum_map::EnumMap;
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
 pub use neqo_crypto::Epoch;
@@ -1253,14 +1250,14 @@ impl CryptoStates {
             cipher: TLS_AES_128_GCM_SHA256,
             next_secret: hkdf::import_key(TLS_VERSION_1_3, &[0xaa; 32]).unwrap(),
         };
-        let initials = enum_map! {
-            Version::Version1 => Some(CryptoState {
-                    tx: CryptoDxState::test_default(),
-                    rx: read(0),
+        let initials = EnumMap::from_array([
+            None,
+            Some(CryptoState {
+                tx: CryptoDxState::test_default(),
+                rx: read(0),
             }),
-            Version::Version2 => None,
-            Version::Draft29 => None,
-        };
+            None,
+        ]);
         Self {
             initials,
             handshake: None,

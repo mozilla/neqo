@@ -117,8 +117,10 @@ impl ExtensionTracker {
         let d = null_safe_slice(data, len);
         Self::wrap_handler_call(arg, |handler| {
             // Cast is safe here because the message type is always part of the enum
-            #[expect(
+            #[allow(
+                clippy::allow_attributes,
                 clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
                 reason = "Cast is safe here because the message type is always part of the enum."
             )]
             match handler.handle(message as HandshakeMessage, d) {

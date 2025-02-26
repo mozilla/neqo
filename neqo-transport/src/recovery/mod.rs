@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use enum_map::{enum_map, EnumMap};
+use enum_map::EnumMap;
 use enumset::enum_set;
 use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
 pub use sent::SentPacket;
@@ -407,11 +407,11 @@ impl LossRecoverySpaces {
 impl Default for LossRecoverySpaces {
     fn default() -> Self {
         Self {
-            spaces: enum_map! {
-                PacketNumberSpace::Initial => Some(LossRecoverySpace::new(PacketNumberSpace::Initial)),
-                PacketNumberSpace::Handshake => Some(LossRecoverySpace::new(PacketNumberSpace::Handshake)),
-                PacketNumberSpace::ApplicationData =>Some(LossRecoverySpace::new(PacketNumberSpace::ApplicationData)),
-            },
+            spaces: EnumMap::from_array([
+                Some(LossRecoverySpace::new(PacketNumberSpace::Initial)),
+                Some(LossRecoverySpace::new(PacketNumberSpace::Handshake)),
+                Some(LossRecoverySpace::new(PacketNumberSpace::ApplicationData)),
+            ]),
         }
     }
 }
