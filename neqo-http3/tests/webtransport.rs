@@ -26,8 +26,8 @@ fn connect() -> (Http3Client, Http3Server) {
     let mut client = Http3Client::new(
         DEFAULT_SERVER_NAME,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
+        &DEFAULT_ADDR,
+        &DEFAULT_ADDR,
         Http3Parameters::default().webtransport(true),
         now(),
     )

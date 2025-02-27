@@ -126,8 +126,8 @@ impl super::Handler for Handler<'_> {
 
 pub fn create_client(
     args: &Args,
-    local_addr: SocketAddr,
-    remote_addr: SocketAddr,
+    local_addr: &SocketAddr,
+    remote_addr: &SocketAddr,
     hostname: &str,
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Connection> {

@@ -106,7 +106,7 @@ fn migration_delay_to_ecn_blackhole() {
 
     // Migrate the client.
     client
-        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), false, now)
+        .migrate(Some(&DEFAULT_ADDR_V4), Some(&DEFAULT_ADDR_V4), false, now)
         .unwrap();
 
     // The client should send MAX_PATH_PROBES path challenges with ECN enabled, and then another
@@ -248,7 +248,7 @@ pub fn migration_with_modifiers(
     server.process_input(orig_path_modifier(client_pkt).unwrap(), now);
 
     client
-        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), false, now)
+        .migrate(Some(&DEFAULT_ADDR_V4), Some(&DEFAULT_ADDR_V4), false, now)
         .unwrap();
 
     let mut migrated = false;
@@ -345,7 +345,7 @@ pub fn migration_with_modifiers(
 
     now += client.process_output(now).callback();
     let mut client_pkt = send_something(&mut client, now);
-    while !migrated && client_pkt.source() == DEFAULT_ADDR_V4 {
+    while !migrated && client_pkt.source() == &DEFAULT_ADDR_V4 {
         client_pkt = send_something(&mut client, now);
     }
     let tos_after_migration = client_pkt.tos();

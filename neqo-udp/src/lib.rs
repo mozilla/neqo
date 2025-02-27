@@ -67,7 +67,7 @@ pub fn send_inner(
     d: &Datagram,
 ) -> io::Result<()> {
     let transmit = Transmit {
-        destination: d.destination(),
+        destination: *d.destination(),
         ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
         contents: d,
         segment_size: None,
@@ -152,8 +152,8 @@ impl<'a> Iterator for DatagramIter<'a> {
                 .and_then(|(meta, ds)| ds.next().map(|d| (meta, d)))
             {
                 return Some(Datagram::from_slice(
-                    meta.addr,
-                    self.local_address,
+                    &meta.addr,
+                    &self.local_address,
                     meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
                     d,
                 ));
@@ -254,8 +254,8 @@ mod tests {
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         let datagram = Datagram::new(
-            sender.inner.local_addr()?,
-            receiver.inner.local_addr()?,
+            &sender.inner.local_addr()?,
+            &receiver.inner.local_addr()?,
             IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
             b"Hello, world!".to_vec(),
         );

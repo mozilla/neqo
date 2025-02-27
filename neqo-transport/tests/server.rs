@@ -158,7 +158,7 @@ fn duplicate_initial_new_path() {
     assert_eq!(*client.state(), State::Init);
     let initial = client.process_output(now()).dgram().unwrap();
     let other = Datagram::new(
-        SocketAddr::new(initial.source().ip(), initial.source().port() ^ 23),
+        &SocketAddr::new(initial.source().ip(), initial.source().port() ^ 23),
         initial.destination(),
         initial.tos(),
         &initial[..],
@@ -422,7 +422,7 @@ fn new_token_different_port() {
 
     // Now rewrite the source port, which should not change that the token is OK.
     let d = dgram.unwrap();
-    let src = SocketAddr::new(d.source().ip(), d.source().port() + 1);
+    let src = &SocketAddr::new(d.source().ip(), d.source().port() + 1);
     let dgram = Some(Datagram::new(src, d.destination(), d.tos(), &d[..]));
     let dgram = server.process(dgram, now()).dgram(); // Retry
     assert!(dgram.is_some());

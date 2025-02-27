@@ -98,7 +98,7 @@ pub const DEFAULT_ADDR_V4: SocketAddr = addr_v4();
 // Create a default datagram with the given data.
 #[must_use]
 pub fn datagram(data: Vec<u8>) -> Datagram {
-    Datagram::new(DEFAULT_ADDR, DEFAULT_ADDR, IpTosEcn::Ect0.into(), data)
+    Datagram::new(&DEFAULT_ADDR, &DEFAULT_ADDR, IpTosEcn::Ect0.into(), data)
 }
 
 /// Create a default socket address.
@@ -161,8 +161,8 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
+        &DEFAULT_ADDR,
+        &DEFAULT_ADDR,
         params.ack_ratio(255), // Tests work better with this set this way.
         now(),
     )
@@ -281,8 +281,8 @@ pub fn http3_client_with_params(params: Http3Parameters) -> Http3Client {
     Http3Client::new(
         DEFAULT_SERVER_NAME,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
+        &DEFAULT_ADDR,
+        &DEFAULT_ADDR,
         params,
         now(),
     )

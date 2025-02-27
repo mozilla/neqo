@@ -359,8 +359,8 @@ impl Server {
         // This is only looking at the first packet header in the datagram.
         // All packets in the datagram are routed to the same connection.
         let len = dgram.len();
-        let destination = dgram.destination();
-        let source = dgram.source();
+        let destination = *dgram.destination();
+        let source = *dgram.source();
         let res = PublicPacket::decode(&mut dgram[..], self.cid_generator.borrow().as_decoder());
         let Ok((packet, _remainder)) = res else {
             qtrace!("[{self}] Discarding {dgram:?}");

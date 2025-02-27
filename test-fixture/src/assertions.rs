@@ -158,7 +158,7 @@ pub fn assert_no_1rtt(payload: &[u8]) {
 /// # Panics
 ///
 /// When the path doesn't use the given socket address at both ends.
-pub fn assert_path(dgram: &Datagram, path_addr: SocketAddr) {
+pub fn assert_path(dgram: &Datagram, path_addr: &SocketAddr) {
     assert_eq!(dgram.source(), path_addr);
     assert_eq!(dgram.destination(), path_addr);
 }
@@ -167,7 +167,7 @@ pub fn assert_path(dgram: &Datagram, path_addr: SocketAddr) {
 ///
 /// When the path doesn't use the default v4 socket address at both ends.
 pub fn assert_v4_path(dgram: &Datagram, padded: bool) {
-    assert_path(dgram, DEFAULT_ADDR_V4);
+    assert_path(dgram, &DEFAULT_ADDR_V4);
     if padded {
         assert_eq!(dgram.len(), Pmtud::default_plpmtu(DEFAULT_ADDR_V4.ip()));
     }
@@ -177,7 +177,7 @@ pub fn assert_v4_path(dgram: &Datagram, padded: bool) {
 ///
 /// When the path doesn't use the default v6 socket address at both ends.
 pub fn assert_v6_path(dgram: &Datagram, padded: bool) {
-    assert_path(dgram, DEFAULT_ADDR);
+    assert_path(dgram, &DEFAULT_ADDR);
     if padded {
         assert_eq!(dgram.len(), Pmtud::default_plpmtu(DEFAULT_ADDR.ip()));
     }

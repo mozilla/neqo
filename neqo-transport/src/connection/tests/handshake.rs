@@ -151,8 +151,8 @@ fn no_alpn() {
         "example.com",
         &["bad-alpn"],
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
+        &DEFAULT_ADDR,
+        &DEFAULT_ADDR,
         ConnectionParameters::default(),
         now(),
     )
@@ -286,7 +286,7 @@ fn crypto_frame_split() {
 #[test]
 fn chacha20poly1305() {
     let mut server = default_server();
-    let mut client = zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR);
+    let mut client = zero_len_cid_client(&DEFAULT_ADDR, &DEFAULT_ADDR);
     client.set_ciphers(&[TLS_CHACHA20_POLY1305_SHA256]).unwrap();
     connect_force_idle(&mut client, &mut server);
 }
@@ -806,8 +806,8 @@ fn connect_one_version() {
             test_fixture::DEFAULT_SERVER_NAME,
             test_fixture::DEFAULT_ALPN,
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-            DEFAULT_ADDR,
-            DEFAULT_ADDR,
+            &DEFAULT_ADDR,
+            &DEFAULT_ADDR,
             ConnectionParameters::default().versions(version, vec![version]),
             now(),
         )
@@ -913,7 +913,7 @@ fn drop_initial_packet_from_wrong_address() {
 
     let p = out.dgram().unwrap();
     let dgram = Datagram::new(
-        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
+        &SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
         p.destination(),
         p.tos(),
         &p[..],
@@ -945,7 +945,7 @@ fn drop_handshake_packet_from_wrong_address() {
 
     let p = s_hs.unwrap();
     let dgram = Datagram::new(
-        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
+        &SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
         p.destination(),
         p.tos(),
         &p[..],

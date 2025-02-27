@@ -299,8 +299,8 @@ impl Http3Client {
     pub fn new(
         server_name: impl Into<String>,
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
-        local_addr: SocketAddr,
-        remote_addr: SocketAddr,
+        local_addr: &SocketAddr,
+        remote_addr: &SocketAddr,
         http3_parameters: Http3Parameters,
         now: Instant,
     ) -> Res<Self> {
@@ -1322,8 +1322,8 @@ mod tests {
         Http3Client::new(
             DEFAULT_SERVER_NAME,
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-            DEFAULT_ADDR,
-            DEFAULT_ADDR,
+            &DEFAULT_ADDR,
+            &DEFAULT_ADDR,
             Http3Parameters::default()
                 .connection_parameters(
                     // Disable compatible upgrade, which complicates tests.

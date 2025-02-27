@@ -56,7 +56,7 @@ pub struct Pmtud {
 
 impl Pmtud {
     /// Returns the MTU search table for the given remote IP address family.
-    const fn search_table(remote_ip: IpAddr) -> &'static [usize] {
+    const fn search_table(remote_ip: &IpAddr) -> &'static [usize] {
         match remote_ip {
             IpAddr::V4(_) => MTU_SIZES_V4,
             IpAddr::V6(_) => MTU_SIZES_V6,
@@ -64,7 +64,7 @@ impl Pmtud {
     }
 
     /// Size of the IPv4/IPv6 and UDP headers, in bytes.
-    const fn header_size(remote_ip: IpAddr) -> usize {
+    const fn header_size(remote_ip: &IpAddr) -> usize {
         match remote_ip {
             IpAddr::V4(_) => 20 + 8,
             IpAddr::V6(_) => 40 + 8,
@@ -72,7 +72,7 @@ impl Pmtud {
     }
 
     #[must_use]
-    pub fn new(remote_ip: IpAddr, iface_mtu: Option<usize>) -> Self {
+    pub fn new(remote_ip: &IpAddr, iface_mtu: Option<usize>) -> Self {
         let search_table = Self::search_table(remote_ip);
         let probe_index = 0;
         Self {
@@ -322,8 +322,8 @@ impl Pmtud {
     /// Returns the default PLPMTU for the given remote IP address.
     #[must_use]
     pub const fn default_plpmtu(remote_ip: IpAddr) -> usize {
-        let search_table = Self::search_table(remote_ip);
-        search_table[0] - Self::header_size(remote_ip)
+        let search_table = Self::search_table(&remote_ip);
+        search_table[0] - Self::header_size(&remote_ip)
     }
 }
 
@@ -390,7 +390,7 @@ mod tests {
         pmtud: &mut Pmtud,
         stats: &mut Stats,
         prot: &mut CryptoDxState,
-        addr: IpAddr,
+        addr: &IpAddr,
         mtu: usize,
         now: Instant,
     ) {
@@ -420,7 +420,7 @@ mod tests {
     }
 
     fn find_pmtu(
-        addr: IpAddr,
+        addr: &IpAddr,
         mtu: usize,
         iface_mtu: Option<usize>,
     ) -> (Pmtud, Stats, CryptoDxState, Instant) {
@@ -448,7 +448,7 @@ mod tests {
         (pmtud, stats, prot, now)
     }
 
-    fn find_pmtu_with_reduction(addr: IpAddr, mtu: usize, smaller_mtu: usize) {
+    fn find_pmtu_with_reduction(addr: &IpAddr, mtu: usize, smaller_mtu: usize) {
         assert!(mtu > smaller_mtu);
         let (mut pmtud, mut stats, mut prot, now) = find_pmtu(addr, mtu, None);
 
@@ -464,7 +464,7 @@ mod tests {
         assert_mtu(&pmtud, smaller_mtu);
     }
 
-    fn find_pmtu_with_increase(addr: IpAddr, mtu: usize, larger_mtu: usize) {
+    fn find_pmtu_with_increase(addr: &IpAddr, mtu: usize, larger_mtu: usize) {
         assert!(mtu < larger_mtu);
         let (mut pmtud, mut stats, mut prot, now) = find_pmtu(addr, mtu, None);
 
@@ -496,7 +496,7 @@ mod tests {
             for path_mtu in path_mtus() {
                 for &iface_mtu in IFACE_MTUS {
                     qinfo!("PMTUD for {addr}, path MTU {path_mtu}, iface MTU {iface_mtu:?}");
-                    find_pmtu(addr, path_mtu, iface_mtu);
+                    find_pmtu(&addr, path_mtu, iface_mtu);
                 }
             }
         }
@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn pmtud_with_reduction() {
-        for &addr in &[V4, V6] {
+        for addr in &[V4, V6] {
             for path_mtu in path_mtus() {
                 let path_mtus = path_mtus();
                 let smaller_mtus = path_mtus.iter().filter(|&mtu| *mtu < path_mtu);
@@ -518,7 +518,7 @@ mod tests {
 
     #[test]
     fn pmtud_with_increase() {
-        for &addr in &[V4, V6] {
+        for addr in &[V4, V6] {
             for path_mtu in path_mtus() {
                 let path_mtus = path_mtus();
                 let larger_mtus = path_mtus.iter().filter(|&mtu| *mtu > path_mtu);
@@ -554,7 +554,7 @@ mod tests {
     fn pmtud_on_packets_lost() {
         const MTU: usize = 1500;
         let now = now();
-        let mut pmtud = Pmtud::new(V4, Some(MTU));
+        let mut pmtud = Pmtud::new(&V4, Some(MTU));
         let mut stats = Stats::default();
         // Start with completed PMTUD with MTU 1500.
         pmtud.stop(
@@ -642,7 +642,7 @@ mod tests {
     fn pmtud_on_packets_lost_and_acked() {
         const MTU: usize = 1500;
         let now = now();
-        let mut pmtud = Pmtud::new(V4, Some(MTU));
+        let mut pmtud = Pmtud::new(&V4, Some(MTU));
         let mut stats = Stats::default();
         // Start with completed PMTUD with MTU 1500.
         pmtud.stop(
