@@ -39,8 +39,8 @@ pub fn default_http3_client(client_params: Http3Parameters) -> Http3Client {
     Http3Client::new(
         DEFAULT_SERVER_NAME,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
+        &DEFAULT_ADDR,
+        &DEFAULT_ADDR,
         client_params,
         now(),
     )

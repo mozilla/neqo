@@ -576,7 +576,7 @@ impl LossRecovery {
         primary_path: &PathRef,
         pn_space: PacketNumberSpace,
         acked_ranges: R,
-        ack_ecn: Option<ecn::Count>,
+        ack_ecn: Option<&ecn::Count>,
         ack_delay: Duration,
         now: Instant,
     ) -> (Vec<SentPacket>, Vec<SentPacket>)
@@ -980,7 +980,7 @@ mod tests {
             &mut self,
             pn_space: PacketNumberSpace,
             acked_ranges: Vec<RangeInclusive<PacketNumber>>,
-            ack_ecn: Option<ecn::Count>,
+            ack_ecn: Option<&ecn::Count>,
             ack_delay: Duration,
             now: Instant,
         ) -> (Vec<SentPacket>, Vec<SentPacket>) {
@@ -1017,8 +1017,8 @@ mod tests {
         fn default() -> Self {
             let stats = StatsCell::default();
             let mut path = Path::temporary(
-                DEFAULT_ADDR,
-                DEFAULT_ADDR,
+                &DEFAULT_ADDR,
+                &DEFAULT_ADDR,
                 &ConnectionParameters::default(),
                 NeqoQlog::default(),
                 now(),

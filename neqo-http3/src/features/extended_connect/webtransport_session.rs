@@ -302,7 +302,7 @@ impl WebTransportSession {
 
             if !stream_id.is_self_initiated(self.role) {
                 self.events
-                    .extended_connect_new_stream(Http3StreamInfo::new(
+                    .extended_connect_new_stream(&Http3StreamInfo::new(
                         stream_id,
                         ExtendedConnectType::WebTransport.get_stream_type(self.session_id),
                     ))?;
@@ -521,7 +521,7 @@ impl RecvStreamEvents for Rc<RefCell<WebTransportSessionListener>> {}
 impl HttpRecvStreamEvents for Rc<RefCell<WebTransportSessionListener>> {
     fn header_ready(
         &self,
-        _stream_info: Http3StreamInfo,
+        _stream_info: &Http3StreamInfo,
         headers: Vec<Header>,
         interim: bool,
         fin: bool,

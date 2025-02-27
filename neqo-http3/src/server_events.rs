@@ -170,13 +170,13 @@ impl Http3OrWebTransportStream {
     pub(crate) const fn new(
         conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
-        stream_info: Http3StreamInfo,
+        stream_info: &Http3StreamInfo,
     ) -> Self {
         Self {
             stream_handler: StreamHandler {
                 conn,
                 handler,
-                stream_info,
+                stream_info: *stream_info,
             },
         }
     }
@@ -329,7 +329,7 @@ impl WebTransportRequest {
         Ok(Http3OrWebTransportStream::new(
             self.stream_handler.conn.clone(),
             Rc::clone(&self.stream_handler.handler),
-            Http3StreamInfo::new(id, Http3StreamType::WebTransport(session_id)),
+            &Http3StreamInfo::new(id, Http3StreamType::WebTransport(session_id)),
         ))
     }
 
@@ -511,7 +511,7 @@ impl Http3ServerEvents {
         &self,
         conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
-        stream_info: Http3StreamInfo,
+        stream_info: &Http3StreamInfo,
         data: Vec<u8>,
         fin: bool,
     ) {
@@ -526,7 +526,7 @@ impl Http3ServerEvents {
         &self,
         conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
-        stream_info: Http3StreamInfo,
+        stream_info: &Http3StreamInfo,
     ) {
         self.insert(Http3ServerEvent::DataWritable {
             stream: Http3OrWebTransportStream::new(conn, handler, stream_info),
@@ -537,7 +537,7 @@ impl Http3ServerEvents {
         &self,
         conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
-        stream_info: Http3StreamInfo,
+        stream_info: &Http3StreamInfo,
         error: AppError,
     ) {
         self.insert(Http3ServerEvent::StreamReset {
@@ -550,7 +550,7 @@ impl Http3ServerEvents {
         &self,
         conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
-        stream_info: Http3StreamInfo,
+        stream_info: &Http3StreamInfo,
         error: AppError,
     ) {
         self.insert(Http3ServerEvent::StreamStopSending {

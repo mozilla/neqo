@@ -463,7 +463,7 @@ impl RecvPushEvents {
 }
 
 impl RecvStreamEvents for RecvPushEvents {
-    fn data_readable(&self, _stream_info: Http3StreamInfo) {
+    fn data_readable(&self, _stream_info: &Http3StreamInfo) {
         self.push_handler.borrow_mut().new_stream_event(
             self.push_id,
             Http3ClientEvent::PushDataReadable {
@@ -472,7 +472,7 @@ impl RecvStreamEvents for RecvPushEvents {
         );
     }
 
-    fn recv_closed(&self, _stream_info: Http3StreamInfo, close_type: CloseType) {
+    fn recv_closed(&self, _stream_info: &Http3StreamInfo, close_type: CloseType) {
         match close_type {
             CloseType::ResetApp(_) => {}
             CloseType::ResetRemote(_) | CloseType::LocalError(_) => self
@@ -487,7 +487,7 @@ impl RecvStreamEvents for RecvPushEvents {
 impl HttpRecvStreamEvents for RecvPushEvents {
     fn header_ready(
         &self,
-        _stream_info: Http3StreamInfo,
+        _stream_info: &Http3StreamInfo,
         headers: Vec<Header>,
         interim: bool,
         fin: bool,

@@ -34,7 +34,7 @@ fn cwnd_is_halved(cc: &ClassicCongestionControl<NewReno>) {
 
 #[test]
 fn issue_876() {
-    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
+    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(&IP_ADDR, MTU));
     let now = now();
     let before = now.checked_sub(Duration::from_millis(100)).unwrap();
     let after = now + Duration::from_millis(150);
@@ -145,7 +145,7 @@ fn issue_876() {
 #[test]
 // https://github.com/mozilla/neqo/pull/1465
 fn issue_1465() {
-    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
+    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(&IP_ADDR, MTU));
     let mut pn = 0;
     let mut now = now();
     let max_datagram_size = cc.max_datagram_size();

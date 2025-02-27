@@ -1533,8 +1533,8 @@ impl CryptoStreams {
 
         #[expect(clippy::type_complexity, reason = "Yeah, a bit complex but still OK.")]
         const fn limit_chunks<'a>(
-            left: (u64, &'a [u8]),
-            right: (u64, &'a [u8]),
+            left: &(u64, &'a [u8]),
+            right: &(u64, &'a [u8]),
             limit: usize,
         ) -> ((u64, &'a [u8]), (u64, &'a [u8])) {
             let (left_offset, mut left) = left;
@@ -1557,7 +1557,7 @@ impl CryptoStreams {
                 (left, _) = left.split_at(limit / 2);
                 (right, _) = right.split_at(limit / 2);
             }
-            ((left_offset, left), (right_offset, right))
+            ((*left_offset, left), (right_offset, right))
         }
 
         let Some(cs) = self.get_mut(space) else {
@@ -1574,7 +1574,7 @@ impl CryptoStreams {
                     let packets_needed = data.len().div_ceil(builder.limit());
                     let limit = data.len() / packets_needed;
                     let ((left_offset, left), (right_offset, right)) =
-                        limit_chunks((offset, left), (offset + mid as u64, right), limit);
+                        limit_chunks(&(offset, left), &(offset + mid as u64, right), limit);
                     (
                         write_chunk(right_offset, right, builder),
                         write_chunk(left_offset, left, builder),

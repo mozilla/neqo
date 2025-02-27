@@ -72,8 +72,8 @@ impl Paths {
     /// This might be a temporary path.
     pub fn find_path(
         &self,
-        local: SocketAddr,
-        remote: SocketAddr,
+        local: &SocketAddr,
+        remote: &SocketAddr,
         conn_params: &ConnectionParameters,
         now: Instant,
         stats: &mut Stats,
@@ -191,7 +191,7 @@ impl Paths {
             || ecn::Info::default().baseline(),
             |p| p.borrow().ecn_info.baseline(),
         );
-        path.borrow_mut().set_ecn_baseline(baseline);
+        path.borrow_mut().set_ecn_baseline(&baseline);
         if force || path.borrow().is_valid() {
             path.borrow_mut().set_valid(now);
             drop(self.select_primary(path, now));
@@ -269,7 +269,7 @@ impl Paths {
     pub fn handle_migration(
         &mut self,
         path: &PathRef,
-        remote: SocketAddr,
+        remote: &SocketAddr,
         now: Instant,
         stats: &mut Stats,
     ) {
@@ -516,8 +516,8 @@ impl Path {
     /// Create a path from addresses and a remote connection ID.
     /// This is used for migration and for new datagrams.
     pub fn temporary(
-        local: SocketAddr,
-        remote: SocketAddr,
+        local: &SocketAddr,
+        remote: &SocketAddr,
         conn_params: &ConnectionParameters,
         qlog: NeqoQlog,
         now: Instant,
@@ -544,11 +544,11 @@ impl Path {
         } else {
             None
         };
-        let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip(), iface_mtu), now);
+        let mut sender = PacketSender::new(conn_params, Pmtud::new(&remote.ip(), iface_mtu), now);
         sender.set_qlog(qlog.clone());
         Self {
-            local,
-            remote,
+            local: *local,
+            remote: *remote,
             local_cid: None,
             remote_cid: None,
             primary: false,
@@ -564,7 +564,7 @@ impl Path {
         }
     }
 
-    pub fn set_ecn_baseline(&mut self, baseline: ecn::Count) {
+    pub fn set_ecn_baseline(&mut self, baseline: &ecn::Count) {
         self.ecn_info.set_baseline(baseline);
     }
 
@@ -598,8 +598,8 @@ impl Path {
     }
 
     /// Determine if this path was the one that the provided datagram was received on.
-    fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
-        self.local == local && self.remote == remote
+    fn received_on(&self, local: &SocketAddr, remote: &SocketAddr) -> bool {
+        self.local == *local && self.remote == *remote
     }
 
     /// Update the remote port number.  Any flexibility we allow in `received_on`
@@ -686,7 +686,7 @@ impl Path {
         // with the current value.
         let tos = self.tos();
         self.ecn_info.on_packet_sent(stats);
-        Datagram::new(self.local, self.remote, tos, payload.into())
+        Datagram::new(&self.local, &self.remote, tos, payload.into())
     }
 
     /// Get local address as `SocketAddr`
@@ -966,7 +966,7 @@ impl Path {
     pub fn on_packets_acked(
         &mut self,
         acked_pkts: &[SentPacket],
-        ack_ecn: Option<ecn::Count>,
+        ack_ecn: Option<&ecn::Count>,
         now: Instant,
         stats: &mut Stats,
     ) {

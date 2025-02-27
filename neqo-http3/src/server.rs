@@ -182,14 +182,14 @@ impl Http3Server {
                         Http3OrWebTransportStream::new(
                             conn.clone(),
                             Rc::clone(handler),
-                            stream_info,
+                            &stream_info,
                         ),
                         headers,
                         fin,
                     ),
                     Http3ServerConnEvent::DataReadable { stream_info } => {
                         prepare_data(
-                            stream_info,
+                            &stream_info,
                             &mut handler_borrowed,
                             conn,
                             handler,
@@ -199,12 +199,12 @@ impl Http3Server {
                     }
                     Http3ServerConnEvent::DataWritable { stream_info } => self
                         .events
-                        .data_writable(conn.clone(), Rc::clone(handler), stream_info),
+                        .data_writable(conn.clone(), Rc::clone(handler), &stream_info),
                     Http3ServerConnEvent::StreamReset { stream_info, error } => {
                         self.events.stream_reset(
                             conn.clone(),
                             Rc::clone(handler),
-                            stream_info,
+                            &stream_info,
                             error,
                         );
                     }
@@ -212,7 +212,7 @@ impl Http3Server {
                         self.events.stream_stop_sending(
                             conn.clone(),
                             Rc::clone(handler),
-                            stream_info,
+                            &stream_info,
                             error,
                         );
                     }
@@ -250,7 +250,7 @@ impl Http3Server {
                         .webtransport_new_stream(Http3OrWebTransportStream::new(
                             conn.clone(),
                             Rc::clone(handler),
-                            stream_info,
+                            &stream_info,
                         )),
                     Http3ServerConnEvent::ExtendedConnectDatagram {
                         session_id,
@@ -288,7 +288,7 @@ impl Http3Server {
     }
 }
 fn prepare_data(
-    stream_info: Http3StreamInfo,
+    stream_info: &Http3StreamInfo,
     handler_borrowed: &mut RefMut<Http3ServerHandler>,
     conn: &ConnectionRef,
     handler: &HandlerRef,
@@ -349,7 +349,7 @@ mod tests {
         max_blocked_streams: 100,
     };
 
-    fn http3params(qpack_settings: QpackSettings) -> Http3Parameters {
+    fn http3params(qpack_settings: &QpackSettings) -> Http3Parameters {
         Http3Parameters::default()
             .max_table_size_encoder(qpack_settings.max_table_size_encoder)
             .max_table_size_decoder(qpack_settings.max_table_size_decoder)
@@ -372,7 +372,7 @@ mod tests {
 
     /// Create a http3 server with default configuration.
     pub fn default_server() -> Http3Server {
-        create_server(http3params(DEFAULT_SETTINGS))
+        create_server(http3params(&DEFAULT_SETTINGS))
     }
 
     fn assert_closed(hconn: &Http3Server, expected: &Error) {
@@ -1194,14 +1194,14 @@ mod tests {
 
     #[test]
     fn zero_rtt() {
-        zero_rtt_with_settings(http3params(DEFAULT_SETTINGS), ZeroRttState::AcceptedClient);
+        zero_rtt_with_settings(http3params(&DEFAULT_SETTINGS), ZeroRttState::AcceptedClient);
     }
 
     /// A larger QPACK decoder table size isn't an impediment to 0-RTT.
     #[test]
     fn zero_rtt_larger_decoder_table() {
         zero_rtt_with_settings(
-            http3params(QpackSettings {
+            http3params(&QpackSettings {
                 max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder + 1,
                 ..DEFAULT_SETTINGS
             }),
@@ -1213,7 +1213,7 @@ mod tests {
     #[test]
     fn zero_rtt_smaller_decoder_table() {
         zero_rtt_with_settings(
-            http3params(QpackSettings {
+            http3params(&QpackSettings {
                 max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder - 1,
                 ..DEFAULT_SETTINGS
             }),
@@ -1225,7 +1225,7 @@ mod tests {
     #[test]
     fn zero_rtt_more_blocked_streams() {
         zero_rtt_with_settings(
-            http3params(QpackSettings {
+            http3params(&QpackSettings {
                 max_blocked_streams: DEFAULT_SETTINGS.max_blocked_streams + 1,
                 ..DEFAULT_SETTINGS
             }),
@@ -1237,7 +1237,7 @@ mod tests {
     #[test]
     fn zero_rtt_fewer_blocked_streams() {
         zero_rtt_with_settings(
-            http3params(QpackSettings {
+            http3params(&QpackSettings {
                 max_blocked_streams: DEFAULT_SETTINGS.max_blocked_streams - 1,
                 ..DEFAULT_SETTINGS
             }),
@@ -1249,7 +1249,7 @@ mod tests {
     #[test]
     fn zero_rtt_smaller_encoder_table() {
         zero_rtt_with_settings(
-            http3params(QpackSettings {
+            http3params(&QpackSettings {
                 max_table_size_encoder: DEFAULT_SETTINGS.max_table_size_encoder - 1,
                 ..DEFAULT_SETTINGS
             }),
@@ -1314,7 +1314,7 @@ mod tests {
             DEFAULT_ALPN,
             anti_replay(),
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-            http3params(DEFAULT_SETTINGS),
+            http3params(&DEFAULT_SETTINGS),
             Some(Box::<RejectZeroRtt>::default()),
         )
         .expect("create a server");

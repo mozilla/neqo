@@ -107,8 +107,8 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
+        &DEFAULT_ADDR,
+        &DEFAULT_ADDR,
         params,
         now(),
     )
@@ -121,7 +121,7 @@ pub fn default_client() -> Connection {
     new_client(ConnectionParameters::default())
 }
 
-fn zero_len_cid_client(local_addr: SocketAddr, remote_addr: SocketAddr) -> Connection {
+fn zero_len_cid_client(local_addr: &SocketAddr, remote_addr: &SocketAddr) -> Connection {
     Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,

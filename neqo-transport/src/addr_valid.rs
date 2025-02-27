@@ -75,7 +75,7 @@ impl AddressValidation {
         })
     }
 
-    fn encode_aad(peer_address: SocketAddr, retry: bool) -> Encoder {
+    fn encode_aad(peer_address: &SocketAddr, retry: bool) -> Encoder {
         // Let's be "clever" by putting the peer's address in the AAD.
         // We don't need to encode these into the token as they should be
         // available when we need to check the token.
@@ -104,7 +104,7 @@ impl AddressValidation {
     pub fn generate_token(
         &self,
         dcid: Option<&ConnectionId>,
-        peer_address: SocketAddr,
+        peer_address: &SocketAddr,
         now: Instant,
     ) -> Res<Vec<u8>> {
         const EXPIRATION_RETRY: Duration = Duration::from_secs(5);
@@ -137,14 +137,14 @@ impl AddressValidation {
     pub fn generate_retry_token(
         &self,
         dcid: &ConnectionId,
-        peer_address: SocketAddr,
+        peer_address: &SocketAddr,
         now: Instant,
     ) -> Res<Vec<u8>> {
         self.generate_token(Some(dcid), peer_address, now)
     }
 
     /// This generates a token for use with `NEW_TOKEN`.
-    pub fn generate_new_token(&self, peer_address: SocketAddr, now: Instant) -> Res<Vec<u8>> {
+    pub fn generate_new_token(&self, peer_address: &SocketAddr, now: Instant) -> Res<Vec<u8>> {
         self.generate_token(None, peer_address, now)
     }
 
@@ -160,7 +160,7 @@ impl AddressValidation {
     fn decrypt_token(
         &self,
         token: &[u8],
-        peer_address: SocketAddr,
+        peer_address: &SocketAddr,
         retry: bool,
         now: Instant,
     ) -> Option<ConnectionId> {
@@ -197,7 +197,7 @@ impl AddressValidation {
     pub fn validate(
         &self,
         token: &[u8],
-        peer_address: SocketAddr,
+        peer_address: &SocketAddr,
         now: Instant,
     ) -> AddressValidationResult {
         qtrace!("AddressValidation {self:p}: validate {:?}", self.validation);

@@ -165,7 +165,7 @@ fn retry_different_ip() {
     // Change the source IP on the address from the client.
     let dgram = dgram.unwrap();
     let other_v4 = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
-    let other_addr = SocketAddr::new(other_v4, 443);
+    let other_addr = &SocketAddr::new(other_v4, 443);
     let from_other = Datagram::new(other_addr, dgram.destination(), dgram.tos(), &dgram[..]);
     let dgram = server.process(Some(from_other), now()).dgram();
     assert!(dgram.is_none());
@@ -186,7 +186,7 @@ fn new_token_different_ip() {
 
     // Now rewrite the source address.
     let d = dgram.unwrap();
-    let src = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), d.source().port());
+    let src = &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), d.source().port());
     let dgram = Some(Datagram::new(src, d.destination(), d.tos(), &d[..]));
     let dgram = server.process(dgram, now()).dgram(); // Retry
     assert!(dgram.is_some());
@@ -211,7 +211,7 @@ fn new_token_expired() {
     // but when trying to generate another Retry.  A month is fine.
     let the_future = now() + Duration::from_secs(60 * 60 * 24 * 30);
     let d = dgram.unwrap();
-    let src = SocketAddr::new(d.source().ip(), d.source().port() + 1);
+    let src = &SocketAddr::new(d.source().ip(), d.source().port() + 1);
     let dgram = Some(Datagram::new(src, d.destination(), d.tos(), &d[..]));
     let dgram = server.process(dgram, the_future).dgram(); // Retry
     assert!(dgram.is_some());

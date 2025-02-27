@@ -21,13 +21,13 @@ pub struct Datagram<D = Vec<u8>> {
 
 impl<D> Datagram<D> {
     #[must_use]
-    pub const fn source(&self) -> SocketAddr {
-        self.src
+    pub const fn source(&self) -> &SocketAddr {
+        &self.src
     }
 
     #[must_use]
-    pub const fn destination(&self) -> SocketAddr {
-        self.dst
+    pub const fn destination(&self) -> &SocketAddr {
+        &self.dst
     }
 
     #[must_use]
@@ -57,10 +57,10 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> AsMut<[u8]> for Datagram<D> {
 }
 
 impl Datagram<Vec<u8>> {
-    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: V) -> Self {
+    pub fn new<V: Into<Vec<u8>>>(src: &SocketAddr, dst: &SocketAddr, tos: IpTos, d: V) -> Self {
         Self {
-            src,
-            dst,
+            src: *src,
+            dst: *dst,
             tos,
             d: d.into(),
         }
@@ -95,8 +95,13 @@ impl<D: AsRef<[u8]>> std::fmt::Debug for Datagram<D> {
 
 impl<'a> Datagram<&'a mut [u8]> {
     #[must_use]
-    pub fn from_slice(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: &'a mut [u8]) -> Self {
-        Self { src, dst, tos, d }
+    pub fn from_slice(src: &SocketAddr, dst: &SocketAddr, tos: IpTos, d: &'a mut [u8]) -> Self {
+        Self {
+            src: *src,
+            dst: *dst,
+            tos,
+            d,
+        }
     }
 
     #[must_use]
