@@ -294,7 +294,6 @@ The call to function `receive` may produce `Http3ClientEvent::DataReadable`. Act
 data is done in the `read_data` function.
 */
 #[derive(Debug)]
-#[allow(clippy::module_name_repetitions)]
 pub struct Http3Connection {
     role: Role,
     pub state: Http3State,
@@ -516,7 +515,6 @@ impl Http3Connection {
             output = self.handle_new_stream(conn, stream_type, stream_id)?;
         }
 
-        #[allow(clippy::match_same_arms)] // clippy is being stupid here
         match output {
             ReceiveOutput::UnblockedStreams(unblocked_streams) => {
                 self.handle_unblocked_streams(unblocked_streams, conn)?;
@@ -535,11 +533,11 @@ impl Http3Connection {
                 NewStreamType::Push(_)
                 | NewStreamType::Http(_)
                 | NewStreamType::WebTransportStream(_),
-            ) => Ok(output),
+            )
+            | ReceiveOutput::NoOutput => Ok(output),
             ReceiveOutput::NewStream(_) => {
                 unreachable!("NewStream should have been handled already")
             }
-            ReceiveOutput::NoOutput => Ok(output),
         }
     }
 

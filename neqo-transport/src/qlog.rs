@@ -6,8 +6,6 @@
 
 // Functions that handle capturing QLOG traces.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     ops::{Deref as _, RangeInclusive},
     time::{Duration, Instant},
@@ -47,7 +45,7 @@ pub fn connection_tparams_set(qlog: &NeqoQlog, tph: &TransportParametersHandler,
     qlog.add_event_data_with_instant(
         || {
             let remote = tph.remote();
-            #[allow(clippy::cast_possible_truncation)] // Nope.
+            #[expect(clippy::cast_possible_truncation, reason = "These are OK.")]
             let ev_data =
                 EventData::TransportParametersSet(qlog::events::quic::TransportParametersSet {
                     owner: None,
@@ -130,7 +128,7 @@ fn connection_started(qlog: &NeqoQlog, path: &PathRef, now: Instant) {
     );
 }
 
-#[allow(clippy::similar_names)]
+#[expect(clippy::similar_names, reason = "new and now are similar.")]
 pub fn connection_state_updated(qlog: &NeqoQlog, new: &State, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
@@ -317,7 +315,7 @@ pub fn packets_lost(qlog: &NeqoQlog, pkts: &[SentPacket], now: Instant) {
     });
 }
 
-#[allow(dead_code)]
+#[expect(dead_code, reason = "TODO: Construct all variants.")]
 pub enum QlogMetric {
     MinRtt(Duration),
     SmoothedRtt(Duration),
@@ -394,8 +392,12 @@ pub fn metrics_updated(qlog: &NeqoQlog, updated_metrics: &[QlogMetric], now: Ins
 
 // Helper functions
 
-#[allow(clippy::too_many_lines)] // Yeah, but it's a nice match.
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // No choice here.
+#[expect(clippy::too_many_lines, reason = "Yeah, but it's a nice match.")]
+#[expect(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    reason = "We need to truncate here."
+)]
 impl From<Frame<'_>> for QuicFrame {
     fn from(frame: Frame) -> Self {
         match frame {

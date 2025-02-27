@@ -7,8 +7,6 @@
 // Building a stream of ordered bytes to give the application from a series of
 // incoming STREAM frames.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cell::RefCell,
     cmp::max,
@@ -35,7 +33,7 @@ use crate::{
 const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
 
 // Export as usize for consistency with SEND_BUFFER_SIZE
-#[allow(clippy::cast_possible_truncation)] // Yeah, nope.
+#[expect(clippy::cast_possible_truncation, reason = "Value fits.")]
 pub const RECV_BUFFER_SIZE: usize = RX_STREAM_DATA_WINDOW as usize;
 
 #[derive(Debug, Default)]
@@ -63,12 +61,20 @@ impl RecvStreams {
         self.streams.insert(id, stream);
     }
 
-    #[allow(clippy::missing_errors_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_errors_doc,
+        reason = "OK here."
+    )]
     pub fn get_mut(&mut self, id: StreamId) -> Res<&mut RecvStream> {
         self.streams.get_mut(&id).ok_or(Error::InvalidStreamId)
     }
 
-    #[allow(clippy::missing_errors_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_errors_doc,
+        reason = "OK here."
+    )]
     pub fn keep_alive(&mut self, id: StreamId, k: bool) -> Res<()> {
         let self_ka = &mut self.keep_alive;
         let s = self.streams.get_mut(&id).ok_or(Error::InvalidStreamId)?;
@@ -1020,7 +1026,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::single_range_in_vec_init)] // Because that lint makes no sense here.
+    #[expect(
+        clippy::single_range_in_vec_init,
+        reason = "Because that lint makes no sense here."
+    )]
     fn recv_noncontiguous() {
         // Non-contiguous with the start, no data available.
         recv_ranges(&[10..20], 0);

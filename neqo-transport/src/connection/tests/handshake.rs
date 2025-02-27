@@ -167,7 +167,7 @@ fn no_alpn() {
 }
 
 #[test]
-#[allow(clippy::cognitive_complexity)]
+#[expect(clippy::cognitive_complexity, reason = "OK in a test.")]
 fn dup_server_flight1() {
     qdebug!("---- client: generate CH");
     let mut client = default_client();

@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::missing_errors_doc)] // Functions simply delegate to tokio and quinn-udp.
+#![expect(
+    clippy::missing_errors_doc,
+    reason = "Functions simply delegate to tokio and quinn-udp."
+)]
 
 use std::{
     array,
@@ -88,7 +91,7 @@ use std::os::fd::AsFd as SocketRef;
 #[cfg(windows)]
 use std::os::windows::io::AsSocket as SocketRef;
 
-#[allow(clippy::missing_panics_doc)]
+#[expect(clippy::missing_panics_doc, reason = "OK here.")]
 pub fn recv_inner<'a>(
     local_address: SocketAddr,
     state: &UdpSocketState,

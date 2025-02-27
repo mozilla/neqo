@@ -38,7 +38,10 @@ fn make_huffman_tree(prefix: u32, len: u8) -> HuffmanDecoderNode {
             let bit = usize::try_from(iter.val & 1).expect("u32 fits in usize");
             next[bit] = Some(Box::new(HuffmanDecoderNode {
                 next: [None, None],
-                #[allow(clippy::cast_possible_truncation)] // We've checked this in a `const_assert!` above.
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "We've checked this in a `const_assert!` above."
+                )]
                 value: Some(i as u16),
             }));
             if next[bit ^ 1].is_some() {

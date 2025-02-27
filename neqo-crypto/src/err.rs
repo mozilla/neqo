@@ -4,29 +4,29 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(dead_code)]
-
 use std::{os::raw::c_char, str::Utf8Error};
 
 use crate::ssl::{SECStatus, SECSuccess};
 
 include!(concat!(env!("OUT_DIR"), "/nspr_error.rs"));
+#[expect(non_snake_case, dead_code, reason = "Code is bindgen-generated.")]
 mod codes {
-    #![allow(non_snake_case)]
     include!(concat!(env!("OUT_DIR"), "/nss_secerr.rs"));
     include!(concat!(env!("OUT_DIR"), "/nss_sslerr.rs"));
 }
 pub use codes::{SECErrorCodes as sec, SSLErrorCodes as ssl};
+#[expect(dead_code, reason = "Code is bindgen-generated.")]
 pub mod nspr {
     include!(concat!(env!("OUT_DIR"), "/nspr_err.rs"));
 }
 
+#[expect(dead_code, reason = "Some constants are not used.")]
 pub mod mozpkix {
     // These are manually extracted from the many bindings generated
     // by bindgen when provided with the simple header:
     // #include "mozpkix/pkixnss.h"
 
-    #[allow(non_camel_case_types)]
+    #[expect(non_camel_case_types, reason = "Code is bindgen-generated.")]
     pub type mozilla_pkix_ErrorCode = ::std::os::raw::c_int;
     pub const MOZILLA_PKIX_ERROR_KEY_PINNING_FAILURE: mozilla_pkix_ErrorCode = -16384;
     pub const MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY: mozilla_pkix_ErrorCode = -16383;
