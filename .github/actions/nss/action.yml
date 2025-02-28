@@ -220,8 +220,21 @@ runs:
           for file in build-nss-android.sh build-android-common.sh; do
             curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/heads/main/libs/$file"
           done
-          export ANDROID_NDK_API_VERSION=$(basename "ANDROID_NDK_HOME")
-          export NDK_HOST_TAG="linux-x86_64"
+          ANDROID_NDK_API_VERSION=$(basename "$ANDROID_NDK_HOME")
+          # See https://github.com/mozilla/application-services/blob/46cacda811da094653dc8e93158956f4cd57e87a/libs/build-all.sh#L89-L102
+          # It figures that NSPR would require monkey-patching to build on Android.
+          echo $'\
+          @@ -2662,6 +2662,9 @@
+
+          case "$target" in
+          *-android*|*-linuxandroid*)
+          +    $as_echo "#define ANDROID 1" >>confdefs.h
+          +    ;;
+          +    unreachable)
+              if test -z "$android_ndk" ; then
+                  as_fn_error $? "You must specify --with-android-ndk=/path/to/ndk when targeting Android." "$LINENO" 5
+              fi
+          ' | patch "nspr/configure"
           bash -x build-nss-android.sh "$(pwd)" "$(pwd)/dist" "$ANDROID_NDK" "$TARGET_PLATFORM" "$ANDROID_NDK_API_VERSION"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
