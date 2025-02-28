@@ -207,7 +207,6 @@ runs:
       shell: bash
       if: ${{ steps.check_build.outputs.build_nss }}
       env:
-        ANDROID_NDK_VERSION: 27.2.12479018
         TARGET_PLATFORM: ${{ inputs.target }}
       run: |
         if [ "$NSS_TARGET" != "Debug" ]; then
@@ -223,7 +222,10 @@ runs:
             chmod a+x "$file"
           done
           ls -la
-          bash -x build-nss-android.sh "." "dist" "$ANDROID_NDK" "$TARGET_PLATFORM" "$ANDROID_NDK_VERSION"
+          ls -la nss
+          ls -la nspr
+          NDK_VERSION=$(basename "ANDROID_NDK_HOME")
+          bash -x build-nss-android.sh "." "dist" "$ANDROID_NDK" "$TARGET_PLATFORM" "$NDK_VERSION"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
           $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
