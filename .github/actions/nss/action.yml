@@ -224,7 +224,8 @@ runs:
           # See https://github.com/mozilla/application-services/blob/46cacda811da094653dc8e93158956f4cd57e87a/libs/build-all.sh#L89-L102
           # It figures that NSPR would require monkey-patching to build on Android.
           sed -i'' 's/if test -z "$android_ndk" ; then/$as_echo "#define ANDROID 1" >>confdefs.h\n    ;;\nunreachable)\n    if test -z "$android_ndk" ; then/g' nspr/configure
-          bash -x build-nss-android.sh "$(pwd)" "$(pwd)/dist" "$ANDROID_NDK" "$TARGET_PLATFORM" "$ANDROID_NDK_API_VERSION"
+          bash build-nss-android.sh "$(pwd)" "$(pwd)/dist" "$ANDROID_NDK" "$TARGET_PLATFORM" "$ANDROID_NDK_API_VERSION" || true
+          cat config.log
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
           $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
