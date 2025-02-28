@@ -29,16 +29,16 @@ license = "MIT OR Apache-2.0"
 rust-version = "1.82.0"
 
 [workspace.dependencies]
-# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 enum-map = { version = "2.7", default-features = false }
 enumset = { version = "1.1", default-features = false }
+hex = { version = "0.4", default-features = false }
 log = { version = "0.4", default-features = false }
 qlog = { version = "0.13", default-features = false }
-quinn-udp = { version = "0.5.6", default-features = false, features = ["direct-log", "fast-apple-datapath"] }
+quinn-udp = { version = "0.5", default-features = false, features = ["direct-log", "fast-apple-datapath"] }
 regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
 static_assertions = { version = "1.1", default-features = false }
 strum = { version = "0.26", default-features = false, features = ["derive"] }
-url = { version = "2.5.3", default-features = false, features = ["std"] }
+url = { version = "2.5", default-features = false, features = ["std"] }
 
 [workspace.lints.rust]
 absolute_paths_not_starting_with_crate = "warn"
