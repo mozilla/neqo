@@ -199,6 +199,7 @@ runs:
           echo "NSS_TARGET=$NSS_TARGET"
           echo "NSS_DIR=$NSS_DIR"
           echo "NSS_PREBUILT=1"
+          echo "NSS_OUT=$NSS_OUT"
         } >> "$GITHUB_ENV"
         if [ "${{ runner.os }}" == "Windows" ]; then
           echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
@@ -222,6 +223,7 @@ runs:
             curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/heads/main/libs/$file"
             chmod a+x "$file"
           done
+          ls -la
           sh -x build-nss-android.sh "$NSS_DIR" "$NSS_OUT" "$ANDROID_NDK" "$NSS_TARGET" "$ANDROID_NDK_VERSION"
         elif [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ]; then
           export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
