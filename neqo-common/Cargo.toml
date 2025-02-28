@@ -30,11 +30,11 @@ windows = { version = "0.58", default-features = false, features = ["Win32_Media
 criterion = { version = "0.5", default-features = false }
 neqo-crypto = { path = "../neqo-crypto" }
 test-fixture = { path = "../test-fixture" }
-regex = { workspace = true }
+regex = { workspace = true, features = ["perf"] }
 
 [features]
 bench = ["neqo-crypto/bench", "test-fixture/bench"]
-build-fuzzing-corpus = ["hex"]
+build-fuzzing-corpus = ["hex/alloc"]
 ci = []
 test-fixture = []
 
