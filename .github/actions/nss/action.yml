@@ -187,13 +187,12 @@ runs:
       shell: bash
       if: ${{ !steps.nss.outputs.use_system_nss }}
       env:
+        NSS_TARGET: ${{ inputs.type }}
         NSS_TYPE: ${{ inputs.type }}
-        NSS_TARGET: ${{ inputs.target }}
         NSS_DIR: ${{ github.workspace }}/nss
       run: |
-        NSS_OUT="${{ github.workspace }}/nss/../dist/$NSS_TYPE"
+        NSS_OUT="${{ github.workspace }}/nss/../dist/$NSS_TARGET"
         {
-          echo "NSS_TYPE=$NSS_TYPE"
           echo "LD_LIBRARY_PATH=$NSS_OUT/lib"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib"
           echo "NSS_TARGET=$NSS_TARGET"
@@ -209,13 +208,14 @@ runs:
       if: ${{ steps.check_build.outputs.build_nss }}
       env:
         ANDROID_NDK_VERSION: 27.2.12479018
+        ANDROID_TARGET: ${{ inputs.target }}
       run: |
-        if [ "$NSS_TYPE" != "Debug" ]; then
+        if [ "$NSS_TARGET" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
           # we also want debug symbols and frame pointers for that, which the normal optimized NSS
           # build process doesn't provide.
           OPT="-o"
-          [ "${{ runner.os }}" != "Windows" ] && [ -z "$NSS_TYPE" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
+          [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
         if [[ $NSS_TARGET == *android ]]; then
           for file in build-nss-android.sh build-android-common.sh android_defaults.sh; do
@@ -223,8 +223,8 @@ runs:
             chmod a+x "$file"
           done
           ls -la
-          sh -x build-nss-android.sh "$NSS_DIR" "$NSS_DIR" "$ANDROID_NDK" "$NSS_TARGET" "$ANDROID_NDK_VERSION"
+          bash -x build-nss-android.sh "$NSS_DIR" "$NSS_DIR" "$ANDROID_NDK" "$ANDROID_TARGET" "$ANDROID_NDK_VERSION"
         elif [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ]; then
           export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-          $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static --target $NSS_TYPE -v
+          $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static -v
         fi
