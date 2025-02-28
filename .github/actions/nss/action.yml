@@ -238,6 +238,7 @@ runs:
             if test -z "$android_ndk" ; then
                 as_fn_error $? "You must specify --with-android-ndk=/path/to/ndk when targeting Android." "$LINENO" 5
             fi
+
         EOF
           cat configure.patch
           patch nspr/configure configure.patch
