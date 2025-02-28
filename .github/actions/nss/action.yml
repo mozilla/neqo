@@ -221,8 +221,9 @@ runs:
             curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/heads/main/libs/$file"
             chmod a+x "$file"
           done
-          NDK_VERSION=$(basename "ANDROID_NDK_HOME")
-          bash -x build-nss-android.sh "$(pwd)" "$(pwd)/dist" "$ANDROID_NDK" "$TARGET_PLATFORM" "$NDK_VERSION"
+          ANDROID_NDK_API_VERSION=$(basename "ANDROID_NDK_HOME")
+          source android_defaults.sh
+          bash -x build-nss-android.sh "$(pwd)" "$(pwd)/dist" "$ANDROID_NDK" "$TARGET_PLATFORM" "$ANDROID_NDK_API_VERSION"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
           $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
