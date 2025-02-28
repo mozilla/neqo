@@ -187,12 +187,13 @@ runs:
       shell: bash
       if: ${{ !steps.nss.outputs.use_system_nss }}
       env:
-        NSS_TARGET: ${{ inputs.type }}
+        NSS_TYPE: ${{ inputs.type }}
+        NSS_TARGET: ${{ inputs.target }}
         NSS_DIR: ${{ github.workspace }}/nss
       run: |
         NSS_OUT="${{ github.workspace }}/nss/../dist/$NSS_TARGET"
         {
-          echo "NSS_TARGET=${{ inputs.type }}"
+          echo "NSS_TYPE=$NSS_TYPE"
           echo "LD_LIBRARY_PATH=$NSS_OUT/lib"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib"
           echo "NSS_TARGET=$NSS_TARGET"
@@ -206,33 +207,20 @@ runs:
     - name: Build
       shell: bash
       if: ${{ steps.check_build.outputs.build_nss }}
-      env:
-        NSS_TARGET: ${{ inputs.type }}
       run: |
-        if [ "$NSS_TARGET" != "Debug" ]; then
+        if [ "$NSS_TYPE" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
           # we also want debug symbols and frame pointers for that, which the normal optimized NSS
           # build process doesn't provide.
           OPT="-o"
-          [ "${{ runner.os }}" != "Windows" ] && [ -z "${{ inputs.target }}" ]&& export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
+          [ "${{ runner.os }}" != "Windows" ] && [ -z "$NSS_TYPE" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
-        if [ "${{ endsWith(inputs.target, 'android') }}" ]; then
-          ANDROID_TOOLCHAIN="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-$(uname -m)"
-          sed -i "/NSPR.*configure/i extra_params+=(--with-android-ndk=\"$ANDROID_NDK\")\nextra_params+=(--target=\"${{ inputs.target }}\")\nextra_params+=(--with-android-platform=\"$ANDROID_TOOLCHAIN/sysroot\")\nextra_params+=(--with-android-toolchain=\"$ANDROID_TOOLCHAIN\")" $NSS_DIR/coreconf/nspr.sh
-          ARCH=$(echo "${{ inputs.target }}" | cut -d- -f1)
-          if [ "$ARCH" == "x86_64" ]; then
-            ARCH="linux-android"
-          else
-            ARCH="$ARCH-android-linux"
-          fi
-          cat "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang" || true
-          ln -svf "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang" "$ANDROID_TOOLCHAIN/bin/$ARCH-gcc"
-          ln -svf "$(which cpp)" "$ANDROID_TOOLCHAIN/bin/$ARCH-cpp"
-          ln -svf "$ANDROID_TOOLCHAIN/bin/llvm-ar" "$ANDROID_TOOLCHAIN/bin/$ARCH-ar"
-          ln -svf "$ANDROID_TOOLCHAIN/bin/llvm-ranlib" "$ANDROID_TOOLCHAIN/bin/$ARCH-ranlib"
-          ls -l "$ANDROID_TOOLCHAIN/bin"
-          sed -i "s/-mandroid//g" $NSS_DIR/../nspr/configure $NSS_DIR/../nspr/configure.in
+        if [[ $NSS_TARGET == *android ]]; then
+          for file in build-nss-android.sh build-android-common.sh android_defaults.sh; do
+            curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/heads/main/libs/$file"
+          done
+          sh -x build-nss-android.sh "$NSS_DIR" "$NSS_OUT" "$ANDROID_NDK_PATH" "$ANDROID_TOOLCHAIN" "$ANDROID_NDK_API_VERSION"
         elif [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ]; then
           export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
+          $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static --target $NSS_TYPE -v
         fi
-        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static --target ${{ inputs.target }} -v
