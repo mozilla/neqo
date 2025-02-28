@@ -208,7 +208,7 @@ runs:
       if: ${{ steps.check_build.outputs.build_nss }}
       env:
         ANDROID_NDK_VERSION: 27.2.12479018
-        ANDROID_TARGET: ${{ inputs.target }}
+        TARGET_PLATFORM: ${{ inputs.target }}
       run: |
         if [ "$NSS_TARGET" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
@@ -217,14 +217,14 @@ runs:
           OPT="-o"
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
-        if [[ $NSS_TARGET == *android ]]; then
+        if [[ $TARGET_PLATFORM == *android ]]; then
           for file in build-nss-android.sh build-android-common.sh android_defaults.sh; do
             curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/heads/main/libs/$file"
             chmod a+x "$file"
           done
           ls -la
           bash -x build-nss-android.sh "$NSS_DIR" "$NSS_DIR" "$ANDROID_NDK" "$ANDROID_TARGET" "$ANDROID_NDK_VERSION"
-        elif [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ]; then
-          export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-          $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static -v
+        else
+          [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
+          $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
         fi
