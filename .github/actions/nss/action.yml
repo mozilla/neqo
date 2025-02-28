@@ -217,12 +217,11 @@ runs:
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
         if [[ $TARGET_PLATFORM == *android ]]; then
-          for file in build-nss-android.sh build-android-common.sh android_defaults.sh; do
+          for file in build-nss-android.sh build-android-common.sh; do
             curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/heads/main/libs/$file"
-            chmod a+x "$file"
           done
-          ANDROID_NDK_API_VERSION=$(basename "ANDROID_NDK_HOME")
-          source android_defaults.sh
+          export ANDROID_NDK_API_VERSION=$(basename "ANDROID_NDK_HOME")
+          export NDK_HOST_TAG="linux-x86_64"
           bash -x build-nss-android.sh "$(pwd)" "$(pwd)/dist" "$ANDROID_NDK" "$TARGET_PLATFORM" "$ANDROID_NDK_API_VERSION"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
