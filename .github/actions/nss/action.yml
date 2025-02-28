@@ -223,7 +223,7 @@ runs:
             chmod a+x "$file"
           done
           ls -la
-          bash -x build-nss-android.sh "$NSS_DIR" "$NSS_DIR/../dist" "$ANDROID_NDK" "$TARGET_PLATFORM" "$ANDROID_NDK_VERSION"
+          bash -x build-nss-android.sh "." "dist" "$ANDROID_NDK" "$TARGET_PLATFORM" "$ANDROID_NDK_VERSION"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
           $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
