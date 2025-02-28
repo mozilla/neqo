@@ -17,8 +17,10 @@ workspace = true
 
 [dependencies]
 # Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
+enum-map = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
+strum = { workspace = true}
 
 [build-dependencies]
 # Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
@@ -33,6 +35,7 @@ toml = { version = "0.5", default-features = false }
 test-fixture = { path = "../test-fixture" }
 
 [features]
+bench = []
 disable-encryption = []
 disable-random = []
 gecko = ["mozbuild"]

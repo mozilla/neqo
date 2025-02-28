@@ -20,7 +20,7 @@ env:
 jobs:
   firefox:
     name: Build Firefox
-    # if: github.event.pull_request.draft == false
+    # if: ${{ github.event.pull_request.draft == false }}
     strategy:
       fail-fast: false
       matrix:
@@ -37,9 +37,11 @@ jobs:
     steps:
       - name: Check out Neqo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Maximize build space
-        if: runner.os == 'Linux'
+        if: ${{ runner.os == 'Linux' }}
         run: |
           sudo rm -rf /usr/local/lib/android || true
           sudo rm -rf /usr/share/dotnet || true
@@ -59,9 +61,10 @@ jobs:
         with:
           repository: mozilla/gecko-dev
           path: mozilla-unified
+          persist-credentials: false
 
       - name: Install deps (Windows)
-        if: runner.os == 'Windows'
+        if: ${{ runner.os == 'Windows' }}
         run: choco install -y mozillabuild --version 4.0.2
 
       - name: Install Rust
@@ -87,9 +90,10 @@ jobs:
 
       - name: Plumb in Neqo
         run: |
-          # Get qlog version used by neqo
+          # Get qlog and mtu version used by neqo
           cargo generate-lockfile
           QLOG_VERSION=$(cargo pkgid qlog | cut -d@ -f2)
+          MTU_VERSION=$(cargo pkgid mtu | cut -d@ -f2)
           rm Cargo.lock
           cd mozilla-unified
           {
@@ -97,6 +101,10 @@ jobs:
             echo 'who = "CI"'
             echo 'criteria = "safe-to-deploy"'
             echo "version = \"$QLOG_VERSION\""
+            echo '[[audits.mtu]]'
+            echo 'who = "CI"'
+            echo 'criteria = "safe-to-deploy"'
+            echo "version = \"$MTU_VERSION\""
           } >> supply-chain/audits.toml
           sed -i'' -e "s/qlog =.*/qlog = \"$QLOG_VERSION\"/" netwerk/socket/neqo_glue/Cargo.toml
           {
@@ -107,6 +115,18 @@ jobs:
             echo 'neqo-qpack = { path = "../neqo-qpack" }'
             echo 'neqo-crypto = { path = "../neqo-crypto" }'
           } >> Cargo.toml
+          {
+            echo '[[trusted.windows-bindgen]]'
+            echo 'criteria = "safe-to-deploy"'
+            echo 'user-id = 64539 # Kenny Kerr (kennykerr)'
+            echo 'start = "2021-11-15"'
+            echo 'end = "2024-09-12"'
+            echo '[[trusted.windows-metadata]]'
+            echo 'criteria = "safe-to-deploy"'
+            echo 'user-id = 64539 # Kenny Kerr (kennykerr)'
+            echo 'start = "2021-11-15"'
+            echo 'end = "2024-09-12"'
+          } >> supply-chain/audits.toml
           cargo update neqo-http3 neqo-transport neqo-common neqo-qpack neqo-crypto
           ./mach vendor rust --ignore-modified
 
@@ -124,16 +144,18 @@ jobs:
 
       - name: Export binary
         id: upload
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: ${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}.tgz
           path: ${{ env.FIREFOX }}.tar
           compression-level: 9
 
-      - run: echo "${{ steps.upload.outputs.artifact-url }}" >> artifact
+      - env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: echo "$ARTIFACT_URL" >> artifact
 
       - name: Export artifact URL
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: artifact-${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}
           path: artifact
@@ -141,11 +163,13 @@ jobs:
 
   comment:
     name: Comment on PR
-    # if: github.event.pull_request.draft == false
+    # if: ${{ github.event.pull_request.draft == false }}
     needs: firefox
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:

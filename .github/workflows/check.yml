@@ -14,9 +14,6 @@ on:
         type: boolean
         required: false
         default: false
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -38,6 +35,8 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           sparse-checkout: Cargo.toml
+          persist-credentials: false
+
       - id: toolchains
         run: |
           msrv="$(grep rust-version Cargo.toml | tr -d '"' | cut -f3 -d\ )"
@@ -48,7 +47,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # TODO: Switch to ubuntu-latest-arm when available as a tag.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
         rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
         type: [debug]
         include:
@@ -61,6 +61,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/rust
         with:
@@ -79,25 +81,27 @@ jobs:
       - name: Check
         run: |
           # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} check $BUILD_TYPE --all-targets --features ci
+          cargo check $BUILD_TYPE --locked --all-targets --features ci
 
       - name: Run tests and determine coverage
         env:
           RUST_LOG: trace
+          RUST_BACKTRACE: 1
+          TOOLCHAIN: ${{ matrix.rust-toolchain }}
         run: |
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
-          if [ "${{ matrix.rust-toolchain }}" == "nightly" ]; then
-            cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --mcdc --include-ffi --features ci --profile ci --codecov --output-path codecov.json
+          if [ "$TOOLCHAIN" == "nightly" ]; then
+            cargo llvm-cov nextest $BUILD_TYPE --locked --mcdc --include-ffi --features ci --profile ci --codecov --output-path codecov.json
           else
-            cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --profile ci
+            cargo nextest run $BUILD_TYPE --locked --features ci --profile ci
           fi
 
       - name: Run client/server transfer
         run: |
           # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
+          cargo build $BUILD_TYPE --bin neqo-client --bin neqo-server
           "target/$BUILD_DIR/neqo-server" "$HOST:4433" &
           PID=$!
           # Give the server time to start.
@@ -111,7 +115,7 @@ jobs:
           RUST_LOG: warn
           BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
-      - uses: codecov/codecov-action@7f8b4b4bde536c465e797be725718b88c5d95e0e # v5.1.1
+      - uses: codecov/codecov-action@13ce06bfc6bbe3ecf90edbbf1bc32fe5978ca1d3 # v5.3.1
         with:
           files: codecov.json
           fail_ci_if_error: false
@@ -119,11 +123,19 @@ jobs:
           verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        if: matrix.type == 'debug' && matrix.rust-toolchain == 'nightly'
+        if: ${{ matrix.type == 'debug' && matrix.rust-toolchain == 'nightly' }}
+
+      - uses: codecov/test-results-action@44ecb3a270cd942bdf0fa8f2ce14cb32493e810a # v1.0.3
+        if: ${{ always() }}
+        with:
+          files: target/nextest/ci/junit.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
       - name: Save simulation seeds artifact
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: ${{ always() }}
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
           path: simulation-seeds
@@ -134,14 +146,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
       - run: cargo update -w --locked
 
   bench:
     needs: [check]
-    if: >
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_benchmarks) ||
-      (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
-      (github.event_name != 'workflow_dispatch' && github.event_name != 'pull_request')
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' }}
     uses: ./.github/workflows/bench.yml
 
   test-android:

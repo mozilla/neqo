@@ -11,7 +11,7 @@ use std::{cmp::max, time::Duration};
 use neqo_common::qtrace;
 
 use crate::{
-    connection::params::ACK_RATIO_SCALE, frame::FRAME_TYPE_ACK_FREQUENCY, packet::PacketBuilder,
+    connection::params::ACK_RATIO_SCALE, frame::FrameType, packet::PacketBuilder,
     recovery::RecoveryToken, stats::FrameStats,
 };
 
@@ -37,16 +37,16 @@ impl AckRate {
         let packets = packets.clamp(MIN_PACKETS, MAX_PACKETS) - 1;
         let delay = rtt * RTT_RATIO / u32::from(ratio);
         let delay = delay.clamp(minimum, MAX_DELAY);
-        qtrace!("AckRate inputs: {}/{}/{}, {:?}", cwnd, mtu, ratio, rtt);
+        qtrace!("AckRate inputs: {cwnd}/{mtu}/{ratio}, {rtt:?}");
         Self { packets, delay }
     }
 
     pub fn write_frame(&self, builder: &mut PacketBuilder, seqno: u64) -> bool {
         builder.write_varint_frame(&[
-            FRAME_TYPE_ACK_FREQUENCY,
+            u64::from(FrameType::AckFrequency),
             seqno,
-            u64::try_from(self.packets + 1).unwrap(),
-            u64::try_from(self.delay.as_micros()).unwrap(),
+            u64::try_from(self.packets + 1).expect("usize fits in u64"),
+            u64::try_from(self.delay.as_micros()).unwrap_or(u64::MAX),
             0,
         ])
     }
@@ -82,12 +82,7 @@ impl FlexibleAckRate {
         mtu: usize,
         rtt: Duration,
     ) -> Self {
-        qtrace!(
-            "FlexibleAckRate: {:?} {:?} {}",
-            max_ack_delay,
-            min_ack_delay,
-            ratio
-        );
+        qtrace!("FlexibleAckRate: {max_ack_delay:?} {min_ack_delay:?} {ratio}");
         let ratio = max(ACK_RATIO_SCALE, ratio); // clamp it
         Self {
             current: AckRate {

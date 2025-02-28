@@ -11,12 +11,12 @@
 set -e
 tmp=$(mktemp -d)
 
-cargo build --bin neqo-client --bin neqo-server
+cargo build --locked --bin neqo-client --bin neqo-server
 
 addr=localhost
 port=4433
 path=/20000
-flags="--verbose --verbose --verbose --qlog-dir $tmp --use-old-http --alpn hq-interop --quic-version 1"
+flags="--verbose --verbose --verbose --qlog-dir $tmp --alpn hq-interop --quic-version 1"
 if [ "$(uname -s)" != "Linux" ]; then
         iface=lo0
 else

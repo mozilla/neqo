@@ -21,7 +21,10 @@ const ZERO: Duration = Duration::from_millis(0);
 const JITTER: Duration = Duration::from_millis(10);
 const TRANSFER_AMOUNT: usize = 1 << 22; // 4Mbyte
 
-#[allow(clippy::needless_pass_by_value)] // Passing String where &str would do is fine here.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Passing String where &str would do is fine here."
+)]
 fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<str>>) {
     for pacing in [false, true] {
         let mut group = c.benchmark_group(format!("transfer/pacing-{pacing}"));
@@ -33,14 +36,20 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
                 || {
                     let nodes = boxed![
                         ConnectionNode::new_client(
-                            ConnectionParameters::default().pmtud(true).pacing(pacing),
+                            ConnectionParameters::default()
+                                .pmtud(true)
+                                .pacing(pacing)
+                                .mlkem(false),
                             boxed![ReachState::new(State::Confirmed)],
                             boxed![SendData::new(TRANSFER_AMOUNT)]
                         ),
                         TailDrop::dsl_uplink(),
                         Delay::new(ZERO..JITTER),
                         ConnectionNode::new_server(
-                            ConnectionParameters::default().pmtud(true).pacing(pacing),
+                            ConnectionParameters::default()
+                                .pmtud(true)
+                                .pacing(pacing)
+                                .mlkem(false),
                             boxed![ReachState::new(State::Confirmed)],
                             boxed![ReceiveData::new(TRANSFER_AMOUNT)]
                         ),

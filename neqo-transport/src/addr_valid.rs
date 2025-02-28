@@ -19,7 +19,8 @@ use neqo_crypto::{
 use smallvec::SmallVec;
 
 use crate::{
-    cid::ConnectionId, packet::PacketBuilder, recovery::RecoveryToken, stats::FrameStats, Res,
+    cid::ConnectionId, frame::FrameType, packet::PacketBuilder, recovery::RecoveryToken,
+    stats::FrameStats, Res,
 };
 
 /// A prefix we add to Retry tokens to distinguish them from `NEW_TOKEN` tokens.
@@ -148,7 +149,7 @@ impl AddressValidation {
     }
 
     pub fn set_validation(&mut self, validation: ValidateAddress) {
-        qtrace!("AddressValidation {:p}: set to {:?}", self, validation);
+        qtrace!("AddressValidation {self:p}: set to {validation:?}");
         self.validation = validation;
     }
 
@@ -170,7 +171,7 @@ impl AddressValidation {
             Some(d) => {
                 let end = self.start_time + Duration::from_millis(u64::from(d));
                 if end < now {
-                    qtrace!("Expired token: {:?} vs. {:?}", end, now);
+                    qtrace!("Expired token: {end:?} vs. {now:?}");
                     return None;
                 }
             }
@@ -190,7 +191,7 @@ impl AddressValidation {
         for i in 0..TOKEN_IDENTIFIER_RETRY.len() {
             difference += (token[i] ^ TOKEN_IDENTIFIER_RETRY[i]).count_ones();
         }
-        usize::try_from(difference).unwrap() < TOKEN_IDENTIFIER_RETRY.len()
+        usize::try_from(difference).expect("u32 fits in usize") < TOKEN_IDENTIFIER_RETRY.len()
     }
 
     pub fn validate(
@@ -199,11 +200,7 @@ impl AddressValidation {
         peer_address: SocketAddr,
         now: Instant,
     ) -> AddressValidationResult {
-        qtrace!(
-            "AddressValidation {:p}: validate {:?}",
-            self,
-            self.validation
-        );
+        qtrace!("AddressValidation {self:p}: validate {:?}", self.validation);
 
         if token.is_empty() {
             if self.validation == ValidateAddress::Never {
@@ -222,12 +219,12 @@ impl AddressValidation {
         let enc = &token[TOKEN_IDENTIFIER_RETRY.len()..];
         // Note that this allows the token identifier part to be corrupted.
         // That's OK here as we don't depend on that being authenticated.
-        #[allow(clippy::option_if_let_else)]
+        #[expect(clippy::option_if_let_else, reason = "Alternative is less readable.")]
         if let Some(cid) = self.decrypt_token(enc, peer_address, retry, now) {
             if retry {
                 // This is from Retry, so we should have an ODCID >= 8.
                 if cid.len() >= 8 {
-                    qinfo!("AddressValidation: valid Retry token for {}", cid);
+                    qinfo!("AddressValidation: valid Retry token for {cid}");
                     AddressValidationResult::ValidRetry(cid)
                 } else {
                     panic!("AddressValidation: Retry token with small CID {cid}");
@@ -265,9 +262,7 @@ impl AddressValidation {
     }
 }
 
-// Note: these lint override can be removed in later versions where the lints
-// either don't trip a false positive or don't apply.  rustc 1.46 is fine.
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant, reason = "No way around it.")]
 pub enum NewTokenState {
     Client {
         /// Tokens that haven't been taken yet.
@@ -292,7 +287,7 @@ impl NewTokenState {
     /// Is there a token available?
     pub fn has_token(&self) -> bool {
         match self {
-            Self::Client { ref pending, .. } => !pending.is_empty(),
+            Self::Client { pending, .. } => !pending.is_empty(),
             Self::Server(..) => false,
         }
     }
@@ -322,7 +317,7 @@ impl NewTokenState {
     pub fn save_token(&mut self, token: Vec<u8>) {
         if let Self::Client {
             ref mut pending,
-            ref old,
+            old,
         } = self
         {
             for t in old.iter().rev().chain(pending.iter().rev()) {
@@ -427,7 +422,7 @@ impl NewTokenSender {
             if t.needs_sending && t.len() <= builder.remaining() {
                 t.needs_sending = false;
 
-                builder.encode_varint(crate::frame::FRAME_TYPE_NEW_TOKEN);
+                builder.encode_varint(FrameType::NewToken);
                 builder.encode_vvec(&t.token);
 
                 tokens.push(RecoveryToken::NewToken(t.seqno));

@@ -22,6 +22,7 @@ env_logger = { version = "0.10", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
 log = { workspace = true }
 qlog = { workspace = true }
+strum = { workspace = true }
 
 [target."cfg(windows)".dependencies]
 # Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
@@ -34,7 +35,7 @@ test-fixture = { path = "../test-fixture" }
 regex = { workspace = true }
 
 [features]
-bench = ["test-fixture/bench"]
+bench = ["neqo-crypto/bench", "test-fixture/bench"]
 build-fuzzing-corpus = ["hex"]
 ci = []
 test-fixture = []

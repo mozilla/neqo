@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(clippy::unwrap_used, reason = " OK in a build script.")]
+
 use std::{
     collections::HashMap,
     env, fs,
@@ -352,7 +354,10 @@ fn setup_standalone(nss: &str) -> Vec<String> {
 
 #[cfg(feature = "gecko")]
 fn setup_for_gecko() -> Vec<String> {
-    use mozbuild::TOPOBJDIR;
+    use mozbuild::{
+        config::{BINDGEN_SYSTEM_FLAGS, NSPR_CFLAGS, NSS_CFLAGS},
+        TOPOBJDIR,
+    };
 
     let fold_libs = mozbuild::config::MOZ_FOLD_LIBS;
     let libs = if fold_libs {
@@ -396,13 +401,11 @@ fn setup_for_gecko() -> Vec<String> {
         );
     }
 
-    let flags_path = TOPOBJDIR.join("netwerk/socket/neqo/extra-bindgen-flags");
-
-    println!("cargo:rerun-if-changed={}", flags_path.to_str().unwrap());
-    let mut flags = fs::read_to_string(flags_path)
-        .expect("Failed to read extra-bindgen-flags file")
-        .split_whitespace()
-        .map(String::from)
+    let mut flags = BINDGEN_SYSTEM_FLAGS
+        .iter()
+        .chain(&NSPR_CFLAGS)
+        .chain(&NSS_CFLAGS)
+        .map(|s| s.to_string())
         .collect::<Vec<_>>();
 
     flags.push(String::from("-include"));

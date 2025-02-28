@@ -35,7 +35,7 @@ runs:
 
     - name: Install dependencies
       run: |
-        sudo add-apt-repository ppa:wireshark-dev/stable
+        sudo add-apt-repository ppa:wireshark-dev/nightly
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends tshark
       shell: bash
@@ -54,20 +54,25 @@ runs:
       shell: bash
 
     - name: Run tests
+      env:
+        CLIENT: ${{ inputs.client }}
+        SERVER: ${{ inputs.server }}
+        TEST: ${{ inputs.test }}
+        IMPLEMENTATIONS: ${{ inputs.implementations }}
       run: |
         cd quic-interop-runner
-        if [ -n "${{ inputs.implementations }}" ]; then
-          echo '${{ inputs.implementations }}' > implementations.json
+        if [ -n "$IMPLEMENTATIONS" ]; then
+          echo "$IMPLEMENTATIONS" > implementations.json
         fi
         ARGS="--log-dir ../logs --json ../result.json"
-        if [ -n "${{ inputs.client }}" ]; then
-          ARGS="$ARGS --client ${{ inputs.client }}"
+        if [ -n "$CLIENT" ]; then
+          ARGS="$ARGS --client $CLIENT"
         fi
-        if [ -n "${{ inputs.server }}" ]; then
-          ARGS="$ARGS --server ${{ inputs.server }}"
+        if [ -n "$SERVER" ]; then
+          ARGS="$ARGS --server $SERVER"
         fi
-        if [ -n "${{ inputs.test }}" ]; then
-          ARGS="$ARGS --test ${{ inputs.test }}"
+        if [ -n "$TEST" ]; then
+          ARGS="$ARGS --test $TEST"
         fi
         # Don't fail CI if the interop test fails
         set -o pipefail
@@ -94,8 +99,8 @@ runs:
         exit $FAILED
       shell: bash
 
-    - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-      if: always()
+    - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+      if: ${{ always() }}
       id: upload-logs
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
@@ -103,15 +108,16 @@ runs:
         compression-level: 9
 
     - name: Store log URL
-      if: always()
+      if: ${{ always() }}
+      env:
+        ARTIFACT_URL: ${{ steps.upload-logs.outputs.artifact-url }}
       run: |
-        jq '. + {log_url: "${{ steps.upload-logs.outputs.artifact-url }}"}' \
-          < result.json  > result.json.tmp && \
-          mv result.json.tmp result.json
+        jq ". + {log_url: \"$ARTIFACT_URL\"}" < result.json  > result.json.tmp
+        mv result.json.tmp result.json
       shell: bash
 
-    - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-      if: always()
+    - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+      if: ${{ always() }}
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
         path: |
