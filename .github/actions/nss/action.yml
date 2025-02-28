@@ -191,7 +191,7 @@ runs:
         NSS_TARGET: ${{ inputs.target }}
         NSS_DIR: ${{ github.workspace }}/nss
       run: |
-        NSS_OUT="${{ github.workspace }}/nss/../dist/$NSS_TARGET"
+        NSS_OUT="${{ github.workspace }}/nss/../dist/$NSS_TYPE"
         {
           echo "NSS_TYPE=$NSS_TYPE"
           echo "LD_LIBRARY_PATH=$NSS_OUT/lib"
@@ -199,7 +199,6 @@ runs:
           echo "NSS_TARGET=$NSS_TARGET"
           echo "NSS_DIR=$NSS_DIR"
           echo "NSS_PREBUILT=1"
-          echo "NSS_OUT=$NSS_OUT"
         } >> "$GITHUB_ENV"
         if [ "${{ runner.os }}" == "Windows" ]; then
           echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
@@ -224,7 +223,7 @@ runs:
             chmod a+x "$file"
           done
           ls -la
-          sh -x build-nss-android.sh "$NSS_DIR" "$NSS_OUT" "$ANDROID_NDK" "$NSS_TARGET" "$ANDROID_NDK_VERSION"
+          sh -x build-nss-android.sh "$NSS_DIR" "$NSS_DIR" "$ANDROID_NDK" "$NSS_TARGET" "$ANDROID_NDK_VERSION"
         elif [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ]; then
           export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
           $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static --target $NSS_TYPE -v
