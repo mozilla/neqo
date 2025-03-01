@@ -229,17 +229,18 @@ runs:
           ./build-nss-android.sh "$(pwd)" "/tmp/dist" "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64" "$TARGET_PLATFORM" "$ANDROID_NDK_VERSION"
           # Manually move the temporary build directory to the final location, which is what neqo-crypto expects.
           echo XXX
-          find /tmp -name certutil
-          CERTUTIL="$(find /tmp -name certutil)"
+          find /tmp > tmp
+          ls -l tmp
+          CERTUTIL="$(grep certutil tmp)"
           echo $CERTUTIL
           TARGET_DIR="$(dirname $CERTUTIL)/.."
           echo "$CERTUTIL $TARGET_DIR"
           mv "$TARGET_DIR" "dist/$NSS_TARGET"
-          CHACHA="$(find /tmp -name chacha20poly1305.h)"
+          CHACHA="$(grep chacha20poly1305.h tmp)"
           PRIVATE_DIR="$(dirname $CHACHA)/.."
           echo "$CHACHA $TARGET_DIR"
           mv "$PRIVATE_DIR" "dist/private"
-          KYBER="$(find /tmp -name kyber.h)"
+          KYBER="$(grep kyber.h tmp)"
           PUBLIC_DIR="$(dirname $KYBER)/../.."
           echo "$KYBER $TARGET_DIR"
           mv "$PUBLIC_DIR" "dist/public"
