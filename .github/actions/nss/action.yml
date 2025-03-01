@@ -228,25 +228,22 @@ runs:
           sed -i'' 's/if test -z "$android_ndk" ; then/$as_echo "#define ANDROID 1" >>confdefs.h\n    ;;\nunreachable)\n    if test -z "$android_ndk" ; then/g' nspr/configure
           ./build-nss-android.sh "$(pwd)" "/tmp/dist" "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64" "$TARGET_PLATFORM" "$ANDROID_NDK_VERSION"
           # Manually move the temporary build directory to the final location, which is what neqo-crypto expects.
-          echo XXX
           find /tmp/tmp.* > tmp
-          ls -l tmp
           CERTUTIL="$(grep certutil tmp)"
-          echo $CERTUTIL
           TARGET_DIR="$(dirname $(dirname $CERTUTIL))"
           echo "$CERTUTIL $TARGET_DIR"
           mkdir -p "dist/$NSS_TARGET"
-          cp -p -L "$TARGET_DIR"/* "dist/$NSS_TARGET/"
+          cp -aR "$TARGET_DIR"/* "dist/$NSS_TARGET/"
           CHACHA="$(grep chacha20poly1305.h tmp)"
           PRIVATE_DIR="$(dirname $(dirname $CHACHA))"
           echo "$CHACHA $TARGET_DIR"
           mkdir -p "dist/private"
-          cp -p -L "$PRIVATE_DIR"/* "dist/private/"
+          cp -aR "$PRIVATE_DIR"/* "dist/private/"
           UTILRENAME="$(grep utilrename.h tmp)"
           PUBLIC_DIR="$(dirname $(dirname $(dirname $UTILRENAME)))"
           echo "$UTILRENAME $TARGET_DIR"
           mkdir -p "dist/public"
-          cp -p -L "$PUBLIC_DIR"/* "dist/public/"
+          cp -aR "$PUBLIC_DIR"/* "dist/public/"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
           $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
