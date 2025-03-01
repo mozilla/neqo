@@ -233,7 +233,7 @@ runs:
           ls -l tmp
           CERTUTIL="$(grep certutil tmp)"
           echo $CERTUTIL
-          TARGET_DIR="$(dirnae $(dirname $CERTUTIL))"
+          TARGET_DIR="$(dirname $(dirname $CERTUTIL))"
           echo "$CERTUTIL $TARGET_DIR"
           # mkdir -p "dist/$NSS_TARGET"
           mv "$TARGET_DIR" "dist/$NSS_TARGET"
