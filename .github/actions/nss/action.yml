@@ -228,7 +228,9 @@ runs:
           sed -i'' 's/if test -z "$android_ndk" ; then/$as_echo "#define ANDROID 1" >>confdefs.h\n    ;;\nunreachable)\n    if test -z "$android_ndk" ; then/g' nspr/configure
           ./build-nss-android.sh "$(pwd)" "/tmp/dist" "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64" "$TARGET_PLATFORM" "$ANDROID_NDK_VERSION"
           # Manually move the temporary build directory to the final location, which is what neqo-crypto expects.
+          echo XXX
           CERTUTIL="$(find /tmp -name certutil)"
+          echo $CERTUTIL
           TARGET_DIR="$(dirname $CERTUTIL)/.."
           echo "$CERTUTIL $TARGET_DIR"
           mv "$TARGET_DIR" "dist/$NSS_TARGET"
