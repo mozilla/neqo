@@ -175,18 +175,6 @@ jobs:
         with:
           persist-credentials: false
 
-      # - name: Install JDK
-      #   uses: actions/setup-java@v4
-      #   with:
-      #     distribution: 'zulu'
-      #     java-version: '21'
-
-      # - name: Install Android SDK
-      #   uses: android-actions/setup-android@v3
-
-      # - name: Install Android NDK
-      #   run: sdkmanager --install "ndk;$NDK_VERSION"
-
       - uses: ./.github/actions/rust
         with:
           version: stable
@@ -203,9 +191,7 @@ jobs:
           target: ${{ matrix.target }}
 
       - name: Build unit tests for Android
-        run: |
-          env | sort
-          cargo ndk -t ${{ matrix.target }} test --no-run
+        run: cargo ndk -t ${{ matrix.target }} test --no-run
 
       - name: Enable KVM group perms
         run: |
