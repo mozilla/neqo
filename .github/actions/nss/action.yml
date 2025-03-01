@@ -217,6 +217,7 @@ runs:
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
         if [[ $TARGET_PLATFORM == *android ]]; then
+          find "$ANDROID_HOME" -ls
           find "$ANDROID_NDK" -ls
           for file in build-nss-android.sh build-android-common.sh; do
             curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/heads/main/libs/$file"
