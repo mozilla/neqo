@@ -235,14 +235,17 @@ runs:
           echo $CERTUTIL
           TARGET_DIR="$(dirname $CERTUTIL)/.."
           echo "$CERTUTIL $TARGET_DIR"
+          mkdir -p "dist/$NSS_TARGET"
           mv "$TARGET_DIR" "dist/$NSS_TARGET"
           CHACHA="$(grep chacha20poly1305.h tmp)"
           PRIVATE_DIR="$(dirname $CHACHA)/.."
           echo "$CHACHA $TARGET_DIR"
+          mkdir -p "dist/private"
           mv "$PRIVATE_DIR" "dist/private"
           KYBER="$(grep kyber.h tmp)"
           PUBLIC_DIR="$(dirname $KYBER)/../.."
           echo "$KYBER $TARGET_DIR"
+          mkdir -p "dist/public"
           mv "$PUBLIC_DIR" "dist/public"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
