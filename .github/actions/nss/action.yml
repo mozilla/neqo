@@ -224,7 +224,7 @@ runs:
             chmod +x "$file"
           done
           # See https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md#android
-          ANDROID_NDK_VERSION=$(basename "$ANDROID_NDK")
+          ANDROID_NDK_VERSION=$(basename "$ANDROID_NDK" | cut -d. -f1)
           # See https://github.com/mozilla/application-services/blob/46cacda811da094653dc8e93158956f4cd57e87a/libs/build-all.sh#L89-L102
           # It figures that NSPR would require monkey-patching to build on Android.
           sed -i'' 's/if test -z "$android_ndk" ; then/$as_echo "#define ANDROID 1" >>confdefs.h\n    ;;\nunreachable)\n    if test -z "$android_ndk" ; then/g' nspr/configure
