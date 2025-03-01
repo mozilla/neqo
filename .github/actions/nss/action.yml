@@ -217,8 +217,8 @@ runs:
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
         if [[ $TARGET_PLATFORM == *android ]]; then
-          find "$ANDROID_HOME" -ls
-          find "$ANDROID_NDK" -ls
+          echo "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64"
+          find "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64" -ls
           for file in build-nss-android.sh build-android-common.sh; do
             curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/heads/main/libs/$file"
             chmod +x "$file"
@@ -229,7 +229,7 @@ runs:
           # It figures that NSPR would require monkey-patching to build on Android.
           sed -i'' 's/if test -z "$android_ndk" ; then/$as_echo "#define ANDROID 1" >>confdefs.h\n    ;;\nunreachable)\n    if test -z "$android_ndk" ; then/g' nspr/configure
           pwd
-          ./build-nss-android.sh "$(pwd)" "$(pwd)/dist" "$ANDROID_NDK" "$TARGET_PLATFORM" "$ANDROID_NDK_VERSION" || true
+          ./build-nss-android.sh "$(pwd)" "$(pwd)/dist" "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64" "$TARGET_PLATFORM" "$ANDROID_NDK_VERSION" || true
           cat config.log
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
