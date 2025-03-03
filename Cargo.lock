@@ -818,7 +818,6 @@ dependencies = [
  "criterion",
  "futures",
  "hex",
- "libc",
  "log",
  "neqo-bin",
  "neqo-common",
@@ -829,6 +828,7 @@ dependencies = [
  "qlog",
  "quinn-udp",
  "regex",
+ "socket2",
  "tokio",
  "url",
 ]
