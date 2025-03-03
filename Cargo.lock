@@ -818,6 +818,7 @@ dependencies = [
  "criterion",
  "futures",
  "hex",
+ "libc",
  "log",
  "neqo-bin",
  "neqo-common",

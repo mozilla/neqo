@@ -6,10 +6,14 @@
 
 #![expect(clippy::missing_errors_doc, reason = "Passing up tokio errors.")]
 
-use std::{io, net::SocketAddr};
+use std::{io, net::SocketAddr, os::fd::AsRawFd as _, ptr};
 
-use neqo_common::Datagram;
+use libc::{c_int, setsockopt, SOL_SOCKET, SO_RCVBUF, SO_SNDBUF};
+use neqo_common::{qwarn, Datagram};
 use neqo_udp::{DatagramIter, RecvBuf};
+
+/// One megabyte in bytes; the size for the receive and send buffers.
+const ONE_MB: c_int = 1 << 20;
 
 /// Ideally this would live in [`neqo-udp`]. [`neqo-udp`] is used in Firefox.
 ///
@@ -27,6 +31,36 @@ impl Socket {
     /// Create a new [`Socket`] bound to the provided address, not managed externally.
     pub fn bind<A: std::net::ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
         let socket = std::net::UdpSocket::bind(addr)?;
+
+        // Try to incresase the receive buffer size.
+        if unsafe {
+            #[expect(clippy::cast_possible_truncation, reason = "size_of::<c_int> is 4")]
+            setsockopt(
+                socket.as_raw_fd(),
+                SOL_SOCKET,
+                SO_RCVBUF,
+                ptr::from_ref(&ONE_MB).cast(),
+                size_of::<c_int>() as u32,
+            )
+        } != 0
+        {
+            qwarn!("Failed to set socket recv size");
+        }
+
+        // Try to incresase the send buffer size.
+        if unsafe {
+            #[expect(clippy::cast_possible_truncation, reason = "size_of::<c_int> is 4")]
+            setsockopt(
+                socket.as_raw_fd(),
+                SOL_SOCKET,
+                SO_SNDBUF,
+                ptr::from_ref(&ONE_MB).cast(),
+                size_of::<c_int>() as u32,
+            )
+        } != 0
+        {
+            qwarn!("Failed to set socket send size");
+        }
 
         Ok(Self {
             state: quinn_udp::UdpSocketState::new((&socket).into())?,
