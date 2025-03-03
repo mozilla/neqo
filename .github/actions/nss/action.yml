@@ -231,17 +231,14 @@ runs:
           find /tmp/tmp.* > tmp
           CERTUTIL="$(grep certutil tmp)"
           TARGET_DIR="$(dirname $(dirname $CERTUTIL))"
-          echo "$CERTUTIL $TARGET_DIR"
           mkdir -p "dist/$NSS_TARGET"
           cp -aR "$TARGET_DIR"/* "dist/$NSS_TARGET/"
           CHACHA="$(grep chacha20poly1305.h tmp)"
           PRIVATE_DIR="$(dirname $(dirname $CHACHA))"
-          echo "$CHACHA $TARGET_DIR"
           mkdir -p "dist/private"
           cp -aR "$PRIVATE_DIR"/* "dist/private/"
           UTILRENAME="$(grep utilrename.h tmp)"
           PUBLIC_DIR="$(dirname $(dirname $(dirname $UTILRENAME)))"
-          echo "$UTILRENAME $TARGET_DIR"
           mkdir -p "dist/public"
           cp -aR "$PUBLIC_DIR"/* "dist/public/"
         else
