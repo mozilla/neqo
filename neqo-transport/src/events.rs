@@ -81,7 +81,6 @@ pub enum ConnectionEvent {
 }
 
 #[derive(Debug, Default, Clone)]
-#[allow(clippy::module_name_repetitions)]
 pub struct ConnectionEvents {
     events: Rc<RefCell<VecDeque<ConnectionEvent>>>,
 }
@@ -254,7 +253,7 @@ impl EventProvider for ConnectionEvents {
 
 #[cfg(test)]
 mod tests {
-    use neqo_common::event::Provider;
+    use neqo_common::event::Provider as _;
 
     use crate::{CloseReason, ConnectionEvent, ConnectionEvents, Error, State, StreamId};
 

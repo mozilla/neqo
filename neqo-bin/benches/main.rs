@@ -4,7 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{env, path::PathBuf, str::FromStr};
+#![expect(clippy::unwrap_used, reason = "OK in a bench.")]
+
+use std::{env, path::PathBuf, str::FromStr as _};
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use neqo_bin::{client, server};
@@ -17,7 +19,6 @@ struct Benchmark {
 }
 
 fn transfer(c: &mut Criterion) {
-    neqo_common::log::init(Some(log::LevelFilter::Off));
     neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap()).unwrap();
 
     let done_sender = spawn_server();
@@ -70,7 +71,11 @@ fn transfer(c: &mut Criterion) {
     done_sender.send(()).unwrap();
 }
 
-#[allow(clippy::redundant_pub_crate)] // Bug in clippy nursery? Not sure how this lint could fire here.
+#[allow(
+    clippy::allow_attributes,
+    clippy::redundant_pub_crate,
+    reason = "TODO: Bug in clippy nursery?"
+)]
 fn spawn_server() -> tokio::sync::oneshot::Sender<()> {
     let (done_sender, mut done_receiver) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {

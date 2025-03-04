@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::mem;
-
 use neqo_common::{qdebug, Datagram};
 use test_fixture::now;
 
@@ -30,7 +28,7 @@ fn check_discarded(
     dups: usize,
 ) {
     // Make sure to flush any saved datagrams before doing this.
-    mem::drop(peer.process_output(now()));
+    drop(peer.process_output(now()));
 
     let before = peer.stats();
     let out = peer.process(Some(pkt.clone()), now());
@@ -58,24 +56,30 @@ fn discarded_initial_keys() {
     qdebug!("---- client: generate CH");
     let mut client = default_client();
     let init_pkt_c = client.process_output(now()).dgram();
-    assert!(init_pkt_c.is_some());
+    let init_pkt_c2 = client.process_output(now()).dgram();
+    assert!(init_pkt_c.is_some() && init_pkt_c2.is_some());
     assert_eq!(init_pkt_c.as_ref().unwrap().len(), client.plpmtu());
+    assert_eq!(init_pkt_c2.as_ref().unwrap().len(), client.plpmtu());
 
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
-    let init_pkt_s = server.process(init_pkt_c.clone(), now()).dgram();
+    server.process_input(init_pkt_c.clone().unwrap(), now());
+    let init_pkt_s = server.process(init_pkt_c2, now()).dgram();
     assert!(init_pkt_s.is_some());
 
     qdebug!("---- client: cert verification");
     let out = client.process(init_pkt_s.clone(), now()).dgram();
     assert!(out.is_some());
 
+    let out = server.process(out, now()).dgram();
+    client.process_input(out.unwrap(), now());
+
     // The client has received a handshake packet. It will remove the Initial keys.
     // We will check this by processing init_pkt_s a second time.
     // The initial packet should be dropped. The packet contains a Handshake packet as well, which
     // will be marked as dup.  And it will contain padding, which will be "dropped".
     // The client will generate a Handshake packet here to avoid stalling.
-    check_discarded(&mut client, &init_pkt_s.unwrap(), true, 2, 1);
+    check_discarded(&mut client, &init_pkt_s.unwrap(), true, 1, 0);
 
     assert!(maybe_authenticate(&mut client));
 
@@ -145,7 +149,7 @@ fn key_update_client() {
     let dgram = client.process_output(now).dgram();
     assert!(dgram.is_some()); // Drop this packet.
     assert_eq!(client.get_epochs(), (Some(4), Some(3)));
-    mem::drop(server.process_output(now));
+    drop(server.process_output(now));
     assert_eq!(server.get_epochs(), (Some(4), Some(4)));
 
     // Even though the server has updated, it hasn't received an ACK yet.
@@ -170,7 +174,7 @@ fn key_update_client() {
     assert_update_blocked(&mut server);
 
     now += AT_LEAST_PTO;
-    mem::drop(client.process_output(now));
+    drop(client.process_output(now));
     assert_eq!(client.get_epochs(), (Some(4), Some(4)));
 }
 
@@ -186,7 +190,7 @@ fn key_update_consecutive() {
 
     // Server sends something.
     // Send twice and drop the first to induce an ACK from the client.
-    mem::drop(send_something(&mut server, now)); // Drop this.
+    drop(send_something(&mut server, now)); // Drop this.
 
     // Another packet from the server will cause the client to ACK and update keys.
     let dgram = send_and_receive(&mut server, &mut client, now);
@@ -198,7 +202,7 @@ fn key_update_consecutive() {
         assert_eq!(server.get_epochs(), (Some(4), Some(3)));
         // Now move the server temporarily into the future so that it
         // rotates the keys.  The client stays in the present.
-        mem::drop(server.process_output(now + AT_LEAST_PTO));
+        drop(server.process_output(now + AT_LEAST_PTO));
         assert_eq!(server.get_epochs(), (Some(4), Some(4)));
     } else {
         panic!("server should have a timer set");
@@ -225,10 +229,20 @@ fn key_update_before_confirmed() {
 
     // Client Initial
     let dgram = client.process_output(now()).dgram();
-    assert!(dgram.is_some());
+    let dgram2 = client.process_output(now()).dgram();
+    assert!(dgram.is_some() && dgram2.is_some());
     assert_update_blocked(&mut client);
 
     // Server Initial + Handshake
+    server.process_input(dgram.unwrap(), now());
+    let dgram = server.process(dgram2, now()).dgram();
+    assert!(dgram.is_some());
+    assert_update_blocked(&mut server);
+
+    let dgram = client.process(dgram, now()).dgram();
+    assert!(dgram.is_some());
+    assert_update_blocked(&mut client);
+
     let dgram = server.process(dgram, now()).dgram();
     assert!(dgram.is_some());
     assert_update_blocked(&mut server);
@@ -304,7 +318,7 @@ fn automatic_update_write_keys() {
     connect_force_idle(&mut client, &mut server);
 
     overwrite_invocations(UPDATE_WRITE_KEYS_AT);
-    mem::drop(send_something(&mut client, now()));
+    drop(send_something(&mut client, now()));
     assert_eq!(client.get_epochs(), (Some(4), Some(3)));
 }
 
@@ -316,10 +330,10 @@ fn automatic_update_write_keys_later() {
 
     overwrite_invocations(UPDATE_WRITE_KEYS_AT + 2);
     // No update after the first.
-    mem::drop(send_something(&mut client, now()));
+    drop(send_something(&mut client, now()));
     assert_eq!(client.get_epochs(), (Some(3), Some(3)));
     // The second will update though.
-    mem::drop(send_something(&mut client, now()));
+    drop(send_something(&mut client, now()));
     assert_eq!(client.get_epochs(), (Some(4), Some(3)));
 }
 

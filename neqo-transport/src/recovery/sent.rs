@@ -98,13 +98,22 @@ impl SentPacket {
     }
 
     /// The length of the packet that was sent.
-    #[allow(clippy::len_without_is_empty)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::len_without_is_empty,
+        reason = "OK here."
+    )]
     #[must_use]
     pub const fn len(&self) -> usize {
         self.len
     }
 
     /// Access the recovery tokens that this holds.
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     #[must_use]
     pub fn tokens(&self) -> &[RecoveryToken] {
         &self.tokens
@@ -190,7 +199,11 @@ pub struct SentPackets {
 }
 
 impl SentPackets {
-    #[allow(clippy::len_without_is_empty)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::len_without_is_empty,
+        reason = "OK here."
+    )]
     #[must_use]
     pub fn len(&self) -> usize {
         self.packets.len()
@@ -238,7 +251,7 @@ impl SentPackets {
             // > values in **descending packet number order**.
             //
             // <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.1>
-            debug_assert!(previous_range_start.map_or(true, |s| s > *range.end()));
+            debug_assert!(previous_range_start.is_none_or(|s| s > *range.end()));
             previous_range_start = Some(*range.start());
 
             // Thus none of the following ACK ranges will acknowledge packets in
@@ -305,7 +318,6 @@ impl SentPackets {
 mod tests {
     use std::{
         cell::OnceCell,
-        convert::TryFrom,
         time::{Duration, Instant},
     };
 
@@ -366,7 +378,7 @@ mod tests {
         let mut it = store.into_iter();
         assert_eq!(idx, it.next().unwrap().pn());
         assert!(it.next().is_none());
-        std::mem::drop(it);
+        drop(it);
         assert_eq!(pkts.len(), 2);
     }
 

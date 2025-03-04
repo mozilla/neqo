@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use neqo_common::event::Provider;
+use neqo_common::event::Provider as _;
 use static_assertions::const_assert;
 use test_fixture::now;
 
@@ -17,7 +17,7 @@ use super::{
 use crate::{
     connection::tests::DEFAULT_ADDR,
     events::{ConnectionEvent, OutgoingDatagramOutcome},
-    frame::FRAME_TYPE_DATAGRAM,
+    frame::FrameType,
     packet::PacketBuilder,
     quic_datagrams::MAX_QUIC_DATAGRAM,
     send_stream::{RetransmissionPriority, TransmissionPriority},
@@ -44,7 +44,7 @@ struct InsertDatagram<'a> {
 
 impl crate::connection::test_internal::FrameWriter for InsertDatagram<'_> {
     fn write_frames(&mut self, builder: &mut PacketBuilder) {
-        builder.encode_varint(FRAME_TYPE_DATAGRAM);
+        builder.encode_varint(FrameType::Datagram);
         builder.encode(self.data);
     }
 }

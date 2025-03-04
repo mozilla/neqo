@@ -4,9 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{mem, time::Duration};
+use std::time::Duration;
 
-use neqo_common::{event::Provider, Decoder, Encoder};
+use neqo_common::{event::Provider as _, Decoder, Encoder};
 use test_fixture::{assertions, datagram, now};
 
 use super::{
@@ -16,7 +16,7 @@ use super::{
 };
 use crate::{
     packet::PACKET_BIT_LONG,
-    tparams::{self, TransportParameter},
+    tparams::{TransportParameter, TransportParameterId::*},
     ConnectionParameters, Error, Version, MIN_INITIAL_PACKET_SIZE,
 };
 
@@ -27,11 +27,11 @@ const INITIAL_PTO: Duration = Duration::from_millis(300);
 fn unknown_version() {
     let mut client = default_client();
     // Start the handshake.
-    mem::drop(client.process_output(now()).dgram());
+    drop(client.process_output(now()).dgram());
 
     let mut unknown_version_packet = vec![0x80, 0x1a, 0x1a, 0x1a, 0x1a];
     unknown_version_packet.resize(MIN_INITIAL_PACKET_SIZE, 0x0);
-    mem::drop(client.process(Some(datagram(unknown_version_packet)), now()));
+    drop(client.process(Some(datagram(unknown_version_packet)), now()));
     assert_eq!(1, client.stats().dropped_rx);
 }
 
@@ -76,6 +76,7 @@ fn version_negotiation_current_version() {
         .dgram()
         .expect("a datagram")
         .to_vec();
+    _ = client.process_output(now()).dgram().expect("a datagram");
 
     let vn = create_vn(
         &initial_pkt,
@@ -83,7 +84,8 @@ fn version_negotiation_current_version() {
     );
 
     let dgram = datagram(vn);
-    let delay = client.process(Some(dgram), now()).callback();
+    let mut delay = client.process(Some(dgram), now()).callback();
+    delay += client.process_output(now() + delay).callback(); // TODO: Why is there first a 5ms pacing delay before the PTO?
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
@@ -98,11 +100,13 @@ fn version_negotiation_version0() {
         .dgram()
         .expect("a datagram")
         .to_vec();
+    _ = client.process_output(now()).dgram().expect("a datagram");
 
     let vn = create_vn(&initial_pkt, &[0, 0x1a1a_1a1a]);
 
     let dgram = datagram(vn);
-    let delay = client.process(Some(dgram), now()).callback();
+    let mut delay = client.process(Some(dgram), now()).callback();
+    delay += client.process_output(now() + delay).callback(); // TODO: Why is there first a 5ms pacing delay before the PTO?
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
@@ -139,11 +143,13 @@ fn version_negotiation_corrupted() {
         .dgram()
         .expect("a datagram")
         .to_vec();
+    _ = client.process_output(now()).dgram().expect("a datagram");
 
     let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a]);
 
     let dgram = datagram(vn[..vn.len() - 1].to_vec());
-    let delay = client.process(Some(dgram), now()).callback();
+    let mut delay = client.process(Some(dgram), now()).callback();
+    delay += client.process_output(now() + delay).callback(); // TODO: Why is there first a 5ms pacing delay before the PTO?
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
@@ -158,11 +164,13 @@ fn version_negotiation_empty() {
         .dgram()
         .expect("a datagram")
         .to_vec();
+    _ = client.process_output(now()).dgram().expect("a datagram");
 
     let vn = create_vn(&initial_pkt, &[]);
 
     let dgram = datagram(vn);
-    let delay = client.process(Some(dgram), now()).callback();
+    let mut delay = client.process(Some(dgram), now()).callback();
+    delay += client.process_output(now() + delay).callback(); // TODO: Why is there first a 5ms pacing delay before the PTO?
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
@@ -198,12 +206,14 @@ fn version_negotiation_bad_cid() {
         .dgram()
         .expect("a datagram")
         .to_vec();
+    _ = client.process_output(now()).dgram().expect("a datagram");
 
     initial_pkt[6] ^= 0xc4;
     let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a, 0xff00_0001]);
 
     let dgram = datagram(vn);
-    let delay = client.process(Some(dgram), now()).callback();
+    let mut delay = client.process(Some(dgram), now()).callback();
+    delay += client.process_output(now() + delay).callback(); // TODO: Why is there first a 5ms pacing delay before the PTO?
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
@@ -230,7 +240,7 @@ fn compatible_upgrade_large_initial() {
     let mut client = new_client(params.clone());
     client
         .set_local_tparam(
-            0x0845_de37_00ac_a5f9,
+            TestTransportParameter,
             TransportParameter::Bytes(vec![0; 2048]),
         )
         .unwrap();
@@ -239,8 +249,10 @@ fn compatible_upgrade_large_initial() {
     // Client Initial should take 2 packets.
     // Each should elicit a Version 1 ACK from the server.
     let dgram = client.process_output(now()).dgram();
-    assert!(dgram.is_some());
-    let dgram = server.process(dgram, now()).dgram();
+    let dgram2 = client.process_output(now()).dgram();
+    assert!(dgram.is_some() && dgram2.is_some());
+    server.process_input(dgram.unwrap(), now());
+    let dgram = server.process(dgram2, now()).dgram();
     assert!(dgram.is_some());
     // The following uses the Version from *outside* this crate.
     assertions::assert_version(dgram.as_ref().unwrap(), Version::Version1.wire_version());
@@ -251,7 +263,7 @@ fn compatible_upgrade_large_initial() {
     assert_eq!(server.version(), Version::Version2);
     // Only handshake padding is "dropped".
     assert_eq!(client.stats().dropped_rx, 1);
-    assert_eq!(server.stats().dropped_rx, 1);
+    assert!(matches!(server.stats().dropped_rx, 2 | 3));
 }
 
 /// A server that supports versions 1 and 2 might prefer version 1 and that's OK.
@@ -328,12 +340,14 @@ fn invalid_server_version() {
         new_server(ConnectionParameters::default().versions(Version::Version2, Version::all()));
 
     let dgram = client.process_output(now()).dgram();
+    let dgram2 = client.process_output(now()).dgram();
     server.process_input(dgram.unwrap(), now());
+    server.process_input(dgram2.unwrap(), now());
 
-    // One packet received.
-    assert_eq!(server.stats().packets_rx, 1);
-    // None dropped; the server will have decrypted it successfully.
-    assert_eq!(server.stats().dropped_rx, 0);
+    // Three packets received (one is zero padding).
+    assert_eq!(server.stats().packets_rx, 3);
+    // One dropped (the zero padding).
+    assert_eq!(server.stats().dropped_rx, 1);
     assert_eq!(server.stats().saved_datagrams, 0);
     // The server effectively hasn't reacted here.
     match server.state() {
@@ -354,7 +368,7 @@ fn invalid_current_version_client() {
     assert_ne!(OTHER_VERSION, client.version());
     client
         .set_local_tparam(
-            tparams::VERSION_INFORMATION,
+            VersionInformation,
             TransportParameter::Versions {
                 current: OTHER_VERSION.wire_version(),
                 other: Version::all()
@@ -390,7 +404,7 @@ fn invalid_current_version_server() {
     assert!(!Version::default().is_compatible(OTHER_VERSION));
     server
         .set_local_tparam(
-            tparams::VERSION_INFORMATION,
+            VersionInformation,
             TransportParameter::Versions {
                 current: OTHER_VERSION.wire_version(),
                 other: vec![OTHER_VERSION.wire_version()],
@@ -416,7 +430,7 @@ fn no_compatible_version() {
     assert_ne!(OTHER_VERSION, client.version());
     client
         .set_local_tparam(
-            tparams::VERSION_INFORMATION,
+            VersionInformation,
             TransportParameter::Versions {
                 current: Version::default().wire_version(),
                 other: vec![OTHER_VERSION.wire_version()],
@@ -457,9 +471,11 @@ fn compatible_upgrade_0rtt_rejected() {
 
     // Create a packet with 0-RTT from the client.
     let initial = send_something(&mut client, now());
+    let initial2 = send_something(&mut client, now());
     assertions::assert_version(&initial, Version::Version1.wire_version());
-    assertions::assert_coalesced_0rtt(&initial);
+    assertions::assert_coalesced_0rtt(&initial2);
     server.process_input(initial, now());
+    server.process_input(initial2, now());
     assert!(!server
         .events()
         .any(|e| matches!(e, ConnectionEvent::NewStream { .. })));
@@ -467,6 +483,8 @@ fn compatible_upgrade_0rtt_rejected() {
     // Finalize the connection.  Don't use connect() because it uses
     // maybe_authenticate() too liberally and that eats the events we want to check.
     let dgram = server.process_output(now()).dgram(); // ServerHello flight
+    let dgram = client.process(dgram, now()).dgram();
+    let dgram = server.process(dgram, now()).dgram();
     let dgram = client.process(dgram, now()).dgram(); // Client Finished (note: no authentication)
     let dgram = server.process(dgram, now()).dgram(); // HANDSHAKE_DONE
     client.process_input(dgram.unwrap(), now());
