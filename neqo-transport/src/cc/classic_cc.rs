@@ -349,8 +349,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         self.acked_bytes = acked_bytes;
         self.ssthresh = self.congestion_window;
         qdebug!(
-            [self],
-            "Cong event -> recovery; cwnd {}, ssthresh {}",
+            "[{self}] Cong event -> recovery; cwnd {}, ssthresh {}",
             self.congestion_window,
             self.ssthresh
         );

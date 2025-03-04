@@ -825,7 +825,7 @@ impl LossRecovery {
         // The spaces in which we will allow probing.
         let mut allow_probes = PacketNumberSpaceSet::default();
         for pn_space in PacketNumberSpace::iter() {
-            if let Some(t) = self.pto_time(path.borrow().rtt(), *pn_space) {
+            if let Some(t) = self.pto_time(path.borrow().rtt(), pn_space) {
                 allow_probes.insert(pn_space);
                 if t <= now {
                     qdebug!("[{self}] PTO timer fired for {pn_space}");
