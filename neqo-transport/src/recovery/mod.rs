@@ -179,14 +179,12 @@ impl LossRecoverySpace {
     }
 
     pub fn pto_packets(&mut self) -> impl Iterator<Item = &SentPacket> {
-        self.sent_packets
-            .iter_mut()
-            .filter_map(|sent| {
-                sent.pto().then(|| {
-                    qtrace!("PTO: marking packet {} lost ", sent.pn());
-                    &*sent
-                })
+        self.sent_packets.iter_mut().filter_map(|sent| {
+            sent.pto().then(|| {
+                qtrace!("PTO: marking packet {} lost ", sent.pn());
+                &*sent
             })
+        })
     }
 
     #[must_use]
