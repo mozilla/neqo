@@ -4,16 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::mem;
-
-use neqo_common::{event::Provider, Encoder};
+use neqo_common::{event::Provider as _, header::HeadersExt as _, Encoder};
 use neqo_transport::StreamType;
 use test_fixture::now;
 
 use crate::{
     features::extended_connect::{
         tests::webtransport::{
-            default_http3_client, default_http3_server, wt_default_parameters, WtTest,
+            assert_wt, default_http3_client, default_http3_server, wt_default_parameters, WtTest,
         },
         SessionCloseReason,
     },
@@ -26,7 +24,7 @@ use crate::{
 #[test]
 fn wt_session() {
     let mut wt = WtTest::new();
-    mem::drop(wt.create_wt_session());
+    drop(wt.create_wt_session());
 }
 
 #[test]
@@ -39,7 +37,7 @@ fn wt_session_reject() {
     wt.check_session_closed_event_client(
         wt_session_id,
         &SessionCloseReason::Status(404),
-        &Some(headers),
+        Some(&headers),
     );
 }
 
@@ -64,7 +62,7 @@ fn wt_session_close_server() {
     wt.check_session_closed_event_client(
         wt_session.stream_id(),
         &SessionCloseReason::Error(Error::HttpNoError.code()),
-        &None,
+        None,
     );
 }
 
@@ -81,7 +79,7 @@ fn wt_session_close_server_close_send() {
             error: 0,
             message: String::new(),
         },
-        &None,
+        None,
     );
 }
 
@@ -97,7 +95,7 @@ fn wt_session_close_server_stop_sending() {
     wt.check_session_closed_event_client(
         wt_session.stream_id(),
         &SessionCloseReason::Error(Error::HttpNoError.code()),
-        &None,
+        None,
     );
 }
 
@@ -113,7 +111,7 @@ fn wt_session_close_server_reset() {
     wt.check_session_closed_event_client(
         wt_session.stream_id(),
         &SessionCloseReason::Error(Error::HttpNoError.code()),
-        &None,
+        None,
     );
 }
 
@@ -134,14 +132,7 @@ fn wt_session_response_with_1xx() {
             headers,
         }) = event
         {
-            assert!(
-                headers
-                    .iter()
-                    .any(|h| h.name() == ":method" && h.value() == "CONNECT")
-                    && headers
-                        .iter()
-                        .any(|h| h.name() == ":protocol" && h.value() == "webtransport")
-            );
+            assert_wt(&headers);
             wt_server_session = Some(session);
         }
     }
@@ -168,7 +159,7 @@ fn wt_session_response_with_1xx() {
             }) if (
                 stream_id == wt_session_id &&
                 status == 200 &&
-                headers.contains(&Header::new(":status", "200"))
+                headers.contains_header(":status", "200")
             )
         )
     };
@@ -189,7 +180,7 @@ fn wt_session_response_with_redirect() {
     wt.check_session_closed_event_client(
         wt_session_id,
         &SessionCloseReason::Status(302),
-        &Some(headers),
+        Some(&headers),
     );
 }
 
@@ -209,14 +200,7 @@ fn wt_session_respone_200_with_fin() {
             headers,
         }) = event
         {
-            assert!(
-                headers
-                    .iter()
-                    .any(|h| h.name() == ":method" && h.value() == "CONNECT")
-                    && headers
-                        .iter()
-                        .any(|h| h.name() == ":protocol" && h.value() == "webtransport")
-            );
+            assert_wt(&headers);
             wt_server_session = Some(session);
         }
     }
@@ -284,7 +268,7 @@ fn wt_session_close_frame_server() {
             error: ERROR_NUM,
             message: ERROR_MESSAGE.to_string(),
         },
-        &None,
+        None,
     );
 }
 
@@ -321,14 +305,14 @@ fn wt_unknown_session_frame_client() {
         &[],
         None,
         false,
-        &None,
+        None,
     );
     wt.check_events_after_closing_session_server(
         &[],
         None,
         &[unidi_server.stream_id()],
         Some(Error::HttpRequestCancelled.code()),
-        &Some((
+        Some(&(
             wt_session.stream_id(),
             SessionCloseReason::Clean {
                 error: ERROR_NUM,
@@ -360,7 +344,7 @@ fn wt_close_session_frame_broken_client() {
     wt.check_session_closed_event_client(
         wt_session.stream_id(),
         &SessionCloseReason::Error(Error::HttpGeneralProtocolStream.code()),
-        &None,
+        None,
     );
     wt.check_session_closed_event_server(
         &wt_session,
@@ -425,18 +409,18 @@ fn wt_close_session_cannot_be_sent_at_once() {
         Err(Error::InvalidStreamId)
     );
 
-    let out = wt.server.process(None, now());
-    let out = wt.client.process(out.as_dgram_ref(), now());
+    let out = wt.server.process_output(now());
+    let out = wt.client.process(out.dgram(), now());
 
     // Client has not received the full CloseSession frame and it can create more streams.
     let unidi_client = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
 
-    let out = wt.server.process(out.as_dgram_ref(), now());
-    let out = wt.client.process(out.as_dgram_ref(), now());
-    let out = wt.server.process(out.as_dgram_ref(), now());
-    let out = wt.client.process(out.as_dgram_ref(), now());
-    let out = wt.server.process(out.as_dgram_ref(), now());
-    let _out = wt.client.process(out.as_dgram_ref(), now());
+    let out = wt.server.process(out.dgram(), now());
+    let out = wt.client.process(out.dgram(), now());
+    let out = wt.server.process(out.dgram(), now());
+    let out = wt.client.process(out.dgram(), now());
+    let out = wt.server.process(out.dgram(), now());
+    let _out = wt.client.process(out.dgram(), now());
 
     wt.check_events_after_closing_session_client(
         &[],
@@ -444,7 +428,7 @@ fn wt_close_session_cannot_be_sent_at_once() {
         &[unidi_client],
         Some(Error::HttpRequestCancelled.code()),
         false,
-        &Some((
+        Some(&(
             wt_session.stream_id(),
             SessionCloseReason::Clean {
                 error: ERROR_NUM,
@@ -452,5 +436,5 @@ fn wt_close_session_cannot_be_sent_at_once() {
             },
         )),
     );
-    wt.check_events_after_closing_session_server(&[], None, &[], None, &None);
+    wt.check_events_after_closing_session_server(&[], None, &[], None, None);
 }

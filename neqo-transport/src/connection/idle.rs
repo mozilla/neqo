@@ -39,9 +39,6 @@ impl IdleTimeout {
             keep_alive_outstanding: false,
         }
     }
-}
-
-impl IdleTimeout {
     pub fn set_peer_timeout(&mut self, peer_timeout: Duration) {
         self.timeout = min(self.timeout, peer_timeout);
     }
@@ -94,6 +91,21 @@ impl IdleTimeout {
         // For a keep-alive timer, wait for half the timeout interval, but be sure
         // not to wait too little or we will send many unnecessary probes.
         self.start(now) + max(self.timeout / 2, pto)
+    }
+
+    pub fn next_keep_alive(&self, now: Instant, pto: Duration) -> Option<Instant> {
+        if self.keep_alive_outstanding {
+            return None;
+        }
+
+        let timeout = self.keep_alive_timeout(now, pto);
+        // Timer is in the past, i.e. we should have sent a keep alive,
+        // but we were unable to, e.g. due to CC.
+        if timeout <= now {
+            return None;
+        }
+
+        Some(timeout)
     }
 
     pub fn send_keep_alive(

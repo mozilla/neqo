@@ -4,17 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(unused)]
+#![allow(clippy::allow_attributes, dead_code, reason = "Exported.")]
 
-use std::{cell::RefCell, mem, ops::Range, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
-use neqo_common::{event::Provider, hex_with_len, qtrace, Datagram, Decoder, Role};
-use neqo_crypto::{
-    constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-    hkdf,
-    hp::HpKey,
-    Aead, AllowZeroRtt, AuthenticationStatus, ResumptionToken,
-};
+use neqo_common::event::Provider as _;
+use neqo_crypto::{AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
     Connection, ConnectionEvent, ConnectionParameters, State,
@@ -42,8 +37,10 @@ pub fn default_server() -> Server {
 
 // Check that there is at least one connection.  Returns a ref to the first confirmed connection.
 pub fn connected_server(server: &Server) -> ConnectionRef {
-    // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
-    #[allow(clippy::mutable_key_type)]
+    #[expect(
+        clippy::mutable_key_type,
+        reason = "ActiveConnectionRef::Hash doesn't access any of the interior mutable types."
+    )]
     let server_connections = server.active_connections();
     // Find confirmed connections.  There should only be one.
     let mut confirmed = server_connections
@@ -58,33 +55,38 @@ pub fn connect(client: &mut Connection, server: &mut Server) -> ConnectionRef {
     server.set_validation(ValidateAddress::Never);
 
     assert_eq!(*client.state(), State::Init);
-    let out = client.process(None, now()); // ClientHello
-    assert!(out.as_dgram_ref().is_some());
-    let out = server.process(out.as_dgram_ref(), now()); // ServerHello...
+    let out = client.process_output(now()); // ClientHello
+    let out2 = client.process_output(now()); // ClientHello
+    assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
+    _ = server.process(out.dgram(), now()); // ACK
+    let out = server.process(out2.dgram(), now()); // ServerHello...
     assert!(out.as_dgram_ref().is_some());
 
     // Ingest the server Certificate.
-    let out = client.process(out.as_dgram_ref(), now());
+    let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some()); // This should just be an ACK.
-    let out = server.process(out.as_dgram_ref(), now());
+    let out = server.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_none()); // So the server should have nothing to say.
 
     // Now mark the server as authenticated.
     client.authenticated(AuthenticationStatus::Ok, now());
-    let out = client.process(None, now());
+    let out = client.process_output(now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(*client.state(), State::Connected);
-    let out = server.process(out.as_dgram_ref(), now());
+    let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some()); // ACK + HANDSHAKE_DONE + NST
 
     // Have the client process the HANDSHAKE_DONE.
-    let out = client.process(out.as_dgram_ref(), now());
+    let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_none());
     assert_eq!(*client.state(), State::Confirmed);
 
     connected_server(server)
 }
 
+#[cfg(test)]
 /// Scrub through client events to find a resumption token.
 pub fn find_ticket(client: &mut Connection) -> ResumptionToken {
     client
@@ -99,20 +101,21 @@ pub fn find_ticket(client: &mut Connection) -> ResumptionToken {
         .unwrap()
 }
 
+#[cfg(test)]
 /// Connect to the server and have it generate a ticket.
 pub fn generate_ticket(server: &mut Server) -> ResumptionToken {
     let mut client = default_client();
-    let mut server_conn = connect(&mut client, server);
+    let server_conn = connect(&mut client, server);
 
     server_conn.borrow_mut().send_ticket(now(), &[]).unwrap();
-    let out = server.process(None, now());
-    client.process_input(out.as_dgram_ref().unwrap(), now()); // Consume ticket, ignore output.
+    let out = server.process_output(now());
+    client.process_input(out.dgram().unwrap(), now()); // Consume ticket, ignore output.
     let ticket = find_ticket(&mut client);
 
     // Have the client close the connection and then let the server clean up.
     client.close(now(), 0, "got a ticket");
     let out = client.process_output(now());
-    mem::drop(server.process(out.as_dgram_ref(), now()));
+    drop(server.process(out.dgram(), now()));
     // Calling active_connections clears the set of active connections.
     assert_eq!(server.active_connections().len(), 1);
     ticket

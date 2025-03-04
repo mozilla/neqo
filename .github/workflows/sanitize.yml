@@ -1,0 +1,92 @@
+name: Sanitize
+on:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  merge_group:
+  workflow_dispatch:
+env:
+  DUMP_SIMULATION_SEEDS: /tmp/simulation-seeds
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sanitize:
+    if: github.actor != 'dependabot[bot]'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest] # No Windows support for sanitizers.
+        sanitizer: [address, thread, leak] # TODO: memory
+        exclude:
+          # Memory and leak sanitizers are not supported on macOS.
+          - os: macos-latest
+            sanitizer: leak
+          # - os: macos-latest
+          #   sanitizer: memory
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/rust
+        with:
+          version: nightly
+          components: rust-src
+          tools: cargo-nextest
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/nss
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+
+      - name: Run tests with sanitizers
+        env:
+          RUST_LOG: trace
+          RUSTDOCFLAGS: "-Z sanitizer=${{ matrix.sanitizer }}"
+          ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
+          RUST_BACKTRACE: 1
+        run: |
+          # Append to RUSTFLAGS, which may already be set by the Rust action.
+          export RUSTFLAGS="-Z sanitizer=${{ matrix.sanitizer }} $RUSTFLAGS"
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            sudo apt-get install -y --no-install-recommends llvm
+            TARGET="x86_64-unknown-linux-gnu"
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            # llvm-symbolizer (as part of llvm) is installed by default on macOS runners
+            TARGET="aarch64-apple-darwin"
+            # Suppress non-neqo leaks on macOS. TODO: Check occasionally if these are still needed.
+            {
+              echo "leak:dyld4::RuntimeState"
+              echo "leak:fetchInitializingClassList"
+              echo "leak:std::rt::lang_start_internal"
+            } > suppressions.txt
+            PWD=$(pwd)
+            export LSAN_OPTIONS="suppressions=$PWD/suppressions.txt"
+          fi
+          cargo nextest run --locked -Z build-std --features ci --profile ci --target "$TARGET"
+
+      - name: Save simulation seeds artifact
+        if: ${{ env.DUMP_SIMULATION_SEEDS }}
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: simulation-seeds-${{ matrix.os }}-sanitizer-${{ matrix.sanitizer }}
+          path: ${{ env.DUMP_SIMULATION_SEEDS }}
+          compression-level: 9

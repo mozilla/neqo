@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
+#![expect(clippy::unwrap_used, reason = "This is test code.")]
 
 use std::{
     cmp::min,
@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Datagram};
+use neqo_common::{event::Provider as _, qdebug, qinfo, qtrace, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
@@ -81,7 +81,8 @@ impl ConnectionNode {
 
     pub fn default_client(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
         Self::new_client(
-            ConnectionParameters::default().pmtud(true),
+            // Simulator logic does not work with multi-packet MLKEM crypto flights.
+            ConnectionParameters::default().pmtud(true).mlkem(false),
             boxed![ReachState::new(State::Confirmed)],
             goals,
         )
@@ -89,7 +90,8 @@ impl ConnectionNode {
 
     pub fn default_server(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
         Self::new_server(
-            ConnectionParameters::default().pmtud(true),
+            // Simulator logic does not work with multi-packet MLKEM crypto flights.
+            ConnectionParameters::default().pmtud(true).mlkem(false),
             boxed![ReachState::new(State::Confirmed)],
             goals,
         )
@@ -138,14 +140,14 @@ impl Node for ConnectionNode {
         self.setup_goals(now);
     }
 
-    fn process(&mut self, mut dgram: Option<Datagram>, now: Instant) -> Output {
+    fn process(&mut self, mut d: Option<Datagram>, now: Instant) -> Output {
         _ = self.process_goals(|goal, c| goal.process(c, now));
         loop {
-            let res = self.c.process(dgram.take().as_ref(), now);
+            let res = self.c.process(d.take(), now);
 
             let mut active = false;
             while let Some(e) = self.c.next_event() {
-                qtrace!([self.c], "received event {:?}", e);
+                qtrace!("[{}] received event {e:?}", self.c);
 
                 // Perform authentication automatically.
                 if matches!(e, ConnectionEvent::AuthenticationNeeded) {
@@ -160,7 +162,7 @@ impl Node for ConnectionNode {
             if matches!(res, Output::Datagram(_)) || !active {
                 return res;
             }
-            qdebug!([self.c], "no datagram and goal activity, looping");
+            qdebug!("[{}] no datagram and goal activity, looping", self.c);
         }
     }
 
@@ -175,7 +177,7 @@ impl Node for ConnectionNode {
     }
 
     fn print_summary(&self, test_name: &str) {
-        qinfo!("{}: {:?}", test_name, self.c.stats());
+        qinfo!("{test_name}: {:?}", self.c.stats());
     }
 }
 
@@ -233,7 +235,7 @@ impl SendData {
     fn make_stream(&mut self, c: &mut Connection) {
         if self.stream_id.is_none() {
             if let Ok(stream_id) = c.stream_create(StreamType::UniDi) {
-                qdebug!([c], "made stream {} for sending", stream_id);
+                qdebug!("[{c}] made stream {stream_id} for sending");
                 self.stream_id = Some(stream_id);
             }
         }
@@ -249,7 +251,7 @@ impl SendData {
                 return status;
             }
             self.remaining -= sent;
-            qtrace!("sent {} remaining {}", sent, self.remaining);
+            qtrace!("sent {sent} remaining {}", self.remaining);
             if self.remaining == 0 {
                 c.stream_close_send(stream_id).unwrap();
                 return GoalStatus::Done;
@@ -315,7 +317,7 @@ impl ReceiveData {
         loop {
             let end = min(self.remaining, buf.len());
             let (recvd, _) = c.stream_recv(stream_id, &mut buf[..end]).unwrap();
-            qtrace!("received {} remaining {}", recvd, self.remaining);
+            qtrace!("received {recvd} remaining {}", self.remaining);
             if recvd == 0 {
                 return status;
             }

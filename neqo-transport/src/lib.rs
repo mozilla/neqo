@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
-
 use neqo_common::qwarn;
 use neqo_crypto::Error as CryptoError;
 
@@ -15,7 +13,7 @@ mod cc;
 mod cid;
 mod connection;
 mod crypto;
-mod ecn;
+pub mod ecn;
 mod events;
 mod fc;
 #[cfg(fuzzing)]
@@ -23,14 +21,17 @@ pub mod frame;
 #[cfg(not(fuzzing))]
 mod frame;
 mod pace;
-#[cfg(fuzzing)]
+#[cfg(any(fuzzing, feature = "bench"))]
 pub mod packet;
-#[cfg(not(fuzzing))]
+#[cfg(not(any(fuzzing, feature = "bench")))]
 mod packet;
 mod path;
 mod pmtud;
 mod qlog;
 mod quic_datagrams;
+#[cfg(feature = "bench")]
+pub mod recovery;
+#[cfg(not(feature = "bench"))]
 mod recovery;
 #[cfg(feature = "bench")]
 pub mod recv_stream;
@@ -43,6 +44,7 @@ pub mod send_stream;
 mod send_stream;
 mod sender;
 pub mod server;
+mod sni;
 mod stats;
 pub mod stream_id;
 pub mod streams;
@@ -67,6 +69,7 @@ pub use self::{
     quic_datagrams::DatagramTracking,
     recv_stream::{RecvStreamStats, RECV_BUFFER_SIZE},
     send_stream::{SendStreamStats, SEND_BUFFER_SIZE},
+    sni::find_sni,
     stats::Stats,
     stream_id::{StreamId, StreamType},
     version::Version,
@@ -81,7 +84,7 @@ const ERROR_AEAD_LIMIT_REACHED: TransportError = 15;
 pub enum Error {
     NoError,
     // Each time this error is returned a different parameter is supplied.
-    // This will be used to distinguish each occurance of this error.
+    // This will be used to distinguish each occurrence of this error.
     InternalError,
     ConnectionRefused,
     FlowControlError,
@@ -104,10 +107,8 @@ pub enum Error {
     ConnectionIdLimitExceeded,
     ConnectionIdsExhausted,
     ConnectionState,
-    DecodingFrame,
     DecryptError,
     DisabledVersion,
-    HandshakeFailed,
     IdleTimeout,
     IntegerOverflow,
     InvalidInput,
@@ -116,17 +117,18 @@ pub enum Error {
     InvalidResumptionToken,
     InvalidRetry,
     InvalidStreamId,
-    KeysDiscarded(crypto::CryptoSpace),
+    KeysDiscarded(crypto::Epoch),
     /// Packet protection keys are exhausted.
     /// Also used when too many key updates have happened.
     KeysExhausted,
     /// Packet protection keys aren't available yet for the identified space.
-    KeysPending(crypto::CryptoSpace),
+    KeysPending(crypto::Epoch),
     /// An attempt to update keys can be blocked if
     /// a packet sent with the current keys hasn't been acknowledged.
     KeyUpdateBlocked,
     NoAvailablePath,
     NoMoreData,
+    NotAvailable,
     NotConnected,
     PacketNumberOverlap,
     PeerApplicationError(AppError),
@@ -138,7 +140,7 @@ pub enum Error {
     UnknownFrameType,
     VersionNegotiation,
     WrongRole,
-    NotAvailable,
+    UnknownTransportParameter,
 }
 
 impl Error {
@@ -175,7 +177,7 @@ impl Error {
 
 impl From<CryptoError> for Error {
     fn from(err: CryptoError) -> Self {
-        qwarn!("Crypto operation failed {:?}", err);
+        qwarn!("Crypto operation failed {err:?}");
         match err {
             CryptoError::EchRetry(config) => Self::EchRetry(config),
             _ => Self::CryptoError(err),
@@ -248,4 +250,4 @@ impl From<CloseError> for CloseReason {
     }
 }
 
-pub type Res<T> = std::result::Result<T, Error>;
+pub type Res<T> = Result<T, Error>;

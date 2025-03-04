@@ -14,13 +14,12 @@ use std::{
     rc::Rc,
 };
 
-use neqo_common::{hex, hex_with_len, qinfo, Decoder, Encoder};
+use neqo_common::{hex, hex_with_len, qdebug, qinfo, Decoder, Encoder};
 use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
 use crate::{
-    frame::FRAME_TYPE_NEW_CONNECTION_ID, packet::PacketBuilder, recovery::RecoveryToken,
-    stats::FrameStats, Error, Res,
+    frame::FrameType, packet::PacketBuilder, recovery::RecoveryToken, stats::FrameStats, Error, Res,
 };
 
 pub const MAX_CONNECTION_ID_LEN: usize = 20;
@@ -93,7 +92,7 @@ impl<'a> From<ConnectionIdRef<'a>> for ConnectionId {
     }
 }
 
-impl std::ops::Deref for ConnectionId {
+impl Deref for ConnectionId {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -124,13 +123,13 @@ pub struct ConnectionIdRef<'a> {
     cid: &'a [u8],
 }
 
-impl<'a> ::std::fmt::Debug for ConnectionIdRef<'a> {
+impl ::std::fmt::Debug for ConnectionIdRef<'_> {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "CID {}", hex_with_len(self.cid))
     }
 }
 
-impl<'a> ::std::fmt::Display for ConnectionIdRef<'a> {
+impl ::std::fmt::Display for ConnectionIdRef<'_> {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "{}", hex(self.cid))
     }
@@ -142,7 +141,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> From<&'a T> for ConnectionIdRef<'a> {
     }
 }
 
-impl<'a> std::ops::Deref for ConnectionIdRef<'a> {
+impl Deref for ConnectionIdRef<'_> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -150,7 +149,7 @@ impl<'a> std::ops::Deref for ConnectionIdRef<'a> {
     }
 }
 
-impl<'a> PartialEq<ConnectionId> for ConnectionIdRef<'a> {
+impl PartialEq<ConnectionId> for ConnectionIdRef<'_> {
     fn eq(&self, other: &ConnectionId) -> bool {
         self.cid == &other.cid[..]
     }
@@ -306,13 +305,22 @@ impl ConnectionIdEntry<[u8; 16]> {
             return false;
         }
 
-        builder.encode_varint(FRAME_TYPE_NEW_CONNECTION_ID);
+        builder.encode_varint(FrameType::NewConnectionId);
         builder.encode_varint(self.seqno);
         builder.encode_varint(0u64);
         builder.encode_vec(1, &self.cid);
         builder.encode(&self.srt);
         stats.new_connection_id += 1;
         true
+    }
+
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
+    pub fn is_empty(&self) -> bool {
+        self.seqno == CONNECTION_ID_SEQNO_EMPTY || self.cid.is_empty()
     }
 }
 
@@ -405,7 +413,7 @@ impl ConnectionIdStore<[u8; 16]> {
     pub fn retire_prior_to(&mut self, retire_prior: u64) -> Vec<u64> {
         let mut retired = Vec::new();
         self.cids.retain(|e| {
-            if e.seqno < retire_prior {
+            if !e.is_empty() && e.seqno < retire_prior {
                 retired.push(e.seqno);
                 false
             } else {
@@ -510,8 +518,18 @@ impl ConnectionIdManager {
     pub fn retire(&mut self, seqno: u64) {
         // TODO(mt) - consider keeping connection IDs around for a short while.
 
-        self.connection_ids.retire(seqno);
-        self.lost_new_connection_id.retain(|cid| cid.seqno != seqno);
+        let empty_cid = seqno == CONNECTION_ID_SEQNO_EMPTY
+            || self
+                .connection_ids
+                .cids
+                .iter()
+                .any(|c| c.seqno == seqno && c.cid.is_empty());
+        if empty_cid {
+            qdebug!("Connection ID {seqno} is zero-length, not retiring");
+        } else {
+            self.connection_ids.retire(seqno);
+            self.lost_new_connection_id.retain(|cid| cid.seqno != seqno);
+        }
     }
 
     /// During the handshake, a server needs to regard the client's choice of destination
@@ -543,7 +561,14 @@ impl ConnectionIdManager {
         stats: &mut FrameStats,
     ) {
         if self.generator.deref().borrow().generates_empty_cids() {
-            debug_assert_eq!(self.generator.borrow_mut().generate_cid().unwrap().len(), 0);
+            debug_assert_eq!(
+                self.generator
+                    .borrow_mut()
+                    .generate_cid()
+                    .expect("OK in debug assert")
+                    .len(),
+                0
+            );
             return;
         }
 

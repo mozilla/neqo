@@ -4,12 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::missing_errors_doc)]
-
 use std::{
     fmt::{self, Display},
-    net::{SocketAddr, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     time::Duration,
 };
@@ -21,6 +18,7 @@ use neqo_transport::{
 };
 
 pub mod client;
+mod send_data;
 pub mod server;
 pub mod udp;
 
@@ -62,10 +60,6 @@ pub struct SharedArgs {
     /// Enable special behavior for use with QUIC Network Simulator
     pub qns_test: Option<String>,
 
-    #[arg(name = "use-old-http", short = 'o', long)]
-    /// Use http 0.9 instead of HTTP/3
-    pub use_old_http: bool,
-
     #[command(flatten)]
     pub quic_parameters: QuicParameters,
 }
@@ -82,7 +76,6 @@ impl Default for SharedArgs {
             max_blocked_streams: 10,
             ciphers: vec![],
             qns_test: None,
-            use_old_http: false,
             quic_parameters: QuicParameters::default(),
         }
     }
@@ -116,7 +109,7 @@ pub struct QuicParameters {
     /// The idle timeout for connections, in seconds.
     pub idle_timeout: u64,
 
-    #[arg(long = "cc", default_value = "newreno")]
+    #[arg(long = "cc", default_value = "cubic")]
     /// The congestion controller to use.
     pub congestion_control: CongestionControlAlgorithm,
 
@@ -127,6 +120,10 @@ pub struct QuicParameters {
     #[arg(long)]
     /// Whether to disable path MTU discovery.
     pub no_pmtud: bool,
+
+    #[arg(long)]
+    /// Whether to slice the SNI.
+    pub no_sni_slicing: bool,
 
     #[arg(name = "preferred-address-v4", long)]
     /// An IPv4 address for the server preferred address.
@@ -145,17 +142,18 @@ impl Default for QuicParameters {
             max_streams_bidi: 16,
             max_streams_uni: 16,
             idle_timeout: 30,
-            congestion_control: CongestionControlAlgorithm::NewReno,
+            congestion_control: CongestionControlAlgorithm::Cubic,
             no_pacing: false,
             no_pmtud: false,
             preferred_address_v4: None,
             preferred_address_v6: None,
+            no_sni_slicing: false,
         }
     }
 }
 
 impl QuicParameters {
-    fn get_sock_addr<F>(opt: &Option<String>, v: &str, f: F) -> Option<SocketAddr>
+    fn get_sock_addr<F>(opt: Option<&String>, v: &str, f: F) -> Option<SocketAddr>
     where
         F: FnMut(&SocketAddr) -> bool,
     {
@@ -167,21 +165,28 @@ impl QuicParameters {
         assert_eq!(
             opt.is_some(),
             addr.is_some(),
-            "unable to resolve '{}' to an {} address",
-            opt.as_ref().unwrap(),
-            v,
+            "unable to resolve '{:?}' to an {v} address",
+            opt.as_ref()?,
         );
         addr
     }
 
     #[must_use]
     pub fn preferred_address_v4(&self) -> Option<SocketAddr> {
-        Self::get_sock_addr(&self.preferred_address_v4, "IPv4", SocketAddr::is_ipv4)
+        Self::get_sock_addr(
+            self.preferred_address_v4.as_ref(),
+            "IPv4",
+            SocketAddr::is_ipv4,
+        )
     }
 
     #[must_use]
     pub fn preferred_address_v6(&self) -> Option<SocketAddr> {
-        Self::get_sock_addr(&self.preferred_address_v6, "IPv6", SocketAddr::is_ipv6)
+        Self::get_sock_addr(
+            self.preferred_address_v6.as_ref(),
+            "IPv6",
+            SocketAddr::is_ipv6,
+        )
     }
 
     #[must_use]
@@ -209,14 +214,19 @@ impl QuicParameters {
 
     #[must_use]
     pub fn get(&self, alpn: &str) -> ConnectionParameters {
-        let params = ConnectionParameters::default()
+        let mut params = ConnectionParameters::default()
             .max_streams(StreamType::BiDi, self.max_streams_bidi)
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .idle_timeout(Duration::from_secs(self.idle_timeout))
             .cc_algorithm(self.congestion_control)
             .pacing(!self.no_pacing)
-            .pmtud(!self.no_pmtud);
-
+            .pmtud(!self.no_pmtud)
+            .sni_slicing(!self.no_sni_slicing);
+        params = if let Some(pa) = self.preferred_address() {
+            params.preferred_address(pa)
+        } else {
+            params
+        };
         if let Some(&first) = self.quic_version.first() {
             let all = if self.quic_version[1..].contains(&first) {
                 &self.quic_version[1..]
@@ -227,10 +237,8 @@ impl QuicParameters {
         } else {
             let version = match alpn {
                 "h3" | "hq-interop" => Version::Version1,
+                #[cfg(feature = "draft-29")]
                 "h3-29" | "hq-29" => Version::Draft29,
-                "h3-30" | "hq-30" => Version::Draft30,
-                "h3-31" | "hq-31" => Version::Draft31,
-                "h3-32" | "hq-32" => Version::Draft32,
                 _ => Version::default(),
             };
             params.versions(version, Version::all())
@@ -260,7 +268,7 @@ impl std::error::Error for Error {}
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf, str::FromStr, time::SystemTime};
+    use std::{fs, path::PathBuf, str::FromStr as _, time::SystemTime};
 
     use crate::{client, server};
 
@@ -270,15 +278,14 @@ mod tests {
 
     impl TempDir {
         fn new() -> Self {
-            let mut dir = std::env::temp_dir();
-            dir.push(format!(
+            let dir = std::env::temp_dir().join(format!(
                 "neqo-bin-test-{}",
                 SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
                     .as_secs()
             ));
-            fs::create_dir(&dir).unwrap();
+            fs::create_dir_all(&dir).unwrap();
             Self { path: dir }
         }
 
@@ -301,7 +308,7 @@ mod tests {
 
         let temp_dir = TempDir::new();
 
-        let mut client_args = client::Args::new(&[1]);
+        let mut client_args = client::Args::new(&[1], false);
         client_args.set_qlog_dir(temp_dir.path());
         let mut server_args = server::Args::default();
         server_args.set_qlog_dir(temp_dir.path());

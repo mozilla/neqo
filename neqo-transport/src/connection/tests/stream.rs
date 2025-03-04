@@ -4,42 +4,43 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cmp::max, collections::HashMap, mem};
+use std::{cmp::max, collections::HashMap};
 
-use neqo_common::{event::Provider, qdebug};
+use neqo_common::{event::Provider as _, qdebug};
 use test_fixture::now;
 
 use super::{
     super::State, assert_error, connect, connect_force_idle, default_client, default_server,
-    maybe_authenticate, new_client, new_server, send_something, DEFAULT_STREAM_DATA,
+    maybe_authenticate, new_client, new_server, send_something, send_with_extra,
+    DEFAULT_STREAM_DATA,
 };
 use crate::{
     events::ConnectionEvent,
+    frame::FrameType,
+    packet::PacketBuilder,
     recv_stream::RECV_BUFFER_SIZE,
     send_stream::{OrderGroup, SendStreamState, SEND_BUFFER_SIZE},
     streams::{SendOrder, StreamOrder},
-    tparams::{self, TransportParameter},
-    CloseReason,
-    // tracking::DEFAULT_ACK_PACKET_TOLERANCE,
-    Connection,
-    ConnectionParameters,
-    Error,
-    StreamId,
-    StreamType,
+    tparams::{TransportParameter, TransportParameterId::*},
+    CloseReason, Connection, ConnectionParameters, Error, StreamId, StreamType,
 };
 
 #[test]
 fn stream_create() {
     let mut client = default_client();
 
-    let out = client.process(None, now());
+    let out = client.process_output(now());
+    let out2 = client.process_output(now());
     let mut server = default_server();
-    let out = server.process(out.as_dgram_ref(), now());
+    server.process_input(out.dgram().unwrap(), now());
+    let out = server.process(out2.dgram(), now());
 
-    let out = client.process(out.as_dgram_ref(), now());
-    mem::drop(server.process(out.as_dgram_ref(), now()));
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now());
+    drop(server.process(out.dgram(), now()));
     assert!(maybe_authenticate(&mut client));
-    let out = client.process(None, now());
+    let out = client.process_output(now());
 
     // client now in State::Connected
     assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
@@ -47,7 +48,7 @@ fn stream_create() {
     assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
     assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 4);
 
-    mem::drop(server.process(out.as_dgram_ref(), now()));
+    drop(server.process(out.dgram(), now()));
     // server now in State::Connected
     assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 3);
     assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 7);
@@ -86,7 +87,7 @@ fn transfer() {
 
     qdebug!("---- server receives");
     for d in datagrams {
-        let out = server.process(Some(&d), now());
+        let out = server.process(Some(d), now());
         // With an RTT of zero, the server will acknowledge every packet immediately.
         assert!(out.as_dgram_ref().is_some());
         qdebug!("Output={:0x?}", out.as_dgram_ref());
@@ -116,7 +117,7 @@ fn transfer() {
     assert!(fin3);
 }
 
-// tests stream sendorder priorization
+// tests stream sendorder prioritization
 fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     let mut client = default_client();
     let mut server = default_server();
@@ -131,8 +132,8 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
         streams.push(id);
         ordered.push((id, *sendorder));
         // must be set before sendorder
-        client.streams.set_fairness(id, true).ok();
-        client.streams.set_sendorder(id, *sendorder).ok();
+        client.streams.set_fairness(id, true).unwrap();
+        client.streams.set_sendorder(id, *sendorder).unwrap();
     }
     // Write some data to all the streams
     for stream_id in streams {
@@ -151,7 +152,7 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
 
     qdebug!("---- server receives");
     for d in datagrams {
-        let out = server.process(Some(&d), now());
+        let out = server.process(Some(d), now());
         qdebug!("Output={:0x?}", out.as_dgram_ref());
     }
     assert_eq!(*server.state(), State::Confirmed);
@@ -217,7 +218,7 @@ fn sendorder_4() {
     ]);
 }
 
-// Tests stream sendorder priorization
+// Tests stream sendorder prioritization
 // Converts Vecs of u64's into StreamIds
 fn fairness_test<S, R>(source: S, number_iterates: usize, truncate_to: usize, result_array: &R)
 where
@@ -306,7 +307,7 @@ fn ordergroup_7() {
 }
 
 #[test]
-// Send fin even if a peer closes a reomte bidi send stream before sending any data.
+// Send fin even if a peer closes a remote bidi send stream before sending any data.
 fn report_fin_when_stream_closed_wo_data() {
     // Note that the two servers in this test will get different anti-replay filters.
     // That's OK because we aren't testing anti-replay.
@@ -317,12 +318,12 @@ fn report_fin_when_stream_closed_wo_data() {
     // create a stream
     let stream_id = client.stream_create(StreamType::BiDi).unwrap();
     client.stream_send(stream_id, &[0x00]).unwrap();
-    let out = client.process(None, now());
-    mem::drop(server.process(out.as_dgram_ref(), now()));
+    let out = client.process_output(now());
+    drop(server.process(out.dgram(), now()));
 
     server.stream_close_send(stream_id).unwrap();
-    let out = server.process(None, now());
-    mem::drop(client.process(out.as_dgram_ref(), now()));
+    let out = server.process_output(now());
+    drop(client.process(out.dgram(), now()));
     let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable { .. });
     assert!(client.events().any(stream_readable));
 }
@@ -330,9 +331,9 @@ fn report_fin_when_stream_closed_wo_data() {
 fn exchange_data(client: &mut Connection, server: &mut Connection) {
     let mut input = None;
     loop {
-        let out = client.process(input.as_ref(), now()).dgram();
+        let out = client.process(input, now()).dgram();
         let c_done = out.is_none();
-        let out = server.process(out.as_ref(), now()).dgram();
+        let out = server.process(out, now()).dgram();
         if out.is_none() && c_done {
             break;
         }
@@ -373,8 +374,8 @@ fn sending_max_data() {
     assert_eq!(received, SMALL_MAX_DATA);
     assert!(!fin);
 
-    let out = server.process(None, now()).dgram();
-    client.process_input(&out.unwrap(), now());
+    let out = server.process_output(now()).dgram();
+    client.process_input(out.unwrap(), now());
 
     assert_eq!(
         client
@@ -393,7 +394,7 @@ fn max_data() {
 
     server
         .set_local_tparam(
-            tparams::INITIAL_MAX_DATA,
+            InitialMaxData,
             TransportParameter::Integer(u64::try_from(SMALL_MAX_DATA).unwrap()),
         )
         .unwrap();
@@ -511,8 +512,8 @@ fn do_not_accept_data_after_stop_sending() {
     // create a stream
     let stream_id = client.stream_create(StreamType::BiDi).unwrap();
     client.stream_send(stream_id, &[0x00]).unwrap();
-    let out = client.process(None, now());
-    mem::drop(server.process(out.as_dgram_ref(), now()));
+    let out = client.process_output(now());
+    drop(server.process(out.dgram(), now()));
 
     let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable { .. });
     assert!(server.events().any(stream_readable));
@@ -520,7 +521,7 @@ fn do_not_accept_data_after_stop_sending() {
     // Send one more packet from client. The packet should arrive after the server
     // has already requested stop_sending.
     client.stream_send(stream_id, &[0x00]).unwrap();
-    let out_second_data_frame = client.process(None, now());
+    let out_second_data_frame = client.process_output(now());
     // Call stop sending.
     assert_eq!(
         Ok(()),
@@ -529,13 +530,96 @@ fn do_not_accept_data_after_stop_sending() {
 
     // Receive the second data frame. The frame should be ignored and
     // DataReadable events shouldn't be posted.
-    let out = server.process(out_second_data_frame.as_dgram_ref(), now());
+    let out = server.process(out_second_data_frame.dgram(), now());
     assert!(!server.events().any(stream_readable));
 
-    mem::drop(client.process(out.as_dgram_ref(), now()));
+    drop(client.process(out.dgram(), now()));
     assert_eq!(
         Err(Error::FinalSizeError),
         client.stream_send(stream_id, &[0x00])
+    );
+}
+
+struct Writer(Vec<u64>);
+
+impl crate::connection::test_internal::FrameWriter for Writer {
+    fn write_frames(&mut self, builder: &mut PacketBuilder) {
+        builder.write_varint_frame(&self.0);
+    }
+}
+
+#[test]
+/// Server sends a number of stream-related frames for a client-initiated stream that is not yet
+/// created. This should cause the client to close the connection.
+fn illegal_stream_related_frames() {
+    fn test_with_illegal_frame(frame: &[u64]) {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+        let dgram = send_with_extra(&mut server, Writer(frame.to_vec()), now());
+        client.process_input(dgram, now());
+        assert!(client.state().closed());
+    }
+
+    // 0 = Client-Initiated, Bidirectional; 2 = Client-Initiated, Unidirectional
+    for stream_id in [0, 2] {
+        for frame_type in [
+            FrameType::ResetStream,
+            FrameType::StopSending,
+            FrameType::MaxStreamData,
+            FrameType::StreamDataBlocked,
+            FrameType::Stream,
+        ] {
+            // The slice contains an extra 0 that is only needed for a RESET_STREAM frame.
+            // It's ignored for the other frame types as PADDING.
+            test_with_illegal_frame(&[frame_type.into(), stream_id, 0, 0]);
+        }
+    }
+}
+
+#[test]
+/// Regression <https://github.com/mozilla/neqo/pull/2358>.
+fn legal_out_of_order_frame_on_remote_initiated_closed_stream() {
+    const REQUEST: &[u8] = b"ping";
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    // Client sends request and closes stream.
+    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    _ = client.stream_send(stream_id, REQUEST).unwrap();
+    client.stream_close_send(stream_id).unwrap();
+    let dgram = client.process_output(now()).dgram();
+
+    // Server reads request and closes stream.
+    server.process_input(dgram.unwrap(), now());
+    let mut buf = [0; REQUEST.len()];
+    server.stream_recv(stream_id, &mut buf).unwrap();
+    server.stream_close_send(stream_id).unwrap();
+    let dgram = server.process_output(now()).dgram();
+    client.process_input(dgram.unwrap(), now());
+
+    // Client ACKs server's close stream, thus server forgetting about stream.
+    let dgram = send_something(&mut client, now());
+    let dgram = server.process(Some(dgram), now()).dgram();
+    client.process_input(dgram.unwrap(), now());
+
+    // Deliver an out-of-order `FRAME_TYPE_MAX_STREAM_DATA` on forgotten stream.
+    let dgram = send_with_extra(
+        &mut client,
+        Writer(vec![
+            u64::from(FrameType::MaxStreamData),
+            stream_id.as_u64(),
+            0,
+            0,
+        ]),
+        now(),
+    );
+    server.process_input(dgram, now());
+
+    assert!(
+        !server.state().closed(),
+        "expect server to ignore out-of-order frame on forgotten stream"
     );
 }
 
@@ -549,8 +633,8 @@ fn simultaneous_stop_sending_and_reset() {
     // create a stream
     let stream_id = client.stream_create(StreamType::BiDi).unwrap();
     client.stream_send(stream_id, &[0x00]).unwrap();
-    let out = client.process(None, now());
-    let ack = server.process(out.as_dgram_ref(), now()).dgram();
+    let out = client.process_output(now());
+    let ack = server.process(out.dgram(), now()).dgram();
 
     let stream_readable =
         |e| matches!(e, ConnectionEvent::RecvStreamReadable { stream_id: id } if id == stream_id);
@@ -559,27 +643,113 @@ fn simultaneous_stop_sending_and_reset() {
     // The client resets the stream. The packet with reset should arrive after the server
     // has already requested stop_sending.
     client.stream_reset_send(stream_id, 0).unwrap();
-    let out_reset_frame = client.process(ack.as_ref(), now()).dgram();
+    let out_reset_frame = client.process(ack, now()).dgram();
 
     // Send something out of order to force the server to generate an
     // acknowledgment at the next opportunity.
     let force_ack = send_something(&mut client, now());
-    server.process_input(&force_ack, now());
+    server.process_input(force_ack, now());
 
     // Call stop sending.
     server.stream_stop_sending(stream_id, 0).unwrap();
     // Receive the second data frame. The frame should be ignored and
     // DataReadable events shouldn't be posted.
-    let ack = server.process(out_reset_frame.as_ref(), now()).dgram();
+    let ack = server.process(out_reset_frame, now()).dgram();
     assert!(ack.is_some());
     assert!(!server.events().any(stream_readable));
 
     // The client gets the STOP_SENDING frame.
-    client.process_input(&ack.unwrap(), now());
+    client.process_input(ack.unwrap(), now());
     assert_eq!(
         Err(Error::InvalidStreamId),
         client.stream_send(stream_id, &[0x00])
     );
+}
+
+#[test]
+/// Make a stream data or control frame arrive after the stream has been used and cleared.
+fn late_stream_related_frames() {
+    fn late_stream_related_frame(frame_type: FrameType) {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        // Client creates a stream and sends some data.
+        let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+        client.stream_send(stream_id, &[0x00]).unwrap();
+        let out = client.process_output(now());
+        _ = server.process(out.dgram(), now()).dgram();
+
+        // Make the server generate a packet containing the test frame.
+        let before = server.stats().frame_tx;
+        match frame_type {
+            FrameType::ResetStream => {
+                server.stream_reset_send(stream_id, 0).unwrap();
+            }
+            FrameType::StopSending => {
+                server.stream_stop_sending(stream_id, 0).unwrap();
+            }
+            FrameType::Stream => {
+                server.stream_send(stream_id, &[0x00]).unwrap();
+                server.stream_close_send(stream_id).unwrap();
+            }
+            FrameType::MaxStreamData => {
+                server
+                    .streams
+                    .get_recv_stream_mut(stream_id)
+                    .unwrap()
+                    .set_stream_max_data(u32::MAX.into());
+            }
+            FrameType::StreamDataBlocked => {
+                let internal_stream = server.streams.get_send_stream_mut(stream_id).unwrap();
+                if let SendStreamState::Ready { fc, .. } = internal_stream.state() {
+                    fc.blocked();
+                } else {
+                    panic!("unexpected stream state");
+                }
+            }
+            _ => panic!("unexpected frame type"),
+        }
+        let tester = server.process_output(now()).dgram();
+        let after = server.stats().frame_tx;
+        match frame_type {
+            FrameType::ResetStream => {
+                assert_eq!(after.reset_stream, before.reset_stream + 1);
+            }
+            FrameType::StopSending => {
+                assert_eq!(after.stop_sending, before.stop_sending + 1);
+            }
+            FrameType::Stream => {
+                assert_eq!(after.stream, before.stream + 1);
+            }
+            FrameType::MaxStreamData => {
+                assert_eq!(after.max_stream_data, before.max_stream_data + 1);
+            }
+            FrameType::StreamDataBlocked => {
+                assert_eq!(after.stream_data_blocked, before.stream_data_blocked + 1);
+            }
+            _ => panic!("unexpected frame type"),
+        }
+
+        // Now clear the streams on the client, and then deliver the test frame.
+        client.streams.clear_streams();
+        let (ss, rs) = client.streams.obtain_stream(stream_id).unwrap();
+        assert!(ss.is_none() && rs.is_none());
+        _ = client.process(tester, now()).dgram();
+
+        // Make sure this worked, i.e., the connection didn't close.
+        assert_eq!(*client.state(), State::Confirmed);
+    }
+
+    for frame_type in [
+        FrameType::ResetStream,
+        FrameType::StopSending,
+        FrameType::MaxStreamData,
+        FrameType::StreamDataBlocked,
+        FrameType::Stream,
+    ] {
+        late_stream_related_frame(frame_type);
+    }
 }
 
 #[test]
@@ -588,35 +758,40 @@ fn client_fin_reorder() {
     let mut server = default_server();
 
     // Send ClientHello.
-    let client_hs = client.process(None, now());
-    assert!(client_hs.as_dgram_ref().is_some());
+    let client_hs = client.process_output(now());
+    let client_hs2 = client.process_output(now());
+    assert!(client_hs.as_dgram_ref().is_some() && client_hs2.as_dgram_ref().is_some());
 
-    let server_hs = server.process(client_hs.as_dgram_ref(), now());
+    server.process_input(client_hs.dgram().unwrap(), now());
+    let server_hs = server.process(client_hs2.dgram(), now());
     assert!(server_hs.as_dgram_ref().is_some()); // ServerHello, etc...
 
-    let client_ack = client.process(server_hs.as_dgram_ref(), now());
+    let client_ack = client.process(server_hs.dgram(), now());
     assert!(client_ack.as_dgram_ref().is_some());
 
-    let server_out = server.process(client_ack.as_dgram_ref(), now());
+    let dgram = server.process(client_ack.dgram(), now());
+    let dgram = client.process(dgram.dgram(), now());
+
+    let server_out = server.process(dgram.dgram(), now());
     assert!(server_out.as_dgram_ref().is_none());
 
     assert!(maybe_authenticate(&mut client));
     assert_eq!(*client.state(), State::Connected);
 
-    let client_fin = client.process(None, now());
+    let client_fin = client.process_output(now());
     assert!(client_fin.as_dgram_ref().is_some());
 
     let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
     client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
-    let client_stream_data = client.process(None, now());
+    let client_stream_data = client.process_output(now());
     assert!(client_stream_data.as_dgram_ref().is_some());
 
     // Now stream data gets before client_fin
-    let server_out = server.process(client_stream_data.as_dgram_ref(), now());
+    let server_out = server.process(client_stream_data.dgram(), now());
     assert!(server_out.as_dgram_ref().is_none()); // the packet will be discarded
 
     assert_eq!(*server.state(), State::Handshaking);
-    let server_out = server.process(client_fin.as_dgram_ref(), now());
+    let server_out = server.process(client_fin.dgram(), now());
     assert!(server_out.as_dgram_ref().is_some());
 }
 
@@ -629,10 +804,10 @@ fn after_fin_is_read_conn_events_for_stream_should_be_removed() {
     let id = server.stream_create(StreamType::BiDi).unwrap();
     server.stream_send(id, &[6; 10]).unwrap();
     server.stream_close_send(id).unwrap();
-    let out = server.process(None, now()).dgram();
+    let out = server.process_output(now()).dgram();
     assert!(out.is_some());
 
-    mem::drop(client.process(out.as_ref(), now()));
+    drop(client.process(out, now()));
 
     // read from the stream before checking connection events.
     let mut buf = vec![0; 4000];
@@ -654,12 +829,12 @@ fn after_stream_stop_sending_is_called_conn_events_for_stream_should_be_removed(
     let id = server.stream_create(StreamType::BiDi).unwrap();
     server.stream_send(id, &[6; 10]).unwrap();
     server.stream_close_send(id).unwrap();
-    let out = server.process(None, now()).dgram();
+    let out = server.process_output(now()).dgram();
     assert!(out.is_some());
 
-    mem::drop(client.process(out.as_ref(), now()));
+    drop(client.process(out, now()));
 
-    // send stop seending.
+    // send stop sending.
     client
         .stream_stop_sending(id, Error::NoError.code())
         .unwrap();
@@ -682,11 +857,11 @@ fn stream_data_blocked_generates_max_stream_data() {
     // Send some data and consume some flow control.
     let stream_id = server.stream_create(StreamType::UniDi).unwrap();
     _ = server.stream_send(stream_id, DEFAULT_STREAM_DATA).unwrap();
-    let dgram = server.process(None, now).dgram();
+    let dgram = server.process_output(now).dgram();
     assert!(dgram.is_some());
 
     // Consume the data.
-    client.process_input(&dgram.unwrap(), now);
+    client.process_input(dgram.unwrap(), now);
     let mut buf = [0; 10];
     let (count, end) = client.stream_recv(stream_id, &mut buf[..]).unwrap();
     assert_eq!(count, DEFAULT_STREAM_DATA.len());
@@ -703,14 +878,14 @@ fn stream_data_blocked_generates_max_stream_data() {
     assert!(dgram.is_some());
 
     let sdb_before = client.stats().frame_rx.stream_data_blocked;
-    let dgram = client.process(dgram.as_ref(), now).dgram();
+    let dgram = client.process(dgram, now).dgram();
     assert_eq!(client.stats().frame_rx.stream_data_blocked, sdb_before + 1);
     assert!(dgram.is_some());
 
     // Client should have sent a MAX_STREAM_DATA frame with just a small increase
     // on the default window size.
     let msd_before = server.stats().frame_rx.max_stream_data;
-    server.process_input(&dgram.unwrap(), now);
+    server.process_input(dgram.unwrap(), now);
     assert_eq!(server.stats().frame_rx.max_stream_data, msd_before + 1);
 
     // Test that the entirety of the receive buffer is available now.
@@ -742,22 +917,22 @@ fn max_streams_after_bidi_closed() {
     // Write on the one stream and send that out.
     _ = client.stream_send(stream_id, REQUEST).unwrap();
     client.stream_close_send(stream_id).unwrap();
-    let dgram = client.process(None, now()).dgram();
+    let dgram = client.process_output(now()).dgram();
 
     // Now handle the stream and send an incomplete response.
-    server.process_input(&dgram.unwrap(), now());
+    server.process_input(dgram.unwrap(), now());
     server.stream_send(stream_id, RESPONSE).unwrap();
     let dgram = server.process_output(now()).dgram();
 
     // The server shouldn't have released more stream credit.
-    client.process_input(&dgram.unwrap(), now());
+    client.process_input(dgram.unwrap(), now());
     let e = client.stream_create(StreamType::BiDi).unwrap_err();
     assert!(matches!(e, Error::StreamLimitError));
 
     // Closing the stream isn't enough.
     server.stream_close_send(stream_id).unwrap();
     let dgram = server.process_output(now()).dgram();
-    client.process_input(&dgram.unwrap(), now());
+    client.process_input(dgram.unwrap(), now());
     assert!(client.stream_create(StreamType::BiDi).is_err());
 
     // The server needs to see an acknowledgment from the client for its
@@ -771,12 +946,12 @@ fn max_streams_after_bidi_closed() {
     // We need an ACK from the client now, but that isn't guaranteed,
     // so give the client one more packet just in case.
     let dgram = send_something(&mut server, now());
-    client.process_input(&dgram, now());
+    client.process_input(dgram, now());
 
     // Now get the client to send the ACK and have the server handle that.
     let dgram = send_something(&mut client, now());
-    let dgram = server.process(Some(&dgram), now()).dgram();
-    client.process_input(&dgram.unwrap(), now());
+    let dgram = server.process(Some(dgram), now()).dgram();
+    client.process_input(dgram.unwrap(), now());
     assert!(client.stream_create(StreamType::BiDi).is_ok());
     assert!(client.stream_create(StreamType::BiDi).is_err());
 }
@@ -790,8 +965,8 @@ fn no_dupdata_readable_events() {
     // create a stream
     let stream_id = client.stream_create(StreamType::BiDi).unwrap();
     client.stream_send(stream_id, &[0x00]).unwrap();
-    let out = client.process(None, now());
-    mem::drop(server.process(out.as_dgram_ref(), now()));
+    let out = client.process_output(now());
+    drop(server.process(out.dgram(), now()));
 
     // We have a data_readable event.
     let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable { .. });
@@ -800,16 +975,16 @@ fn no_dupdata_readable_events() {
     // Send one more data frame from client. The previous stream data has not been read yet,
     // therefore there should not be a new DataReadable event.
     client.stream_send(stream_id, &[0x00]).unwrap();
-    let out_second_data_frame = client.process(None, now());
-    mem::drop(server.process(out_second_data_frame.as_dgram_ref(), now()));
+    let out_second_data_frame = client.process_output(now());
+    drop(server.process(out_second_data_frame.dgram(), now()));
     assert!(!server.events().any(stream_readable));
 
     // One more frame with a fin will not produce a new DataReadable event, because the
     // previous stream data has not been read yet.
     client.stream_send(stream_id, &[0x00]).unwrap();
     client.stream_close_send(stream_id).unwrap();
-    let out_third_data_frame = client.process(None, now());
-    mem::drop(server.process(out_third_data_frame.as_dgram_ref(), now()));
+    let out_third_data_frame = client.process_output(now());
+    drop(server.process(out_third_data_frame.dgram(), now()));
     assert!(!server.events().any(stream_readable));
 }
 
@@ -822,8 +997,8 @@ fn no_dupdata_readable_events_empty_last_frame() {
     // create a stream
     let stream_id = client.stream_create(StreamType::BiDi).unwrap();
     client.stream_send(stream_id, &[0x00]).unwrap();
-    let out = client.process(None, now());
-    mem::drop(server.process(out.as_dgram_ref(), now()));
+    let out = client.process_output(now());
+    drop(server.process(out.dgram(), now()));
 
     // We have a data_readable event.
     let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable { .. });
@@ -832,8 +1007,8 @@ fn no_dupdata_readable_events_empty_last_frame() {
     // An empty frame with a fin will not produce a new DataReadable event, because
     // the previous stream data has not been read yet.
     client.stream_close_send(stream_id).unwrap();
-    let out_second_data_frame = client.process(None, now());
-    mem::drop(server.process(out_second_data_frame.as_dgram_ref(), now()));
+    let out_second_data_frame = client.process_output(now());
+    drop(server.process(out_second_data_frame.dgram(), now()));
     assert!(!server.events().any(stream_readable));
 }
 
@@ -854,15 +1029,15 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
     assert_eq!(u64::try_from(written1).unwrap(), RECV_BUFFER_START);
 
     // Send the stream to the client.
-    let out = server.process(None, now());
-    mem::drop(client.process(out.as_dgram_ref(), now()));
+    let out = server.process_output(now());
+    drop(client.process(out.dgram(), now()));
 
     // change max_stream_data for stream_id.
     client.set_stream_max_data(stream_id, new_fc).unwrap();
 
     // server should receive a MAX_SREAM_DATA frame if the flow control window is updated.
-    let out2 = client.process(None, now());
-    let out3 = server.process(out2.as_dgram_ref(), now());
+    let out2 = client.process_output(now());
+    let out3 = server.process(out2.dgram(), now());
     let expected = usize::from(RECV_BUFFER_START < new_fc);
     assert_eq!(server.stats().frame_rx.max_stream_data, expected);
 
@@ -875,17 +1050,17 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
     }
 
     // Exchange packets so that client gets all data.
-    let out4 = client.process(out3.as_dgram_ref(), now());
-    let out5 = server.process(out4.as_dgram_ref(), now());
-    mem::drop(client.process(out5.as_dgram_ref(), now()));
+    let out4 = client.process(out3.dgram(), now());
+    let out5 = server.process(out4.dgram(), now());
+    drop(client.process(out5.dgram(), now()));
 
     // read all data by client
     let mut buf = [0x0; 10000];
     let (read, _) = client.stream_recv(stream_id, &mut buf).unwrap();
     assert_eq!(u64::try_from(read).unwrap(), max(RECV_BUFFER_START, new_fc));
 
-    let out4 = client.process(None, now());
-    mem::drop(server.process(out4.as_dgram_ref(), now()));
+    let out4 = client.process_output(now());
+    drop(server.process(out4.dgram(), now()));
 
     let written3 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
     assert_eq!(u64::try_from(written3).unwrap(), new_fc);
@@ -939,13 +1114,13 @@ fn session_flow_control_stop_sending_state_recv() {
     // In this case the final size is only known after RESET frame is received.
     // The server sends STOP_SENDING -> the client sends RESET -> the server
     // sends MAX_DATA.
-    let out = server.process(None, now()).dgram();
-    let out = client.process(out.as_ref(), now()).dgram();
+    let out = server.process_output(now()).dgram();
+    let out = client.process(out, now()).dgram();
     // the client is still limited.
     let stream_id2 = client.stream_create(StreamType::UniDi).unwrap();
     assert_eq!(client.stream_avail_send_space(stream_id2).unwrap(), 0);
-    let out = server.process(out.as_ref(), now()).dgram();
-    client.process_input(&out.unwrap(), now());
+    let out = server.process(out, now()).dgram();
+    client.process_input(out.unwrap(), now());
     assert_eq!(
         client.stream_avail_send_space(stream_id2).unwrap(),
         SMALL_MAX_DATA
@@ -977,12 +1152,12 @@ fn session_flow_control_stop_sending_state_size_known() {
         SMALL_MAX_DATA
     );
 
-    let out1 = client.process(None, now()).dgram();
+    let out1 = client.process_output(now()).dgram();
     // Delay this packet and let the server receive fin first (it will enter SizeKnown state).
     client.stream_close_send(stream_id).unwrap();
-    let out2 = client.process(None, now()).dgram();
+    let out2 = client.process_output(now()).dgram();
 
-    server.process_input(&out2.unwrap(), now());
+    server.process_input(out2.unwrap(), now());
 
     server
         .stream_stop_sending(stream_id, Error::NoError.code())
@@ -991,8 +1166,8 @@ fn session_flow_control_stop_sending_state_size_known() {
     // In this case the final size is known when stream_stop_sending is called
     // and the server releases flow control immediately and sends STOP_SENDING and
     // MAX_DATA in the same packet.
-    let out = server.process(out1.as_ref(), now()).dgram();
-    client.process_input(&out.unwrap(), now());
+    let out = server.process(out1, now()).dgram();
+    client.process_input(out.unwrap(), now());
 
     // The flow control should have been updated and the client can again send
     // SMALL_MAX_DATA.
@@ -1108,16 +1283,20 @@ fn session_flow_control_affects_all_streams() {
 
 fn connect_w_different_limit(bidi_limit: u64, unidi_limit: u64) {
     let mut client = default_client();
-    let out = client.process(None, now());
+    let out = client.process_output(now());
+    let out2 = client.process_output(now());
     let mut server = new_server(
         ConnectionParameters::default()
             .max_streams(StreamType::BiDi, bidi_limit)
             .max_streams(StreamType::UniDi, unidi_limit),
     );
-    let out = server.process(out.as_dgram_ref(), now());
+    server.process_input(out.dgram().unwrap(), now());
+    let out = server.process(out2.dgram(), now());
 
-    let out = client.process(out.as_dgram_ref(), now());
-    mem::drop(server.process(out.as_dgram_ref(), now()));
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now());
+    drop(server.process(out.dgram(), now()));
 
     assert!(maybe_authenticate(&mut client));
 

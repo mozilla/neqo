@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(clippy::unwrap_used, reason = "This is test code.")]
+
 use std::{
     cmp::max,
     collections::VecDeque,
@@ -141,7 +143,7 @@ impl TailDrop {
     /// If the last packet that was sending has been sent, start sending
     /// the next one.
     fn maybe_send(&mut self, now: Instant) {
-        if self.next_deque.as_ref().map_or(false, |t| *t <= now) {
+        if self.next_deque.as_ref().is_some_and(|t| *t <= now) {
             if let Some(d) = self.queue.pop_front() {
                 self.used -= self.size(&d);
                 self.send(d, now);
@@ -176,8 +178,7 @@ impl Node for TailDrop {
 
     fn print_summary(&self, test_name: &str) {
         qinfo!(
-            "{}: taildrop: rx {} drop {} tx {} maxq {}",
-            test_name,
+            "{test_name}: taildrop: rx {} drop {} tx {} maxq {}",
             self.received,
             self.dropped,
             self.delivered,

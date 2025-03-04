@@ -4,16 +4,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg(test)]
+
 use std::{cell::RefCell, rc::Rc};
 
-use neqo_common::{event::Provider, Header};
+use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, WebTransportEvent, WebTransportRequest, WebTransportServerEvent,
     WebTransportSessionAcceptAction,
 };
-use neqo_transport::{StreamId, StreamType};
+use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use test_fixture::{
     anti_replay, fixture_init, now, CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3,
     DEFAULT_KEYS, DEFAULT_SERVER_NAME,
@@ -41,29 +43,33 @@ fn connect() -> (Http3Client, Http3Server) {
     )
     .expect("create a server");
     assert_eq!(client.state(), Http3State::Initializing);
-    let out = client.process(None, now());
+    let out = client.process_output(now());
+    let out2 = client.process_output(now());
     assert_eq!(client.state(), Http3State::Initializing);
 
-    let out = server.process(out.as_dgram_ref(), now());
-    let out = client.process(out.as_dgram_ref(), now());
-    let out = server.process(out.as_dgram_ref(), now());
+    _ = server.process(out.dgram(), now());
+    let out = server.process(out2.dgram(), now());
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_none());
 
     let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
     assert!(client.events().any(authentication_needed));
     client.authenticated(AuthenticationStatus::Ok, now());
 
-    let mut out = client.process(out.as_dgram_ref(), now()).dgram();
+    let mut out = client.process(out.dgram(), now()).dgram();
     let connected = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::Connected));
     assert!(client.events().any(connected));
 
     assert_eq!(client.state(), Http3State::Connected);
 
-    // Exchange H3 setttings
+    // Exchange H3 settings
     loop {
-        out = server.process(out.as_ref(), now()).dgram();
+        out = server.process(out, now()).dgram();
         let dgram_present = out.is_some();
-        out = client.process(out.as_ref(), now()).dgram();
+        out = client.process(out, now()).dgram();
         if out.is_none() && !dgram_present {
             break;
         }
@@ -74,8 +80,8 @@ fn connect() -> (Http3Client, Http3Server) {
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
     let mut out = None;
     loop {
-        out = client.process(out.as_ref(), now()).dgram();
-        out = server.process(out.as_ref(), now()).dgram();
+        out = client.process(out, now()).dgram();
+        out = server.process(out, now()).dgram();
         if out.is_none() {
             break;
         }
@@ -96,12 +102,8 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
                 headers,
             }) => {
                 assert!(
-                    headers
-                        .iter()
-                        .any(|h| h.name() == ":method" && h.value() == "CONNECT")
-                        && headers
-                            .iter()
-                            .any(|h| h.name() == ":protocol" && h.value() == "webtransport")
+                    headers.contains_header(":method", "CONNECT")
+                        && headers.contains_header(":protocol", "webtransport")
                 );
                 session
                     .response(&WebTransportSessionAcceptAction::Accept)
@@ -127,7 +129,7 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
             }) if (
                 stream_id == wt_session_id &&
                 status == 200 &&
-                headers.contains(&Header::new(":status", "200"))
+                headers.contains_header(":status", "200")
             )
         )
     };
@@ -227,6 +229,17 @@ fn receive_data_server(
     assert_eq!(new_stream, new_stream_received);
     assert_eq!(stream_closed, expected_fin);
     wt_stream.unwrap()
+}
+
+#[test]
+fn wt_keepalive() {
+    let (mut client, mut server) = connect();
+    let _wt_session = create_wt_session(&mut client, &mut server);
+    let idle_timeout = ConnectionParameters::default().get_idle_timeout();
+    // Expect client and server to send PING after half of the idle timeout in order to keep
+    // connection alive.
+    assert_eq!(client.process_output(now()).callback(), idle_timeout / 2);
+    assert_eq!(server.process_output(now()).callback(), idle_timeout / 2);
 }
 
 #[test]

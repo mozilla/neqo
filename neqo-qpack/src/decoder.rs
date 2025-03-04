@@ -40,7 +40,7 @@ impl QPackDecoder {
     /// If settings include invalid values.
     #[must_use]
     pub fn new(qpack_settings: &QpackSettings) -> Self {
-        qdebug!("Decoder: creating a new qpack decoder.");
+        qdebug!("Decoder: creating a new qpack decoder");
         let mut send_buf = QpackData::default();
         send_buf.encode_varint(QPACK_UNI_STREAM_TYPE_DECODER);
         Self {
@@ -67,12 +67,9 @@ impl QPackDecoder {
         self.max_table_size
     }
 
-    /// # Panics
-    ///
-    /// If the number of blocked streams is too large.
     #[must_use]
-    pub fn get_blocked_streams(&self) -> u16 {
-        u16::try_from(self.max_blocked_streams).unwrap()
+    pub const fn get_blocked_streams(&self) -> usize {
+        self.max_blocked_streams
     }
 
     /// returns a list of unblocked streams
@@ -93,7 +90,7 @@ impl QPackDecoder {
         let r = self
             .blocked_streams
             .iter()
-            .filter_map(|(id, req)| if *req <= base_new { Some(*id) } else { None })
+            .filter_map(|(id, req)| (*req <= base_new).then_some(*id))
             .collect::<Vec<_>>();
         self.blocked_streams.retain(|(_, req)| *req > base_new);
         Ok(r)
@@ -139,14 +136,14 @@ impl QPackDecoder {
                 self.stats.dynamic_table_inserts += 1;
             }
             DecodedEncoderInstruction::NoInstruction => {
-                unreachable!("This can be call only with an instruction.");
+                unreachable!("This can be call only with an instruction");
             }
         }
         Ok(())
     }
 
     fn set_capacity(&mut self, cap: u64) -> Res<()> {
-        qdebug!([self], "received instruction capacity cap={}", cap);
+        qdebug!("[{self}] received instruction capacity cap={cap}");
         if cap > self.max_table_size {
             return Err(Error::EncoderStream);
         }
@@ -174,7 +171,6 @@ impl QPackDecoder {
     /// # Panics
     ///
     /// Never, but rust doesn't know that.
-    #[allow(clippy::map_err_ignore)]
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
         // Encode increment instruction if needed.
         let increment = self.table.base() - self.acked_inserts;
@@ -182,11 +178,14 @@ impl QPackDecoder {
             DecoderInstruction::InsertCountIncrement { increment }.marshal(&mut self.send_buf);
             self.acked_inserts = self.table.base();
         }
-        if self.send_buf.len() != 0 && self.local_stream_id.is_some() {
+        if !self.send_buf.is_empty() && self.local_stream_id.is_some() {
             let r = conn
-                .stream_send(self.local_stream_id.unwrap(), &self.send_buf[..])
+                .stream_send(
+                    self.local_stream_id.ok_or(Error::Internal)?,
+                    &self.send_buf[..],
+                )
                 .map_err(|_| Error::DecoderStream)?;
-            qdebug!([self], "{} bytes sent.", r);
+            qdebug!("[{self}] {r} bytes sent");
             self.send_buf.read(r);
         }
         Ok(())
@@ -214,7 +213,7 @@ impl QPackDecoder {
         buf: &[u8],
         stream_id: StreamId,
     ) -> Res<Option<Vec<Header>>> {
-        qdebug!([self], "decode header block.");
+        qdebug!("[{self}] decode header block");
         let mut decoder = HeaderDecoder::new(buf);
 
         match decoder.decode_header_block(&self.table, self.max_entries, self.table.base()) {
@@ -225,7 +224,7 @@ impl QPackDecoder {
                     let r = self
                         .blocked_streams
                         .iter()
-                        .filter_map(|(id, req)| if *id == stream_id { Some(*req) } else { None })
+                        .filter_map(|(id, req)| (*id == stream_id).then_some(*req))
                         .collect::<Vec<_>>();
                     if !r.is_empty() {
                         debug_assert!(r.len() == 1);
@@ -285,8 +284,6 @@ fn map_error(err: &Error) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use std::mem;
-
     use neqo_common::Header;
     use neqo_transport::{StreamId, StreamType};
     use test_fixture::now;
@@ -333,8 +330,8 @@ mod tests {
             .peer_conn
             .stream_send(decoder.recv_stream_id, encoder_instruction)
             .unwrap();
-        let out = decoder.peer_conn.process(None, now());
-        mem::drop(decoder.conn.process(out.as_dgram_ref(), now()));
+        let out = decoder.peer_conn.process_output(now());
+        drop(decoder.conn.process(out.dgram(), now()));
         assert_eq!(
             decoder
                 .decoder
@@ -345,8 +342,8 @@ mod tests {
 
     fn send_instructions_and_check(decoder: &mut TestDecoder, decoder_instruction: &[u8]) {
         decoder.decoder.send(&mut decoder.conn).unwrap();
-        let out = decoder.conn.process(None, now());
-        mem::drop(decoder.peer_conn.process(out.as_dgram_ref(), now()));
+        let out = decoder.conn.process_output(now());
+        drop(decoder.peer_conn.process(out.dgram(), now()));
         let mut buf = [0_u8; 100];
         let (amount, fin) = decoder
             .peer_conn

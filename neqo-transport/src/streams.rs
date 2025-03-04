@@ -18,7 +18,13 @@ use crate::{
     send_stream::{SendStream, SendStreams, TransmissionPriority},
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
-    tparams::{self, TransportParametersHandler},
+    tparams::{
+        TransportParameterId::{
+            InitialMaxData, InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote,
+            InitialMaxStreamDataUni, InitialMaxStreamsBidi, InitialMaxStreamsUni,
+        },
+        TransportParametersHandler,
+    },
     ConnectionEvents, Error, Res,
 };
 
@@ -73,15 +79,9 @@ impl Streams {
         role: Role,
         events: ConnectionEvents,
     ) -> Self {
-        let limit_bidi = tps
-            .borrow()
-            .local
-            .get_integer(tparams::INITIAL_MAX_STREAMS_BIDI);
-        let limit_uni = tps
-            .borrow()
-            .local
-            .get_integer(tparams::INITIAL_MAX_STREAMS_UNI);
-        let max_data = tps.borrow().local.get_integer(tparams::INITIAL_MAX_DATA);
+        let limit_bidi = tps.borrow().local.get_integer(InitialMaxStreamsBidi);
+        let limit_uni = tps.borrow().local.get_integer(InitialMaxStreamsUni);
+        let max_data = tps.borrow().local.get_integer(InitialMaxData);
         Self {
             role,
             tps,
@@ -104,17 +104,11 @@ impl Streams {
         self.clear_streams();
         debug_assert_eq!(
             self.remote_stream_limits[StreamType::BiDi].max_active(),
-            self.tps
-                .borrow()
-                .local
-                .get_integer(tparams::INITIAL_MAX_STREAMS_BIDI)
+            self.tps.borrow().local.get_integer(InitialMaxStreamsBidi)
         );
         debug_assert_eq!(
             self.remote_stream_limits[StreamType::UniDi].max_active(),
-            self.tps
-                .borrow()
-                .local
-                .get_integer(tparams::INITIAL_MAX_STREAMS_UNI)
+            self.tps.borrow().local.get_integer(InitialMaxStreamsUni)
         );
         self.local_stream_limits = LocalStreamLimits::new(self.role);
     }
@@ -183,7 +177,7 @@ impl Streams {
             }
             Frame::DataBlocked { data_limit } => {
                 // Should never happen since we set data limit to max
-                qwarn!("Received DataBlocked with data limit {}", data_limit);
+                qwarn!("Received DataBlocked with data limit {data_limit}");
                 stats.data_blocked += 1;
                 self.handle_data_blocked();
             }
@@ -202,10 +196,10 @@ impl Streams {
             }
             Frame::StreamsBlocked { .. } => {
                 stats.streams_blocked += 1;
-                // We send an update evry time we retire a stream. There is no need to
+                // We send an update every time we retire a stream. There is no need to
                 // trigger flow updates here.
             }
-            _ => unreachable!("This is not a stream Frame"),
+            _ => return Err(Error::InternalError), // This is not a stream frame.
         }
         Ok(())
     }
@@ -334,11 +328,10 @@ impl Streams {
         // filter the list, removing closed streams
         self.send.remove_terminal();
 
-        let send = &self.send;
-        let (removed_bidi, removed_uni) = self.recv.clear_terminal(send, self.role);
+        let (removed_bidi, removed_uni) = self.recv.clear_terminal(&self.send, self.role);
 
         // Send max_streams updates if we removed remote-initiated recv streams.
-        // The updates will be send if any steams has been removed.
+        // The updates will be send if any streams has been removed.
         self.remote_stream_limits[StreamType::BiDi].add_retired(removed_bidi);
         self.remote_stream_limits[StreamType::UniDi].add_retired(removed_uni);
     }
@@ -357,8 +350,8 @@ impl Streams {
             // look at the local transport parameters for the
             // INITIAL_MAX_STREAM_DATA_BIDI_REMOTE value to decide how much this endpoint
             // will allow its peer to send.
-            StreamType::BiDi => tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
-            StreamType::UniDi => tparams::INITIAL_MAX_STREAM_DATA_UNI,
+            StreamType::BiDi => InitialMaxStreamDataBidiRemote,
+            StreamType::UniDi => InitialMaxStreamDataUni,
         };
         let recv_initial_max_stream_data = self.tps.borrow().local.get_integer(tp);
 
@@ -387,7 +380,7 @@ impl Streams {
                     .tps
                     .borrow()
                     .remote()
-                    .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
+                    .get_integer(InitialMaxStreamDataBidiLocal);
                 self.send.insert(
                     next_stream_id,
                     SendStream::new(
@@ -406,15 +399,27 @@ impl Streams {
     /// indicated by its stream id.
     /// # Errors
     /// When the stream cannot be created due to stream limits.
+    /// When the stream is locally-initiated and has not existed.
     pub fn obtain_stream(
         &mut self,
         stream_id: StreamId,
     ) -> Res<(Option<&mut SendStream>, Option<&mut RecvStream>)> {
         self.ensure_created_if_remote(stream_id)?;
-        Ok((
-            self.send.get_mut(stream_id).ok(),
-            self.recv.get_mut(stream_id).ok(),
-        ))
+        let ss = self.send.get_mut(stream_id).ok();
+        let rs = self.recv.get_mut(stream_id).ok();
+        // If it is:
+        // - neither a known send nor receive stream,
+        // - and it must be locally initiated,
+        // - and its index is larger than the local used stream limit,
+        // then it is an illegal stream.
+        if ss.is_none()
+            && rs.is_none()
+            && !stream_id.is_remote_initiated(self.role)
+            && self.local_stream_limits[stream_id.stream_type()].used() <= stream_id.index()
+        {
+            return Err(Error::StreamStateError);
+        }
+        Ok((ss, rs))
     }
 
     /// # Errors
@@ -436,8 +441,8 @@ impl Streams {
             None => Err(Error::StreamLimitError),
             Some(new_id) => {
                 let send_limit_tp = match st {
-                    StreamType::UniDi => tparams::INITIAL_MAX_STREAM_DATA_UNI,
-                    StreamType::BiDi => tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
+                    StreamType::UniDi => InitialMaxStreamDataUni,
+                    StreamType::BiDi => InitialMaxStreamDataBidiRemote,
                 };
                 let send_limit = self.tps.borrow().remote().get_integer(send_limit_tp);
                 let stream = SendStream::new(
@@ -458,7 +463,7 @@ impl Streams {
                         .tps
                         .borrow()
                         .local
-                        .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
+                        .get_integer(InitialMaxStreamDataBidiLocal);
 
                     self.recv.insert(
                         new_id,
@@ -495,14 +500,10 @@ impl Streams {
             self.tps
                 .borrow()
                 .remote()
-                .get_integer(tparams::INITIAL_MAX_STREAMS_BIDI),
+                .get_integer(InitialMaxStreamsBidi),
         );
-        _ = self.local_stream_limits[StreamType::UniDi].update(
-            self.tps
-                .borrow()
-                .remote()
-                .get_integer(tparams::INITIAL_MAX_STREAMS_UNI),
-        );
+        _ = self.local_stream_limits[StreamType::UniDi]
+            .update(self.tps.borrow().remote().get_integer(InitialMaxStreamsUni));
 
         // As a client, there are two sets of initial limits for sending stream data.
         // If the second limit is higher and streams have been created, then
@@ -511,12 +512,9 @@ impl Streams {
             self.send.update_initial_limit(self.tps.borrow().remote());
         }
 
-        self.sender_fc.borrow_mut().update(
-            self.tps
-                .borrow()
-                .remote()
-                .get_integer(tparams::INITIAL_MAX_DATA),
-        );
+        self.sender_fc
+            .borrow_mut()
+            .update(self.tps.borrow().remote().get_integer(InitialMaxData));
 
         if self.local_stream_limits[StreamType::BiDi].available() > 0 {
             self.events.send_stream_creatable(StreamType::BiDi);

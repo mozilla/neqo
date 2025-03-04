@@ -4,9 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
-#![allow(clippy::unseparated_literal_suffix, clippy::used_underscore_binding)] // For bindgen code.
-
 mod aead;
 #[cfg(feature = "disable-encryption")]
 pub mod aead_null;
@@ -63,14 +60,14 @@ mod min_version;
 use min_version::MINIMUM_NSS_VERSION;
 use neqo_common::qerror;
 
-#[allow(non_upper_case_globals)]
+#[expect(non_upper_case_globals, reason = "Code is bindgen-generated.")]
 mod nss {
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
 
 // Need to map the types through.
 fn secstatus_to_res(code: nss::SECStatus) -> Res<()> {
-    crate::err::secstatus_to_res(code as crate::ssl::SECStatus)
+    err::secstatus_to_res(code)
 }
 
 enum NssLoaded {
@@ -106,7 +103,7 @@ fn version_check() -> Res<()> {
 /// This allows us to use SSLTRACE in all of our unit tests and programs.
 #[cfg(debug_assertions)]
 fn enable_ssl_trace() -> Res<()> {
-    let opt = ssl::Opt::Locking.as_int();
+    let opt = Opt::Locking.as_int();
     let mut v: ::std::os::raw::c_int = 0;
     secstatus_to_res(unsafe { ssl::SSL_OptionGetDefault(opt, &mut v) })
 }
@@ -201,7 +198,7 @@ where
     if data.is_null() || len == 0 {
         &[]
     } else {
-        #[allow(clippy::disallowed_methods)]
+        #[expect(clippy::disallowed_methods, reason = "This is non-null.")]
         std::slice::from_raw_parts(data, len)
     }
 }

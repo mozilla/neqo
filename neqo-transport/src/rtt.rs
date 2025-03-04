@@ -39,7 +39,6 @@ pub enum RttSource {
 }
 
 #[derive(Debug)]
-#[allow(clippy::module_name_repetitions)]
 pub struct RttEstimate {
     first_sample_time: Option<Instant>,
     latest_rtt: Duration,
@@ -74,7 +73,7 @@ impl RttEstimate {
     }
 
     pub fn set_initial(&mut self, rtt: Duration) {
-        qtrace!("initial RTT={:?}", rtt);
+        qtrace!("initial RTT={rtt:?}");
         if rtt >= GRANULARITY {
             // Ignore if the value is too small.
             self.init(rtt);
@@ -154,6 +153,7 @@ impl RttEstimate {
                 QlogMetric::SmoothedRtt(self.smoothed_rtt),
                 QlogMetric::RttVariance(self.rttvar),
             ],
+            now,
         );
     }
 

@@ -4,9 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg(test)]
+
 use std::sync::OnceLock;
 
-use neqo_common::event::Provider;
+use neqo_common::event::Provider as _;
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Error, Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Server,
@@ -29,8 +31,8 @@ fn response_header_103() -> &'static Vec<Header> {
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
     let mut out = None;
     loop {
-        out = client.process(out.as_ref(), now()).dgram();
-        out = server.process(out.as_ref(), now()).dgram();
+        out = client.process(out, now()).dgram();
+        out = server.process(out, now()).dgram();
         if out.is_none() {
             break;
         }

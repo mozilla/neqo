@@ -4,12 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    mem,
-    time::{Duration, Instant},
-};
+#![cfg(test)]
 
-use neqo_common::{event::Provider, qtrace, Datagram};
+use std::time::{Duration, Instant};
+
+use neqo_common::{event::Provider as _, qtrace, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
@@ -94,20 +93,24 @@ fn process_client_events(conn: &mut Http3Client) {
 
 fn connect_peers(hconn_c: &mut Http3Client, hconn_s: &mut Http3Server) -> Option<Datagram> {
     assert_eq!(hconn_c.state(), Http3State::Initializing);
-    let out = hconn_c.process(None, now()); // Initial
-    let out = hconn_s.process(out.as_dgram_ref(), now()); // Initial + Handshake
-    let out = hconn_c.process(out.as_dgram_ref(), now()); // ACK
-    mem::drop(hconn_s.process(out.as_dgram_ref(), now())); // consume ACK
+    let out = hconn_c.process_output(now()); // Initial
+    let out2 = hconn_c.process_output(now()); // Initial
+    _ = hconn_s.process(out.dgram(), now()); // ACK
+    let out = hconn_s.process(out2.dgram(), now()); // Initial + Handshake
+    let out = hconn_c.process(out.dgram(), now());
+    let out = hconn_s.process(out.dgram(), now());
+    let out = hconn_c.process(out.dgram(), now());
+    drop(hconn_s.process(out.dgram(), now())); // consume ACK
     let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
     assert!(hconn_c.events().any(authentication_needed));
     hconn_c.authenticated(AuthenticationStatus::Ok, now());
-    let out = hconn_c.process(None, now()); // Handshake
+    let out = hconn_c.process_output(now()); // Handshake
     assert_eq!(hconn_c.state(), Http3State::Connected);
-    let out = hconn_s.process(out.as_dgram_ref(), now()); // Handshake
-    let out = hconn_c.process(out.as_dgram_ref(), now());
-    let out = hconn_s.process(out.as_dgram_ref(), now());
+    let out = hconn_s.process(out.dgram(), now()); // Handshake
+    let out = hconn_c.process(out.dgram(), now());
+    let out = hconn_s.process(out.dgram(), now());
     // assert!(hconn_s.settings_received);
-    let out = hconn_c.process(out.as_dgram_ref(), now());
+    let out = hconn_c.process(out.dgram(), now());
     // assert!(hconn_c.settings_received);
 
     out.dgram()
@@ -121,32 +124,39 @@ fn connect_peers_with_network_propagation_delay(
     let net_delay = Duration::from_millis(net_delay);
     assert_eq!(hconn_c.state(), Http3State::Initializing);
     let mut now = now();
-    let out = hconn_c.process(None, now); // Initial
+    let out = hconn_c.process_output(now); // Initial
+    let out2 = hconn_c.process_output(now); // Initial
     now += net_delay;
-    let out = hconn_s.process(out.as_dgram_ref(), now); // Initial + Handshake
+    _ = hconn_s.process(out.dgram(), now); // ACK
+    let out = hconn_s.process(out2.dgram(), now);
     now += net_delay;
-    let out = hconn_c.process(out.as_dgram_ref(), now); // ACK
+    let out = hconn_c.process(out.dgram(), now);
     now += net_delay;
-    let out = hconn_s.process(out.as_dgram_ref(), now); // consume ACK
+    let out = hconn_s.process(out.dgram(), now);
+    now += net_delay;
+    let out = hconn_c.process(out.dgram(), now); // ACK
+    now += net_delay;
+    let out = hconn_s.process(out.dgram(), now); // consume ACK
     assert!(out.dgram().is_none());
     let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
     assert!(hconn_c.events().any(authentication_needed));
     now += net_delay;
     hconn_c.authenticated(AuthenticationStatus::Ok, now);
-    let out = hconn_c.process(None, now); // Handshake
+    let out = hconn_c.process_output(now); // Handshake
     assert_eq!(hconn_c.state(), Http3State::Connected);
     now += net_delay;
-    let out = hconn_s.process(out.as_dgram_ref(), now); // HANDSHAKE_DONE
+    let out = hconn_s.process(out.dgram(), now); // HANDSHAKE_DONE
     now += net_delay;
-    let out = hconn_c.process(out.as_dgram_ref(), now); // Consume HANDSHAKE_DONE, send control streams.
+    let out = hconn_c.process(out.dgram(), now); // Consume HANDSHAKE_DONE, send control streams.
     now += net_delay;
-    let out = hconn_s.process(out.as_dgram_ref(), now); // consume and send control streams.
+    let out = hconn_s.process(out.dgram(), now); // consume and send control streams.
     now += net_delay;
-    let out = hconn_c.process(out.as_dgram_ref(), now); // consume control streams.
+    let out = hconn_c.process(out.dgram(), now); // consume control streams.
     (out.dgram(), now)
 }
 
-fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
+#[must_use]
+pub fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
     let mut hconn_c = default_http3_client();
     let mut hconn_s = default_http3_server();
 
@@ -157,8 +167,8 @@ fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server, out_ex: Option<Datagram>) {
     let mut out = out_ex;
     loop {
-        out = client.process(out.as_ref(), now()).dgram();
-        out = server.process(out.as_ref(), now()).dgram();
+        out = client.process(out, now()).dgram();
+        out = server.process(out, now()).dgram();
         if out.is_none() {
             break;
         }
@@ -186,17 +196,17 @@ fn fetch() {
         .unwrap();
     assert_eq!(req, 0);
     hconn_c.stream_close_send(req).unwrap();
-    let out = hconn_c.process(dgram.as_ref(), now());
+    let out = hconn_c.process(dgram, now());
     qtrace!("-----server");
-    let out = hconn_s.process(out.as_dgram_ref(), now());
-    mem::drop(hconn_c.process(out.as_dgram_ref(), now()));
+    let out = hconn_s.process(out.dgram(), now());
+    drop(hconn_c.process(out.dgram(), now()));
     process_server_events(&hconn_s);
-    let out = hconn_s.process(None, now());
+    let out = hconn_s.process(None::<Datagram>, now());
 
     qtrace!("-----client");
-    mem::drop(hconn_c.process(out.as_dgram_ref(), now()));
-    let out = hconn_s.process(None, now());
-    mem::drop(hconn_c.process(out.as_dgram_ref(), now()));
+    drop(hconn_c.process(out.dgram(), now()));
+    let out = hconn_s.process(None::<Datagram>, now());
+    drop(hconn_c.process(out.dgram(), now()));
     process_client_events(&mut hconn_c);
 }
 
@@ -215,10 +225,10 @@ fn response_103() {
         .unwrap();
     assert_eq!(req, 0);
     hconn_c.stream_close_send(req).unwrap();
-    let out = hconn_c.process(dgram.as_ref(), now());
+    let out = hconn_c.process(dgram, now());
 
-    let out = hconn_s.process(out.as_dgram_ref(), now());
-    mem::drop(hconn_c.process(out.as_dgram_ref(), now()));
+    let out = hconn_s.process(out.dgram(), now());
+    drop(hconn_c.process(out.dgram(), now()));
     let request = receive_request(&hconn_s).unwrap();
     let info_headers = [
         Header::new(":status", "103"),
@@ -226,9 +236,9 @@ fn response_103() {
     ];
     // Send 103
     request.send_headers(&info_headers).unwrap();
-    let out = hconn_s.process(None, now());
+    let out = hconn_s.process(None::<Datagram>, now());
 
-    mem::drop(hconn_c.process(out.as_dgram_ref(), now()));
+    drop(hconn_c.process(out.dgram(), now()));
 
     let info_headers_event = |e| {
         matches!(e, Http3ClientEvent::HeaderReady { headers,
@@ -238,14 +248,14 @@ fn response_103() {
     assert!(hconn_c.events().any(info_headers_event));
 
     set_response(&request);
-    let out = hconn_s.process(None, now());
-    mem::drop(hconn_c.process(out.as_dgram_ref(), now()));
+    let out = hconn_s.process(None::<Datagram>, now());
+    drop(hconn_c.process(out.dgram(), now()));
     process_client_events(&mut hconn_c);
 }
 
 /// Test [`neqo_http3::SendMessage::send_data`] to set
 /// [`neqo_transport::SendStream::set_writable_event_low_watermark`].
-#[allow(clippy::cast_possible_truncation)]
+#[expect(clippy::cast_possible_truncation, reason = "OK in a test.")]
 #[test]
 fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>> {
     const STREAM_LIMIT: u64 = 5000;
@@ -256,7 +266,7 @@ fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>
         ConnectionParameters::default().max_stream_data(StreamType::BiDi, false, STREAM_LIMIT),
     ));
     let mut hconn_s = default_http3_server();
-    mem::drop(connect_peers(&mut hconn_c, &mut hconn_s));
+    drop(connect_peers(&mut hconn_c, &mut hconn_s));
 
     // Client sends GET to server.
     let stream_id = hconn_c.fetch(
@@ -298,7 +308,7 @@ fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>
     exchange_packets(&mut hconn_c, &mut hconn_s, None);
     assert!(hconn_s.events().any(data_writable));
 
-    // Sending more fails, given that each data frame needs to be preceeded by a
+    // Sending more fails, given that each data frame needs to be preceded by a
     // header, i.e. needs more than 1 byte of send space to send 1 byte payload.
     assert_eq!(request.available()?, 1);
     assert_eq!(request.send_data(&buf)?, 0);
@@ -330,7 +340,7 @@ fn data_writable_events() {
     ));
     let mut hconn_s = default_http3_server();
 
-    mem::drop(connect_peers(&mut hconn_c, &mut hconn_s));
+    drop(connect_peers(&mut hconn_c, &mut hconn_s));
 
     // Create a request.
     let req = hconn_c
@@ -433,7 +443,7 @@ fn zerortt() {
     let mut hconn_c = default_http3_client();
     hconn_c
         .enable_resumption(now(), &token)
-        .expect("Set resumption token.");
+        .expect("Set resumption token");
     let mut hconn_s = default_http3_server();
 
     // Create a request.
@@ -448,8 +458,13 @@ fn zerortt() {
         .unwrap();
     hconn_c.stream_close_send(req).unwrap();
 
-    let out = hconn_c.process(dgram.as_ref(), now());
-    let out = hconn_s.process(out.as_dgram_ref(), now());
+    let out = hconn_c.process(dgram, now());
+    let out2 = hconn_c.process_output(now());
+    _ = hconn_s.process(out.dgram(), now());
+    let out = hconn_s.process(out2.dgram(), now());
+
+    let out = hconn_c.process(out.dgram(), now());
+    let out = hconn_s.process(out.dgram(), now());
 
     let mut request_stream = None;
     let mut zerortt_state_change = false;
@@ -513,7 +528,7 @@ fn fetch_noresponse_will_idletimeout() {
         .unwrap();
     assert_eq!(req, 0);
     hconn_c.stream_close_send(req).unwrap();
-    let _out = hconn_c.process(dgram.as_ref(), now);
+    let _out = hconn_c.process(dgram, now);
     qtrace!("-----server");
 
     let mut done = false;

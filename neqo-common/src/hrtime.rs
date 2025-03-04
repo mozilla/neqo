@@ -70,7 +70,7 @@ impl PeriodSet {
     fn min(&self) -> Option<Period> {
         for (i, v) in self.counts.iter().enumerate() {
             if *v > 0 {
-                return Some(Period(u8::try_from(i).unwrap() + Period::MIN.0));
+                return Some(Period(u8::try_from(i).ok()? + Period::MIN.0));
             }
         }
         None
@@ -78,9 +78,9 @@ impl PeriodSet {
 }
 
 #[cfg(target_os = "macos")]
-#[allow(non_camel_case_types)]
+#[expect(non_camel_case_types, reason = "These are C types.")]
 mod mac {
-    use std::{mem::size_of, ptr::addr_of_mut};
+    use std::ptr::addr_of_mut;
 
     // These are manually extracted from the many bindings generated
     // by bindgen when provided with the simple header:
@@ -124,7 +124,7 @@ mod mac {
     }
 
     const THREAD_TIME_CONSTRAINT_POLICY: thread_policy_flavor_t = 2;
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation, reason = "These are C types.")]
     const THREAD_TIME_CONSTRAINT_POLICY_COUNT: mach_msg_type_number_t =
         (size_of::<thread_time_constraint_policy>() / size_of::<integer_t>())
             as mach_msg_type_number_t;
@@ -179,7 +179,11 @@ mod mac {
 
     /// Create a realtime policy and set it.
     pub fn set_realtime(base: f64) {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "These are C types."
+        )]
         let policy = thread_time_constraint_policy {
             period: base as u32, // Base interval
             computation: (base * 0.5) as u32,
@@ -302,7 +306,10 @@ impl Time {
     }
 
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    #[allow(clippy::unused_self)]
+    #[expect(
+        clippy::unused_self,
+        reason = "Not used on platforms other than macOS and Windows."
+    )]
     const fn start(&self) {}
 
     #[cfg(windows)]
@@ -313,7 +320,10 @@ impl Time {
     }
 
     #[cfg(not(target_os = "windows"))]
-    #[allow(clippy::unused_self)]
+    #[expect(
+        clippy::unused_self,
+        reason = "Not used on platforms other than Windows."
+    )]
     const fn stop(&self) {}
 
     fn update(&mut self) {
@@ -370,12 +380,10 @@ impl Drop for Time {
     }
 }
 
-// Only run these tests in CI on platforms other than MacOS and Windows, where the timer
-// inaccuracies are too high to pass the tests.
-#[cfg(all(
-    test,
-    not(all(any(target_os = "macos", target_os = "windows"), feature = "ci"))
-))]
+// Only run these tests in CI on Linux, where the timer accuracies are OK enough to pass the tests,
+// but only when not running sanitizers.
+#[cfg(all(target_os = "linux", not(neqo_sanitize)))]
+#[cfg(test)]
 mod test {
     use std::{
         thread::{sleep, spawn},
