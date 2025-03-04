@@ -20,18 +20,22 @@ inputs:
 runs:
   using: composite
   steps:
-    - if: github.event_name == 'pull_request'
+    - if: ${{ github.event_name == 'pull_request' }}
       shell: bash
+      env:
+        CONTENTS: ${{ inputs.contents }}
+        NAME: ${{ inputs.name }}
+        LOG_URL: ${{ inputs.log-url }}
       run: |
         mkdir comment-data
-        cp "${{ inputs.contents }}" comment-data/contents
-        echo "${{ inputs.name }}" > comment-data/name
+        cp "$CONTENTS" comment-data/contents
+        echo "$NAME" > comment-data/name
         echo "${{ github.event.number }}" > comment-data/pr-number
-        if [ -n "${{ inputs.log-url }}" ]; then
-          echo "${{ inputs.log-url }}" > comment-data/log-url
+        if [ -n "$LOG_URL" ]; then
+          echo "$LOG_URL" > comment-data/log-url
         fi
-    - if: github.event_name == 'pull_request'
-      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+    - if: ${{ github.event_name == 'pull_request' }}
+      uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
       with:
         name: ${{ inputs.name }}
         path: comment-data

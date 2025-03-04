@@ -44,32 +44,27 @@ impl<'a> Decoder<'a> {
     }
 
     /// Skip helper that panics if `n` is `None` or not able to fit in `usize`.
+    /// Only use this for tests because we panic rather than reporting a result.
+    #[cfg(any(test, feature = "test-fixture"))]
     fn skip_inner(&mut self, n: Option<u64>) {
+        #[expect(clippy::unwrap_used, reason = "Only used in tests.")]
         self.skip(usize::try_from(n.expect("invalid length")).unwrap());
     }
 
     /// Skip a vector.  Panics if there isn't enough space.
     /// Only use this for tests because we panic rather than reporting a result.
+    #[cfg(any(test, feature = "test-fixture"))]
     pub fn skip_vec(&mut self, n: usize) {
-        let len = self.decode_uint(n);
+        let len = self.decode_n(n);
         self.skip_inner(len);
     }
 
     /// Skip a variable length vector.  Panics if there isn't enough space.
     /// Only use this for tests because we panic rather than reporting a result.
+    #[cfg(any(test, feature = "test-fixture"))]
     pub fn skip_vvec(&mut self) {
         let len = self.decode_varint();
         self.skip_inner(len);
-    }
-
-    /// Decodes (reads) a single byte.
-    pub fn decode_byte(&mut self) -> Option<u8> {
-        if self.remaining() < 1 {
-            return None;
-        }
-        let b = self.buf[self.offset];
-        self.offset += 1;
-        Some(b)
     }
 
     /// Provides the next byte without moving the read position.
@@ -92,33 +87,43 @@ impl<'a> Decoder<'a> {
         Some(res)
     }
 
-    /// Decodes an unsigned integer of length 1..=8.
-    ///
-    /// # Panics
-    ///
-    /// This panics if `n` is not in the range `1..=8`.
-    pub fn decode_uint(&mut self, n: usize) -> Option<u64> {
-        assert!(n > 0 && n <= 8);
+    #[inline]
+    pub(crate) fn decode_n(&mut self, n: usize) -> Option<u64> {
+        debug_assert!(n > 0 && n <= 8);
         if self.remaining() < n {
             return None;
         }
-        let mut v = 0_u64;
-        for i in 0..n {
-            let b = self.buf[self.offset + i];
-            v = v << 8 | u64::from(b);
-        }
-        self.offset += n;
-        Some(v)
+        Some(if n == 1 {
+            let v = u64::from(self.buf[self.offset]);
+            self.offset += 1;
+            v
+        } else {
+            let mut buf = [0; 8];
+            buf[8 - n..].copy_from_slice(&self.buf[self.offset..self.offset + n]);
+            self.offset += n;
+            u64::from_be_bytes(buf)
+        })
+    }
+
+    /// Decodes a big-endian, unsigned integer value into the target type.
+    /// This returns `None` if there is not enough data remaining
+    /// or if the conversion to the identified type fails.
+    /// Conversion is via `u64`, so failures are impossible for
+    /// unsigned integer types: `u8`, `u16`, `u32`, or `u64`.
+    /// Signed types will fail if the high bit is set.
+    pub fn decode_uint<T: TryFrom<u64>>(&mut self) -> Option<T> {
+        let v = self.decode_n(size_of::<T>());
+        v.and_then(|v| T::try_from(v).ok())
     }
 
     /// Decodes a QUIC varint.
     pub fn decode_varint(&mut self) -> Option<u64> {
-        let b1 = self.decode_byte()?;
+        let b1 = self.decode_n(1)?;
         match b1 >> 6 {
-            0 => Some(u64::from(b1 & 0x3f)),
-            1 => Some((u64::from(b1 & 0x3f) << 8) | self.decode_uint(1)?),
-            2 => Some((u64::from(b1 & 0x3f) << 24) | self.decode_uint(3)?),
-            3 => Some((u64::from(b1 & 0x3f) << 56) | self.decode_uint(7)?),
+            0 => Some(b1),
+            1 => Some(((b1 & 0x3f) << 8) | self.decode_n(1)?),
+            2 => Some(((b1 & 0x3f) << 24) | self.decode_n(3)?),
+            3 => Some(((b1 & 0x3f) << 56) | self.decode_n(7)?),
             _ => unreachable!(),
         }
     }
@@ -143,7 +148,7 @@ impl<'a> Decoder<'a> {
 
     /// Decodes a TLS-style length-prefixed buffer.
     pub fn decode_vec(&mut self, n: usize) -> Option<&'a [u8]> {
-        let len = self.decode_uint(n);
+        let len = self.decode_n(n);
         self.decode_checked(len)
     }
 
@@ -157,7 +162,6 @@ impl<'a> Decoder<'a> {
 // Implement `AsRef` for `Decoder` so that values can be examined without
 // moving the cursor.
 impl<'a> AsRef<[u8]> for Decoder<'a> {
-    #[must_use]
     fn as_ref(&self) -> &'a [u8] {
         &self.buf[self.offset..]
     }
@@ -170,7 +174,6 @@ impl Debug for Decoder<'_> {
 }
 
 impl<'a> From<&'a [u8]> for Decoder<'a> {
-    #[must_use]
     fn from(buf: &'a [u8]) -> Self {
         Decoder::new(buf)
     }
@@ -180,14 +183,12 @@ impl<'a, T> From<&'a T> for Decoder<'a>
 where
     T: AsRef<[u8]>,
 {
-    #[must_use]
     fn from(buf: &'a T) -> Self {
         Decoder::new(buf.as_ref())
     }
 }
 
 impl<'b> PartialEq<Decoder<'b>> for Decoder<'_> {
-    #[must_use]
     fn eq(&self, other: &Decoder<'b>) -> bool {
         self.buf == other.buf
     }
@@ -223,7 +224,7 @@ impl Encoder {
     /// When `len` doesn't fit in a `u64`.
     #[must_use]
     pub fn vvec_len(len: usize) -> usize {
-        Self::varint_len(u64::try_from(len).unwrap()) + len
+        Self::varint_len(u64::try_from(len).expect("usize should fit into u64")) + len
     }
 
     /// Default construction of an empty buffer.
@@ -272,6 +273,7 @@ impl Encoder {
     /// # Panics
     ///
     /// When `s` contains non-hex values or an odd number of values.
+    #[cfg(any(test, feature = "test-fixture"))]
     #[must_use]
     pub fn from_hex(s: impl AsRef<str>) -> Self {
         let s = s.as_ref();
@@ -281,6 +283,7 @@ impl Encoder {
         let mut enc = Self::with_capacity(cap);
 
         for i in 0..cap {
+            #[expect(clippy::unwrap_used, reason = "Only used in tests.")]
             let v = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).unwrap();
             enc.encode_byte(v);
         }
@@ -336,8 +339,11 @@ impl Encoder {
     ///
     /// When `v` is longer than 2^64.
     pub fn encode_vec(&mut self, n: usize, v: &[u8]) -> &mut Self {
-        self.encode_uint(n, u64::try_from(v.as_ref().len()).unwrap())
-            .encode(v)
+        self.encode_uint(
+            n,
+            u64::try_from(v.as_ref().len()).expect("v is longer than 2^64"),
+        )
+        .encode(v)
     }
 
     /// Encode a vector in TLS style using a closure for the contents.
@@ -345,7 +351,10 @@ impl Encoder {
     /// # Panics
     ///
     /// When `f()` returns a length larger than `2^8n`.
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "AND'ing with 0xff makes this OK."
+    )]
     pub fn encode_vec_with<F: FnOnce(&mut Self)>(&mut self, n: usize, f: F) -> &mut Self {
         let start = self.buf.len();
         self.buf.resize(self.buf.len() + n, 0);
@@ -364,7 +373,7 @@ impl Encoder {
     ///
     /// When `v` is longer than 2^64.
     pub fn encode_vvec(&mut self, v: &[u8]) -> &mut Self {
-        self.encode_varint(u64::try_from(v.as_ref().len()).unwrap())
+        self.encode_varint(u64::try_from(v.as_ref().len()).expect("v is longer than 2^64"))
             .encode(v)
     }
 
@@ -442,14 +451,12 @@ impl AsMut<[u8]> for Encoder {
 }
 
 impl<'a> From<Decoder<'a>> for Encoder {
-    #[must_use]
     fn from(dec: Decoder<'a>) -> Self {
         Self::from(&dec.buf[dec.offset..])
     }
 }
 
 impl From<&[u8]> for Encoder {
-    #[must_use]
     fn from(buf: &[u8]) -> Self {
         Self {
             buf: Vec::from(buf),
@@ -458,7 +465,6 @@ impl From<&[u8]> for Encoder {
 }
 
 impl From<Encoder> for Vec<u8> {
-    #[must_use]
     fn from(buf: Encoder) -> Self {
         buf.buf
     }
@@ -481,16 +487,28 @@ mod tests {
         let enc = Encoder::from_hex("0123");
         let mut dec = enc.as_decoder();
 
-        assert_eq!(dec.decode_byte().unwrap(), 0x01);
-        assert_eq!(dec.decode_byte().unwrap(), 0x23);
-        assert!(dec.decode_byte().is_none());
+        assert_eq!(dec.decode_uint::<u8>().unwrap(), 0x01);
+        assert_eq!(dec.decode_uint::<u8>().unwrap(), 0x23);
+        assert!(dec.decode_uint::<u8>().is_none());
+    }
+
+    #[test]
+    fn peek_byte() {
+        let enc = Encoder::from_hex("01");
+        let mut dec = enc.as_decoder();
+
+        assert_eq!(dec.offset(), 0);
+        assert_eq!(dec.peek_byte().unwrap(), 0x01);
+        dec.skip(1);
+        assert_eq!(dec.offset(), 1);
+        assert!(dec.peek_byte().is_none());
     }
 
     #[test]
     fn decode_byte_short() {
         let enc = Encoder::from_hex("");
         let mut dec = enc.as_decoder();
-        assert!(dec.decode_byte().is_none());
+        assert!(dec.decode_uint::<u8>().is_none());
     }
 
     #[test]
@@ -501,7 +519,7 @@ mod tests {
         assert!(dec.decode(2).is_none());
 
         let mut dec = Decoder::from(&[]);
-        assert_eq!(dec.decode_remainder().len(), 0);
+        assert!(dec.decode_remainder().is_empty());
     }
 
     #[test]

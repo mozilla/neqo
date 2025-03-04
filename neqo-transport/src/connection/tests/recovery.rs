@@ -4,10 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    mem,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use neqo_common::qdebug;
 use neqo_crypto::AuthenticationStatus;
@@ -25,14 +22,14 @@ use super::{
 };
 use crate::{
     connection::{test_internal::FrameWriter, tests::cwnd_min},
-    frame::FRAME_TYPE_ACK,
+    frame::FrameType,
     packet::PacketBuilder,
     recovery::{
         FAST_PTO_SCALE, MAX_OUTSTANDING_UNACK, MAX_PTO_PACKET_COUNT, MIN_OUTSTANDING_UNACK,
     },
     rtt::GRANULARITY,
     stats::MAX_PTO_COUNTS,
-    tparams::TransportParameter,
+    tparams::{TransportParameter, TransportParameterId::*},
     tracking::DEFAULT_ACK_DELAY,
     CloseReason, Error, Pmtud, StreamType,
 };
@@ -166,8 +163,9 @@ fn pto_initial() {
     const INITIAL_PTO: Duration = Duration::from_millis(300);
     let mut now = now();
 
+    // This test makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
     qdebug!("---- client: generate CH");
-    let mut client = default_client();
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let pkt1 = client.process_output(now).dgram();
     assert!(pkt1.is_some());
     assert_eq!(pkt1.clone().unwrap().len(), client.plpmtu());
@@ -216,9 +214,20 @@ fn pto_handshake_complete() {
     let mut server = default_server();
 
     let pkt = client.process_output(now).dgram();
+    let pkt2 = client.process_output(now).dgram();
     assert_initial(pkt.as_ref().unwrap(), false);
+    assert_initial(pkt2.as_ref().unwrap(), false);
     let cb = client.process_output(now).callback();
-    assert_eq!(cb, Duration::from_millis(300));
+    assert_eq!(cb, Duration::from_millis(5)); // Pacing delay
+
+    now += HALF_RTT;
+    server.process_input(pkt.unwrap(), now);
+    let pkt = server.process(pkt2, now).dgram();
+    assert_initial(pkt.as_ref().unwrap(), false);
+
+    now += HALF_RTT;
+    let pkt = client.process(pkt, now).dgram();
+    assert_initial(pkt.as_ref().unwrap(), false);
 
     now += HALF_RTT;
     let pkt = server.process(pkt, now).dgram();
@@ -335,18 +344,25 @@ fn pto_handshake_frames() {
     qdebug!("---- client: generate CH");
     let mut client = default_client();
     let pkt = client.process_output(now);
+    let pkt2 = client.process_output(now);
 
     now += Duration::from_millis(10);
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
-    let pkt = server.process(pkt.dgram(), now);
+    server.process_input(pkt.dgram().unwrap(), now);
+    let pkt = server.process(pkt2.dgram(), now);
 
     now += Duration::from_millis(10);
     qdebug!("---- client: cert verification");
     let pkt = client.process(pkt.dgram(), now);
 
     now += Duration::from_millis(10);
-    mem::drop(server.process(pkt.dgram(), now));
+    let pkt = server.process(pkt.dgram(), now);
+    now += Duration::from_millis(10);
+    let pkt = client.process(pkt.dgram(), now);
+
+    now += Duration::from_millis(10);
+    drop(server.process(pkt.dgram(), now));
 
     now += Duration::from_millis(10);
     client.authenticated(AuthenticationStatus::Ok, now);
@@ -381,12 +397,16 @@ fn pto_handshake_frames() {
 fn handshake_ack_pto() {
     const RTT: Duration = Duration::from_millis(10);
     let mut now = now();
-    let mut client = default_client();
+    // This test makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
+    // to work.
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let mut server = default_server();
     // This is a greasing transport parameter, and large enough that the
     // server needs to send two Handshake packets.
     let big = TransportParameter::Bytes(vec![0; Pmtud::default_plpmtu(DEFAULT_ADDR.ip())]);
-    server.set_local_tparam(0xce16, big).unwrap();
+    server
+        .set_local_tparam(TestTransportParameter, big)
+        .unwrap();
 
     let c1 = client.process_output(now).dgram();
 
@@ -443,7 +463,7 @@ fn loss_recovery_crash() {
     let now = now();
 
     // The server sends something, but we will drop this.
-    mem::drop(send_something(&mut server, now));
+    drop(send_something(&mut server, now));
 
     // Then send something again, but let it through.
     let ack = send_and_receive(&mut server, &mut client, now);
@@ -459,7 +479,7 @@ fn loss_recovery_crash() {
     assert!(dgram.is_some());
 
     // This crashes.
-    mem::drop(send_something(&mut server, now + AT_LEAST_PTO));
+    drop(send_something(&mut server, now + AT_LEAST_PTO));
 }
 
 // If we receive packets after the PTO timer has fired, we won't clear
@@ -474,7 +494,7 @@ fn ack_after_pto() {
     let mut now = now();
 
     // The client sends and is forced into a PTO.
-    mem::drop(send_something(&mut client, now));
+    drop(send_something(&mut client, now));
 
     // Jump forward to the PTO and drain the PTO packets.
     now += AT_LEAST_PTO;
@@ -490,7 +510,7 @@ fn ack_after_pto() {
     // delivery is just the thing.
     // Note: The server can't ACK anything here, but none of what
     // the client has sent so far has been transferred.
-    mem::drop(send_something(&mut server, now));
+    drop(send_something(&mut server, now));
     let dgram = send_something(&mut server, now);
 
     // The client is now after a PTO, but if it receives something
@@ -563,7 +583,9 @@ fn lost_but_kept_and_lr_timer() {
 fn loss_time_past_largest_acked() {
     const RTT: Duration = Duration::from_secs(10);
     const INCR: Duration = Duration::from_millis(1);
-    let mut client = default_client();
+    // This test makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
+    // to work.
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let mut server = default_server();
 
     let mut now = now();
@@ -646,7 +668,7 @@ fn trickle(sender: &mut Connection, receiver: &mut Connection, mut count: usize,
     let id = sender.stream_create(StreamType::UniDi).unwrap();
     let mut maybe_ack = None;
     while count > 0 {
-        qdebug!("trickle: remaining={}", count);
+        qdebug!("trickle: remaining={count}");
         assert_eq!(sender.stream_send(id, &[9]).unwrap(), 1);
         let dgram = sender.process(maybe_ack, now).dgram();
 
@@ -740,7 +762,13 @@ fn expected_pto(rtt: Duration) -> Duration {
 
 #[test]
 fn fast_pto() {
-    let mut client = new_client(ConnectionParameters::default().fast_pto(FAST_PTO_SCALE / 2));
+    // This test makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
+    // to work.
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .fast_pto(FAST_PTO_SCALE / 2)
+            .mlkem(false),
+    );
     let mut server = default_server();
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 
@@ -777,7 +805,13 @@ fn fast_pto() {
 /// based on the "true" value of the timer.
 #[test]
 fn fast_pto_persistent_congestion() {
-    let mut client = new_client(ConnectionParameters::default().fast_pto(FAST_PTO_SCALE * 2));
+    // This test makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
+    // to work.
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .fast_pto(FAST_PTO_SCALE * 2)
+            .mlkem(false),
+    );
     let mut server = default_server();
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 
@@ -823,7 +857,7 @@ fn ack_for_unsent() {
 
     impl FrameWriter for AckforUnsentWriter {
         fn write_frames(&mut self, builder: &mut PacketBuilder) {
-            builder.encode_varint(FRAME_TYPE_ACK);
+            builder.encode_varint(FrameType::Ack);
             builder.encode_varint(666u16); // Largest ACKed
             builder.encode_varint(0u8); // ACK delay
             builder.encode_varint(0u8); // ACK block count

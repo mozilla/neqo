@@ -1,6 +1,8 @@
 .DS_Store
+.envrc
 *.qlog
 *~
 /.vscode/
 /lcov.info
+/mutants.out*/
 /target/
