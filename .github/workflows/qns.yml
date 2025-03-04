@@ -66,8 +66,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
-          cache-from: type=registry,ref=${{ github.repository }}-qns:buildcache
-          cache-to: type=registry,ref=${{ github.repository }}-qns:buildcache,mode=max
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-qns:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}-qns:buildcache,mode=max
           platforms: 'linux/amd64, linux/arm64'
 
       - uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
@@ -76,8 +76,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
-          cache-from: type=registry,ref=${{ github.repository }}-qns:buildcache
-          cache-to: type=registry,ref=${{ github.repository }}-qns:buildcache,mode=max
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-qns:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}-qns:buildcache,mode=max
           platforms: 'linux/amd64'
           outputs: type=docker,dest=/tmp/${{ env.LATEST }}.tar
 
