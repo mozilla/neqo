@@ -61,7 +61,7 @@ jobs:
               echo "System NSS package too old (minorversion $NSS_MINOR_VERSION < $NSS_MINIMUM_VERSION); skipping checks"
               exit 0
             fi
-            sh rustup.sh --default-toolchain stable --profile minimal --component clippy llvm-tools -y
+            sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools -y
             . "$HOME/.cargo/env"
             cargo check --locked --all-targets
             cargo clippy -- -D warnings
@@ -119,7 +119,7 @@ jobs:
               echo "System NSS package too old (minorversion $NSS_MINOR_VERSION < $NSS_MINIMUM_VERSION); skipping checks"
               exit 0
             fi
-            sh rustup.sh --default-toolchain stable --profile minimal --component clippy llvm-tools -y
+            sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools -y
             . "$HOME/.cargo/env"
             # FIXME: Why do we need to set this on NetBSD?
             export LD_LIBRARY_PATH=/usr/pkg/lib/nss:/usr/pkg/lib/nspr
