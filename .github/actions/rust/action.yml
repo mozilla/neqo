@@ -40,7 +40,7 @@ runs:
 
     - name: Install build dependencies (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && !endsWith(inputs.targets, 'android') }}
+      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -56,7 +56,7 @@ runs:
         {
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
-          if [[ "${{ runner.os }}" == "Linux" && "$(command -v mold)" ]]; then
+          if [[ "${{ runner.os }}" == "Linux" && "${{ inputs.targets }}" == "" && "$(command -v mold)" ]]; then
             echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold $RUSTFLAGS"
           elif [[ "${{ runner.os }}" == "Windows" ]]; then
             echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld $RUSTFLAGS"
@@ -79,6 +79,7 @@ runs:
       uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
       with:
         cache-bin: ${{ runner.environment == 'github-hosted' }}
+        key: ${{ inputs.targets }}
         save-if: ${{ github.ref == 'refs/heads/main' }} # Only cache runs from `main`
 
     - name: Set up MSVC (Windows)
