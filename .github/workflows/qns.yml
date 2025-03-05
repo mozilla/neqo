@@ -66,11 +66,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          # FIXME: gcc for arm64 currently segmentation faults :-( recheck periodically
-          # platforms: 'linux/amd64, linux/arm64'
-          platforms: 'linux/amd64'
+          platforms: 'linux/amd64, linux/arm64'
 
       - uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         id: docker_build_and_push
@@ -78,8 +74,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           platforms: 'linux/amd64'
           outputs: type=docker,dest=/tmp/${{ env.LATEST }}.tar
 
