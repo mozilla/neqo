@@ -40,7 +40,7 @@ runs:
 
     - name: Install build dependencies (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && !endsWith(inputs.targets, 'android') }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
