@@ -75,6 +75,7 @@ jobs:
           cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
           export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
+          echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
           cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
