@@ -222,6 +222,8 @@ jobs:
                   taskset -c 2 nice -n -20 setarch --addr-no-randomize \
                     samply $PERF_OPT -o "$FILENAME.server.samply" $CMD &
                   PID=$!
+                  echo $PID
+                  ps -efww
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
                   taskset -c 3 nice -n -20 setarch --addr-no-randomize \
@@ -242,6 +244,7 @@ jobs:
                   # shellcheck disable=SC2086
                   taskset -c 3 nice -n -20 setarch --addr-no-randomize \
                     samply $PERF_OPT -o "$FILENAME.client.samply" $CMD > /dev/null 2>&1
+                  ps -efww
                   kill $PID
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
