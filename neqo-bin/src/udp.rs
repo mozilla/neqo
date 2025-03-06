@@ -28,6 +28,13 @@ impl Socket {
     pub fn bind<A: std::net::ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
         let socket = std::net::UdpSocket::bind(addr)?;
 
+        // Try to incresase the send and receive buffer sizes.
+        let socket = socket2::Socket::from(socket);
+        let one_mb: usize = 1 << 20;
+        socket.set_send_buffer_size(one_mb)?;
+        socket.set_recv_buffer_size(one_mb)?;
+        let socket = std::net::UdpSocket::from(socket);
+
         Ok(Self {
             state: quinn_udp::UdpSocketState::new((&socket).into())?,
             inner: tokio::net::UdpSocket::from_std(socket)?,
