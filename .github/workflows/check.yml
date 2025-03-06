@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       run_benchmarks:
-        description: 'Run benchmarks'
+        description: "Run benchmarks"
         type: boolean
         required: false
         default: false
@@ -154,3 +154,68 @@ jobs:
     needs: [check]
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' }}
     uses: ./.github/workflows/bench.yml
+
+  check-android:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-linux-android
+            emulator-arch: x86_64
+            # Note that x86_64 image is only available for API 21+. See
+            # https://github.com/ReactiveCircus/android-emulator-runner?tab=readme-ov-file#configurations.
+            api-level: 21
+          - target: i686-linux-android
+            emulator-arch: x86
+            api-level: 21
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/rust
+        with:
+          version: stable
+          targets: ${{ matrix.target }}
+          tools: cargo-ndk
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/nss
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+          target: ${{ matrix.target }}
+
+      - run: cargo ndk -t ${{ matrix.target }} test --no-run
+
+      - env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          echo "TARGET=$TARGET" >> "$GITHUB_ENV"
+          cat <<'EOF' > /tmp/rust-android-run-tests-on-emulator.sh
+          #!/bin/bash
+          set -e
+          adb wait-for-device
+          while [ -z "$(adb shell getprop sys.boot_completed | tr -d '\r')" ]; do sleep 1; done
+          any_failures=0
+          for test in $(find target/$TARGET/debug/deps/ -type f -executable ! -name "*.so" -name "*-*"); do
+            adb push "$test" /data/local/tmp/
+            adb shell chmod +x /data/local/tmp/$(basename "$test")
+            adb shell API_LEVEL=$API_LEVEL /data/local/tmp/$(basename "$test") || any_failures=1
+          done
+          exit $any_failures
+          EOF
+          chmod a+x /tmp/rust-android-run-tests-on-emulator.sh
+
+      - uses: reactivecircus/android-emulator-runner@62dbb605bba737720e10b196cb4220d374026a6d # v2.33.0
+        with:
+          api-level: ${{ matrix.api-level }}
+          arch: ${{ matrix.emulator-arch }}
+          script: /tmp/rust-android-run-tests-on-emulator.sh
