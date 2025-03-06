@@ -9,7 +9,7 @@ env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   TOOLCHAIN: stable
-  PERF_OPT: record -F4999 --call-graph fp -g
+  PERF_OPT: record --rate 4999 --save-only --verbose
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
@@ -57,7 +57,7 @@ jobs:
         uses: ./.github/actions/rust
         with:
           version: $TOOLCHAIN
-          tools: hyperfine, flamegraph
+          tools: hyperfine, samply
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get minimum NSS version
@@ -220,7 +220,7 @@ jobs:
                   FILENAME="$client-$server$EXT"
                   # shellcheck disable=SC2086
                   taskset -c 2 nice -n -20 setarch --addr-no-randomize \
-                    perf $PERF_OPT -o "$FILENAME.server.perf" $CMD &
+                    samply $PERF_OPT -o "$FILENAME.server.samply" $CMD &
                   PID=$!
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
@@ -241,7 +241,7 @@ jobs:
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
                   taskset -c 3 nice -n -20 setarch --addr-no-randomize \
-                    perf $PERF_OPT -o "$FILENAME.client.perf" $CMD > /dev/null 2>&1
+                    samply $PERF_OPT -o "$FILENAME.client.samply" $CMD > /dev/null 2>&1
                   kill $PID
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
@@ -305,19 +305,6 @@ jobs:
           sudo ip link set dev lo mtu 65536
         if: ${{ success() || failure() || cancelled() }}
 
-      - name: Post-process perf data
-        run: |
-          for f in *.perf; do
-            # Convert for profiler.firefox.com
-            perf script -i "$f" -F +pid > "$f.fx" &
-            # Generate perf reports
-            perf report -i "$f" --no-children --stdio > "$f.txt" &
-            # Generate flamegraphs
-            flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}" &
-          done
-          wait
-          rm neqo.svg
-
       - name: Format results as Markdown
         id: results
         run: |
@@ -369,9 +356,7 @@ jobs:
         with:
           name: ${{ github.event.repository.name }}-${{ github.sha }}
           path: |
-            *.svg
-            *.perf
-            *.perf.fx
+            *.samply
             *.txt
             *.md
             results.*
