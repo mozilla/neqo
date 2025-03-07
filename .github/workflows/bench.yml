@@ -246,8 +246,9 @@ jobs:
                     taskset -c 3 nice -n -20 setarch --addr-no-randomize \
                     $CMD > /dev/null 2>&1
                   ps -efww | grep $PID || true
-                  ls -lt
-                  kill $PID
+                  ls -l
+                  kill -HUP $PID
+                  ps -efww | grep $PID || true
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                     sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n' >> steps.md
 
