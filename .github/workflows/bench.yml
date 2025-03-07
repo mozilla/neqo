@@ -219,8 +219,11 @@ jobs:
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
                   # shellcheck disable=SC2086
-                  taskset -c 2 nice -n -20 setarch --addr-no-randomize \
-                    samply $PERF_OPT -o "$FILENAME.server.samply" $CMD &
+                  samply $PERF_OPT -o "$FILENAME.server.samply" \
+                    taskset -c 2 nice -n -20 setarch --addr-no-randomize \
+                    $CMD &
+                  PID=$!
+                  echo $PID
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
                   taskset -c 3 nice -n -20 setarch --addr-no-randomize \
@@ -239,9 +242,12 @@ jobs:
                   # the perf profiles of those different runs.
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
-                  taskset -c 3 nice -n -20 setarch --addr-no-randomize \
-                    samply $PERF_OPT -o "$FILENAME.client.samply" $CMD > /dev/null 2>&1
-                  pkill -HUP neqo-server
+                  samply $PERF_OPT -o "$FILENAME.client.samply" \
+                    taskset -c 3 nice -n -20 setarch --addr-no-randomize \
+                    $CMD > /dev/null 2>&1
+                  ps -efww | grep $PID || true
+                  ls -lt
+                  kill $PID
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                     sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n' >> steps.md
 
