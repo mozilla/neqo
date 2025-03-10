@@ -122,3 +122,7 @@ lto = "fat"
 # Inherits from the "release" profile, so just provide overrides here:
 # https://doc.rust-lang.org/cargo/reference/profiles.html#release
 debug = true
+
+[profile.profiling]
+inherits = "release"
+debug = true

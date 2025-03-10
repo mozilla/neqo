@@ -75,6 +75,7 @@ jobs:
           cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
           export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
+          echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
           cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
@@ -90,7 +91,7 @@ jobs:
           bazel build -c opt --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
 
       - name: Download cached main-branch results
-        uses: actions/cache/restore@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4.2.1
+        uses: actions/cache/restore@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
         with:
           path: |
             target/criterion
@@ -355,7 +356,7 @@ jobs:
 
       - name: Cache main-branch results
         if: ${{ github.ref == 'refs/heads/main' }}
-        uses: actions/cache/save@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4.2.1
+        uses: actions/cache/save@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
         with:
           path: |
             target/criterion
