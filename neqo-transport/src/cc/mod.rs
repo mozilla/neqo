@@ -63,6 +63,11 @@ pub trait CongestionControl: Display + Debug {
         now: Instant,
     ) -> bool;
 
+    /// Initiate a congestion response.
+    ///
+    /// Returns true if the congestion window was reduced.
+    fn on_congestion_event(&mut self, last_packet: &SentPacket, now: Instant) -> bool;
+
     /// Returns true if the congestion window was reduced.
     fn on_ecn_ce_received(&mut self, largest_acked_pkt: &SentPacket, now: Instant) -> bool;
 
