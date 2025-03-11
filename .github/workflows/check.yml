@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       run_benchmarks:
-        description: 'Run benchmarks'
+        description: "Run benchmarks"
         type: boolean
         required: false
         default: false
@@ -151,6 +151,6 @@ jobs:
       - run: cargo update -w --locked
 
   bench:
-    needs: [check]
+    # needs: [check]
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' }}
     uses: ./.github/workflows/bench.yml
