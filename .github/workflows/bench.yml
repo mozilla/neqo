@@ -247,7 +247,7 @@ jobs:
                     $CMD > /dev/null 2>&1
                   ps -efww | grep $PID || true
                   ls -l *.samply
-                  killall -m target/release/neqo-server|| true
+                  killall neqo-server|| true
                   # sleep 1
                   # kill $PID || true
                   # sleep 1
