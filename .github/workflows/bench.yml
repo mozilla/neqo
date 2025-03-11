@@ -247,11 +247,11 @@ jobs:
                     $CMD > /dev/null 2>&1
                   ps -efww | grep $PID || true
                   ls -l *.samply
-                  kill -HUP $PID || true
-                  sleep 1
-                  kill $PID || true
-                  sleep 1
-                  kill -9 $PID || true
+                  killall -m target/release/neqo-server|| true
+                  # sleep 1
+                  # kill $PID || true
+                  # sleep 1
+                  # kill -9 $PID || true
                   ps -efww | grep $PID || true
                   ps -efww | grep neqo || true
                   ps -efww | grep samply || true
