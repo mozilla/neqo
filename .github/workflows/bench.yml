@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   schedule:
     # Run at minute 0 past every 8th hour, so there is a `main`-branch baseline in the cache.
-    - cron: '0 */8 * * *'
+    - cron: "0 */8 * * *"
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
@@ -246,8 +246,12 @@ jobs:
                     taskset -c 3 nice -n -20 setarch --addr-no-randomize \
                     $CMD > /dev/null 2>&1
                   ps -efww | grep $PID || true
-                  ls -l
+                  ls -l *.samply
                   kill -HUP $PID
+                  sleep 1
+                  kill $PID || true
+                  sleep 1
+                  kill -9 $PID || true
                   ps -efww | grep $PID || true
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                     sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n' >> steps.md
