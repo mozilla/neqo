@@ -246,6 +246,10 @@ runs:
           PUBLIC_DIR="$(dirname $(dirname $(dirname $UTILRENAME)))"
           mkdir -p "dist/public"
           cp -vaR "$PUBLIC_DIR"/* "dist/"
+          LIBNSPR4="$(grep libnspr4.a tmp)"
+          LIB_DIR="$(dirname $LIBNSPR4)"
+          mkdir -p "dist/$NSS_TARGET/lib"
+          cp -vaR "$LIB_DIR"/* "dist/$NSS_TARGET/lib"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
           $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
