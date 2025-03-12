@@ -204,7 +204,9 @@ jobs:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
           target: ${{ matrix.target }}
 
-      - run: cargo ndk -t ${{ matrix.target }} --bindgen test --no-run
+      - run: |
+          find dist -ls
+          cargo ndk -t ${{ matrix.target }} test --no-run
 
       - env:
           TARGET: ${{ matrix.target }}
