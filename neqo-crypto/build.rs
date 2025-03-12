@@ -192,13 +192,6 @@ fn static_link() {
     }
     if env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "android" {
         other_libs.push("stdc++");
-        let android_home = env::var("ANDROID_HOME").expect("ANDROID_HOME not set");
-        // const ANDROID_NDK_VERSION: &str = "28.0.13004108";
-        // // One of these will exist, depending on the host platform.
-        // const LIB_DIR: &str =
-        //     "/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/19/lib/linux/";
-        // println!("cargo:rustc-link-search={android_home}/ndk/{ANDROID_NDK_VERSION}/{LIB_DIR}");
-        println!("cargo:rustc-link-lib=static=clang_rt.builtins-x86_64-android");
     } else {
         other_libs.push("pthread");
     }

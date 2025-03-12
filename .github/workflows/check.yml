@@ -161,7 +161,7 @@ jobs:
       # https://searchfox.org/mozilla-central/search?q=NDK_VERSION =&path=python/mozboot/mozboot/android.py
       NDK_VERSION: 27.2.12479018 # r27c
       # https://searchfox.org/mozilla-central/search?q=\bapi_level=&path=taskcluster/scripts/misc/build-llvm-common.sh&regexp=true
-      API_LEVEL: 21
+      API_LEVEL: 24
 
     strategy:
       matrix:
