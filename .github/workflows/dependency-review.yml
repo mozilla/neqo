@@ -10,7 +10,6 @@ name: 'Dependency Review'
 on:
   pull_request:
     branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   merge_group:
 
 concurrency:
