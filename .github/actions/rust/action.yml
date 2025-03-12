@@ -3,16 +3,16 @@ description: Install Rust and tools
 
 inputs:
   version:
-    description: 'Rust toolchain version to install'
-    default: 'stable'
+    description: "Rust toolchain version to install"
+    default: "stable"
   components:
-    description: 'Rust components to install'
-    default: ''
+    description: "Rust components to install"
+    default: ""
   tools:
-    description: 'Additional Rust tools to install'
-    default: ''
+    description: "Additional Rust tools to install"
+    default: ""
   token:
-    description: 'A Github PAT'
+    description: "A Github PAT"
     required: true
   targets:
     description: Comma-separated list of target triples to install for this toolchain
@@ -52,11 +52,13 @@ runs:
     # See https://corrode.dev/blog/tips-for-faster-ci-builds/
     - name: Set up build environment
       shell: bash
+      env:
+        TARGETS: ${{ inputs.targets }}
       run: |
         {
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
-          if [[ "${{ runner.os }}" == "Linux" && "${{ inputs.targets }}" == "" && "$(command -v mold)" ]]; then
+          if [[ "${{ runner.os }}" == "Linux" && "$TARGETS" == "" && "$(command -v mold)" ]]; then
             echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold $RUSTFLAGS"
           elif [[ "${{ runner.os }}" == "Windows" ]]; then
             echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld $RUSTFLAGS"
