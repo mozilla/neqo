@@ -185,7 +185,10 @@ fn static_link() {
     // Dynamic libs that aren't transitively included by NSS libs.
     let mut other_libs = Vec::new();
     if env::consts::OS != "windows" {
-        other_libs.extend_from_slice(&["pthread", "dl", "c", "z"]);
+        other_libs.extend_from_slice(&["dl", "c", "z"]);
+        if env::consts::OS != "android" {
+            other_libs.push("pthread");
+        }
     }
     if env::consts::OS == "macos" {
         other_libs.push("sqlite3");
@@ -349,8 +352,8 @@ fn setup_standalone(nss: &str) -> Vec<String> {
         flags.push(String::from("-I") + i.to_str().unwrap());
     }
 
-    let target_os = env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS was not set");
-    if target_os == "android" {
+    // let target_os = env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS was not set");
+    if env::consts::OS == "android" {
         let sysroot =
             env::var("CARGO_NDK_SYSROOT_PATH").expect("CARGO_NDK_SYSROOT_PATH was not set");
         flags.push(format!("--sysroot={sysroot}"));
