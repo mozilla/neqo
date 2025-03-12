@@ -182,6 +182,9 @@ fn static_link() {
     if env::consts::OS != "macos" {
         static_libs.push("sqlite");
     }
+    if target_os() == "android" {
+        static_libs.extend_from_slice(&["plds4", "plc4", "nspr4"]);
+    }
     for lib in static_libs {
         println!("cargo:rustc-link-lib=static={lib}");
     }
