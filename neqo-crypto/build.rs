@@ -349,6 +349,13 @@ fn setup_standalone(nss: &str) -> Vec<String> {
         flags.push(String::from("-I") + i.to_str().unwrap());
     }
 
+    let target_os = env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS was not set");
+    if target_os == "android" {
+        let sysroot =
+            env::var("CARGO_NDK_SYSROOT_PATH").expect("CARGO_NDK_SYSROOT_PATH was not set");
+        flags.push(format!("--sysroot={sysroot}"));
+    }
+
     flags
 }
 

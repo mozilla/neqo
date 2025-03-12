@@ -229,7 +229,6 @@ runs:
           ./build-nss-android.sh "$(pwd)" "/tmp/dist" "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64" "$TARGET_PLATFORM" "$ANDROID_NDK_VERSION"
           # Manually move the temporary build directory to the final location, which is what neqo-crypto expects.
           find /tmp/tmp.* > tmp
-          cat tmp
           CERTUTIL="$(grep certutil tmp)"
           TARGET_DIR="$(dirname $(dirname $CERTUTIL))"
           mkdir -p "dist/$NSS_TARGET"
