@@ -828,6 +828,7 @@ dependencies = [
  "qlog",
  "quinn-udp",
  "regex",
+ "socket2",
  "tokio",
  "url",
 ]
