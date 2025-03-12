@@ -306,7 +306,7 @@ fn pkg_config() -> Vec<String> {
             flags.push(String::from(f));
             println!("cargo:include={include}");
         } else if let Some(path) = f.strip_prefix("-L") {
-            println!("cargo:rustc-link-search={path}");
+            println!("cargo:rustc-link-search=native={path}");
         } else if let Some(lib) = f.strip_prefix("-l") {
             println!("cargo:rustc-link-lib=dylib={lib}");
         } else {
@@ -342,7 +342,10 @@ fn setup_standalone(nss: &str) -> Vec<String> {
     let includes = get_includes(&nsstarget, &nssdist);
 
     let nsslibdir = nsstarget.join("lib");
-    println!("cargo:rustc-link-search={}", nsslibdir.to_str().unwrap());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        nsslibdir.to_str().unwrap()
+    );
     if is_debug() || env::consts::OS == "windows" || target_os() == "android" {
         static_link();
     } else {
@@ -383,25 +386,25 @@ fn setup_for_gecko() -> Vec<String> {
 
     if fold_libs {
         println!(
-            "cargo:rustc-link-search={}",
+            "cargo:rustc-link-search=native={}",
             TOPOBJDIR.join("security").to_str().unwrap()
         );
     } else {
         println!(
-            "cargo:rustc-link-search={}",
+            "cargo:rustc-link-search=native={}",
             TOPOBJDIR.join("dist").join("bin").to_str().unwrap()
         );
         let nsslib_path = TOPOBJDIR.join("security").join("nss").join("lib");
         println!(
-            "cargo:rustc-link-search={}",
+            "cargo:rustc-link-search=native={}",
             nsslib_path.join("nss").join("nss_nss3").to_str().unwrap()
         );
         println!(
-            "cargo:rustc-link-search={}",
+            "cargo:rustc-link-search=native={}",
             nsslib_path.join("ssl").join("ssl_ssl3").to_str().unwrap()
         );
         println!(
-            "cargo:rustc-link-search={}",
+            "cargo:rustc-link-search=native={}",
             TOPOBJDIR
                 .join("config")
                 .join("external")
