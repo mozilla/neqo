@@ -205,7 +205,7 @@ jobs:
           target: ${{ matrix.target }}
 
       - run: |
-          find dist
+          find dist -ls
           cargo ndk -t ${{ matrix.target }} --bindgen test --no-run --verbose
 
       - env:
