@@ -27,13 +27,13 @@ on NSS, you need to set an environment as follows:
 ### Linux
 
 ```shell
-export LD_LIBRARY_PATH="$(dirname "$(find . -name libssl3.so -print | head -1)")"
+export LD_LIBRARY_PATH="$(find . -name libssl3.so -print | head -1 | xargs dirname | xargs realpath)"
 ```
 
 ### macOS
 
 ```shell
-export DYLD_LIBRARY_PATH="$(dirname "$(find . -name libssl3.dylib -print | head -1)")"
+export DYLD_LIBRARY_PATH="$(find . -name libssl3.dylib -print | head -1 | xargs dirname | xargs realpath)"
 ```
 
 Note: If you did not already compile NSS separately, you need to have
