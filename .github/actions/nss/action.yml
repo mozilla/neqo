@@ -235,7 +235,7 @@ runs:
           mkdir -p "dist/$NSS_TARGET"
           cp -aR "$TARGET_DIR"/* "dist/$NSS_TARGET/"
           NSPR_H="$(grep nspr.h tmp)"
-          INCLUDE_DIR="$(dirname $NSPR_H)"
+          INCLUDE_DIR="$(dirname $(dirname $NSPR_H))"
           cp -aR "$INCLUDE_DIR"/* "dist/$NSS_TARGET/"
           CHACHA="$(grep chacha20poly1305.h tmp)"
           PRIVATE_DIR="$(dirname $(dirname $CHACHA))"
