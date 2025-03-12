@@ -152,16 +152,12 @@ fn dynamic_link() {
 
 fn dynamic_link_both(extra_libs: &[&str]) {
     let nspr_libs = if env::consts::OS == "windows" {
-        Some(&["libplds4", "libplc4", "libnspr4"])
-    } else if target_os() != "android" {
-        Some(&["plds4", "plc4", "nspr4"])
+        &["libplds4", "libplc4", "libnspr4"]
     } else {
-        None
+        &["plds4", "plc4", "nspr4"]
     };
-    if let Some(nspr_libs) = nspr_libs {
-        for lib in nspr_libs.iter().chain(extra_libs) {
-            println!("cargo:rustc-link-lib=dylib={lib}");
-        }
+    for lib in nspr_libs.iter().chain(extra_libs) {
+        println!("cargo:rustc-link-lib=dylib={lib}");
     }
 }
 
@@ -194,6 +190,7 @@ fn static_link() {
     let mut other_libs = Vec::new();
     if env::consts::OS != "windows" {
         other_libs.extend_from_slice(&["dl", "c", "z"]);
+        // Android libc includes pthread.
         if target_os() != "android" {
             other_libs.push("pthread");
         }
@@ -309,7 +306,7 @@ fn pkg_config() -> Vec<String> {
             flags.push(String::from(f));
             println!("cargo:include={include}");
         } else if let Some(path) = f.strip_prefix("-L") {
-            println!("cargo:rustc-link-search=native={path}");
+            println!("cargo:rustc-link-search={path}");
         } else if let Some(lib) = f.strip_prefix("-l") {
             println!("cargo:rustc-link-lib=dylib={lib}");
         } else {
@@ -345,10 +342,7 @@ fn setup_standalone(nss: &str) -> Vec<String> {
     let includes = get_includes(&nsstarget, &nssdist);
 
     let nsslibdir = nsstarget.join("lib");
-    println!(
-        "cargo:rustc-link-search=native={}",
-        nsslibdir.to_str().unwrap()
-    );
+    println!("cargo:rustc-link-search={}", nsslibdir.to_str().unwrap());
     if is_debug() || env::consts::OS == "windows" {
         static_link();
     } else {
@@ -389,25 +383,25 @@ fn setup_for_gecko() -> Vec<String> {
 
     if fold_libs {
         println!(
-            "cargo:rustc-link-search=native={}",
+            "cargo:rustc-link-search={}",
             TOPOBJDIR.join("security").to_str().unwrap()
         );
     } else {
         println!(
-            "cargo:rustc-link-search=native={}",
+            "cargo:rustc-link-search={}",
             TOPOBJDIR.join("dist").join("bin").to_str().unwrap()
         );
         let nsslib_path = TOPOBJDIR.join("security").join("nss").join("lib");
         println!(
-            "cargo:rustc-link-search=native={}",
+            "cargo:rustc-link-search={}",
             nsslib_path.join("nss").join("nss_nss3").to_str().unwrap()
         );
         println!(
-            "cargo:rustc-link-search=native={}",
+            "cargo:rustc-link-search={}",
             nsslib_path.join("ssl").join("ssl_ssl3").to_str().unwrap()
         );
         println!(
-            "cargo:rustc-link-search=native={}",
+            "cargo:rustc-link-search={}",
             TOPOBJDIR
                 .join("config")
                 .join("external")
