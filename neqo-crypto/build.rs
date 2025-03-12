@@ -185,14 +185,13 @@ fn static_link() {
     // Dynamic libs that aren't transitively included by NSS libs.
     let mut other_libs = Vec::new();
     if env::consts::OS != "windows" {
-        other_libs.extend_from_slice(&["pthread", "dl", "c", "z"]);
+        other_libs.extend_from_slice(&["dl", "c", "z"]);
     }
     if env::consts::OS == "macos" {
         other_libs.push("sqlite3");
     }
     if env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "android" {
-        println!("cargo:rustc-link-lib=c++_shared");
-
+        other_libs.push("c++_shared");
         if let Ok(output_path) = env::var("CARGO_NDK_OUTPUT_PATH") {
             let sysroot_libs_path =
                 PathBuf::from(env::var_os("CARGO_NDK_SYSROOT_LIBS_PATH").unwrap());
@@ -205,6 +204,8 @@ fn static_link() {
             )
             .unwrap();
         }
+    } else {
+        other_libs.push("pthread");
     }
     dynamic_link_both(&other_libs);
 }
