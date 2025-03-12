@@ -35,8 +35,8 @@ jobs:
     permissions:
       packages: write
     steps:
-      - uses: docker/setup-qemu-action@4574d27a4764455b42196d70a065bc6853246a25 # v3.4.0
-      - uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
+      - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
         with:
           cache-binary: ${{ github.event_name == 'pull_request' }} # zizmor: ignore[cache-poisoning]
 
@@ -46,7 +46,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
+      - uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}-qns
@@ -192,7 +192,7 @@ jobs:
           pattern: '*results'
           path: results
 
-      - uses: actions/cache/restore@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4.2.1
+      - uses: actions/cache/restore@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
         with:
           path: results-main
           key: qns-${{ github.sha }}
@@ -308,7 +308,7 @@ jobs:
           echo "${{ github.sha }}" > results-main/baseline-sha.txt
 
       - if: ${{ github.ref == 'refs/heads/main' }}
-        uses: actions/cache/save@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4.2.1
+        uses: actions/cache/save@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
         with:
           path: results-main
           key: qns-${{ github.sha }}
