@@ -185,14 +185,26 @@ fn static_link() {
     // Dynamic libs that aren't transitively included by NSS libs.
     let mut other_libs = Vec::new();
     if env::consts::OS != "windows" {
-        other_libs.extend_from_slice(&["dl", "c", "z"]);
-        // // Android libc includes pthread.
-        // if target_os() != "android" {
-        //     other_libs.push("pthread");
-        // }
+        other_libs.extend_from_slice(&["pthread", "dl", "c", "z"]);
     }
     if env::consts::OS == "macos" {
         other_libs.push("sqlite3");
+    }
+    if env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "android" {
+        println!("cargo:rustc-link-lib=c++_shared");
+
+        if let Ok(output_path) = env::var("CARGO_NDK_OUTPUT_PATH") {
+            let sysroot_libs_path =
+                PathBuf::from(env::var_os("CARGO_NDK_SYSROOT_LIBS_PATH").unwrap());
+            let lib_path = sysroot_libs_path.join("libc++_shared.so");
+            fs::copy(
+                lib_path,
+                Path::new(&output_path)
+                    .join(env::var("CARGO_NDK_ANDROID_TARGET").unwrap())
+                    .join("libc++_shared.so"),
+            )
+            .unwrap();
+        }
     }
     dynamic_link_both(&other_libs);
 }
