@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       run_benchmarks:
-        description: "Run benchmarks"
+        description: 'Run benchmarks'
         type: boolean
         required: false
         default: false
@@ -206,7 +206,7 @@ jobs:
 
       - run: |
           find dist -ls
-          cargo ndk -t ${{ matrix.target }} --bindgen test --no-run --verbose
+          cargo ndk --bindgen -t ${{ matrix.target }} test --no-run --verbose
 
       - env:
           TARGET: ${{ matrix.target }}

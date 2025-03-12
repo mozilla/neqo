@@ -56,10 +56,6 @@ struct Bindings {
     cplusplus: bool,
 }
 
-fn target_os() -> String {
-    env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS was not set")
-}
-
 fn is_debug() -> bool {
     // Check the build profile and not whether debug symbols are enabled (i.e.,
     // `env::var("DEBUG")`), because we enable those for benchmarking/profiling and still want
@@ -182,9 +178,6 @@ fn static_link() {
     if env::consts::OS != "macos" {
         static_libs.push("sqlite");
     }
-    if target_os() == "android" {
-        static_libs.extend_from_slice(&["plds4", "plc4", "nspr4"]);
-    }
     for lib in static_libs {
         println!("cargo:rustc-link-lib=static={lib}");
     }
@@ -193,17 +186,15 @@ fn static_link() {
     let mut other_libs = Vec::new();
     if env::consts::OS != "windows" {
         other_libs.extend_from_slice(&["dl", "c", "z"]);
-        // Android libc includes pthread.
-        if target_os() != "android" {
-            other_libs.push("pthread");
-        }
+        // // Android libc includes pthread.
+        // if target_os() != "android" {
+        //     other_libs.push("pthread");
+        // }
     }
     if env::consts::OS == "macos" {
         other_libs.push("sqlite3");
     }
-    if target_os() != "android" {
-        dynamic_link_both(&other_libs);
-    }
+    dynamic_link_both(&other_libs);
 }
 
 fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
@@ -360,12 +351,6 @@ fn setup_standalone(nss: &str) -> Vec<String> {
     let mut flags: Vec<String> = Vec::new();
     for i in includes {
         flags.push(String::from("-I") + i.to_str().unwrap());
-    }
-
-    if target_os() == "android" {
-        let sysroot =
-            env::var("CARGO_NDK_SYSROOT_PATH").expect("CARGO_NDK_SYSROOT_PATH was not set");
-        flags.push(format!("--sysroot={sysroot}"));
     }
 
     flags

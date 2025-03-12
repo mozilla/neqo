@@ -19,11 +19,11 @@ workspace = true
 # Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 enum-map = { workspace = true }
 enumset = { workspace = true }
-indexmap = { version = "2.2", default-features = false }  # See https://github.com/mozilla/neqo/issues/1858
+indexmap = { version = "2.2", default-features = false } # See https://github.com/mozilla/neqo/issues/1858
 log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
-mtu = { version = "0.2.7", default-features = false }     # neqo is only user currently, can bump freely
+mtu = { version = "0.2.7", default-features = false } # neqo is only user currently, can bump freely
 qlog = { workspace = true }
 smallvec = { version = "1.13", default-features = false }
 static_assertions = { workspace = true }
@@ -37,10 +37,10 @@ test-fixture = { path = "../test-fixture" }
 [features]
 bench = ["neqo-common/bench", "neqo-crypto/bench"]
 build-fuzzing-corpus = [
-    "neqo-common/build-fuzzing-corpus",
-    "neqo-crypto/disable-encryption",
-    "neqo-crypto/disable-random",
-    "test-fixture/disable-random",
+        "neqo-common/build-fuzzing-corpus",
+        "neqo-crypto/disable-encryption",
+        "neqo-crypto/disable-random",
+        "test-fixture/disable-random",
 ]
 disable-encryption = ["neqo-crypto/disable-encryption"]
 draft-29 = []
