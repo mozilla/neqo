@@ -38,9 +38,9 @@ runs:
       if: ${{ env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted' }}
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
-    - name: Install build dependencies (Linux)
+    - name: Install mold (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && !endsWith(inputs.targets, 'android')}}
+      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && !contains(inputs.targets, '-android')}}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
