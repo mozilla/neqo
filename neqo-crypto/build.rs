@@ -198,7 +198,9 @@ fn static_link() {
     if env::consts::OS == "macos" {
         other_libs.push("sqlite3");
     }
-    dynamic_link_both(&other_libs);
+    if target_os() != "android" {
+        dynamic_link_both(&other_libs);
+    }
 }
 
 fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
@@ -346,7 +348,7 @@ fn setup_standalone(nss: &str) -> Vec<String> {
         "cargo:rustc-link-search=native={}",
         nsslibdir.to_str().unwrap()
     );
-    if is_debug() || env::consts::OS == "windows" || target_os() == "android" {
+    if is_debug() || env::consts::OS == "windows" {
         static_link();
     } else {
         dynamic_link();
