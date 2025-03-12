@@ -343,7 +343,7 @@ fn setup_standalone(nss: &str) -> Vec<String> {
 
     let nsslibdir = nsstarget.join("lib");
     println!("cargo:rustc-link-search={}", nsslibdir.to_str().unwrap());
-    if is_debug() || env::consts::OS == "windows" {
+    if is_debug() || env::consts::OS == "windows" || target_os() == "android" {
         static_link();
     } else {
         dynamic_link();
