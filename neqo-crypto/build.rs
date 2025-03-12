@@ -56,6 +56,10 @@ struct Bindings {
     cplusplus: bool,
 }
 
+fn target_os() -> String {
+    env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS was not set")
+}
+
 fn is_debug() -> bool {
     // Check the build profile and not whether debug symbols are enabled (i.e.,
     // `env::var("DEBUG")`), because we enable those for benchmarking/profiling and still want
@@ -148,12 +152,16 @@ fn dynamic_link() {
 
 fn dynamic_link_both(extra_libs: &[&str]) {
     let nspr_libs = if env::consts::OS == "windows" {
-        &["libplds4", "libplc4", "libnspr4"]
+        Some(&["libplds4", "libplc4", "libnspr4"])
+    } else if target_os() != "android" {
+        Some(&["plds4", "plc4", "nspr4"])
     } else {
-        &["plds4", "plc4", "nspr4"]
+        None
     };
-    for lib in nspr_libs.iter().chain(extra_libs) {
-        println!("cargo:rustc-link-lib=dylib={lib}");
+    if let Some(nspr_libs) = nspr_libs {
+        for lib in nspr_libs.iter().chain(extra_libs) {
+            println!("cargo:rustc-link-lib=dylib={lib}");
+        }
     }
 }
 
@@ -186,7 +194,7 @@ fn static_link() {
     let mut other_libs = Vec::new();
     if env::consts::OS != "windows" {
         other_libs.extend_from_slice(&["dl", "c", "z"]);
-        if env::consts::OS != "android" {
+        if target_os() != "android" {
             other_libs.push("pthread");
         }
     }
@@ -352,8 +360,7 @@ fn setup_standalone(nss: &str) -> Vec<String> {
         flags.push(String::from("-I") + i.to_str().unwrap());
     }
 
-    // let target_os = env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS was not set");
-    if env::consts::OS == "android" {
+    if target_os() == "android" {
         let sysroot =
             env::var("CARGO_NDK_SYSROOT_PATH").expect("CARGO_NDK_SYSROOT_PATH was not set");
         flags.push(format!("--sysroot={sysroot}"));
