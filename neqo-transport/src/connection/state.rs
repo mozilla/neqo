@@ -177,7 +177,9 @@ impl ClosingFrame {
         // Truncate the reason phrase if it doesn't fit.  As we send this frame in
         // multiple packet number spaces, limit the overall size to 256.
         let available = min(256, builder.remaining());
-        let reason = if available < Encoder::vvec_len(self.reason_phrase.len()) {
+        let reason_len =
+            u64::try_from(self.reason_phrase.len()).expect("reason length fits in u64");
+        let reason = if available < Encoder::vvec_len(reason_len) {
             &self.reason_phrase[..available - 2]
         } else {
             &self.reason_phrase

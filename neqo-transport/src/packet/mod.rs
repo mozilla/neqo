@@ -313,7 +313,8 @@ impl PacketBuilder {
     /// For an Initial packet, encode the token.
     /// If you fail to do this, then you will not get a valid packet.
     pub fn initial_token(&mut self, token: &[u8]) {
-        if Encoder::vvec_len(token.len()) < self.remaining() {
+        let token_len = u64::try_from(token.len()).expect("token length fits in u64");
+        if Encoder::vvec_len(token_len) < self.remaining() {
             self.encoder.encode_vvec(token);
         } else {
             self.limit = 0;

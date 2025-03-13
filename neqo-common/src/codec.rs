@@ -223,8 +223,8 @@ impl Encoder {
     ///
     /// When `len` doesn't fit in a `u64`.
     #[must_use]
-    pub fn vvec_len(len: usize) -> usize {
-        Self::varint_len(u64::try_from(len).expect("usize should fit into u64")) + len
+    pub fn vvec_len(len: u64) -> usize {
+        Self::varint_len(len) + usize::try_from(len).expect("len doesn't fit in a u64")
     }
 
     /// Default construction of an empty buffer.
