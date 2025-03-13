@@ -613,7 +613,6 @@ mod tests {
     };
 
     const PTO: Duration = RTT;
-    const RTT_ESTIMATE: RttEstimate = RttEstimate::from_duration(RTT);
     const ZERO: Duration = Duration::from_secs(0);
     const EPSILON: Duration = Duration::from_nanos(1);
     const GAP: Duration = Duration::from_secs(1);
@@ -1091,7 +1090,7 @@ mod tests {
                 packet_burst_size * cc.max_datagram_size()
             );
             now += RTT;
-            cc.on_packets_acked(&pkts, &RTT_ESTIMATE, now);
+            cc.on_packets_acked(&pkts, &RttEstimate::default(), now);
             assert_eq!(cc.bytes_in_flight(), 0);
             assert_eq!(cc.acked_bytes, 0);
             assert_eq!(cwnd, cc.congestion_window); // CWND doesn't grow because we're app limited
@@ -1121,7 +1120,7 @@ mod tests {
         now += RTT;
         // Check if congestion window gets increased for all packets currently in flight
         for (i, pkt) in pkts.into_iter().enumerate() {
-            cc.on_packets_acked(&[pkt], &RTT_ESTIMATE, now);
+            cc.on_packets_acked(&[pkt], &RttEstimate::default(), now);
 
             assert_eq!(
                 cc.bytes_in_flight(),
@@ -1177,7 +1176,7 @@ mod tests {
         );
         cc.on_packet_sent(&p_not_lost, now);
         now += RTT;
-        cc.on_packets_acked(&[p_not_lost], &RTT_ESTIMATE, now);
+        cc.on_packets_acked(&[p_not_lost], &RttEstimate::default(), now);
         cwnd_is_halved(&cc);
         // cc is app limited therefore cwnd in not increased.
         assert_eq!(cc.acked_bytes, 0);
@@ -1209,7 +1208,7 @@ mod tests {
             );
             now += RTT;
             for (i, pkt) in pkts.into_iter().enumerate() {
-                cc.on_packets_acked(&[pkt], &RTT_ESTIMATE, now);
+                cc.on_packets_acked(&[pkt], &RttEstimate::default(), now);
 
                 assert_eq!(
                     cc.bytes_in_flight(),
@@ -1245,7 +1244,7 @@ mod tests {
         let mut last_acked_bytes = 0;
         // Check if congestion window gets increased for all packets currently in flight
         for (i, pkt) in pkts.into_iter().enumerate() {
-            cc.on_packets_acked(&[pkt], &RTT_ESTIMATE, now);
+            cc.on_packets_acked(&[pkt], &RttEstimate::default(), now);
 
             assert_eq!(
                 cc.bytes_in_flight(),

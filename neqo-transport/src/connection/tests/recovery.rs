@@ -30,7 +30,7 @@ use crate::{
     rtt::GRANULARITY,
     stats::MAX_PTO_COUNTS,
     tparams::{TransportParameter, TransportParameterId::*},
-    tracking::DEFAULT_ACK_DELAY,
+    tracking::{DEFAULT_LOCAL_ACK_DELAY, DEFAULT_REMOTE_ACK_DELAY},
     CloseReason, Error, Pmtud, StreamType,
 };
 
@@ -713,7 +713,7 @@ fn ping_with_ack(fast: bool) {
     trickle(&mut sender, &mut receiver, 1, now);
     assert_eq!(receiver.stats().frame_tx.ping, 1);
     if let Output::Callback(t) = sender.process_output(now) {
-        assert_eq!(t, DEFAULT_ACK_DELAY);
+        assert_eq!(t, DEFAULT_LOCAL_ACK_DELAY);
         assert!(sender.process_output(now + t).dgram().is_some());
     }
     assert_eq!(sender.stats().frame_tx.ack, sender_acks_before + 1);
@@ -755,9 +755,9 @@ fn expected_pto(rtt: Duration) -> Duration {
     // PTO calculation is rtt + 4rttvar + ack delay.
     // rttvar should be (rtt + 4 * (rtt / 2) * (3/4)^n + 25ms)/2
     // where n is the number of round trips
-    // This uses a 25ms ack delay as the ACK delay extension
+    // This uses the default maximum ACK delay (25ms) as the ACK delay extension
     // is negotiated and no ACK_DELAY frame has been received.
-    rtt + rtt * 9 / 8 + Duration::from_millis(25)
+    rtt + rtt * 9 / 8 + DEFAULT_REMOTE_ACK_DELAY
 }
 
 #[test]
