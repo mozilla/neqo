@@ -110,8 +110,9 @@ jobs:
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
 
-      # - name: Run cargo bench
-      #   run: |
+      - name: Run cargo bench
+        run: |
+            touch results.txt
       #     sudo ip link set dev lo mtu "$MTU"
       #     taskset -c 2 nice -n -20 setarch --addr-no-randomize \
       #       cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
