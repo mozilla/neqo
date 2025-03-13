@@ -186,14 +186,12 @@ fn static_link() {
     let mut other_libs = Vec::new();
     if env::consts::OS != "windows" {
         other_libs.extend_from_slice(&["dl", "c", "z"]);
+        if env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() != "android" {
+            other_libs.push("pthread");
+        }
     }
     if env::consts::OS == "macos" {
         other_libs.push("sqlite3");
-    }
-    if env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "android" {
-        other_libs.push("stdc++");
-    } else {
-        other_libs.push("pthread");
     }
     dynamic_link_both(&other_libs);
 }

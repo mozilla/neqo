@@ -216,6 +216,7 @@ jobs:
           set -e
           adb shell ip addr show
           export GITHUB_ACTIONS=1
+          export LD_LIBRARY_PATH="$LD_LIBRARY_PATH"
           adb wait-for-device
           while [ -z "$(adb shell getprop sys.boot_completed | tr -d '\r')" ]; do sleep 1; done
           any_failures=0
@@ -229,6 +230,7 @@ jobs:
           exit $any_failures
           EOF
           chmod a+x /tmp/rust-android-run-tests-on-emulator.sh
+          cat /tmp/rust-android-run-tests-on-emulator.sh
 
       - uses: reactivecircus/android-emulator-runner@62dbb605bba737720e10b196cb4220d374026a6d # v2.33.0
         with:
