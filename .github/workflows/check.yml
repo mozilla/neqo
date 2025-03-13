@@ -214,16 +214,16 @@ jobs:
           cat <<'EOF' > /tmp/rust-android-run-tests-on-emulator.sh
           #!/bin/bash
           set -e
-          adb shell find / -ls
           adb wait-for-device
           while [ -z "$(adb shell getprop sys.boot_completed | tr -d '\r')" ]; do sleep 1; done
           any_failures=0
           for test in $(find target/$TARGET/debug/deps/ -type f -executable ! -name "*.so" -name "*-*"); do
             adb push "$test" /data/local/tmp/
+            adb push "$LD_LIBRARY_PATH" /data/local/tmp/
             adb shell chmod +x /data/local/tmp/$(basename "$test")
             # See https://unix.stackexchange.com/a/451140/409256
-            adb shell "API_LEVEL=$API_LEVEL /data/local/tmp/$(basename "$test") || echo _FAIL_" 2>&1 | tee output
-            grep _FAIL_ output && any_failures=1
+            adb shell "RUST_BACKTRACE=1 API_LEVEL=$API_LEVEL /data/local/tmp/$(basename "$test") || echo _FAIL_" 2>&1 | tee output
+            grep _FAIL_ output > /dev/null && any_failures=1
           done
           exit $any_failures
           EOF
@@ -238,4 +238,3 @@ jobs:
           script: /tmp/rust-android-run-tests-on-emulator.sh
         env:
           TARGET: ${{ matrix.target }}
-          LD_LIBRARY_PATH: ${{ env.LD_LIBRARY_PATH }}
