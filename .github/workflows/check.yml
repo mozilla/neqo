@@ -224,7 +224,7 @@ jobs:
             adb shell chmod +x /data/local/tmp/$(basename "$test")
             adb shell ls -l /data/local/tmp
             # See https://unix.stackexchange.com/a/451140/409256
-            adb shell "RUST_BACKTRACE=1 CARGO_MANIFEST_DIR=/data/local/tmp API_LEVEL=$API_LEVEL /data/local/tmp/$(basename "$test") || echo _FAIL_" 2>&1 | tee output
+            adb shell "RUST_BACKTRACE=1 LD_LIBRARY_PATH=/data/local/tmp CARGO_MANIFEST_DIR=/data/local/tmp API_LEVEL=$API_LEVEL /data/local/tmp/$(basename "$test") || echo _FAIL_" 2>&1 | tee output
             grep _FAIL_ output > /dev/null && any_failures=1
           done
           exit $any_failures
