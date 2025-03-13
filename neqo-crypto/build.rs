@@ -152,8 +152,14 @@ fn dynamic_link_both(extra_libs: &[&str]) {
     } else {
         &["plds4", "plc4", "nspr4"]
     };
+    let kind = if env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "android" {
+        // Never link dynamically on Android.
+        "static"
+    } else {
+        "dylib"
+    };
     for lib in nspr_libs.iter().chain(extra_libs) {
-        println!("cargo:rustc-link-lib=dylib={lib}");
+        println!("cargo:rustc-link-lib={kind}={lib}");
     }
 }
 
