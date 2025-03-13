@@ -202,7 +202,10 @@ jobs:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
           target: ${{ matrix.target }}
 
-      - run: cargo ndk --bindgen -t ${{ matrix.target }} test --no-run
+      - run: |
+          cargo ndk-env
+          cargo ndk-env --platform $API_LEVEL
+          cargo ndk --bindgen --platform $API_LEVEL --target ${{ matrix.target }} test --no-run
 
       - env:
           TARGET: ${{ matrix.target }}
