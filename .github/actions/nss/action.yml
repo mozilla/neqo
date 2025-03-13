@@ -212,4 +212,4 @@ runs:
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
         [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static -v
