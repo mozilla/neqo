@@ -248,10 +248,8 @@ jobs:
                   ps -efww | grep $PID || true
                   ls -l *.samply
                   killall neqo-server|| true
-                  # sleep 1
-                  # kill $PID || true
-                  # sleep 1
-                  # kill -9 $PID || true
+                  killall quic_server || true
+                  killall quicinteropserver || true
                   ps -efww | grep $PID || true
                   ps -efww | grep neqo || true
                   ps -efww | grep samply || true
