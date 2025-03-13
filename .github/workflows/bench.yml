@@ -9,7 +9,7 @@ env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   TOOLCHAIN: stable
-  PERF_OPT: record --rate 4999 --save-only --verbose
+  PERF_OPT: record --rate 4999 --save-only --verbose --unstable-presymbolicate
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
@@ -223,8 +223,6 @@ jobs:
                   samply $PERF_OPT -o "$FILENAME.server.samply" \
                     taskset -c 2 nice -n -20 setarch --addr-no-randomize \
                     $CMD &
-                  PID=$!
-                  echo $PID
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
                   taskset -c 3 nice -n -20 setarch --addr-no-randomize \
@@ -246,14 +244,10 @@ jobs:
                   samply $PERF_OPT -o "$FILENAME.client.samply" \
                     taskset -c 3 nice -n -20 setarch --addr-no-randomize \
                     $CMD > /dev/null 2>&1
-                  ps -efww | grep $PID || true
-                  ls -l *.samply
                   killall neqo-server|| true
                   killall quic_server || true
                   killall quicinteropserver || true
-                  ps -efww | grep $PID || true
-                  ps -efww | grep neqo || true
-                  ps -efww | grep samply || true
+
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                     sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n' >> steps.md
 
@@ -367,6 +361,7 @@ jobs:
           name: ${{ github.event.repository.name }}-${{ github.sha }}
           path: |
             *.samply
+            *.syms.json
             *.txt
             *.md
             results.*
