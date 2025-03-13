@@ -224,8 +224,10 @@ jobs:
             adb push "$LD_LIBRARY_PATH" "$TMP/"
             adb shell chmod +x "$TMP/$(basename "$test")"
             adb shell ls -l "$TMP"
+            adb shell ls -l "$TMP/db"
+            adb shell ls -l "$TMP/lib"
             # See https://unix.stackexchange.com/a/451140/409256
-            adb shell "RUST_BACKTRACE=1 LD_LIBRARY_PATH=$TMP CARGO_MANIFEST_DIR=$TMP API_LEVEL=$API_LEVEL $TMP/$(basename "$test") || echo _FAIL_" 2>&1 | tee output
+            adb shell "RUST_BACKTRACE=1 LD_LIBRARY_PATH=$TMP/lib CARGO_MANIFEST_DIR=$TMP API_LEVEL=$API_LEVEL $TMP/$(basename "$test") || echo _FAIL_" 2>&1 | tee output
             grep _FAIL_ output > /dev/null && any_failures=1
           done
           exit $any_failures
