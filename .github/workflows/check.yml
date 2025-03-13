@@ -214,9 +214,7 @@ jobs:
           cat <<'EOF' > /tmp/rust-android-run-tests-on-emulator.sh
           #!/bin/bash
           set -e
-          adb shell ip addr show
-          export GITHUB_ACTIONS=1
-          export LD_LIBRARY_PATH="$LD_LIBRARY_PATH"
+          adb shell find / -ls
           adb wait-for-device
           while [ -z "$(adb shell getprop sys.boot_completed | tr -d '\r')" ]; do sleep 1; done
           any_failures=0
