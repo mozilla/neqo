@@ -26,7 +26,7 @@ defaults:
 
 jobs:
   toolchains:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
     steps:
@@ -45,12 +45,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # TODO: Switch to ubuntu-latest-arm when available as a tag.
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, windows-2025]
         rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
         type: [debug]
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             rust-toolchain: stable
             type: release
     env:
@@ -141,7 +140,7 @@ jobs:
 
   check-cargo-lock:
     name: Ensure `Cargo.lock` contains all required dependencies
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
