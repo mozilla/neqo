@@ -37,9 +37,6 @@ pub mod assertions;
 pub mod header_protection;
 pub mod sim;
 
-/// The path for the database used in tests.
-pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
-
 /// Initialize the test fixture.  Only call this if you aren't also calling a
 /// fixture function that depends on setup.  Other functions in the fixture
 /// that depend on this setup call the function for you.
@@ -48,8 +45,10 @@ pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
 ///
 /// When the NSS initialization fails.
 pub fn fixture_init() {
-    println!("Initializing test fixture with NSS DB at {}", NSS_DB_PATH);
-    init_db(NSS_DB_PATH).unwrap();
+    // The path for the database used in tests.
+    let nss_db_path = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
+    println!("Initializing test fixture with NSS DB at {nss_db_path}");
+    init_db(nss_db_path).unwrap();
 }
 
 // This needs to be > 2ms to avoid it being rounded to zero.
