@@ -125,6 +125,7 @@ impl Default for ConnectionParameters {
             pmtud: false,
             // Firefox on OpenBSD is sandboxed and cannot access the routing socket that the mtu
             // crate uses to obtain the local interface MTU. (Trying to do so crashes the process.)
+            // See https://bugzilla.mozilla.org/show_bug.cgi?id=1952304
             pmtud_iface_mtu: cfg!(not(target_os = "openbsd")),
             sni_slicing: true,
             mlkem: true,
