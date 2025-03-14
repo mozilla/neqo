@@ -147,22 +147,13 @@ fn dynamic_link() {
 }
 
 fn dynamic_link_both(extra_libs: &[&str]) {
-    for lib in extra_libs {
-        println!("cargo:rustc-link-lib=dylib={lib}");
-    }
     let nspr_libs = if env::consts::OS == "windows" {
         &["libplds4", "libplc4", "libnspr4"]
     } else {
         &["plds4", "plc4", "nspr4"]
     };
-    let kind = if env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "android" {
-        // Never link NSS dynamically on Android.
-        "static"
-    } else {
-        "dylib"
-    };
-    for lib in nspr_libs {
-        println!("cargo:rustc-link-lib={kind}={lib}");
+    for lib in nspr_libs.iter().chain(extra_libs) {
+        println!("cargo:rustc-link-lib=dylib={lib}");
     }
 }
 
@@ -196,6 +187,7 @@ fn static_link() {
     if env::consts::OS != "windows" {
         other_libs.extend_from_slice(&["dl", "c", "z"]);
         if env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() != "android" {
+            // On Android, pthread is part of libc.
             other_libs.push("pthread");
         }
     }
