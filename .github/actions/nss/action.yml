@@ -218,7 +218,7 @@ runs:
         fi
         if [[ $TARGET_PLATFORM == *-android* ]]; then
           for file in build-nss-android.sh build-android-common.sh; do
-            curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/heads/main/libs/$file"
+            curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/tags/v137.0/libs/$file"
             chmod +x "$file"
           done
           # See https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md#android
