@@ -48,6 +48,7 @@ pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
 ///
 /// When the NSS initialization fails.
 pub fn fixture_init() {
+    println!("Initializing test fixture with NSS DB at {}", NSS_DB_PATH);
     init_db(NSS_DB_PATH).unwrap();
 }
 

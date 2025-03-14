@@ -218,15 +218,16 @@ jobs:
           while [ -z "$(adb shell getprop sys.boot_completed | tr -d '\r')" ]; do sleep 1; done
           any_failures=0
           TMP=/data/local/tmp
+          adb push "test-fixture/db" "$TMP/"
+          adb shell ls -l "$TMP/db"
+          adb push "$LD_LIBRARY_PATH" "$TMP/"
+          adb shell ls -l "$TMP/lib"
           for test in $(find target/$TARGET/debug/deps/ -type f -executable ! -name "*.so" -name "*-*"); do
             adb push "$test" "$TMP/"
-            adb push "test-fixture/db" "$TMP/"
-            adb push "$LD_LIBRARY_PATH" "$TMP/"
             adb shell chmod +x "$TMP/$(basename "$test")"
             adb shell ls -l "$TMP"
-            adb shell ls -l "$TMP/db"
-            adb shell ls -l "$TMP/lib"
             # See https://unix.stackexchange.com/a/451140/409256
+            echo "RUST_BACKTRACE=1 LD_LIBRARY_PATH=$TMP/lib CARGO_MANIFEST_DIR=$TMP API_LEVEL=$API_LEVEL $TMP/$(basename "$test")"
             adb shell "RUST_BACKTRACE=1 LD_LIBRARY_PATH=$TMP/lib CARGO_MANIFEST_DIR=$TMP API_LEVEL=$API_LEVEL $TMP/$(basename "$test") || echo _FAIL_" 2>&1 | tee output
             grep _FAIL_ output > /dev/null && any_failures=1
           done
