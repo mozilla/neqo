@@ -9,7 +9,6 @@
 use std::{
     cell::{OnceCell, RefCell},
     cmp::max,
-    env,
     fmt::Display,
     io::{self, Cursor, Result, Write},
     mem,
@@ -38,8 +37,7 @@ pub mod assertions;
 pub mod header_protection;
 pub mod sim;
 
-/// The path for the database used in tests. Can be overridden by setting the
-/// `NSS_DB_PATH` environment variable.
+/// The path for the database used in tests.
 pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
 
 /// Initialize the test fixture.  Only call this if you aren't also calling a
@@ -50,10 +48,7 @@ pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
 ///
 /// When the NSS initialization fails.
 pub fn fixture_init() {
-    // Allow overriding the compile-time NSS database path (which is relative to CARGO_MANIFEST_DIR)
-    // with one set via an environment variable.
-    let path = env::var("NSS_DB_PATH").unwrap_or_else(|_| NSS_DB_PATH.to_string());
-    init_db(path).unwrap();
+    init_db(NSS_DB_PATH).unwrap();
 }
 
 // This needs to be > 2ms to avoid it being rounded to zero.

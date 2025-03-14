@@ -28,7 +28,7 @@ pub mod selfencrypt;
 mod ssl;
 mod time;
 
-use std::{ffi::CString, path::PathBuf, ptr::null, sync::OnceLock};
+use std::{env, ffi::CString, path::PathBuf, ptr::null, sync::OnceLock};
 
 #[cfg(not(feature = "disable-encryption"))]
 pub use self::aead::RealAead as Aead;
@@ -167,6 +167,9 @@ pub fn init() -> Res<()> {
 ///
 /// If NSS cannot be initialized.
 pub fn init_db<P: Into<PathBuf>>(dir: P) -> Res<()> {
+    // Allow overriding the NSS database path with one set via an environment variable.
+    let dir = env::var("NSS_DB_PATH")
+        .unwrap_or(dir.into().to_str().ok_or(Error::InternalError)?.to_string());
     let res = INITIALIZED.get_or_init(|| init_once(Some(dir.into())));
     res.as_ref().map(|_| ()).map_err(Clone::clone)
 }

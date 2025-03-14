@@ -237,6 +237,7 @@ jobs:
           arch: ${{ matrix.emulator-arch == 'arm64-v8' && 'arm64-v8a' || matrix.emulator-arch }}
           ndk: ${{ env.NDK_VERSION }}
           emulator-boot-timeout: 120
+          disk-size: 2G
           script: /tmp/rust-android-run-tests-on-emulator.sh
         env:
           TARGET: ${{ matrix.target }}
