@@ -302,6 +302,10 @@ impl PacketBuilder {
     }
 
     /// Add unpredictable values for unprotected parts of the packet.
+    ///
+    /// # Panics
+    ///
+    /// If the token length cannot fit into a `u64`.
     pub fn scramble(&mut self, quic_bit: bool) {
         debug_assert!(self.len() > self.header.start);
         let mask = if quic_bit { PACKET_BIT_FIXED_QUIC } else { 0 }
@@ -312,6 +316,10 @@ impl PacketBuilder {
 
     /// For an Initial packet, encode the token.
     /// If you fail to do this, then you will not get a valid packet.
+    ///
+    /// # Panics
+    ///
+    /// If the token length cannot fit into a `u64`.
     pub fn initial_token(&mut self, token: &[u8]) {
         let token_len = u64::try_from(token.len()).expect("token length fits in u64");
         if Encoder::vvec_len(token_len) < self.remaining() {
