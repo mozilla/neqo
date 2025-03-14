@@ -388,8 +388,7 @@ struct NewTokenFrameStatus {
 
 impl NewTokenFrameStatus {
     fn len(&self) -> usize {
-        let token_len = u64::try_from(self.token.len()).expect("token length fits in u64");
-        1 + Encoder::vvec_len(token_len)
+        1 + Encoder::vvec_len(self.token.len())
     }
 }
 
