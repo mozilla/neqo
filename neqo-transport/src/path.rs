@@ -19,7 +19,6 @@ use neqo_crypto::random;
 
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
-    cc::CongestionControlAlgorithm,
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn,
     frame::FrameType,
@@ -29,7 +28,7 @@ use crate::{
     rtt::{RttEstimate, RttSource},
     sender::PacketSender,
     stats::FrameStats,
-    Stats,
+    ConnectionParameters, Stats,
 };
 
 /// The number of times that a path will be probed before it is considered failed.
@@ -75,8 +74,7 @@ impl Paths {
         &self,
         local: SocketAddr,
         remote: SocketAddr,
-        cc: CongestionControlAlgorithm,
-        pacing: bool,
+        conn_params: &ConnectionParameters,
         now: Instant,
         stats: &mut Stats,
     ) -> PathRef {
@@ -85,7 +83,7 @@ impl Paths {
             .find_map(|p| p.borrow().received_on(local, remote).then(|| Rc::clone(p)))
             .unwrap_or_else(|| {
                 let mut p =
-                    Path::temporary(local, remote, cc, pacing, self.qlog.clone(), now, stats);
+                    Path::temporary(local, remote, conn_params, self.qlog.clone(), now, stats);
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
                 }
@@ -520,30 +518,33 @@ impl Path {
     pub fn temporary(
         local: SocketAddr,
         remote: SocketAddr,
-        cc: CongestionControlAlgorithm,
-        pacing: bool,
+        conn_params: &ConnectionParameters,
         qlog: NeqoQlog,
         now: Instant,
         stats: &mut Stats,
     ) -> Self {
-        let iface_mtu = match mtu::interface_and_mtu(remote.ip()) {
-            Ok((name, mtu)) => {
-                qdebug!(
-                    "Outbound interface {name} for destination {ip} has MTU {mtu}",
-                    ip = remote.ip()
-                );
-                stats.pmtud_iface_mtu = mtu;
-                Some(mtu)
+        let iface_mtu = if conn_params.pmtud_iface_mtu_enabled() {
+            match mtu::interface_and_mtu(remote.ip()) {
+                Ok((name, mtu)) => {
+                    qdebug!(
+                        "Outbound interface {name} for destination {ip} has MTU {mtu}",
+                        ip = remote.ip()
+                    );
+                    stats.pmtud_iface_mtu = mtu;
+                    Some(mtu)
+                }
+                Err(e) => {
+                    qwarn!(
+                        "Failed to determine outbound interface for destination {ip}: {e}",
+                        ip = remote.ip()
+                    );
+                    None
+                }
             }
-            Err(e) => {
-                qwarn!(
-                    "Failed to determine outbound interface for destination {ip}: {e}",
-                    ip = remote.ip()
-                );
-                None
-            }
+        } else {
+            None
         };
-        let mut sender = PacketSender::new(cc, pacing, Pmtud::new(remote.ip(), iface_mtu), now);
+        let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip(), iface_mtu), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
