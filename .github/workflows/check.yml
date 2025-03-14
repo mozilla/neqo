@@ -227,8 +227,8 @@ jobs:
             adb shell chmod +x "$TMP/$(basename "$test")"
             adb shell ls -l "$TMP"
             # See https://unix.stackexchange.com/a/451140/409256
-            echo "RUST_BACKTRACE=1 LD_LIBRARY_PATH=$TMP/lib CARGO_MANIFEST_DIR=$TMP API_LEVEL=$API_LEVEL $TMP/$(basename "$test")"
-            adb shell "RUST_BACKTRACE=1 LD_LIBRARY_PATH=$TMP/lib CARGO_MANIFEST_DIR=$TMP API_LEVEL=$API_LEVEL $TMP/$(basename "$test") || echo _FAIL_" 2>&1 | tee output
+            echo "RUST_BACKTRACE=1 LD_LIBRARY_PATH=$TMP/lib NSS_DB_PATH=$TMP/db API_LEVEL=$API_LEVEL $TMP/$(basename "$test")"
+            adb shell "RUST_BACKTRACE=1 LD_LIBRARY_PATH=$TMP/lib NSS_DB_PATH=$TMP/db API_LEVEL=$API_LEVEL $TMP/$(basename "$test") || echo _FAIL_" 2>&1 | tee output
             grep _FAIL_ output > /dev/null && any_failures=1
           done
           exit $any_failures
