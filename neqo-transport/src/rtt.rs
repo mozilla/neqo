@@ -60,14 +60,14 @@ impl RttEstimate {
     }
 
     #[cfg(test)]
-    pub const fn from_duration(rtt: Duration) -> Self {
+    pub fn from_duration(rtt: Duration) -> Self {
         Self {
             first_sample_time: None,
             latest_rtt: rtt,
             smoothed_rtt: rtt,
             rttvar: Duration::from_millis(0),
             min_rtt: rtt,
-            ack_delay: PeerAckDelay::Fixed(Duration::from_millis(25)),
+            ack_delay: PeerAckDelay::default(),
             best_source: RttSource::Ack,
         }
     }

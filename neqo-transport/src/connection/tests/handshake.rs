@@ -36,7 +36,7 @@ use crate::{
     server::ValidateAddress,
     stats::FrameStats,
     tparams::{TransportParameter, TransportParameterId::*},
-    tracking::DEFAULT_ACK_DELAY,
+    tracking::DEFAULT_LOCAL_ACK_DELAY,
     CloseReason, ConnectionParameters, Error, Pmtud, StreamType, Version,
 };
 
@@ -1089,7 +1089,7 @@ fn ech_retry_fallback_rejected() {
 fn bad_min_ack_delay() {
     const EXPECTED_ERROR: CloseReason = CloseReason::Transport(Error::TransportParameterError);
     let mut server = default_server();
-    let max_ad = u64::try_from(DEFAULT_ACK_DELAY.as_micros()).unwrap();
+    let max_ad = u64::try_from(DEFAULT_LOCAL_ACK_DELAY.as_micros()).unwrap();
     server
         .set_local_tparam(MinAckDelay, TransportParameter::Integer(max_ad + 1))
         .unwrap();

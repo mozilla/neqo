@@ -22,7 +22,7 @@ use crate::{
         },
         TransportParametersHandler,
     },
-    tracking::DEFAULT_ACK_DELAY,
+    tracking::DEFAULT_LOCAL_ACK_DELAY,
     version::{Version, VersionConfig},
     CongestionControlAlgorithm, Res,
 };
@@ -440,8 +440,10 @@ impl ConnectionParameters {
         if self.grease {
             tps.local.set_empty(GreaseQuicBit);
         }
-        tps.local
-            .set_integer(MaxAckDelay, u64::try_from(DEFAULT_ACK_DELAY.as_millis())?);
+        tps.local.set_integer(
+            MaxAckDelay,
+            u64::try_from(DEFAULT_LOCAL_ACK_DELAY.as_millis())?,
+        );
         tps.local
             .set_integer(MinAckDelay, u64::try_from(GRANULARITY.as_micros())?);
 
