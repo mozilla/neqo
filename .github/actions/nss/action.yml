@@ -8,13 +8,16 @@ inputs:
   minimum-version:
     description: "Minimum required version of NSS"
     required: true
+  target:
+    description: "Target for cross-compilation"
+    default: ""
 
 runs:
   using: composite
   steps:
     - name: Install system NSS (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && inputs.target == '' }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -23,7 +26,7 @@ runs:
 
     - name: Install system NSS (MacOS)
       shell: bash
-      if: ${{ runner.os == 'MacOS' && runner.environment == 'github-hosted' }}
+      if: ${{ runner.os == 'MacOS' && runner.environment == 'github-hosted' && inputs.target == '' }}
       run: |
         [ "$BREW_UPDATED" ] || brew update && echo "BREW_UPDATED=1" >> "$GITHUB_ENV"
         brew install nss
@@ -33,6 +36,7 @@ runs:
       env:
         MIN_VERSION: ${{ inputs.minimum-version }}
       shell: bash
+      if: inputs.target == ''
       run: |
         if ! command -v pkg-config &> /dev/null; then
           echo "pkg-config: not found"
@@ -116,7 +120,7 @@ runs:
       uses: actions/cache/restore@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
       with:
         path: dist
-        key: nss-${{ runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.heads.outputs.nss_head }}-${{ steps.heads.outputs.NSPR_HEAD }}
+        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.heads.outputs.nss_head }}-${{ steps.heads.outputs.NSPR_HEAD }}
 
     - name: Check if build is needed
       id: check_build
@@ -184,9 +188,10 @@ runs:
       if: ${{ !steps.nss.outputs.use_system_nss }}
       env:
         NSS_TARGET: ${{ inputs.type }}
+        NSS_TYPE: ${{ inputs.type }}
         NSS_DIR: ${{ github.workspace }}/nss
       run: |
-        NSS_OUT="${{ github.workspace }}/nss/../dist/$NSS_TARGET"
+        NSS_OUT="${{ github.workspace }}/dist/$NSS_TARGET"
         {
           echo "LD_LIBRARY_PATH=$NSS_OUT/lib"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib"
@@ -202,7 +207,7 @@ runs:
       shell: bash
       if: ${{ steps.check_build.outputs.build_nss }}
       env:
-        NSS_TARGET: ${{ inputs.type }}
+        TARGET_PLATFORM: ${{ inputs.target }}
       run: |
         if [ "$NSS_TARGET" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
@@ -211,5 +216,40 @@ runs:
           OPT="-o"
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
-        [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static -v
+        if [[ $TARGET_PLATFORM == *-android* ]]; then
+          for file in build-nss-android.sh build-android-common.sh; do
+            curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/tags/v137.0/libs/$file"
+            chmod +x "$file"
+          done
+          # See https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md#android
+          ANDROID_NDK_VERSION=$(basename "$ANDROID_NDK" | cut -d. -f1)
+          # See https://github.com/mozilla/application-services/blob/46cacda811da094653dc8e93158956f4cd57e87a/libs/build-all.sh#L89-L102
+          # It figures that NSPR would require monkey-patching to build on Android.
+          sed -i'' 's/if test -z "$android_ndk" ; then/$as_echo "#define ANDROID 1" >>confdefs.h\n    ;;\nunreachable)\n    if test -z "$android_ndk" ; then/g' nspr/configure
+          ./build-nss-android.sh "$(pwd)" "/tmp/dist" "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64" "$TARGET_PLATFORM" "$ANDROID_NDK_VERSION"
+          # Manually move the temporary build directory to the final location, which is what neqo-crypto expects.
+          find /tmp/tmp.* > tmp
+          CERTUTIL="$(grep certutil tmp)"
+          TARGET_DIR="$(dirname $(dirname $CERTUTIL))"
+          mkdir -p "dist/$NSS_TARGET"
+          cp -vaL "$TARGET_DIR"/* "dist/$NSS_TARGET/"
+          NSPR_H="$(grep nspr.h tmp)"
+          INCLUDE_DIR="$(dirname $NSPR_H)"
+          mkdir -p "dist/$NSS_TARGET/include/nspr"
+          cp -vaL "$INCLUDE_DIR"/* "dist/$NSS_TARGET/include/nspr"
+          CHACHA="$(grep chacha20poly1305.h tmp)"
+          PRIVATE_DIR="$(dirname $(dirname $CHACHA))"
+          mkdir -p "dist/private"
+          cp -vaL "$PRIVATE_DIR"/* "dist/private/"
+          UTILRENAME="$(grep utilrename.h tmp)"
+          PUBLIC_DIR="$(dirname $(dirname $(dirname $UTILRENAME)))"
+          mkdir -p "dist/public"
+          cp -vaL "$PUBLIC_DIR"/* "dist/"
+          LIBNSPR4="$(grep lib/libnspr4.a tmp)"
+          LIB_DIR="$(dirname $LIBNSPR4)"
+          mkdir -p "dist/$NSS_TARGET/lib"
+          cp -vaL "$LIB_DIR"/* "dist/$NSS_TARGET/lib"
+        else
+          [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
+          $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
+        fi
