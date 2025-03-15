@@ -252,8 +252,19 @@ impl ServerRunner {
             match server.process(input_dgram.take(), now()) {
                 Output::Datagram(dgram) => {
                     let socket = Self::find_socket(sockets, dgram.source());
-                    socket.writable().await?;
-                    socket.send(&dgram)?;
+                    loop {
+                        // Optimistically attempt sending datagram. In case the
+                        // OS buffer is full, wait till socket is writable then
+                        // try again.
+                        match socket.send(&dgram) {
+                            Ok(()) => break,
+                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                socket.writable().await?;
+                                // Now try again.
+                            }
+                            e @ Err(_) => return e,
+                        }
+                    }
                 }
                 Output::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
