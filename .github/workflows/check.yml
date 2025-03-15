@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       run_benchmarks:
-        description: "Run benchmarks"
+        description: 'Run benchmarks'
         type: boolean
         required: false
         default: false
