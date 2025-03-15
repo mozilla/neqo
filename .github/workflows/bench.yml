@@ -9,6 +9,7 @@ env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   TOOLCHAIN: stable
+  # PERF_OPT: record --rate 4999 --save-only --verbose --unstable-presymbolicate
   PERF_OPT: record -F4999 --call-graph fp -g
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
@@ -57,7 +58,7 @@ jobs:
         uses: ./.github/actions/rust
         with:
           version: $TOOLCHAIN
-          tools: hyperfine, flamegraph
+          tools: hyperfine, flamegraph, samply
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get minimum NSS version
@@ -72,11 +73,11 @@ jobs:
 
       - name: Build neqo
         run: |
-          cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
+          # cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
           export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
           echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
-          cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
+          cargo "+$TOOLCHAIN" build --locked --profile profiling --bin neqo-client --bin neqo-server
 
       - name: Build msquic
         run: |
@@ -112,11 +113,12 @@ jobs:
 
       - name: Run cargo bench
         run: |
-          sudo ip link set dev lo mtu "$MTU"
-          taskset -c 2 nice -n -20 setarch --addr-no-randomize \
-            cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
-          taskset -c 2 nice -n -20 setarch --addr-no-randomize \
-            cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
+          touch results.txt
+      #     sudo ip link set dev lo mtu "$MTU"
+      #     taskset -c 2 nice -n -20 setarch --addr-no-randomize \
+      #       cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
+      #     taskset -c 2 nice -n -20 setarch --addr-no-randomize \
+      #       cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -136,12 +138,12 @@ jobs:
           truncate -s "$BIGSIZE" "$TMP/$BIGSIZE"
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
-            ["neqo"]="target/release/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
+            ["neqo"]="target/profiling/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
             ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
             ["google"]="gquiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
           )
           declare -A server_cmd=(
-            ["neqo"]="target/release/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
+            ["neqo"]="target/profiling/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
             ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
             ["google"]="gquiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
           )
@@ -222,6 +224,9 @@ jobs:
                   taskset -c 2 nice -n -20 setarch --addr-no-randomize \
                     perf $PERF_OPT -o "$FILENAME.server.perf" $CMD &
                   PID=$!
+                  # samply $PERF_OPT -o "$FILENAME.server.samply" \
+                  #   taskset -c 2 nice -n -20 setarch --addr-no-randomize \
+                  #   $CMD &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
                   taskset -c 3 nice -n -20 setarch --addr-no-randomize \
@@ -243,6 +248,12 @@ jobs:
                   taskset -c 3 nice -n -20 setarch --addr-no-randomize \
                     perf $PERF_OPT -o "$FILENAME.client.perf" $CMD > /dev/null 2>&1
                   kill $PID
+                  # samply $PERF_OPT -o "$FILENAME.client.samply" \
+                  #   taskset -c 3 nice -n -20 setarch --addr-no-randomize \
+                  #   $CMD > /dev/null 2>&1
+                  # killall neqo-server|| true
+                  # killall quic_server || true
+                  # killall quicinteropserver || true
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                     sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n' >> steps.md
@@ -305,19 +316,6 @@ jobs:
           sudo ip link set dev lo mtu 65536
         if: ${{ success() || failure() || cancelled() }}
 
-      - name: Post-process perf data
-        run: |
-          for f in *.perf; do
-            # Convert for profiler.firefox.com
-            perf script -i "$f" -F +pid > "$f.fx" &
-            # Generate perf reports
-            perf report -i "$f" --no-children --stdio > "$f.txt" &
-            # Generate flamegraphs
-            flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}" &
-          done
-          wait
-          rm neqo.svg
-
       - name: Format results as Markdown
         id: results
         run: |
@@ -363,6 +361,19 @@ jobs:
             hyperfine
           key: bench-results-${{ runner.name }}-${{ github.sha }}
 
+      - name: Post-process perf data
+        run: |
+          for f in *.perf; do
+            # Convert for profiler.firefox.com
+            perf script -i "$f" -F +pid > "$f.fx" &
+            # Generate perf reports
+            perf report -i "$f" --no-children --stdio > "$f.txt" &
+            # Generate flamegraphs
+            flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}" &
+          done
+          wait
+          rm neqo.svg
+
       - name: Export perf data
         id: export
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
@@ -372,6 +383,8 @@ jobs:
             *.svg
             *.perf
             *.perf.fx
+            *.samply
+            *.syms.json
             *.txt
             *.md
             results.*
