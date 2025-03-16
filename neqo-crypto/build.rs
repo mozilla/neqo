@@ -185,7 +185,11 @@ fn static_link() {
     // Dynamic libs that aren't transitively included by NSS libs.
     let mut other_libs = Vec::new();
     if env::consts::OS != "windows" {
-        other_libs.extend_from_slice(&["pthread", "dl", "c", "z"]);
+        if env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() != "android" {
+            // On Android, pthread is part of libc.
+            other_libs.push("pthread");
+        }
+        other_libs.extend_from_slice(&["dl", "c", "z"]);
     }
     if env::consts::OS == "macos" {
         other_libs.push("sqlite3");

@@ -27,13 +27,13 @@ on NSS, you need to set an environment as follows:
 ### Linux
 
 ```shell
-export LD_LIBRARY_PATH="$(dirname "$(find . -name libssl3.so -print | head -1)")"
+export LD_LIBRARY_PATH="$(find . -name libssl3.so -print | head -1 | xargs dirname | xargs realpath)"
 ```
 
 ### macOS
 
 ```shell
-export DYLD_LIBRARY_PATH="$(dirname "$(find . -name libssl3.dylib -print | head -1)")"
+export DYLD_LIBRARY_PATH="$(find . -name libssl3.dylib -print | head -1 | xargs dirname | xargs realpath)"
 ```
 
 Note: If you did not already compile NSS separately, you need to have
@@ -125,7 +125,9 @@ something has changed.
 ### Connect with Firefox to local neqo-server
 
 1. Run `neqo-server` via `cargo run --bin neqo-server -- 'localhost:12345' --db ./test-fixture/db`.
-2. On Firefox, set `about:config` preference `network.http.http3.alt-svc-mapping-for-testing` to `localhost;h3=":12345"`.
+2. On Firefox, set `about:config` preferences:
+  - `network.http.http3.alt-svc-mapping-for-testing` to `localhost;h3=":12345"`
+  - `network.http.http3.disable_when_third_party_roots_found` to `false`
 3. Optionally enable logging via `about:logging` or profiling via <https://profiler.firefox.com/>.
 4. Navigate to <https://localhost:12345> and accept self-signed certificate.
 
