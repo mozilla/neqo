@@ -37,14 +37,17 @@ fn set_tos(mut d: Datagram, ecn: IpTosEcn) -> Datagram {
     d
 }
 
-fn noop(d: Datagram) -> Option<Datagram> {
+#[expect(clippy::unnecessary_wraps)]
+const fn noop(d: Datagram) -> Option<Datagram> {
     Some(d)
 }
 
+#[expect(clippy::unnecessary_wraps)]
 fn bleach(d: Datagram) -> Option<Datagram> {
     Some(set_tos(d, IpTosEcn::NotEct))
 }
 
+#[expect(clippy::unnecessary_wraps)]
 fn remark(d: Datagram) -> Option<Datagram> {
     if d.tos().is_ecn_marked() {
         Some(set_tos(d, IpTosEcn::Ect1))
@@ -53,6 +56,7 @@ fn remark(d: Datagram) -> Option<Datagram> {
     }
 }
 
+#[expect(clippy::unnecessary_wraps)]
 fn ce(d: Datagram) -> Option<Datagram> {
     if d.tos().is_ecn_marked() {
         Some(set_tos(d, IpTosEcn::Ce))
@@ -65,8 +69,8 @@ fn drop(_d: Datagram) -> Option<Datagram> {
     None
 }
 
-fn drop_ecn_marked_datagrams() -> fn(Datagram) -> Option<Datagram> {
-    |d| (!d.tos().is_ecn_marked()).then_some(d)
+fn drop_ecn_marked_datagrams(d: Datagram) -> Option<Datagram> {
+    (!d.tos().is_ecn_marked()).then_some(d)
 }
 
 #[test]
@@ -81,7 +85,7 @@ fn handshake_delay_with_ecn_blackhole() {
         &mut server,
         start,
         DEFAULT_RTT,
-        drop_ecn_marked_datagrams(),
+        drop_ecn_marked_datagrams,
     );
 
     assert_eq!(
