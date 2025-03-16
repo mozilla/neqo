@@ -39,14 +39,17 @@ fn set_tos(mut d: Datagram, ecn: Ecn) -> Datagram {
     d
 }
 
-fn noop(d: Datagram) -> Option<Datagram> {
+#[expect(clippy::unnecessary_wraps, reason = "Callers expect an Option.")]
+const fn noop(d: Datagram) -> Option<Datagram> {
     Some(d)
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "Callers expect an Option.")]
 fn bleach(d: Datagram) -> Option<Datagram> {
     Some(set_tos(d, Ecn::NotEct))
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "Callers expect an Option.")]
 fn remark(d: Datagram) -> Option<Datagram> {
     if d.tos().is_ecn_marked() {
         Some(set_tos(d, Ecn::Ect1))
@@ -55,6 +58,7 @@ fn remark(d: Datagram) -> Option<Datagram> {
     }
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "Callers expect an Option.")]
 fn ce(d: Datagram) -> Option<Datagram> {
     if d.tos().is_ecn_marked() {
         Some(set_tos(d, Ecn::Ce))
@@ -67,8 +71,8 @@ fn drop(_d: Datagram) -> Option<Datagram> {
     None
 }
 
-fn drop_ecn_marked_datagrams() -> fn(Datagram) -> Option<Datagram> {
-    |d| (!d.tos().is_ecn_marked()).then_some(d)
+fn drop_ecn_marked_datagrams(d: Datagram) -> Option<Datagram> {
+    (!d.tos().is_ecn_marked()).then_some(d)
 }
 
 /// Given that ECN validation only starts after the handshake, it does not delay
@@ -85,7 +89,7 @@ fn handshake_delay_with_ecn_blackhole() {
         &mut server,
         start,
         DEFAULT_RTT,
-        drop_ecn_marked_datagrams(),
+        drop_ecn_marked_datagrams,
     );
 
     assert!(client.state().connected());
@@ -108,7 +112,7 @@ fn request_response_delay_after_handshake_with_ecn_blackhole() {
         &mut server,
         now,
         DEFAULT_RTT,
-        drop_ecn_marked_datagrams(),
+        drop_ecn_marked_datagrams,
     );
 
     let start = now;
@@ -300,7 +304,7 @@ fn disables_on_remark() {
 
 /// This function performs a handshake over a path that modifies packets via `orig_path_modifier`.
 /// It then sends `burst` packets on that path, and then migrates to a new path that
-/// /// modifies packets via `new_path_modifier`.  It sends `burst` packets on the new path.
+/// modifies packets via `new_path_modifier`.  It sends `burst` packets on the new path.
 /// The function returns the TOS value of the last packet sent on the old path and the TOS value
 /// of the last packet sent on the new path to allow for verification of correct behavior.
 pub fn migration_with_modifiers(
