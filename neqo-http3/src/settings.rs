@@ -66,7 +66,6 @@ impl HSetting {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[allow(clippy::module_name_repetitions)]
 pub struct HSettings {
     settings: Vec<HSetting>,
 }

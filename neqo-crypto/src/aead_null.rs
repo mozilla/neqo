@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(clippy::missing_errors_doc, reason = "OK here.")]
+
 use std::fmt;
 
 use crate::{
@@ -17,7 +19,6 @@ pub const AEAD_NULL_TAG: &[u8] = &[0x0a; 16];
 pub struct AeadNull {}
 
 impl AeadNull {
-    #[allow(clippy::missing_errors_doc)]
     pub const fn new(
         _version: Version,
         _cipher: Cipher,
@@ -32,7 +33,6 @@ impl AeadNull {
         AEAD_NULL_TAG.len()
     }
 
-    #[allow(clippy::missing_errors_doc)]
     pub fn encrypt<'a>(
         &self,
         _count: u64,
@@ -46,7 +46,6 @@ impl AeadNull {
         Ok(&output[..l + self.expansion()])
     }
 
-    #[allow(clippy::missing_errors_doc)]
     pub fn encrypt_in_place<'a>(
         &self,
         _count: u64,
@@ -80,7 +79,6 @@ impl AeadNull {
         }
     }
 
-    #[allow(clippy::missing_errors_doc)]
     pub fn decrypt<'a>(
         &self,
         count: u64,
@@ -94,7 +92,6 @@ impl AeadNull {
         })
     }
 
-    #[allow(clippy::missing_errors_doc)]
     pub fn decrypt_in_place<'a>(
         &self,
         count: u64,

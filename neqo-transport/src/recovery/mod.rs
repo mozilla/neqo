@@ -6,8 +6,6 @@
 
 // Tracking of sent packets and detecting their loss.
 
-#![allow(clippy::module_name_repetitions)]
-
 #[cfg(feature = "bench")]
 pub mod sent;
 #[cfg(not(feature = "bench"))]
@@ -20,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use enum_map::{enum_map, EnumMap};
+use enum_map::EnumMap;
 use enumset::enum_set;
 use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
 pub use sent::SentPacket;
@@ -409,11 +407,11 @@ impl LossRecoverySpaces {
 impl Default for LossRecoverySpaces {
     fn default() -> Self {
         Self {
-            spaces: enum_map! {
-                PacketNumberSpace::Initial => Some(LossRecoverySpace::new(PacketNumberSpace::Initial)),
-                PacketNumberSpace::Handshake => Some(LossRecoverySpace::new(PacketNumberSpace::Handshake)),
-                PacketNumberSpace::ApplicationData =>Some(LossRecoverySpace::new(PacketNumberSpace::ApplicationData)),
-            },
+            spaces: EnumMap::from_array([
+                Some(LossRecoverySpace::new(PacketNumberSpace::Initial)),
+                Some(LossRecoverySpace::new(PacketNumberSpace::Handshake)),
+                Some(LossRecoverySpace::new(PacketNumberSpace::ApplicationData)),
+            ]),
         }
     }
 }
@@ -884,7 +882,7 @@ impl LossRecovery {
 
     /// Check how packets should be sent, based on whether there is a PTO,
     /// what the current congestion window is, and what the pacer says.
-    #[allow(clippy::option_if_let_else)]
+    #[expect(clippy::option_if_let_else, reason = "Alternative is less readable.")]
     pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
         qtrace!("[{self}] get send profile {now:?}");
         let sender = path.sender();
@@ -941,12 +939,12 @@ mod tests {
         LossRecovery, LossRecoverySpace, PacketNumberSpace, SendProfile, SentPacket, FAST_PTO_SCALE,
     };
     use crate::{
-        cc::CongestionControlAlgorithm,
         cid::{ConnectionId, ConnectionIdEntry},
         ecn,
         packet::{PacketNumber, PacketType},
         path::{Path, PathRef},
         stats::{Stats, StatsCell},
+        ConnectionParameters,
     };
 
     // Shorthand for a time in milliseconds.
@@ -1006,13 +1004,11 @@ mod tests {
 
     impl Default for Fixture {
         fn default() -> Self {
-            const CC: CongestionControlAlgorithm = CongestionControlAlgorithm::NewReno;
             let stats = StatsCell::default();
             let mut path = Path::temporary(
                 DEFAULT_ADDR,
                 DEFAULT_ADDR,
-                CC,
-                true,
+                &ConnectionParameters::default(),
                 NeqoQlog::default(),
                 now(),
                 &mut stats.borrow_mut(),

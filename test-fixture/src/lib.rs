@@ -4,8 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
-#![allow(clippy::unwrap_used)] // This is test code.
+#![expect(clippy::unwrap_used, reason = "This is test code.")]
 
 use std::{
     cell::{OnceCell, RefCell},
@@ -374,13 +373,13 @@ impl Write for SharedVec {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         self.buf
             .lock()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
+            .map_err(|e| io::Error::other(e.to_string()))?
             .write(buf)
     }
     fn flush(&mut self) -> Result<()> {
         self.buf
             .lock()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
+            .map_err(|e| io::Error::other(e.to_string()))?
             .flush()
     }
 }

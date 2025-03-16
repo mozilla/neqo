@@ -314,7 +314,11 @@ impl ConnectionIdEntry<[u8; 16]> {
         true
     }
 
-    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     pub fn is_empty(&self) -> bool {
         self.seqno == CONNECTION_ID_SEQNO_EMPTY || self.cid.is_empty()
     }

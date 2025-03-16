@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use enum_map::enum_map;
+use enum_map::EnumMap;
 use neqo_common::{event::Provider as _, qdebug, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use test_fixture::{fixture_init, new_neqo_qlog, now, DEFAULT_ADDR};
@@ -206,7 +206,7 @@ fn handshake_with_modifier(
         )
     };
 
-    let mut did_ping = enum_map! {_ => false};
+    let mut did_ping = EnumMap::from_array([false, false]);
     while !is_done(a) {
         _ = maybe_authenticate(a);
         // Insert a PING frame into the first application data packet an endpoint sends,
@@ -686,8 +686,7 @@ fn assert_path_challenge_min_len(c: &Connection, d: &Datagram, now: Instant) {
     let path = c.paths.find_path(
         d.source(),
         d.destination(),
-        c.conn_params.get_cc_algorithm(),
-        c.conn_params.pacing_enabled(),
+        &c.conn_params,
         now,
         &mut c.stats.borrow_mut(),
     );

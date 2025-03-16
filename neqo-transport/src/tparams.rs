@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(unused_qualifications, reason = "TODO: Clippy bug?")]
+
 // Transport parameters. See -transport section 7.3.
 
 use std::{
@@ -792,7 +794,6 @@ where
 }
 
 #[cfg(test)]
-#[allow(unused_variables)]
 mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
@@ -838,7 +839,7 @@ mod tests {
         let mut enc = Encoder::default();
         tps.encode(&mut enc);
 
-        let tps2 = TransportParameters::decode(&mut enc.as_decoder()).expect("Couldn't decode");
+        TransportParameters::decode(&mut enc.as_decoder()).expect("Couldn't decode");
     }
 
     fn make_spa() -> TransportParameter {

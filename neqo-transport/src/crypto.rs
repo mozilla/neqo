@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cell::RefCell,
     cmp::{max, min},
@@ -15,9 +13,6 @@ use std::{
     time::Instant,
 };
 
-#[cfg(not(feature = "disable-encryption"))]
-#[cfg(test)]
-use enum_map::enum_map;
 use enum_map::EnumMap;
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
 pub use neqo_crypto::Epoch;
@@ -135,7 +130,11 @@ impl Crypto {
     }
 
     /// Get the set of enabled protocols.
-    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     pub fn protocols(&self) -> &[String] {
         &self.protocols
     }
@@ -1251,14 +1250,14 @@ impl CryptoStates {
             cipher: TLS_AES_128_GCM_SHA256,
             next_secret: hkdf::import_key(TLS_VERSION_1_3, &[0xaa; 32]).unwrap(),
         };
-        let initials = enum_map! {
-            Version::Version1 => Some(CryptoState {
-                    tx: CryptoDxState::test_default(),
-                    rx: read(0),
+        let initials = EnumMap::from_array([
+            None,
+            Some(CryptoState {
+                tx: CryptoDxState::test_default(),
+                rx: read(0),
             }),
-            Version::Version2 => None,
-            Version::Draft29 => None,
-        };
+            None,
+        ]);
         Self {
             initials,
             handshake: None,
@@ -1437,7 +1436,7 @@ impl CryptoStreams {
     }
 
     pub fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
-        self.get_mut(space).map_or(true, |cs| cs.tx.is_empty())
+        self.get_mut(space).is_none_or(|cs| cs.tx.is_empty())
     }
 
     const fn get(&self, space: PacketNumberSpace) -> Option<&CryptoStream> {
@@ -1532,7 +1531,7 @@ impl CryptoStreams {
             stats.crypto += 1;
         }
 
-        #[allow(clippy::type_complexity)]
+        #[expect(clippy::type_complexity, reason = "Yeah, a bit complex but still OK.")]
         const fn limit_chunks<'a>(
             left: (u64, &'a [u8]),
             right: (u64, &'a [u8]),

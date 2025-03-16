@@ -19,7 +19,6 @@ use neqo_crypto::random;
 
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
-    cc::CongestionControlAlgorithm,
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn,
     frame::FrameType,
@@ -29,7 +28,7 @@ use crate::{
     rtt::{RttEstimate, RttSource},
     sender::PacketSender,
     stats::FrameStats,
-    Stats,
+    ConnectionParameters, Stats,
 };
 
 /// The number of times that a path will be probed before it is considered failed.
@@ -51,7 +50,7 @@ pub type PathRef = Rc<RefCell<Path>>;
 #[derive(Debug, Default)]
 pub struct Paths {
     /// All of the paths.  All of these paths will be permanent.
-    #[allow(clippy::struct_field_names)]
+    #[expect(clippy::struct_field_names, reason = "This is the best name.")]
     paths: Vec<PathRef>,
     /// This is the primary path.  This will only be `None` initially, so
     /// care needs to be taken regarding that only during the handshake.
@@ -75,8 +74,7 @@ impl Paths {
         &self,
         local: SocketAddr,
         remote: SocketAddr,
-        cc: CongestionControlAlgorithm,
-        pacing: bool,
+        conn_params: &ConnectionParameters,
         now: Instant,
         stats: &mut Stats,
     ) -> PathRef {
@@ -85,7 +83,7 @@ impl Paths {
             .find_map(|p| p.borrow().received_on(local, remote).then(|| Rc::clone(p)))
             .unwrap_or_else(|| {
                 let mut p =
-                    Path::temporary(local, remote, cc, pacing, self.qlog.clone(), now, stats);
+                    Path::temporary(local, remote, conn_params, self.qlog.clone(), now, stats);
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
                 }
@@ -229,7 +227,10 @@ impl Paths {
         if primary_failed {
             self.primary = None;
             // Find a valid path to fall back to.
-            #[allow(clippy::option_if_let_else)]
+            #[expect(
+                clippy::option_if_let_else,
+                reason = "The alternative is less readable."
+            )]
             if let Some(fallback) = self
                 .paths
                 .iter()
@@ -517,30 +518,33 @@ impl Path {
     pub fn temporary(
         local: SocketAddr,
         remote: SocketAddr,
-        cc: CongestionControlAlgorithm,
-        pacing: bool,
+        conn_params: &ConnectionParameters,
         qlog: NeqoQlog,
         now: Instant,
         stats: &mut Stats,
     ) -> Self {
-        let iface_mtu = match mtu::interface_and_mtu(remote.ip()) {
-            Ok((name, mtu)) => {
-                qdebug!(
-                    "Outbound interface {name} for destination {ip} has MTU {mtu}",
-                    ip = remote.ip()
-                );
-                stats.pmtud_iface_mtu = mtu;
-                Some(mtu)
+        let iface_mtu = if conn_params.pmtud_iface_mtu_enabled() {
+            match mtu::interface_and_mtu(remote.ip()) {
+                Ok((name, mtu)) => {
+                    qdebug!(
+                        "Outbound interface {name} for destination {ip} has MTU {mtu}",
+                        ip = remote.ip()
+                    );
+                    stats.pmtud_iface_mtu = mtu;
+                    Some(mtu)
+                }
+                Err(e) => {
+                    qwarn!(
+                        "Failed to determine outbound interface for destination {ip}: {e}",
+                        ip = remote.ip()
+                    );
+                    None
+                }
             }
-            Err(e) => {
-                qwarn!(
-                    "Failed to determine outbound interface for destination {ip}: {e}",
-                    ip = remote.ip()
-                );
-                None
-            }
+        } else {
+            None
         };
-        let mut sender = PacketSender::new(cc, pacing, Pmtud::new(remote.ip(), iface_mtu), now);
+        let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip(), iface_mtu), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
@@ -738,7 +742,7 @@ impl Path {
                 // The path validation failure may be due to ECN blackholing, try again without ECN.
                 qinfo!("[{self}] Possible ECN blackhole, disabling ECN and re-probing path");
                 self.ecn_info
-                    .disable_ecn(stats, crate::ecn::ValidationError::BlackHole);
+                    .disable_ecn(stats, ecn::ValidationError::BlackHole);
                 ProbeState::ProbeNeeded { probe_count: 0 }
             } else {
                 qinfo!("[{self}] Probing failed");
@@ -853,7 +857,11 @@ impl Path {
     /// This only considers retransmissions of probes, not cleanup of the path.
     /// If there is no other activity, then there is no real need to schedule a
     /// timer to cleanup old paths.
-    #[allow(clippy::missing_const_for_fn)] // TODO: False positive on nightly. Check periodically if this can be removed.
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     pub fn next_timeout(&self, pto: Duration) -> Option<Instant> {
         if let ProbeState::Probing { sent, .. } = &self.state {
             Some(*sent + pto)

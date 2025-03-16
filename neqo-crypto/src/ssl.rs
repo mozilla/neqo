@@ -4,8 +4,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(dead_code, non_upper_case_globals, non_snake_case)]
-#![allow(clippy::too_many_lines, clippy::cognitive_complexity)] // For included code
+#![allow(
+    clippy::allow_attributes,
+    dead_code,
+    non_upper_case_globals,
+    non_snake_case,
+    clippy::cognitive_complexity,
+    clippy::too_many_lines,
+    reason = "For included bindgen code."
+)]
 
 use std::os::raw::{c_uint, c_void};
 
@@ -15,16 +22,19 @@ use crate::{
 };
 
 include!(concat!(env!("OUT_DIR"), "/nss_ssl.rs"));
+#[expect(non_snake_case, reason = "OK here.")]
 mod SSLOption {
     include!(concat!(env!("OUT_DIR"), "/nss_sslopt.rs"));
 }
 
 // I clearly don't understand how bindgen operates.
-pub enum PLArenaPool {}
+// pub enum PLArenaPool {}
 pub enum PRFileDesc {}
 
 // Remap some constants.
+#[expect(non_upper_case_globals, reason = "OK here.")]
 pub const SECSuccess: SECStatus = _SECStatus_SECSuccess;
+#[expect(non_upper_case_globals, reason = "OK here.")]
 pub const SECFailure: SECStatus = _SECStatus_SECFailure;
 
 #[derive(Debug, Copy, Clone)]
@@ -65,11 +75,6 @@ impl Opt {
     }
 }
 
-experimental_api!(SSL_GetCurrentEpoch(
-    fd: *mut PRFileDesc,
-    read_epoch: *mut u16,
-    write_epoch: *mut u16,
-));
 experimental_api!(SSL_HelloRetryRequestCallback(
     fd: *mut PRFileDesc,
     cb: SSLHelloRetryRequestCallback,

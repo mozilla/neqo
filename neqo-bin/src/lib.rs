@@ -4,9 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::missing_errors_doc)]
-
 use std::{
     fmt::{self, Display},
     net::{SocketAddr, ToSocketAddrs as _},

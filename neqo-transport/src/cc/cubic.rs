@@ -62,7 +62,7 @@ const EXPONENTIAL_GROWTH_REDUCTION: f64 = 2.0;
 pub fn convert_to_f64(v: usize) -> f64 {
     let mut f_64 = f64::from(u32::try_from(v >> 21).unwrap_or(u32::MAX));
     f_64 *= 2_097_152.0; // f_64 <<= 21
-    #[allow(clippy::cast_possible_truncation)] // The mask makes this safe.
+    #[expect(clippy::cast_possible_truncation, reason = "The mask makes this safe.")]
     let v_trunc = (v & 0x1f_ffff) as u32;
     f_64 += f64::from(v_trunc);
     f_64
@@ -132,7 +132,7 @@ impl Display for Cubic {
     }
 }
 
-#[allow(clippy::doc_markdown)]
+#[expect(clippy::doc_markdown, reason = "Not doc items; names from RFC.")]
 impl Cubic {
     /// Original equations is:
     /// K = cubic_root(W_max*(1-beta_cubic)/C) (Eq. 2 RFC8312)
@@ -181,9 +181,11 @@ impl Cubic {
 }
 
 impl WindowAdjustment for Cubic {
-    // This is because of the cast in the last line from f64 to usize.
-    #[allow(clippy::cast_possible_truncation)]
-    #[allow(clippy::cast_sign_loss)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "Cast from f64 to usize."
+    )]
     fn bytes_for_cwnd_increase(
         &mut self,
         curr_cwnd: usize,

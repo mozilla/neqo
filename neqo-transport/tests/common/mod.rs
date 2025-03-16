@@ -4,17 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(unused)]
+#![allow(clippy::allow_attributes, dead_code, reason = "Exported.")]
 
-use std::{cell::RefCell, mem, ops::Range, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
-use neqo_common::{event::Provider as _, hex_with_len, qtrace, Datagram, Decoder, Role};
-use neqo_crypto::{
-    constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-    hkdf,
-    hp::HpKey,
-    Aead, AllowZeroRtt, AuthenticationStatus, ResumptionToken,
-};
+use neqo_common::event::Provider as _;
+use neqo_crypto::{AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
     Connection, ConnectionEvent, ConnectionParameters, State,
@@ -42,8 +37,10 @@ pub fn default_server() -> Server {
 
 // Check that there is at least one connection.  Returns a ref to the first confirmed connection.
 pub fn connected_server(server: &Server) -> ConnectionRef {
-    // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
-    #[allow(clippy::mutable_key_type)]
+    #[expect(
+        clippy::mutable_key_type,
+        reason = "ActiveConnectionRef::Hash doesn't access any of the interior mutable types."
+    )]
     let server_connections = server.active_connections();
     // Find confirmed connections.  There should only be one.
     let mut confirmed = server_connections
@@ -108,7 +105,7 @@ pub fn find_ticket(client: &mut Connection) -> ResumptionToken {
 /// Connect to the server and have it generate a ticket.
 pub fn generate_ticket(server: &mut Server) -> ResumptionToken {
     let mut client = default_client();
-    let mut server_conn = connect(&mut client, server);
+    let server_conn = connect(&mut client, server);
 
     server_conn.borrow_mut().send_ticket(now(), &[]).unwrap();
     let out = server.process_output(now());

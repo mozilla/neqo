@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::unwrap_used)] // OK in a bench.
+#![expect(clippy::unwrap_used, reason = "OK in a bench.")]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use neqo_common::Decoder;
