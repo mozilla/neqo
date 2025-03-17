@@ -1329,7 +1329,9 @@ fn client_initial_retransmits_identical() {
 #[test]
 fn server_initial_retransmits_identical() {
     let mut now = now();
-    let mut client = default_client();
+    // We need to calculate largest_acked below, which is difficult is packet number randomization
+    // in enabled.
+    let mut client = new_client(ConnectionParameters::default().randomize_ci_pn(false));
     let mut ci = client.process_output(now).dgram();
     let mut ci2 = client.process_output(now).dgram();
 
