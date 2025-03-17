@@ -9,7 +9,7 @@ mod common;
 use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
 
 use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
-use neqo_common::{qdebug, qtrace, Datagram, Decoder, Encoder, Role};
+use neqo_common::{qtrace, Datagram, Decoder, Encoder, Role};
 use neqo_crypto::{
     generate_ech_keys, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
 };
