@@ -141,6 +141,63 @@ fn migration_delay_to_ecn_blackhole() {
 }
 
 #[test]
+fn debug() {
+    let stats = crate::Stats::default();
+    assert_eq!(
+        format!("{stats:?}"),
+        "stats for\u{0020}
+  rx: 0 drop 0 dup 0 saved 0
+  tx: 0 lost 0 lateack 0 ptoack 0
+  pmtud: 0 sent 0 acked 0 lost 0 change 0 iface_mtu 0 pmtu
+  resumed: false
+  frames rx:
+    crypto 0 done 0 token 0 close 0
+    ack 0 (max 0) ping 0 padding 0
+    stream 0 reset 0 stop 0
+    max: stream 0 data 0 stream_data 0
+    blocked: stream 0 data 0 stream_data 0
+    datagram 0
+    ncid 0 rcid 0 pchallenge 0 presponse 0
+    ack_frequency 0
+  frames tx:
+    crypto 0 done 0 token 0 close 0
+    ack 0 (max 0) ping 0 padding 0
+    stream 0 reset 0 stop 0
+    max: stream 0 data 0 stream_data 0
+    blocked: stream 0 data 0 stream_data 0
+    datagram 0
+    ncid 0 rcid 0 pchallenge 0 presponse 0
+    ack_frequency 0
+  ecn:
+    tx:
+      VersionNegotiation: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      Initial: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      Handshake: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      ZeroRtt: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      Retry: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      Short: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      OtherVersion: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+    acked:
+      VersionNegotiation: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      Initial: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      Handshake: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      ZeroRtt: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      Retry: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      Short: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      OtherVersion: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+    rx:
+      VersionNegotiation: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      Initial: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      Handshake: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      ZeroRtt: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      Retry: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      Short: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+      OtherVersion: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
+    path validation outcomes: ValidationCount({Capable: 0, NotCapable(BlackHole): 0, NotCapable(Bleaching): 0, NotCapable(ReceivedUnsentECT1): 0})\n"
+    );
+}
+
+#[test]
 fn stats() {
     let now = now();
     let mut client = default_client();
