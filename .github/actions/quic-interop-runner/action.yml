@@ -134,7 +134,7 @@ runs:
 
     - id: result
       if: ${{ always() }}
-      run:
+      run: |
         if [ -z "$FAILED" ]; then
           echo "result=timeout" >> $GITHUB_OUTPUT
         elif [ "$FAILED" -eq 0 ]; then
