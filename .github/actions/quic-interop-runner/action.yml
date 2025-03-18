@@ -23,7 +23,6 @@ inputs:
 outputs:
   result:
     description: 'One of "success", "failure", or "timeout".'
-    required: true
     value: ${{ steps.result.outputs.result }}
 
 runs:
