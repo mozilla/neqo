@@ -313,7 +313,11 @@ impl Debug for Stats {
         self.ecn_tx_acked.fmt(f)?;
         writeln!(f, "    rx:")?;
         self.ecn_rx.fmt(f)?;
-        writeln!(f, "    path validation outcomes: {:?}", self.ecn_path_validation)
+        writeln!(
+            f,
+            "    path validation outcomes: {:?}",
+            self.ecn_path_validation
+        )
     }
 }
 
