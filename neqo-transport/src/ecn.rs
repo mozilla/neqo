@@ -12,6 +12,7 @@ use neqo_common::{qdebug, qinfo, qwarn, IpTosEcn};
 use crate::{
     packet::{PacketNumber, PacketType},
     recovery::SentPacket,
+    tracking::PacketNumberSpace,
     Stats,
 };
 
@@ -210,10 +211,11 @@ impl Info {
         acked_packets: &[SentPacket],
         ack_ecn: Option<Count>,
         stats: &mut Stats,
+        pn_space: PacketNumberSpace,
     ) -> bool {
         let prev_baseline = self.baseline;
 
-        self.validate_ack_ecn_and_update(acked_packets, ack_ecn, stats);
+        self.validate_ack_ecn_and_update(acked_packets, ack_ecn, stats, pn_space);
 
         matches!(self.state, ValidationState::Capable)
             && (self.baseline - prev_baseline)[IpTosEcn::Ce] > 0
@@ -246,17 +248,8 @@ impl Info {
         acked_packets: &[SentPacket],
         ack_ecn: Option<Count>,
         stats: &mut Stats,
+        pn_space: PacketNumberSpace,
     ) {
-        // RFC 9000, Appendix A.4:
-        //
-        // > From the "unknown" state, successful validation of the ECN counts in an ACK frame
-        // > (see Section 13.4.2.1) causes the ECN state for the path to become "capable", unless
-        // > no marked packet has been acknowledged.
-        match self.state {
-            ValidationState::Testing { .. } | ValidationState::Failed(_) => return,
-            ValidationState::Unknown | ValidationState::Capable => {}
-        }
-
         // RFC 9000, Section 13.4.2.1:
         //
         // > Validating ECN counts from reordered ACK frames can result in failure. An endpoint MUST
@@ -265,6 +258,25 @@ impl Info {
         let largest_acked = acked_packets.first().expect("must be there").pn();
         if largest_acked <= self.largest_acked {
             return;
+        }
+
+        if let Some(ack_ecn) = ack_ecn {
+            let packet_type = match pn_space {
+                PacketNumberSpace::Initial => PacketType::Initial,
+                PacketNumberSpace::Handshake => PacketType::Handshake,
+                PacketNumberSpace::ApplicationData => PacketType::Short,
+            };
+            stats.ecn_tx_acked[packet_type] = ack_ecn;
+        }
+
+        // RFC 9000, Appendix A.4:
+        //
+        // > From the "unknown" state, successful validation of the ECN counts in an ACK frame
+        // > (see Section 13.4.2.1) causes the ECN state for the path to become "capable", unless
+        // > no marked packet has been acknowledged.
+        match self.state {
+            ValidationState::Testing { .. } | ValidationState::Failed(_) => return,
+            ValidationState::Unknown | ValidationState::Capable => {}
         }
 
         // RFC 9000, Section 13.4.2.1:
@@ -313,7 +325,6 @@ impl Info {
             self.state.set(ValidationState::Capable, stats);
         }
         self.baseline = ack_ecn;
-        stats.ecn_tx = ack_ecn;
         self.largest_acked = largest_acked;
     }
 

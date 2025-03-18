@@ -7,6 +7,7 @@
 use std::time::Duration;
 
 use neqo_common::{Datagram, IpTos, IpTosEcn};
+use strum::IntoEnumIterator as _;
 use test_fixture::{
     assertions::{assert_v4_path, assert_v6_path},
     fixture_init, now, DEFAULT_ADDR_V4,
@@ -20,6 +21,7 @@ use crate::{
         send_with_modifier_and_receive, DEFAULT_RTT,
     },
     ecn,
+    packet::PacketType,
     path::MAX_PATH_PROBES,
     ConnectionId, ConnectionParameters, StreamType,
 };
@@ -163,14 +165,33 @@ fn stats() {
             }
         }
 
-        for codepoint in [IpTosEcn::Ect1, IpTosEcn::Ce] {
-            assert_eq!(stats.ecn_tx[codepoint], 0);
-            assert_eq!(stats.ecn_rx[codepoint], 0);
+        for packet_type in PacketType::iter() {
+            for codepoint in [IpTosEcn::Ect1, IpTosEcn::Ce] {
+                assert_eq!(stats.ecn_tx[packet_type][codepoint], 0);
+                assert_eq!(stats.ecn_tx_acked[packet_type][codepoint], 0);
+                assert_eq!(stats.ecn_rx[packet_type][codepoint], 0);
+            }
         }
     }
 
-    assert!(client.stats().ecn_tx[IpTosEcn::Ect0] <= server.stats().ecn_rx[IpTosEcn::Ect0]);
-    assert!(server.stats().ecn_tx[IpTosEcn::Ect0] <= client.stats().ecn_rx[IpTosEcn::Ect0]);
+    for packet_type in PacketType::iter() {
+        assert!(
+            client.stats().ecn_tx_acked[packet_type][IpTosEcn::Ect0]
+                <= server.stats().ecn_rx[packet_type][IpTosEcn::Ect0]
+        );
+        assert!(
+            server.stats().ecn_tx_acked[packet_type][IpTosEcn::Ect0]
+                <= client.stats().ecn_rx[packet_type][IpTosEcn::Ect0]
+        );
+        assert_eq!(
+            client.stats().ecn_tx[packet_type][IpTosEcn::Ect0],
+            server.stats().ecn_rx[packet_type][IpTosEcn::Ect0]
+        );
+        assert_eq!(
+            server.stats().ecn_tx[packet_type][IpTosEcn::Ect0],
+            client.stats().ecn_rx[packet_type][IpTosEcn::Ect0]
+        );
+    }
 }
 
 #[test]

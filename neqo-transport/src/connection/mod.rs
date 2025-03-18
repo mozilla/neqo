@@ -20,7 +20,7 @@ use std::{
 
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, Role,
+    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, IpTosEcn, Role,
 };
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
@@ -1524,11 +1524,12 @@ impl Connection {
         migrate: bool,
         now: Instant,
     ) {
+        let ecn_mark = IpTosEcn::from(tos);
+        self.stats.borrow_mut().ecn_rx[packet.packet_type()] += ecn_mark;
         let space = PacketNumberSpace::from(packet.packet_type());
         if let Some(space) = self.acks.get_mut(space) {
             let space_ecn_marks = space.ecn_marks();
-            *space_ecn_marks += tos.into();
-            self.stats.borrow_mut().ecn_rx = *space_ecn_marks;
+            *space_ecn_marks += ecn_mark;
         } else {
             qtrace!("Not tracking ECN for dropped packet number space");
         }
@@ -2483,10 +2484,11 @@ impl Connection {
             if ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
             }
+            let ecn_mark = IpTosEcn::from(path.borrow().tos());
             let sent = SentPacket::new(
                 pt,
                 pn,
-                path.borrow().tos().into(),
+                ecn_mark,
                 now,
                 ack_eliciting,
                 tokens,
@@ -2506,6 +2508,12 @@ impl Connection {
                 }
                 self.loss_recovery.on_packet_sent(path, sent, now);
             }
+
+            // Track which packet types are sent with which ECN codepoints. For
+            // coalesced packets, this increases the counts for each packet type
+            // contained in the coalesced packet. This is per Section 13.4.1 of
+            // RFC 9000.
+            self.stats.borrow_mut().ecn_tx[pt] += ecn_mark;
 
             if space == PacketNumberSpace::Handshake
                 && self.role == Role::Server

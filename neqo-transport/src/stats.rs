@@ -9,14 +9,18 @@
 use std::{
     cell::RefCell,
     fmt::{self, Debug},
-    ops::Deref,
+    ops::{Deref, DerefMut},
     rc::Rc,
     time::Duration,
 };
 
+use enum_map::EnumMap;
 use neqo_common::qwarn;
 
-use crate::{ecn, packet::PacketNumber};
+use crate::{
+    ecn,
+    packet::{PacketNumber, PacketType},
+};
 
 pub const MAX_PTO_COUNTS: usize = 16;
 
@@ -135,6 +139,32 @@ pub struct DatagramStats {
     pub dropped_queue_full: usize,
 }
 
+/// ECN counts by QUIC packet type.
+#[derive(Default, Clone)]
+pub struct EcnCount(EnumMap<PacketType, ecn::Count>);
+
+impl Debug for EcnCount {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (pt, count) in &self.0 {
+            writeln!(f, "      {pt:?}: {count:?}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Deref for EcnCount {
+    type Target = EnumMap<PacketType, ecn::Count>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for EcnCount {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 /// Connection statistics
 #[derive(Default, Clone)]
 pub struct Stats {
@@ -198,6 +228,8 @@ pub struct Stats {
 
     /// ECN path validation count, indexed by validation outcome.
     pub ecn_path_validation: ecn::ValidationCount,
+    /// ECN counts for outgoing UDP datagrams, recorded locally.
+    pub ecn_tx: EcnCount,
     /// ECN counts for outgoing UDP datagrams, returned by remote through QUIC ACKs.
     ///
     /// Note: Given that QUIC ACKs only carry [`Ect0`], [`Ect1`] and [`Ce`], but
@@ -209,9 +241,9 @@ pub struct Stats {
     /// [`Ect1`]: neqo_common::tos::IpTosEcn::Ect1
     /// [`Ce`]: neqo_common::tos::IpTosEcn::Ce
     /// [`NotEct`]: neqo_common::tos::IpTosEcn::NotEct
-    pub ecn_tx: ecn::Count,
+    pub ecn_tx_acked: EcnCount,
     /// ECN counts for incoming UDP datagrams, read from IP TOS header.
-    pub ecn_rx: ecn::Count,
+    pub ecn_rx: EcnCount,
 }
 
 impl Stats {
@@ -274,11 +306,14 @@ impl Debug for Stats {
         self.frame_rx.fmt(f)?;
         writeln!(f, "  frames tx:")?;
         self.frame_tx.fmt(f)?;
-        writeln!(
-            f,
-            "  ecn: {:?} for tx {:?} for rx {:?} path validation outcomes",
-            self.ecn_tx, self.ecn_rx, self.ecn_path_validation,
-        )
+        writeln!(f, "  ecn:")?;
+        writeln!(f, "    tx:")?;
+        self.ecn_tx.fmt(f)?;
+        writeln!(f, "    acked:")?;
+        self.ecn_tx_acked.fmt(f)?;
+        writeln!(f, "    rx:")?;
+        self.ecn_rx.fmt(f)?;
+        writeln!(f, "    path validation outcomes: {:?}", self.ecn_path_validation)
     }
 }
 

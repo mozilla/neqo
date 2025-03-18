@@ -12,8 +12,10 @@ use std::{
     time::Instant,
 };
 
+use enum_map::Enum;
 use neqo_common::{hex, hex_with_len, qtrace, qwarn, Decoder, Encoder};
 use neqo_crypto::random;
+use strum::EnumIter;
 
 use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
@@ -48,7 +50,7 @@ pub use metadata::MetaData;
 
 pub type PacketNumber = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, EnumIter)]
 pub enum PacketType {
     VersionNegotiation,
     Initial,
