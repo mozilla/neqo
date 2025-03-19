@@ -932,12 +932,12 @@ mod tests {
         LossRecovery, LossRecoverySpace, PacketNumberSpace, SendProfile, SentPacket, FAST_PTO_SCALE,
     };
     use crate::{
-        cc::CongestionControlAlgorithm,
         cid::{ConnectionId, ConnectionIdEntry},
         ecn,
         packet::{PacketNumber, PacketType},
         path::{Path, PathRef},
         stats::{Stats, StatsCell},
+        ConnectionParameters,
     };
 
     // Shorthand for a time in milliseconds.
@@ -997,13 +997,11 @@ mod tests {
 
     impl Default for Fixture {
         fn default() -> Self {
-            const CC: CongestionControlAlgorithm = CongestionControlAlgorithm::NewReno;
             let stats = StatsCell::default();
             let mut path = Path::temporary(
                 DEFAULT_ADDR,
                 DEFAULT_ADDR,
-                CC,
-                true,
+                &ConnectionParameters::default(),
                 NeqoQlog::default(),
                 now(),
                 &mut stats.borrow_mut(),

@@ -665,6 +665,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_pointer_width = "64")] // Test does not compile on 32-bit targets.
     #[should_panic(expected = "Varint value too large")]
     fn encoded_vvec_length_oob() {
         _ = Encoder::vvec_len(1 << 62);

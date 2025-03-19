@@ -373,13 +373,13 @@ impl Write for SharedVec {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         self.buf
             .lock()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
+            .map_err(|e| io::Error::other(e.to_string()))?
             .write(buf)
     }
     fn flush(&mut self) -> Result<()> {
         self.buf
             .lock()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
+            .map_err(|e| io::Error::other(e.to_string()))?
             .flush()
     }
 }
