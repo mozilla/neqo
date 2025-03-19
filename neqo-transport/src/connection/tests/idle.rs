@@ -750,6 +750,40 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
 }
 
 #[test]
+fn keep_alive_no_unnecessary_ping() {
+    const RTT: Duration = Duration::from_millis(500); // PTO will be ~1.1125s
+
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = connect_rtt_idle(&mut client, &mut server, RTT);
+
+    // Create a stream and send data on it that will be lost.
+    let stream = client.stream_create(StreamType::BiDi).unwrap();
+    client.stream_keep_alive(stream, true).unwrap();
+    _ = client.stream_send(stream, DEFAULT_STREAM_DATA).unwrap();
+    let _lost_packet = client.process_output(now).dgram();
+
+    // Client returns PTO timer.
+    assert!(matches!(client.process_output(now), Output::Callback(_)));
+
+    // Wait for idle timeout. This includes PTO. Thus both PTO and idle timeout
+    // are firing now.
+    now += default_timeout() / 2;
+    let retransmit = client.process_output(now).dgram();
+    assert!(retransmit.is_some());
+    let pings_before = client.stats().frame_tx.ping;
+    let pto_ping = client.process_output(now).dgram();
+    assert!(pto_ping.is_some());
+    assert_eq!(client.stats().frame_tx.ping, pings_before + 1);
+
+    // Expect no additional idle timeout ping, given that a PTO ping was just
+    // sent. I.e. expect idle timer to piggy back on PTO ping.
+    let pings_before = client.stats().frame_tx.ping;
+    assert!(client.process_output(now).dgram().is_none());
+    assert_eq!(client.stats().frame_tx.ping, pings_before);
+}
+
+#[test]
 fn keep_alive_with_unresponsive_server() {
     let mut client = default_client();
     let mut server = default_server();
