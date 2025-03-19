@@ -12,7 +12,7 @@ use neqo_common::qtrace;
 
 use crate::{
     connection::params::ACK_RATIO_SCALE, frame::FrameType, packet::PacketBuilder,
-    recovery::RecoveryToken, stats::FrameStats,
+    recovery::RecoveryToken, stats::FrameStats, tracking::DEFAULT_REMOTE_ACK_DELAY,
 };
 
 #[derive(Debug, Clone)]
@@ -202,6 +202,6 @@ impl PeerAckDelay {
 
 impl Default for PeerAckDelay {
     fn default() -> Self {
-        Self::fixed(Duration::from_millis(25))
+        Self::fixed(DEFAULT_REMOTE_ACK_DELAY)
     }
 }
