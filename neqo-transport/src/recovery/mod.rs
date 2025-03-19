@@ -41,7 +41,6 @@ pub const PACKET_THRESHOLD: u64 = 3;
 /// If the congestion window is this small, we will only send ACK frames.
 pub const ACK_ONLY_SIZE_LIMIT: usize = 256;
 /// The maximum number of packets we send on a PTO.
-/// And the maximum number to declare lost when the PTO timer is hit.
 pub const MAX_PTO_PACKET_COUNT: usize = 2;
 /// The preferred limit on the number of packets that are tracked.
 /// If we exceed this number, we start sending `PING` frames sooner to
@@ -426,7 +425,6 @@ struct PtoState {
 
 impl PtoState {
     /// The number of packets we send on a PTO.
-    /// And the number to declare lost when the PTO timer is hit.
     fn pto_packet_count(space: PacketNumberSpace) -> usize {
         if space == PacketNumberSpace::ApplicationData {
             MAX_PTO_PACKET_COUNT
