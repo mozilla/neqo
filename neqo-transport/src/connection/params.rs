@@ -92,6 +92,8 @@ pub struct ConnectionParameters {
     pacing: bool,
     /// Whether the connection performs PLPMTUD.
     pmtud: bool,
+    /// Whether PMTUD should take the local interface MTU into account.
+    pmtud_iface_mtu: bool,
     /// Whether the connection should use SNI slicing.
     sni_slicing: bool,
     /// Whether to enable mlkem768nistp256-sha256.
@@ -121,6 +123,7 @@ impl Default for ConnectionParameters {
             disable_migration: false,
             pacing: true,
             pmtud: false,
+            pmtud_iface_mtu: true,
             sni_slicing: true,
             mlkem: true,
         }
@@ -380,6 +383,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn pmtud(mut self, pmtud: bool) -> Self {
         self.pmtud = pmtud;
+        self
+    }
+
+    #[must_use]
+    pub const fn pmtud_iface_mtu_enabled(&self) -> bool {
+        self.pmtud_iface_mtu
+    }
+
+    #[must_use]
+    pub const fn pmtud_iface_mtu(mut self, pmtud_iface_mtu: bool) -> Self {
+        self.pmtud_iface_mtu = pmtud_iface_mtu;
         self
     }
 

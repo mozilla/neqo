@@ -686,8 +686,7 @@ fn assert_path_challenge_min_len(c: &Connection, d: &Datagram, now: Instant) {
     let path = c.paths.find_path(
         d.source(),
         d.destination(),
-        c.conn_params.get_cc_algorithm(),
-        c.conn_params.pacing_enabled(),
+        &c.conn_params,
         now,
         &mut c.stats.borrow_mut(),
     );
