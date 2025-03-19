@@ -15,7 +15,8 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::qwarn;
+use neqo_common::{qwarn, IpTosEcn};
+use strum::IntoEnumIterator as _;
 
 use crate::{
     ecn,
@@ -165,6 +166,43 @@ impl DerefMut for EcnCount {
     }
 }
 
+/// Packet types and numbers of the first ECN mark transition between to marks.
+#[derive(Default, Clone)]
+pub struct EcnTransitions(EnumMap<IpTosEcn, EnumMap<IpTosEcn, Option<(PacketType, PacketNumber)>>>);
+
+impl Deref for EcnTransitions {
+    type Target = EnumMap<IpTosEcn, EnumMap<IpTosEcn, Option<(PacketType, PacketNumber)>>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for EcnTransitions {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Debug for EcnTransitions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for from in IpTosEcn::iter() {
+            if self.0[from].iter().all(|(_, v)| v.is_none()) {
+                // Don't show all-None rows.
+                continue;
+            }
+            write!(f, "      From {from:?} to: ")?;
+            for to in IpTosEcn::iter() {
+                // Don't show transitions that were not recorded.
+                if let Some(pkt) = self.0[from][to] {
+                    write!(f, "{to:?}: {pkt:?} ")?;
+                }
+            }
+            writeln!(f)?;
+        }
+        Ok(())
+    }
+}
+
 /// Connection statistics
 #[derive(Default, Clone)]
 pub struct Stats {
@@ -244,6 +282,9 @@ pub struct Stats {
     pub ecn_tx_acked: EcnCount,
     /// ECN counts for incoming UDP datagrams, read from IP TOS header.
     pub ecn_rx: EcnCount,
+    /// Packet numbers of the first observed (received) ECN mark transition between two marks.
+    pub ecn_last_mark: Option<IpTosEcn>,
+    pub ecn_rx_transition: EcnTransitions,
 }
 
 impl Stats {
@@ -317,7 +358,9 @@ impl Debug for Stats {
             f,
             "    path validation outcomes: {:?}",
             self.ecn_path_validation
-        )
+        )?;
+        writeln!(f, "    mark transitions:")?;
+        self.ecn_rx_transition.fmt(f)
     }
 }
 

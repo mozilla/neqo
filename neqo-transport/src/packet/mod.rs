@@ -50,8 +50,9 @@ pub use metadata::MetaData;
 
 pub type PacketNumber = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, EnumIter, Default)]
 pub enum PacketType {
+    #[default]
     VersionNegotiation,
     Initial,
     Handshake,
