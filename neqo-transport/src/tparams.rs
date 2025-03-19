@@ -402,7 +402,7 @@ impl TransportParameters {
             MaxAckDelay => DEFAULT_REMOTE_ACK_DELAY
                 .as_millis()
                 .try_into()
-                .expect("delay fit u64"),
+                .expect("default remote ack delay in ms can't overflow u64"),
             ActiveConnectionIdLimit => 2,
             _ => panic!("Transport parameter not known or not an Integer"),
         };
