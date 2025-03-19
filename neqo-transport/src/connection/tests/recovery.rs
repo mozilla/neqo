@@ -389,6 +389,47 @@ fn pto_handshake_frames() {
     assert_eq!(server.stats().frame_rx.crypto, crypto_before + 1);
 }
 
+#[test]
+fn pto_retransmits_previous_frames_across_datagrams() {
+    const NUM_PACKETS_BEFORE_PTO: usize = 10;
+
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let mut now = now();
+
+    // Send multiple tiny stream frames, each in separate UDP datagrams.
+    let mut client_stream_frame_tx = client.stats().frame_tx.stream;
+    for _ in 0..NUM_PACKETS_BEFORE_PTO {
+        let stream = client.stream_create(StreamType::UniDi).unwrap();
+        assert_eq!(client.stream_send(stream, b"42").unwrap(), 2);
+
+        let lost = client.process_output(now);
+        assert!(lost.dgram().is_some());
+
+        assert_eq!(client.stats().frame_tx.stream, client_stream_frame_tx + 1);
+        client_stream_frame_tx = client.stats().frame_tx.stream;
+    }
+
+    // Nothing to do, should return callback.
+    let out = client.process_output(now);
+    assert!(matches!(out, Output::Callback(_)));
+
+    // One second later, it should want to send PTO packet.
+    now += AT_LEAST_PTO;
+    let client_pto = client.process_output(now);
+
+    // Expect single `client_pto` datagram to retransmit all stream frames
+    // previously sent in separate datagrams, as each is tiny.
+    let server_stream_frame_rx = server.stats().frame_rx.stream;
+    server.process_input(client_pto.dgram().unwrap(), now);
+    assert_eq!(
+        server.stats().frame_rx.stream,
+        server_stream_frame_rx + NUM_PACKETS_BEFORE_PTO
+    );
+}
+
 /// In the case that the Handshake takes too many packets, the server might
 /// be stalled on the anti-amplification limit.  If a Handshake ACK from the
 /// client is lost, the client has to keep the PTO timer armed or the server
