@@ -48,16 +48,9 @@ pub fn connection_tparams_set(qlog: &NeqoQlog, tph: &TransportParametersHandler,
             #[expect(clippy::cast_possible_truncation, reason = "These are OK.")]
             let ev_data =
                 EventData::TransportParametersSet(qlog::events::quic::TransportParametersSet {
-                    owner: None,
-                    resumption_allowed: None,
-                    early_data_enabled: None,
-                    tls_cipher: None,
-                    aead_tag_length: None,
                     original_destination_connection_id: remote
                         .get_bytes(OriginalDestinationConnectionId)
                         .map(hex),
-                    initial_source_connection_id: None,
-                    retry_source_connection_id: None,
                     stateless_reset_token: remote.get_bytes(StatelessResetToken).map(hex),
                     disable_active_migration: remote.get_empty(DisableMigration).then_some(true),
                     max_idle_timeout: Some(remote.get_integer(TransportParameterId::IdleTimeout)),
@@ -87,6 +80,7 @@ pub fn connection_tparams_set(qlog: &NeqoQlog, tph: &TransportParametersHandler,
                             stateless_reset_token: hex(cid.reset_token()),
                         })
                     }),
+                    ..Default::default()
                 });
 
             Some(ev_data)
@@ -166,8 +160,8 @@ pub fn client_version_information_initiated(
                         .map(|v| format!("{:02x}", v.wire_version()))
                         .collect(),
                 ),
-                server_versions: None,
                 chosen_version: Some(format!("{:02x}", version_config.initial().wire_version())),
+                ..Default::default()
             }))
         },
         now,
@@ -214,7 +208,7 @@ pub fn server_version_information_failed(
                         .map(|v| format!("{:02x}", v.wire_version()))
                         .collect(),
                 ),
-                chosen_version: None,
+                ..Default::default()
             }))
         },
         now,
@@ -241,30 +235,18 @@ pub fn packet_io(qlog: &NeqoQlog, meta: packet::MetaData, now: Instant) {
                 }
             }
 
-            // TODO: Use `default` for these initializations once https://github.com/cloudflare/quiche/pull/1931 has shipped.
             match meta.direction() {
                 Direction::Tx => Some(EventData::PacketSent(PacketSent {
                     header: meta.into(),
                     frames: Some(frames),
-                    is_coalesced: None,
-                    retry_token: None,
-                    stateless_reset_token: None,
-                    supported_versions: None,
                     raw: Some(raw),
-                    datagram_id: None,
-                    send_at_time: None,
-                    trigger: None,
+                    ..Default::default()
                 })),
                 Direction::Rx => Some(EventData::PacketReceived(PacketReceived {
                     header: meta.into(),
                     frames: Some(frames.to_vec()),
-                    is_coalesced: None,
-                    retry_token: None,
-                    stateless_reset_token: None,
-                    supported_versions: None,
                     raw: Some(raw),
-                    datagram_id: None,
-                    trigger: None,
+                    ..Default::default()
                 })),
             }
         },
@@ -281,14 +263,13 @@ pub fn packet_dropped(qlog: &NeqoQlog, public_packet: &PublicPacket, now: Instan
                 length: Some(public_packet.len() as u64),
                 payload_length: None,
                 data: None,
+                // TODO: ..Default::default() once qlog is past 0.15.1
             };
 
             let ev_data = EventData::PacketDropped(PacketDropped {
                 header: Some(header),
                 raw: Some(raw),
-                datagram_id: None,
-                details: None,
-                trigger: None,
+                ..Default::default()
             });
 
             Some(ev_data)
@@ -305,8 +286,7 @@ pub fn packets_lost(qlog: &NeqoQlog, pkts: &[SentPacket], now: Instant) {
 
             let ev_data = EventData::PacketLost(PacketLost {
                 header: Some(header),
-                trigger: None,
-                frames: None,
+                ..Default::default()
             });
 
             stream.add_event_data_with_instant(ev_data, now)?;
