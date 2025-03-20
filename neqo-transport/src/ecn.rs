@@ -107,7 +107,13 @@ impl Count {
     /// Whether any of the ECN counts are non-zero.
     #[must_use]
     pub fn is_some(&self) -> bool {
-        self[IpTosEcn::Ect0] > 0 || self[IpTosEcn::Ect1] > 0 || self[IpTosEcn::Ce] > 0
+        self.0.iter().any(|(_, &count)| count > 0)
+    }
+
+    /// Whether all of the ECN counts are zero.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        !self.is_some()
     }
 }
 

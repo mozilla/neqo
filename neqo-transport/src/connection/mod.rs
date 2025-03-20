@@ -1538,6 +1538,7 @@ impl Connection {
             }
         }
         stats.ecn_last_mark = Some(ecn_mark);
+        stats.dscp_rx[tos.into()] += 1;
         drop(stats);
         let space = PacketNumberSpace::from(packet.packet_type());
         if let Some(space) = self.acks.get_mut(space) {

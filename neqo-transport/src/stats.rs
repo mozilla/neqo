@@ -15,7 +15,7 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{qwarn, IpTosEcn};
+use neqo_common::{qwarn, IpTosDscp, IpTosEcn};
 use strum::IntoEnumIterator as _;
 
 use crate::{
@@ -146,9 +146,9 @@ pub struct EcnCount(EnumMap<PacketType, ecn::Count>);
 
 impl Debug for EcnCount {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for (pt, count) in &self.0 {
-            if count == &ecn::Count::default() {
-                // Don't show all-zero rows.
+        for (pt, count) in self.0 {
+            // Don't show all-zero rows.
+            if count.is_empty() {
                 continue;
             }
             writeln!(f, "      {pt:?} {count:?}")?;
@@ -190,8 +190,8 @@ impl DerefMut for EcnTransitions {
 impl Debug for EcnTransitions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for from in IpTosEcn::iter() {
+            // Don't show all-None rows.
             if self.0[from].iter().all(|(_, v)| v.is_none()) {
-                // Don't show all-None rows.
                 continue;
             }
             write!(f, "      First {from:?} ")?;
@@ -204,6 +204,36 @@ impl Debug for EcnTransitions {
             writeln!(f)?;
         }
         Ok(())
+    }
+}
+
+/// Received packet counts by DSCP value.
+#[derive(Default, Clone)]
+pub struct DscpCount(EnumMap<IpTosDscp, usize>);
+
+impl Debug for DscpCount {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (dscp, count) in self.0 {
+            // Don't show zero counts.
+            if count == 0 {
+                continue;
+            }
+            write!(f, "{dscp:?}: {count} ")?;
+        }
+        Ok(())
+    }
+}
+
+impl Deref for DscpCount {
+    type Target = EnumMap<IpTosDscp, usize>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for DscpCount {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -289,6 +319,10 @@ pub struct Stats {
     /// Packet numbers of the first observed (received) ECN mark transition between two marks.
     pub ecn_last_mark: Option<IpTosEcn>,
     pub ecn_rx_transition: EcnTransitions,
+
+    /// Counters for DSCP values received. This only tracks DSCP marks on incoming packets that
+    /// were processed by the connection, which is not all non-dropped received packets.
+    pub dscp_rx: DscpCount,
 }
 
 impl Stats {
@@ -351,8 +385,7 @@ impl Debug for Stats {
         self.frame_rx.fmt(f)?;
         writeln!(f, "  frames tx:")?;
         self.frame_tx.fmt(f)?;
-        writeln!(f, "  ecn:")?;
-        writeln!(f, "    tx:")?;
+        writeln!(f, "  ecn:\n    tx:")?;
         self.ecn_tx.fmt(f)?;
         writeln!(f, "    acked:")?;
         self.ecn_tx_acked.fmt(f)?;
@@ -364,7 +397,8 @@ impl Debug for Stats {
             self.ecn_path_validation
         )?;
         writeln!(f, "    mark transitions:")?;
-        self.ecn_rx_transition.fmt(f)
+        self.ecn_rx_transition.fmt(f)?;
+        writeln!(f, "  dscp: {:?}", self.dscp_rx)
     }
 }
 

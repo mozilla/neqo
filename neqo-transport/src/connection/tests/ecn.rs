@@ -173,7 +173,8 @@ fn debug() {
     acked:
     rx:
     path validation outcomes: ValidationCount({Capable: 0, NotCapable(BlackHole): 0, NotCapable(Bleaching): 0, NotCapable(ReceivedUnsentECT1): 0})
-    mark transitions:\n"
+    mark transitions:
+  dscp: \n"
     );
 }
 
