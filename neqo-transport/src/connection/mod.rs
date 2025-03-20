@@ -341,8 +341,7 @@ impl Connection {
         let path = Path::temporary(
             local_addr,
             remote_addr,
-            c.conn_params.get_cc_algorithm(),
-            c.conn_params.pacing_enabled(),
+            &c.conn_params,
             NeqoQlog::default(),
             now,
             &mut c.stats.borrow_mut(),
@@ -1583,8 +1582,7 @@ impl Connection {
         let path = self.paths.find_path(
             d.destination(),
             d.source(),
-            self.conn_params.get_cc_algorithm(),
-            self.conn_params.pacing_enabled(),
+            &self.conn_params,
             now,
             &mut self.stats.borrow_mut(),
         );
@@ -1934,8 +1932,7 @@ impl Connection {
         let path = self.paths.find_path(
             local,
             remote,
-            self.conn_params.get_cc_algorithm(),
-            self.conn_params.pacing_enabled(),
+            &self.conn_params,
             now,
             &mut self.stats.borrow_mut(),
         );

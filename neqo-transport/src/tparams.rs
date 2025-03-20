@@ -35,6 +35,7 @@ use TransportParameterId::{
 use crate::{
     cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
     packet::MIN_INITIAL_PACKET_SIZE,
+    tracking::DEFAULT_REMOTE_ACK_DELAY,
     version::{Version, VersionConfig, WireVersion},
     Error, Res,
 };
@@ -398,7 +399,10 @@ impl TransportParameters {
             | MaxDatagramFrameSize => 0,
             MaxUdpPayloadSize => 65527,
             AckDelayExponent => 3,
-            MaxAckDelay => 25,
+            MaxAckDelay => DEFAULT_REMOTE_ACK_DELAY
+                .as_millis()
+                .try_into()
+                .expect("default remote ack delay in ms can't overflow u64"),
             ActiveConnectionIdLimit => 2,
             _ => panic!("Transport parameter not known or not an Integer"),
         };
