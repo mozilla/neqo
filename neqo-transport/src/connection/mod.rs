@@ -2475,6 +2475,9 @@ impl Connection {
             );
 
             self.stats.borrow_mut().packets_tx += 1;
+            if pt == PacketType::Initial && self.stats.borrow().first_initial_pn.is_none() {
+                self.stats.borrow_mut().first_initial_pn = Some(pn);
+            }
             let tx = self
                 .crypto
                 .states
