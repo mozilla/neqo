@@ -2222,24 +2222,26 @@ impl Connection {
             return true;
         }
 
-        let probe = if untracked && builder.packet_empty() || force_probe {
+        let pto = path.borrow().rtt().pto(self.confirmed());
+        let mut probe = if untracked && builder.packet_empty() || force_probe {
             // If we received an untracked packet and we aren't probing already
             // or the PTO timer fired: probe.
             true
+        } else if !builder.packet_empty() {
+            // The packet only contains an ACK.  Check whether we want to
+            // force an ACK with a PING so we can stop tracking packets.
+            self.loss_recovery.should_probe(pto, now)
         } else {
-            let pto = path.borrow().rtt().pto(self.confirmed());
-            if !builder.packet_empty() {
-                // The packet only contains an ACK.  Check whether we want to
-                // force an ACK with a PING so we can stop tracking packets.
-                self.loss_recovery.should_probe(pto, now)
-            } else if self.streams.need_keep_alive() {
-                // We need to keep the connection alive, including sending
-                // a PING again.
-                self.idle_timeout.send_keep_alive(now, pto, tokens)
-            } else {
-                false
-            }
+            false
         };
+
+        if self.streams.need_keep_alive() {
+            // We need to keep the connection alive, including sending a PING
+            // again. If a PING is already scheduled (i.e. `probe` is `true`)
+            // piggy back on it. If not, schedule one.
+            probe |= self.idle_timeout.send_keep_alive(now, pto, tokens);
+        }
+
         if probe {
             // Nothing ack-eliciting and we need to probe; send PING.
             debug_assert_ne!(builder.remaining(), 0);
