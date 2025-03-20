@@ -151,7 +151,7 @@ impl Debug for EcnCount {
                 // Don't show all-zero rows.
                 continue;
             }
-            writeln!(f, "      {pt:?}: {count:?}")?;
+            writeln!(f, "      {pt:?} {count:?}")?;
         }
         Ok(())
     }
@@ -194,11 +194,11 @@ impl Debug for EcnTransitions {
                 // Don't show all-None rows.
                 continue;
             }
-            write!(f, "      From {from:?} to: ")?;
+            write!(f, "      First {from:?} ")?;
             for to in IpTosEcn::iter() {
                 // Don't show transitions that were not recorded.
                 if let Some(pkt) = self.0[from][to] {
-                    write!(f, "{to:?}: {pkt:?} ")?;
+                    write!(f, "to {to:?} {pkt:?} ")?;
                 }
             }
             writeln!(f)?;
