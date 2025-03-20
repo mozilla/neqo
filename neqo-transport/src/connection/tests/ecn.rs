@@ -170,30 +170,10 @@ fn debug() {
     ack_frequency 0
   ecn:
     tx:
-      VersionNegotiation: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      Initial: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      Handshake: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      ZeroRtt: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      Retry: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      Short: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      OtherVersion: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
     acked:
-      VersionNegotiation: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      Initial: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      Handshake: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      ZeroRtt: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      Retry: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      Short: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      OtherVersion: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
     rx:
-      VersionNegotiation: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      Initial: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      Handshake: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      ZeroRtt: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      Retry: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      Short: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-      OtherVersion: Count({NotEct: 0, Ect1: 0, Ect0: 0, Ce: 0})
-    path validation outcomes: ValidationCount({Capable: 0, NotCapable(BlackHole): 0, NotCapable(Bleaching): 0, NotCapable(ReceivedUnsentECT1): 0})\n"
+    path validation outcomes: ValidationCount({Capable: 0, NotCapable(BlackHole): 0, NotCapable(Bleaching): 0, NotCapable(ReceivedUnsentECT1): 0})
+    mark transitions:\n"
     );
 }
 

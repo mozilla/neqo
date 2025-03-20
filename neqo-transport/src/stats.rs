@@ -147,6 +147,10 @@ pub struct EcnCount(EnumMap<PacketType, ecn::Count>);
 impl Debug for EcnCount {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for (pt, count) in &self.0 {
+            if count == &ecn::Count::default() {
+                // Don't show all-zero rows.
+                continue;
+            }
             writeln!(f, "      {pt:?}: {count:?}")?;
         }
         Ok(())
