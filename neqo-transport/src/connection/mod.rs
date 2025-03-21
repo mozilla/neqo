@@ -1319,7 +1319,7 @@ impl Connection {
         );
         self.saved_datagrams.save(epoch, d, now);
         self.stats.borrow_mut().saved_datagrams += 1;
-        // We already counted the datagram as received in `[input_path]`. We
+        // We already counted the datagram as received in [`input_path`]. We
         // will do so again when we (re-)process it, so reduce the count now.
         self.stats.borrow_mut().packets_rx -= 1;
     }
