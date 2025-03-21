@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use core::panic;
 use std::{
     cell::RefCell,
     cmp::{max, min},
@@ -17,7 +18,7 @@ use enum_map::EnumMap;
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
 pub use neqo_crypto::Epoch;
 use neqo_crypto::{
-    hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState,
+    hkdf, hp::HpKey, random, Aead, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState,
     PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker,
     TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE,
     TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519,
@@ -243,6 +244,7 @@ impl Crypto {
 
     /// Lock in a compatible upgrade.
     pub fn confirm_version(&mut self, confirmed: Version) {
+        // FIXME: Should this error be suppressed here?
         _ = self.states.confirm_version(self.version, confirmed);
         self.version = confirmed;
     }
@@ -444,8 +446,14 @@ impl CryptoDxState {
         epoch: Epoch,
         secret: &SymKey,
         cipher: Cipher,
+        randomize_ci_pn: bool,
     ) -> Res<Self> {
-        qdebug!("Making {direction:?} {epoch:?} CryptoDxState, v={version:?} cipher={cipher}",);
+        let min_pn = if randomize_ci_pn {
+            PacketNumber::from((random::<1>()[0] >> 4) + 1)
+        } else {
+            0
+        };
+        qdebug!("Making {direction:?} {epoch:?} CryptoDxState, v={version:?} cipher={cipher} min_pn={min_pn}",);
         let hplabel = String::from(version.label_prefix()) + "hp";
         Ok(Self {
             version,
@@ -453,8 +461,8 @@ impl CryptoDxState {
             epoch: usize::from(epoch),
             aead: Aead::new(TLS_VERSION_1_3, cipher, secret, version.label_prefix())?,
             hpkey: HpKey::extract(TLS_VERSION_1_3, cipher, secret, &hplabel)?,
-            used_pn: 0..0,
-            min_pn: 0,
+            used_pn: 0..min_pn,
+            min_pn,
             invocations: Self::limit(direction, cipher),
             largest_packet_len: INITIAL_LARGEST_PACKET_LEN,
         })
@@ -465,6 +473,7 @@ impl CryptoDxState {
         direction: CryptoDxDirection,
         label: &str,
         dcid: &[u8],
+        randomize_ci_pn: bool,
     ) -> Res<Self> {
         qtrace!("new_initial {version:?} {}", ConnectionIdRef::from(dcid));
         let salt = version.initial_salt();
@@ -478,7 +487,14 @@ impl CryptoDxState {
 
         let secret = hkdf::expand_label(TLS_VERSION_1_3, cipher, &initial_secret, &[], label)?;
 
-        Self::new(version, direction, Epoch::Initial, &secret, cipher)
+        Self::new(
+            version,
+            direction,
+            Epoch::Initial,
+            &secret,
+            cipher,
+            randomize_ci_pn,
+        )
     }
 
     /// Determine the confidentiality and integrity limits for the cipher.
@@ -569,17 +585,17 @@ impl CryptoDxState {
         let next = prev.next_pn();
         self.min_pn = next;
         if self.used_pn.is_empty() {
-            self.used_pn = next..next;
+            self.used_pn = prev.used_pn.clone();
             Ok(())
-        } else if prev.used_pn.end > self.used_pn.start {
+        } else if prev.used_pn.end > self.min_pn {
             qdebug!(
                 "[{self}] Found packet with too new packet number {} > {}, compared to {prev}",
-                self.used_pn.start,
+                self.min_pn,
                 prev.used_pn.end,
             );
             Err(Error::PacketNumberOverlap)
         } else {
-            self.used_pn.start = next;
+            self.used_pn = next..max(next, self.used_pn.end);
             Ok(())
         }
     }
@@ -699,6 +715,7 @@ impl CryptoDxState {
             CryptoDxDirection::Write,
             "server in",
             CLIENT_CID,
+            false,
         )
         .unwrap()
     }
@@ -761,7 +778,7 @@ impl CryptoDxAppData {
         cipher: Cipher,
     ) -> Res<Self> {
         Ok(Self {
-            dx: CryptoDxState::new(version, dir, Epoch::ApplicationData, secret, cipher)?,
+            dx: CryptoDxState::new(version, dir, Epoch::ApplicationData, secret, cipher, false)?,
             cipher,
             next_secret: Self::update_secret(cipher, secret)?,
         })
@@ -940,7 +957,13 @@ impl CryptoStates {
 
     /// Create the initial crypto state.
     /// Note that the version here can change and that's OK.
-    pub fn init<'v, V>(&mut self, versions: V, role: Role, dcid: &[u8]) -> Res<()>
+    pub fn init<'v, V>(
+        &mut self,
+        versions: V,
+        role: Role,
+        dcid: &[u8],
+        randomize_ci_pn: bool,
+    ) -> Res<()>
     where
         V: IntoIterator<Item = &'v Version>,
     {
@@ -959,8 +982,14 @@ impl CryptoStates {
             );
 
             let mut initial = CryptoState {
-                tx: CryptoDxState::new_initial(*v, CryptoDxDirection::Write, write, dcid)?,
-                rx: CryptoDxState::new_initial(*v, CryptoDxDirection::Read, read, dcid)?,
+                tx: CryptoDxState::new_initial(
+                    *v,
+                    CryptoDxDirection::Write,
+                    write,
+                    dcid,
+                    randomize_ci_pn,
+                )?,
+                rx: CryptoDxState::new_initial(*v, CryptoDxDirection::Read, read, dcid, false)?,
             };
             if let Some(prev) = &self.initials[*v] {
                 qinfo!(
@@ -982,7 +1011,7 @@ impl CryptoStates {
     /// the overall effort is small enough to write off.
     pub fn init_server(&mut self, version: Version, dcid: &[u8]) -> Res<()> {
         if self.initials[version].is_none() {
-            self.init(&[version], Role::Server, dcid)?;
+            self.init(&[version], Role::Server, dcid, false)?;
         }
         Ok(())
     }
@@ -1018,6 +1047,7 @@ impl CryptoStates {
             Epoch::ZeroRtt,
             secret,
             cipher,
+            false,
         )?);
         Ok(())
     }
@@ -1059,6 +1089,7 @@ impl CryptoStates {
                 Epoch::Handshake,
                 write_secret,
                 cipher,
+                false,
             )?,
             rx: CryptoDxState::new(
                 version,
@@ -1066,6 +1097,7 @@ impl CryptoStates {
                 Epoch::Handshake,
                 read_secret,
                 cipher,
+                false,
             )?,
         });
         Ok(())
