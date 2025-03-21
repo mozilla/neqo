@@ -242,9 +242,10 @@ impl Crypto {
     }
 
     /// Lock in a compatible upgrade.
-    pub fn confirm_version(&mut self, confirmed: Version) {
-        _ = self.states.confirm_version(self.version, confirmed);
+    pub fn confirm_version(&mut self, confirmed: Version) -> Res<()> {
+        self.states.confirm_version(self.version, confirmed)?;
         self.version = confirmed;
+        Ok(())
     }
 
     /// Returns true if new handshake keys were installed.
