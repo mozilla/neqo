@@ -815,17 +815,36 @@ impl LossRecovery {
     /// When it has, mark packets as "lost" for the purposes of having frames
     /// regenerated in subsequent packets.  The packets aren't truly lost, so
     /// we have to clone the `SentPacket` instance.
-    fn maybe_fire_pto(&mut self, rtt: &RttEstimate, now: Instant, lost: &mut Vec<SentPacket>) {
+    fn maybe_fire_pto(&mut self, primary_path: &PathRef, now: Instant, lost: &mut Vec<SentPacket>) {
         let mut pto_space = None;
         // The spaces in which we will allow probing.
         let mut allow_probes = PacketNumberSpaceSet::default();
         for pn_space in PacketNumberSpace::iter() {
-            if let Some(t) = self.pto_time(rtt, pn_space) {
+            if let Some(t) = self.pto_time(primary_path.borrow().rtt(), pn_space) {
                 allow_probes.insert(pn_space);
                 if t <= now {
                     qdebug!("[{self}] PTO timer fired for {pn_space}");
                     if let Some(space) = self.spaces.get_mut(pn_space) {
-                        lost.extend(space.pto_packets().cloned());
+                        let mut size = 0;
+                        let mtu = primary_path.borrow().plpmtu();
+                        lost.extend(
+                            space
+                                .pto_packets()
+                                // Do not consider all packets for
+                                // retransmission on PTO. On a high bandwidth
+                                // delay connection, that would be a lot of
+                                // `SentPacket`s to clone.
+                                //
+                                // Given that we are sending at most
+                                // `MAX_PTO_PACKET_COUNT` packets on PTO,
+                                // consider as many packets for retransmission
+                                // as would fit into those PTO packets.
+                                .take_while(move |p| {
+                                    size += p.len();
+                                    size <= MAX_PTO_PACKET_COUNT * mtu
+                                })
+                                .cloned(),
+                        );
                         pto_space = pto_space.or(Some(pn_space));
                     }
                 }
@@ -867,7 +886,7 @@ impl LossRecovery {
         }
         self.stats.borrow_mut().lost += lost_packets.len();
 
-        self.maybe_fire_pto(primary_path.borrow().rtt(), now, &mut lost_packets);
+        self.maybe_fire_pto(primary_path, now, &mut lost_packets);
         lost_packets
     }
 
