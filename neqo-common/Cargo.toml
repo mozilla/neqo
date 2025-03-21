@@ -16,25 +16,33 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 enum-map = { workspace = true }
 env_logger = { version = "0.10", default-features = false }
-hex = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
+hex = { workspace = true, optional = true }
 log = { workspace = true }
 qlog = { workspace = true }
+strum = { workspace = true }
 
 [target."cfg(windows)".dependencies]
-# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 windows = { version = "0.58", default-features = false, features = ["Win32_Media"] }
 
 [dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+neqo-crypto = { path = "../neqo-crypto" }
 test-fixture = { path = "../test-fixture" }
 regex = { workspace = true }
 
 [features]
+bench = ["neqo-crypto/bench", "test-fixture/bench"]
+build-fuzzing-corpus = ["hex/alloc"]
 ci = []
-build-fuzzing-corpus = ["hex"]
+test-fixture = []
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
+
+[[bench]]
+name = "decoder"
+harness = false
+required-features = ["bench"]

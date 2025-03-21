@@ -4,6 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed."
+)]
+
 use std::{
     ops::Deref,
     os::raw::c_void,
@@ -139,7 +144,6 @@ impl TryInto<PRTime> for Time {
 }
 
 impl From<Time> for Instant {
-    #[must_use]
     fn from(t: Time) -> Self {
         t.t
     }
@@ -233,7 +237,7 @@ mod test {
         init();
         let base = get_base();
         let delta_micros = PRTime::try_from(DELTA.as_micros()).unwrap();
-        println!("{} - {}", base.prtime, delta_micros);
+        println!("{} - {delta_micros}", base.prtime);
         let t = Time::try_from(base.prtime - delta_micros).unwrap();
         assert_eq!(Instant::from(t) + DELTA, base.instant);
     }

@@ -19,8 +19,7 @@ use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
 use crate::{
-    frame::FRAME_TYPE_NEW_CONNECTION_ID, packet::PacketBuilder, recovery::RecoveryToken,
-    stats::FrameStats, Error, Res,
+    frame::FrameType, packet::PacketBuilder, recovery::RecoveryToken, stats::FrameStats, Error, Res,
 };
 
 pub const MAX_CONNECTION_ID_LEN: usize = 20;
@@ -93,7 +92,7 @@ impl<'a> From<ConnectionIdRef<'a>> for ConnectionId {
     }
 }
 
-impl std::ops::Deref for ConnectionId {
+impl Deref for ConnectionId {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -142,7 +141,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> From<&'a T> for ConnectionIdRef<'a> {
     }
 }
 
-impl std::ops::Deref for ConnectionIdRef<'_> {
+impl Deref for ConnectionIdRef<'_> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -306,7 +305,7 @@ impl ConnectionIdEntry<[u8; 16]> {
             return false;
         }
 
-        builder.encode_varint(FRAME_TYPE_NEW_CONNECTION_ID);
+        builder.encode_varint(FrameType::NewConnectionId);
         builder.encode_varint(self.seqno);
         builder.encode_varint(0u64);
         builder.encode_vec(1, &self.cid);
@@ -315,6 +314,11 @@ impl ConnectionIdEntry<[u8; 16]> {
         true
     }
 
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     pub fn is_empty(&self) -> bool {
         self.seqno == CONNECTION_ID_SEQNO_EMPTY || self.cid.is_empty()
     }
@@ -557,7 +561,14 @@ impl ConnectionIdManager {
         stats: &mut FrameStats,
     ) {
         if self.generator.deref().borrow().generates_empty_cids() {
-            debug_assert_eq!(self.generator.borrow_mut().generate_cid().unwrap().len(), 0);
+            debug_assert_eq!(
+                self.generator
+                    .borrow_mut()
+                    .generate_cid()
+                    .expect("OK in debug assert")
+                    .len(),
+                0
+            );
             return;
         }
 

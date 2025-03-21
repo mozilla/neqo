@@ -4,9 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg(test)]
+
 use std::sync::OnceLock;
 
-use neqo_common::event::Provider;
+use neqo_common::event::Provider as _;
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Error, Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Server,

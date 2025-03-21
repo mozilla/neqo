@@ -4,13 +4,19 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::future_not_send)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::future_not_send,
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    reason = "This is example code."
+)]
 
 use std::{
     cell::RefCell,
     fmt::{self, Display},
     fs, io,
-    net::{SocketAddr, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     pin::Pin,
     process::exit,
@@ -21,7 +27,7 @@ use std::{
 use clap::Parser;
 use futures::{
     future::{select, select_all, Either},
-    FutureExt,
+    FutureExt as _,
 };
 use neqo_common::{qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{
@@ -29,6 +35,7 @@ use neqo_crypto::{
     init_db, AntiReplay, Cipher,
 };
 use neqo_transport::{Output, RandomConnectionIdGenerator, Version};
+use neqo_udp::RecvBuf;
 use tokio::time::Sleep;
 
 use crate::SharedArgs;
@@ -121,9 +128,9 @@ pub struct Args {
 #[cfg(any(test, feature = "bench"))]
 impl Default for Args {
     fn default() -> Self {
-        use std::str::FromStr;
+        use std::str::FromStr as _;
         Self {
-            shared: crate::SharedArgs::default(),
+            shared: SharedArgs::default(),
             hosts: vec!["[::]:12345".to_string()],
             db: PathBuf::from_str("../test-fixture/db").unwrap(),
             key: "key".to_string(),
@@ -189,20 +196,18 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
     fs::read(path)
 }
 
-#[allow(clippy::module_name_repetitions)]
 pub trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<Datagram<&[u8]>>, now: Instant) -> Output;
+    fn process(&mut self, dgram: Option<Datagram<&mut [u8]>>, now: Instant) -> Output;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }
 
-#[allow(clippy::module_name_repetitions)]
 pub struct ServerRunner {
     now: Box<dyn Fn() -> Instant>,
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<(SocketAddr, crate::udp::Socket)>,
-    recv_buf: Vec<u8>,
+    recv_buf: RecvBuf,
 }
 
 impl ServerRunner {
@@ -217,7 +222,7 @@ impl ServerRunner {
             server,
             timeout: None,
             sockets,
-            recv_buf: vec![0; neqo_udp::RECV_BUF_SIZE],
+            recv_buf: RecvBuf::new(),
         }
     }
 
@@ -241,17 +246,28 @@ impl ServerRunner {
         timeout: &mut Option<Pin<Box<Sleep>>>,
         sockets: &mut [(SocketAddr, crate::udp::Socket)],
         now: &dyn Fn() -> Instant,
-        mut input_dgram: Option<Datagram<&[u8]>>,
+        mut input_dgram: Option<Datagram<&mut [u8]>>,
     ) -> Result<(), io::Error> {
         loop {
             match server.process(input_dgram.take(), now()) {
                 Output::Datagram(dgram) => {
                     let socket = Self::find_socket(sockets, dgram.source());
-                    socket.writable().await?;
-                    socket.send(&dgram)?;
+                    loop {
+                        // Optimistically attempt sending datagram. In case the
+                        // OS buffer is full, wait till socket is writable then
+                        // try again.
+                        match socket.send(&dgram) {
+                            Ok(()) => break,
+                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                socket.writable().await?;
+                                // Now try again.
+                            }
+                            e @ Err(_) => return e,
+                        }
+                    }
                 }
                 Output::Callback(new_timeout) => {
-                    qdebug!("Setting timeout of {:?}", new_timeout);
+                    qdebug!("Setting timeout of {new_timeout:?}");
                     *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
@@ -263,7 +279,7 @@ impl ServerRunner {
 
     async fn read_and_process(&mut self, sockets_index: usize) -> Result<(), io::Error> {
         loop {
-            let (host, socket) = self.sockets.get_mut(sockets_index).unwrap();
+            let (host, socket) = &mut self.sockets[sockets_index];
             let Some(input_dgrams) = socket.recv(*host, &mut self.recv_buf)? else {
                 break;
             };
@@ -341,8 +357,6 @@ enum Ready {
 }
 
 pub async fn server(mut args: Args) -> Res<()> {
-    const HQ_INTEROP: &str = "hq-interop";
-
     neqo_common::log::init(
         args.shared
             .verbose
@@ -362,17 +376,15 @@ pub async fn server(mut args: Args) -> Res<()> {
                 args.shared.quic_parameters.quic_version = vec![Version::Version1];
             }
         } else {
-            qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions.");
+            qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions");
         }
 
         // These are the default for all tests except http3.
-        args.shared.use_old_http = true;
-        args.shared.alpn = String::from(HQ_INTEROP);
+        args.shared.alpn = String::from("hq-interop");
         // TODO: More options to deduplicate with client?
         match testcase.as_str() {
             "http3" => {
-                args.shared.use_old_http = false;
-                args.shared.alpn = "h3".into();
+                args.shared.alpn = String::from("h3");
             }
             "zerortt" => args.shared.quic_parameters.max_streams_bidi = 100,
             "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" | "ecn" => {}
@@ -396,7 +408,7 @@ pub async fn server(mut args: Args) -> Res<()> {
     let hosts = args.listen_addresses();
     if hosts.is_empty() {
         qerror!("No valid hosts defined");
-        Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"))?;
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts").into());
     }
     let sockets = hosts
         .into_iter()
@@ -414,12 +426,12 @@ pub async fn server(mut args: Args) -> Res<()> {
         .expect("unable to setup anti-replay");
     let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
 
-    let server: Box<dyn HttpServer> = if args.shared.use_old_http {
+    let server: Box<dyn HttpServer> = if args.shared.alpn == "h3" {
+        Box::new(http3::HttpServer::new(&args, anti_replay, cid_mgr))
+    } else {
         Box::new(
             http09::HttpServer::new(&args, anti_replay, cid_mgr).expect("We cannot make a server!"),
         )
-    } else {
-        Box::new(http3::HttpServer::new(&args, anti_replay, cid_mgr))
     };
 
     ServerRunner::new(Box::new(move || args.now()), server, sockets)

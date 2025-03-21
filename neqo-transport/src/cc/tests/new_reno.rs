@@ -6,26 +6,21 @@
 
 // Congestion control
 
-use std::{
-    net::{IpAddr, Ipv4Addr},
-    time::Duration,
-};
+use std::time::Duration;
 
 use neqo_common::IpTosEcn;
 use test_fixture::now;
 
+use super::{IP_ADDR, MTU, RTT};
 use crate::{
-    cc::{new_reno::NewReno, ClassicCongestionControl, CongestionControl},
+    cc::{new_reno::NewReno, ClassicCongestionControl, CongestionControl as _},
     packet::PacketType,
     pmtud::Pmtud,
     recovery::SentPacket,
     rtt::RttEstimate,
 };
 
-const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
-const PTO: Duration = Duration::from_millis(100);
-const RTT: Duration = Duration::from_millis(98);
-const RTT_ESTIMATE: RttEstimate = RttEstimate::from_duration(RTT);
+const PTO: Duration = RTT;
 
 fn cwnd_is_default(cc: &ClassicCongestionControl<NewReno>) {
     assert_eq!(cc.cwnd(), cc.cwnd_initial());
@@ -38,9 +33,8 @@ fn cwnd_is_halved(cc: &ClassicCongestionControl<NewReno>) {
 }
 
 #[test]
-#[allow(clippy::too_many_lines)]
 fn issue_876() {
-    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR));
+    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
     let now = now();
     let before = now.checked_sub(Duration::from_millis(100)).unwrap();
     let after = now + Duration::from_millis(150);
@@ -135,7 +129,7 @@ fn issue_876() {
     assert_eq!(cc.bytes_in_flight(), 6 * cc.max_datagram_size() - 5);
 
     // and ack it. cwnd increases slightly
-    cc.on_packets_acked(&sent_packets[6..], &RTT_ESTIMATE, now);
+    cc.on_packets_acked(&sent_packets[6..], &RttEstimate::default(), now);
     assert_eq!(cc.acked_bytes(), sent_packets[6].len());
     cwnd_is_halved(&cc);
     assert_eq!(cc.bytes_in_flight(), 5 * cc.max_datagram_size() - 2);
@@ -151,7 +145,7 @@ fn issue_876() {
 #[test]
 // https://github.com/mozilla/neqo/pull/1465
 fn issue_1465() {
-    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR));
+    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
     let mut pn = 0;
     let mut now = now();
     let max_datagram_size = cc.max_datagram_size();
@@ -201,7 +195,7 @@ fn issue_1465() {
 
     // the acked packets before on_packet_sent were the cause of
     // https://github.com/mozilla/neqo/pull/1465
-    cc.on_packets_acked(&[p2], &RTT_ESTIMATE, now);
+    cc.on_packets_acked(&[p2], &RttEstimate::default(), now);
 
     assert_eq!(cc.bytes_in_flight(), 0);
 
@@ -209,7 +203,7 @@ fn issue_1465() {
     let p4 = send_next(&mut cc, now);
     cc.on_packet_sent(&p4, now);
     now += RTT;
-    cc.on_packets_acked(&[p4], &RTT_ESTIMATE, now);
+    cc.on_packets_acked(&[p4], &RttEstimate::default(), now);
 
     // do the same as in the first rtt but now the bug appears
     let p5 = send_next(&mut cc, now);

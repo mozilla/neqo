@@ -13,8 +13,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use enum_map::enum_map;
-use neqo_common::{event::Provider, qdebug, qtrace, Datagram, Decoder, Role};
+use enum_map::EnumMap;
+use neqo_common::{event::Provider as _, qdebug, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use test_fixture::{fixture_init, new_neqo_qlog, now, DEFAULT_ADDR};
 
@@ -24,12 +24,12 @@ use crate::{
     cc::CWND_INITIAL_PKTS,
     cid::ConnectionIdRef,
     events::ConnectionEvent,
-    frame::FRAME_TYPE_PING,
+    frame::FrameType,
     packet::PacketBuilder,
     pmtud::Pmtud,
     recovery::ACK_ONLY_SIZE_LIMIT,
     stats::{FrameStats, Stats, MAX_PTO_COUNTS},
-    tparams::{DISABLE_MIGRATION, GREASE_QUIC_BIT},
+    tparams::TransportParameterId::*,
     ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, EmptyConnectionIdGenerator,
     Error, StreamId, StreamType, Version, MIN_INITIAL_PACKET_SIZE,
 };
@@ -72,7 +72,7 @@ pub struct CountingConnectionIdGenerator {
 
 impl ConnectionIdDecoder for CountingConnectionIdGenerator {
     fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
-        let len = usize::from(dec.peek_byte().unwrap());
+        let len = usize::from(dec.peek_byte()?);
         dec.decode(len).map(ConnectionIdRef::from)
     }
 }
@@ -81,10 +81,10 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     fn generate_cid(&mut self) -> Option<ConnectionId> {
         let mut r = random::<20>();
         r[0] = 8;
-        r[1] = u8::try_from(self.counter >> 24).unwrap();
-        r[2] = u8::try_from((self.counter >> 16) & 0xff).unwrap();
-        r[3] = u8::try_from((self.counter >> 8) & 0xff).unwrap();
-        r[4] = u8::try_from(self.counter & 0xff).unwrap();
+        r[1] = u8::try_from(self.counter >> 24).ok()?;
+        r[2] = u8::try_from((self.counter >> 16) & 0xff).ok()?;
+        r[3] = u8::try_from((self.counter >> 8) & 0xff).ok()?;
+        r[4] = u8::try_from(self.counter & 0xff).ok()?;
         self.counter += 1;
         Some(ConnectionId::from(&r[..8]))
     }
@@ -180,9 +180,9 @@ pub fn rttvar_after_n_updates(n: usize, rtt: Duration) -> Duration {
 /// This inserts a PING frame into packets.
 struct PingWriter {}
 
-impl crate::connection::test_internal::FrameWriter for PingWriter {
+impl test_internal::FrameWriter for PingWriter {
     fn write_frames(&mut self, builder: &mut PacketBuilder) {
-        builder.encode_varint(FRAME_TYPE_PING);
+        builder.encode_varint(FrameType::Ping);
     }
 }
 
@@ -206,7 +206,7 @@ fn handshake_with_modifier(
         )
     };
 
-    let mut did_ping = enum_map! {_ => false};
+    let mut did_ping = EnumMap::from_array([false, false]);
     while !is_done(a) {
         _ = maybe_authenticate(a);
         // Insert a PING frame into the first application data packet an endpoint sends,
@@ -346,7 +346,7 @@ fn connect_rtt_idle_with_modifier(
     // Drain events from both as well.
     _ = client.events().count();
     _ = server.events().count();
-    qtrace!("----- connected and idle with RTT {:?}", rtt);
+    qtrace!("----- connected and idle with RTT {rtt:?}");
     now
 }
 
@@ -370,7 +370,7 @@ fn fill_stream(c: &mut Connection, stream: StreamId) {
     const BLOCK_SIZE: usize = 4_096;
     loop {
         let bytes_sent = c.stream_send(stream, &[0x42; BLOCK_SIZE]).unwrap();
-        qtrace!("fill_cwnd wrote {} bytes", bytes_sent);
+        qtrace!("fill_cwnd wrote {bytes_sent} bytes");
         if bytes_sent < BLOCK_SIZE {
             break;
         }
@@ -391,9 +391,8 @@ fn fill_cwnd(c: &mut Connection, stream: StreamId, mut now: Instant) -> (Vec<Dat
     loop {
         let pkt = c.process_output(now);
         qtrace!(
-            "fill_cwnd cwnd remaining={}, output: {:?}",
-            cwnd_avail(c),
-            pkt
+            "fill_cwnd cwnd remaining={}, output: {pkt:?}",
+            cwnd_avail(c)
         );
         match pkt {
             Output::Datagram(dgram) => {
@@ -465,14 +464,14 @@ where
     let mut srv_buf = [0; 4_096];
 
     let in_dgrams = in_dgrams.into_iter();
-    qdebug!([dest], "ack_bytes {} datagrams", in_dgrams.len());
+    qdebug!("[{dest}] ack_bytes {} datagrams", in_dgrams.len());
     for dgram in in_dgrams {
         dest.process_input(dgram, now);
     }
 
     loop {
         let (bytes_read, _fin) = dest.stream_recv(stream, &mut srv_buf).unwrap();
-        qtrace!([dest], "ack_bytes read {} bytes", bytes_read);
+        qtrace!("[{dest}] ack_bytes read {bytes_read} bytes");
         if bytes_read == 0 {
             break;
         }
@@ -502,13 +501,13 @@ fn induce_persistent_congestion(
 ) -> Instant {
     // Note: wait some arbitrary time that should be longer than pto
     // timer. This is rather brittle.
-    qtrace!([client], "induce_persistent_congestion");
+    qtrace!("[{client}] induce_persistent_congestion");
     now += AT_LEAST_PTO;
 
     let mut pto_counts = [0; MAX_PTO_COUNTS];
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
-    qtrace!([client], "first PTO");
+    qtrace!("[{client}] first PTO");
     let (c_tx_dgrams, next_now) = fill_cwnd(client, stream, now);
     now = next_now;
     assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
@@ -516,7 +515,7 @@ fn induce_persistent_congestion(
     pto_counts[0] = 1;
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
-    qtrace!([client], "second PTO");
+    qtrace!("[{client}] second PTO");
     now += AT_LEAST_PTO * 2;
     let (c_tx_dgrams, next_now) = fill_cwnd(client, stream, now);
     now = next_now;
@@ -526,7 +525,7 @@ fn induce_persistent_congestion(
     pto_counts[1] = 1;
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
-    qtrace!([client], "third PTO");
+    qtrace!("[{client}] third PTO");
     now += AT_LEAST_PTO * 4;
     let (c_tx_dgrams, next_now) = fill_cwnd(client, stream, now);
     now = next_now;
@@ -591,7 +590,7 @@ fn send_something_paced_with_modifier(
     let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
     assert!(sender.stream_send(stream_id, DEFAULT_STREAM_DATA).is_ok());
     assert!(sender.stream_close_send(stream_id).is_ok());
-    qdebug!([sender], "send_something on {}", stream_id);
+    qdebug!("[{sender}] send_something on {stream_id}");
     let dgram = match sender.process_output(now) {
         Output::Callback(t) => {
             assert!(allow_pacing, "send_something: unexpected delay");
@@ -687,9 +686,9 @@ fn assert_path_challenge_min_len(c: &Connection, d: &Datagram, now: Instant) {
     let path = c.paths.find_path(
         d.source(),
         d.destination(),
-        c.conn_params.get_cc_algorithm(),
-        c.conn_params.pacing_enabled(),
+        &c.conn_params,
         now,
+        &mut c.stats.borrow_mut(),
     );
     if path.borrow().amplification_limit() < path.borrow().plpmtu() {
         // If the amplification limit is less than the PLPMTU, then the path
@@ -698,9 +697,8 @@ fn assert_path_challenge_min_len(c: &Connection, d: &Datagram, now: Instant) {
     }
     assert!(
         d.len() >= MIN_INITIAL_PACKET_SIZE,
-        "{} < {}",
-        d.len(),
-        MIN_INITIAL_PACKET_SIZE
+        "{} < {MIN_INITIAL_PACKET_SIZE}",
+        d.len()
     );
 }
 
@@ -730,7 +728,7 @@ fn create_server() {
 fn tp_grease() {
     for enable in [true, false] {
         let client = new_client(ConnectionParameters::default().grease(enable));
-        let grease = client.tps.borrow_mut().local.get_empty(GREASE_QUIC_BIT);
+        let grease = client.tps.borrow_mut().local.get_empty(GreaseQuicBit);
         assert_eq!(enable, grease);
     }
 }
@@ -739,7 +737,7 @@ fn tp_grease() {
 fn tp_disable_migration() {
     for disable in [true, false] {
         let client = new_client(ConnectionParameters::default().disable_migration(disable));
-        let disable_migration = client.tps.borrow_mut().local.get_empty(DISABLE_MIGRATION);
+        let disable_migration = client.tps.borrow_mut().local.get_empty(DisableMigration);
         assert_eq!(disable, disable_migration);
     }
 }

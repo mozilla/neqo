@@ -4,13 +4,36 @@ ignore:
   - "neqo-bin"
   - "test-fixture"
 
+# Add any new components to the list below.
+component_management:
+  individual_components:
+    - component_id: "neqo-common"
+      paths:
+        - "neqo-common/"
+    - component_id: "neqo-crypto"
+      paths:
+        - "neqo-crypto/"
+    - component_id: "neqo-http3"
+      paths:
+        - "neqo-http3/"
+    - component_id: "neqo-qpack"
+      paths:
+        - "neqo-qpack/"
+    - component_id: "neqo-transport"
+      paths:
+        - "neqo-transport/"
+    - component_id: "neqo-udp"
+      paths:
+        - "neqo-udp/"
+
 # Do not notify until at least three results have been uploaded from the CI pipeline.
 # (This corresponds to the three main platforms we support: Linux, macOS, and Windows.)
 codecov:
-    notify:
-        after_n_builds: 3
-comment:
+  notify:
     after_n_builds: 3
+comment:
+  layout: "header, diff, flags, components"  # Show component info in the PR comment.
+  after_n_builds: 3
 
 coverage:
   status:

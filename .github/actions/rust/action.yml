@@ -24,7 +24,7 @@ runs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
       with:
-        toolchain: ${{ inputs.version }}
+        toolchain: ${{ inputs.version  }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
 
@@ -35,42 +35,79 @@ runs:
       #
       # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
       # is too small for this to be effective there.
-      if: env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted'
+      if: ${{ env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted' }}
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
+    - name: Install mold (Linux)
+      shell: bash
+      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && !contains(inputs.targets, '-android')}}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        if [ "$(apt-cache search --names-only '^mold$' | wc -l)" -ge 1 ]; then
+          [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+          sudo apt-get install -y --no-install-recommends mold
+        fi
+
+    # See https://corrode.dev/blog/tips-for-faster-ci-builds/
+    - name: Set up build environment
+      shell: bash
+      env:
+        TARGETS: ${{ inputs.targets }}
+      run: |
+        {
+          echo "CARGO_PROFILE_RELEASE_LTO=true"
+          echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
+          if [[ "${{ runner.os }}" == "Linux" && "$TARGETS" == "" && "$(command -v mold)" ]]; then
+            echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold $RUSTFLAGS"
+          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld $RUSTFLAGS"
+          fi
+        } >> "$GITHUB_ENV"
+
     - name: Enable sscache
-      if: runner.environment != 'github-hosted'
+      if: ${{ runner.environment != 'github-hosted' }}
+      env:
+        RUNNER_ENVIRONMENT: ${{ runner.environment }}
       shell: bash
       run: |
         echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
         echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
-        if [ "${{ runner.environment }}" == "github-hosted" ]; then
+        if [ "$RUNNER_ENVIRONMENT" == "github-hosted" ]; then
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
 
+    - name: Enable Rust cache
+      uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+      with:
+        cache-bin: ${{ runner.environment == 'github-hosted' }}
+        key: ${{ inputs.targets }}
+        save-if: ${{ github.ref == 'refs/heads/main' }} # Only cache runs from `main`
+
     - name: Set up MSVC (Windows)
-      if: runner.os == 'Windows'
-      uses: ilammy/msvc-dev-cmd@v1
+      if: ${{ runner.os == 'Windows' }}
+      uses: ilammy/msvc-dev-cmd@v1 # zizmor: ignore[unpinned-uses]
       # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
       # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
     # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
     - name: Set up build environment (Windows)
       shell: bash
-      if: runner.os == 'Windows'
+      if: ${{ runner.os == 'Windows' }}
       run: rm /usr/bin/link.exe || true
 
     - name: Install cargo-quickinstall
       shell: bash
-      if: inputs.tools != ''
+      if: ${{ inputs.tools != '' }}
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
-      run: cargo +${{ inputs.version }} install cargo-quickinstall
+      run: cargo install --locked cargo-quickinstall
 
     - name: Install Rust tools
       shell: bash
-      if: inputs.tools != ''
+      if: ${{ inputs.tools != '' }}
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
-      run: cargo +${{ inputs.version }} quickinstall $(echo ${{ inputs.tools }} | tr -d ",")
+        TOOLS: ${{ inputs.tools }}
+      # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
+      run: cargo quickinstall --force $(echo $TOOLS | tr -d ",")

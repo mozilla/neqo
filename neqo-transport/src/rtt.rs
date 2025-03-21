@@ -39,7 +39,6 @@ pub enum RttSource {
 }
 
 #[derive(Debug)]
-#[allow(clippy::module_name_repetitions)]
 pub struct RttEstimate {
     first_sample_time: Option<Instant>,
     latest_rtt: Duration,
@@ -61,20 +60,20 @@ impl RttEstimate {
     }
 
     #[cfg(test)]
-    pub const fn from_duration(rtt: Duration) -> Self {
+    pub fn from_duration(rtt: Duration) -> Self {
         Self {
             first_sample_time: None,
             latest_rtt: rtt,
             smoothed_rtt: rtt,
             rttvar: Duration::from_millis(0),
             min_rtt: rtt,
-            ack_delay: PeerAckDelay::Fixed(Duration::from_millis(25)),
+            ack_delay: PeerAckDelay::default(),
             best_source: RttSource::Ack,
         }
     }
 
     pub fn set_initial(&mut self, rtt: Duration) {
-        qtrace!("initial RTT={:?}", rtt);
+        qtrace!("initial RTT={rtt:?}");
         if rtt >= GRANULARITY {
             // Ignore if the value is too small.
             self.init(rtt);

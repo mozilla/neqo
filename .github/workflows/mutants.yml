@@ -2,10 +2,8 @@ name: Find mutants
 on:
   push:
     branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   pull_request:
     branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   workflow_dispatch:
 
 concurrency:
@@ -17,12 +15,13 @@ permissions:
 
 jobs:
   mutants:
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - id: nss-version
         run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
@@ -37,21 +36,26 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Find incremental mutants
-        if: github.event_name == 'pull_request'
+        id: mutants
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        if: ${{ github.event_name == 'pull_request' }}
         run: |
-          git diff origin/${{ github.base_ref }}.. > pr.diff
+          git diff "origin/$BASE_REF".. > pr.diff
           set -o pipefail
           cargo mutants --test-tool=nextest --no-shuffle -j 2 -vV --in-diff pr.diff | tee results.txt || true
-          echo 'TITLE=Incremental Mutants' >> "$GITHUB_ENV"
+          echo 'title=Incremental Mutants' >> "$GITHUB_OUTPUT"
 
       - name: Find mutants
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
           set -o pipefail
           cargo mutants --test-tool=nextest -vV --in-place | tee results.txt || true
-          echo 'TITLE=All Mutants' >> "$GITHUB_ENV"
+          echo 'title=All Mutants' >> "$GITHUB_OUTPUT"
 
       - name: Post step summary
+        env:
+          TITLE: ${{ steps.mutants.outputs.title }}
         run: |
           {
             echo "### $TITLE"
@@ -61,7 +65,7 @@ jobs:
             echo '```'
           } > "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: mutants.out
           path: mutants.out

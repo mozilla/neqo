@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::mem;
-
 use neqo_crypto::{
     constants::{
         Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
@@ -28,7 +26,7 @@ fn hp_test(cipher: Cipher, expected: &[u8]) {
     let mask = hp.mask(&[0; 16]).expect("should produce a mask");
     assert_eq!(mask, expected, "first invocation should be correct");
 
-    #[allow(clippy::redundant_clone)] // This is deliberate.
+    #[expect(clippy::redundant_clone, reason = "This is deliberate.")]
     let hp2 = hp.clone();
     let mask = hp2.mask(&[0; 16]).expect("clone produces mask");
     assert_eq!(mask, expected, "clone should produce the same mask");
@@ -71,12 +69,12 @@ fn chacha20_ctr() {
 #[should_panic(expected = "out of range")]
 fn aes_short() {
     let hp = make_hp(TLS_AES_128_GCM_SHA256);
-    mem::drop(hp.mask(&[0; 15]));
+    drop(hp.mask(&[0; 15]));
 }
 
 #[test]
 #[should_panic(expected = "out of range")]
 fn chacha20_short() {
     let hp = make_hp(TLS_CHACHA20_POLY1305_SHA256);
-    mem::drop(hp.mask(&[0; 15]));
+    drop(hp.mask(&[0; 15]));
 }

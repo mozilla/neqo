@@ -6,8 +6,6 @@
 
 // Congestion control
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     fmt::{self, Display},
     time::{Duration, Instant},
@@ -21,7 +19,7 @@ use crate::{
     pmtud::Pmtud,
     recovery::SentPacket,
     rtt::RttEstimate,
-    Stats,
+    ConnectionParameters, Stats,
 };
 
 /// The number of packets we allow to burst from the pacer.
@@ -41,15 +39,10 @@ impl Display for PacketSender {
 
 impl PacketSender {
     #[must_use]
-    pub fn new(
-        alg: CongestionControlAlgorithm,
-        pacing_enabled: bool,
-        pmtud: Pmtud,
-        now: Instant,
-    ) -> Self {
+    pub fn new(conn_params: &ConnectionParameters, pmtud: Pmtud, now: Instant) -> Self {
         let mtu = pmtud.plpmtu();
         Self {
-            cc: match alg {
+            cc: match conn_params.get_cc_algorithm() {
                 CongestionControlAlgorithm::NewReno => {
                     Box::new(ClassicCongestionControl::new(NewReno::default(), pmtud))
                 }
@@ -57,7 +50,12 @@ impl PacketSender {
                     Box::new(ClassicCongestionControl::new(Cubic::default(), pmtud))
                 }
             },
-            pacer: Pacer::new(pacing_enabled, now, mtu * PACING_BURST_SIZE, mtu),
+            pacer: Pacer::new(
+                conn_params.pacing_enabled(),
+                now,
+                mtu * PACING_BURST_SIZE,
+                mtu,
+            ),
         }
     }
 
@@ -93,9 +91,8 @@ impl PacketSender {
         let current_mtu = self.pmtud().plpmtu();
         if current_mtu != self.pacer.mtu() {
             qdebug!(
-                "PLPMTU changed from {} to {}, updating pacer",
-                self.pacer.mtu(),
-                current_mtu
+                "PLPMTU changed from {} to {current_mtu}, updating pacer",
+                self.pacer.mtu()
             );
             self.pacer.set_mtu(current_mtu);
         }
@@ -109,7 +106,7 @@ impl PacketSender {
         stats: &mut Stats,
     ) {
         self.cc.on_packets_acked(acked_pkts, rtt_est, now);
-        self.pmtud_mut().on_packets_acked(acked_pkts, stats);
+        self.pmtud_mut().on_packets_acked(acked_pkts, now, stats);
         self.maybe_update_pacer_mtu();
     }
 
@@ -161,11 +158,7 @@ impl PacketSender {
     #[must_use]
     pub fn next_paced(&self, rtt: Duration) -> Option<Instant> {
         // Only pace if there are bytes in flight.
-        if self.cc.bytes_in_flight() > 0 {
-            Some(self.pacer.next(rtt, self.cc.cwnd()))
-        } else {
-            None
-        }
+        (self.cc.bytes_in_flight() > 0).then(|| self.pacer.next(rtt, self.cc.cwnd()))
     }
 
     #[must_use]

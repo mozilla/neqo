@@ -2,11 +2,9 @@ name: QNS
 on:
   push:
     branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   pull_request:
     branches: ["main"]
     types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   merge_group:
   workflow_dispatch:
   schedule:
@@ -28,21 +26,25 @@ env:
 jobs:
   docker-image:
     name: Build Docker image
-    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
     outputs:
       imageID: ${{ steps.docker_build_and_push.outputs.imageID }}
     permissions:
       packages: write
     steps:
-      - uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3.2.0
-      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
-      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+      - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+        with:
+          cache-binary: ${{ github.event_name == 'pull_request' }} # zizmor: ignore[cache-poisoning]
+
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
+      - uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}-qns
@@ -55,54 +57,68 @@ jobs:
             # set latest tag for default branch
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
-        if: github.event_name != 'pull_request'
+      - uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
+        if: ${{ github.event_name != 'pull_request' }}
         with:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           platforms: 'linux/amd64, linux/arm64'
 
-      - uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+      - uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         id: docker_build_and_push
         with:
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           platforms: 'linux/amd64'
           outputs: type=docker,dest=/tmp/${{ env.LATEST }}.tar
 
-      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: '${{ env.LATEST }} Docker image'
           path: /tmp/${{ env.LATEST }}.tar
 
   implementations:
     name: Determine interop pairs
+    if: ${{ github.event_name != 'push' }}
     needs: docker-image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       pairs: ${{ steps.config.outputs.pairs }}
       implementations: ${{ steps.config.outputs.implementations }}
     env:
       URL: https://github.com/mozilla/neqo
       ROLE: both
+      IMAGE: ${{ needs.docker-image.outputs.imageID }}
     steps:
       - id: config
         run: |
-          # Add neqo-latest to implementations.json
-          curl https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json | \
-            jq --arg key "$LATEST" --argjson newEntry '
-              {
-                "image": "${{ needs.docker-image.outputs.imageID }}",
-                "url": "${{ env.URL }}",
-                "role": "${{ env.ROLE }}"
-              }' '.[$key] = $newEntry' > implementations.json
+          # Add neqo-latest and some non-default implementations.
+          # tquic: https://github.com/quic-interop/quic-interop-runner/pull/385/files
+          # openssl: https://github.com/quic-interop/quic-interop-runner/pull/402/files
+          cat <<EOF > additional.json
+          {
+            "neqo-latest": {
+              "image": "$IMAGE",
+              "url": "$URL",
+              "role": "$ROLE"
+            },
+            "tquic": {
+              "image": "tquicgroup/tquic:latest",
+              "url": "https://github.com/Tencent/tquic/",
+              "role": "both"
+            },
+            "openssl": {
+              "image": "quay.io/openssl-ci/openssl-quic-interop",
+              "url": "https://github.com/openssl/openssl",
+              "role": "client"
+            }
+          }
+          EOF
+          curl -o runner.json https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json
+          jq '. += input' runner.json additional.json > implementations.json
           {
             echo "implementations<<EOF"
             cat implementations.json
@@ -125,14 +141,15 @@ jobs:
 
   run-qns:
     name: Run QNS
+    if: ${{ github.event_name != 'push' }}
     needs: implementations
     strategy:
       fail-fast: false
       matrix:
         pair: ${{ fromJson(needs.implementations.outputs.pairs) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+      - uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
         with:
           name: '${{ env.LATEST }} Docker image'
           path: /tmp
@@ -140,12 +157,16 @@ jobs:
       - run: docker load --input /tmp/${{ env.LATEST }}.tar
 
       - id: depair
+        env:
+          PAIR: ${{ matrix.pair }}
         run: |
-          PAIR=$(echo ${{ matrix.pair }} | sed "s/$DELIM/%/g")
+          PAIR="${PAIR/$DELIM/%}"
           echo "client=$(echo "$PAIR" | cut -d% -f1)" >> "$GITHUB_OUTPUT"
           echo "server=$(echo "$PAIR" | cut -d% -f2)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
       - uses: ./.github/actions/quic-interop-runner
@@ -157,25 +178,30 @@ jobs:
 
   report:
     name: Report results
+    if: ${{ !cancelled() && github.event_name != 'push' }}
     needs: [run-qns, implementations]
-    runs-on: ubuntu-latest
-    if: always()
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
         with:
           pattern: '*results'
           path: results
 
-      - uses: actions/cache/restore@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
+      - uses: actions/cache/restore@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
         with:
           path: results-main
           key: qns-${{ github.sha }}
           restore-keys: qns-
 
       - run: sudo apt-get install -y --no-install-recommends wdiff
-      - run: |
-          mapfile -t LIST < <(echo '${{ needs.implementations.outputs.pairs }}' | jq '.[]' | sort)
+      - env:
+          PAIRS: ${{ needs.implementations.outputs.pairs }}
+        run: |
+          # shellcheck disable=SC2153
+          mapfile -t LIST < <(echo "$PAIRS" | jq '.[]' | sort)
           for PREFIX in "${LIST[@]}"; do
             PREFIX=$(echo "$PREFIX" | tr -d '"')
             CLIENT=$(echo "$PREFIX" | cut -f1 -d " ")
@@ -213,7 +239,23 @@ jobs:
                 fi
                 [ -n "$RESULT" ] || continue
                 DIFF=$(wdiff -n "$BASELINE" - <<< "$RESULT" || true)
-                RESULT=$(echo "$DIFF" | sed -E "s/\[-/ _~~/g; s/-\]/~~_ /g; s/\{\+/ <ins>\*\*/g; s/\+\}/\*\*<\/ins> /g")
+                if [ "$GROUP" == "failed" ]; then
+                  ADD=":warning:"
+                  ADD_DELIM="\*\*"
+                  DEL=":rocket:"
+                  DEL_DELIM="~~"
+                elif [ "$GROUP" == "succeeded" ]; then
+                  ADD=":rocket:"
+                  ADD_DELIM="~~"
+                  DEL=":warning:"
+                  DEL_DELIM="\*\*"
+                else
+                  ADD=""
+                  ADD_DELIM=""
+                  DEL=""
+                  DEL_DELIM=""
+                fi
+                RESULT=$(echo "$DIFF" | sed -E "s/\[-/ $DEL$DEL_DELIM/g; s/-\]/$DEL_DELIM /g; s/\{\+/ $ADD$ADD_DELIM/g; s/\+\}/$ADD_DELIM /g")
                 echo "* [$PAIR]($LOG): $RESULT" >> "$ROLE.$GROUP.md"
               done
             done
@@ -228,9 +270,9 @@ jobs:
               fi
               echo
               echo "#### $LATEST as client"
-              cat client.failed.md
+              cat client.failed.md || echo
               echo "#### $LATEST as server"
-              cat server.failed.md
+              cat server.failed.md || echo
             else
               echo -n "None "
               if [ -e "client.succeeded.md" ] || [ -e "server.succeeded.md" ] || [ -e "client.unsupported.md" ] || [ -e "server.unsupported.md" ]; then
@@ -257,13 +299,14 @@ jobs:
             echo "</details>"
           } >> comment.md
 
-      - if: github.ref == 'refs/heads/main'
+      - if: ${{ github.ref == 'refs/heads/main' }}
         run: |
+          rm -rf results-main || true
           mv results results-main
           echo "${{ github.sha }}" > results-main/baseline-sha.txt
 
-      - if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
+      - if: ${{ github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
         with:
           path: results-main
           key: qns-${{ github.sha }}

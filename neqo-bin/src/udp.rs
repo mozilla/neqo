@@ -4,10 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(clippy::missing_errors_doc, reason = "Passing up tokio errors.")]
+
 use std::{io, net::SocketAddr};
 
 use neqo_common::Datagram;
-use neqo_udp::DatagramIter;
+use neqo_udp::{DatagramIter, RecvBuf};
 
 /// Ideally this would live in [`neqo-udp`]. [`neqo-udp`] is used in Firefox.
 ///
@@ -59,7 +61,7 @@ impl Socket {
     pub fn recv<'a>(
         &self,
         local_address: SocketAddr,
-        recv_buf: &'a mut [u8],
+        recv_buf: &'a mut RecvBuf,
     ) -> Result<Option<DatagramIter<'a>>, io::Error> {
         self.inner
             .try_io(tokio::io::Interest::READABLE, || {
