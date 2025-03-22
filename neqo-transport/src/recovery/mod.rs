@@ -820,35 +820,36 @@ impl LossRecovery {
         // The spaces in which we will allow probing.
         let mut allow_probes = PacketNumberSpaceSet::default();
         for pn_space in PacketNumberSpace::iter() {
-            if let Some(t) = self.pto_time(primary_path.borrow().rtt(), pn_space) {
-                allow_probes.insert(pn_space);
-                if t <= now {
-                    qdebug!("[{self}] PTO timer fired for {pn_space}");
-                    if let Some(space) = self.spaces.get_mut(pn_space) {
-                        let mut size = 0;
-                        let mtu = primary_path.borrow().plpmtu();
-                        lost.extend(
-                            space
-                                .pto_packets()
-                                // Do not consider all packets for
-                                // retransmission on PTO. On a high bandwidth
-                                // delay connection, that would be a lot of
-                                // `SentPacket`s to clone.
-                                //
-                                // Given that we are sending at most
-                                // `MAX_PTO_PACKET_COUNT` packets on PTO,
-                                // consider as many packets for retransmission
-                                // as would fit into those PTO packets.
-                                .take_while(move |p| {
-                                    size += p.len();
-                                    size <= MAX_PTO_PACKET_COUNT * mtu
-                                })
-                                .cloned(),
-                        );
-                        pto_space = pto_space.or(Some(pn_space));
-                    }
-                }
+            let Some(t) = self.pto_time(primary_path.borrow().rtt(), pn_space) else {
+                continue;
+            };
+            allow_probes.insert(pn_space);
+            if t > now {
+                continue;
             }
+            qdebug!("[{self}] PTO timer fired for {pn_space}");
+            let Some(space) = self.spaces.get_mut(pn_space) else {
+                continue;
+            };
+            let mut size = 0;
+            let mtu = primary_path.borrow().plpmtu();
+            lost.extend(
+                space
+                    .pto_packets()
+                    // Do not consider all packets for retransmission on PTO. On
+                    // a high bandwidth delay connection, that would be a lot of
+                    // `SentPacket`s to clone.
+                    //
+                    // Given that we are sending at most `MAX_PTO_PACKET_COUNT`
+                    // packets on PTO, consider as many packets for
+                    // retransmission as would fit into those PTO packets.
+                    .take_while(move |p| {
+                        size += p.len();
+                        size <= MAX_PTO_PACKET_COUNT * mtu
+                    })
+                    .cloned(),
+            );
+            pto_space = pto_space.or(Some(pn_space));
         }
 
         // This has to happen outside the loop. Increasing the PTO count here causes the
