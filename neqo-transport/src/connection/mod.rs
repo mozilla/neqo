@@ -2406,6 +2406,7 @@ impl Connection {
         closing_frame: Option<&ClosingFrame>,
     ) -> Res<SendOption> {
         let mut initial_sent = None;
+        let mut packet_tos = None;
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
@@ -2483,6 +2484,7 @@ impl Connection {
                     pn,
                     builder.len() + aead_expansion,
                     &builder.as_ref()[payload_start..],
+                    *packet_tos.get_or_insert(path.borrow().tos(&mut tokens)),
                 ),
                 now,
             );
@@ -2502,7 +2504,7 @@ impl Connection {
             let sent = SentPacket::new(
                 pt,
                 pn,
-                path.borrow().tos().into(),
+                packet_tos.unwrap_or_default().into(),
                 now,
                 ack_eliciting,
                 tokens,
@@ -2566,10 +2568,11 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, initial, now);
             }
             path.borrow_mut().add_sent(packets.len());
-            Ok(SendOption::Yes(
-                path.borrow_mut()
-                    .datagram(packets, &mut self.stats.borrow_mut()),
-            ))
+            Ok(SendOption::Yes(path.borrow_mut().datagram(
+                packets,
+                packet_tos.unwrap_or_default(),
+                &mut self.stats.borrow_mut(),
+            )))
         }
     }
 
@@ -3121,6 +3124,9 @@ impl Connection {
                             .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Lost);
                         self.stats.borrow_mut().datagram_tx.lost += 1;
                     }
+                    RecoveryToken::EcnEct0 => self
+                        .paths
+                        .lost_ecn(lost.packet_type(), &mut self.stats.borrow_mut()),
                 }
             }
         }
@@ -3186,7 +3192,7 @@ impl Connection {
                         .events
                         .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Acked),
                     // We only worry when these are lost
-                    RecoveryToken::HandshakeDone => (),
+                    RecoveryToken::HandshakeDone | RecoveryToken::EcnEct0 => (),
                 }
             }
         }

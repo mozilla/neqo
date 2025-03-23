@@ -24,6 +24,7 @@ pub struct SentPacket {
     pt: PacketType,
     pn: PacketNumber,
     ecn_mark: IpTosEcn,
+    // TODO: Still needed? Tracked in tokens.
     ack_eliciting: bool,
     time_sent: Instant,
     primary_path: bool,
@@ -73,10 +74,16 @@ impl SentPacket {
         self.pn
     }
 
-    /// The ECN mark of the packet.
-    #[must_use]
     pub const fn ecn_mark(&self) -> IpTosEcn {
         self.ecn_mark
+    }
+
+    /// The ECN mark of the packet.
+    #[must_use]
+    pub fn ecn_marked_ect0(&self) -> bool {
+        self.tokens
+            .iter()
+            .any(|t| matches!(t, RecoveryToken::EcnEct0))
     }
 
     /// The time that this packet was sent.
