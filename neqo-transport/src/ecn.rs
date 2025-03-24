@@ -241,7 +241,7 @@ impl Info {
     }
 
     /// After the ECN validation test has ended, check if the path is ECN capable.
-    pub(crate) fn validate_ack_ecn_and_update(
+    fn validate_ack_ecn_and_update(
         &mut self,
         acked_packets: &[SentPacket],
         ack_ecn: Option<Count>,
