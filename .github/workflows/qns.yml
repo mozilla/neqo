@@ -98,6 +98,7 @@ jobs:
           # Add neqo-latest and some non-default implementations.
           # tquic: https://github.com/quic-interop/quic-interop-runner/pull/385/files
           # openssl: https://github.com/quic-interop/quic-interop-runner/pull/402/files
+          # linuxquic: https://github.com/quic-interop/quic-interop-runner/pull/428
           cat <<EOF > additional.json
           {
             "neqo-latest": {
@@ -114,6 +115,11 @@ jobs:
               "image": "quay.io/openssl-ci/openssl-quic-interop",
               "url": "https://github.com/openssl/openssl",
               "role": "client"
+            },
+            "linuxquic": {
+              "image": "quay.io/lxin/linuxquic-interop:latest",
+              "url": "https://github.com/lxin/quic",
+              "role": "both"
             }
           }
           EOF
