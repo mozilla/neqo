@@ -827,7 +827,7 @@ impl LossRecovery {
             if t > now {
                 continue;
             }
-            qdebug!("[{self}] PTO timer fired for {pn_space}");
+            qdebug!("[{self}] PTO timer fired for {pn_space:?}");
             let Some(space) = self.spaces.get_mut(pn_space) else {
                 continue;
             };
