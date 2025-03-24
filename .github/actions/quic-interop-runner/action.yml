@@ -20,6 +20,11 @@ inputs:
     required: false
     default: ''
 
+outputs:
+  result:
+    description: 'One of "success", "failure", or "timeout".'
+    value: ${{ steps.result.outputs.result }}
+
 runs:
   using: "composite"
   steps:
@@ -100,8 +105,10 @@ runs:
             echo "Panic detected in $log"
             tail -n 50 "$log"
             FAILED=1
+            [ -z "$FAILED" ] && echo "FAILED=1" >> "$GITHUB_ENV"
           fi
         done
+        [ -z "$FAILED" ] && echo "FAILED=0" >> "$GITHUB_ENV"
         # Remove all log files > $MAX_SIZE for succeeded tests to make the artifacts smaller.
         MAX_SIZE=2M
         echo "Removed log file > $MAX_SIZE during GitHub workflow" > note.txt
@@ -140,3 +147,15 @@ runs:
           result.json
           summary.txt
         retention-days: 1
+
+    - id: result
+      if: ${{ always() }}
+      run: |
+        if [ -z "$FAILED" ]; then
+          echo "result=timeout" >> $GITHUB_OUTPUT
+        elif [ "$FAILED" -eq 0 ]; then
+          echo "result=success" >> $GITHUB_OUTPUT
+        else
+          echo "result=failure" >> $GITHUB_OUTPUT
+        fi
+      shell: bash

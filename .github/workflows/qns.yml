@@ -177,10 +177,17 @@ jobs:
       # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
       - uses: ./.github/actions/quic-interop-runner
         timeout-minutes: ${{ fromJSON(env.TIMEOUT) }}
+        continue-on-error: true
+        id: run
         with:
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
+
+      - if: ${{ always() }}
+        env:
+          RESULT: ${{ steps.run.outputs.result }}
+        run: test "$RESULT" != "error"
 
   report:
     name: Report results
