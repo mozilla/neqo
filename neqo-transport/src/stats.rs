@@ -170,7 +170,7 @@ impl DerefMut for EcnCount {
     }
 }
 
-/// Packet types and numbers of the first ECN mark transition between to marks.
+/// Packet types and numbers of the first ECN mark transition between two marks.
 #[derive(Default, Clone)]
 pub struct EcnTransitions(EnumMap<IpTosEcn, EnumMap<IpTosEcn, Option<(PacketType, PacketNumber)>>>);
 
