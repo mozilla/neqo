@@ -245,7 +245,7 @@ pub struct Connection {
     cid_manager: ConnectionIdManager,
     address_validation: AddressValidationInfo,
     /// The connection IDs that were provided by the peer.
-    connection_ids: ConnectionIdStore<[u8; 16]>,
+    cids: ConnectionIdStore<[u8; 16]>,
 
     /// The source connection ID that this endpoint uses for the handshake.
     /// Since we need to communicate this to our peer in tparams, setting this
@@ -420,7 +420,7 @@ impl Connection {
             acks: AckTracker::default(),
             idle_timeout: IdleTimeout::new(conn_params.get_idle_timeout()),
             streams: Streams::new(tphandler, role, events.clone()),
-            connection_ids: ConnectionIdStore::default(),
+            cids: ConnectionIdStore::default(),
             state_signaling: StateSignaling::Idle,
             loss_recovery: LossRecovery::new(stats.clone(), conn_params.get_fast_pto()),
             events,
@@ -1809,7 +1809,7 @@ impl Connection {
             // If there isn't a connection ID to use for this path, the packet
             // will be processed, but it won't be attributed to a path.  That means
             // no path probes or PATH_RESPONSE.  But it's not fatal.
-            if let Some(cid) = self.connection_ids.next() {
+            if let Some(cid) = self.cids.next() {
                 self.paths.make_permanent(path, None, cid, now);
                 Ok(())
             } else if let Some(primary) = self.paths.primary() {
@@ -1963,7 +1963,7 @@ impl Connection {
         };
         if let Some((addr, cid)) = spa {
             // The connection ID isn't special, so just save it.
-            self.connection_ids.add_remote(cid)?;
+            self.cids.add_remote(cid)?;
 
             // The preferred address doesn't dictate what the local address is, so this
             // has to use the existing address.  So only pay attention to a preferred
@@ -2984,14 +2984,13 @@ impl Connection {
                 retire_prior,
             } => {
                 self.stats.borrow_mut().frame_rx.new_connection_id += 1;
-                self.connection_ids.add_remote(ConnectionIdEntry::new(
+                self.cids.add_remote(ConnectionIdEntry::new(
                     sequence_number,
                     ConnectionId::from(connection_id),
                     stateless_reset_token.to_owned(),
                 ))?;
-                self.paths
-                    .retire_cids(retire_prior, &mut self.connection_ids);
-                if self.connection_ids.len() >= LOCAL_ACTIVE_CID_LIMIT {
+                self.paths.retire_cids(retire_prior, &mut self.cids);
+                if self.cids.len() >= LOCAL_ACTIVE_CID_LIMIT {
                     qinfo!("[{self}] received too many connection IDs");
                     return Err(Error::ConnectionIdLimitExceeded);
                 }
