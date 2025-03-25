@@ -8,7 +8,7 @@
 
 use std::{io, net::SocketAddr};
 
-use neqo_common::{qdebug, Datagram};
+use neqo_common::{qwarn, Datagram};
 use neqo_udp::{DatagramIter, RecvBuf};
 
 /// Ideally this would live in [`neqo-udp`]. [`neqo-udp`] is used in Firefox.
@@ -32,18 +32,18 @@ impl Socket {
 
         let send_buf = state.send_buffer_size((&socket).into())?;
         if send_buf < ONE_MB {
-            qdebug!("Increasing send buffer size from {send_buf} to {ONE_MB}");
+            qwarn!("Increasing send buffer size from {send_buf} to {ONE_MB}");
             state.set_send_buffer_size((&socket).into(), ONE_MB)?;
         } else {
-            qdebug!("Default send buffer size is {send_buf}, not changing");
+            qwarn!("Default send buffer size is {send_buf}, not changing");
         }
 
         let recv_buf = state.recv_buffer_size((&socket).into())?;
         if recv_buf < ONE_MB {
-            qdebug!("Increasing receive buffer size from {recv_buf} to {ONE_MB}");
+            qwarn!("Increasing receive buffer size from {recv_buf} to {ONE_MB}");
             state.set_recv_buffer_size((&socket).into(), ONE_MB)?;
         } else {
-            qdebug!("Default receive buffer size is {recv_buf}, not changing");
+            qwarn!("Default receive buffer size is {recv_buf}, not changing");
         }
 
         Ok(Self {
