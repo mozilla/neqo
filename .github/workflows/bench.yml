@@ -114,15 +114,15 @@ jobs:
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
 
-      - name: Run cargo bench
-        run: |
-          sudo ip link set dev lo mtu "$MTU"
-          export NSS_DB_PATH="./test-fixture/db"
-          for BENCH in $BENCHES; do
-            NAME=$(basename "$BENCH" | cut -d- -f1)
-            # shellcheck disable=SC2086
-            perf $PERF_OPT -o "$NAME.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec "$BENCH" -- --bench | tee -a results.txt
-          done
+      # - name: Run cargo bench
+      #   run: |
+      #     sudo ip link set dev lo mtu "$MTU"
+      #     export NSS_DB_PATH="./test-fixture/db"
+      #     for BENCH in $BENCHES; do
+      #       NAME=$(basename "$BENCH" | cut -d- -f1)
+      #       # shellcheck disable=SC2086
+      #       perf $PERF_OPT -o "$NAME.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec "$BENCH" -- --bench --noplot n| tee -a results.txt
+      #     done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -224,7 +224,7 @@ jobs:
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
-                  echo "$CMD"
+                  echo "1: $CMD"
                   # shellcheck disable=SC2086
                   perf $PERF_OPT -o "$FILENAME.server.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec "$CMD" &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
@@ -243,9 +243,10 @@ jobs:
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
                   # the perf profiles of those different runs.
                   CMD=${CMD//$SIZE/$BIGSIZE}
+                  echo "2: $CMD"
                   # shellcheck disable=SC2086
-                  perf $PERF_OPT -o "$FILENAME.client.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec "$CMD" > /dev/null 2>&1
-                  # pkill only matches on the first 15 characters of the commans?!
+                  perf $PERF_OPT -o "$FILENAME.client.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec $CMD > /dev/null 2>&1
+                  # pkill only matches on the first 15 characters of the command?!
                   pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
