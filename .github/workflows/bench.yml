@@ -71,15 +71,15 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-      # - name: Build neqo
-      #   run: |
-      #     # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
-      #     export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
-      #     echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
-      #     cargo "+$TOOLCHAIN" bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
-      #     BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
-      #     echo "BENCHES=$BENCHES" >> "$GITHUB_ENV"
-      #     cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
+      - name: Build neqo
+        run: |
+          # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
+          export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
+          echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
+          # cargo "+$TOOLCHAIN" bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
+          # BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
+          # echo "BENCHES=$BENCHES" >> "$GITHUB_ENV"
+          cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
         run: |
