@@ -114,9 +114,9 @@ jobs:
       - name: Run cargo bench
         run: |
           sudo ip link set dev lo mtu "$MTU"
-          cset proc --set=cpu2 --exec bash -- -c "\
-            CARGO_LOG=cargo::core::compiler::fingerprint=info cargo \"+$TOOLCHAIN\" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt"
-          cset proc --set=cpu2 --exec bash -- -c "\
+          cset proc --set=cpu2 --exec bash -- -c "nice -n -20 setarch --addr-no-randomize \
+            cargo \"+$TOOLCHAIN\" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt"
+          cset proc --set=cpu2 --exec bash -- -c "nice -n -20 setarch --addr-no-randomize \
             cargo \"+$TOOLCHAIN\" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt"
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
@@ -221,14 +221,14 @@ jobs:
                   FILENAME="$client-$server$EXT"
                   # shellcheck disable=SC2086
                   cset proc --set=cpu2 --exec bash -- -c "\
-                    perf $PERF_OPT -o \"$FILENAME.server.perf\" $CMD &"
+                    perf $PERF_OPT -o \"$FILENAME.server.perf\" nice -n -20 setarch --addr-no-randomize $CMD &"
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
                   cset proc --set=cpu3 --exec bash -- -c "\
                     hyperfine --command-name \"$TAG\" --time-unit millisecond  \
                       --export-json \"hyperfine/$FILENAME.json\" \
                       --export-markdown \"hyperfine/$FILENAME.md\" \
-                      --output null --warmup 5 --runs $RUNS --prepare \"sleep 1\" \"$CMD\" |
+                      --output null --warmup 5 --runs $RUNS --prepare \"sleep 1\" \"nice -n -20 setarch --addr-no-randomize $CMD\" |
                     tee -a comparison.txt"
                   echo >> comparison.txt
                   # Sanity check the size of the last retrieved file.
@@ -241,10 +241,8 @@ jobs:
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
                   cset proc --set=cpu3 --exec bash -- -c "\
-                    perf $PERF_OPT -o \"$FILENAME.client.perf\" $CMD > /dev/null 2>&1"
-                  echo "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')")"
-                  ps -efwww | grep "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')")" || true
-                  pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')")"
+                    perf $PERF_OPT -o \"$FILENAME.client.perf\" nice -n -20 setarch --addr-no-randomize $CMD > /dev/null 2>&1"
+                  pkill -ef "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')")"
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                     sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n' >> steps.md
