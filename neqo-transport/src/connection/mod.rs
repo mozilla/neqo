@@ -2142,15 +2142,26 @@ impl Connection {
             }
         }
 
-        for prio in [
-            TransmissionPriority::Critical,
+        self.streams
+            .write_frames(TransmissionPriority::Critical, builder, tokens, frame_stats);
+        if builder.is_full() {
+            return;
+        }
+
+        self.streams
+            .write_maintenance_frames(builder, tokens, frame_stats);
+        if builder.is_full() {
+            return;
+        }
+
+        self.streams.write_frames(
             TransmissionPriority::Important,
-        ] {
-            self.streams
-                .write_frames(prio, builder, tokens, frame_stats);
-            if builder.is_full() {
-                return;
-            }
+            builder,
+            tokens,
+            frame_stats,
+        );
+        if builder.is_full() {
+            return;
         }
 
         // NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, and ACK_FREQUENCY.
