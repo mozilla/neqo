@@ -114,9 +114,9 @@ jobs:
       - name: Run cargo bench
         run: |
           sudo ip link set dev lo mtu "$MTU"
-          sudo cset proc --set=cpu2 --exec sudo -- -i -u bench bash -c "cd $(pwd); \
+          cset proc --set=cpu2 --exec bash -c "\
             cargo \"+$TOOLCHAIN\" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt"
-          sudo cset proc --set=cpu2 --exec sudo -- -i -u bench bash -c "cd $(pwd); \
+          cset proc --set=cpu2 --exec bash -c "\
             cargo \"+$TOOLCHAIN\" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt"
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
