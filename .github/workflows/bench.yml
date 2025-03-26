@@ -242,7 +242,8 @@ jobs:
                   # shellcheck disable=SC2086
                   cset proc --set=cpu3 --exec bash -- -c "\
                     perf $PERF_OPT -o \"$FILENAME.client.perf\" nice -n -20 setarch --addr-no-randomize $CMD > /dev/null 2>&1"
-                  pkill -ef "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')")"
+                  # pkill only matches on the first 15 characters of the commans?!
+                  pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                     sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n' >> steps.md
@@ -256,10 +257,9 @@ jobs:
                     # Even though we tell hyperfine to use milliseconds, it still outputs in seconds when dumping to JSON.
                     DELTA=$(bc -l <<< "($MEAN - $BASELINE_MEAN) * 1000")
                     PERCENT=$(bc -l <<< "(($MEAN - $BASELINE_MEAN) / $BASELINE_MEAN) * 100")
-                    MIBS=$(bc -l <<< "($SIZE / 1048576) / ($MEAN / 1000)")
+                    MIBS=$(bc -l <<< "($SIZE / 1048576) / $MEAN")
                     RANGE=$(grep -Po '^.*± *\K.*' < "hyperfine/$FILENAME.md" | cut -d' ' -f1)
-                    MIBS_RANGE=$(bc -l <<< "($SIZE / 1048576) / ($RANGE / 1000)")
-                    echo "Transfer rate: $MIBS MiB/s ± $MIBS_RANGE"
+                    MIBS_RANGE=$(bc -l <<< "($SIZE / 1048576) / $RANGE")
 
                     # If a performance change is statistically significant, highlight it.
                     jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
