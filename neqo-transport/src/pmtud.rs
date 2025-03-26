@@ -336,7 +336,7 @@ mod tests {
         time::Instant,
     };
 
-    use neqo_common::{qdebug, qinfo, Encoder, IpTosEcn};
+    use neqo_common::{qdebug, qinfo, Encoder};
     use test_fixture::{fixture_init, now};
 
     use crate::{
@@ -357,16 +357,8 @@ mod tests {
         Some(u16::MAX as usize),
     ];
 
-    fn make_sentpacket(pn: u64, now: Instant, len: usize) -> SentPacket {
-        SentPacket::new(
-            PacketType::Short,
-            pn,
-            IpTosEcn::default(),
-            now,
-            true,
-            Vec::new(),
-            len,
-        )
+    const fn make_sentpacket(pn: u64, now: Instant, len: usize) -> SentPacket {
+        SentPacket::new(PacketType::Short, pn, now, true, Vec::new(), len)
     }
 
     /// Asserts that the PMTUD process has stopped at the given MTU.

@@ -943,7 +943,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{qlog::NeqoQlog, IpTosEcn};
+    use neqo_common::qlog::NeqoQlog;
     use test_fixture::{now, DEFAULT_ADDR};
 
     use super::{
@@ -1124,7 +1124,6 @@ mod tests {
                 SentPacket::new(
                     PacketType::Short,
                     pn,
-                    IpTosEcn::default(),
                     pn_time(pn),
                     true,
                     Vec::new(),
@@ -1152,7 +1151,6 @@ mod tests {
             lrs.on_packet_sent(SentPacket::new(
                 PacketType::Short,
                 pn,
-                IpTosEcn::default(),
                 pn_time(pn),
                 true,
                 Vec::new(),
@@ -1277,7 +1275,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Short,
                 0,
-                IpTosEcn::default(),
                 pn_time(0),
                 true,
                 Vec::new(),
@@ -1289,7 +1286,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Short,
                 1,
-                IpTosEcn::default(),
                 pn_time(0) + TEST_RTT / 4,
                 true,
                 Vec::new(),
@@ -1388,7 +1384,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Initial,
                 0,
-                IpTosEcn::default(),
                 pn_time(0),
                 true,
                 Vec::new(),
@@ -1400,7 +1395,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Handshake,
                 0,
-                IpTosEcn::default(),
                 pn_time(1),
                 true,
                 Vec::new(),
@@ -1412,7 +1406,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Short,
                 0,
-                IpTosEcn::default(),
                 pn_time(2),
                 true,
                 Vec::new(),
@@ -1427,15 +1420,7 @@ mod tests {
             PacketType::Handshake,
             PacketType::Short,
         ] {
-            let sent_pkt = SentPacket::new(
-                *sp,
-                1,
-                IpTosEcn::default(),
-                pn_time(3),
-                true,
-                Vec::new(),
-                ON_SENT_SIZE,
-            );
+            let sent_pkt = SentPacket::new(*sp, 1, pn_time(3), true, Vec::new(), ON_SENT_SIZE);
             let pn_space = PacketNumberSpace::from(sent_pkt.packet_type());
             lr.on_packet_sent(sent_pkt, Instant::now());
             lr.on_ack_received(
@@ -1467,7 +1452,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Initial,
                 0,
-                IpTosEcn::default(),
                 pn_time(3),
                 true,
                 Vec::new(),
@@ -1485,7 +1469,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Initial,
                 0,
-                IpTosEcn::default(),
                 now(),
                 true,
                 Vec::new(),
@@ -1508,7 +1491,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Handshake,
                 0,
-                IpTosEcn::default(),
                 now(),
                 true,
                 Vec::new(),
@@ -1517,15 +1499,7 @@ mod tests {
             Instant::now(),
         );
         lr.on_packet_sent(
-            SentPacket::new(
-                PacketType::Short,
-                0,
-                IpTosEcn::default(),
-                now(),
-                true,
-                Vec::new(),
-                ON_SENT_SIZE,
-            ),
+            SentPacket::new(PacketType::Short, 0, now(), true, Vec::new(), ON_SENT_SIZE),
             Instant::now(),
         );
 
@@ -1561,7 +1535,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Initial,
                 0,
-                IpTosEcn::default(),
                 now(),
                 true,
                 Vec::new(),

@@ -2504,7 +2504,6 @@ impl Connection {
             let sent = SentPacket::new(
                 pt,
                 pn,
-                packet_tos.unwrap_or_default().into(),
                 now,
                 ack_eliciting,
                 tokens,
