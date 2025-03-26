@@ -72,9 +72,10 @@ jobs:
 
       - name: Build neqo
         run: |
-          cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
+          echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
           export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
+          cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
           cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
@@ -105,7 +106,7 @@ jobs:
           mkdir -p hyperfine
 
       # Disable turboboost, hyperthreading and use performance governor.
-      # Also see https://manuel.bernhardt.io/posts/2023-11-16-core-pinning/.
+      # Also creates "cpu2" and "cpu3" CPU sets for use with cset.
       # On the bencher, logical cores 2 and 3 have been isolated for use by the benchmarks.
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
@@ -114,7 +115,7 @@ jobs:
         run: |
           sudo ip link set dev lo mtu "$MTU"
           cset proc --set=cpu2 --exec bash -- -c "\
-            cargo \"+$TOOLCHAIN\" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt"
+            CARGO_LOG=cargo::core::compiler::fingerprint=info cargo \"+$TOOLCHAIN\" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt"
           cset proc --set=cpu2 --exec bash -- -c "\
             cargo \"+$TOOLCHAIN\" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt"
 
@@ -241,6 +242,8 @@ jobs:
                   # shellcheck disable=SC2086
                   cset proc --set=cpu3 --exec bash -- -c "\
                     perf $PERF_OPT -o \"$FILENAME.client.perf\" $CMD > /dev/null 2>&1"
+                  echo "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')")"
+                  ps -efwww | grep "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')")" || true
                   pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')")"
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
@@ -255,9 +258,9 @@ jobs:
                     # Even though we tell hyperfine to use milliseconds, it still outputs in seconds when dumping to JSON.
                     DELTA=$(bc -l <<< "($MEAN - $BASELINE_MEAN) * 1000")
                     PERCENT=$(bc -l <<< "(($MEAN - $BASELINE_MEAN) / $BASELINE_MEAN) * 100")
-                    MIBS=$(bc -l <<< "$SIZE / ($MEAN * 1000) / 1048576")
+                    MIBS=$(bc -l <<< "($SIZE / 1048576) / ($MEAN / 1000)")
                     RANGE=$(grep -Po '^.*± *\K.*' < "hyperfine/$FILENAME.md" | cut -d' ' -f1)
-                    MIBS_RANGE=$(bc -l <<< "$SIZE / ($RANGE * 1000) / 1048576")
+                    MIBS_RANGE=$(bc -l <<< "($SIZE / 1048576) / ($RANGE / 1000)")
                     echo "Transfer rate: $MIBS MiB/s ± $MIBS_RANGE"
 
                     # If a performance change is statistically significant, highlight it.
@@ -300,7 +303,7 @@ jobs:
           } > comparison.md
           rm -r "$TMP"
 
-      # Re-enable turboboost, hyperthreading and use powersave governor.
+      # Re-enable turboboost, hyperthreading and use powersave governor. Remove all CPU sets.
       - name: Restore machine
         run: |
           sudo /root/bin/unprep.sh
