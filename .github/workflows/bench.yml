@@ -256,7 +256,7 @@ jobs:
                     MEAN=$(jq -r '.results[0].mean' "$RESULT")
                     # Even though we tell hyperfine to use milliseconds, it still outputs in seconds when dumping to JSON.
                     DELTA=$(bc -l <<< "($MEAN - $BASELINE_MEAN) * 1000")
-                    PERCENT=$(bc -l <<< "($MEAN - $BASELINE_MEAN) / ($BASELINE_MEAN + $MEAN)/2 * 100")
+                    PERCENT=$(bc -l <<< "(($MEAN - $BASELINE_MEAN) / $BASELINE_MEAN) * 100")
                     MIBS=$(bc -l <<< "$SIZE / ($MEAN * 1000) / 1048576")
                     RANGE=$(cut -d'±' -f2 < "hyperfine/$FILENAME.md" | cut -d' ' -f1)
                     MIBS_RANGE=$(bc -l <<< "$SIZE / ($RANGE * 1000) / 1048576")
