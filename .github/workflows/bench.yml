@@ -73,9 +73,9 @@ jobs:
       - name: Build neqo
         run: |
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
-          echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
           export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
-          cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
+          echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
+          cargo "+$TOOLCHAIN" bench --locked --workspace --features bench --no-run
           cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
@@ -115,9 +115,9 @@ jobs:
         run: |
           sudo ip link set dev lo mtu "$MTU"
           cset proc --set=cpu2 --exec bash -- -c "nice -n -20 setarch --addr-no-randomize \
-            cargo \"+$TOOLCHAIN\" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt"
+            cargo \"+$TOOLCHAIN\" bench --locked --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt"
           cset proc --set=cpu2 --exec bash -- -c "nice -n -20 setarch --addr-no-randomize \
-            cargo \"+$TOOLCHAIN\" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt"
+            cargo \"+$TOOLCHAIN\" bench --locked --package neqo-bin --features bench -- --noplot | tee -a results.txt"
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
