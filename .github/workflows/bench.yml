@@ -226,8 +226,9 @@ jobs:
                   FILENAME="$client-$server$EXT"
                   echo "1: $CMD"
                   # shellcheck disable=SC2086
-                  perf $PERF_OPT -o "$FILENAME.server.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec "$CMD" &
+                  perf $PERF_OPT -o "$FILENAME.server.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec $CMD &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
+                  ps -efww
                   echo "2: $CMD"
                   # shellcheck disable=SC2086
                   hyperfine --command-name "$TAG" --time-unit millisecond  \
