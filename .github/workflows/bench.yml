@@ -71,15 +71,15 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-      - name: Build neqo
-        run: |
-          # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
-          export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
-          echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
-          cargo "+$TOOLCHAIN" bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
-          BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
-          echo "BENCHES=$BENCHES" >> "$GITHUB_ENV"
-          cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
+      # - name: Build neqo
+      #   run: |
+      #     # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
+      #     export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
+      #     echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
+      #     cargo "+$TOOLCHAIN" bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
+      #     BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
+      #     echo "BENCHES=$BENCHES" >> "$GITHUB_ENV"
+      #     cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
         run: |
@@ -228,11 +228,12 @@ jobs:
                   # shellcheck disable=SC2086
                   perf $PERF_OPT -o "$FILENAME.server.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec "$CMD" &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
+                  echo "2: $CMD"
                   # shellcheck disable=SC2086
                   hyperfine --command-name "$TAG" --time-unit millisecond  \
                     --export-json "hyperfine/$FILENAME.json" \
                     --export-markdown "hyperfine/$FILENAME.md" \
-                    --output null --warmup 5 --runs $RUNS --prepare "sleep 1" "nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec $CMD" |
+                    --output null --warmup 5 --runs "$RUNS" --prepare "sleep 1" "nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec $CMD" |
                   tee -a comparison.txt
                   echo >> comparison.txt
                   # Sanity check the size of the last retrieved file.
@@ -243,7 +244,7 @@ jobs:
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
                   # the perf profiles of those different runs.
                   CMD=${CMD//$SIZE/$BIGSIZE}
-                  echo "2: $CMD"
+                  echo "3: $CMD"
                   # shellcheck disable=SC2086
                   perf $PERF_OPT -o "$FILENAME.client.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec $CMD > /dev/null 2>&1
                   # pkill only matches on the first 15 characters of the command?!
