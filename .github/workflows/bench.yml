@@ -117,11 +117,11 @@ jobs:
       - name: Run cargo bench
         run: |
           sudo ip link set dev lo mtu "$MTU"
-          export NSS_DB_PATH="$(pwd)/test-fixture/db"
+          export NSS_DB_PATH="./test-fixture/db"
           for BENCH in $BENCHES; do
             NAME=$(basename "$BENCH" | cut -d- -f1)
             # shellcheck disable=SC2086
-            cset proc --set=cpu2 --exec perf -- $PERF_OPT -o "$NAME.perf" nice -n -20 setarch --addr-no-randomize "$BENCH" --bench
+            perf -- $PERF_OPT -o "$NAME.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec "$BENCH" -- --bench | tee -a results.txt
           done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
@@ -142,14 +142,14 @@ jobs:
           truncate -s "$BIGSIZE" "$TMP/$BIGSIZE"
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
-            ["neqo"]="target/release/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
-            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
-            ["google"]="gquiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
+            ["neqo"]="target/release/neqo-client -- _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
+            ["msquic"]="msquic/build/bin/Release/quicinterop -- -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
+            ["google"]="gquiche/bazel-bin/quiche/quic_client -- --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
           )
           declare -A server_cmd=(
-            ["neqo"]="target/release/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
-            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
-            ["google"]="gquiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
+            ["neqo"]="target/release/neqo-server -- _cc _pacing _flags -Q 1 $HOST:$PORT"
+            ["msquic"]="msquic/build/bin/Release/quicinteropserver -- -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
+            ["google"]="gquiche/bazel-bin/quiche/quic_server -- --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
           )
           # Flags to pass to neqo when it runs against another implementation.
           declare -A neqo_flags=(
@@ -224,17 +224,16 @@ jobs:
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
+                  echo "$CMD"
                   # shellcheck disable=SC2086
-                  cset proc --set=cpu2 --exec bash -- -c "\
-                    perf $PERF_OPT -o \"$FILENAME.server.perf\" nice -n -20 setarch --addr-no-randomize $CMD &"
+                  perf $PERF_OPT -o "$FILENAME.server.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec "$CMD" &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
-                  cset proc --set=cpu3 --exec bash -- -c "\
-                    hyperfine --command-name \"$TAG\" --time-unit millisecond  \
-                      --export-json \"hyperfine/$FILENAME.json\" \
-                      --export-markdown \"hyperfine/$FILENAME.md\" \
-                      --output null --warmup 5 --runs $RUNS --prepare \"sleep 1\" \"nice -n -20 setarch --addr-no-randomize $CMD\" |
-                    tee -a comparison.txt"
+                  hyperfine --command-name "$TAG" --time-unit millisecond  \
+                    --export-json "hyperfine/$FILENAME.json" \
+                    --export-markdown "hyperfine/$FILENAME.md" \
+                    --output null --warmup 5 --runs $RUNS --prepare "sleep 1" "nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec $CMD" |
+                  tee -a comparison.txt
                   echo >> comparison.txt
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
@@ -245,8 +244,7 @@ jobs:
                   # the perf profiles of those different runs.
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
-                  cset proc --set=cpu3 --exec bash -- -c "\
-                    perf $PERF_OPT -o \"$FILENAME.client.perf\" nice -n -20 setarch --addr-no-randomize $CMD > /dev/null 2>&1"
+                  perf $PERF_OPT -o "$FILENAME.client.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec "$CMD" > /dev/null 2>&1
                   # pkill only matches on the first 15 characters of the commans?!
                   pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
 
