@@ -31,23 +31,23 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout msquic
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          repository: microsoft/msquic
-          ref: main
-          path: msquic
-          submodules: true
-          persist-credentials: false
+      # - name: Checkout msquic
+      #   uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      #   with:
+      #     repository: microsoft/msquic
+      #     ref: main
+      #     path: msquic
+      #     submodules: true
+      #     persist-credentials: false
 
-      - name: Checkout google/quiche
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          repository: google/quiche
-          ref: main
-          path: gquiche
-          submodules: true
-          persist-credentials: false
+      # - name: Checkout google/quiche
+      #   uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      #   with:
+      #     repository: google/quiche
+      #     ref: main
+      #     path: gquiche
+      #     submodules: true
+      #     persist-credentials: false
 
       - name: Set PATH and environment
         run: |
@@ -114,9 +114,9 @@ jobs:
       - name: Run cargo bench
         run: |
           sudo ip link set dev lo mtu "$MTU"
-          sudo cset proc --set=cpu2 --exec sudo -- -i -u bench -D "$(pwd)" bash -c "\
+          sudo cset proc --set=cpu2 --exec sudo -- -i -u bench bash -c "cd $(pwd); \
             cargo \"+$TOOLCHAIN\" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt"
-          sudo cset proc --set=cpu2 --exec sudo -- -i -u bench -D "$(pwd)" bash -c "\
+          sudo cset proc --set=cpu2 --exec sudo -- -i -u bench bash -c "cd $(pwd); \
             cargo \"+$TOOLCHAIN\" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt"
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
@@ -220,12 +220,12 @@ jobs:
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
                   # shellcheck disable=SC2086
-                  sudo cset proc --set=cpu2 --exec sudo -- -i -u bench -D "$(pwd)" bash -c "\
+                  sudo cset proc --set=cpu2 --exec sudo -- -i -u bench bash -c "cd $(pwd); \
                     perf $PERF_OPT -o \"$FILENAME.server.perf\" $CMD &"
                   PID=$!
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
-                  sudo cset proc --set=cpu3 --exec sudo -- -i -u bench -D "$(pwd)" bash -c "\
+                  sudo cset proc --set=cpu3 --exec sudo -- -i -u bench bash -c "cd $(pwd); \
                     hyperfine --command-name \"$TAG\" --time-unit millisecond  \
                       --export-json \"hyperfine/$FILENAME.json\" \
                       --export-markdown \"hyperfine/$FILENAME.md\" \
@@ -241,7 +241,7 @@ jobs:
                   # the perf profiles of those different runs.
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
-                  sudo cset proc --set=cpu3 --exec sudo -- -i -u bench -D "$(pwd)" bash -c "\
+                  sudo cset proc --set=cpu3 --exec sudo -- -i -u bench bash -c "cd $(pwd); \
                     perf $PERF_OPT -o \"$FILENAME.client.perf\" $CMD > /dev/null 2>&1"
                   kill $PID
 
