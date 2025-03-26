@@ -114,10 +114,10 @@ jobs:
       - name: Run cargo bench
         run: |
           sudo ip link set dev lo mtu "$MTU"
-          cset shield --exec "bash -c \"taskset -c 2 nice -n -20 setarch --addr-no-randomize \
-            cargo \"+$TOOLCHAIN\" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt\""
-          cset shield --exec "bash -c \"taskset -c 2 nice -n -20 setarch --addr-no-randomize \
-            cargo \"+$TOOLCHAIN\" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt\""
+          cset shield --exec bash -- -c "taskset -c 2 nice -n -20 setarch --addr-no-randomize \
+            cargo \"+$TOOLCHAIN\" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt"
+          cset shield --exec bash -- -c "taskset -c 2 nice -n -20 setarch --addr-no-randomize \
+            cargo \"+$TOOLCHAIN\" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt"
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -220,17 +220,17 @@ jobs:
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
                   # shellcheck disable=SC2086
-                  cset shield --exec "bash -c \"taskset -c 2 nice -n -20 setarch --addr-no-randomize \
-                    perf $PERF_OPT -o "$FILENAME.server.perf" $CMD &\""
+                  cset shield --exec bash -- -c "taskset -c 2 nice -n -20 setarch --addr-no-randomize \
+                    perf $PERF_OPT -o \"$FILENAME.server.perf\" $CMD &"
                   PID=$!
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
-                  cset shield --exec "bash -c \"taskset -c 3 nice -n -20 setarch --addr-no-randomize \
+                  cset shield --exec bash -- -c "taskset -c 3 nice -n -20 setarch --addr-no-randomize \
                     hyperfine --command-name \"$TAG\" --time-unit millisecond  \
                       --export-json \"hyperfine/$FILENAME.json\" \
                       --export-markdown \"hyperfine/$FILENAME.md\" \
                       --output null --warmup 5 --runs $RUNS --prepare \"sleep 1\" \"$CMD\" |
-                    tee -a comparison.txt\""
+                    tee -a comparison.txt"
                   echo >> comparison.txt
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
@@ -241,8 +241,8 @@ jobs:
                   # the perf profiles of those different runs.
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
-                  cset shield --exec "bash -c \"taskset -c 3 nice -n -20 setarch --addr-no-randomize \
-                    perf $PERF_OPT -o \"$FILENAME.client.perf\" $CMD > /dev/null 2>&1\""
+                  cset shield --exec bash -- -c "taskset -c 3 nice -n -20 setarch --addr-no-randomize \
+                    perf $PERF_OPT -o \"$FILENAME.client.perf\" $CMD > /dev/null 2>&1"
                   kill $PID
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
