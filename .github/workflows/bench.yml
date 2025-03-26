@@ -75,8 +75,8 @@ jobs:
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
           export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
           echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
-          BENCHES=$(cargo "+$TOOLCHAIN" bench --locked --workspace --features bench --no-run 2>&1 | \
-            grep Running | cut -d\( -f2 | cut -d\) -f1)
+          cargo "+$TOOLCHAIN" bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
+          BENCHES=$(grep Running benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
           echo "BENCHES=$BENCHES" >> "$GITHUB_ENV"
           cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
 
@@ -116,10 +116,10 @@ jobs:
       - name: Run cargo bench
         run: |
           sudo ip link set dev lo mtu "$MTU"
-          for bench in $BENCHES; do
-            name=$(basename "$bench" | cut -d- -f1)
+          for BENCH in $BENCHES; do
+            NAME=$(basename "$BENCH" | cut -d- -f1)
             # shellcheck disable=SC2086
-            cset proc --set=cpu2 --exec perf -- $PERF_OPT -o "$name.perf" nice -n -20 setarch --addr-no-randomize "$bench" --bench
+            cset proc --set=cpu2 --exec perf -- $PERF_OPT -o "$NAME.perf" nice -n -20 setarch --addr-no-randomize "$BENCH" --bench
           done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
