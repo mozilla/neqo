@@ -31,23 +31,23 @@ jobs:
         with:
           persist-credentials: false
 
-      # - name: Checkout msquic
-      #   uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      #   with:
-      #     repository: microsoft/msquic
-      #     ref: main
-      #     path: msquic
-      #     submodules: true
-      #     persist-credentials: false
+      - name: Checkout msquic
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: microsoft/msquic
+          ref: main
+          path: msquic
+          submodules: true
+          persist-credentials: false
 
-      # - name: Checkout google/quiche
-      #   uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      #   with:
-      #     repository: google/quiche
-      #     ref: main
-      #     path: gquiche
-      #     submodules: true
-      #     persist-credentials: false
+      - name: Checkout google/quiche
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: google/quiche
+          ref: main
+          path: gquiche
+          submodules: true
+          persist-credentials: false
 
       - name: Set PATH and environment
         run: |
@@ -72,24 +72,23 @@ jobs:
 
       - name: Build neqo
         run: |
-          # cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
+          cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
           export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
-          # echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
           cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
 
-      # - name: Build msquic
-      #   run: |
-      #     mkdir -p msquic/build
-      #     cd msquic/build
-      #     cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
-      #     cmake --build .
+      - name: Build msquic
+        run: |
+          mkdir -p msquic/build
+          cd msquic/build
+          cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
+          cmake --build .
 
-      # - name: Build google/quiche
-      #   run: |
-      #     cd gquiche
-      #     bazel build -c opt --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
-      #     bazel shutdown
+      - name: Build google/quiche
+        run: |
+          cd gquiche
+          bazel build -c opt --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
+          bazel shutdown
 
       - name: Download cached main-branch results
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
@@ -111,13 +110,13 @@ jobs:
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
 
-      # - name: Run cargo bench
-      #   run: |
-      #     sudo ip link set dev lo mtu "$MTU"
-      #     cset proc --set=cpu2 --exec bash -- -c "\
-      #       cargo \"+$TOOLCHAIN\" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt"
-      #     cset proc --set=cpu2 --exec bash -- -c "\
-      #       cargo \"+$TOOLCHAIN\" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt"
+      - name: Run cargo bench
+        run: |
+          sudo ip link set dev lo mtu "$MTU"
+          cset proc --set=cpu2 --exec bash -- -c "\
+            cargo \"+$TOOLCHAIN\" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt"
+          cset proc --set=cpu2 --exec bash -- -c "\
+            cargo \"+$TOOLCHAIN\" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt"
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -257,7 +256,7 @@ jobs:
                     DELTA=$(bc -l <<< "($MEAN - $BASELINE_MEAN) * 1000")
                     PERCENT=$(bc -l <<< "(($MEAN - $BASELINE_MEAN) / $BASELINE_MEAN) * 100")
                     MIBS=$(bc -l <<< "$SIZE / ($MEAN * 1000) / 1048576")
-                    RANGE=$(cut -d'±' -f2 < "hyperfine/$FILENAME.md" | cut -d' ' -f1)
+                    RANGE=$(grep -Po '^.*± *\K.*' < "hyperfine/$FILENAME.md" | cut -d' ' -f1)
                     MIBS_RANGE=$(bc -l <<< "$SIZE / ($RANGE * 1000) / 1048576")
                     echo "Transfer rate: $MIBS MiB/s ± $MIBS_RANGE"
 
