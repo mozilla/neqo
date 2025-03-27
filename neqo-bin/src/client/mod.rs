@@ -474,7 +474,6 @@ impl<'a, H: Handler> Runner<'a, H> {
 
         loop {
             while (send || exit) && !data.is_empty() {
-                qdebug!("Sending GSO batch ");
                 let common = first.take().unwrap();
                 // Send all collected datagrams as GSO-sized chunks.
                 for chunk in data.chunks(self.socket.max_gso_segments() * common.len()) {

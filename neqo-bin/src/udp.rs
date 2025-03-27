@@ -49,7 +49,7 @@ impl Socket {
         self.inner.readable().await
     }
 
-    /// Send a [`contents`] on the given [`Socket`].
+    /// Send `contents` on the given [`Socket`].
     pub fn send(
         &self,
         source: SocketAddr,
@@ -71,7 +71,7 @@ impl Socket {
         })
     }
 
-    /// Receive a batch of [`Datagram`]s on the given [`Socket`], each set with
+    /// Receive a batch of `Datagram`s on the given [`Socket`], each set with
     /// the provided local address.
     pub fn recv<'a>(
         &self,
