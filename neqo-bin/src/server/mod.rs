@@ -254,7 +254,7 @@ impl ServerRunner {
         let mut batch_meta: Option<DatagramMetaData> = None;
         let mut batch_data = SmallVec::<[u8; 8 * 1500]>::new(); // FIXME: A guess.
         let mut next: Option<Datagram> = None;
-        let mut exit = false; // Should we exit the next loop on the next interation?
+        let mut exit = false; // Should we exit the loop on the next interation?
         let mut send = false; // Should we send on the next loop interation?
         let mut maybe_gso_failed = false;
 
