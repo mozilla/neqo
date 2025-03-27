@@ -615,7 +615,7 @@ impl LossRecovery {
         }
 
         qdebug!(
-            "[{self}] ACK for {pn_space} - largest_acked={}",
+            "[{self}] ACK for {pn_space:?} - largest_acked={}",
             largest_acked_pkt.pn()
         );
 
@@ -700,7 +700,7 @@ impl LossRecovery {
 
     /// Discard state for a given packet number space.
     pub fn discard(&mut self, primary_path: &PathRef, space: PacketNumberSpace, now: Instant) {
-        qdebug!("[{self}] Reset loss recovery state for {space}");
+        qdebug!("[{self}] Reset loss recovery state for {space:?}");
         let mut path = primary_path.borrow_mut();
         for p in self.spaces.drop_space(space) {
             path.discard_packet(&p, now, &mut self.stats.borrow_mut());
