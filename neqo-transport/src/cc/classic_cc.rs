@@ -594,7 +594,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use neqo_common::{qinfo, IpTosEcn};
+    use neqo_common::qinfo;
     use test_fixture::now;
 
     use super::{ClassicCongestionControl, WindowAdjustment, PERSISTENT_CONG_THRESH};
@@ -636,7 +636,6 @@ mod tests {
         SentPacket::new(
             PacketType::Short,
             pn,
-            IpTosEcn::default(),
             now() + t,
             ack_eliciting,
             Vec::new(),
@@ -851,7 +850,6 @@ mod tests {
                 SentPacket::new(
                     PacketType::Short,
                     u64::try_from(i).unwrap(),
-                    IpTosEcn::default(),
                     by_pto(t),
                     true,
                     Vec::new(),
@@ -973,10 +971,9 @@ mod tests {
         lost[0] = SentPacket::new(
             lost[0].packet_type(),
             lost[0].pn(),
-            lost[0].ecn_mark(),
             lost[0].time_sent(),
             false,
-            Vec::new(),
+            lost[0].tokens().to_vec(),
             lost[0].len(),
         );
         assert!(!persistent_congestion_by_pto(
@@ -1075,7 +1072,6 @@ mod tests {
                 let p = SentPacket::new(
                     PacketType::Short,
                     next_pn,
-                    IpTosEcn::default(),
                     now,
                     true,
                     Vec::new(),
@@ -1103,7 +1099,6 @@ mod tests {
             let p = SentPacket::new(
                 PacketType::Short,
                 next_pn,
-                IpTosEcn::default(),
                 now,
                 true,
                 Vec::new(),
@@ -1154,7 +1149,6 @@ mod tests {
         let p_lost = SentPacket::new(
             PacketType::Short,
             1,
-            IpTosEcn::default(),
             now,
             true,
             Vec::new(),
@@ -1168,7 +1162,6 @@ mod tests {
         let p_not_lost = SentPacket::new(
             PacketType::Short,
             2,
-            IpTosEcn::default(),
             now,
             true,
             Vec::new(),
@@ -1192,7 +1185,6 @@ mod tests {
                 let p = SentPacket::new(
                     PacketType::Short,
                     next_pn,
-                    IpTosEcn::default(),
                     now,
                     true,
                     Vec::new(),
@@ -1226,7 +1218,6 @@ mod tests {
             let p = SentPacket::new(
                 PacketType::Short,
                 next_pn,
-                IpTosEcn::default(),
                 now,
                 true,
                 Vec::new(),
@@ -1266,7 +1257,6 @@ mod tests {
         let p_ce = SentPacket::new(
             PacketType::Short,
             1,
-            IpTosEcn::default(),
             now,
             true,
             Vec::new(),
