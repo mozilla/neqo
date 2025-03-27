@@ -64,23 +64,28 @@ impl Default for RecvBuf {
 pub fn send_inner(
     state: &UdpSocketState,
     socket: quinn_udp::UdpSockRef<'_>,
-    d: &Datagram,
+    source: SocketAddr,
+    destination: SocketAddr,
+    tos: IpTos,
+    len: usize,
+    contents: &[u8],
 ) -> io::Result<()> {
     let transmit = Transmit {
-        destination: d.destination(),
-        ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
-        contents: d,
-        segment_size: None,
+        destination,
+        ecn: EcnCodepoint::from_bits(Into::<u8>::into(tos)),
+        contents,
+        segment_size: Some(len),
         src_ip: None,
     };
 
     state.try_send(socket, &transmit)?;
 
     qtrace!(
-        "sent {} bytes from {} to {}",
-        d.len(),
-        d.source(),
-        d.destination()
+        "sent {} bytes in {} packets from {} to {}",
+        contents.len(),
+        contents.len() / len,
+        source,
+        destination
     );
 
     Ok(())
@@ -201,8 +206,23 @@ impl<S: SocketRef> Socket<S> {
     }
 
     /// Send a [`Datagram`] on the given [`Socket`].
-    pub fn send(&self, d: &Datagram) -> io::Result<()> {
-        send_inner(&self.state, (&self.inner).into(), d)
+    pub fn send(
+        &self,
+        source: SocketAddr,
+        destination: SocketAddr,
+        tos: IpTos,
+        len: usize,
+        contents: &[u8],
+    ) -> io::Result<()> {
+        send_inner(
+            &self.state,
+            (&self.inner).into(),
+            source,
+            destination,
+            tos,
+            len,
+            contents,
+        )
     }
 
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each
@@ -255,14 +275,24 @@ mod tests {
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        let datagram = Datagram::new(
+        let data = b"Hello, world!";
+        sender.send(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
-            b"Hello, world!".to_vec(),
-        );
+            data.len(),
+            data,
+        )?;
 
-        sender.send(&datagram)?;
+        let data = b"Hello, world!";
+        let tos = IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1));
+        sender.send(
+            sender.inner.local_addr()?,
+            receiver.inner.local_addr()?,
+            tos,
+            data.len(),
+            data,
+        )?;
 
         let mut recv_buf = RecvBuf::new();
         let mut received_datagrams = receiver
@@ -285,7 +315,7 @@ mod tests {
             );
         } else {
             assert_eq!(
-                IpTosEcn::from(datagram.tos()),
+                IpTosEcn::from(tos),
                 IpTosEcn::from(received_datagrams.next().unwrap().tos())
             );
         }

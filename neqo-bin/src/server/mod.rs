@@ -15,7 +15,8 @@
 use std::{
     cell::RefCell,
     fmt::{self, Display},
-    fs, io,
+    fs,
+    io::{self},
     net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     pin::Pin,
@@ -241,6 +242,7 @@ impl ServerRunner {
     // Free function (i.e. not taking `&mut self: ServerRunner`) to be callable by
     // `ServerRunner::read_and_process` while holding a reference to
     // `ServerRunner::recv_buf`.
+    // FIXME: This should really be merged/unified with neqo_bin::client::Runner::process_output.
     async fn process_inner(
         server: &mut Box<dyn HttpServer>,
         timeout: &mut Option<Pin<Box<Sleep>>>,
@@ -248,30 +250,83 @@ impl ServerRunner {
         now: &dyn Fn() -> Instant,
         mut input_dgram: Option<Datagram<&mut [u8]>>,
     ) -> Result<(), io::Error> {
+        // TODO: Would it be more efficient to store only the length, destination and TOS byte
+        // instead of entire datagrams here?
+        let mut first: Option<Datagram> = None;
+        let mut next: Option<Datagram> = None;
+        let mut data = Vec::<u8>::new();
+        let mut exit = false;
+        let mut send = false;
+
         loop {
+            if (send || exit) && !data.is_empty() {
+                let common = first.take().unwrap();
+                // Send all collected datagrams as GSO-sized chunks.
+                let socket = Self::find_socket(sockets, common.source());
+                for chunk in data.chunks(socket.max_gso_segments() * common.len()) {
+                    // Optimistically attempt sending datagram. In case the OS
+                    // buffer is full, wait till socket is writable then try again.
+                    match socket.send(
+                        common.source(),
+                        common.destination(),
+                        common.tos(),
+                        common.len(),
+                        chunk,
+                    ) {
+                        Ok(()) => break,
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                            socket.writable().await?;
+                            // Now try again.
+                        }
+                        e @ Err(_) => return e,
+                    }
+                }
+
+                // If we encountered a datagram with different length, destination or TOS byte,
+                // start a new GSO batch with it.
+                first = next.take();
+                if let Some(next) = &first {
+                    data = next.to_vec();
+                } else {
+                    data.clear();
+                    send = false;
+                }
+            }
+
+            if exit {
+                debug_assert!(first.is_none() && next.is_none() && data.is_empty());
+                break;
+            }
+
             match server.process(input_dgram.take(), now()) {
                 Output::Datagram(dgram) => {
-                    let socket = Self::find_socket(sockets, dgram.source());
-                    loop {
-                        // Optimistically attempt sending datagram. In case the
-                        // OS buffer is full, wait till socket is writable then
-                        // try again.
-                        match socket.send(&dgram) {
-                            Ok(()) => break,
-                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                                socket.writable().await?;
-                                // Now try again.
-                            }
-                            e @ Err(_) => return e,
+                    if first.is_none() {
+                        // This is the first datagram we are collecting.
+                        data.extend_from_slice(dgram.as_ref());
+                        first = Some(dgram);
+                    } else {
+                        let common = first.clone().unwrap();
+                        if common.len() == dgram.len()
+                            && common.destination() == dgram.destination()
+                            && common.tos() == dgram.tos()
+                        {
+                            // Another datagram with the same length, destination and TOS byte -
+                            // collect it.
+                            data.extend_from_slice(dgram.as_ref());
+                        } else {
+                            // Another datagram but with different length, destination or TOS byte -
+                            // remember it.
+                            next = Some(dgram);
+                            send = true;
                         }
                     }
                 }
                 Output::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
                     *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
-                    break;
+                    exit = true;
                 }
-                Output::None => break,
+                Output::None => exit = true,
             }
         }
         Ok(())

@@ -461,14 +461,32 @@ impl<'a, H: Handler> Runner<'a, H> {
         Ok(self.handler.take_token())
     }
 
+    // FIXME: This should really be merged/unified with
+    // neqo_bin::server::ServerRunner::process_inner.
     async fn process_output(&mut self) -> Result<(), io::Error> {
+        // TODO: Would it be more efficient to store only the length, destination and TOS byte
+        // instead of entire datagrams here?
+        let mut first: Option<Datagram> = None;
+        let mut next: Option<Datagram> = None;
+        let mut data = Vec::<u8>::new();
+        let mut exit = false;
+        let mut send = false;
+
         loop {
-            match self.client.process_output(Instant::now()) {
-                Output::Datagram(dgram) => loop {
+            while (send || exit) && !data.is_empty() {
+                qdebug!("Sending GSO batch ");
+                let common = first.take().unwrap();
+                // Send all collected datagrams as GSO-sized chunks.
+                for chunk in data.chunks(self.socket.max_gso_segments() * common.len()) {
                     // Optimistically attempt sending datagram. In case the OS
-                    // buffer is full, wait till socket is writable then try
-                    // again.
-                    match self.socket.send(&dgram) {
+                    // buffer is full, wait till socket is writable then try again.
+                    match self.socket.send(
+                        common.source(),
+                        common.destination(),
+                        common.tos(),
+                        common.len(),
+                        chunk,
+                    ) {
                         Ok(()) => break,
                         Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                             self.socket.writable().await?;
@@ -476,15 +494,56 @@ impl<'a, H: Handler> Runner<'a, H> {
                         }
                         e @ Err(_) => return e,
                     }
-                },
+                }
+
+                // If we encountered a datagram with different length, destination or TOS byte,
+                // start a new GSO batch with it.
+                first = next.take();
+                if let Some(next) = &first {
+                    data = next.to_vec();
+                } else {
+                    data.clear();
+                    send = false;
+                }
+            }
+
+            if exit {
+                debug_assert!(first.is_none() && next.is_none() && data.is_empty());
+                break;
+            }
+
+            match self.client.process_output(Instant::now()) {
+                Output::Datagram(dgram) => {
+                    if first.is_none() {
+                        // This is the first datagram we are collecting.
+                        data.extend_from_slice(dgram.as_ref());
+                        first = Some(dgram);
+                    } else {
+                        let common = first.clone().unwrap();
+                        if common.len() == dgram.len()
+                            && common.destination() == dgram.destination()
+                            && common.tos() == dgram.tos()
+                        {
+                            // Another datagram with the same length, destination and TOS byte -
+                            // collect it.
+                            data.extend_from_slice(dgram.as_ref());
+                        } else {
+                            // Another datagram but with different length, destination or TOS byte -
+                            // remember it.
+                            next = Some(dgram);
+                            send = true;
+                        }
+                    }
+                }
+                // }
                 Output::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
                     self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
-                    break;
+                    exit = true;
                 }
                 Output::None => {
                     qdebug!("Output::None");
-                    break;
+                    exit = true;
                 }
             }
         }
