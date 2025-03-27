@@ -36,7 +36,7 @@ use neqo_crypto::{
     init_db, AntiReplay, Cipher,
 };
 use neqo_transport::{Output, RandomConnectionIdGenerator, Version};
-use neqo_udp::RecvBuf;
+use neqo_udp::{DatagramMetaData, RecvBuf};
 use tokio::time::Sleep;
 
 use crate::SharedArgs;
@@ -252,7 +252,7 @@ impl ServerRunner {
     ) -> Result<(), io::Error> {
         // TODO: Would it be more efficient to store only the length, destination and TOS byte
         // instead of entire datagrams here?
-        let mut first: Option<Datagram> = None;
+        let mut first: Option<DatagramMetaData> = None;
         let mut next: Option<Datagram> = None;
         let mut data = Vec::<u8>::new();
         let mut exit = false;
@@ -267,13 +267,7 @@ impl ServerRunner {
                 for chunk in data.chunks(socket.max_gso_segments() * common.len()) {
                     // Optimistically attempt sending datagram. In case the OS
                     // buffer is full, wait till socket is writable then try again.
-                    match socket.send(
-                        common.source(),
-                        common.destination(),
-                        common.tos(),
-                        common.len(),
-                        chunk,
-                    ) {
+                    match socket.send(&common, chunk) {
                         Ok(()) => break,
                         Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                             socket.writable().await?;
@@ -298,9 +292,9 @@ impl ServerRunner {
 
                 // If we encountered a datagram with different length, destination or TOS byte,
                 // start a new GSO batch with it.
-                first = next.take();
-                if let Some(next) = &first {
+                if let Some(next) = next.take() {
                     data = next.to_vec();
+                    first = Some(next.into());
                 } else {
                     data.clear();
                     send = false;
@@ -317,13 +311,10 @@ impl ServerRunner {
                     if first.is_none() {
                         // This is the first datagram we are collecting.
                         data.extend_from_slice(dgram.as_ref());
-                        first = Some(dgram);
+                        first = Some(dgram.into());
                     } else {
                         let common = first.clone().unwrap();
-                        if common.len() == dgram.len()
-                            && common.destination() == dgram.destination()
-                            && common.tos() == dgram.tos()
-                        {
+                        if common.eql(&dgram) {
                             // Another datagram with the same length, destination and TOS byte -
                             // collect it.
                             data.extend_from_slice(dgram.as_ref());

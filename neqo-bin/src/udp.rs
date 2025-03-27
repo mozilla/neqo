@@ -8,8 +8,7 @@
 
 use std::{io, net::SocketAddr};
 
-use neqo_common::IpTos;
-use neqo_udp::{DatagramIter, RecvBuf};
+use neqo_udp::{DatagramIter, DatagramMetaData, RecvBuf};
 
 /// Ideally this would live in [`neqo-udp`]. [`neqo-udp`] is used in Firefox.
 ///
@@ -50,24 +49,9 @@ impl Socket {
     }
 
     /// Send `contents` on the given [`Socket`].
-    pub fn send(
-        &self,
-        source: SocketAddr,
-        destination: SocketAddr,
-        tos: IpTos,
-        len: usize,
-        contents: &[u8],
-    ) -> io::Result<()> {
+    pub fn send(&self, meta: &DatagramMetaData, contents: &[u8]) -> io::Result<()> {
         self.inner.try_io(tokio::io::Interest::WRITABLE, || {
-            neqo_udp::send_inner(
-                &self.state,
-                (&self.inner).into(),
-                source,
-                destination,
-                tos,
-                len,
-                contents,
-            )
+            neqo_udp::send_inner(&self.state, (&self.inner).into(), meta, contents)
         })
     }
 
