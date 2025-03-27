@@ -292,7 +292,7 @@ impl ServerRunner {
                 // If we encountered a datagram with different length, destination or TOS byte,
                 // start a new GSO batch with it.
                 if let Some(next) = next.take() {
-                    batch_data = SmallVec::from_vec(next.to_vec());
+                    batch_data = SmallVec::from(next.as_ref());
                     batch_meta = Some(next.into());
                 } else {
                     batch_data.clear();
