@@ -37,6 +37,7 @@ use neqo_crypto::{
 };
 use neqo_transport::{Output, RandomConnectionIdGenerator, Version};
 use neqo_udp::{DatagramMetaData, RecvBuf};
+use smallvec::SmallVec;
 use tokio::time::Sleep;
 
 use crate::SharedArgs;
@@ -250,24 +251,22 @@ impl ServerRunner {
         now: &dyn Fn() -> Instant,
         mut input_dgram: Option<Datagram<&mut [u8]>>,
     ) -> Result<(), io::Error> {
-        // TODO: Would it be more efficient to store only the length, destination and TOS byte
-        // instead of entire datagrams here?
-        let mut first: Option<DatagramMetaData> = None;
+        let mut batch_meta: Option<DatagramMetaData> = None;
+        let mut batch_data = SmallVec::<[u8; 8 * 1500]>::new(); // FIXME: A guess.
         let mut next: Option<Datagram> = None;
-        let mut data = Vec::<u8>::new();
-        let mut exit = false;
-        let mut send = false;
-        let mut error_other = false;
+        let mut exit = false; // Should we exit the next loop on the next interation?
+        let mut send = false; // Should we send on the next loop interation?
+        let mut maybe_gso_failed = false;
 
         'outer: loop {
-            if (send || exit) && !data.is_empty() {
-                let common = first.take().unwrap();
+            while (send || exit) && !batch_data.is_empty() {
+                let meta = batch_meta.take().unwrap();
                 // Send all collected datagrams as GSO-sized chunks.
-                let socket = Self::find_socket(sockets, common.source());
-                for chunk in data.chunks(socket.max_gso_segments() * common.len()) {
+                let socket = Self::find_socket(sockets, meta.source());
+                for gso_chunk in batch_data.chunks(socket.max_gso_segments() * meta.len()) {
                     // Optimistically attempt sending datagram. In case the OS
                     // buffer is full, wait till socket is writable then try again.
-                    match socket.send(&common, chunk) {
+                    match socket.send(&meta, gso_chunk) {
                         Ok(()) => break,
                         Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                             socket.writable().await?;
@@ -276,9 +275,9 @@ impl ServerRunner {
                         Err(e) if e.kind() == io::ErrorKind::Other => {
                             // This can happen if the interface does not support GSO.
                             // quinn-udp will set `max_gso_segments` to 1 in this case.
-                            if !error_other && socket.max_gso_segments() == 1 {
+                            if !maybe_gso_failed && socket.max_gso_segments() == 1 {
                                 // Retry this once.
-                                error_other = true;
+                                maybe_gso_failed = true;
                                 continue 'outer;
                             }
                             return Err(e);
@@ -293,35 +292,36 @@ impl ServerRunner {
                 // If we encountered a datagram with different length, destination or TOS byte,
                 // start a new GSO batch with it.
                 if let Some(next) = next.take() {
-                    data = next.to_vec();
-                    first = Some(next.into());
+                    batch_data = SmallVec::from_vec(next.to_vec());
+                    batch_meta = Some(next.into());
                 } else {
-                    data.clear();
+                    batch_data.clear();
                     send = false;
                 }
             }
 
             if exit {
-                debug_assert!(first.is_none() && next.is_none() && data.is_empty());
+                debug_assert!(batch_meta.is_none() && next.is_none() && batch_data.is_empty());
                 break;
             }
 
             match server.process(input_dgram.take(), now()) {
                 Output::Datagram(dgram) => {
-                    if first.is_none() {
+                    if batch_meta.is_none() {
                         // This is the first datagram we are collecting.
-                        data.extend_from_slice(dgram.as_ref());
-                        first = Some(dgram.into());
+                        batch_data.extend_from_slice(dgram.as_ref());
+                        batch_meta = Some(dgram.into());
                     } else {
-                        let common = first.clone().unwrap();
-                        if common.eql(&dgram) {
+                        let meta = batch_meta.clone().unwrap();
+                        if meta.eql(&dgram) {
                             // Another datagram with the same length, destination and TOS byte -
                             // collect it.
-                            data.extend_from_slice(dgram.as_ref());
+                            batch_data.extend_from_slice(dgram.as_ref());
                         } else {
                             // Another datagram but with different length, destination or TOS byte -
                             // remember it.
                             next = Some(dgram);
+                            // We need to send the current batch before we can send the next one.
                             send = true;
                         }
                     }
@@ -331,9 +331,13 @@ impl ServerRunner {
                     *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     exit = true;
                 }
-                Output::None => exit = true,
+                Output::None => {
+                    qdebug!("Output::None");
+                    exit = true;
+                }
             }
         }
+
         Ok(())
     }
 

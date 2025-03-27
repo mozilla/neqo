@@ -68,16 +68,11 @@ pub struct DatagramMetaData {
     len: usize,
     tos: IpTos,
 }
-
+#[expect(clippy::len_without_is_empty, reason = "We don't need it.")]
 impl DatagramMetaData {
     #[must_use]
     pub const fn len(&self) -> usize {
         self.len
-    }
-
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.len == 0
     }
 
     #[must_use]
