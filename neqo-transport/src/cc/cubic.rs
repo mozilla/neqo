@@ -75,14 +75,14 @@ pub const CUBIC_FAST_CONVERGENCE: f64 = 0.85; // (1.0 + CUBIC_BETA) / 2.0;
 /// this value reduces the magnitude of the resulting growth by a constant factor.
 /// A value of 1.0 would mean a return to the rate used in slow start.
 ///
-/// UPDATE: Not found in RFC. What is the reason for this and should we reconsider?
+/// UPDATE: Not found in RFC. I don't exactly understand why we're doing this?
 const EXPONENTIAL_GROWTH_REDUCTION: f64 = 2.0;
 
 /// Convert an integer congestion window value into a floating point value.
 /// This has the effect of reducing larger values to `1<<53`.
 /// If you have a congestion window that large, something is probably wrong.
 ///
-/// UPDATE: not found in RFC.
+/// UPDATE: not part of RFC.
 pub fn convert_to_f64(v: usize) -> f64 {
     let mut f_64 = f64::from(u32::try_from(v >> 21).unwrap_or(u32::MAX));
     f_64 *= 2_097_152.0; // f_64 <<= 21
@@ -302,15 +302,17 @@ impl WindowAdjustment for Cubic {
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.2-11.1>
         //
         // And the `cwnd` increase of `target - cwnd / cwnd` only applies here,
-        // not in the Reno-friendly region. So that needs to be adjusted. See wording:
+        // not in the Reno-friendly region. So that needs to be adjusted. Right now
+        // we are doing the `target - cwnd / cwnd` part for all regions I think.
+        // See wording:
         //
-        // > cwnd SHOULD be set to w_est
+        // > cwnd SHOULD be set to w_est ("set to")
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-8>
         //
         // vs.
         //
-        // > cwnd MUST be incremented by `target - cwnd / cwnd`
+        // > cwnd MUST be incremented by `target - cwnd / cwnd` ("incremented by")
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#name-convex-region>
         let time_ca = self
@@ -331,9 +333,17 @@ impl WindowAdjustment for Cubic {
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
         //
-        // UPDATE: This is handled differently in the new RFC, but it's also
-        // different from the original RFC. Still need to understand what exactly
-        // is going on here.
+        // UPDATE/QUESTION: This is handled differently in the new RFC, but our implementation is also
+        // different from the original RFC. Still need to understand what exactly is going on here.
+        //
+        // Also note:
+        //
+        // > Once w_est has grown to reach the cwnd at the time of most recently setting
+        // > ssthresh -- that is, w_est >= cwnd_prior -- the sender SHOULD set CUBIC_ALPHA to
+        // > 1 to ensure that it can achieve the same congestion window increment rate
+        // > as Reno, which uses AIMD(1, 0.5).
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-11>
         let max_datagram_size = convert_to_f64(max_datagram_size);
         let tcp_cnt = self.estimated_tcp_cwnd / CUBIC_ALPHA;
         let incr = (self.tcp_acked_bytes / tcp_cnt).floor();
@@ -345,7 +355,7 @@ impl WindowAdjustment for Cubic {
         // Take the larger cwnd of Cubic concave or convex and Cubic Reno-friendly region.
         //
         // > When receiving a new ACK in congestion avoidance (where cwnd could be greater than
-        // > or less than Wmax), CUBIC checks whether Wcubic(t) is less than w_est.  If so, CUBIC
+        // > or less than w_max), CUBIC checks whether W_cubic(t) is less than w_est.  If so, CUBIC
         // > is in the Reno-friendly region and cwnd SHOULD be set to w_est at each reception of a new ACK.
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-8>
@@ -377,6 +387,41 @@ impl WindowAdjustment for Cubic {
         acked_to_increase as usize
     }
 
+    // UPDATE: CUBIC RFC 9438 changes the logic for multiplicative decrease and uses
+    // `bytes_in_flight` instead of `cwnd` for it's calculation:
+    //
+    // > ssthresh = bytes_in_flight * CUBIC_BETA
+    // > cwnd_prior = cwnd
+    // > if (reduction_on_loss) {
+    // >     cwnd = max(ssthresh, 2*MSS)
+    // > } else if (reduction_on_ece) {
+    // >     cwnd = max(ssthresh, 1*MSS)
+    // > }
+    // > ssthresh = max(ssthresh, 2*MSS)
+    //
+    // <https://datatracker.ietf.org/doc/html/rfc9438#figure-5>
+    //
+    // With the note:
+    //
+    // > A QUIC sender that uses a cwnd value to calculate new values for cwnd and ssthresh after
+    // > detecting a congestion event is REQUIRED to apply similar mechanisms [RFC9002].
+    //
+    // "similar mechanisms" refering to taking "measures to prevent cwnd from growing when the
+    // volume of bytes in flight is smaller than cwnd".
+    //
+    // QUESTION: Do we already do this somewhere?
+    //
+    // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.6>
+    //
+    // We are setting ssthresh in `on_congestion_event()` in `classic_cc.rs` after having returned `cwnd`
+    // from `reduce_cwnd()` below. That is code that isn't CUBIC specific though, so we can add a condition
+    // there to check which cc algorithm we're using and do the `ssthresh|cwnd = max(...)` outlined above
+    // for CUBIC only.
+    //
+    // (or maybe don't do it at all because QUIC has a minimum congestion window of 2*MSS, as mentioned
+    // further below)
+    // QUESTION: Which takes precedence? The minimum congestion window of 2*MSS for QUIC or CUBIC wanting to set
+    // cwnd to 1*MSS on reduction by ECE?
     fn reduce_cwnd(
         &mut self,
         curr_cwnd: usize,
@@ -386,12 +431,26 @@ impl WindowAdjustment for Cubic {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
         // Fast Convergence
         //
-        // If congestion event occurs before the maximum congestion window before the last
-        // congestion event, we reduce the the maximum congestion window and thereby W_max.
-        // check cwnd + MAX_DATAGRAM_SIZE instead of cwnd because with cwnd in bytes, cwnd may be
+        // > During a congestion event, if the current cwnd is less than w_max, this indicates
+        // > that the saturation point experienced by this flow is getting reduced because of
+        // > a change in available bandwidth. This flow can then release more bandwidth by
+        // > reducing w_max further. This action effectively lengthens the time for this flow
+        // > to increase its congestion window, because the reduced w_max forces the flow to
+        // > plateau earlier. This allows more time for the new flow to catch up to its
+        // > congestion window size.
+        //
+        // Check cwnd + MAX_DATAGRAM_SIZE instead of cwnd because with cwnd in bytes, cwnd may be
         // slightly off.
         //
-        // <https://www.rfc-editor.org/rfc/rfc8312#section-4.6>
+        // UPDATE: New logic for fast convergence.
+        //
+        // if (cwnd < w_max AND fast_convergence_enabled) {
+        //     w_max = cwnd * CUBIC_FAST_CONVERGENCE;
+        // } else {
+        //     w_max = cwnd;
+        // }
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
         self.last_max_cwnd =
             if curr_cwnd_f64 + convert_to_f64(max_datagram_size) < self.last_max_cwnd {
                 curr_cwnd_f64 * CUBIC_FAST_CONVERGENCE
@@ -424,4 +483,32 @@ impl WindowAdjustment for Cubic {
 
 // UPDATE: Things to remember that didn't make it anywhere else:
 //
-// - what about `ssthresh`
+// 1. Minimum congestion window:
+//
+// > Note that CUBIC MUST continue to reduce cwnd in response to congestion events
+// > detected by ECN-Echo ACKs until it reaches a value of 1 SMSS. If congestion events
+// > indicated by ECN-Echo ACKs persist, a sender with a cwnd of 1 SMSS MUST reduce its
+// > sending rate even further. This can be achieved by using a retransmission timer
+// > with exponential backoff, as described in [RFC3168].
+//
+// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.6-7> VERSUS
+//
+// > QUIC therefore recommends that the minimum congestion window be two packets.
+//
+// <https://datatracker.ietf.org/doc/html/rfc9002#section-4.8>
+//
+// QUESTION: So this probably does not apply to CUBIC on QUIC and we never go below 2*MSS
+// (as is currently implemented)?
+//
+// 2. Timeout: <https://datatracker.ietf.org/doc/html/rfc9438#section-4.8>
+//
+// > QUIC does not collapse the congestion window when the PTO expires, since a single
+// > packet loss at the tail does not indicate persistent congestion.
+//
+// <https://datatracker.ietf.org/doc/html/rfc9002#section-4.7>
+//
+// QUESTION: Timeout (RTO/PTO) does not apply to us then?
+//
+// 3. Spurious fast retransmits: <https://datatracker.ietf.org/doc/html/rfc9438#section-4.9.2>
+//
+// QUESTION: Do we want to implement this? If yes then we may be able to do it in a follow up PR.
