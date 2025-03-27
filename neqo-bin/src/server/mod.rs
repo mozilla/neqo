@@ -257,8 +257,9 @@ impl ServerRunner {
         let mut data = Vec::<u8>::new();
         let mut exit = false;
         let mut send = false;
+        let mut error_other = false;
 
-        loop {
+        'outer: loop {
             if (send || exit) && !data.is_empty() {
                 let common = first.take().unwrap();
                 // Send all collected datagrams as GSO-sized chunks.
@@ -278,7 +279,20 @@ impl ServerRunner {
                             socket.writable().await?;
                             // Now try again.
                         }
-                        e @ Err(_) => return e,
+                        Err(e) if e.kind() == io::ErrorKind::Other => {
+                            // This can happen if the interface does not support GSO.
+                            // quinn-udp will set `max_gso_segments` to 1 in this case.
+                            if !error_other && socket.max_gso_segments() == 1 {
+                                // Retry this once.
+                                error_other = true;
+                                continue 'outer;
+                            }
+                            return Err(e);
+                        }
+                        e @ Err(_) => {
+                            qwarn!("{e:?}");
+                            return e;
+                        }
                     }
                 }
 
