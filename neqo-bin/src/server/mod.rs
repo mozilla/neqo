@@ -282,9 +282,9 @@ impl ServerRunner {
                             }
                             return Err(e);
                         }
-                        e @ Err(_) => {
-                            qwarn!("{e:?}");
-                            return e;
+                        Err(e) => {
+                            qwarn!("{e:?} {:?}", e.kind());
+                            return Err(e);
                         }
                     }
                 }
