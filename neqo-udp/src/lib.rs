@@ -61,26 +61,74 @@ impl Default for RecvBuf {
     }
 }
 
+#[derive(Clone)]
+pub struct DatagramMetaData {
+    src: SocketAddr,
+    dst: SocketAddr,
+    len: usize,
+    tos: IpTos,
+}
+#[expect(clippy::len_without_is_empty, reason = "We don't need it.")]
+impl DatagramMetaData {
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    #[must_use]
+    pub const fn tos(&self) -> IpTos {
+        self.tos
+    }
+
+    #[must_use]
+    pub const fn destination(&self) -> SocketAddr {
+        self.dst
+    }
+
+    #[must_use]
+    pub const fn source(&self) -> SocketAddr {
+        self.src
+    }
+
+    #[must_use]
+    pub fn eql(&self, other: &Datagram) -> bool {
+        self.dst == other.destination() && self.len == other.len() && self.tos == other.tos()
+    }
+}
+
+impl From<Datagram> for DatagramMetaData {
+    fn from(value: Datagram) -> Self {
+        Self {
+            src: value.source(),
+            dst: value.destination(),
+            len: value.len(),
+            tos: value.tos(),
+        }
+    }
+}
+
 pub fn send_inner(
     state: &UdpSocketState,
     socket: quinn_udp::UdpSockRef<'_>,
-    d: &Datagram,
+    meta: &DatagramMetaData,
+    contents: &[u8],
 ) -> io::Result<()> {
     let transmit = Transmit {
-        destination: d.destination(),
-        ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
-        contents: d,
-        segment_size: None,
+        destination: meta.destination(),
+        ecn: EcnCodepoint::from_bits(Into::<u8>::into(meta.tos())),
+        contents,
+        segment_size: Some(meta.len()),
         src_ip: None,
     };
 
     state.try_send(socket, &transmit)?;
 
     qtrace!(
-        "sent {} bytes from {} to {}",
-        d.len(),
-        d.source(),
-        d.destination()
+        "sent {} bytes in {} packets from {} to {}",
+        contents.len(),
+        contents.len() / meta.len(),
+        meta.source(),
+        meta.destination()
     );
 
     Ok(())
@@ -201,8 +249,8 @@ impl<S: SocketRef> Socket<S> {
     }
 
     /// Send a [`Datagram`] on the given [`Socket`].
-    pub fn send(&self, d: &Datagram) -> io::Result<()> {
-        send_inner(&self.state, (&self.inner).into(), d)
+    pub fn send(&self, meta: &DatagramMetaData, contents: &[u8]) -> io::Result<()> {
+        send_inner(&self.state, (&self.inner).into(), meta, contents)
     }
 
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each
@@ -255,14 +303,28 @@ mod tests {
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        let datagram = Datagram::new(
-            sender.inner.local_addr()?,
-            receiver.inner.local_addr()?,
-            IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
-            b"Hello, world!".to_vec(),
-        );
+        let data = b"Hello, world!";
+        sender.send(
+            &DatagramMetaData {
+                src: sender.inner.local_addr()?,
+                dst: receiver.inner.local_addr()?,
+                tos: IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
+                len: data.len(),
+            },
+            data,
+        )?;
 
-        sender.send(&datagram)?;
+        let data = b"Hello, world!";
+        let tos = IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1));
+        sender.send(
+            &DatagramMetaData {
+                src: sender.inner.local_addr()?,
+                dst: receiver.inner.local_addr()?,
+                tos: IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
+                len: data.len(),
+            },
+            data,
+        )?;
 
         let mut recv_buf = RecvBuf::new();
         let mut received_datagrams = receiver
@@ -285,7 +347,7 @@ mod tests {
             );
         } else {
             assert_eq!(
-                IpTosEcn::from(datagram.tos()),
+                IpTosEcn::from(tos),
                 IpTosEcn::from(received_datagrams.next().unwrap().tos())
             );
         }

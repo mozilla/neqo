@@ -935,6 +935,7 @@ dependencies = [
  "qlog",
  "quinn-udp",
  "regex",
+ "smallvec",
  "tokio",
  "url",
 ]
