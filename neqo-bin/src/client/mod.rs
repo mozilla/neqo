@@ -472,9 +472,9 @@ impl<'a, H: Handler> Runner<'a, H> {
         let mut send = false; // Should we send on the next loop interation?
         let mut maybe_gso_failed = false;
 
-        loop {
+        'outer: loop {
             if (send || exit) && !batch_data.is_empty() {
-                let meta = batch_meta.take().unwrap();
+                let meta = batch_meta.clone().unwrap();
                 // Send all collected datagrams as GSO-sized chunks.
                 for gso_chunk in batch_data.chunks(self.socket.max_gso_segments() * meta.len()) {
                     // Optimistically attempt sending datagram. In case the OS
@@ -492,9 +492,10 @@ impl<'a, H: Handler> Runner<'a, H> {
                                 if !maybe_gso_failed && self.socket.max_gso_segments() == 1 {
                                     // Retry this once.
                                     maybe_gso_failed = true;
-                                } else {
-                                    return e;
+                                    qdebug!("GSO failed, retrying without");
+                                    continue 'outer;
                                 }
+                                return e;
                             }
                         }
                     }
@@ -507,6 +508,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                     batch_meta = Some(next.into());
                 } else {
                     batch_data.clear();
+                    batch_meta = None;
                     send = false;
                 }
             }

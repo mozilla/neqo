@@ -258,9 +258,9 @@ impl ServerRunner {
         let mut send = false; // Should we send on the next loop interation?
         let mut maybe_gso_failed = false;
 
-        loop {
+        'outer: loop {
             if (send || exit) && !batch_data.is_empty() {
-                let meta = batch_meta.take().unwrap();
+                let meta = batch_meta.clone().unwrap();
                 // Send all collected datagrams as GSO-sized chunks.
                 let socket = Self::find_socket(sockets, meta.source());
                 for gso_chunk in batch_data.chunks(socket.max_gso_segments() * meta.len()) {
@@ -279,9 +279,10 @@ impl ServerRunner {
                                 if !maybe_gso_failed && socket.max_gso_segments() == 1 {
                                     // Retry this once.
                                     maybe_gso_failed = true;
-                                } else {
-                                    return e;
+                                    qdebug!("GSO failed, retrying without");
+                                    continue 'outer;
                                 }
+                                return e;
                             }
                         }
                     }
@@ -294,6 +295,7 @@ impl ServerRunner {
                     batch_meta = Some(next.into());
                 } else {
                     batch_data.clear();
+                    batch_meta = None;
                     send = false;
                 }
             }
