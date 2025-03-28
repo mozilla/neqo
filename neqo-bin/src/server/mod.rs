@@ -258,33 +258,31 @@ impl ServerRunner {
         let mut send = false; // Should we send on the next loop interation?
         let mut maybe_gso_failed = false;
 
-        'outer: loop {
-            while (send || exit) && !batch_data.is_empty() {
+        loop {
+            if (send || exit) && !batch_data.is_empty() {
                 let meta = batch_meta.take().unwrap();
                 // Send all collected datagrams as GSO-sized chunks.
                 let socket = Self::find_socket(sockets, meta.source());
                 for gso_chunk in batch_data.chunks(socket.max_gso_segments() * meta.len()) {
                     // Optimistically attempt sending datagram. In case the OS
                     // buffer is full, wait till socket is writable then try again.
-                    match socket.send(&meta, gso_chunk) {
-                        Ok(()) => break,
-                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                            socket.writable().await?;
-                            // Now try again.
-                        }
-                        Err(e) if e.kind() == io::ErrorKind::Other => {
-                            // This can happen if the interface does not support GSO.
-                            // quinn-udp will set `max_gso_segments` to 1 in this case.
-                            if !maybe_gso_failed && socket.max_gso_segments() == 1 {
-                                // Retry this once.
-                                maybe_gso_failed = true;
-                                continue 'outer;
+                    loop {
+                        match socket.send(&meta, gso_chunk) {
+                            Ok(()) => break,
+                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                socket.writable().await?;
+                                // Now try again.
                             }
-                            return Err(e);
-                        }
-                        Err(e) => {
-                            qwarn!("{e:?} {:?}", e.kind());
-                            return Err(e);
+                            e @ Err(_) => {
+                                // This can happen if the interface does not support GSO.
+                                // quinn-udp will set `max_gso_segments` to 1 in this case.
+                                if !maybe_gso_failed && socket.max_gso_segments() == 1 {
+                                    // Retry this once.
+                                    maybe_gso_failed = true;
+                                } else {
+                                    return e;
+                                }
+                            }
                         }
                     }
                 }
