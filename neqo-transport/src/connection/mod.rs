@@ -323,6 +323,7 @@ impl Connection {
         now: Instant,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
+        let randomize_ci_pn = conn_params.randomize_ci_pn_enabled();
         let mut c = Self::new(
             Role::Client,
             Agent::from(Client::new(server_name.into(), conn_params.is_greasing())?),
@@ -334,6 +335,7 @@ impl Connection {
             c.conn_params.get_versions().compatible(),
             Role::Client,
             &dcid,
+            randomize_ci_pn,
         )?;
         c.original_destination_cid = Some(dcid);
         let path = Path::temporary(
@@ -1233,6 +1235,7 @@ impl Connection {
             self.conn_params.get_versions().compatible(),
             self.role,
             &retry_scid,
+            false,
         )?;
         self.address_validation = AddressValidationInfo::Retry {
             token: packet.token().to_vec(),
@@ -2490,6 +2493,9 @@ impl Connection {
             );
 
             self.stats.borrow_mut().packets_tx += 1;
+            if pt == PacketType::Initial && self.stats.borrow().first_initial_pn.is_none() {
+                self.stats.borrow_mut().first_initial_pn = Some(pn);
+            }
             let tx = self
                 .crypto
                 .states
