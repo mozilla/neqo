@@ -2523,6 +2523,7 @@ impl Connection {
             if ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
             }
+            let ecn_mark = IpTosEcn::from(path.borrow().tos(&mut tokens));
             let sent = SentPacket::new(
                 pt,
                 pn,
@@ -2550,7 +2551,7 @@ impl Connection {
             // coalesced packets, this increases the counts for each packet type
             // contained in the coalesced packet. This is per Section 13.4.1 of
             // RFC 9000.
-            self.stats.borrow_mut().ecn_tx[pt] += IpTosEcn::from(path.borrow().tos());
+            self.stats.borrow_mut().ecn_tx[pt] += ecn_mark;
 
             if space == PacketNumberSpace::Handshake
                 && self.role == Role::Server

@@ -12,6 +12,7 @@ use neqo_common::{qdebug, qinfo, qwarn, IpTosEcn};
 use crate::{
     packet::{PacketNumber, PacketType},
     recovery::{RecoveryToken, SentPacket},
+    tracking::PacketNumberSpace,
     Stats,
 };
 
