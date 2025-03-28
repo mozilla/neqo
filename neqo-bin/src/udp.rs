@@ -8,7 +8,7 @@
 
 use std::{io, net::SocketAddr};
 
-use neqo_common::Datagram;
+use neqo_common::{qdebug, Datagram};
 use neqo_udp::{DatagramIter, RecvBuf};
 
 /// Ideally this would live in [`neqo-udp`]. [`neqo-udp`] is used in Firefox.
@@ -26,10 +26,28 @@ pub struct Socket {
 impl Socket {
     /// Create a new [`Socket`] bound to the provided address, not managed externally.
     pub fn bind<A: std::net::ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
+        const ONE_MB: usize = 1 << 20;
         let socket = std::net::UdpSocket::bind(addr)?;
+        let state = quinn_udp::UdpSocketState::new((&socket).into())?;
+
+        let send_buf = state.send_buffer_size((&socket).into())?;
+        if send_buf < ONE_MB {
+            qdebug!("Increasing send buffer size from {send_buf} to {ONE_MB}");
+            state.set_send_buffer_size((&socket).into(), ONE_MB)?;
+        } else {
+            qdebug!("Default send buffer size is {send_buf}, not changing");
+        }
+
+        let recv_buf = state.recv_buffer_size((&socket).into())?;
+        if recv_buf < ONE_MB {
+            qdebug!("Increasing receive buffer size from {recv_buf} to {ONE_MB}");
+            state.set_recv_buffer_size((&socket).into(), ONE_MB)?;
+        } else {
+            qdebug!("Default receive buffer size is {recv_buf}, not changing");
+        }
 
         Ok(Self {
-            state: quinn_udp::UdpSocketState::new((&socket).into())?,
+            state,
             inner: tokio::net::UdpSocket::from_std(socket)?,
         })
     }
