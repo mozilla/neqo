@@ -38,9 +38,9 @@ runs:
       if: ${{ env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted' }}
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
-    - name: Install build dependencies (Linux)
+    - name: Install mold (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && !contains(inputs.targets, '-android')}}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -52,11 +52,13 @@ runs:
     # See https://corrode.dev/blog/tips-for-faster-ci-builds/
     - name: Set up build environment
       shell: bash
+      env:
+        TARGETS: ${{ inputs.targets }}
       run: |
         {
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
-          if [[ "${{ runner.os }}" == "Linux" && "${{ inputs.targets }}" == "" && "$(command -v mold)" ]]; then
+          if [[ "${{ runner.os }}" == "Linux" && "$TARGETS" == "" && "$(command -v mold)" ]]; then
             echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold $RUSTFLAGS"
           elif [[ "${{ runner.os }}" == "Windows" ]]; then
             echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld $RUSTFLAGS"
@@ -80,7 +82,6 @@ runs:
       with:
         cache-bin: ${{ runner.environment == 'github-hosted' }}
         key: ${{ inputs.targets }}
-        save-if: ${{ github.ref == 'refs/heads/main' }} # Only cache runs from `main`
 
     - name: Set up MSVC (Windows)
       if: ${{ runner.os == 'Windows' }}

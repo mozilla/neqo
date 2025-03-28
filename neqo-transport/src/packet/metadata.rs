@@ -66,19 +66,20 @@ impl MetaData<'_> {
         }
     }
 
-    pub fn new_out<'a>(
+    pub const fn new_out<'a>(
         path: &'a PathRef,
         packet_type: PacketType,
         packet_number: PacketNumber,
         length: usize,
         payload: &'a [u8],
+        tos: IpTos,
     ) -> MetaData<'a> {
         MetaData {
             path,
             direction: Direction::Tx,
             packet_type,
             packet_number,
-            tos: path.borrow().tos(),
+            tos,
             len: length,
             payload,
         }

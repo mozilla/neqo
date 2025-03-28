@@ -30,7 +30,7 @@ use crate::{
     rtt::GRANULARITY,
     stats::MAX_PTO_COUNTS,
     tparams::{TransportParameter, TransportParameterId::*},
-    tracking::DEFAULT_ACK_DELAY,
+    tracking::{DEFAULT_LOCAL_ACK_DELAY, DEFAULT_REMOTE_ACK_DELAY},
     CloseReason, Error, Pmtud, StreamType,
 };
 
@@ -389,6 +389,47 @@ fn pto_handshake_frames() {
     assert_eq!(server.stats().frame_rx.crypto, crypto_before + 1);
 }
 
+#[test]
+fn pto_retransmits_previous_frames_across_datagrams() {
+    const NUM_PACKETS_BEFORE_PTO: usize = 10;
+
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let mut now = now();
+
+    // Send multiple tiny stream frames, each in separate UDP datagrams.
+    let mut client_stream_frame_tx = client.stats().frame_tx.stream;
+    for _ in 0..NUM_PACKETS_BEFORE_PTO {
+        let stream = client.stream_create(StreamType::UniDi).unwrap();
+        assert_eq!(client.stream_send(stream, b"42").unwrap(), 2);
+
+        let lost = client.process_output(now);
+        assert!(lost.dgram().is_some());
+
+        assert_eq!(client.stats().frame_tx.stream, client_stream_frame_tx + 1);
+        client_stream_frame_tx = client.stats().frame_tx.stream;
+    }
+
+    // Nothing to do, should return callback.
+    let out = client.process_output(now);
+    assert!(matches!(out, Output::Callback(_)));
+
+    // One second later, it should want to send PTO packet.
+    now += AT_LEAST_PTO;
+    let client_pto = client.process_output(now);
+
+    // Expect single `client_pto` datagram to retransmit all stream frames
+    // previously sent in separate datagrams, as each is tiny.
+    let server_stream_frame_rx = server.stats().frame_rx.stream;
+    server.process_input(client_pto.dgram().unwrap(), now);
+    assert_eq!(
+        server.stats().frame_rx.stream,
+        server_stream_frame_rx + NUM_PACKETS_BEFORE_PTO
+    );
+}
+
 /// In the case that the Handshake takes too many packets, the server might
 /// be stalled on the anti-amplification limit.  If a Handshake ACK from the
 /// client is lost, the client has to keep the PTO timer armed or the server
@@ -713,7 +754,7 @@ fn ping_with_ack(fast: bool) {
     trickle(&mut sender, &mut receiver, 1, now);
     assert_eq!(receiver.stats().frame_tx.ping, 1);
     if let Output::Callback(t) = sender.process_output(now) {
-        assert_eq!(t, DEFAULT_ACK_DELAY);
+        assert_eq!(t, DEFAULT_LOCAL_ACK_DELAY);
         assert!(sender.process_output(now + t).dgram().is_some());
     }
     assert_eq!(sender.stats().frame_tx.ack, sender_acks_before + 1);
@@ -755,9 +796,9 @@ fn expected_pto(rtt: Duration) -> Duration {
     // PTO calculation is rtt + 4rttvar + ack delay.
     // rttvar should be (rtt + 4 * (rtt / 2) * (3/4)^n + 25ms)/2
     // where n is the number of round trips
-    // This uses a 25ms ack delay as the ACK delay extension
+    // This uses the default maximum ACK delay (25ms) as the ACK delay extension
     // is negotiated and no ACK_DELAY frame has been received.
-    rtt + rtt * 9 / 8 + Duration::from_millis(25)
+    rtt + rtt * 9 / 8 + DEFAULT_REMOTE_ACK_DELAY
 }
 
 #[test]
