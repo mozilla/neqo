@@ -32,7 +32,7 @@ jobs:
 
       - uses: ./.github/actions/rust
         with:
-          tools: cargo-mutants
+          tools: cargo-mutants, cargo-nextest
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Find incremental mutants
