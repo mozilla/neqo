@@ -204,7 +204,7 @@ impl Streams {
         Ok(())
     }
 
-    fn write_maintenance_frames(
+    pub fn write_maintenance_frames(
         &mut self,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
@@ -252,13 +252,6 @@ impl Streams {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        if priority == TransmissionPriority::Important {
-            self.write_maintenance_frames(builder, tokens, stats);
-            if builder.is_full() {
-                return;
-            }
-        }
-
         self.send.write_frames(priority, builder, tokens, stats);
     }
 

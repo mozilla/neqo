@@ -465,10 +465,19 @@ impl<'a, H: Handler> Runner<'a, H> {
     async fn process_output(&mut self) -> Result<(), io::Error> {
         loop {
             match self.client.process_output(Instant::now()) {
-                Output::Datagram(dgram) => {
-                    self.socket.writable().await?;
-                    self.socket.send(&dgram)?;
-                }
+                Output::Datagram(dgram) => loop {
+                    // Optimistically attempt sending datagram. In case the OS
+                    // buffer is full, wait till socket is writable then try
+                    // again.
+                    match self.socket.send(&dgram) {
+                        Ok(()) => break,
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                            self.socket.writable().await?;
+                            // Now try again.
+                        }
+                        e @ Err(_) => return e,
+                    }
+                },
                 Output::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
                     self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
