@@ -652,6 +652,7 @@ impl LossRecovery {
             ack_ecn,
             now,
             &mut self.stats.borrow_mut(),
+            pn_space,
         );
 
         self.pto_state = None;

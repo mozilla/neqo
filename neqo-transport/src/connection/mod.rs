@@ -20,7 +20,7 @@ use std::{
 
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, Role,
+    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, IpTosEcn, Role,
 };
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
@@ -1518,20 +1518,35 @@ impl Connection {
     }
 
     /// After a Initial, Handshake, `ZeroRtt`, or Short packet is successfully processed.
+    #[expect(clippy::too_many_arguments, reason = "Yes, but they're needed.")]
     fn postprocess_packet(
         &mut self,
         path: &PathRef,
         tos: IpTos,
         remote: SocketAddr,
         packet: &PublicPacket,
+        packet_number: PacketNumber,
         migrate: bool,
         now: Instant,
     ) {
+        let ecn_mark = IpTosEcn::from(tos);
+        let mut stats = self.stats.borrow_mut();
+        stats.ecn_rx[packet.packet_type()] += ecn_mark;
+        if let Some(last_ecn_mark) = stats.ecn_last_mark {
+            if last_ecn_mark != ecn_mark
+                && stats.ecn_rx_transition[last_ecn_mark][ecn_mark].is_none()
+            {
+                stats.ecn_rx_transition[last_ecn_mark][ecn_mark] =
+                    Some((packet.packet_type(), packet_number));
+            }
+        }
+        stats.ecn_last_mark = Some(ecn_mark);
+        stats.dscp_rx[tos.into()] += 1;
+        drop(stats);
         let space = PacketNumberSpace::from(packet.packet_type());
         if let Some(space) = self.acks.get_mut(space) {
             let space_ecn_marks = space.ecn_marks();
-            *space_ecn_marks += tos.into();
-            self.stats.borrow_mut().ecn_rx = *space_ecn_marks;
+            *space_ecn_marks += ecn_mark;
         } else {
             qtrace!("Not tracking ECN for dropped packet number space");
         }
@@ -1629,6 +1644,7 @@ impl Connection {
             match packet.decrypt(&mut self.crypto.states, now + pto) {
                 Ok(payload) => {
                     // OK, we have a valid packet.
+                    let packet_number = payload.pn();
                     self.idle_timeout.on_packet_received(now);
                     self.log_packet(
                         packet::MetaData::new_in(path, tos, packet_len, &payload),
@@ -1647,14 +1663,20 @@ impl Connection {
 
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if let Some(space) = self.acks.get_mut(space) {
-                        if space.is_duplicate(payload.pn()) {
-                            qdebug!("Duplicate packet {space}-{}", payload.pn());
+                        if space.is_duplicate(packet_number) {
+                            qdebug!("Duplicate packet {space}-{}", packet_number);
                             self.stats.borrow_mut().dups_rx += 1;
                         } else {
                             match self.process_packet(path, &payload, now) {
                                 Ok(migrate) => {
                                     self.postprocess_packet(
-                                        path, tos, remote, &packet, migrate, now,
+                                        path,
+                                        tos,
+                                        remote,
+                                        &packet,
+                                        packet_number,
+                                        migrate,
+                                        now,
                                     );
                                 }
                                 Err(e) => {
@@ -2501,6 +2523,7 @@ impl Connection {
             if ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
             }
+            let ecn_mark = IpTosEcn::from(path.borrow().tos(&mut tokens));
             let sent = SentPacket::new(
                 pt,
                 pn,
@@ -2523,6 +2546,12 @@ impl Connection {
                 }
                 self.loss_recovery.on_packet_sent(path, sent, now);
             }
+
+            // Track which packet types are sent with which ECN codepoints. For
+            // coalesced packets, this increases the counts for each packet type
+            // contained in the coalesced packet. This is per Section 13.4.1 of
+            // RFC 9000.
+            self.stats.borrow_mut().ecn_tx[pt] += ecn_mark;
 
             if space == PacketNumberSpace::Handshake
                 && self.role == Role::Server
