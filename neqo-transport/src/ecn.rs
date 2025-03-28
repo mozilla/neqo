@@ -11,8 +11,7 @@ use neqo_common::{qdebug, qinfo, qwarn, IpTosEcn};
 
 use crate::{
     packet::{PacketNumber, PacketType},
-    recovery::SentPacket,
-    tracking::PacketNumberSpace,
+    recovery::{RecoveryToken, SentPacket},
     Stats,
 };
 
@@ -227,19 +226,20 @@ impl Info {
             && (self.baseline - prev_baseline)[IpTosEcn::Ce] > 0
     }
 
-    pub(crate) fn on_packets_lost(&mut self, lost_packets: &[SentPacket], stats: &mut Stats) {
+    pub(crate) fn lost_ecn(&mut self, pt: PacketType, stats: &mut Stats) {
+        if pt != PacketType::Initial {
+            return;
+        }
+
         if let ValidationState::Testing {
             probes_sent,
             initial_probes_lost: probes_lost,
         } = &mut self.state
         {
-            *probes_lost += lost_packets
-                .iter()
-                .filter(|p| p.packet_type() == PacketType::Initial && p.ecn_mark().is_ecn_marked())
-                .count();
+            *probes_lost += 1;
             // If we have lost all initial probes a bunch of times, we can conclude that the path
             // is not ECN capable and likely drops all ECN marked packets.
-            if probes_sent == probes_lost && *probes_lost == TEST_COUNT_INITIAL_PHASE {
+            if *probes_sent == *probes_lost && *probes_lost == TEST_COUNT_INITIAL_PHASE {
                 qdebug!(
                     "ECN validation failed, all {probes_lost} initial marked packets were lost"
                 );
@@ -249,7 +249,7 @@ impl Info {
     }
 
     /// After the ECN validation test has ended, check if the path is ECN capable.
-    pub(crate) fn validate_ack_ecn_and_update(
+    fn validate_ack_ecn_and_update(
         &mut self,
         acked_packets: &[SentPacket],
         ack_ecn: Option<Count>,
@@ -307,7 +307,7 @@ impl Info {
         // > ECT(0) marking.
         let newly_acked_sent_with_ect0: u64 = acked_packets
             .iter()
-            .filter(|p| p.ecn_mark() == IpTosEcn::Ect0)
+            .filter(|p| p.ecn_marked_ect0())
             .count()
             .try_into()
             .expect("usize fits into u64");
@@ -334,11 +334,20 @@ impl Info {
         self.largest_acked = largest_acked;
     }
 
-    /// The ECN mark to use for packets sent on this path.
-    pub(crate) const fn ecn_mark(&self) -> IpTosEcn {
+    pub(crate) const fn is_marking(&self) -> bool {
         match self.state {
-            ValidationState::Testing { .. } | ValidationState::Capable => IpTosEcn::Ect0,
-            ValidationState::Failed(_) | ValidationState::Unknown => IpTosEcn::NotEct,
+            ValidationState::Testing { .. } | ValidationState::Capable => true,
+            ValidationState::Failed(_) | ValidationState::Unknown => false,
+        }
+    }
+
+    /// The ECN mark to use for packets sent on this path.
+    pub(crate) fn ecn_mark(&self, tokens: &mut Vec<RecoveryToken>) -> IpTosEcn {
+        if self.is_marking() {
+            tokens.push(RecoveryToken::EcnEct0);
+            IpTosEcn::Ect0
+        } else {
+            IpTosEcn::NotEct
         }
     }
 }

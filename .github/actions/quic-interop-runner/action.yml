@@ -20,6 +20,11 @@ inputs:
     required: false
     default: ''
 
+outputs:
+  result:
+    description: 'One of "success", "failure", or "timeout".'
+    value: ${{ steps.result.outputs.result }}
+
 runs:
   using: "composite"
   steps:
@@ -38,6 +43,22 @@ runs:
         sudo add-apt-repository ppa:wireshark-dev/nightly
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends tshark
+      shell: bash
+
+    - name: Checkout linuxquic repository
+      if: ${{ inputs.server == 'linuxquic' || inputs.client == 'linuxquic' }}
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        repository: 'lxin/quic'
+        path: 'linuxquic'
+
+    - name: Install Linux QUIC module
+      if: ${{ inputs.server == 'linuxquic' || inputs.client == 'linuxquic' }}
+      run: |
+        cd linuxquic && sed -i '/LIBGNUTLS/d' configure.ac
+        ./autogen.sh && ./configure --prefix=/usr
+        sudo make -C modules install
+        cd ../ && rm -r linuxquic
       shell: bash
 
     - uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
@@ -84,8 +105,10 @@ runs:
             echo "Panic detected in $log"
             tail -n 50 "$log"
             FAILED=1
+            [ -z "$FAILED" ] && echo "FAILED=1" >> "$GITHUB_ENV"
           fi
         done
+        [ -z "$FAILED" ] && echo "FAILED=0" >> "$GITHUB_ENV"
         # Remove all log files > $MAX_SIZE for succeeded tests to make the artifacts smaller.
         MAX_SIZE=2M
         echo "Removed log file > $MAX_SIZE during GitHub workflow" > note.txt
@@ -99,7 +122,7 @@ runs:
         exit $FAILED
       shell: bash
 
-    - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       if: ${{ always() }}
       id: upload-logs
       with:
@@ -116,7 +139,7 @@ runs:
         mv result.json.tmp result.json
       shell: bash
 
-    - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       if: ${{ always() }}
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
@@ -124,3 +147,15 @@ runs:
           result.json
           summary.txt
         retention-days: 1
+
+    - id: result
+      if: ${{ always() }}
+      run: |
+        if [ -z "$FAILED" ]; then
+          echo "result=timeout" >> $GITHUB_OUTPUT
+        elif [ "$FAILED" -eq 0 ]; then
+          echo "result=success" >> $GITHUB_OUTPUT
+        else
+          echo "result=failure" >> $GITHUB_OUTPUT
+        fi
+      shell: bash

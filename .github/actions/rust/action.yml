@@ -82,7 +82,6 @@ runs:
       with:
         cache-bin: ${{ runner.environment == 'github-hosted' }}
         key: ${{ inputs.targets }}
-        save-if: ${{ github.ref == 'refs/heads/main' }} # Only cache runs from `main`
 
     - name: Set up MSVC (Windows)
       if: ${{ runner.os == 'Windows' }}

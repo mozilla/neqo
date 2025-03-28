@@ -164,8 +164,14 @@ impl ::std::fmt::Display for PacketRange {
     }
 }
 
-/// The ACK delay we use.
-pub const DEFAULT_ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
+/// The default maximum ACK delay we use locally and advertise to the remote.
+pub const DEFAULT_LOCAL_ACK_DELAY: Duration = Duration::from_millis(20);
+/// The default maximum ACK delay we assume the remote uses.
+///
+/// > If this value is absent, a default of 25 milliseconds is assumed.
+///
+/// <https://datatracker.ietf.org/doc/html/rfc9000#section-18.2>
+pub const DEFAULT_REMOTE_ACK_DELAY: Duration = Duration::from_millis(25);
 /// The default number of in-order packets we will receive after
 /// largest acknowledged without sending an immediate acknowledgment.
 pub const DEFAULT_ACK_PACKET_TOLERANCE: PacketNumber = 1;
@@ -229,7 +235,7 @@ impl RecvdPackets {
             ack_time: None,
             last_ack_time: None,
             ack_frequency_seqno: 0,
-            ack_delay: DEFAULT_ACK_DELAY,
+            ack_delay: DEFAULT_LOCAL_ACK_DELAY,
             unacknowledged_count: 0,
             unacknowledged_tolerance: if space == PacketNumberSpace::ApplicationData {
                 DEFAULT_ACK_PACKET_TOLERANCE

@@ -12,9 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{
-    hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Encoder, IpTos, IpTosEcn,
-};
+use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Encoder, IpTos};
 use neqo_crypto::random;
 
 use crate::{
@@ -22,7 +20,7 @@ use crate::{
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn,
     frame::FrameType,
-    packet::PacketBuilder,
+    packet::{PacketBuilder, PacketType},
     pmtud::Pmtud,
     recovery::{RecoveryToken, SentPacket},
     rtt::{RttEstimate, RttSource},
@@ -415,6 +413,12 @@ impl Paths {
         }
     }
 
+    pub fn lost_ecn(&self, pt: PacketType, stats: &mut Stats) {
+        if let Some(path) = self.primary() {
+            path.borrow_mut().lost_ecn(pt, stats);
+        }
+    }
+
     /// Get an estimate of the RTT on the primary path.
     #[cfg(test)]
     pub fn rtt(&self) -> Duration {
@@ -570,8 +574,8 @@ impl Path {
     }
 
     /// Return the DSCP/ECN marking to use for outgoing packets on this path.
-    pub fn tos(&self) -> IpTos {
-        self.ecn_info.ecn_mark().into()
+    pub fn tos(&self, tokens: &mut Vec<RecoveryToken>) -> IpTos {
+        self.ecn_info.ecn_mark(tokens).into()
     }
 
     /// Whether this path is the primary or current path for the connection.
@@ -681,11 +685,15 @@ impl Path {
     }
 
     /// Make a datagram.
-    pub fn datagram<V: Into<Vec<u8>>>(&mut self, payload: V, stats: &mut Stats) -> Datagram {
+    pub fn datagram<V: Into<Vec<u8>>>(
+        &mut self,
+        payload: V,
+        tos: IpTos,
+        stats: &mut Stats,
+    ) -> Datagram {
         // Make sure to use the TOS value from before calling ecn::Info::on_packet_sent, which may
         // update the ECN state and can hence change it - this packet should still be sent
         // with the current value.
-        let tos = self.tos();
         self.ecn_info.on_packet_sent(stats);
         Datagram::new(self.local, self.remote, tos, payload.into())
     }
@@ -739,7 +747,7 @@ impl Path {
             _ => 0,
         };
         self.state = if probe_count >= MAX_PATH_PROBES {
-            if self.ecn_info.ecn_mark() == IpTosEcn::Ect0 {
+            if self.ecn_info.is_marking() {
                 // The path validation failure may be due to ECN blackholing, try again without ECN.
                 qinfo!("[{self}] Possible ECN blackhole, disabling ECN and re-probing path");
                 self.ecn_info
@@ -821,6 +829,10 @@ impl Path {
 
     pub fn lost_ack_frequency(&mut self, lost: &AckRate) {
         self.rtt.frame_lost(lost);
+    }
+
+    pub fn lost_ecn(&mut self, pt: PacketType, stats: &mut Stats) {
+        self.ecn_info.lost_ecn(pt, stats);
     }
 
     pub fn acked_ack_frequency(&mut self, acked: &AckRate) {
@@ -1000,7 +1012,6 @@ impl Path {
         now: Instant,
     ) {
         debug_assert!(self.is_primary());
-        self.ecn_info.on_packets_lost(lost_packets, stats);
         let cwnd_reduced = self.sender.on_packets_lost(
             self.rtt.first_sample_time(),
             prev_largest_acked_sent,

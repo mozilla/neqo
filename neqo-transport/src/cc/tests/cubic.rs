@@ -15,7 +15,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::IpTosEcn;
 use test_fixture::now;
 
 use super::{IP_ADDR, MTU, RTT};
@@ -47,7 +46,6 @@ fn fill_cwnd(cc: &mut ClassicCongestionControl<Cubic>, mut next_pn: u64, now: In
         let sent = SentPacket::new(
             PacketType::Short,
             next_pn,
-            IpTosEcn::default(),
             now,
             true,
             Vec::new(),
@@ -63,7 +61,6 @@ fn ack_packet(cc: &mut ClassicCongestionControl<Cubic>, pn: u64, now: Instant) {
     let acked = SentPacket::new(
         PacketType::Short,
         pn,
-        IpTosEcn::default(),
         now,
         true,
         Vec::new(),
@@ -77,7 +74,6 @@ fn packet_lost(cc: &mut ClassicCongestionControl<Cubic>, pn: u64) {
     let p_lost = SentPacket::new(
         PacketType::Short,
         pn,
-        IpTosEcn::default(),
         now(),
         true,
         Vec::new(),
