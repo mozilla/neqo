@@ -266,7 +266,7 @@ where
     }
 
     const fn should_send_flowc_update(&self) -> bool {
-        let window_bytes_unused = self.max_allowed.saturating_sub(self.retired);
+        let window_bytes_unused = self.max_allowed - self.retired;
         window_bytes_unused < self.max_active - self.max_active / WINDOW_UPDATE_FRACTION
     }
 
@@ -810,12 +810,17 @@ mod test {
     fn changing_max_active() {
         let mut fc = ReceiverFlowControl::new((), 100);
         fc.set_max_active(50);
+
         // There is no MAX_STREAM_DATA frame needed.
         assert!(!fc.frame_needed());
+
         // We can still retire more than 50.
+        fc.consume(60).unwrap();
         fc.retire(60);
+
         // There is no MAX_STREAM_DATA frame needed yet.
         assert!(!fc.frame_needed());
+        fc.consume(16).unwrap();
         fc.retire(76);
         assert!(fc.frame_needed());
         assert_eq!(fc.next_limit(), 126);
@@ -823,9 +828,14 @@ mod test {
         // Increase max_active.
         fc.set_max_active(60);
         assert!(fc.frame_needed());
-        assert_eq!(fc.next_limit(), 136);
+        let new_max = fc.next_limit();
+        assert_eq!(new_max, 136);
+
+        // Sent update, accounting for the new `max_active`.
+        fc.frame_sent(new_max);
 
         // We can retire more than 60.
+        fc.consume(60).unwrap();
         fc.retire(136);
         assert!(fc.frame_needed());
         assert_eq!(fc.next_limit(), 196);
