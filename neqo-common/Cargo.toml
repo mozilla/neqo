@@ -16,15 +16,14 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 enum-map = { workspace = true }
 env_logger = { version = "0.10", default-features = false }
-hex = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
+hex = { workspace = true, optional = true }
 log = { workspace = true }
 qlog = { workspace = true }
+strum = { workspace = true }
 
 [target."cfg(windows)".dependencies]
-# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 windows = { version = "0.58", default-features = false, features = ["Win32_Media"] }
 
 [dev-dependencies]
@@ -35,7 +34,7 @@ regex = { workspace = true }
 
 [features]
 bench = ["neqo-crypto/bench", "test-fixture/bench"]
-build-fuzzing-corpus = ["hex"]
+build-fuzzing-corpus = ["hex/alloc"]
 ci = []
 test-fixture = []
 

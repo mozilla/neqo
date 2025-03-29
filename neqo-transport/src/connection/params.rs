@@ -12,8 +12,17 @@ use crate::{
     recv_stream::INITIAL_RECV_WINDOW_SIZE,
     rtt::GRANULARITY,
     stream_id::StreamType,
-    tparams::{self, PreferredAddress, TransportParameter, TransportParametersHandler},
-    tracking::DEFAULT_ACK_DELAY,
+    tparams::{
+        PreferredAddress, TransportParameter,
+        TransportParameterId::{
+            self, ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit, InitialMaxData,
+            InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni,
+            InitialMaxStreamsBidi, InitialMaxStreamsUni, MaxAckDelay, MaxDatagramFrameSize,
+            MinAckDelay,
+        },
+        TransportParametersHandler,
+    },
+    tracking::DEFAULT_LOCAL_ACK_DELAY,
     version::{Version, VersionConfig},
     CongestionControlAlgorithm, Res,
 };
@@ -44,7 +53,7 @@ pub enum PreferredAddressConfig {
 /// `ConnectionParameters` use for setting initial value for QUIC parameters.
 /// This collects configuration like initial limits, protocol version, and
 /// congestion control algorithm.
-#[allow(clippy::struct_excessive_bools)] // We need that many, sorry.
+#[expect(clippy::struct_excessive_bools, reason = "We need that many, sorry.")]
 #[derive(Debug, Clone)]
 pub struct ConnectionParameters {
     versions: VersionConfig,
@@ -83,6 +92,8 @@ pub struct ConnectionParameters {
     pacing: bool,
     /// Whether the connection performs PLPMTUD.
     pmtud: bool,
+    /// Whether PMTUD should take the local interface MTU into account.
+    pmtud_iface_mtu: bool,
     /// Whether the connection should use SNI slicing.
     sni_slicing: bool,
     /// Whether to enable mlkem768nistp256-sha256.
@@ -114,6 +125,7 @@ impl Default for ConnectionParameters {
             disable_migration: false,
             pacing: true,
             pmtud: false,
+            pmtud_iface_mtu: true,
             sni_slicing: true,
             mlkem: true,
         }
@@ -377,6 +389,17 @@ impl ConnectionParameters {
     }
 
     #[must_use]
+    pub const fn pmtud_iface_mtu_enabled(&self) -> bool {
+        self.pmtud_iface_mtu
+    }
+
+    #[must_use]
+    pub const fn pmtud_iface_mtu(mut self, pmtud_iface_mtu: bool) -> Self {
+        self.pmtud_iface_mtu = pmtud_iface_mtu;
+        self
+    }
+
+    #[must_use]
     pub const fn sni_slicing_enabled(&self) -> bool {
         self.sni_slicing
     }
@@ -410,52 +433,47 @@ impl ConnectionParameters {
         let mut tps = TransportParametersHandler::new(role, self.versions.clone());
         // default parameters
         tps.local.set_integer(
-            tparams::ACTIVE_CONNECTION_ID_LIMIT,
+            ActiveConnectionIdLimit,
             u64::try_from(LOCAL_ACTIVE_CID_LIMIT)?,
         );
         if self.disable_migration {
-            tps.local.set_empty(tparams::DISABLE_MIGRATION);
+            tps.local.set_empty(DisableMigration);
         }
         if self.grease {
-            tps.local.set_empty(tparams::GREASE_QUIC_BIT);
+            tps.local.set_empty(GreaseQuicBit);
         }
         tps.local.set_integer(
-            tparams::MAX_ACK_DELAY,
-            u64::try_from(DEFAULT_ACK_DELAY.as_millis())?,
+            MaxAckDelay,
+            u64::try_from(DEFAULT_LOCAL_ACK_DELAY.as_millis())?,
         );
-        tps.local.set_integer(
-            tparams::MIN_ACK_DELAY,
-            u64::try_from(GRANULARITY.as_micros())?,
-        );
+        tps.local
+            .set_integer(MinAckDelay, u64::try_from(GRANULARITY.as_micros())?);
 
         // set configurable parameters
-        tps.local
-            .set_integer(tparams::INITIAL_MAX_DATA, self.max_data);
+        tps.local.set_integer(InitialMaxData, self.max_data);
         tps.local.set_integer(
-            tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
+            InitialMaxStreamDataBidiLocal,
             self.max_stream_data_bidi_local,
         );
         tps.local.set_integer(
-            tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
+            InitialMaxStreamDataBidiRemote,
             self.max_stream_data_bidi_remote,
         );
-        tps.local.set_integer(
-            tparams::INITIAL_MAX_STREAM_DATA_UNI,
-            self.max_stream_data_uni,
-        );
         tps.local
-            .set_integer(tparams::INITIAL_MAX_STREAMS_BIDI, self.max_streams_bidi);
+            .set_integer(InitialMaxStreamDataUni, self.max_stream_data_uni);
         tps.local
-            .set_integer(tparams::INITIAL_MAX_STREAMS_UNI, self.max_streams_uni);
+            .set_integer(InitialMaxStreamsBidi, self.max_streams_bidi);
+        tps.local
+            .set_integer(InitialMaxStreamsUni, self.max_streams_uni);
         tps.local.set_integer(
-            tparams::IDLE_TIMEOUT,
+            TransportParameterId::IdleTimeout,
             u64::try_from(self.idle_timeout.as_millis()).unwrap_or(0),
         );
         if let PreferredAddressConfig::Address(preferred) = &self.preferred_address {
             if role == Role::Server {
                 let (cid, srt) = cid_manager.preferred_address_cid()?;
                 tps.local.set(
-                    tparams::PREFERRED_ADDRESS,
+                    TransportParameterId::PreferredAddress,
                     TransportParameter::PreferredAddress {
                         v4: preferred.ipv4(),
                         v6: preferred.ipv6(),
@@ -466,7 +484,7 @@ impl ConnectionParameters {
             }
         }
         tps.local
-            .set_integer(tparams::MAX_DATAGRAM_FRAME_SIZE, self.datagram_size);
+            .set_integer(MaxDatagramFrameSize, self.datagram_size);
         Ok(tps)
     }
 }

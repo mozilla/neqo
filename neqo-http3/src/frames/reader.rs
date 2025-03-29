@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::fmt::Debug;
 
 use neqo_common::{
@@ -93,7 +91,6 @@ enum FrameReaderState {
     UnknownFrameDischargeData { decoder: IncrementalDecoderIgnore },
 }
 
-#[allow(clippy::module_name_repetitions)]
 #[derive(Debug)]
 pub struct FrameReader {
     state: FrameReaderState,

@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::missing_errors_doc)] // Functions simply delegate to tokio and quinn-udp.
+#![expect(
+    clippy::missing_errors_doc,
+    reason = "Functions simply delegate to tokio and quinn-udp."
+)]
 
 use std::{
     array,
@@ -88,7 +91,7 @@ use std::os::fd::AsFd as SocketRef;
 #[cfg(windows)]
 use std::os::windows::io::AsSocket as SocketRef;
 
-#[allow(clippy::missing_panics_doc)]
+#[expect(clippy::missing_panics_doc, reason = "OK here.")]
 pub fn recv_inner<'a>(
     local_address: SocketAddr,
     state: &UdpSocketState,
@@ -215,6 +218,8 @@ impl<S: SocketRef> Socket<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+
     use neqo_common::{IpTosDscp, IpTosEcn};
 
     use super::*;
@@ -265,11 +270,25 @@ mod tests {
             .expect("receive to succeed");
 
         // Assert that the ECN is correct.
-        assert_eq!(
-            IpTosEcn::from(datagram.tos()),
-            IpTosEcn::from(received_datagrams.next().unwrap().tos())
-        );
-
+        // On Android API level <= 25 the IPv4 `IP_TOS` control message is
+        // not supported and thus ECN bits can not be received.
+        if cfg!(target_os = "android")
+            && env::var("API_LEVEL")
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok())
+                .expect("API_LEVEL environment variable to be set on Android")
+                <= 25
+        {
+            assert_eq!(
+                IpTosEcn::default(),
+                IpTosEcn::from(received_datagrams.next().unwrap().tos())
+            );
+        } else {
+            assert_eq!(
+                IpTosEcn::from(datagram.tos()),
+                IpTosEcn::from(received_datagrams.next().unwrap().tos())
+            );
+        }
         Ok(())
     }
 

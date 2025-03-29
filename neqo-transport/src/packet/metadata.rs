@@ -44,6 +44,11 @@ pub struct MetaData<'a> {
 }
 
 impl MetaData<'_> {
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     pub fn new_in<'a>(
         path: &'a PathRef,
         tos: IpTos,
@@ -61,19 +66,20 @@ impl MetaData<'_> {
         }
     }
 
-    pub fn new_out<'a>(
+    pub const fn new_out<'a>(
         path: &'a PathRef,
         packet_type: PacketType,
         packet_number: PacketNumber,
         length: usize,
         payload: &'a [u8],
+        tos: IpTos,
     ) -> MetaData<'a> {
         MetaData {
             path,
             direction: Direction::Tx,
             packet_type,
             packet_number,
-            tos: path.borrow().tos(),
+            tos,
             len: length,
             payload,
         }

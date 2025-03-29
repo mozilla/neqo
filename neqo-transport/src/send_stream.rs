@@ -6,8 +6,6 @@
 
 // Buffering data to send until it is acked.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
@@ -26,13 +24,16 @@ use smallvec::SmallVec;
 use crate::{
     events::ConnectionEvents,
     fc::SenderFlowControl,
-    frame::{Frame, FRAME_TYPE_RESET_STREAM},
+    frame::{Frame, FrameType},
     packet::PacketBuilder,
     recovery::{RecoveryToken, StreamRecoveryToken},
     stats::FrameStats,
     stream_id::StreamId,
     streams::SendOrder,
-    tparams::{self, TransportParameters},
+    tparams::{
+        TransportParameterId::{InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni},
+        TransportParameters,
+    },
     AppError, Error, Res,
 };
 
@@ -222,7 +223,11 @@ impl RangeTracker {
     /// The only tricky parts are making sure that we maintain `self.acked`,
     /// which is the first acknowledged range.  And making sure that we don't create
     /// ranges of the same type that are adjacent; these need to be merged.
-    #[allow(clippy::missing_panics_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_panics_doc,
+        reason = "OK here."
+    )]
     pub fn mark_acked(&mut self, new_off: u64, new_len: usize) {
         let end = new_off + u64::try_from(new_len).expect("usize fits in u64");
         let new_off = max(self.acked, new_off);
@@ -321,7 +326,11 @@ impl RangeTracker {
     /// +     SS
     /// = SSSSSS
     /// ```
-    #[allow(clippy::missing_panics_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_panics_doc,
+        reason = "OK here."
+    )]
     pub fn mark_sent(&mut self, mut new_off: u64, new_len: usize) {
         let new_end = new_off + u64::try_from(new_len).expect("usize fits in u64");
         new_off = max(self.acked, new_off);
@@ -542,7 +551,11 @@ impl TxBuffer {
         self.ranges.mark_sent(offset, len);
     }
 
-    #[allow(clippy::missing_panics_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_panics_doc,
+        reason = "OK here."
+    )]
     pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
         let prev_retired = self.retired();
         self.ranges.mark_acked(offset, len);
@@ -731,7 +744,6 @@ impl PartialEq for SendStream {
 impl Eq for SendStream {}
 
 impl SendStream {
-    #[allow(clippy::missing_panics_doc)]
     pub fn new(
         stream_id: StreamId,
         max_stream_data: u64,
@@ -837,7 +849,11 @@ impl SendStream {
     }
 
     #[must_use]
-    #[allow(clippy::missing_panics_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_panics_doc,
+        reason = "OK here."
+    )]
     pub fn bytes_written(&self) -> u64 {
         match &self.state {
             SendStreamState::Send { send_buf, .. } | SendStreamState::DataSent { send_buf, .. } => {
@@ -943,7 +959,11 @@ impl SendStream {
     }
 
     /// Maybe write a `STREAM` frame.
-    #[allow(clippy::missing_panics_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_panics_doc,
+        reason = "OK here."
+    )]
     pub fn write_stream_frame(
         &mut self,
         priority: TransmissionPriority,
@@ -1026,7 +1046,7 @@ impl SendStream {
                 final_written,
             }),
             SendStreamState::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
-        };
+        }
     }
 
     pub fn reset_lost(&mut self) {
@@ -1060,7 +1080,7 @@ impl SendStream {
                 return false;
             }
             if builder.write_varint_frame(&[
-                FRAME_TYPE_RESET_STREAM,
+                FrameType::ResetStream.into(),
                 self.stream_id.as_u64(),
                 err,
                 final_size,
@@ -1107,7 +1127,11 @@ impl SendStream {
         }
     }
 
-    #[allow(clippy::missing_panics_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_panics_doc,
+        reason = "OK here."
+    )]
     pub fn mark_as_sent(&mut self, offset: u64, len: usize, fin: bool) {
         self.bytes_sent = max(
             self.bytes_sent,
@@ -1117,7 +1141,7 @@ impl SendStream {
         if let Some(buf) = self.state.tx_buf_mut() {
             buf.mark_as_sent(offset, len);
             self.send_blocked_if_space_needed(0);
-        };
+        }
 
         if fin {
             if let SendStreamState::DataSent { fin_sent, .. } = &mut self.state {
@@ -1126,7 +1150,11 @@ impl SendStream {
         }
     }
 
-    #[allow(clippy::missing_panics_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_panics_doc,
+        reason = "OK here."
+    )]
     pub fn mark_as_acked(&mut self, offset: u64, len: usize, fin: bool) {
         match self.state {
             SendStreamState::Send {
@@ -1163,7 +1191,11 @@ impl SendStream {
         }
     }
 
-    #[allow(clippy::missing_panics_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_panics_doc,
+        reason = "OK here."
+    )]
     pub fn mark_as_lost(&mut self, offset: u64, len: usize, fin: bool) {
         self.retransmission_offset = max(
             self.retransmission_offset,
@@ -1332,7 +1364,11 @@ impl SendStream {
         }
     }
 
-    #[allow(clippy::missing_panics_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_panics_doc,
+        reason = "OK here."
+    )]
     pub fn reset(&mut self, err: AppError) {
         match &self.state {
             SendStreamState::Ready { fc, .. } => {
@@ -1372,7 +1408,7 @@ impl SendStream {
             SendStreamState::DataRecvd { .. } => qtrace!("[{self}] already in DataRecvd state"),
             SendStreamState::ResetSent { .. } => qtrace!("[{self}] already in ResetSent state"),
             SendStreamState::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
-        };
+        }
     }
 
     #[cfg(test)]
@@ -1540,12 +1576,20 @@ pub struct SendStreams {
 }
 
 impl SendStreams {
-    #[allow(clippy::missing_errors_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_errors_doc,
+        reason = "OK here."
+    )]
     pub fn get(&self, id: StreamId) -> Res<&SendStream> {
         self.map.get(&id).ok_or(Error::InvalidStreamId)
     }
 
-    #[allow(clippy::missing_errors_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_errors_doc,
+        reason = "OK here."
+    )]
     pub fn get_mut(&mut self, id: StreamId) -> Res<&mut SendStream> {
         self.map.get_mut(&id).ok_or(Error::InvalidStreamId)
     }
@@ -1567,7 +1611,11 @@ impl SendStreams {
         }
     }
 
-    #[allow(clippy::missing_errors_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_errors_doc,
+        reason = "OK here."
+    )]
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
         self.set_fairness(stream_id, true)?;
         if let Some(stream) = self.map.get_mut(&stream_id) {
@@ -1592,7 +1640,11 @@ impl SendStreams {
         }
     }
 
-    #[allow(clippy::missing_errors_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_errors_doc,
+        reason = "OK here."
+    )]
     pub fn set_fairness(&mut self, stream_id: StreamId, make_fair: bool) -> Res<()> {
         let stream: &mut SendStream = self.map.get_mut(&stream_id).ok_or(Error::InvalidStreamId)?;
         let was_fair = stream.fair;
@@ -1678,7 +1730,7 @@ impl SendStreams {
                                 group.remove(*stream_id);
                             }
                         }
-                    };
+                    }
                 }
                 // if unfair, we're done
                 return false;
@@ -1758,21 +1810,29 @@ impl SendStreams {
         }
     }
 
-    #[allow(clippy::missing_panics_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_panics_doc,
+        reason = "OK here."
+    )]
     pub fn update_initial_limit(&mut self, remote: &TransportParameters) {
         for (id, ss) in &mut self.map {
             let limit = if id.is_bidi() {
                 assert!(!id.is_remote_initiated(Role::Client));
-                remote.get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
+                remote.get_integer(InitialMaxStreamDataBidiRemote)
             } else {
-                remote.get_integer(tparams::INITIAL_MAX_STREAM_DATA_UNI)
+                remote.get_integer(InitialMaxStreamDataUni)
             };
             ss.set_max_stream_data(limit);
         }
     }
 }
 
-#[allow(clippy::into_iter_without_iter)]
+#[allow(
+    clippy::allow_attributes,
+    clippy::into_iter_without_iter,
+    reason = "OK here."
+)]
 impl<'a> IntoIterator for &'a mut SendStreams {
     type Item = (&'a StreamId, &'a mut SendStream);
     type IntoIter = indexmap::map::IterMut<'a, StreamId, SendStream>;

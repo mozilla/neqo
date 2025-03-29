@@ -7,8 +7,6 @@
 // Building a stream of ordered bytes to give the application from a series of
 // incoming STREAM frames.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cell::RefCell,
     cmp::max,
@@ -24,7 +22,7 @@ use smallvec::SmallVec;
 use crate::{
     events::ConnectionEvents,
     fc::ReceiverFlowControl,
-    frame::FRAME_TYPE_STOP_SENDING,
+    frame::FrameType,
     packet::PacketBuilder,
     recovery::{RecoveryToken, StreamRecoveryToken},
     send_stream::SendStreams,
@@ -75,12 +73,20 @@ impl RecvStreams {
         self.streams.insert(id, stream);
     }
 
-    #[allow(clippy::missing_errors_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_errors_doc,
+        reason = "OK here."
+    )]
     pub fn get_mut(&mut self, id: StreamId) -> Res<&mut RecvStream> {
         self.streams.get_mut(&id).ok_or(Error::InvalidStreamId)
     }
 
-    #[allow(clippy::missing_errors_doc)]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_errors_doc,
+        reason = "OK here."
+    )]
     pub fn keep_alive(&mut self, id: StreamId, k: bool) -> Res<()> {
         let self_ka = &mut self.keep_alive;
         let s = self.streams.get_mut(&id).ok_or(Error::InvalidStreamId)?;
@@ -910,7 +916,7 @@ impl RecvStream {
             } => {
                 if *frame_needed
                     && builder.write_varint_frame(&[
-                        FRAME_TYPE_STOP_SENDING,
+                        FrameType::StopSending.into(),
                         self.stream_id.as_u64(),
                         *err,
                     ])
@@ -1040,7 +1046,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::single_range_in_vec_init)] // Because that lint makes no sense here.
+    #[expect(
+        clippy::single_range_in_vec_init,
+        reason = "Because that lint makes no sense here."
+    )]
     fn recv_noncontiguous() {
         // Non-contiguous with the start, no data available.
         recv_ranges(&[10..20], 0);

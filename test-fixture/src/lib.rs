@@ -4,8 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
-#![allow(clippy::unwrap_used)] // This is test code.
+#![expect(clippy::unwrap_used, reason = "This is test code.")]
 
 use std::{
     cell::{OnceCell, RefCell},
@@ -293,20 +292,13 @@ pub fn connect() -> (Connection, Connection) {
 /// When the client can't be created.
 #[must_use]
 pub fn default_http3_client() -> Http3Client {
-    fixture_init();
-    Http3Client::new(
-        DEFAULT_SERVER_NAME,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
+    http3_client_with_params(
         Http3Parameters::default()
             .max_table_size_encoder(100)
             .max_table_size_decoder(100)
             .max_blocked_streams(100)
             .max_concurrent_push_streams(10),
-        now(),
     )
-    .expect("create a default client")
 }
 
 /// Create a http3 client.
@@ -335,6 +327,22 @@ pub fn http3_client_with_params(params: Http3Parameters) -> Http3Client {
 /// When the server can't be created.
 #[must_use]
 pub fn default_http3_server() -> Http3Server {
+    http3_server_with_params(
+        Http3Parameters::default()
+            .max_table_size_encoder(100)
+            .max_table_size_decoder(100)
+            .max_blocked_streams(100)
+            .max_concurrent_push_streams(10),
+    )
+}
+
+/// Create a http3 server.
+///
+/// # Panics
+///
+/// When the server can't be created.
+#[must_use]
+pub fn http3_server_with_params(params: Http3Parameters) -> Http3Server {
     fixture_init();
     Http3Server::new(
         now(),
@@ -342,14 +350,10 @@ pub fn default_http3_server() -> Http3Server {
         DEFAULT_ALPN_H3,
         anti_replay(),
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        Http3Parameters::default()
-            .max_table_size_encoder(100)
-            .max_table_size_decoder(100)
-            .max_blocked_streams(100)
-            .max_concurrent_push_streams(10),
+        params,
         None,
     )
-    .expect("create a default server")
+    .expect("create a server")
 }
 
 /// Split the first packet off a coalesced packet.
@@ -400,13 +404,13 @@ impl Write for SharedVec {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         self.buf
             .lock()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
+            .map_err(|e| io::Error::other(e.to_string()))?
             .write(buf)
     }
     fn flush(&mut self) -> Result<()> {
         self.buf
             .lock()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
+            .map_err(|e| io::Error::other(e.to_string()))?
             .flush()
     }
 }

@@ -34,7 +34,6 @@ type HandlerRef = Rc<RefCell<Http3ServerHandler>>;
 
 const MAX_EVENT_DATA_SIZE: usize = 1024;
 
-#[allow(clippy::module_name_repetitions)]
 pub struct Http3Server {
     server: Server,
     http3_parameters: Http3Parameters,
@@ -138,9 +137,10 @@ impl Http3Server {
     /// Process HTTP3 layer.
     fn process_http3(&mut self, now: Instant) {
         qtrace!("[{self}] Process http3 internal");
-        // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable
-        // types.
-        #[allow(clippy::mutable_key_type)]
+        #[expect(
+            clippy::mutable_key_type,
+            reason = "ActiveConnectionRef::Hash doesn't access any of the interior mutable types."
+        )]
         let mut active_conns = self.server.active_connections();
         active_conns.extend(
             self.http3_handlers
@@ -155,7 +155,10 @@ impl Http3Server {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Function is mostly a match statement."
+    )]
     fn process_events(&mut self, conn: &ConnectionRef, now: Instant) {
         let mut remove = false;
         let http3_parameters = &self.http3_parameters;

@@ -35,8 +35,8 @@ use crate::{
     events::ConnectionEvent,
     server::ValidateAddress,
     stats::FrameStats,
-    tparams::{self, TransportParameter, MIN_ACK_DELAY},
-    tracking::DEFAULT_ACK_DELAY,
+    tparams::{TransportParameter, TransportParameterId::*},
+    tracking::DEFAULT_LOCAL_ACK_DELAY,
     CloseReason, ConnectionParameters, Error, Pmtud, StreamType, Version,
 };
 
@@ -167,7 +167,7 @@ fn no_alpn() {
 }
 
 #[test]
-#[allow(clippy::cognitive_complexity)]
+#[expect(clippy::cognitive_complexity, reason = "OK in a test.")]
 fn dup_server_flight1() {
     qdebug!("---- client: generate CH");
     let mut client = default_client();
@@ -346,8 +346,11 @@ fn reorder_05rtt() {
 
     // We can't use the standard facility to complete the handshake, so
     // drive it as aggressively as possible.
+    assert_eq!(client.stats().saved_datagrams, 0);
+    assert_eq!(client.stats().packets_rx, 0);
     client.process_input(s2, now());
     assert_eq!(client.stats().saved_datagrams, 1);
+    assert_eq!(client.stats().packets_rx, 0);
 
     // After processing the first packet, the client should go back and
     // process the 0.5-RTT packet data, which should make data available.
@@ -492,7 +495,7 @@ fn coalesce_05rtt() {
     drop(client.process(s2, now).dgram());
     // This packet will contain an ACK, but we can ignore it.
     assert_eq!(client.stats().dropped_rx, 0);
-    assert_eq!(client.stats().packets_rx, 4);
+    assert_eq!(client.stats().packets_rx, 3);
     assert_eq!(client.stats().saved_datagrams, 1);
 
     // After (successful) authentication, the packet is processed.
@@ -500,7 +503,7 @@ fn coalesce_05rtt() {
     let c3 = client.process_output(now).dgram();
     assert!(c3.is_some());
     assert_eq!(client.stats().dropped_rx, 0); // No Initial padding.
-    assert_eq!(client.stats().packets_rx, 5);
+    assert_eq!(client.stats().packets_rx, 4);
     assert_eq!(client.stats().saved_datagrams, 1);
     assert!(client.stats().frame_rx.padding > 0); // Padding uses frames.
 
@@ -548,7 +551,7 @@ fn reorder_handshake() {
     let dgram = client.process(s_hs, now).dgram();
     assertions::assert_initial(dgram.as_ref().unwrap(), false);
     assert_eq!(client.stats().saved_datagrams, 1);
-    assert_eq!(client.stats().packets_rx, 2);
+    assert_eq!(client.stats().packets_rx, 1);
 
     // Get the server to try again.
     // Though we currently allow the server to arm its PTO timer, use
@@ -566,11 +569,11 @@ fn reorder_handshake() {
     now += RTT / 2;
     client.process_input(s_hs.unwrap(), now);
     assert_eq!(client.stats().saved_datagrams, 2);
-    assert_eq!(client.stats().packets_rx, 3);
+    assert_eq!(client.stats().packets_rx, 1);
 
     client.process_input(s_init, now);
     // Each saved packet should now be "received" again.
-    assert_eq!(client.stats().packets_rx, 8);
+    assert_eq!(client.stats().packets_rx, 6);
     maybe_authenticate(&mut client);
     let c3 = client.process_output(now).dgram();
     assert!(c3.is_some());
@@ -627,7 +630,7 @@ fn reorder_1rtt() {
     }
     // The server has now received those packets, and saved them.
     // The six extra received are Initial + the junk we use for padding.
-    assert_eq!(server.stats().packets_rx, PACKETS + 6);
+    assert_eq!(server.stats().packets_rx, PACKETS + 2);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
     assert_eq!(server.stats().dropped_rx, 3);
 
@@ -635,7 +638,7 @@ fn reorder_1rtt() {
     let s2 = server.process(c2, now).dgram();
     // The server has now received those packets, and saved them.
     // The two additional are a Handshake and a 1-RTT (w/ NEW_CONNECTION_ID).
-    assert_eq!(server.stats().packets_rx, PACKETS * 2 + 8);
+    assert_eq!(server.stats().packets_rx, PACKETS + 8);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
     assert_eq!(server.stats().dropped_rx, 3);
     assert_eq!(*server.state(), State::Confirmed);
@@ -840,7 +843,9 @@ fn anti_amplification() {
     // With a gigantic transport parameter, the server is unable to complete
     // the handshake within the amplification limit.
     let very_big = TransportParameter::Bytes(vec![0; Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) * 3]);
-    server.set_local_tparam(0xce16, very_big).unwrap();
+    server
+        .set_local_tparam(TestTransportParameter, very_big)
+        .unwrap();
 
     let c_init = client.process_output(now).dgram();
     now += DEFAULT_RTT / 2;
@@ -1087,9 +1092,9 @@ fn ech_retry_fallback_rejected() {
 fn bad_min_ack_delay() {
     const EXPECTED_ERROR: CloseReason = CloseReason::Transport(Error::TransportParameterError);
     let mut server = default_server();
-    let max_ad = u64::try_from(DEFAULT_ACK_DELAY.as_micros()).unwrap();
+    let max_ad = u64::try_from(DEFAULT_LOCAL_ACK_DELAY.as_micros()).unwrap();
     server
-        .set_local_tparam(MIN_ACK_DELAY, TransportParameter::Integer(max_ad + 1))
+        .set_local_tparam(MinAckDelay, TransportParameter::Integer(max_ad + 1))
         .unwrap();
     let mut client = default_client();
 
@@ -1371,7 +1376,7 @@ fn grease_quic_bit_transport_parameter() {
             .remote
             .as_ref()
             .unwrap()
-            .get_empty(tparams::GREASE_QUIC_BIT)
+            .get_empty(GreaseQuicBit)
     }
 
     for client_grease in [true, false] {

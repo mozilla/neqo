@@ -2,11 +2,9 @@ name: QNS
 on:
   push:
     branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   pull_request:
     branches: ["main"]
     types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   merge_group:
   workflow_dispatch:
   schedule:
@@ -28,24 +26,29 @@ env:
 jobs:
   docker-image:
     name: Build Docker image
-    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
     outputs:
       imageID: ${{ steps.docker_build_and_push.outputs.imageID }}
     permissions:
       packages: write
     steps:
-      - uses: docker/setup-qemu-action@4574d27a4764455b42196d70a065bc6853246a25 # v3.4.0
-      - uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
+      - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
         with:
-          cache-binary: ${{ github.event_name == 'pull_request' }} # zizmor: ignore[cache-poisoning]
+          platforms: arm64
+          cache-image: false
 
-      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+        with:
+          cache-binary: false
+
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
+      - uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}-qns
@@ -58,31 +61,25 @@ jobs:
             # set latest tag for default branch
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - uses: docker/build-push-action@ca877d9245402d1537745e0e356eab47c3520991 # v6.13.0
+      - uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         if: ${{ github.event_name != 'pull_request' }}
         with:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          # FIXME: gcc for arm64 currently segmentation faults :-( recheck periodically
-          # platforms: 'linux/amd64, linux/arm64'
-          platforms: 'linux/amd64'
+          platforms: 'linux/amd64, linux/arm64'
 
-      - uses: docker/build-push-action@ca877d9245402d1537745e0e356eab47c3520991 # v6.13.0
+      - uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         id: docker_build_and_push
         with:
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           platforms: 'linux/amd64'
           outputs: type=docker,dest=/tmp/${{ env.LATEST }}.tar
 
-      - uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: '${{ env.LATEST }} Docker image'
           path: /tmp/${{ env.LATEST }}.tar
@@ -91,7 +88,7 @@ jobs:
     name: Determine interop pairs
     if: ${{ github.event_name != 'push' }}
     needs: docker-image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       pairs: ${{ steps.config.outputs.pairs }}
       implementations: ${{ steps.config.outputs.implementations }}
@@ -105,6 +102,7 @@ jobs:
           # Add neqo-latest and some non-default implementations.
           # tquic: https://github.com/quic-interop/quic-interop-runner/pull/385/files
           # openssl: https://github.com/quic-interop/quic-interop-runner/pull/402/files
+          # linuxquic: https://github.com/quic-interop/quic-interop-runner/pull/428
           cat <<EOF > additional.json
           {
             "neqo-latest": {
@@ -121,6 +119,11 @@ jobs:
               "image": "quay.io/openssl-ci/openssl-quic-interop",
               "url": "https://github.com/openssl/openssl",
               "role": "client"
+            },
+            "linuxquic": {
+              "image": "quay.io/lxin/linuxquic-interop:latest",
+              "url": "https://github.com/lxin/quic",
+              "role": "both"
             }
           }
           EOF
@@ -154,9 +157,9 @@ jobs:
       fail-fast: false
       matrix:
         pair: ${{ fromJson(needs.implementations.outputs.pairs) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+      - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           name: '${{ env.LATEST }} Docker image'
           path: /tmp
@@ -178,26 +181,33 @@ jobs:
       # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
       - uses: ./.github/actions/quic-interop-runner
         timeout-minutes: ${{ fromJSON(env.TIMEOUT) }}
+        continue-on-error: true
+        id: run
         with:
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
 
+      - if: ${{ always() }}
+        env:
+          RESULT: ${{ steps.run.outputs.result }}
+        run: test "$RESULT" != "error"
+
   report:
     name: Report results
     if: ${{ !cancelled() && github.event_name != 'push' }}
     needs: [run-qns, implementations]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+      - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           pattern: '*results'
           path: results
 
-      - uses: actions/cache/restore@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      - uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: results-main
           key: qns-${{ github.sha }}
@@ -313,7 +323,7 @@ jobs:
           echo "${{ github.sha }}" > results-main/baseline-sha.txt
 
       - if: ${{ github.ref == 'refs/heads/main' }}
-        uses: actions/cache/save@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: results-main
           key: qns-${{ github.sha }}

@@ -4,14 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    dead_code,
-    non_upper_case_globals,
-    non_camel_case_types,
-    non_snake_case,
-    clippy::unwrap_used
-)]
-
 use std::{
     cell::RefCell,
     ops::{Deref, DerefMut},
@@ -27,7 +19,14 @@ use crate::{
     null_safe_slice,
 };
 
-#[allow(clippy::unreadable_literal)]
+#[expect(
+    dead_code,
+    non_snake_case,
+    non_upper_case_globals,
+    non_camel_case_types,
+    clippy::unreadable_literal,
+    reason = "For included bindgen code."
+)]
 mod nss_p11 {
     include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
 }
@@ -47,6 +46,7 @@ macro_rules! scoped_ptr {
             /// # Errors
             ///
             /// When passed a null pointer generates an error.
+            #[allow(clippy::allow_attributes, dead_code, reason = "False positive.")]
             pub fn from_ptr(ptr: *mut $target) -> Result<Self, $crate::err::Error> {
                 if ptr.is_null() {
                     Err($crate::err::Error::last_nss_error())
@@ -58,7 +58,6 @@ macro_rules! scoped_ptr {
 
         impl Deref for $scoped {
             type Target = *mut $target;
-            #[must_use]
             fn deref(&self) -> &*mut $target {
                 &self.ptr
             }
@@ -108,7 +107,6 @@ impl PublicKey {
 }
 
 impl Clone for PublicKey {
-    #[must_use]
     fn clone(&self) -> Self {
         let ptr = unsafe { SECKEY_CopyPublicKey(self.ptr) };
         assert!(!ptr.is_null());
@@ -163,7 +161,6 @@ impl PrivateKey {
 unsafe impl Send for PrivateKey {}
 
 impl Clone for PrivateKey {
-    #[must_use]
     fn clone(&self) -> Self {
         let ptr = unsafe { SECKEY_CopyPrivateKey(self.ptr) };
         assert!(!ptr.is_null());
@@ -211,7 +208,6 @@ impl SymKey {
 }
 
 impl Clone for SymKey {
-    #[must_use]
     fn clone(&self) -> Self {
         let ptr = unsafe { PK11_ReferenceSymKey(self.ptr) };
         assert!(!ptr.is_null());
@@ -226,6 +222,12 @@ impl std::fmt::Debug for SymKey {
         } else {
             write!(f, "Opaque SymKey")
         }
+    }
+}
+
+impl Default for SymKey {
+    fn default() -> Self {
+        Self { ptr: null_mut() }
     }
 }
 
@@ -267,7 +269,7 @@ impl Item {
         Ok(SECItem {
             type_: SECItemType::siBuffer,
             data: data.cast_mut().cast(),
-            len: c_uint::try_from(std::mem::size_of::<T>())?,
+            len: c_uint::try_from(size_of::<T>())?,
         })
     }
 
@@ -278,20 +280,6 @@ impl Item {
             data: null_mut(),
             len: 0,
         }
-    }
-
-    /// This dereferences the pointer held by the item and makes a copy of the
-    /// content that is referenced there.
-    ///
-    /// # Safety
-    ///
-    /// This dereferences two pointers.  It doesn't get much less safe.
-    pub unsafe fn into_vec(self) -> Vec<u8> {
-        let b = self.ptr.as_ref().unwrap();
-        // Sanity check the type, as some types don't count bytes in `Item::len`.
-        assert_eq!(b.type_, SECItemType::siBuffer);
-        let slc = null_safe_slice(b.data, b.len);
-        Vec::from(slc)
     }
 }
 
@@ -352,7 +340,7 @@ pub fn randomize<B: AsMut<[u8]>>(mut buf: B) -> B {
 pub fn randomize<B: AsMut<[u8]>>(mut buf: B) -> B {
     let m_buf = buf.as_mut();
     let len = std::os::raw::c_int::try_from(m_buf.len()).expect("usize fits into c_int");
-    secstatus_to_res(unsafe { PK11_GenerateRandom(m_buf.as_mut_ptr(), len) }).unwrap();
+    secstatus_to_res(unsafe { PK11_GenerateRandom(m_buf.as_mut_ptr(), len) }).expect("NSS failed");
     buf
 }
 

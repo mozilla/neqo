@@ -19,7 +19,6 @@ use crate::{
     MessageType, Priority, PushId, ReceiveOutput, RecvStream, Res, Stream,
 };
 
-#[allow(clippy::module_name_repetitions)]
 pub struct RecvMessageInfo {
     pub message_type: MessageType,
     pub stream_type: Http3StreamType,

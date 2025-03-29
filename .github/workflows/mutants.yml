@@ -2,10 +2,8 @@ name: Find mutants
 on:
   push:
     branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   pull_request:
     branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   workflow_dispatch:
 
 concurrency:
@@ -18,7 +16,7 @@ permissions:
 jobs:
   mutants:
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -34,7 +32,7 @@ jobs:
 
       - uses: ./.github/actions/rust
         with:
-          tools: cargo-mutants
+          tools: cargo-mutants, cargo-nextest
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Find incremental mutants
@@ -67,7 +65,7 @@ jobs:
             echo '```'
           } > "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: mutants.out
           path: mutants.out

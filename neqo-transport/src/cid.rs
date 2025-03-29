@@ -19,8 +19,7 @@ use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
 use crate::{
-    frame::FRAME_TYPE_NEW_CONNECTION_ID, packet::PacketBuilder, recovery::RecoveryToken,
-    stats::FrameStats, Error, Res,
+    frame::FrameType, packet::PacketBuilder, recovery::RecoveryToken, stats::FrameStats, Error, Res,
 };
 
 pub const MAX_CONNECTION_ID_LEN: usize = 20;
@@ -306,7 +305,7 @@ impl ConnectionIdEntry<[u8; 16]> {
             return false;
         }
 
-        builder.encode_varint(FRAME_TYPE_NEW_CONNECTION_ID);
+        builder.encode_varint(FrameType::NewConnectionId);
         builder.encode_varint(self.seqno);
         builder.encode_varint(0u64);
         builder.encode_vec(1, &self.cid);
@@ -315,6 +314,11 @@ impl ConnectionIdEntry<[u8; 16]> {
         true
     }
 
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_const_for_fn,
+        reason = "TODO: False positive on nightly."
+    )]
     pub fn is_empty(&self) -> bool {
         self.seqno == CONNECTION_ID_SEQNO_EMPTY || self.cid.is_empty()
     }

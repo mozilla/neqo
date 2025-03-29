@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::unwrap_used)] // This is example code.
+#![expect(clippy::unwrap_used, reason = "This is example code.")]
 
 //! An [HTTP 0.9](https://www.w3.org/Protocols/HTTP/AsImplemented.html) client implementation.
 

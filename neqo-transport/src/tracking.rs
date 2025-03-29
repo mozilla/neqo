@@ -9,53 +9,52 @@
 use std::{
     cmp::min,
     collections::VecDeque,
-    ops::{Index, IndexMut},
     time::{Duration, Instant},
 };
 
-use enum_map::{enum_map, Enum, EnumMap};
+use enum_map::{Enum, EnumMap};
+use enumset::{EnumSet, EnumSetType};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
-use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
+use neqo_crypto::Epoch;
+use strum::EnumIter;
 
 use crate::{
     ecn,
-    frame::{FRAME_TYPE_ACK, FRAME_TYPE_ACK_ECN},
+    frame::FrameType,
     packet::{PacketBuilder, PacketNumber, PacketType},
     recovery::RecoveryToken,
     stats::FrameStats,
     Error, Res,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq, Enum)]
+#[derive(Debug, PartialOrd, Ord, EnumSetType, Enum, EnumIter)]
 pub enum PacketNumberSpace {
     Initial,
     Handshake,
     ApplicationData,
 }
 
-#[allow(clippy::use_self)] // https://github.com/rust-lang/rust-clippy/issues/3410
-impl PacketNumberSpace {
-    pub fn iter() -> impl Iterator<Item = &'static PacketNumberSpace> {
-        const SPACES: &[PacketNumberSpace] = &[
-            PacketNumberSpace::Initial,
-            PacketNumberSpace::Handshake,
-            PacketNumberSpace::ApplicationData,
-        ];
-        SPACES.iter()
-    }
-}
-
 impl From<Epoch> for PacketNumberSpace {
     fn from(epoch: Epoch) -> Self {
         match epoch {
-            TLS_EPOCH_INITIAL => Self::Initial,
-            TLS_EPOCH_HANDSHAKE => Self::Handshake,
-            _ => Self::ApplicationData,
+            Epoch::Initial => Self::Initial,
+            Epoch::Handshake => Self::Handshake,
+            Epoch::ApplicationData | Epoch::ZeroRtt => Self::ApplicationData,
         }
     }
 }
 
-#[allow(clippy::fallible_impl_from)]
+impl From<PacketNumberSpace> for Epoch {
+    fn from(val: PacketNumberSpace) -> Self {
+        match val {
+            PacketNumberSpace::Initial => Self::Initial,
+            PacketNumberSpace::Handshake => Self::Handshake,
+            PacketNumberSpace::ApplicationData => Self::ApplicationData,
+        }
+    }
+}
+
+#[expect(clippy::fallible_impl_from, reason = "OK here.")]
 impl From<PacketType> for PacketNumberSpace {
     fn from(pt: PacketType) -> Self {
         match pt {
@@ -67,63 +66,7 @@ impl From<PacketType> for PacketNumberSpace {
     }
 }
 
-#[derive(Clone, Copy, Default)]
-pub struct PacketNumberSpaceSet {
-    spaces: EnumMap<PacketNumberSpace, bool>,
-}
-
-impl PacketNumberSpaceSet {
-    pub fn all() -> Self {
-        Self {
-            spaces: enum_map! {
-                PacketNumberSpace::Initial => true,
-                PacketNumberSpace::Handshake => true,
-                PacketNumberSpace::ApplicationData => true,
-            },
-        }
-    }
-}
-
-impl Index<PacketNumberSpace> for PacketNumberSpaceSet {
-    type Output = bool;
-
-    fn index(&self, index: PacketNumberSpace) -> &Self::Output {
-        &self.spaces[index]
-    }
-}
-
-impl IndexMut<PacketNumberSpace> for PacketNumberSpaceSet {
-    fn index_mut(&mut self, index: PacketNumberSpace) -> &mut Self::Output {
-        &mut self.spaces[index]
-    }
-}
-
-impl<T: AsRef<[PacketNumberSpace]>> From<T> for PacketNumberSpaceSet {
-    fn from(spaces: T) -> Self {
-        let mut v = Self::default();
-        for sp in spaces.as_ref() {
-            v[*sp] = true;
-        }
-        v
-    }
-}
-
-impl std::fmt::Debug for PacketNumberSpaceSet {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let mut first = true;
-        f.write_str("(")?;
-        for sp in PacketNumberSpace::iter() {
-            if self[*sp] {
-                if !first {
-                    f.write_str("+")?;
-                    first = false;
-                }
-                std::fmt::Display::fmt(sp, f)?;
-            }
-        }
-        f.write_str(")")
-    }
-}
+pub type PacketNumberSpaceSet = EnumSet<PacketNumberSpace>;
 
 impl std::fmt::Display for PacketNumberSpace {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -221,8 +164,14 @@ impl ::std::fmt::Display for PacketRange {
     }
 }
 
-/// The ACK delay we use.
-pub const DEFAULT_ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
+/// The default maximum ACK delay we use locally and advertise to the remote.
+pub const DEFAULT_LOCAL_ACK_DELAY: Duration = Duration::from_millis(20);
+/// The default maximum ACK delay we assume the remote uses.
+///
+/// > If this value is absent, a default of 25 milliseconds is assumed.
+///
+/// <https://datatracker.ietf.org/doc/html/rfc9000#section-18.2>
+pub const DEFAULT_REMOTE_ACK_DELAY: Duration = Duration::from_millis(25);
 /// The default number of in-order packets we will receive after
 /// largest acknowledged without sending an immediate acknowledgment.
 pub const DEFAULT_ACK_PACKET_TOLERANCE: PacketNumber = 1;
@@ -286,7 +235,7 @@ impl RecvdPackets {
             ack_time: None,
             last_ack_time: None,
             ack_frequency_seqno: 0,
-            ack_delay: DEFAULT_ACK_DELAY,
+            ack_delay: DEFAULT_LOCAL_ACK_DELAY,
             unacknowledged_count: 0,
             unacknowledged_tolerance: if space == PacketNumberSpace::ApplicationData {
                 DEFAULT_ACK_PACKET_TOLERANCE
@@ -512,9 +461,9 @@ impl RecvdPackets {
         }
 
         builder.encode_varint(if self.ecn_count.is_some() {
-            FRAME_TYPE_ACK_ECN
+            FrameType::AckEcn
         } else {
-            FRAME_TYPE_ACK
+            FrameType::Ack
         });
         let mut iter = ranges.iter();
         let Some(first) = iter.next() else { return };
@@ -663,11 +612,11 @@ impl AckTracker {
 impl Default for AckTracker {
     fn default() -> Self {
         Self {
-            spaces: enum_map! {
-                PacketNumberSpace::Initial => Some(RecvdPackets::new(PacketNumberSpace::Initial)),
-                PacketNumberSpace::Handshake => Some(RecvdPackets::new(PacketNumberSpace::Handshake)),
-                PacketNumberSpace::ApplicationData => Some(RecvdPackets::new(PacketNumberSpace::ApplicationData)),
-            },
+            spaces: EnumMap::from_array([
+                Some(RecvdPackets::new(PacketNumberSpace::Initial)),
+                Some(RecvdPackets::new(PacketNumberSpace::Handshake)),
+                Some(RecvdPackets::new(PacketNumberSpace::ApplicationData)),
+            ]),
         }
     }
 }
@@ -680,8 +629,8 @@ mod tests {
     use test_fixture::now;
 
     use super::{
-        AckTracker, Duration, Instant, PacketNumberSpace, PacketNumberSpaceSet, RecoveryToken,
-        RecvdPackets, MAX_TRACKED_RANGES,
+        AckTracker, Duration, Instant, PacketNumberSpace, RecoveryToken, RecvdPackets,
+        MAX_TRACKED_RANGES,
     };
     use crate::{
         frame::Frame,
@@ -1113,48 +1062,6 @@ mod tests {
             tracker.ack_time(now() + Duration::from_millis(1)),
             Some(now())
         );
-    }
-
-    #[test]
-    fn pnspaceset_default() {
-        let set = PacketNumberSpaceSet::default();
-        assert!(!set[PacketNumberSpace::Initial]);
-        assert!(!set[PacketNumberSpace::Handshake]);
-        assert!(!set[PacketNumberSpace::ApplicationData]);
-    }
-
-    #[test]
-    fn pnspaceset_from() {
-        let set = PacketNumberSpaceSet::from(&[PacketNumberSpace::Initial]);
-        assert!(set[PacketNumberSpace::Initial]);
-        assert!(!set[PacketNumberSpace::Handshake]);
-        assert!(!set[PacketNumberSpace::ApplicationData]);
-
-        let set =
-            PacketNumberSpaceSet::from(&[PacketNumberSpace::Handshake, PacketNumberSpace::Initial]);
-        assert!(set[PacketNumberSpace::Initial]);
-        assert!(set[PacketNumberSpace::Handshake]);
-        assert!(!set[PacketNumberSpace::ApplicationData]);
-
-        let set = PacketNumberSpaceSet::from(&[
-            PacketNumberSpace::ApplicationData,
-            PacketNumberSpace::ApplicationData,
-        ]);
-        assert!(!set[PacketNumberSpace::Initial]);
-        assert!(!set[PacketNumberSpace::Handshake]);
-        assert!(set[PacketNumberSpace::ApplicationData]);
-    }
-
-    #[test]
-    fn pnspaceset_copy() {
-        let set = PacketNumberSpaceSet::from(&[
-            PacketNumberSpace::Handshake,
-            PacketNumberSpace::ApplicationData,
-        ]);
-        let copy = set;
-        assert!(!copy[PacketNumberSpace::Initial]);
-        assert!(copy[PacketNumberSpace::Handshake]);
-        assert!(copy[PacketNumberSpace::ApplicationData]);
     }
 
     #[test]

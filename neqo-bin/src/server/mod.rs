@@ -4,8 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::future_not_send)]
-#![allow(clippy::unwrap_used)] // This is example code.
+#![expect(
+    clippy::unwrap_used,
+    clippy::future_not_send,
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    reason = "This is example code."
+)]
 
 use std::{
     cell::RefCell,
@@ -191,14 +196,12 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
     fs::read(path)
 }
 
-#[allow(clippy::module_name_repetitions)]
 pub trait HttpServer: Display {
     fn process(&mut self, dgram: Option<Datagram<&mut [u8]>>, now: Instant) -> Output;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }
 
-#[allow(clippy::module_name_repetitions)]
 pub struct ServerRunner {
     now: Box<dyn Fn() -> Instant>,
     server: Box<dyn HttpServer>,
@@ -249,8 +252,19 @@ impl ServerRunner {
             match server.process(input_dgram.take(), now()) {
                 Output::Datagram(dgram) => {
                     let socket = Self::find_socket(sockets, dgram.source());
-                    socket.writable().await?;
-                    socket.send(&dgram)?;
+                    loop {
+                        // Optimistically attempt sending datagram. In case the
+                        // OS buffer is full, wait till socket is writable then
+                        // try again.
+                        match socket.send(&dgram) {
+                            Ok(()) => break,
+                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                socket.writable().await?;
+                                // Now try again.
+                            }
+                            e @ Err(_) => return e,
+                        }
+                    }
                 }
                 Output::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");

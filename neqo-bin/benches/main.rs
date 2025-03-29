@@ -4,13 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::unwrap_used)] // OK in a bench.
+#![expect(clippy::unwrap_used, reason = "OK in a bench.")]
 
 use std::{env, path::PathBuf, str::FromStr as _};
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use neqo_bin::{client, server};
-use tokio::runtime::Runtime;
+use tokio::runtime::Builder;
 
 struct Benchmark {
     name: String,
@@ -57,13 +57,14 @@ fn transfer(c: &mut Criterion) {
             Throughput::Elements(requests.len() as u64)
         });
         group.bench_function("client", |b| {
-            b.to_async(Runtime::new().unwrap()).iter_batched(
-                || client::client(client::Args::new(&requests, upload)),
-                |client| async move {
-                    client.await.unwrap();
-                },
-                BatchSize::PerIteration,
-            );
+            b.to_async(Builder::new_current_thread().enable_all().build().unwrap())
+                .iter_batched(
+                    || client::client(client::Args::new(&requests, upload)),
+                    |client| async move {
+                        client.await.unwrap();
+                    },
+                    BatchSize::PerIteration,
+                );
         });
         group.finish();
     }
@@ -71,17 +72,25 @@ fn transfer(c: &mut Criterion) {
     done_sender.send(()).unwrap();
 }
 
-#[allow(clippy::redundant_pub_crate)] // Bug in clippy nursery? Not sure how this lint could fire here.
+#[allow(
+    clippy::allow_attributes,
+    clippy::redundant_pub_crate,
+    reason = "TODO: Bug in clippy nursery?"
+)]
 fn spawn_server() -> tokio::sync::oneshot::Sender<()> {
     let (done_sender, mut done_receiver) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
-        Runtime::new().unwrap().block_on(async {
-            let mut server = Box::pin(server::server(server::Args::default()));
-            tokio::select! {
-                _ = &mut done_receiver => {}
-                res = &mut server  => panic!("expect server not to terminate: {res:?}"),
-            };
-        });
+        Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let mut server = Box::pin(server::server(server::Args::default()));
+                tokio::select! {
+                    _ = &mut done_receiver => {}
+                    res = &mut server  => panic!("expect server not to terminate: {res:?}"),
+                };
+            });
     });
     done_sender
 }

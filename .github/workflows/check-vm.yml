@@ -2,10 +2,8 @@ name: CI VM
 on:
   push:
     branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   pull_request:
     branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   merge_group:
   workflow_dispatch:
 env:
@@ -22,6 +20,7 @@ permissions:
 
 jobs:
   check-vm:
+    if: github.actor != 'dependabot[bot]'
     strategy:
       fail-fast: false
       matrix:
@@ -31,7 +30,7 @@ jobs:
               # netbsd, # FIXME: NSS package is new enough, but test_fixture::fixture_init dies with `NssError { name: "SEC_ERROR_LEGACY_DATABASE", code: -8015, desc: "The certificate/key database is in an old, unsupported format." }`
               # solaris # FIXME: Re-enable once their NSS package is new enough.
             ]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -44,7 +43,7 @@ jobs:
       - run: curl -o rustup.sh --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
 
       - if: ${{ matrix.os == 'freebsd' }}
-        uses: vmactions/freebsd-vm@848dac7e118679d08e2c2f9d42cd96608d834323 # v1.1.8
+        uses: vmactions/freebsd-vm@8873d98fd1413b5977cb2f7348fe329775159892 # v1.1.9
         with:
           usesh: true
           envs: "CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG GITHUB_ACTIONS"
@@ -60,7 +59,7 @@ jobs:
               echo "System NSS package too old (minorversion $NSS_MINOR_VERSION < $NSS_MINIMUM_VERSION); skipping checks"
               exit 0
             fi
-            sh rustup.sh --default-toolchain stable --profile minimal --component clippy llvm-tools -y
+            sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools -y
             . "$HOME/.cargo/env"
             cargo check --locked --all-targets
             cargo clippy -- -D warnings
@@ -118,7 +117,7 @@ jobs:
               echo "System NSS package too old (minorversion $NSS_MINOR_VERSION < $NSS_MINIMUM_VERSION); skipping checks"
               exit 0
             fi
-            sh rustup.sh --default-toolchain stable --profile minimal --component clippy llvm-tools -y
+            sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools -y
             . "$HOME/.cargo/env"
             # FIXME: Why do we need to set this on NetBSD?
             export LD_LIBRARY_PATH=/usr/pkg/lib/nss:/usr/pkg/lib/nspr
@@ -164,7 +163,7 @@ jobs:
             cargo test --locked --no-fail-fast --release
             rm -rf target # Don't sync this back to host
 
-      - uses: codecov/codecov-action@13ce06bfc6bbe3ecf90edbbf1bc32fe5978ca1d3 # v5.3.1
+      - uses: codecov/codecov-action@0565863a31f2c772f9f0395002a31e3f06189574 # v5.4.0
         with:
           files: lcov.info
           fail_ci_if_error: false

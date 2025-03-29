@@ -155,7 +155,8 @@ fn connect_peers_with_network_propagation_delay(
     (out.dgram(), now)
 }
 
-fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
+#[must_use]
+pub fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
     let mut hconn_c = default_http3_client();
     let mut hconn_s = default_http3_server();
 
@@ -254,7 +255,7 @@ fn response_103() {
 
 /// Test [`neqo_http3::SendMessage::send_data`] to set
 /// [`neqo_transport::SendStream::set_writable_event_low_watermark`].
-#[allow(clippy::cast_possible_truncation)]
+#[expect(clippy::cast_possible_truncation, reason = "OK in a test.")]
 #[test]
 fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>> {
     const STREAM_LIMIT: u64 = 5000;
