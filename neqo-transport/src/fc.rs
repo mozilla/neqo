@@ -252,7 +252,7 @@ where
         }
 
         self.retired = retired;
-        if self.should_send_flowc_update() {
+        if self.should_send_update() {
             self.frame_pending = true;
         }
     }
@@ -265,7 +265,7 @@ where
         }
     }
 
-    const fn should_send_flowc_update(&self) -> bool {
+    const fn should_send_update(&self) -> bool {
         let window_bytes_unused = self.max_allowed - self.retired;
         window_bytes_unused < self.max_active - self.max_active / WINDOW_UPDATE_FRACTION
     }
@@ -331,7 +331,7 @@ impl ReceiverFlowControl<()> {
     pub fn add_retired(&mut self, count: u64) {
         debug_assert!(self.retired + count <= self.consumed);
         self.retired += count;
-        if self.should_send_flowc_update() {
+        if self.should_send_update() {
             self.frame_pending = true;
         }
     }
@@ -417,7 +417,7 @@ impl ReceiverFlowControl<StreamId> {
     pub fn add_retired(&mut self, count: u64) {
         debug_assert!(self.retired + count <= self.consumed);
         self.retired += count;
-        if self.should_send_flowc_update() {
+        if self.should_send_update() {
             self.frame_pending = true;
         }
     }
