@@ -216,7 +216,7 @@ where
     ///
     /// Only used in [`ReceiverFlowControl<StreamId>`] implementation for
     /// receive window auto-tuning.
-    max_allowed_sent_at: Option<Instant>,
+    last_update: Option<Instant>,
     /// Item received, but not retired yet.
     /// This will be used for byte flow control: each stream will remember its largest byte
     /// offset received and session flow control will remember the sum of all bytes consumed
@@ -237,7 +237,7 @@ where
             subject,
             max_active: max,
             max_allowed: max,
-            max_allowed_sent_at: None,
+            last_update: None,
             consumed: 0,
             retired: 0,
             frame_pending: false,
@@ -375,7 +375,7 @@ impl ReceiverFlowControl<StreamId> {
         // allowed by the maximum flow control window and the current rtt (
         // max_active / rtt ), try to increase the maximum flow control window (
         // max_active ).
-        if let Some(max_allowed_sent_at) = self.max_allowed_sent_at {
+        if let Some(max_allowed_sent_at) = self.last_update {
             let elapsed = now.duration_since(max_allowed_sent_at);
             let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
 
@@ -410,7 +410,7 @@ impl ReceiverFlowControl<StreamId> {
                 max_data: max_allowed,
             }));
             self.frame_sent(max_allowed);
-            self.max_allowed_sent_at = Some(now);
+            self.last_update = Some(now);
         }
     }
 
