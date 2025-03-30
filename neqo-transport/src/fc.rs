@@ -10,6 +10,7 @@
 use std::{
     cmp::min,
     fmt::Debug,
+    num::NonZeroU64,
     ops::{Deref, DerefMut, Index, IndexMut},
     time::{Duration, Instant},
 };
@@ -34,6 +35,13 @@ use crate::{
 ///
 /// Value aligns with [`crate::connection::params::DEFAULT_ACK_RATIO`].
 pub const WINDOW_UPDATE_FRACTION: u64 = 4;
+/// Multiplier for auto-tuning the stream receive window.
+///
+/// See [`ReceiverFlowControl::auto_tune`].
+///
+/// Note that the flow control window should grow at least as fast as the
+/// congestion control window, in order to not unnecessarily limit throughput.
+const WINDOW_INCREASE_MULTIPLIER: u64 = 4;
 
 #[derive(Debug)]
 pub struct SenderFlowControl<T>
@@ -369,34 +377,7 @@ impl ReceiverFlowControl<StreamId> {
             return;
         }
 
-        // Auto-tune max_active, i.e. the flow control window.
-        //
-        // If the sending rate ( window_bytes used / elapsed ) exceeds the rate
-        // allowed by the maximum flow control window and the current rtt (
-        // max_active / rtt ), try to increase the maximum flow control window (
-        // max_active ).
-        if let Some(max_allowed_sent_at) = self.last_update {
-            let elapsed = now.duration_since(max_allowed_sent_at);
-            let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
-
-            // Same as `elapsed / rtt < window_bytes_used / max_active`
-            // without floating point division.
-            if elapsed.as_micros() * u128::from(self.max_active)
-                < rtt.as_micros() * u128::from(window_bytes_used)
-            {
-                let prev_max_active = self.max_active;
-                // Try doubling the flow control window.
-                //
-                // Note that the flow control window should grow at least as
-                // fast as the congestion control window, in order to not
-                // unnecessarily limit throughput.
-                self.max_active = min(2 * self.max_active, MAX_RECV_WINDOW_SIZE);
-                qdebug!(
-                    "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB last update: {:?} rtt: {rtt:?} stream_id: {}",
-                    prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now - max_allowed_sent_at, self.subject,
-                );
-            }
-        }
+        let _ = self.auto_tune(now, rtt);
 
         let max_allowed = self.next_limit();
         if builder.write_varint_frame(&[
@@ -412,6 +393,56 @@ impl ReceiverFlowControl<StreamId> {
             self.frame_sent(max_allowed);
             self.last_update = Some(now);
         }
+    }
+
+    /// Auto-tune [`ReceiverFlowControl::max_active`], i.e. the stream flow
+    /// control window.
+    ///
+    /// If the sending rate (`window_bytes_used`) exceeds the rate allowed by
+    /// the maximum flow control window and the current rtt
+    /// (`window_bytes_expected`), try to increase the maximum flow control
+    /// window ([`ReceiverFlowControl::max_active`]).
+    ///
+    /// Returns [`Result`] for flow-control only. No need to handle [`Err`].
+    fn auto_tune(&mut self, now: Instant, rtt: Duration) -> Result<(), ()> {
+        let max_allowed_sent_at = self.last_update.ok_or(())?;
+
+        let elapsed: u64 = now
+            .duration_since(max_allowed_sent_at)
+            .as_micros()
+            .try_into()
+            .map_err(|_| ())?;
+        let rtt: NonZeroU64 = rtt
+            .as_micros()
+            .try_into()
+            .and_then(|rtt: u64| NonZeroU64::try_from(rtt))
+            .map_err(|_| ())?;
+        let window_bytes_expected = self.max_active * elapsed / rtt;
+        let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
+        let excess = window_bytes_used
+            .checked_sub(window_bytes_expected)
+            .ok_or(())?; // Below expected. No auto-tuning needed.
+
+        let prev_max_active = self.max_active;
+        self.max_active = min(
+            self.max_active + excess * WINDOW_INCREASE_MULTIPLIER,
+            MAX_RECV_WINDOW_SIZE,
+        );
+        qdebug!(
+            "Increasing max stream receive window by {} B, \
+            previous max_active: {} MiB, \
+            new max_active: {} MiB, \
+            last update: {:?}, \
+            rtt: {rtt:?}, \
+            stream_id: {}",
+            self.max_active - prev_max_active,
+            prev_max_active / 1024 / 1024,
+            self.max_active / 1024 / 1024,
+            now - max_allowed_sent_at,
+            self.subject,
+        );
+
+        Ok(())
     }
 
     pub fn add_retired(&mut self, count: u64) {
@@ -1091,6 +1122,9 @@ mod test {
     #[test]
     fn auto_tuning_approximates_bandwidth_delay_product() -> Res<()> {
         const DATA_FRAME_SIZE: u64 = 1_500;
+        /// Allow auto-tuning algorithm to be off from actual bandwidth-delay
+        /// product by up to 1KiB.
+        const TOLERANCE: u64 = 1024;
 
         test_fixture::fixture_init();
 
@@ -1175,12 +1209,13 @@ mod test {
             );
 
             assert!(
-                fc.max_active() >= bdp || fc.max_active() == MAX_RECV_WINDOW_SIZE,
+                fc.max_active() + TOLERANCE >= bdp || fc.max_active() == MAX_RECV_WINDOW_SIZE,
                 "{summary} Receive window is smaller than the bdp."
             );
             assert!(
-                fc.max_active <= 2 * bdp || fc.max_active == INITIAL_RECV_WINDOW_SIZE as u64,
-                "{summary} Receive window is more than twice the bdp."
+                fc.max_active - TOLERANCE <= bdp
+                    || fc.max_active == INITIAL_RECV_WINDOW_SIZE as u64,
+                "{summary} Receive window is larger than the bdp."
             );
 
             qdebug!("{summary}");
