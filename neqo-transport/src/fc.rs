@@ -377,7 +377,7 @@ impl ReceiverFlowControl<StreamId> {
             return;
         }
 
-        let _ = self.auto_tune(now, rtt);
+        self.auto_tune(now, rtt);
 
         let max_allowed = self.next_limit();
         if builder.write_varint_frame(&[
@@ -402,26 +402,33 @@ impl ReceiverFlowControl<StreamId> {
     /// the maximum flow control window and the current rtt
     /// (`window_bytes_expected`), try to increase the maximum flow control
     /// window ([`ReceiverFlowControl::max_active`]).
-    ///
-    /// Returns [`Result`] for flow-control only. No need to handle [`Err`].
-    fn auto_tune(&mut self, now: Instant, rtt: Duration) -> Result<(), ()> {
-        let max_allowed_sent_at = self.last_update.ok_or(())?;
+    fn auto_tune(&mut self, now: Instant, rtt: Duration) {
+        let Some(max_allowed_sent_at) = self.last_update else {
+            return;
+        };
 
-        let elapsed: u64 = now
+        let Ok(elapsed): Result<u64, _> = now
             .duration_since(max_allowed_sent_at)
             .as_micros()
             .try_into()
-            .map_err(|_| ())?;
-        let rtt: NonZeroU64 = rtt
+        else {
+            return;
+        };
+
+        let Ok(rtt): Result<NonZeroU64, _> = rtt
             .as_micros()
             .try_into()
             .and_then(|rtt: u64| NonZeroU64::try_from(rtt))
-            .map_err(|_| ())?;
+        else {
+            return;
+        };
+
         let window_bytes_expected = self.max_active * elapsed / rtt;
         let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
-        let excess = window_bytes_used
-            .checked_sub(window_bytes_expected)
-            .ok_or(())?; // Below expected. No auto-tuning needed.
+        let Some(excess) = window_bytes_used.checked_sub(window_bytes_expected) else {
+            // Used below expected. No auto-tuning needed.
+            return;
+        };
 
         let prev_max_active = self.max_active;
         self.max_active = min(
@@ -441,8 +448,6 @@ impl ReceiverFlowControl<StreamId> {
             now - max_allowed_sent_at,
             self.subject,
         );
-
-        Ok(())
     }
 
     pub fn add_retired(&mut self, count: u64) {
@@ -1118,7 +1123,7 @@ mod test {
         Ok(())
     }
 
-    #[allow(clippy::cast_precision_loss)]
+    #[expect(clippy::cast_precision_loss, reason = "This is test code.")]
     #[test]
     fn auto_tuning_approximates_bandwidth_delay_product() -> Res<()> {
         const DATA_FRAME_SIZE: u64 = 1_500;

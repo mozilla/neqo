@@ -301,7 +301,7 @@ pub struct ReadySimulator {
 }
 
 impl ReadySimulator {
-    #[allow(clippy::must_use_candidate)]
+    #[expect(clippy::must_use_candidate, reason = "run duration only needed in some tests")]
     pub fn run(mut self) -> Duration {
         let real_start = Instant::now();
         let end = self.sim.process_loop(self.start, self.now);
