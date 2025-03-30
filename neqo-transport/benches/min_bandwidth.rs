@@ -35,7 +35,7 @@ pub fn main() {
     const TRANSFER_AMOUNT: usize = GIB;
     const LINK_BANDWIDTH: usize = GBIT;
     const LINK_RTT_MS: usize = 40;
-    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.5;
+    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.85;
 
     let gbit_link = || {
         let rate_byte = LINK_BANDWIDTH / 8;
