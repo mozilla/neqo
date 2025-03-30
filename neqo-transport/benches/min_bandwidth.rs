@@ -24,7 +24,7 @@ use test_fixture::{
     },
 };
 
-#[allow(clippy::cast_precision_loss)]
+#[expect(clippy::cast_precision_loss, reason = "OK in a bench.")]
 pub fn main() {
     const MIB: usize = 1_024 * 1_024;
     const GIB: usize = 1_024 * MIB;
