@@ -150,6 +150,12 @@ impl Output {
     }
 }
 
+impl From<Option<Datagram>> for Output {
+    fn from(value: Option<Datagram>) -> Self {
+        value.map_or(Self::None, Self::Datagram)
+    }
+}
+
 /// Used by inner functions like `Connection::output`.
 enum SendOption {
     /// Yes, please send this datagram.
@@ -2132,7 +2138,13 @@ impl Connection {
         &mut self,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
+        now: Instant,
     ) {
+        let rtt = self.paths.primary().map_or_else(
+            || RttEstimate::default().estimate(),
+            |p| p.borrow().rtt().estimate(),
+        );
+
         let stats = &mut self.stats.borrow_mut();
         let frame_stats = &mut stats.frame_tx;
         if self.role == Role::Server {
@@ -2149,7 +2161,7 @@ impl Connection {
         }
 
         self.streams
-            .write_maintenance_frames(builder, tokens, frame_stats);
+            .write_maintenance_frames(builder, tokens, frame_stats, now, rtt);
         if builder.is_full() {
             return;
         }
@@ -2328,7 +2340,7 @@ impl Connection {
                         .send_probe(builder, &mut self.stats.borrow_mut());
                     ack_eliciting = true;
                 }
-                self.write_appdata_frames(builder, &mut tokens);
+                self.write_appdata_frames(builder, &mut tokens, now);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
                 self.crypto.write_frame(
