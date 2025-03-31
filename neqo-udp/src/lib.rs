@@ -166,8 +166,6 @@ impl SendBatch {
             // We need to send the current batch before we can send the next one.
             true
         }
-
-        // self.data.extend_from_slice(dgram.as_ref());
     }
 
     pub fn switch_to_next(&mut self) {
