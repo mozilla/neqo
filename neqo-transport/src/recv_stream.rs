@@ -132,7 +132,6 @@ impl RecvStreams {
 /// from incoming STREAM frames.
 #[derive(Debug, Default)]
 pub struct RxStreamOrderer {
-    // TODO: Consider shrinking from time to time?
     data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
     retired: u64,                        // Number of bytes the application has read
     received: u64,                       // The number of bytes stored in `data_ranges`
