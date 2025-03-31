@@ -420,6 +420,7 @@ impl ReceiverFlowControl<StreamId> {
             .try_into()
             .and_then(|rtt: u64| NonZeroU64::try_from(rtt))
         else {
+            // RTT is zero, no need for tuning.
             return;
         };
 
