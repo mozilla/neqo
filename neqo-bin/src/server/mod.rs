@@ -283,9 +283,10 @@ impl ServerRunner {
                             }
                         }
                     }
-                    send = batch.switch_to_next();
                 }
+                batch.switch_to_next();
             }
+
             if exit {
                 debug_assert!(batch.all_empty());
                 break;

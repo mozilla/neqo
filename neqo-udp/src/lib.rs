@@ -171,13 +171,11 @@ impl SendBatch {
         // self.data.extend_from_slice(dgram.as_ref());
     }
 
-    pub fn switch_to_next(&mut self) -> bool {
+    pub fn switch_to_next(&mut self) {
         if let Some(next) = self.next.take() {
             self.set(next);
-            true
         } else {
             self.clear();
-            false
         }
     }
 
