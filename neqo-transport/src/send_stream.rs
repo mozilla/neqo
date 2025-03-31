@@ -37,6 +37,11 @@ use crate::{
     AppError, Error, Res,
 };
 
+/// The maximum stream send buffer size.
+///
+/// See [`crate::recv_stream::MAX_RECV_WINDOW_SIZE`] for an explanation of this
+/// concrete value.
+///
 /// Keep in sync with [`crate::recv_stream::MAX_RECV_WINDOW_SIZE`].
 pub const MAX_SEND_BUFFER_SIZE: usize = 10 * 1024 * 1024;
 
