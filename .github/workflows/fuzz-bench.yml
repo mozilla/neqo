@@ -34,5 +34,5 @@ jobs:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       # Check that the fuzz and bench targets build
-      - run: cargo fuzz check
+      - run: cargo fuzz build
       - run: cargo bench --features bench --no-run
