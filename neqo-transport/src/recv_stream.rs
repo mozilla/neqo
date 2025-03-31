@@ -1824,7 +1824,11 @@ mod tests {
     }
 
     /// Test that the flow controls will send updates.
-    #[expect(clippy::too_many_lines, clippy::cast_possible_truncation, reason = "This is test code.")]
+    #[expect(
+        clippy::too_many_lines,
+        clippy::cast_possible_truncation,
+        reason = "This is test code."
+    )]
     #[test]
     fn fc_state_recv_7() {
         const CONNECTION_WINDOW: u64 = 1024;
