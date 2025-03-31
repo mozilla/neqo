@@ -1072,7 +1072,7 @@ mod test {
 
         assert!(
             initial_max_active < increased_max_active,
-            "expect receive window auto-tuning to increase max_active on 0 latency connection"
+            "expect receive window auto-tuning to increase max_active on full utilization of high bdp connection"
         );
 
         // Huge idle time.
@@ -1084,7 +1084,7 @@ mod test {
         assert_eq!(
             increased_max_active,
             fc.max_active(),
-            "expect receive window auto-tuning never to decrease max_active"
+            "expect receive window auto-tuning never to decrease max_active on low utilization"
         );
 
         Ok(())
