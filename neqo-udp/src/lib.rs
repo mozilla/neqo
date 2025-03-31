@@ -20,6 +20,7 @@ use std::{
 use log::{log_enabled, Level};
 use neqo_common::{qdebug, qtrace, Datagram, IpTos};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
+use smallvec::SmallVec;
 
 /// Receive buffer size
 ///
@@ -61,6 +62,7 @@ impl Default for RecvBuf {
     }
 }
 
+/// The meta data associated with a UDP datagram.
 #[derive(Clone)]
 pub struct DatagramMetaData {
     src: SocketAddr,
@@ -90,8 +92,9 @@ impl DatagramMetaData {
         self.src
     }
 
+    /// Whether the given datagram matches this meta data.
     #[must_use]
-    pub fn eql(&self, other: &Datagram) -> bool {
+    pub fn matches(&self, other: &Datagram) -> bool {
         self.dst == other.destination() && self.len == other.len() && self.tos == other.tos()
     }
 }
@@ -104,6 +107,83 @@ impl From<Datagram> for DatagramMetaData {
             len: value.len(),
             tos: value.tos(),
         }
+    }
+}
+
+/// A batch of datagrams to be sent on a socket, sharing the same meta data.
+///
+/// When a datagram is pushed that does not match the meta data of the batch,
+/// it is stored in `next` and a send indication is returned.
+#[derive(Default)]
+pub struct SendBatch {
+    meta: Option<DatagramMetaData>,
+    data: SmallVec<[u8; 8 * 1500]>, // FIXME: A guess.
+    next: Option<Datagram>,
+}
+
+impl SendBatch {
+    #[must_use]
+    pub const fn meta(&self) -> Option<&DatagramMetaData> {
+        self.meta.as_ref()
+    }
+
+    #[must_use]
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    #[must_use]
+    pub fn all_empty(&self) -> bool {
+        self.meta.is_none() && self.data.is_empty() && self.next.is_none()
+    }
+
+    fn clear(&mut self) {
+        self.meta = None;
+        self.data.clear();
+    }
+
+    fn set(&mut self, dgram: Datagram) {
+        self.data = SmallVec::from(dgram.as_ref());
+        self.meta = Some(DatagramMetaData::from(dgram));
+    }
+
+    pub fn push(&mut self, dgram: Datagram) -> bool {
+        if self.is_empty() {
+            // This is the first datagram we are collecting.
+            self.set(dgram);
+            false
+        } else if self.matches(&dgram) {
+            // Another datagram with the same length, destination and TOS byte - collect it.
+            self.data.extend_from_slice(dgram.as_ref());
+            false
+        } else {
+            // Another datagram but with different length, destination or TOS byte - remember it.
+            self.next = Some(dgram);
+            // We need to send the current batch before we can send the next one.
+            true
+        }
+
+        // self.data.extend_from_slice(dgram.as_ref());
+    }
+
+    pub fn switch_to_next(&mut self) -> bool {
+        if let Some(next) = self.next.take() {
+            self.set(next);
+            true
+        } else {
+            self.clear();
+            false
+        }
+    }
+
+    #[must_use]
+    pub fn matches(&self, other: &Datagram) -> bool {
+        self.meta.as_ref().is_some_and(|meta| meta.matches(other))
     }
 }
 
