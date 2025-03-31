@@ -148,7 +148,7 @@ impl SendBatch {
     }
 
     fn set(&mut self, dgram: Datagram) {
-        self.data = SmallVec::from(dgram.as_ref());
+        self.data = SmallVec::from_slice(dgram.as_ref());
         self.meta = Some(DatagramMetaData::from(dgram));
     }
 
