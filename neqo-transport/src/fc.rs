@@ -424,6 +424,8 @@ impl ReceiverFlowControl<StreamId> {
             return;
         };
 
+        // Compute the amount of bytes we have received in excess
+        // of what `max_active` might allow.
         let window_bytes_expected = self.max_active * elapsed / rtt;
         let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
         let Some(excess) = window_bytes_used.checked_sub(window_bytes_expected) else {
