@@ -156,7 +156,6 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 #[must_use]
 pub fn new_client(params: ConnectionParameters) -> Connection {
     fixture_init();
-    let (log, _contents) = new_neqo_qlog();
     let mut client = Connection::new_client(
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
@@ -167,7 +166,23 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
         now(),
     )
     .expect("create a client");
-    client.set_qlog(log);
+
+    if let Ok(dir) = std::env::var("QLOGDIR") {
+        let cid = client.odcid().unwrap();
+        client.set_qlog(
+            NeqoQlog::enabled_with_file(
+                dir.parse().unwrap(),
+                Role::Client,
+                Some("Neqo client qlog".to_string()),
+                Some("Neqo client qlog".to_string()),
+                format!("client-{cid}"),
+            )
+            .unwrap(),
+        );
+    } else {
+        let (log, _contents) = new_neqo_qlog();
+        client.set_qlog(log);
+    }
     client
 }
 
@@ -186,7 +201,10 @@ pub fn default_server() -> Connection {
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server_h3() -> Connection {
-    new_server(DEFAULT_ALPN_H3, ConnectionParameters::default())
+    new_server(
+        DEFAULT_ALPN_H3,
+        ConnectionParameters::default().pacing(false),
+    )
 }
 
 /// Create a transport server with a configuration.
@@ -197,7 +215,6 @@ pub fn default_server_h3() -> Connection {
 #[must_use]
 pub fn new_server(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection {
     fixture_init();
-    let (log, _contents) = new_neqo_qlog();
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
         alpn,
@@ -205,7 +222,21 @@ pub fn new_server(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Con
         params.ack_ratio(255),
     )
     .expect("create a server");
-    c.set_qlog(log);
+    if let Ok(dir) = std::env::var("QLOGDIR") {
+        c.set_qlog(
+            NeqoQlog::enabled_with_file(
+                dir.parse().unwrap(),
+                Role::Server,
+                Some("Neqo server qlog".to_string()),
+                Some("Neqo server qlog".to_string()),
+                "server".to_string(),
+            )
+            .unwrap(),
+        );
+    } else {
+        let (log, _contents) = new_neqo_qlog();
+        c.set_qlog(log);
+    }
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
         .expect("enable 0-RTT");
     c
