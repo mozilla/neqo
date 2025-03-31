@@ -19,7 +19,6 @@ workspace = true
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 quinn-udp = { workspace = true }
-smallvec = { workspace = true}
 
 [build-dependencies]
 cfg_aliases = "0.2"
