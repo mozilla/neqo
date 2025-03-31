@@ -1139,7 +1139,7 @@ mod test {
         // Run multiple iterations with randomized bandwidth and rtt.
         for _ in 0..1_000 {
             // Random bandwidth between 1 Mbit/s and 1 Gbit/s.
-            let bandwidth = u64::from(u16::from_be_bytes(random::<2>()) % 1_000 + 1) * 1024 * 1024;
+            let bandwidth = u64::from(u16::from_be_bytes(random::<2>()) % 1_000 + 1) * 1_000 * 1_000;
             // Random delay between 1 ms and 256 ms.
             let rtt = Duration::from_millis(u64::from(random::<1>()[0]) + 1);
             let bdp = bandwidth * u64::try_from(rtt.as_millis()).unwrap() / 1_000 / 8;
