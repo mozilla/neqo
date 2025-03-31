@@ -35,6 +35,7 @@ use crate::{
 ///
 /// Value aligns with [`crate::connection::params::DEFAULT_ACK_RATIO`].
 pub const WINDOW_UPDATE_FRACTION: u64 = 4;
+
 /// Multiplier for auto-tuning the stream receive window.
 ///
 /// See [`ReceiverFlowControl::auto_tune`].
