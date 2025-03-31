@@ -150,6 +150,12 @@ impl Output {
     }
 }
 
+impl From<Option<Datagram>> for Output {
+    fn from(value: Option<Datagram>) -> Self {
+        value.map_or(Self::None, Self::Datagram)
+    }
+}
+
 /// Used by inner functions like `Connection::output`.
 enum SendOption {
     /// Yes, please send this datagram.

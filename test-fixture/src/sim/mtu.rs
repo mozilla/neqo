@@ -39,6 +39,6 @@ impl Node for Mtu {
 
             header + dgram.len() <= self.mtu
         })
-        .map_or(Output::None, Output::Datagram)
+        .into()
     }
 }
