@@ -47,7 +47,7 @@ jobs:
           # FIXME: https://github.com/rust-fuzz/cargo-fuzz/issues/404
           [ "$UBUNTU" = "true" ] && FUZZ_FLAGS="-s none"
           # shellcheck disable=SC2086
-          cargo fuzz build -v $FUZZ_FLAGS
+          cargo fuzz build $FUZZ_FLAGS
 
       - if: ${{ matrix.check == 'bench' }}
         run: cargo bench --features bench --no-run
