@@ -143,9 +143,9 @@ fn dynamic_link() {
             "nssutil3.dll",
             "nss3.dll",
             "ssl3.dll",
-            "plds4.dll",
-            "plc4.dll",
-            "nspr4.dll",
+            "libplds4.dll",
+            "libplc4.dll",
+            "libnspr4.dll",
         ]
     } else {
         &["nssutil3", "nss3", "ssl3", "plds4", "plc4", "nspr4"]
@@ -165,7 +165,11 @@ fn static_link() {
         "certhi",
         "cryptohi",
         "freebl",
-        "nspr4",
+        if env::consts::OS == "windows" {
+            "libnspr4"
+        } else {
+            "nspr4"
+        },
         "nss_static",
         "nssb",
         "nssdev",
@@ -174,8 +178,16 @@ fn static_link() {
         "pk11wrap",
         "pkcs12",
         "pkcs7",
-        "plc4",
-        "plds4",
+        if env::consts::OS == "windows" {
+            "libplc4"
+        } else {
+            "plc4"
+        },
+        if env::consts::OS == "windows" {
+            "libplds4"
+        } else {
+            "plds4"
+        },
         "smime",
         "softokn_static",
         "ssl",
