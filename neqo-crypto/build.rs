@@ -143,9 +143,9 @@ fn dynamic_link() {
             "nssutil3.dll",
             "nss3.dll",
             "ssl3.dll",
-            "libplds4.dll",
-            "libplc4.dll",
-            "libnspr4.dll",
+            "plds4.dll",
+            "plc4.dll",
+            "nspr4.dll",
         ]
     } else {
         &["nssutil3", "nss3", "ssl3", "plds4", "plc4", "nspr4"]
@@ -198,12 +198,12 @@ fn static_link() {
 
     // Dynamic libs that aren't transitively included by NSS libs.
     let mut other_libs = Vec::new();
-    if env::consts::OS != "windows"
-        && env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() != "android"
-    {
-        // On Android, pthread is part of libc.
-        other_libs.push("pthread");
-    }
+    // if env::consts::OS != "windows"
+    //     && env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() != "android"
+    // {
+    //     // On Android, pthread is part of libc.
+    //     other_libs.push("pthread");
+    // }
     dynamic_link_both(&other_libs);
 }
 
