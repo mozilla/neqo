@@ -332,7 +332,8 @@ fn setup_standalone(nss: &str) -> Vec<String> {
         nsslibdir.to_str().unwrap()
     );
     #[expect(unexpected_cfgs, reason = "cargo-fuzz defines fuzzing")]
-    if cfg!(any(debug_assertions, fuzzing)) {
+    // FIXME: NSPR doesn't build proper dynamic libraries on Windows.
+    if cfg!(any(debug_assertions, fuzzing)) || env::consts::OS == "windows" {
         static_link();
     } else {
         dynamic_link();

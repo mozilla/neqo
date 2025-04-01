@@ -253,13 +253,3 @@ runs:
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
           $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
         fi
-
-    - name: Rename NSPR libs (Windows)
-      shell: bash
-      if: ${{ runner.os == 'Windows' }}
-      run: |
-        ls -la "$LD_LIBRARY_PATH"
-        file "$LD_LIBRARY_PATH/"*
-        for LIB in libplds4.dll libplc4.dll libnspr4.dll; do
-          cp -v "$LD_LIBRARY_PATH/$LIB" "$LD_LIBRARY_PATH/$LIB.lib"
-        done
