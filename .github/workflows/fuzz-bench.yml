@@ -48,7 +48,7 @@ jobs:
           # FIXME: https://github.com/rust-fuzz/cargo-fuzz/issues/404
           [ "$UBUNTU" = "true" ] && FUZZ_FLAGS="-s none"
           # FIXME: https://github.com/rust-fuzz/cargo-fuzz/issues/397
-          [ "$ARM" = "true" ] && CARGO_FLAGS="-C target-feature=-crt-static"
+          [ "$ARM" = "true" ] && CARGO_FLAGS="-Z unstable-options -C target-feature=-crt-static"
           # shellcheck disable=SC2086
           cargo $CARGO_FLAGS fuzz build -v $FUZZ_FLAGS
 
