@@ -8,7 +8,8 @@
 
 use std::{io, net::SocketAddr};
 
-use neqo_udp::{DatagramIter, DatagramMetaData, RecvBuf};
+use neqo_common::DatagramMetaData;
+use neqo_udp::{DatagramIter, RecvBuf};
 
 /// Ideally this would live in [`neqo-udp`]. [`neqo-udp`] is used in Firefox.
 ///
