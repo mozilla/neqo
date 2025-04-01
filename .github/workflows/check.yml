@@ -48,7 +48,7 @@ jobs:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, windows-2025]
         rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
         type: [debug]
-        # Include some release build, which are dynamically linked, to check it that works on all platforms.
+        # Include some dynamically-linked release builds, to check that that works on all platforms.
         include:
           - os: ubuntu-24.04
             rust-toolchain: stable
