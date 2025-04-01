@@ -147,12 +147,7 @@ fn dynamic_link() {
 }
 
 fn dynamic_link_both(extra_libs: &[&str]) {
-    let nspr_libs = if env::consts::OS == "windows" {
-        &["libplds4", "libplc4", "libnspr4"]
-    } else {
-        &["plds4", "plc4", "nspr4"]
-    };
-    for lib in nspr_libs.iter().chain(extra_libs) {
+    for lib in extra_libs {
         println!("cargo:rustc-link-lib=dylib={lib}");
     }
 }
@@ -163,6 +158,7 @@ fn static_link() {
         "certhi",
         "cryptohi",
         "freebl",
+        "nspr4",
         "nss_static",
         "nssb",
         "nssdev",
@@ -171,6 +167,8 @@ fn static_link() {
         "pk11wrap",
         "pkcs12",
         "pkcs7",
+        "plc4",
+        "plds4",
         "smime",
         "softokn_static",
         "ssl",
@@ -342,7 +340,7 @@ fn setup_standalone(nss: &str) -> Vec<String> {
         "cargo:rustc-link-search=native={}",
         nsslibdir.to_str().unwrap()
     );
-    if is_debug() || env::consts::OS == "windows" {
+    if is_debug() || env::consts::OS == "windows" || env::var("FUZZING_ENGINE").is_ok() {
         static_link();
     } else {
         dynamic_link();
