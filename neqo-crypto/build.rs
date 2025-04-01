@@ -143,9 +143,9 @@ fn dynamic_link() {
             "nssutil3.dll",
             "nss3.dll",
             "ssl3.dll",
-            "libplds4",
-            "libplc4",
-            "libnspr4",
+            "plds4.dll",
+            "plc4.dll",
+            "nspr4.dll",
         ]
     } else {
         &["nssutil3", "nss3", "ssl3", "plds4", "plc4", "nspr4"]
