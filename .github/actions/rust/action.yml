@@ -97,7 +97,7 @@ runs:
 
     - name: Install cargo-quickinstall
       shell: bash
-      if: ${{ inputs.tools != '' }}
+      if: ${{ inputs.tools != '' && inputs.tools != 'cargo-fuzz' }}
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
       run: cargo install --locked cargo-quickinstall
