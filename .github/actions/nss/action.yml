@@ -203,6 +203,10 @@ runs:
           echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         fi
         ls -la "$NSS_OUT/lib"
+        file "$NSS_OUT/lib/"*
+        for LIB in libplds4.dll libplc4.dll libnspr4.dll do
+          cp -v "$NSS_OUT/lib/$LIB" "$NSS_OUT/lib/$LIB.lib"
+        done
 
     - name: Build
       shell: bash
