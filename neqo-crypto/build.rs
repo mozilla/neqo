@@ -153,7 +153,7 @@ fn static_link() {
         "certdb",
         "certhi",
         "cryptohi",
-        "freebl",
+        "freebl_static",
         if env::consts::OS == "windows" {
             "libnspr4"
         } else {
