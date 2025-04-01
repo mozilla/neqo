@@ -56,13 +56,6 @@ struct Bindings {
     cplusplus: bool,
 }
 
-fn is_debug() -> bool {
-    // Check the build profile and not whether debug symbols are enabled (i.e.,
-    // `env::var("DEBUG")`), because we enable those for benchmarking/profiling and still want
-    // to build NSS in release mode.
-    env::var("PROFILE").unwrap_or_default() == "debug"
-}
-
 // bindgen needs access to libclang.
 // On windows, this doesn't just work, you have to set LIBCLANG_PATH.
 // Rather than download the 400Mb+ files, like gecko does, let's just reuse their work.
@@ -138,8 +131,8 @@ fn build_nss(dir: PathBuf, nsstarget: &str) {
 }
 
 fn dynamic_link() {
-    let libs = if env::consts::OS == "windows" {
-        &[
+    let dynamic_libs = if env::consts::OS == "windows" {
+        [
             "nssutil3.dll",
             "nss3.dll",
             "ssl3.dll",
@@ -148,19 +141,15 @@ fn dynamic_link() {
             "nspr4.dll",
         ]
     } else {
-        &["nssutil3", "nss3", "ssl3", "plds4", "plc4", "nspr4"]
+        ["nssutil3", "nss3", "ssl3", "plds4", "plc4", "nspr4"]
     };
-    dynamic_link_both(libs);
-}
-
-fn dynamic_link_both(extra_libs: &[&str]) {
-    for lib in extra_libs {
+    for lib in dynamic_libs {
         println!("cargo:rustc-link-lib=dylib={lib}");
     }
 }
 
 fn static_link() {
-    let static_libs = vec![
+    let static_libs = [
         "certdb",
         "certhi",
         "cryptohi",
@@ -195,16 +184,6 @@ fn static_link() {
     for lib in static_libs {
         println!("cargo:rustc-link-lib=static={lib}");
     }
-
-    // Dynamic libs that aren't transitively included by NSS libs.
-    let mut other_libs = Vec::new();
-    // if env::consts::OS != "windows"
-    //     && env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() != "android"
-    // {
-    //     // On Android, pthread is part of libc.
-    //     other_libs.push("pthread");
-    // }
-    dynamic_link_both(&other_libs);
 }
 
 fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
@@ -352,7 +331,8 @@ fn setup_standalone(nss: &str) -> Vec<String> {
         "cargo:rustc-link-search=native={}",
         nsslibdir.to_str().unwrap()
     );
-    if is_debug() || env::var("FUZZING_ENGINE").is_ok() {
+    #[expect(unexpected_cfgs, reason = "cargo-fuzz defines fuzzing")]
+    if cfg!(any(debug_assertions, fuzzing)) {
         static_link();
     } else {
         dynamic_link();

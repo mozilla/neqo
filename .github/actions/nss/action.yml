@@ -202,6 +202,7 @@ runs:
         if [ "${{ runner.os }}" == "Windows" ]; then
           echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         fi
+        ls -la "$NSS_OUT/lib"
 
     - name: Build
       shell: bash
