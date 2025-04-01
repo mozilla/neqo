@@ -498,8 +498,8 @@ impl<'a, H: Handler> Runner<'a, H> {
                             }
                         }
                     }
+                    batch.switch_to_next();
                 }
-                batch.switch_to_next();
             }
 
             if exit {
