@@ -10,7 +10,7 @@ use std::{env, path::PathBuf, str::FromStr as _};
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use neqo_bin::{client, server};
-use tokio::runtime::Runtime;
+use tokio::runtime::Builder;
 
 struct Benchmark {
     name: String,
@@ -44,7 +44,7 @@ fn transfer(c: &mut Criterion) {
             upload: false,
         },
         Benchmark {
-            name: format!("1-conn/1-100mb-resp{mtu} (aka. Upload)"),
+            name: format!("1-conn/1-100mb-req{mtu} (aka. Upload)"),
             requests: vec![100 * 1024 * 1024],
             upload: true,
         },
@@ -57,13 +57,14 @@ fn transfer(c: &mut Criterion) {
             Throughput::Elements(requests.len() as u64)
         });
         group.bench_function("client", |b| {
-            b.to_async(Runtime::new().unwrap()).iter_batched(
-                || client::client(client::Args::new(&requests, upload)),
-                |client| async move {
-                    client.await.unwrap();
-                },
-                BatchSize::PerIteration,
-            );
+            b.to_async(Builder::new_current_thread().enable_all().build().unwrap())
+                .iter_batched(
+                    || client::client(client::Args::new(&requests, upload)),
+                    |client| async move {
+                        client.await.unwrap();
+                    },
+                    BatchSize::PerIteration,
+                );
         });
         group.finish();
     }
@@ -79,13 +80,17 @@ fn transfer(c: &mut Criterion) {
 fn spawn_server() -> tokio::sync::oneshot::Sender<()> {
     let (done_sender, mut done_receiver) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
-        Runtime::new().unwrap().block_on(async {
-            let mut server = Box::pin(server::server(server::Args::default()));
-            tokio::select! {
-                _ = &mut done_receiver => {}
-                res = &mut server  => panic!("expect server not to terminate: {res:?}"),
-            };
-        });
+        Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let mut server = Box::pin(server::server(server::Args::default()));
+                tokio::select! {
+                    _ = &mut done_receiver => {}
+                    res = &mut server  => panic!("expect server not to terminate: {res:?}"),
+                };
+            });
     });
     done_sender
 }
