@@ -139,9 +139,16 @@ fn build_nss(dir: PathBuf, nsstarget: &str) {
 
 fn dynamic_link() {
     let libs = if env::consts::OS == "windows" {
-        &["nssutil3.dll", "nss3.dll", "ssl3.dll"]
+        &[
+            "nssutil3.dll",
+            "nss3.dll",
+            "ssl3.dll",
+            "libplds4",
+            "libplc4",
+            "libnspr4",
+        ]
     } else {
-        &["nssutil3", "nss3", "ssl3"]
+        &["nssutil3", "nss3", "ssl3", "plds4", "plc4", "nspr4"]
     };
     dynamic_link_both(libs);
 }
@@ -153,7 +160,7 @@ fn dynamic_link_both(extra_libs: &[&str]) {
 }
 
 fn static_link() {
-    let mut static_libs = vec![
+    let static_libs = vec![
         "certdb",
         "certhi",
         "cryptohi",
@@ -173,24 +180,17 @@ fn static_link() {
         "softokn_static",
         "ssl",
     ];
-    if env::consts::OS != "macos" {
-        static_libs.push("sqlite");
-    }
     for lib in static_libs {
         println!("cargo:rustc-link-lib=static={lib}");
     }
 
     // Dynamic libs that aren't transitively included by NSS libs.
     let mut other_libs = Vec::new();
-    if env::consts::OS != "windows" {
-        if env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() != "android" {
-            // On Android, pthread is part of libc.
-            other_libs.push("pthread");
-        }
-        other_libs.extend_from_slice(&["dl", "c", "z"]);
-    }
-    if env::consts::OS == "macos" {
-        other_libs.push("sqlite3");
+    if env::consts::OS != "windows"
+        && env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() != "android"
+    {
+        // On Android, pthread is part of libc.
+        other_libs.push("pthread");
     }
     dynamic_link_both(&other_libs);
 }
