@@ -1031,6 +1031,7 @@ dependencies = [
  "log",
  "neqo-common",
  "quinn-udp",
+ "smallvec",
 ]
 
 [[package]]

@@ -20,6 +20,7 @@ use std::{
 use log::{log_enabled, Level};
 use neqo_common::{qdebug, qtrace, Datagram, DatagramMetaData, IpTos};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
+use smallvec::SmallVec;
 
 /// Receive buffer size
 ///
@@ -68,7 +69,7 @@ impl Default for RecvBuf {
 #[derive(Default)]
 pub struct SendBatch {
     meta: Option<DatagramMetaData>,
-    data: Vec<u8>,
+    data: SmallVec<[u8; 8 * 1500]>, // FIXME: A guess.
     next: Option<Datagram>,
 }
 
@@ -99,7 +100,7 @@ impl SendBatch {
     }
 
     fn set(&mut self, dgram: &Datagram) {
-        self.data = Vec::from(dgram.as_ref());
+        self.data = SmallVec::from_slice(dgram.as_ref());
         self.meta = Some(dgram.meta().clone());
     }
 
