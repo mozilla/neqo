@@ -41,7 +41,16 @@ jobs:
 
       # Check that the fuzz and bench targets build
       - if: ${{ matrix.check == 'fuzz' }}
-        run: cargo fuzz build
+        env:
+          UBUNTU: ${{ startsWith(matrix.os, 'ubuntu') }}
+          ARM: ${{ endsWith(matrix.os, '-arm') }}
+        run: |
+          # FIXME: https://github.com/rust-fuzz/cargo-fuzz/issues/404
+          [ "$UBUNTU" = "true" ] && FUZZ_FLAGS="-s none"
+          # FIXME: https://github.com/rust-fuzz/cargo-fuzz/issues/397
+          [ "$ARM" = "true" ] && CARGO_FLAGS="-C target-feature=-crt-static"
+          # shellcheck disable=SC2086
+          cargo $CARGO_FLAGS fuzz build -v $FUZZ_FLAGS
 
       - if: ${{ matrix.check == 'bench' }}
         run: cargo bench --features bench --no-run
