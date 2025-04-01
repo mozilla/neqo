@@ -254,9 +254,9 @@ runs:
           $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
         fi
 
-    - name: Set up build environment (Windows)
+    - name: Rename NSPR libs (Windows)
       shell: bash
-      if: ${{ runner.os == 'Windows' && steps.check_build.outputs.build_nss }}
+      if: ${{ runner.os == 'Windows' }}
       run: |
         ls -la "$NSS_OUT/lib"
         file "$NSS_OUT/lib/"*
