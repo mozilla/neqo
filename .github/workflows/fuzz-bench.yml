@@ -44,10 +44,8 @@ jobs:
         env:
           UBUNTU: ${{ startsWith(matrix.os, 'ubuntu') }}
         run: |
-          # FIXME: https://github.com/rust-fuzz/cargo-fuzz/issues/404
-          # [ "$UBUNTU" = "true" ] && FUZZ_FLAGS="-s none"
-          # shellcheck disable=SC2086
-          cargo fuzz build $FUZZ_FLAGS
+          # FIXME: https://github.com/rust-fuzz/cargo-fuzz/issues/384 for why no LTO.
+          CARGO_PROFILE_RELEASE_LTO=false cargo fuzz build
 
       - if: ${{ matrix.check == 'bench' }}
         run: cargo bench --features bench --no-run
