@@ -90,10 +90,11 @@ impl DatagramMetaData {
     pub const fn source(&self) -> SocketAddr {
         self.src
     }
+}
 
-    /// Whether the given datagram matches this meta data.
-    #[must_use]
-    pub fn matches(&self, other: &Datagram) -> bool {
+/// Whether the given datagram matches this meta data.
+impl PartialEq<Datagram> for DatagramMetaData {
+    fn eq(&self, other: &Datagram) -> bool {
         self.dst == other.destination() && self.len == other.len() && self.tos == other.tos()
     }
 }
@@ -156,7 +157,7 @@ impl SendBatch {
             // This is the first datagram we are collecting.
             self.set(dgram);
             false
-        } else if self.matches(&dgram) {
+        } else if self == &dgram {
             // Another datagram with the same length, destination and TOS byte - collect it.
             self.data.extend_from_slice(dgram.as_ref());
             false
@@ -175,10 +176,11 @@ impl SendBatch {
             self.clear();
         }
     }
+}
 
-    #[must_use]
-    pub fn matches(&self, other: &Datagram) -> bool {
-        self.meta.as_ref().is_some_and(|meta| meta.matches(other))
+impl PartialEq<Datagram> for SendBatch {
+    fn eq(&self, other: &Datagram) -> bool {
+        self.meta.as_ref().is_some_and(|meta| meta == other)
     }
 }
 
