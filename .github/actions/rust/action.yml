@@ -108,5 +108,13 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
         TOOLS: ${{ inputs.tools }}
-      # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
-      run: cargo quickinstall --force $(echo $TOOLS | tr -d ",")
+      run: |
+        for tool in $(echo $TOOLS | tr -d ","); do
+          if [ "$tool" = "cargo-fuzz"]; then
+            # FIXME: See https://github.com/rust-fuzz/cargo-fuzz/issues/398 for why no quickinstall/binstall here.
+            cargo install $tool
+          else
+            # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
+            cargo quickinstall --force $tool
+          fi
+        done
