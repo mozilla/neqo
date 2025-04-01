@@ -41,14 +41,7 @@ jobs:
 
       # Check that the fuzz and bench targets build
       - if: ${{ matrix.check == 'fuzz' }}
-        run: |
-          if [ "${{ startsWith(matrix.os, 'ubuntu') && 'ubuntu' }}" = "ubuntu" ]; then
-            sudo apt-get install -y --no-install-recommends llvm
-          fi
-          cargo fuzz build
-        env:
-          # FIXME: https://github.com/rust-fuzz/cargo-fuzz/issues/384
-          CARGO_PROFILE_RELEASE_LTO: false
+        run: cargo fuzz build
 
       - if: ${{ matrix.check == 'bench' }}
         run: cargo bench --features bench --no-run
