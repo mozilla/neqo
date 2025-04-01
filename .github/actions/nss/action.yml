@@ -260,6 +260,6 @@ runs:
       run: |
         ls -la "$LD_LIBRARY_PATH"
         file "$LD_LIBRARY_PATH/"*
-        for LIB in libplds4.dll libplc4.dll libnspr4.dll do
+        for LIB in libplds4.dll libplc4.dll libnspr4.dll; do
           cp -v "$LD_LIBRARY_PATH/$LIB" "$LD_LIBRARY_PATH/$LIB.lib"
         done
