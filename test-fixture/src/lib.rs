@@ -38,7 +38,11 @@ pub mod header_protection;
 pub mod sim;
 
 /// The path for the database used in tests.
-pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
+pub const NSS_DB_PATH: &str = if let Some(dir) = option_env!("NSS_DB_PATH") {
+    dir
+} else {
+    concat!(env!("CARGO_MANIFEST_DIR"), "/db")
+};
 
 /// Initialize the test fixture.  Only call this if you aren't also calling a
 /// fixture function that depends on setup.  Other functions in the fixture

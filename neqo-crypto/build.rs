@@ -178,7 +178,11 @@ fn static_link() {
         "softokn_static",
         "ssl",
     ];
-    if env::consts::OS != "macos" {
+    // macOS always dynamically links against the system sqlite library.
+    // See https://github.com/nss-dev/nss/blob/a8c22d8fc0458db3e261acc5e19b436ab573a961/coreconf/Darwin.mk#L130-L135
+    if env::consts::OS == "macos" {
+        println!("cargo:rustc-link-lib=dylib=sqlite3");
+    } else {
         static_libs.push("sqlite");
     }
     // Hardware specific libs.
@@ -215,11 +219,6 @@ fn static_link() {
     }
     for lib in static_libs {
         println!("cargo:rustc-link-lib=static={lib}");
-    }
-    // Dynamic libs that aren't transitively included by NSS libs.
-    if env::consts::OS == "macos" {
-        println!("cargo:rustc-link-lib=dylib=sqlite3");
-        // static_libs.push("sqlite");
     }
 }
 
@@ -368,9 +367,9 @@ fn setup_standalone(nss: &str) -> Vec<String> {
         "cargo:rustc-link-search=native={}",
         nsslibdir.to_str().unwrap()
     );
-    // FIXME: NSPR doesn't build proper dynamic libraries on Windows.
     if env::var("CARGO_CFG_FUZZING").is_ok()
-        || env::var("DEBUG").is_ok()
+        || env::var("PROFILE").unwrap_or_default() == "debug"
+        // FIXME: NSPR doesn't build proper dynamic libraries on Windows.
         || env::consts::OS == "windows"
     {
         static_link();
