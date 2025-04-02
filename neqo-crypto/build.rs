@@ -208,9 +208,7 @@ fn static_link() {
         static_libs.push("hw-acc-crypto-avx2");
     }
     // https://searchfox.org/nss/rev/08c4d05078d00089f8d7540651b0717a9d66f87e/lib/freebl/freebl.gyp#315-324
-    if ((target_os == "android" || target_os == "linux") && target_arch == "x86_64")
-        || target_os == "windows"
-    {
+    if (target_os == "android" || target_os == "linux") && target_arch == "x86_64" {
         static_libs.push("intel-gcm-wrap_c_lib");
         // https://searchfox.org/nss/rev/08c4d05078d00089f8d7540651b0717a9d66f87e/lib/freebl/freebl.gyp#43-47
         if (target_os == "android" || target_os == "linux") && target_arch == "x86_64" {
