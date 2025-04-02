@@ -178,6 +178,9 @@ fn static_link() {
         "softokn_static",
         "ssl",
     ];
+    if env::consts::OS != "macos" {
+        static_libs.push("sqlite3");
+    }
     // Hardware specific libs.
     // See https://github.com/mozilla/application-services/blob/0a2dac76f979b8bcfb6bacb5424b50f58520b8fe/components/support/rc_crypto/nss/nss_build_common/src/lib.rs#L127-L157
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
