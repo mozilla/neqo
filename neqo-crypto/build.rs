@@ -164,7 +164,7 @@ fn static_link() {
         "nssdev",
         "nsspki",
         "nssutil",
-        "pk11wrap_static",
+        "pk11wrap",
         if env::consts::OS == "windows" {
             "libplc4"
         } else {
@@ -212,11 +212,6 @@ fn static_link() {
     }
     for lib in static_libs {
         println!("cargo:rustc-link-lib=static={lib}");
-    }
-    // Dynamic libs that aren't transitively included by NSS libs.
-    if env::consts::OS == "macos" {
-        println!("cargo:rustc-link-lib=dylib=sqlite3");
-        // static_libs.push("sqlite");
     }
 }
 
