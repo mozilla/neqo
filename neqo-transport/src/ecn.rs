@@ -268,12 +268,7 @@ impl Info {
         }
 
         if let Some(ack_ecn) = ack_ecn {
-            let packet_type = match pn_space {
-                PacketNumberSpace::Initial => PacketType::Initial,
-                PacketNumberSpace::Handshake => PacketType::Handshake,
-                PacketNumberSpace::ApplicationData => PacketType::Short,
-            };
-            stats.ecn_tx_acked[packet_type] = ack_ecn;
+            stats.ecn_tx_acked[pn_space.into()] = ack_ecn;
         }
 
         // RFC 9000, Appendix A.4:

@@ -22,6 +22,7 @@ use crate::{
     crypto::{CryptoDxState, CryptoStates, Epoch},
     frame::FrameType,
     recovery::SendProfile,
+    tracking::PacketNumberSpace,
     version::{Version, WireVersion},
     Error, Pmtud, Res,
 };
@@ -50,9 +51,8 @@ pub use metadata::MetaData;
 
 pub type PacketNumber = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, EnumIter, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, EnumIter)]
 pub enum PacketType {
-    #[default]
     VersionNegotiation,
     Initial,
     Handshake,
@@ -109,6 +109,16 @@ impl From<Epoch> for PacketType {
             Epoch::ZeroRtt => Self::ZeroRtt,
             Epoch::Handshake => Self::Handshake,
             Epoch::ApplicationData => Self::Short,
+        }
+    }
+}
+
+impl From<PacketNumberSpace> for PacketType {
+    fn from(space: PacketNumberSpace) -> Self {
+        match space {
+            PacketNumberSpace::Initial => Self::Initial,
+            PacketNumberSpace::Handshake => Self::Handshake,
+            PacketNumberSpace::ApplicationData => Self::Short,
         }
     }
 }
