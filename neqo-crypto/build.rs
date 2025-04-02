@@ -149,7 +149,7 @@ fn dynamic_link() {
 }
 
 fn static_link() {
-    let mut static_libs = vec![
+    let static_libs = [
         "certdb",
         "certhi",
         "cryptohi",
@@ -164,7 +164,7 @@ fn static_link() {
         "nssdev",
         "nsspki",
         "nssutil",
-        "pk11wrap",
+        "pk11wrap_static",
         "pkcs12",
         "pkcs7",
         if env::consts::OS == "windows" {
@@ -181,38 +181,6 @@ fn static_link() {
         "softokn_static",
         "ssl",
     ];
-    // Hardware specific libs.
-    // See https://github.com/mozilla/application-services/blob/0a2dac76f979b8bcfb6bacb5424b50f58520b8fe/components/support/rc_crypto/nss/nss_build_common/src/lib.rs#L127-L157
-    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-    // https://searchfox.org/nss/rev/0d5696b3edce5124353f03159d2aa15549db8306/lib/freebl/freebl.gyp#508-542
-    if target_arch == "arm" || target_arch == "aarch64" {
-        static_libs.push("armv8_c_lib");
-    }
-    if target_arch == "x86_64" || target_arch == "x86" {
-        static_libs.push("gcm-aes-x86_c_lib");
-        static_libs.push("sha-x86_c_lib");
-    }
-    if target_arch == "arm" {
-        static_libs.push("gcm-aes-arm32-neon_c_lib");
-    }
-    if target_arch == "aarch64" {
-        static_libs.push("gcm-aes-aarch64_c_lib");
-    }
-    if target_arch == "x86_64" {
-        static_libs.push("hw-acc-crypto-avx");
-        static_libs.push("hw-acc-crypto-avx2");
-    }
-    // https://searchfox.org/nss/rev/08c4d05078d00089f8d7540651b0717a9d66f87e/lib/freebl/freebl.gyp#315-324
-    if ((target_os == "android" || target_os == "linux") && target_arch == "x86_64")
-        || target_os == "windows"
-    {
-        static_libs.push("intel-gcm-wrap_c_lib");
-        // https://searchfox.org/nss/rev/08c4d05078d00089f8d7540651b0717a9d66f87e/lib/freebl/freebl.gyp#43-47
-        if (target_os == "android" || target_os == "linux") && target_arch == "x86_64" {
-            static_libs.push("intel-gcm-s_lib");
-        }
-    }
     for lib in static_libs {
         println!("cargo:rustc-link-lib=static={lib}");
     }
