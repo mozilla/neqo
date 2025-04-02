@@ -30,26 +30,28 @@ impl Socket {
         let socket = std::net::UdpSocket::bind(addr)?;
         let state = quinn_udp::UdpSocketState::new((&socket).into())?;
 
-        let send_buf = state.send_buffer_size((&socket).into())?;
+        let send_buf_before = state.send_buffer_size((&socket).into())?;
         // FIXME: We need to experiment if increasing this actually improves performance.
         // Also, on BSD and Apple targets, this seems to increase the `net.inet.udp.maxdgram`
         // sysctl, which is not the same as the socket buffer.
-        // if send_buf < ONE_MB {
-        //     qdebug!("Increasing socket send buffer size from {send_buf} to {ONE_MB}");
+        // if send_buf_before < ONE_MB {
         //     state.set_send_buffer_size((&socket).into(), ONE_MB)?;
+        //     let send_buf_after = state.send_buffer_size((&socket).into())?;
+        //     qdebug!("Increasing socket send buffer size from {send_buf_before} to {ONE_MB}, now: {send_buf_after}");
         // } else {
-        //     qdebug!("Default socket send buffer size is {send_buf}, not changing");
+        //     qdebug!("Default socket send buffer size is {send_buf_before}, not changing");
         // }
-        qdebug!("Default socket send buffer size is {send_buf}");
+        qdebug!("Default socket send buffer size is {send_buf_before}");
 
-        let recv_buf = state.recv_buffer_size((&socket).into())?;
-        if recv_buf < ONE_MB {
-            qdebug!("Increasing socket receive buffer size from {recv_buf} to {ONE_MB}");
+        let recv_buf_before = state.recv_buffer_size((&socket).into())?;
+        if recv_buf_before < ONE_MB {
             // Same as Firefox.
             // <https://searchfox.org/mozilla-central/source/modules/libpref/init/StaticPrefList.yaml#13474-13478>
             state.set_recv_buffer_size((&socket).into(), ONE_MB)?;
+            let recv_buf_after = state.recv_buffer_size((&socket).into())?;
+            qdebug!("Increasing socket recv buffer size from {recv_buf_before} to {ONE_MB}, now: {recv_buf_after}");
         } else {
-            qdebug!("Default socket receive buffer size is {recv_buf}, not changing");
+            qdebug!("Default socket receive buffer size is {recv_buf_before}, not changing");
         }
 
         Ok(Self {
