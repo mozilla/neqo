@@ -140,7 +140,7 @@ pub struct DatagramStats {
     pub dropped_queue_full: usize,
 }
 
-/// ECN counts by QUIC packet type.
+/// ECN counts by QUIC [`PacketType`].
 #[derive(Default, Clone)]
 pub struct EcnCount(EnumMap<PacketType, ecn::Count>);
 
