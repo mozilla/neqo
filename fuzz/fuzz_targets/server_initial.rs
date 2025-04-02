@@ -26,7 +26,7 @@ fuzz_target!(|data: &[u8]| {
     };
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Server);
     let (_, pn) = remove_header_protection(&hp, header, payload);
-
+    println!("pn: {pn}");
     let mut payload_enc = Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE);
     payload_enc.encode(data); // Add fuzzed data.
 
@@ -39,7 +39,7 @@ fuzz_target!(|data: &[u8]| {
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
         .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + 1).unwrap())
-        .encode_byte(u8::try_from(pn).inspect_err(|e| eprintln!("{pn} {e}")).unwrap());
+        .encode_byte(u8::try_from(pn).inspect_err(|e| println!("{pn} {e}")).unwrap());
 
     let mut ciphertext = header_enc.as_ref().to_vec();
     ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
