@@ -38,7 +38,16 @@ pub mod header_protection;
 pub mod sim;
 
 /// The path for the database used in tests.
-pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
+///
+/// Initialized via the `NSS_DB_PATH` environment variable. If that is not set,
+/// it defaults to the `db` directory in the current crate. If the environment
+/// variable is set to `$ARGV0`, it will be initialized to the directory of the
+/// current executable.
+pub const NSS_DB_PATH: &str = if let Some(dir) = option_env!("NSS_DB_PATH") {
+    dir
+} else {
+    concat!(env!("CARGO_MANIFEST_DIR"), "/db")
+};
 
 /// Initialize the test fixture.  Only call this if you aren't also calling a
 /// fixture function that depends on setup.  Other functions in the fixture
@@ -48,7 +57,14 @@ pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
 ///
 /// When the NSS initialization fails.
 pub fn fixture_init() {
-    init_db(NSS_DB_PATH).unwrap();
+    if NSS_DB_PATH == "$ARGV0" {
+        let mut current_exe = std::env::current_exe().unwrap();
+        current_exe.pop();
+        let nss_db_path = current_exe.to_str().unwrap();
+        init_db(nss_db_path).unwrap();
+    } else {
+        init_db(NSS_DB_PATH).unwrap();
+    }
 }
 
 // This needs to be > 2ms to avoid it being rounded to zero.
