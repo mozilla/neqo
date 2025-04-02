@@ -31,19 +31,23 @@ impl Socket {
         let state = quinn_udp::UdpSocketState::new((&socket).into())?;
 
         let send_buf = state.send_buffer_size((&socket).into())?;
-        if send_buf < ONE_MB {
-            qdebug!("Increasing send buffer size from {send_buf} to {ONE_MB}");
-            state.set_send_buffer_size((&socket).into(), ONE_MB)?;
-        } else {
-            qdebug!("Default send buffer size is {send_buf}, not changing");
-        }
+        // FIXME: We need to experiment if increasing this actually improves performance.
+        // Also, on BSD and Apple targets, this seems to increase the `net.inet.udp.maxdgram`
+        // sysctl, which is not the same as the socket buffer.
+        // if send_buf < ONE_MB {
+        //     qdebug!("Increasing socket send buffer size from {send_buf} to {ONE_MB}");
+        //     state.set_send_buffer_size((&socket).into(), ONE_MB)?;
+        // } else {
+        //     qdebug!("Default socket send buffer size is {send_buf}, not changing");
+        // }
+        qdebug!("Default socket send buffer size is {send_buf}");
 
         let recv_buf = state.recv_buffer_size((&socket).into())?;
         if recv_buf < ONE_MB {
-            qdebug!("Increasing receive buffer size from {recv_buf} to {ONE_MB}");
+            qdebug!("Increasing socket receive buffer size from {recv_buf} to {ONE_MB}");
             state.set_recv_buffer_size((&socket).into(), ONE_MB)?;
         } else {
-            qdebug!("Default receive buffer size is {recv_buf}, not changing");
+            qdebug!("Default socket receive buffer size is {recv_buf}, not changing");
         }
 
         Ok(Self {
