@@ -26,7 +26,6 @@ use crate::{
     rtt::{RttEstimate, RttSource},
     sender::PacketSender,
     stats::FrameStats,
-    tracking::PacketNumberSpace,
     ConnectionParameters, Stats,
 };
 
@@ -982,13 +981,10 @@ impl Path {
         ack_ecn: Option<ecn::Count>,
         now: Instant,
         stats: &mut Stats,
-        pn_space: PacketNumberSpace,
     ) {
         debug_assert!(self.is_primary());
 
-        let ecn_ce_received = self
-            .ecn_info
-            .on_packets_acked(acked_pkts, ack_ecn, stats, pn_space);
+        let ecn_ce_received = self.ecn_info.on_packets_acked(acked_pkts, ack_ecn, stats);
         if ecn_ce_received {
             let cwnd_reduced = self
                 .sender

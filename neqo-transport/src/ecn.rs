@@ -12,7 +12,6 @@ use neqo_common::{qdebug, qinfo, qwarn, IpTosEcn};
 use crate::{
     packet::{PacketNumber, PacketType},
     recovery::{RecoveryToken, SentPacket},
-    tracking::PacketNumberSpace,
     Stats,
 };
 
@@ -217,11 +216,10 @@ impl Info {
         acked_packets: &[SentPacket],
         ack_ecn: Option<Count>,
         stats: &mut Stats,
-        pn_space: PacketNumberSpace,
     ) -> bool {
         let prev_baseline = self.baseline;
 
-        self.validate_ack_ecn_and_update(acked_packets, ack_ecn, stats, pn_space);
+        self.validate_ack_ecn_and_update(acked_packets, ack_ecn, stats);
 
         matches!(self.state, ValidationState::Capable)
             && (self.baseline - prev_baseline)[IpTosEcn::Ce] > 0
@@ -255,20 +253,15 @@ impl Info {
         acked_packets: &[SentPacket],
         ack_ecn: Option<Count>,
         stats: &mut Stats,
-        pn_space: PacketNumberSpace,
     ) {
         // RFC 9000, Section 13.4.2.1:
         //
         // > Validating ECN counts from reordered ACK frames can result in failure. An endpoint MUST
         // > NOT fail ECN validation as a result of processing an ACK frame that does not increase
         // > the largest acknowledged packet number.
-        let largest_acked = acked_packets.first().expect("must be there").pn();
-        if largest_acked <= self.largest_acked {
+        let largest_acked = acked_packets.first().expect("must be there");
+        if largest_acked.pn() <= self.largest_acked {
             return;
-        }
-
-        if let Some(ack_ecn) = ack_ecn {
-            stats.ecn_tx_acked[pn_space.into()] = ack_ecn;
         }
 
         // RFC 9000, Appendix A.4:
@@ -295,6 +288,7 @@ impl Info {
             self.disable_ecn(stats, ValidationError::Bleaching);
             return;
         };
+        stats.ecn_tx_acked[largest_acked.packet_type()] = ack_ecn;
 
         // We always mark with ECT(0) - if at all - so we only need to check for that.
         //
@@ -327,7 +321,7 @@ impl Info {
             self.state.set(ValidationState::Capable, stats);
         }
         self.baseline = ack_ecn;
-        self.largest_acked = largest_acked;
+        self.largest_acked = largest_acked.pn();
     }
 
     pub(crate) const fn is_marking(&self) -> bool {

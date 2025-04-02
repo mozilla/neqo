@@ -1555,8 +1555,7 @@ impl Connection {
         drop(stats);
         let space = PacketNumberSpace::from(packet.packet_type());
         if let Some(space) = self.acks.get_mut(space) {
-            let space_ecn_marks = space.ecn_marks();
-            *space_ecn_marks += ecn_mark;
+            *space.ecn_marks() += ecn_mark;
         } else {
             qtrace!("Not tracking ECN for dropped packet number space");
         }
@@ -1654,7 +1653,7 @@ impl Connection {
             match packet.decrypt(&mut self.crypto.states, now + pto) {
                 Ok(payload) => {
                     // OK, we have a valid packet.
-                    let packet_number = payload.pn();
+                    let pn = payload.pn();
                     self.idle_timeout.on_packet_received(now);
                     self.log_packet(
                         packet::MetaData::new_in(path, tos, packet_len, &payload),
@@ -1673,20 +1672,14 @@ impl Connection {
 
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if let Some(space) = self.acks.get_mut(space) {
-                        if space.is_duplicate(packet_number) {
-                            qdebug!("Duplicate packet {space}-{}", packet_number);
+                        if space.is_duplicate(pn) {
+                            qdebug!("Duplicate packet {space}-{}", pn);
                             self.stats.borrow_mut().dups_rx += 1;
                         } else {
                             match self.process_packet(path, &payload, now) {
                                 Ok(migrate) => {
                                     self.postprocess_packet(
-                                        path,
-                                        tos,
-                                        remote,
-                                        &packet,
-                                        packet_number,
-                                        migrate,
-                                        now,
+                                        path, tos, remote, &packet, pn, migrate, now,
                                     );
                                 }
                                 Err(e) => {
@@ -2515,6 +2508,7 @@ impl Connection {
                 continue;
             }
 
+            let tos = path.borrow().tos(&mut tokens);
             self.log_packet(
                 packet::MetaData::new_out(
                     path,
@@ -2522,7 +2516,7 @@ impl Connection {
                     pn,
                     builder.len() + aead_expansion,
                     &builder.as_ref()[payload_start..],
-                    *packet_tos.get_or_insert(path.borrow().tos(&mut tokens)),
+                    *packet_tos.get_or_insert(tos),
                 ),
                 now,
             );
@@ -2539,7 +2533,6 @@ impl Connection {
             if ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
             }
-            let ecn_mark = IpTosEcn::from(path.borrow().tos(&mut tokens));
             let sent = SentPacket::new(
                 pt,
                 pn,
@@ -2567,7 +2560,7 @@ impl Connection {
             // coalesced packets, this increases the counts for each packet type
             // contained in the coalesced packet. This is per Section 13.4.1 of
             // RFC 9000.
-            self.stats.borrow_mut().ecn_tx[pt] += ecn_mark;
+            self.stats.borrow_mut().ecn_tx[pt] += IpTosEcn::from(tos);
 
             if space == PacketNumberSpace::Handshake
                 && self.role == Role::Server
