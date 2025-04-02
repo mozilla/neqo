@@ -1542,9 +1542,8 @@ impl Connection {
         let ecn_mark = IpTosEcn::from(tos);
         let mut stats = self.stats.borrow_mut();
         stats.ecn_rx[packet.packet_type()] += ecn_mark;
-        if let Some(last_ecn_mark) = stats.ecn_last_mark {
-            if last_ecn_mark != ecn_mark
-                && stats.ecn_rx_transition[last_ecn_mark][ecn_mark].is_none()
+        if let Some(last_ecn_mark) = stats.ecn_last_mark.filter(|last_ecn_mark|last_ecn_mark != ecn_mark
+                && stats.ecn_rx_transition[last_ecn_mark][ecn_mark].is_none())
             {
                 stats.ecn_rx_transition[last_ecn_mark][ecn_mark] =
                     Some((packet.packet_type(), packet_number));
