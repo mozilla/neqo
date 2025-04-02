@@ -38,6 +38,11 @@ pub mod header_protection;
 pub mod sim;
 
 /// The path for the database used in tests.
+///
+/// Initialized via the `NSS_DB_PATH` environment variable. If that is not set,
+/// it defaults to the `db` directory in the current crate. If the environment
+/// variable is set to `$ARGV0`, it will be initialized to the directory of the
+/// current executable.
 pub const NSS_DB_PATH: &str = if let Some(dir) = option_env!("NSS_DB_PATH") {
     dir
 } else {
@@ -56,10 +61,8 @@ pub fn fixture_init() {
         let mut current_exe = std::env::current_exe().unwrap();
         current_exe.pop();
         let nss_db_path = current_exe.to_str().unwrap();
-        eprintln!("NSS_DB_PATH: {nss_db_path}");
         init_db(nss_db_path).unwrap();
     } else {
-        eprintln!("NSS_DB_PATH: {NSS_DB_PATH}");
         init_db(NSS_DB_PATH).unwrap();
     }
 }
