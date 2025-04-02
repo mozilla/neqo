@@ -52,7 +52,16 @@ pub const NSS_DB_PATH: &str = if let Some(dir) = option_env!("NSS_DB_PATH") {
 ///
 /// When the NSS initialization fails.
 pub fn fixture_init() {
-    init_db(NSS_DB_PATH).unwrap();
+    if NSS_DB_PATH == "$ARGV0" {
+        let mut current_exe = std::env::current_exe().unwrap();
+        current_exe.pop();
+        let nss_db_path = current_exe.to_str().unwrap();
+        eprintln!("NSS_DB_PATH: {nss_db_path}");
+        init_db(nss_db_path).unwrap();
+    } else {
+        eprintln!("NSS_DB_PATH: {NSS_DB_PATH}");
+        init_db(NSS_DB_PATH).unwrap();
+    }
 }
 
 // This needs to be > 2ms to avoid it being rounded to zero.
