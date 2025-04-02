@@ -37,8 +37,8 @@ impl Socket {
         // if send_buf_before < ONE_MB {
         //     state.set_send_buffer_size((&socket).into(), ONE_MB)?;
         //     let send_buf_after = state.send_buffer_size((&socket).into())?;
-        //     qdebug!("Increasing socket send buffer size from {send_buf_before} to {ONE_MB}, now: {send_buf_after}");
-        // } else {
+        //     qdebug!("Increasing socket send buffer size from {send_buf_before} to {ONE_MB}, now:
+        // {send_buf_after}"); } else {
         //     qdebug!("Default socket send buffer size is {send_buf_before}, not changing");
         // }
         qdebug!("Default socket send buffer size is {send_buf_before}");
