@@ -45,6 +45,8 @@ impl Socket {
         let recv_buf = state.recv_buffer_size((&socket).into())?;
         if recv_buf < ONE_MB {
             qdebug!("Increasing socket receive buffer size from {recv_buf} to {ONE_MB}");
+            // Same as Firefox.
+            // <https://searchfox.org/mozilla-central/source/modules/libpref/init/StaticPrefList.yaml#13474-13478>
             state.set_recv_buffer_size((&socket).into(), ONE_MB)?;
         } else {
             qdebug!("Default socket receive buffer size is {recv_buf}, not changing");
