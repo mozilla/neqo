@@ -2508,7 +2508,8 @@ impl Connection {
                 continue;
             }
 
-            // If we don't have a TOS for this UDP datagram yet (i.e. `tos` is `None`), get it, adding a `RecoveryToken::EcnEct0` to `tokens` in case of loss.
+            // If we don't have a TOS for this UDP datagram yet (i.e. `tos` is `None`), get it,
+            // adding a `RecoveryToken::EcnEct0` to `tokens` in case of loss.
             let tos = packet_tos.get_or_insert_with(|| path.borrow().tos(&mut tokens));
             self.log_packet(
                 packet::MetaData::new_out(
@@ -2517,7 +2518,7 @@ impl Connection {
                     pn,
                     builder.len() + aead_expansion,
                     &builder.as_ref()[payload_start..],
-                    *packet_tos.get_or_insert(tos),
+                    *tos,
                 ),
                 now,
             );
@@ -2561,7 +2562,7 @@ impl Connection {
             // coalesced packets, this increases the counts for each packet type
             // contained in the coalesced packet. This is per Section 13.4.1 of
             // RFC 9000.
-            self.stats.borrow_mut().ecn_tx[pt] += IpTosEcn::from(tos);
+            self.stats.borrow_mut().ecn_tx[pt] += IpTosEcn::from(*tos);
 
             if space == PacketNumberSpace::Handshake
                 && self.role == Role::Server
