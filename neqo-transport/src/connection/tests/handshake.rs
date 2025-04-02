@@ -29,7 +29,7 @@ use super::{
 };
 use crate::{
     connection::{
-        tests::{new_client, new_server},
+        tests::{exchange_ticket, new_client, new_server},
         AddressValidation,
     },
     events::ConnectionEvent,
@@ -1390,4 +1390,39 @@ fn grease_quic_bit_transport_parameter() {
             assert_eq!(server_grease, get_remote_tp(&client));
         }
     }
+}
+
+#[test]
+fn zero_rtt_with_ech() {
+    let mut server = default_server();
+    let (sk, pk) = generate_ech_keys().unwrap();
+    server
+        .server_enable_ech(ECH_CONFIG_ID, ECH_PUBLIC_NAME, &sk, &pk)
+        .unwrap();
+
+    let mut client = default_client();
+    client.client_enable_ech(server.ech_config()).unwrap();
+
+    connect(&mut client, &mut server);
+
+    assert!(client.tls_info().unwrap().ech_accepted());
+    assert!(server.tls_info().unwrap().ech_accepted());
+
+    let token = exchange_ticket(&mut client, &mut server, now());
+    let mut client = default_client();
+    client.client_enable_ech(server.ech_config()).unwrap();
+    client
+        .enable_resumption(now(), token)
+        .expect("should set token");
+
+    let mut server = resumed_server(&client);
+    server
+        .server_enable_ech(ECH_CONFIG_ID, ECH_PUBLIC_NAME, &sk, &pk)
+        .unwrap();
+
+    connect(&mut client, &mut server);
+    assert!(client.tls_info().unwrap().ech_accepted());
+    assert!(server.tls_info().unwrap().ech_accepted());
+    assert!(client.tls_info().unwrap().early_data_accepted());
+    assert!(server.tls_info().unwrap().early_data_accepted());
 }
