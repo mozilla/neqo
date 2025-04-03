@@ -146,6 +146,11 @@ impl SendBatch {
     }
 
     #[must_use]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_const_for_fn,
+        reason = "Remove allow and add const when MSRV >= 1.88."
+    )]
     pub fn data(&self) -> &[u8] {
         &self.data
     }
