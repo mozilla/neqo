@@ -1,5 +1,6 @@
 .DS_Store
 .envrc
+*.qlog
 *.sqlog
 *~
 /.vscode/
