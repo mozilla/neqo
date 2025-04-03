@@ -1550,7 +1550,6 @@ impl Connection {
         }
 
         stats.ecn_last_mark = Some(ecn_mark);
-        stats.dscp_rx[tos.into()] += 1;
         drop(stats);
         let space = PacketNumberSpace::from(packet.packet_type());
         if let Some(space) = self.acks.get_mut(space) {
@@ -1640,6 +1639,7 @@ impl Connection {
                         break;
                     }
                 };
+            self.stats.borrow_mut().dscp_rx[tos.into()] += 1;
             match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
                 PreprocessResult::Continue => (),
                 PreprocessResult::Next => break,

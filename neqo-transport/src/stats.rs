@@ -25,8 +25,7 @@ use crate::{
 
 pub const MAX_PTO_COUNTS: usize = 16;
 
-#[derive(Default, Clone)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct FrameStats {
     pub ack: usize,
     pub largest_acknowledged: PacketNumber,
@@ -129,7 +128,7 @@ impl FrameStats {
 }
 
 /// Datagram stats
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct DatagramStats {
     /// The number of datagrams declared lost.
     pub lost: usize,
@@ -141,7 +140,7 @@ pub struct DatagramStats {
 }
 
 /// ECN counts by QUIC [`PacketType`].
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct EcnCount(EnumMap<PacketType, ecn::Count>);
 
 impl Debug for EcnCount {
@@ -171,7 +170,7 @@ impl DerefMut for EcnCount {
 }
 
 /// Packet types and numbers of the first ECN mark transition between two marks.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct EcnTransitions(EnumMap<IpTosEcn, EnumMap<IpTosEcn, Option<(PacketType, PacketNumber)>>>);
 
 impl Deref for EcnTransitions {
@@ -208,7 +207,7 @@ impl Debug for EcnTransitions {
 }
 
 /// Received packet counts by DSCP value.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct DscpCount(EnumMap<IpTosDscp, usize>);
 
 impl Debug for DscpCount {
@@ -238,7 +237,7 @@ impl DerefMut for DscpCount {
 }
 
 /// Connection statistics
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct Stats {
     info: String,
 
@@ -300,7 +299,8 @@ pub struct Stats {
 
     /// ECN path validation count, indexed by validation outcome.
     pub ecn_path_validation: ecn::ValidationCount,
-    /// ECN counts for outgoing UDP datagrams, recorded locally.
+    /// ECN counts for outgoing UDP datagrams, recorded locally. For coalesced packets,
+    /// counts increase for all packet types in the coalesced datagram.
     pub ecn_tx: EcnCount,
     /// ECN counts for outgoing UDP datagrams, returned by remote through QUIC ACKs.
     ///
@@ -314,14 +314,14 @@ pub struct Stats {
     /// [`Ce`]: neqo_common::tos::IpTosEcn::Ce
     /// [`NotEct`]: neqo_common::tos::IpTosEcn::NotEct
     pub ecn_tx_acked: EcnCount,
-    /// ECN counts for incoming UDP datagrams, read from IP TOS header.
+    /// ECN counts for incoming UDP datagrams, read from IP TOS header. For coalesced packets,
+    /// counts increase for all packet types in the coalesced datagram.
     pub ecn_rx: EcnCount,
     /// Packet numbers of the first observed (received) ECN mark transition between two marks.
     pub ecn_last_mark: Option<IpTosEcn>,
     pub ecn_rx_transition: EcnTransitions,
 
-    /// Counters for DSCP values received. This only tracks DSCP marks on incoming packets that
-    /// were processed by the connection, which is not all non-dropped received packets.
+    /// Counters for DSCP values received.
     pub dscp_rx: DscpCount,
 }
 

@@ -6,6 +6,7 @@
 
 mod common;
 
+use common::assert_dscp;
 use neqo_common::{Datagram, Decoder, Encoder, Role};
 use neqo_transport::{
     CloseReason, ConnectionParameters, Error, State, Version, MIN_INITIAL_PACKET_SIZE,
@@ -21,7 +22,9 @@ use test_fixture::{
 
 #[test]
 fn connect() {
-    let (_client, _server) = test_fixture::connect();
+    let (client, server) = test_fixture::connect();
+    assert_dscp(&client.stats());
+    assert_dscp(&server.stats());
 }
 
 #[test]
