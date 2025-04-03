@@ -413,10 +413,7 @@ fn zero_rtt_no_time_threshold_loss_detection_before_first_ack() {
     // it will delay the ACK.
     let _client_pkt1 = client.process(server_hs.dgram(), now);
     let _client_pkt2 = client.process(server_process_0rtt.dgram(), now);
-    assert!(matches!(
-        client.process_output(now),
-        Output::Callback(_)
-    ));
+    assert!(matches!(client.process_output(now), Output::Callback(_)));
 
     // Progress time by half an RTT. Thus ~1.5 RTT have elapsed since the client
     // sent the 0-RTT application data. ~1.5 RTT is past the time threshold
