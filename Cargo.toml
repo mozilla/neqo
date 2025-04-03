@@ -34,7 +34,7 @@ enumset = { version = "1.1", default-features = false }
 hex = { version = "0.4", default-features = false }
 log = { version = "0.4", default-features = false }
 qlog = { version = "0.15", default-features = false }
-quinn-udp = { version = "0.5.10", default-features = false, features = ["direct-log", "fast-apple-datapath"] }
+quinn-udp = { version = "0.5.11", default-features = false, features = ["direct-log", "fast-apple-datapath"] }
 regex = { version = "1.9", default-features = false }
 smallvec = { version = "1.13", default-features = false, features = ["union", "const_generics"] }
 static_assertions = { version = "1.1", default-features = false }
