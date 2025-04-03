@@ -96,7 +96,7 @@ impl std::error::Error for Error {}
 
 type Res<T> = Result<T, Error>;
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Parser, Default)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     #[command(flatten)]
@@ -106,7 +106,7 @@ pub struct Args {
     #[arg(default_value = "[::]:4433")]
     hosts: Vec<String>,
 
-    #[arg(short = 'd', long, default_value = "./test-fixture/db")]
+    #[arg(short = 'd', long, default_value = "test-fixture/db")]
     /// NSS database directory.
     db: PathBuf,
 
@@ -123,21 +123,6 @@ pub struct Args {
     /// This generates a new set of ECH keys when it is invoked.
     /// The resulting configuration is printed to stdout in hexadecimal format.
     ech: bool,
-}
-
-#[cfg(any(test, feature = "bench"))]
-impl Default for Args {
-    fn default() -> Self {
-        use std::str::FromStr as _;
-        Self {
-            shared: SharedArgs::default(),
-            hosts: vec!["[::]:12345".to_string()],
-            db: PathBuf::from_str("../test-fixture/db").unwrap(),
-            key: "key".to_string(),
-            retry: false,
-            ech: false,
-        }
-    }
 }
 
 impl Args {

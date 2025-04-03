@@ -18,6 +18,7 @@ use std::{
 
 use neqo_common::{qtrace, Role};
 use smallvec::SmallVec;
+use strum::Display;
 
 use crate::{
     events::ConnectionEvents,
@@ -375,7 +376,7 @@ impl RxStreamOrderer {
 }
 
 /// QUIC receiving states, based on -transport 3.2.
-#[derive(Debug)]
+#[derive(Debug, Display)]
 // Because a dead_code warning is easier than clippy::unused_self, see https://github.com/rust-lang/rust/issues/68408
 enum RecvStreamState {
     Recv {
@@ -429,18 +430,6 @@ impl RecvStreamState {
             fc: ReceiverFlowControl::new(stream_id, max_bytes),
             recv_buf: RxStreamOrderer::new(),
             session_fc,
-        }
-    }
-
-    const fn name(&self) -> &str {
-        match self {
-            Self::Recv { .. } => "Recv",
-            Self::SizeKnown { .. } => "SizeKnown",
-            Self::DataRecvd { .. } => "DataRecvd",
-            Self::DataRead { .. } => "DataRead",
-            Self::AbortReading { .. } => "AbortReading",
-            Self::WaitForReset { .. } => "WaitForReset",
-            Self::ResetRecvd { .. } => "ResetRecvd",
         }
     }
 
@@ -566,8 +555,8 @@ impl RecvStream {
         qtrace!(
             "RecvStream {} state {} -> {}",
             self.stream_id.as_u64(),
-            self.state.name(),
-            new_state.name()
+            self.state,
+            new_state
         );
 
         match new_state {
@@ -686,7 +675,7 @@ impl RecvStream {
             | RecvStreamState::AbortReading { .. }
             | RecvStreamState::WaitForReset { .. }
             | RecvStreamState::ResetRecvd { .. } => {
-                qtrace!("data received when we are in state {}", self.state.name());
+                qtrace!("data received when we are in state {}", self.state);
             }
         }
 
@@ -847,7 +836,7 @@ impl RecvStream {
     }
 
     pub fn stop_sending(&mut self, err: AppError) {
-        qtrace!("stop_sending called when in state {}", self.state.name());
+        qtrace!("stop_sending called when in state {}", self.state);
         match &mut self.state {
             RecvStreamState::Recv {
                 fc,

@@ -27,8 +27,6 @@ mod SSLOption {
     include!(concat!(env!("OUT_DIR"), "/nss_sslopt.rs"));
 }
 
-// I clearly don't understand how bindgen operates.
-// pub enum PLArenaPool {}
 pub enum PRFileDesc {}
 
 // Remap some constants.
@@ -56,11 +54,6 @@ pub enum Opt {
 }
 
 impl Opt {
-    #[must_use]
-    pub const fn as_int(self) -> PRInt32 {
-        self as PRInt32
-    }
-
     // Some options are backwards, like SSL_NO_LOCKS, so use this to manage that.
     fn map_enabled(self, enabled: bool) -> PRIntn {
         let v = match self {
@@ -71,7 +64,7 @@ impl Opt {
     }
 
     pub(crate) fn set(self, fd: *mut PRFileDesc, value: bool) -> Res<()> {
-        secstatus_to_res(unsafe { SSL_OptionSet(fd, self.as_int(), self.map_enabled(value)) })
+        secstatus_to_res(unsafe { SSL_OptionSet(fd, self as PRInt32, self.map_enabled(value)) })
     }
 }
 
