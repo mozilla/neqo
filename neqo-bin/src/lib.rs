@@ -276,6 +276,9 @@ mod tests {
         let mut client_args = client::Args::new(&[1], false);
         client_args.set_qlog_dir(temp_dir.path());
         let mut server_args = server::Args::default();
+        server_args.shared().alpn = "h3".to_string();
+        server_args.set_key("key".to_string());
+        server_args.set_hosts(vec!["[::]:12345".to_string()]);
         server_args.set_qlog_dir(temp_dir.path());
 
         let client = client::client(client_args);

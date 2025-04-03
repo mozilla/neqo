@@ -106,7 +106,7 @@ pub struct Args {
     #[arg(default_value = "[::]:4433")]
     hosts: Vec<String>,
 
-    #[arg(short = 'd', long, default_value = "test-fixture/db")]
+    #[arg(short = 'd', long, default_value = "./test-fixture/db")]
     /// NSS database directory.
     db: PathBuf,
 
@@ -166,6 +166,21 @@ impl Args {
         } else {
             Instant::now()
         }
+    }
+
+    #[cfg(any(test, feature = "bench"))]
+    pub fn shared(&mut self) -> &mut SharedArgs {
+        &mut self.shared
+    }
+
+    #[cfg(any(test, feature = "bench"))]
+    pub fn set_key(&mut self, key: String) {
+        self.key = key;
+    }
+
+    #[cfg(any(test, feature = "bench"))]
+    pub fn set_hosts(&mut self, hosts: Vec<String>) {
+        self.hosts = hosts;
     }
 
     #[cfg(any(test, feature = "bench"))]
