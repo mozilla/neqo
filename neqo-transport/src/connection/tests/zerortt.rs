@@ -414,7 +414,7 @@ fn zero_rtt_no_time_threshold_loss_detection_before_first_ack() {
     let _client_pkt1 = client.process(server_hs.dgram(), now);
     let _client_pkt2 = client.process(server_process_0rtt.dgram(), now);
     assert!(matches!(
-        client.process_output(dbg!(now)),
+        client.process_output(now),
         Output::Callback(_)
     ));
 
@@ -427,6 +427,6 @@ fn zero_rtt_no_time_threshold_loss_detection_before_first_ack() {
     // 0-RTT stream data lost, nor attempt to retransmit it. Given that thus far
     // no Application space ACK has been received, time threshold based loss
     // detection does not yet apply.
-    assert!(client.process_output(dbg!(now)).dgram().is_none());
+    assert!(client.process_output(now).dgram().is_none());
     assert_eq!(client.stats().lost, 0);
 }
