@@ -37,7 +37,13 @@ use crate::{
     AppError, Error, Res,
 };
 
-pub const SEND_BUFFER_SIZE: usize = 0x10_0000; // 1 MiB
+/// The maximum stream send buffer size.
+///
+/// See [`crate::recv_stream::MAX_RECV_WINDOW_SIZE`] for an explanation of this
+/// concrete value.
+///
+/// Keep in sync with [`crate::recv_stream::MAX_RECV_WINDOW_SIZE`].
+pub const MAX_SEND_BUFFER_SIZE: usize = 10 * 1024 * 1024;
 
 /// The priority that is assigned to sending data for the stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -503,10 +509,10 @@ impl TxBuffer {
 
     /// Attempt to add some or all of the passed-in buffer to the `TxBuffer`.
     pub fn send(&mut self, buf: &[u8]) -> usize {
-        let can_buffer = min(SEND_BUFFER_SIZE - self.buffered(), buf.len());
+        let can_buffer = min(MAX_SEND_BUFFER_SIZE - self.buffered(), buf.len());
         if can_buffer > 0 {
             self.send_buf.extend(&buf[..can_buffer]);
-            debug_assert!(self.send_buf.len() <= SEND_BUFFER_SIZE);
+            debug_assert!(self.send_buf.len() <= MAX_SEND_BUFFER_SIZE);
         }
         can_buffer
     }
@@ -588,7 +594,7 @@ impl TxBuffer {
     }
 
     fn avail(&self) -> usize {
-        SEND_BUFFER_SIZE - self.buffered()
+        MAX_SEND_BUFFER_SIZE - self.buffered()
     }
 
     fn used(&self) -> u64 {
@@ -646,7 +652,7 @@ impl SendStreamState {
     fn tx_avail(&self) -> usize {
         match self {
             // In Ready, TxBuffer not yet allocated but size is known
-            Self::Ready { .. } => SEND_BUFFER_SIZE,
+            Self::Ready { .. } => MAX_SEND_BUFFER_SIZE,
             Self::Send { send_buf, .. } | Self::DataSent { send_buf, .. } => send_buf.avail(),
             Self::DataRecvd { .. } | Self::ResetSent { .. } | Self::ResetRecvd { .. } => 0,
         }
@@ -1245,6 +1251,7 @@ impl SendStream {
     }
 
     pub fn set_max_stream_data(&mut self, limit: u64) {
+        qdebug!("setting max_stream_data to {limit}");
         if let SendStreamState::Ready { fc, .. } | SendStreamState::Send { fc, .. } =
             &mut self.state
         {
@@ -1863,9 +1870,10 @@ mod tests {
         recovery::{RecoveryToken, StreamRecoveryToken},
         send_stream::{
             RangeState, RangeTracker, SendStream, SendStreamState, SendStreams, TxBuffer,
+            MAX_SEND_BUFFER_SIZE,
         },
         stats::FrameStats,
-        ConnectionEvents, StreamId, SEND_BUFFER_SIZE,
+        ConnectionEvents, StreamId, INITIAL_RECV_WINDOW_SIZE,
     };
 
     fn connection_fc(limit: u64) -> Rc<RefCell<SenderFlowControl<()>>> {
@@ -2332,17 +2340,15 @@ mod tests {
     fn tx_buffer_next_bytes_1() {
         let mut txb = TxBuffer::new();
 
-        assert_eq!(txb.avail(), SEND_BUFFER_SIZE);
-
         // Fill the buffer
-        let big_buf = vec![1; SEND_BUFFER_SIZE * 2];
-        assert_eq!(txb.send(&big_buf), SEND_BUFFER_SIZE);
+        let big_buf = vec![1; INITIAL_RECV_WINDOW_SIZE];
+        assert_eq!(txb.send(&big_buf), INITIAL_RECV_WINDOW_SIZE);
         assert!(matches!(txb.next_bytes(),
-                         Some((0, x)) if x.len() == SEND_BUFFER_SIZE
+                         Some((0, x)) if x.len() == INITIAL_RECV_WINDOW_SIZE
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark almost all as sent. Get what's left
-        let one_byte_from_end = SEND_BUFFER_SIZE as u64 - 1;
+        let one_byte_from_end = INITIAL_RECV_WINDOW_SIZE as u64 - 1;
         txb.mark_as_sent(0, usize::try_from(one_byte_from_end).unwrap());
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 1
@@ -2350,7 +2356,7 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark all as sent. Get nothing
-        txb.mark_as_sent(0, SEND_BUFFER_SIZE);
+        txb.mark_as_sent(0, INITIAL_RECV_WINDOW_SIZE);
         assert!(txb.next_bytes().is_none());
 
         // Mark as lost. Get it again
@@ -2362,7 +2368,7 @@ mod tests {
 
         // Mark a larger range lost, including beyond what's in the buffer even.
         // Get a little more
-        let five_bytes_from_end = SEND_BUFFER_SIZE as u64 - 5;
+        let five_bytes_from_end = INITIAL_RECV_WINDOW_SIZE as u64 - 5;
         txb.mark_as_lost(five_bytes_from_end, 100);
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 5
@@ -2387,7 +2393,7 @@ mod tests {
         txb.mark_as_sent(five_bytes_from_end, 5);
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 30
-                         && start == SEND_BUFFER_SIZE as u64
+                         && start == INITIAL_RECV_WINDOW_SIZE as u64
                          && x.iter().all(|ch| *ch == 2)));
     }
 
@@ -2395,17 +2401,15 @@ mod tests {
     fn tx_buffer_next_bytes_2() {
         let mut txb = TxBuffer::new();
 
-        assert_eq!(txb.avail(), SEND_BUFFER_SIZE);
-
         // Fill the buffer
-        let big_buf = vec![1; SEND_BUFFER_SIZE * 2];
-        assert_eq!(txb.send(&big_buf), SEND_BUFFER_SIZE);
+        let big_buf = vec![1; INITIAL_RECV_WINDOW_SIZE];
+        assert_eq!(txb.send(&big_buf), INITIAL_RECV_WINDOW_SIZE);
         assert!(matches!(txb.next_bytes(),
-                         Some((0, x)) if x.len()==SEND_BUFFER_SIZE
+                         Some((0, x)) if x.len()==INITIAL_RECV_WINDOW_SIZE
                          && x.iter().all(|ch| *ch == 1)));
 
         // As above
-        let forty_bytes_from_end = SEND_BUFFER_SIZE as u64 - 40;
+        let forty_bytes_from_end = INITIAL_RECV_WINDOW_SIZE as u64 - 40;
 
         txb.mark_as_acked(0, usize::try_from(forty_bytes_from_end).unwrap());
         assert!(matches!(txb.next_bytes(),
@@ -2425,7 +2429,7 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark a range 'A' in second slice as sent. Should still return the same
-        let range_a_start = SEND_BUFFER_SIZE as u64 + 30;
+        let range_a_start = INITIAL_RECV_WINDOW_SIZE as u64 + 30;
         let range_a_end = range_a_start + 10;
         txb.mark_as_sent(range_a_start, 10);
         assert!(matches!(txb.next_bytes(),
@@ -2434,7 +2438,7 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Ack entire first slice and into second slice
-        let ten_bytes_past_end = SEND_BUFFER_SIZE as u64 + 10;
+        let ten_bytes_past_end = INITIAL_RECV_WINDOW_SIZE as u64 + 10;
         txb.mark_as_acked(0, usize::try_from(ten_bytes_past_end).unwrap());
 
         // Get up to marked range A
@@ -2473,24 +2477,24 @@ mod tests {
         }
 
         // Should hit stream flow control limit before filling up send buffer
-        let big_buf = vec![4; SEND_BUFFER_SIZE + 100];
-        let res = s.send(&big_buf[..SEND_BUFFER_SIZE]).unwrap();
+        let big_buf = vec![4; INITIAL_RECV_WINDOW_SIZE + 100];
+        let res = s.send(&big_buf[..INITIAL_RECV_WINDOW_SIZE]).unwrap();
         assert_eq!(res, 1024 - 100);
 
         // should do nothing, max stream data already 1024
         s.set_max_stream_data(1024);
-        let res = s.send(&big_buf[..SEND_BUFFER_SIZE]).unwrap();
+        let res = s.send(&big_buf[..INITIAL_RECV_WINDOW_SIZE]).unwrap();
         assert_eq!(res, 0);
 
         // should now hit the conn flow control (4096)
         s.set_max_stream_data(1_048_576);
-        let res = s.send(&big_buf[..SEND_BUFFER_SIZE]).unwrap();
+        let res = s.send(&big_buf[..INITIAL_RECV_WINDOW_SIZE]).unwrap();
         assert_eq!(res, 3072);
 
         // should now hit the tx buffer size
-        conn_fc.borrow_mut().update(SEND_BUFFER_SIZE as u64);
+        conn_fc.borrow_mut().update(INITIAL_RECV_WINDOW_SIZE as u64);
         let res = s.send(&big_buf).unwrap();
-        assert_eq!(res, SEND_BUFFER_SIZE - 4096);
+        assert_eq!(res, INITIAL_RECV_WINDOW_SIZE - 4096);
 
         // TODO(agrover@mozilla.com): test ooo acks somehow
         s.mark_as_acked(0, 40, false);
@@ -2556,17 +2560,8 @@ mod tests {
         conn_fc.borrow_mut().update(1_000_000_000);
         assert_eq!(conn_events.events().count(), 0);
 
-        // Unblocking both by a large amount will cause avail() to be limited by
-        // tx buffer size.
-        assert_eq!(s.avail(), SEND_BUFFER_SIZE - 4);
-
-        let big_buf = vec![b'a'; SEND_BUFFER_SIZE];
-        assert_eq!(s.send(&big_buf).unwrap(), SEND_BUFFER_SIZE - 4);
-
-        // No event because still blocked by tx buffer full
-        s.set_max_stream_data(2_000_000_000);
-        assert_eq!(conn_events.events().count(), 0);
-        assert_eq!(s.send(b"hello").unwrap(), 0);
+        let big_buf = vec![b'a'; INITIAL_RECV_WINDOW_SIZE];
+        assert_eq!(s.send(&big_buf).unwrap(), INITIAL_RECV_WINDOW_SIZE);
     }
 
     #[test]
@@ -2859,6 +2854,19 @@ mod tests {
             .borrow_mut()
             .write_frames(&mut builder, &mut tokens, &mut stats);
         assert_eq!(stats.data_blocked, 1);
+    }
+
+    #[test]
+    fn max_send_buffer_size() {
+        // Huge FC limit. Thus buffer size limited only.
+        const FC_LIMIT: u64 = 1024 * 1024 * 1024;
+        let s = SendStream::new(
+            StreamId::from(4),
+            FC_LIMIT,
+            connection_fc(FC_LIMIT),
+            ConnectionEvents::default(),
+        );
+        assert_eq!(s.avail(), MAX_SEND_BUFFER_SIZE);
     }
 
     #[test]

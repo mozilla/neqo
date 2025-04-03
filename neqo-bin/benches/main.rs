@@ -44,7 +44,7 @@ fn transfer(c: &mut Criterion) {
             upload: false,
         },
         Benchmark {
-            name: format!("1-conn/1-100mb-resp{mtu} (aka. Upload)"),
+            name: format!("1-conn/1-100mb-req{mtu} (aka. Upload)"),
             requests: vec![100 * 1024 * 1024],
             upload: true,
         },
