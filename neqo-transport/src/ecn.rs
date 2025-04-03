@@ -325,7 +325,10 @@ impl Info {
         }
     }
 
-    /// The ECN mark to use for packets sent on this path.
+    /// The ECN mark to use for an outgoing UDP datagram.
+    ///
+    /// On [`IpTosEcn::Ect0`] adds a [`RecoveryToken::EcnEct0`] to `tokens` in
+    /// order to detect potential loss, then handled in [`Info::lost_ecn`].
     pub(crate) fn ecn_mark(&self, tokens: &mut Vec<RecoveryToken>) -> IpTosEcn {
         if self.is_marking() {
             tokens.push(RecoveryToken::EcnEct0);
