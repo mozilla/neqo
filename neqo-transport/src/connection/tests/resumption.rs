@@ -90,11 +90,12 @@ fn ticket_rtt(rtt: Duration) -> Duration {
     // A simple ACK_ECN frame for a single packet with packet number 0 with a single ECT(0) mark.
     const ACK_FRAME_1: &[u8] = &[0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00];
 
-    // This test needs to decrypt the CI, so turn off MLKEM.
+    // This test needs to decrypt the CI, so turn off MLKEM and packet number randomization.
     let mut client = new_client(
         ConnectionParameters::default()
             .versions(Version::Version1, vec![Version::Version1])
-            .mlkem(false),
+            .mlkem(false)
+            .randomize_ci_pn(false),
     );
     let mut server = default_server();
     let mut now = now();
