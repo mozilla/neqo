@@ -18,7 +18,7 @@ use std::{
 };
 
 use log::{log_enabled, Level};
-use neqo_common::{qdebug, qtrace, Datagram, DatagramMetaData, IpTos};
+use neqo_common::{qdebug, qtrace, Datagram, IpTos};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 
 /// Receive buffer size
@@ -61,13 +61,72 @@ impl Default for RecvBuf {
     }
 }
 
+/// The meta data associated with a UDP datagram.
+#[derive(Clone, PartialEq, Eq)]
+pub struct DatagramMetaData {
+    src: SocketAddr,
+    dst: SocketAddr,
+    tos: IpTos,
+    len: usize,
+}
+
+impl DatagramMetaData {
+    #[must_use]
+    pub const fn new(src: SocketAddr, dst: SocketAddr, tos: IpTos, len: usize) -> Self {
+        Self { src, dst, tos, len }
+    }
+
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    #[must_use]
+    pub const fn tos(&self) -> IpTos {
+        self.tos
+    }
+
+    #[must_use]
+    pub const fn destination(&self) -> SocketAddr {
+        self.dst
+    }
+
+    #[must_use]
+    pub const fn source(&self) -> SocketAddr {
+        self.src
+    }
+}
+
+/// Whether the given datagram matches this meta data.
+impl PartialEq<Datagram> for DatagramMetaData {
+    fn eq(&self, other: &Datagram) -> bool {
+        self.dst == other.destination() && self.len == other.len() && self.tos == other.tos()
+    }
+}
+
+impl From<&Datagram> for DatagramMetaData {
+    fn from(dgram: &Datagram) -> Self {
+        Self::new(
+            dgram.source(),
+            dgram.destination(),
+            dgram.tos(),
+            dgram.len(),
+        )
+    }
+}
+
 /// A batch of datagrams to be sent on a socket, sharing the same meta data.
 ///
 /// When a datagram is pushed that does not match the meta data of the batch,
 /// it is stored in `next` and a send indication is returned.
 pub struct SendBatch {
     meta: Option<DatagramMetaData>,
-    data: Vec<u8>, // FIXME: A guess.
+    data: Vec<u8>,
     next: Option<Datagram>,
 }
 
@@ -108,7 +167,7 @@ impl SendBatch {
 
     fn set(&mut self, dgram: &Datagram) {
         self.data = Vec::from(dgram.as_ref());
-        self.meta = Some(dgram.meta().clone());
+        self.meta = Some(dgram.into());
     }
 
     pub fn push(&mut self, dgram: Datagram) -> bool {
@@ -116,7 +175,11 @@ impl SendBatch {
             // This is the first datagram we are collecting.
             self.set(&dgram);
             false
-        } else if self.meta.as_ref().is_some_and(|meta| meta == dgram.meta()) {
+        } else if self
+            .meta
+            .as_ref()
+            .is_some_and(|meta| meta == &DatagramMetaData::from(&dgram))
+        {
             // Another datagram with the same length, destination and TOS byte - collect it.
             self.data.extend_from_slice(dgram.as_ref());
             false

@@ -24,7 +24,7 @@ use enum_map::Enum;
 pub use self::fuzz::write_item_to_fuzzing_corpus;
 pub use self::{
     codec::{Decoder, Encoder},
-    datagram::{Datagram, DatagramMetaData},
+    datagram::Datagram,
     header::Header,
     incrdecoder::{IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint},
     tos::{IpTos, IpTosDscp, IpTosEcn},
