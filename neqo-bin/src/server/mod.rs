@@ -249,7 +249,7 @@ impl ServerRunner {
         now: &dyn Fn() -> Instant,
         mut input_dgram: Option<Datagram<&mut [u8]>>,
     ) -> Result<(), io::Error> {
-        let mut batch = SendBatch::default();
+        let mut batch = SendBatch::with_capacity(u16::MAX.into());
         let mut exit = false; // Should we exit the loop on the next interation?
         let mut send = false; // Should we send on the next loop interation?
         let mut maybe_gso_failed = false;
