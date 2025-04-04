@@ -106,7 +106,13 @@ impl Count {
     /// Whether any of the ECN counts are non-zero.
     #[must_use]
     pub fn is_some(&self) -> bool {
-        self[IpTosEcn::Ect0] > 0 || self[IpTosEcn::Ect1] > 0 || self[IpTosEcn::Ce] > 0
+        self.0.iter().any(|(_, &count)| count > 0)
+    }
+
+    /// Whether all of the ECN counts are zero.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        !self.is_some()
     }
 }
 
@@ -248,6 +254,16 @@ impl Info {
         ack_ecn: Option<Count>,
         stats: &mut Stats,
     ) {
+        // RFC 9000, Section 13.4.2.1:
+        //
+        // > Validating ECN counts from reordered ACK frames can result in failure. An endpoint MUST
+        // > NOT fail ECN validation as a result of processing an ACK frame that does not increase
+        // > the largest acknowledged packet number.
+        let largest_acked = acked_packets.first().expect("must be there");
+        if largest_acked.pn() <= self.largest_acked {
+            return;
+        }
+
         // RFC 9000, Appendix A.4:
         //
         // > From the "unknown" state, successful validation of the ECN counts in an ACK frame
@@ -256,16 +272,6 @@ impl Info {
         match self.state {
             ValidationState::Testing { .. } | ValidationState::Failed(_) => return,
             ValidationState::Unknown | ValidationState::Capable => {}
-        }
-
-        // RFC 9000, Section 13.4.2.1:
-        //
-        // > Validating ECN counts from reordered ACK frames can result in failure. An endpoint MUST
-        // > NOT fail ECN validation as a result of processing an ACK frame that does not increase
-        // > the largest acknowledged packet number.
-        let largest_acked = acked_packets.first().expect("must be there").pn();
-        if largest_acked <= self.largest_acked {
-            return;
         }
 
         // RFC 9000, Section 13.4.2.1:
@@ -282,6 +288,7 @@ impl Info {
             self.disable_ecn(stats, ValidationError::Bleaching);
             return;
         };
+        stats.ecn_tx_acked[largest_acked.packet_type()] = ack_ecn;
 
         // We always mark with ECT(0) - if at all - so we only need to check for that.
         //
@@ -314,8 +321,7 @@ impl Info {
             self.state.set(ValidationState::Capable, stats);
         }
         self.baseline = ack_ecn;
-        stats.ecn_tx = ack_ecn;
-        self.largest_acked = largest_acked;
+        self.largest_acked = largest_acked.pn();
     }
 
     pub(crate) const fn is_marking(&self) -> bool {
