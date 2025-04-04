@@ -61,26 +61,172 @@ impl Default for RecvBuf {
     }
 }
 
+/// The meta data associated with a UDP datagram.
+#[derive(Clone, PartialEq, Eq)]
+pub struct DatagramMetaData {
+    src: SocketAddr,
+    dst: SocketAddr,
+    tos: IpTos,
+    len: usize,
+}
+
+impl DatagramMetaData {
+    #[must_use]
+    pub const fn new(src: SocketAddr, dst: SocketAddr, tos: IpTos, len: usize) -> Self {
+        Self { src, dst, tos, len }
+    }
+
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    #[must_use]
+    pub const fn tos(&self) -> IpTos {
+        self.tos
+    }
+
+    #[must_use]
+    pub const fn destination(&self) -> SocketAddr {
+        self.dst
+    }
+
+    #[must_use]
+    pub const fn source(&self) -> SocketAddr {
+        self.src
+    }
+}
+
+/// Whether the given datagram matches this meta data.
+impl PartialEq<Datagram> for DatagramMetaData {
+    fn eq(&self, other: &Datagram) -> bool {
+        self.dst == other.destination() && self.len == other.len() && self.tos == other.tos()
+    }
+}
+
+impl From<&Datagram> for DatagramMetaData {
+    fn from(dgram: &Datagram) -> Self {
+        Self::new(
+            dgram.source(),
+            dgram.destination(),
+            dgram.tos(),
+            dgram.len(),
+        )
+    }
+}
+
+/// A batch of datagrams to be sent on a socket, sharing the same meta data.
+///
+/// When a datagram is pushed that does not match the meta data of the batch,
+/// it is stored in `next` and a send indication is returned.
+pub struct SendBatch {
+    meta: Option<DatagramMetaData>,
+    data: Vec<u8>,
+    next: Option<Datagram>,
+}
+
+impl SendBatch {
+    #[must_use]
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            meta: None,
+            data: Vec::with_capacity(capacity),
+            next: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn meta(&self) -> Option<&DatagramMetaData> {
+        self.meta.as_ref()
+    }
+
+    #[must_use]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_const_for_fn,
+        reason = "Remove allow and add const when MSRV >= 1.88."
+    )]
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    #[must_use]
+    pub fn all_empty(&self) -> bool {
+        self.meta.is_none() && self.data.is_empty() && self.next.is_none()
+    }
+
+    fn clear(&mut self) {
+        self.meta = None;
+        self.data.clear();
+    }
+
+    fn set(&mut self, dgram: &Datagram) {
+        self.data = Vec::from(dgram.as_ref());
+        self.meta = Some(dgram.into());
+    }
+
+    pub fn push(&mut self, dgram: Datagram) -> bool {
+        if self.is_empty() {
+            // This is the first datagram we are collecting.
+            self.set(&dgram);
+            false
+        } else if self
+            .meta
+            .as_ref()
+            .is_some_and(|meta| meta == &DatagramMetaData::from(&dgram))
+        {
+            // Another datagram with the same length, destination and TOS byte - collect it.
+            self.data.extend_from_slice(dgram.as_ref());
+            false
+        } else {
+            // Another datagram but with different length, destination or TOS byte - remember it.
+            self.next = Some(dgram);
+            // We need to send the current batch before we can send the next one.
+            true
+        }
+    }
+
+    pub fn switch_to_next(&mut self) {
+        if let Some(next) = self.next.take() {
+            self.set(&next);
+        } else {
+            self.clear();
+        }
+    }
+}
+
 pub fn send_inner(
     state: &UdpSocketState,
     socket: quinn_udp::UdpSockRef<'_>,
-    d: &Datagram,
+    meta: &DatagramMetaData,
+    contents: &[u8],
 ) -> io::Result<()> {
     let transmit = Transmit {
-        destination: d.destination(),
-        ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
-        contents: d,
-        segment_size: None,
+        destination: meta.destination(),
+        ecn: EcnCodepoint::from_bits(Into::<u8>::into(meta.tos())),
+        contents,
+        segment_size: Some(meta.len()),
         src_ip: None,
     };
 
     state.try_send(socket, &transmit)?;
 
     qtrace!(
-        "sent {} bytes from {} to {}",
-        d.len(),
-        d.source(),
-        d.destination()
+        "sent {} bytes in {} packets from {} to {}",
+        contents.len(),
+        contents.len() / meta.len(),
+        meta.source(),
+        meta.destination()
     );
 
     Ok(())
@@ -201,8 +347,9 @@ impl<S: SocketRef> Socket<S> {
     }
 
     /// Send a [`Datagram`] on the given [`Socket`].
-    pub fn send(&self, d: &Datagram) -> io::Result<()> {
-        send_inner(&self.state, (&self.inner).into(), d)
+    pub fn send(&self, meta: &DatagramMetaData, contents: &[u8]) -> io::Result<()> {
+        debug_assert_eq!(meta.len(), contents.len());
+        send_inner(&self.state, (&self.inner).into(), meta, contents)
     }
 
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each
@@ -255,14 +402,28 @@ mod tests {
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        let datagram = Datagram::new(
-            sender.inner.local_addr()?,
-            receiver.inner.local_addr()?,
-            IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
-            b"Hello, world!".to_vec(),
-        );
+        let data = b"Hello, world!";
+        sender.send(
+            &DatagramMetaData::new(
+                sender.inner.local_addr()?,
+                receiver.inner.local_addr()?,
+                IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
+                data.len(),
+            ),
+            data,
+        )?;
 
-        sender.send(&datagram)?;
+        let data = b"Hello, world!";
+        let tos = IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1));
+        sender.send(
+            &DatagramMetaData::new(
+                sender.inner.local_addr()?,
+                receiver.inner.local_addr()?,
+                IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
+                data.len(),
+            ),
+            data,
+        )?;
 
         let mut recv_buf = RecvBuf::new();
         let mut received_datagrams = receiver
@@ -285,7 +446,7 @@ mod tests {
             );
         } else {
             assert_eq!(
-                IpTosEcn::from(datagram.tos()),
+                IpTosEcn::from(tos),
                 IpTosEcn::from(received_datagrams.next().unwrap().tos())
             );
         }
