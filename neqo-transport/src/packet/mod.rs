@@ -12,15 +12,17 @@ use std::{
     time::Instant,
 };
 
+use enum_map::Enum;
 use neqo_common::{hex, hex_with_len, qtrace, qwarn, Decoder, Encoder};
 use neqo_crypto::random;
-use strum::FromRepr;
+use strum::{EnumIter, FromRepr};
 
 use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
     crypto::{CryptoDxState, CryptoStates, Epoch},
     frame::FrameType,
     recovery::SendProfile,
+    tracking::PacketNumberSpace,
     version::{Version, WireVersion},
     Error, Pmtud, Res,
 };
@@ -49,7 +51,7 @@ pub use metadata::MetaData;
 
 pub type PacketNumber = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, FromRepr)]
 #[repr(u8)]
 pub enum PacketType {
     Initial = 0,
@@ -103,6 +105,16 @@ impl From<Epoch> for PacketType {
             Epoch::ZeroRtt => Self::ZeroRtt,
             Epoch::Handshake => Self::Handshake,
             Epoch::ApplicationData => Self::Short,
+        }
+    }
+}
+
+impl From<PacketNumberSpace> for PacketType {
+    fn from(space: PacketNumberSpace) -> Self {
+        match space {
+            PacketNumberSpace::Initial => Self::Initial,
+            PacketNumberSpace::Handshake => Self::Handshake,
+            PacketNumberSpace::ApplicationData => Self::Short,
         }
     }
 }
