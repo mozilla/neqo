@@ -9,7 +9,7 @@ use std::{cmp::max, time::Duration};
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
     connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT},
-    recv_stream::RECV_BUFFER_SIZE,
+    recv_stream::INITIAL_RECV_WINDOW_SIZE,
     rtt::GRANULARITY,
     stream_id::StreamType,
     tparams::{
@@ -34,7 +34,7 @@ const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 pub const ACK_RATIO_SCALE: u8 = 10;
 /// By default, aim to have the peer acknowledge 4 times per round trip time.
 /// See `ConnectionParameters.ack_ratio` for more.
-const DEFAULT_ACK_RATIO: u8 = 4 * ACK_RATIO_SCALE;
+pub const DEFAULT_ACK_RATIO: u8 = 4 * ACK_RATIO_SCALE;
 /// The local value for the idle timeout period.
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
@@ -106,10 +106,12 @@ impl Default for ConnectionParameters {
             versions: VersionConfig::default(),
             cc_algorithm: CongestionControlAlgorithm::Cubic,
             max_data: LOCAL_MAX_DATA,
-            max_stream_data_bidi_remote: u64::try_from(RECV_BUFFER_SIZE)
+            max_stream_data_bidi_remote: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
                 .expect("usize fits in u64"),
-            max_stream_data_bidi_local: u64::try_from(RECV_BUFFER_SIZE).expect("usize fits in u64"),
-            max_stream_data_uni: u64::try_from(RECV_BUFFER_SIZE).expect("usize fits in u64"),
+            max_stream_data_bidi_local: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
+                .expect("usize fits in u64"),
+            max_stream_data_uni: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
+                .expect("usize fits in u64"),
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
             ack_ratio: DEFAULT_ACK_RATIO,

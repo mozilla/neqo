@@ -82,13 +82,13 @@ impl From<SmallVec<[u8; MAX_CONNECTION_ID_LEN]>> for ConnectionId {
 
 impl<T: AsRef<[u8]> + ?Sized> From<&T> for ConnectionId {
     fn from(buf: &T) -> Self {
-        Self::from(SmallVec::from(buf.as_ref()))
+        Self::from(SmallVec::from_slice(buf.as_ref()))
     }
 }
 
 impl<'a> From<ConnectionIdRef<'a>> for ConnectionId {
     fn from(cidref: ConnectionIdRef<'a>) -> Self {
-        Self::from(SmallVec::from(cidref.cid))
+        Self::from(SmallVec::from_slice(cidref.cid))
     }
 }
 

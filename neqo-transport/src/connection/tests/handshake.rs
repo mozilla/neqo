@@ -29,7 +29,7 @@ use super::{
 };
 use crate::{
     connection::{
-        tests::{new_client, new_server},
+        tests::{exchange_ticket, new_client, new_server},
         AddressValidation,
     },
     events::ConnectionEvent,
@@ -346,8 +346,11 @@ fn reorder_05rtt() {
 
     // We can't use the standard facility to complete the handshake, so
     // drive it as aggressively as possible.
+    assert_eq!(client.stats().saved_datagrams, 0);
+    assert_eq!(client.stats().packets_rx, 0);
     client.process_input(s2, now());
     assert_eq!(client.stats().saved_datagrams, 1);
+    assert_eq!(client.stats().packets_rx, 0);
 
     // After processing the first packet, the client should go back and
     // process the 0.5-RTT packet data, which should make data available.
@@ -492,7 +495,7 @@ fn coalesce_05rtt() {
     drop(client.process(s2, now).dgram());
     // This packet will contain an ACK, but we can ignore it.
     assert_eq!(client.stats().dropped_rx, 0);
-    assert_eq!(client.stats().packets_rx, 4);
+    assert_eq!(client.stats().packets_rx, 3);
     assert_eq!(client.stats().saved_datagrams, 1);
 
     // After (successful) authentication, the packet is processed.
@@ -500,7 +503,7 @@ fn coalesce_05rtt() {
     let c3 = client.process_output(now).dgram();
     assert!(c3.is_some());
     assert_eq!(client.stats().dropped_rx, 0); // No Initial padding.
-    assert_eq!(client.stats().packets_rx, 5);
+    assert_eq!(client.stats().packets_rx, 4);
     assert_eq!(client.stats().saved_datagrams, 1);
     assert!(client.stats().frame_rx.padding > 0); // Padding uses frames.
 
@@ -548,7 +551,7 @@ fn reorder_handshake() {
     let dgram = client.process(s_hs, now).dgram();
     assertions::assert_initial(dgram.as_ref().unwrap(), false);
     assert_eq!(client.stats().saved_datagrams, 1);
-    assert_eq!(client.stats().packets_rx, 2);
+    assert_eq!(client.stats().packets_rx, 1);
 
     // Get the server to try again.
     // Though we currently allow the server to arm its PTO timer, use
@@ -566,11 +569,11 @@ fn reorder_handshake() {
     now += RTT / 2;
     client.process_input(s_hs.unwrap(), now);
     assert_eq!(client.stats().saved_datagrams, 2);
-    assert_eq!(client.stats().packets_rx, 3);
+    assert_eq!(client.stats().packets_rx, 1);
 
     client.process_input(s_init, now);
     // Each saved packet should now be "received" again.
-    assert_eq!(client.stats().packets_rx, 8);
+    assert_eq!(client.stats().packets_rx, 6);
     maybe_authenticate(&mut client);
     let c3 = client.process_output(now).dgram();
     assert!(c3.is_some());
@@ -627,7 +630,7 @@ fn reorder_1rtt() {
     }
     // The server has now received those packets, and saved them.
     // The six extra received are Initial + the junk we use for padding.
-    assert_eq!(server.stats().packets_rx, PACKETS + 6);
+    assert_eq!(server.stats().packets_rx, PACKETS + 2);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
     assert_eq!(server.stats().dropped_rx, 3);
 
@@ -1389,4 +1392,39 @@ fn grease_quic_bit_transport_parameter() {
             assert_eq!(server_grease, get_remote_tp(&client));
         }
     }
+}
+
+#[test]
+fn zero_rtt_with_ech() {
+    let mut server = default_server();
+    let (sk, pk) = generate_ech_keys().unwrap();
+    server
+        .server_enable_ech(ECH_CONFIG_ID, ECH_PUBLIC_NAME, &sk, &pk)
+        .unwrap();
+
+    let mut client = default_client();
+    client.client_enable_ech(server.ech_config()).unwrap();
+
+    connect(&mut client, &mut server);
+
+    assert!(client.tls_info().unwrap().ech_accepted());
+    assert!(server.tls_info().unwrap().ech_accepted());
+
+    let token = exchange_ticket(&mut client, &mut server, now());
+    let mut client = default_client();
+    client.client_enable_ech(server.ech_config()).unwrap();
+    client
+        .enable_resumption(now(), token)
+        .expect("should set token");
+
+    let mut server = resumed_server(&client);
+    server
+        .server_enable_ech(ECH_CONFIG_ID, ECH_PUBLIC_NAME, &sk, &pk)
+        .unwrap();
+
+    connect(&mut client, &mut server);
+    assert!(client.tls_info().unwrap().ech_accepted());
+    assert!(server.tls_info().unwrap().ech_accepted());
+    assert!(client.tls_info().unwrap().early_data_accepted());
+    assert!(server.tls_info().unwrap().early_data_accepted());
 }
