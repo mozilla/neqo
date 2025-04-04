@@ -403,8 +403,6 @@ impl PartialEq for WebTransportRequest {
     }
 }
 
-impl Eq for WebTransportRequest {}
-
 #[derive(Debug, Clone)]
 pub enum WebTransportServerEvent {
     NewSession {

@@ -10,7 +10,6 @@ use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
     collections::{btree_map::Entry, BTreeMap, VecDeque},
-    hash::{Hash, Hasher},
     mem,
     num::NonZeroUsize,
     ops::Add,
@@ -692,12 +691,6 @@ pub struct SendStream {
     bytes_sent: u64,
     fair: bool,
     writable_event_low_watermark: NonZeroUsize,
-}
-
-impl Hash for SendStream {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.stream_id.hash(state);
-    }
 }
 
 impl SendStream {
