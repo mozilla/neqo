@@ -2509,7 +2509,7 @@ impl Connection {
 
             // If we don't have a TOS for this UDP datagram yet (i.e. `tos` is `None`), get it,
             // adding a `RecoveryToken::EcnEct0` to `tokens` in case of loss.
-            let tos = packet_tos.get_or_insert_with(|| path.borrow().tos(&mut tokens));
+            let tos = packet_tos.get_or_insert_with(|| path.borrow().tos(pt, &mut tokens));
             self.log_packet(
                 packet::MetaData::new_out(
                     path,
@@ -2948,6 +2948,7 @@ impl Connection {
                 .pmtud_mut()
                 .start(now, &mut self.stats.borrow_mut());
         }
+        self.paths.start_ecn();
         Ok(())
     }
 
