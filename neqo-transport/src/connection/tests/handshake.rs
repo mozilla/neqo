@@ -597,7 +597,7 @@ fn reorder_handshake() {
 fn reorder_1rtt() {
     const RTT: Duration = Duration::from_millis(100);
     const PACKETS: usize = 4; // Many, but not enough to overflow cwnd.
-    let mut client = new_client(ConnectionParameters::default().mlkem(false));
+    let mut client = default_client();
     let mut server = default_server();
     let mut now = now();
 
@@ -1142,22 +1142,22 @@ fn only_server_initial() {
     assert!(handshake.is_some());
 
     // The client sends an Initial ACK.
-    assert_eq!(client.stats().frame_tx.ack, 0);
+    assert_eq!(client.stats().frame_tx.ack, 1);
     let probe = client.process(Some(initial), now).dgram();
     assertions::assert_initial(&probe.unwrap(), false);
     assert_eq!(client.stats().dropped_rx, 0);
-    assert_eq!(client.stats().frame_tx.ack, 1);
+    assert_eq!(client.stats().frame_tx.ack, 2);
 
     let (initial, handshake) = split_datagram(&server_dgram2.unwrap());
     assert!(handshake.is_some());
 
     // The same happens after a PTO.
     now += AT_LEAST_PTO;
-    assert_eq!(client.stats().frame_tx.ack, 1);
+    assert_eq!(client.stats().frame_tx.ack, 2);
     let discarded = client.stats().dropped_rx;
     let probe = client.process(Some(initial), now).dgram();
     assertions::assert_initial(&probe.unwrap(), false);
-    assert_eq!(client.stats().frame_tx.ack, 2);
+    assert_eq!(client.stats().frame_tx.ack, 3);
     assert_eq!(client.stats().dropped_rx, discarded);
 
     // Pass the Handshake packet and complete the handshake.
