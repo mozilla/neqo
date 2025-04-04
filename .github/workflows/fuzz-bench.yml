@@ -39,13 +39,15 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-      # Check that the fuzz and bench targets build
+      # Check that the fuzz and bench targets work
       - if: ${{ matrix.check == 'fuzz' }}
         env:
           UBUNTU: ${{ startsWith(matrix.os, 'ubuntu') }}
         run: |
-          # FIXME: https://github.com/rust-fuzz/cargo-fuzz/issues/384 for why no LTO.
-          CARGO_PROFILE_RELEASE_LTO=false cargo fuzz build
+          cargo fuzz build --dev
+          for fuzzer in $(cargo fuzz list); do
+            cargo fuzz run --dev "$fuzzer" -- -runs=1
+          done
 
       - if: ${{ matrix.check == 'bench' }}
-        run: cargo bench --features bench --no-run
+        run: cargo bench --features bench --profile dev --  --profile-time 1
