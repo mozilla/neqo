@@ -71,7 +71,7 @@ impl PacketType {
 
     #[must_use]
     fn to_byte(self, v: Version) -> u8 {
-        debug_assert!(
+        assert!(
             matches!(
                 self,
                 Self::Initial | Self::ZeroRtt | Self::Handshake | Self::Retry

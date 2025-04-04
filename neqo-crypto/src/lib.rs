@@ -103,9 +103,7 @@ fn version_check() -> Res<()> {
 /// This allows us to use SSLTRACE in all of our unit tests and programs.
 #[cfg(debug_assertions)]
 fn enable_ssl_trace() -> Res<()> {
-    use ssl::PRInt32;
-
-    let opt = Opt::Locking as PRInt32;
+    let opt = Opt::Locking.as_int();
     let mut v: ::std::os::raw::c_int = 0;
     secstatus_to_res(unsafe { ssl::SSL_OptionGetDefault(opt, &mut v) })
 }
