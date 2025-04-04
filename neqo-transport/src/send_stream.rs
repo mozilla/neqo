@@ -700,13 +700,6 @@ impl Hash for SendStream {
     }
 }
 
-impl PartialEq for SendStream {
-    fn eq(&self, other: &Self) -> bool {
-        self.stream_id == other.stream_id
-    }
-}
-impl Eq for SendStream {}
-
 impl SendStream {
     pub fn new(
         stream_id: StreamId,

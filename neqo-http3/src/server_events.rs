@@ -51,8 +51,6 @@ impl PartialEq for StreamHandler {
     }
 }
 
-impl Eq for StreamHandler {}
-
 impl StreamHandler {
     pub const fn stream_id(&self) -> StreamId {
         self.stream_info.stream_id()
