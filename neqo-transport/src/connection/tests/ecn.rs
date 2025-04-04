@@ -90,10 +90,13 @@ fn handshake_delay_with_ecn_blackhole() {
         drop_ecn_marked_datagrams(),
     );
 
+    assert!(client.state().connected());
+    assert!(server.state().connected());
+
     assert_eq!(
         (finish - start).as_millis() / DEFAULT_RTT.as_millis(),
-        15,
-        "expected 6 RTT for client to detect blackhole, 6 RTT for server to detect blackhole and 3 RTT for handshake to be confirmed",
+        45,
+        "expected 3 RTT for first client PTO + 6 RTT for second PTO + 12 RTT for third PTO + another 21 RTT for the same on the server side + 3 RTT for handshake to be confirmed",
     );
 }
 

@@ -2856,12 +2856,13 @@ impl Connection {
         }
     }
 
-    fn confirm_version(&mut self, v: Version) {
+    fn confirm_version(&mut self, v: Version) -> Res<()> {
         if self.version != v {
             qdebug!("[{self}] Compatible upgrade {:?} ==> {v:?}", self.version);
         }
-        self.crypto.confirm_version(v);
+        self.crypto.confirm_version(v)?;
         self.version = v;
+        Ok(())
     }
 
     fn compatible_upgrade(&mut self, packet_version: Version) -> Res<()> {
@@ -2870,7 +2871,7 @@ impl Connection {
         }
 
         if self.role == Role::Client {
-            self.confirm_version(packet_version);
+            self.confirm_version(packet_version)?;
         } else if self.tps.borrow().remote.is_some() {
             let version = self.tps.borrow().version();
             let dcid = self
@@ -2878,7 +2879,7 @@ impl Connection {
                 .as_ref()
                 .ok_or(Error::ProtocolViolation)?;
             self.crypto.states.init_server(version, dcid)?;
-            self.confirm_version(version);
+            self.confirm_version(version)?;
         }
         Ok(())
     }

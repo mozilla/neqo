@@ -329,7 +329,7 @@ impl LossRecoverySpace {
             .sent_packets
             .iter_mut()
             // BTreeMap iterates in order of ascending PN
-            .take_while(|p| p.pn() < largest_acked.unwrap_or(PacketNumber::MAX))
+            .take_while(|p| largest_acked.is_some_and(|largest_ack| p.pn() < largest_ack))
         {
             // Packets sent before now - loss_delay are deemed lost.
             if packet.time_sent() + loss_delay <= now {

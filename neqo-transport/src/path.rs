@@ -309,14 +309,10 @@ impl Paths {
             if p.borrow_mut().path_response(response, now, stats) {
                 // The response was accepted.  If this path is one we intend
                 // to migrate to, then migrate.
-                if self
+                if let Some(primary) = self
                     .migration_target
-                    .as_ref()
-                    .is_some_and(|target| Rc::ptr_eq(target, p))
+                    .take_if(|target| Rc::ptr_eq(target, p))
                 {
-                    let Some(primary) = self.migration_target.take() else {
-                        break;
-                    };
                     drop(self.select_primary(&primary, now));
                     return true;
                 }
