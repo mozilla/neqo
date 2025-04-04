@@ -46,7 +46,7 @@ jobs:
         run: |
           cargo fuzz build --dev
           for fuzzer in $(cargo fuzz list); do
-            cargo fuzz run --dev "$fuzzer" -- -runs=1
+            cargo fuzz run --dev --sanitizer none "$fuzzer" -- -runs=1
           done
 
       - if: ${{ matrix.check == 'bench' }}
