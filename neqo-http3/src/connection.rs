@@ -18,6 +18,7 @@ use neqo_transport::{
     streams::SendOrder, AppError, CloseReason, Connection, DatagramTracking, State, StreamId,
     StreamType, ZeroRttState,
 };
+use strum::Display;
 
 use crate::{
     client_events::Http3ClientEvents,
@@ -53,18 +54,10 @@ where
     pub priority: Priority,
 }
 
+#[derive(Display)]
 pub enum WebTransportSessionAcceptAction {
     Accept,
     Reject(Vec<Header>),
-}
-
-impl ::std::fmt::Display for WebTransportSessionAcceptAction {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        match self {
-            Self::Accept => f.write_str("Accept"),
-            Self::Reject(_) => f.write_str("Reject"),
-        }
-    }
 }
 
 #[derive(Debug)]

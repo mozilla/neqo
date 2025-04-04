@@ -987,6 +987,7 @@ dependencies = [
  "neqo-transport",
  "qlog",
  "sfv",
+ "strum",
  "test-fixture",
  "url",
 ]

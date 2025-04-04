@@ -12,23 +12,19 @@ use crate::{Error, Res};
 pub type WireVersion = u32;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Enum)]
+#[repr(u32)]
 pub enum Version {
-    Version2,
+    Version2 = 0x6b33_43cf,
     #[default]
-    Version1,
+    Version1 = 1,
     #[cfg(feature = "draft-29")]
-    Draft29,
+    Draft29 = 0xff00_0000 + 29,
 }
 
 impl Version {
     #[must_use]
     pub const fn wire_version(self) -> WireVersion {
-        match self {
-            Self::Version2 => 0x6b33_43cf,
-            Self::Version1 => 1,
-            #[cfg(feature = "draft-29")]
-            Self::Draft29 => 0xff00_0000 + 29,
-        }
+        self as u32
     }
 
     pub(crate) const fn initial_salt(self) -> &'static [u8] {
