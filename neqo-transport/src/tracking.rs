@@ -462,6 +462,7 @@ impl RecvdPackets {
         } else {
             FrameType::Ack
         });
+
         let mut iter = ranges.iter();
         let Some(first) = iter.next() else { return };
         builder.encode_varint(first.largest);

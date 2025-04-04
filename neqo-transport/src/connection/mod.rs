@@ -3147,6 +3147,7 @@ impl Connection {
                 .pmtud_mut()
                 .start(now, &mut self.stats.borrow_mut());
         }
+        self.paths.start_ecn();
         Ok(())
     }
 
@@ -3376,7 +3377,7 @@ impl Connection {
                     }
                     recovery::Token::EcnEct0 => self
                         .paths
-                        .lost_ecn(lost.packet_type(), &mut self.stats.borrow_mut()),
+                        .lost_ecn( &mut self.stats.borrow_mut()),
                 }
             }
         }
