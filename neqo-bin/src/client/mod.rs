@@ -186,11 +186,23 @@ impl Args {
     #[expect(clippy::missing_panics_doc, reason = "This is example code.")]
     pub fn new(requests: &[usize], upload: bool) -> Self {
         use std::str::FromStr as _;
+        const DEFAULT_PAYLOAD_SIZE: usize = 100;
+
+        if upload {
+            assert!(requests.len() == 1, "currently supports single upload only");
+        }
+
         Self {
             shared: SharedArgs::default(),
             urls: requests
                 .iter()
-                .map(|r| Url::from_str(&format!("http://[::1]:12345/{r}")).unwrap())
+                .map(|r| {
+                    Url::from_str(&format!(
+                        "http://[::1]:12345/{}",
+                        if upload { DEFAULT_PAYLOAD_SIZE } else { *r }
+                    ))
+                    .unwrap()
+                })
                 .collect(),
             method: if upload { "POST".into() } else { "GET".into() },
             header: vec![],
@@ -205,7 +217,11 @@ impl Args {
             ipv4_only: false,
             ipv6_only: false,
             test: None,
-            upload_size: if upload { requests[0] } else { 100 },
+            upload_size: if upload {
+                requests[0]
+            } else {
+                DEFAULT_PAYLOAD_SIZE
+            },
             stats: false,
             cid_len: 0,
         }
