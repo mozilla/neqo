@@ -96,7 +96,7 @@ impl std::error::Error for Error {}
 
 type Res<T> = Result<T, Error>;
 
-#[derive(Debug, Parser, Default)]
+#[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     #[command(flatten)]
@@ -123,6 +123,21 @@ pub struct Args {
     /// This generates a new set of ECH keys when it is invoked.
     /// The resulting configuration is printed to stdout in hexadecimal format.
     ech: bool,
+}
+
+#[cfg(any(test, feature = "bench"))]
+impl Default for Args {
+    fn default() -> Self {
+        use std::str::FromStr as _;
+        Self {
+            shared: SharedArgs::default(),
+            hosts: vec!["[::]:12345".to_string()],
+            db: PathBuf::from_str("../test-fixture/db").unwrap(),
+            key: "key".to_string(),
+            retry: false,
+            ech: false,
+        }
+    }
 }
 
 impl Args {
@@ -166,21 +181,6 @@ impl Args {
         } else {
             Instant::now()
         }
-    }
-
-    #[cfg(any(test, feature = "bench"))]
-    pub fn shared(&mut self) -> &mut SharedArgs {
-        &mut self.shared
-    }
-
-    #[cfg(any(test, feature = "bench"))]
-    pub fn set_key(&mut self, key: String) {
-        self.key = key;
-    }
-
-    #[cfg(any(test, feature = "bench"))]
-    pub fn set_hosts(&mut self, hosts: Vec<String>) {
-        self.hosts = hosts;
     }
 
     #[cfg(any(test, feature = "bench"))]

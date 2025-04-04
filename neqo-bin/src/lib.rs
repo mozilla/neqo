@@ -27,7 +27,7 @@ pub mod udp;
 /// See `network.buffer.cache.size` pref <https://searchfox.org/mozilla-central/rev/f6e3b81aac49e602f06c204f9278da30993cdc8a/modules/libpref/init/all.js#3212>
 const STREAM_IO_BUFFER_SIZE: usize = 32 * 1024;
 
-#[derive(Debug, Parser, Default)]
+#[derive(Debug, Parser)]
 pub struct SharedArgs {
     #[command(flatten)]
     verbose: Option<clap_verbosity_flag::Verbosity>,
@@ -64,7 +64,24 @@ pub struct SharedArgs {
     pub quic_parameters: QuicParameters,
 }
 
-#[derive(Debug, Parser, Default)]
+#[cfg(any(test, feature = "bench"))]
+impl Default for SharedArgs {
+    fn default() -> Self {
+        Self {
+            verbose: None,
+            alpn: "h3".into(),
+            qlog_dir: None,
+            max_table_size_encoder: 16384,
+            max_table_size_decoder: 16384,
+            max_blocked_streams: 10,
+            ciphers: vec![],
+            qns_test: None,
+            quic_parameters: QuicParameters::default(),
+        }
+    }
+}
+
+#[derive(Debug, Parser)]
 pub struct QuicParameters {
     #[arg(
         short = 'Q',
@@ -115,6 +132,24 @@ pub struct QuicParameters {
     #[arg(name = "preferred-address-v6", long)]
     /// An IPv6 address for the server preferred address.
     pub preferred_address_v6: Option<String>,
+}
+
+#[cfg(any(test, feature = "bench"))]
+impl Default for QuicParameters {
+    fn default() -> Self {
+        Self {
+            quic_version: vec![],
+            max_streams_bidi: 16,
+            max_streams_uni: 16,
+            idle_timeout: 30,
+            congestion_control: CongestionControlAlgorithm::Cubic,
+            no_pacing: false,
+            no_pmtud: false,
+            preferred_address_v4: None,
+            preferred_address_v6: None,
+            no_sni_slicing: false,
+        }
+    }
 }
 
 impl QuicParameters {
@@ -276,9 +311,6 @@ mod tests {
         let mut client_args = client::Args::new(&[1], false);
         client_args.set_qlog_dir(temp_dir.path());
         let mut server_args = server::Args::default();
-        server_args.shared().alpn = "h3".to_string();
-        server_args.set_key("key".to_string());
-        server_args.set_hosts(vec!["[::]:12345".to_string()]);
         server_args.set_qlog_dir(temp_dir.path());
 
         let client = client::client(client_args);
