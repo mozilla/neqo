@@ -26,7 +26,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 # Don't increase beyond what Firefox is currently using:
 # https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
-rust-version = "1.82.0"
+rust-version = "1.85.0"
 
 [workspace.dependencies]
 enum-map = { version = "2.7", default-features = false }
