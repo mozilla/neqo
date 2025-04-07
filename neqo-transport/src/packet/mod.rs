@@ -5,6 +5,12 @@
 // except according to those terms.
 
 // Encoding and decoding packets off the wire.
+
+#![allow(
+    clippy::module_name_repetitions,
+    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
+)]
+
 use std::{
     cmp::min,
     fmt,
