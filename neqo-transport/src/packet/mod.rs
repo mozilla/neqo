@@ -5,6 +5,12 @@
 // except according to those terms.
 
 // Encoding and decoding packets off the wire.
+
+#![allow(
+    clippy::module_name_repetitions,
+    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
+)]
+
 use std::{
     cmp::min,
     fmt,
@@ -15,7 +21,7 @@ use std::{
 use enum_map::Enum;
 use neqo_common::{hex, hex_with_len, qtrace, qwarn, Decoder, Encoder};
 use neqo_crypto::random;
-use strum::EnumIter;
+use strum::{EnumIter, FromRepr};
 
 use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
@@ -51,41 +57,37 @@ pub use metadata::MetaData;
 
 pub type PacketNumber = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, EnumIter, FromRepr)]
+#[repr(u8)]
 pub enum PacketType {
-    VersionNegotiation,
-    Initial,
-    Handshake,
-    ZeroRtt,
-    Retry,
+    Initial = 0,
+    ZeroRtt = 1,
+    Handshake = 2,
+    Retry = 3,
     Short,
     OtherVersion,
+    VersionNegotiation,
 }
 
 impl PacketType {
     #[must_use]
     fn from_byte(t: u8, v: Version) -> Self {
         // Version2 adds one to the type, modulo 4
-        match t.wrapping_sub(u8::from(v == Version::Version2)) & 3 {
-            0 => Self::Initial,
-            1 => Self::ZeroRtt,
-            2 => Self::Handshake,
-            3 => Self::Retry,
-            _ => panic!("packet type out of range"),
-        }
+        Self::from_repr(t.wrapping_sub(u8::from(v == Version::Version2)) & 3)
+            .expect("packet type in range")
     }
 
     #[must_use]
     fn to_byte(self, v: Version) -> u8 {
-        let t = match self {
-            Self::Initial => 0,
-            Self::ZeroRtt => 1,
-            Self::Handshake => 2,
-            Self::Retry => 3,
-            _ => panic!("not a long header packet type"),
-        };
+        assert!(
+            matches!(
+                self,
+                Self::Initial | Self::ZeroRtt | Self::Handshake | Self::Retry
+            ),
+            "is a long header packet type"
+        );
         // Version2 adds one to the type, modulo 4
-        (t + u8::from(v == Version::Version2)) & 3
+        (self as u8 + u8::from(v == Version::Version2)) & 3
     }
 }
 

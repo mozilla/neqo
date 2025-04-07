@@ -6,6 +6,11 @@
 
 // Tracking of sent packets and detecting their loss.
 
+#![allow(
+    clippy::module_name_repetitions,
+    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
+)]
+
 #[cfg(feature = "bench")]
 pub mod sent;
 #[cfg(not(feature = "bench"))]

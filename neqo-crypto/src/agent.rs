@@ -4,6 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(
+    clippy::module_name_repetitions,
+    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
+)]
 #![expect(
     clippy::unwrap_used,
     reason = "Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed."
