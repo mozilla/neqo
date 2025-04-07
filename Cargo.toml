@@ -81,6 +81,7 @@ literal_string_with_formatting_args = "allow" # FIXME: Re-enable "warn" when MSR
 lossy_float_literal = "warn"
 mem_forget = "warn"
 mixed_read_write_in_expression = "warn"
+module_name_repetitions = "warn"
 multiple_crate_versions = "allow"
 multiple_inherent_impl = "warn"
 mutex_atomic = "warn"
