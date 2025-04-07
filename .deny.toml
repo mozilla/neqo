@@ -28,4 +28,4 @@ unknown-git = "deny"
 required-git-spec = "rev"
 
 [advisories]
-ignore = ["RUSTSEC-2025-0023"]
+ignore = ["RUSTSEC-2025-0023"] // FIXME: Remove this once Firefox moves to libc >= 0.2.168
