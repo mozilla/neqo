@@ -31,7 +31,7 @@ use std::ptr::NonNull;
 
 pub use crate::{
     agentio::{as_c_void, Record, RecordList},
-    cert::CertificateInfo
+    cert::CertificateInfo,
 };
 use crate::{
     agentio::{AgentIo, METHODS},
@@ -592,7 +592,7 @@ impl SecretAgent {
     /// This returns an error if the certificate compression could not be established
     ///
     /// [RFC8879]: https://datatracker.ietf.org/doc/rfc8879/
-    pub fn set_zlib_certificate_compression(&mut self) -> Res<()> {
+    pub fn set_zlib_certificate_compression(&mut self, include_encoding: bool) -> Res<()> {
         fn decode_zlib(bytes: &[u8]) -> std::io::Result<Vec<u8>> {
             let mut decoder = ZlibDecoder::new(bytes);
             let mut decompressed = Vec::new();
@@ -680,7 +680,10 @@ impl SecretAgent {
             let test_alg: SSLCertificateCompressionAlgorithm = SSLCertificateCompressionAlgorithm {
                 id: 1,
                 name: encoding_zlib_name.as_ptr() as *mut ::std::os::raw::c_char,
-                encode: Some(encode_zlib_extern),
+                encode: match include_encoding {
+                    true => Some(encode_zlib_extern),
+                    false => None,
+                },
                 decode: Some(decode_zlib_extern),
             };
 

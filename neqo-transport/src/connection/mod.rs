@@ -563,7 +563,7 @@ impl Connection {
 
     // Enable using Zlib encoding/decoding certificate compression.
     pub fn set_zlib_certificate_compression(&mut self) -> Res<()> {
-        self.crypto.tls.set_zlib_certificate_compression()?;
+        self.crypto.tls.set_zlib_certificate_compression(false)?;
         Ok(())
     }
     /// Enable a set of ciphers.

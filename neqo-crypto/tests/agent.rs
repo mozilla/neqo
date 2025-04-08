@@ -535,3 +535,18 @@ fn ech_retry() {
     assert!(client.preinfo().unwrap().ech_accepted().unwrap());
     assert!(server.preinfo().unwrap().ech_accepted().unwrap());
 }
+
+#[test]
+fn connection_succeeds_with_zlib() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    server
+        .set_zlib_certificate_compression(true)
+        .expect("server is establish zlib compression");
+    client
+    .set_zlib_certificate_compression(true)
+        .expect("client is establish zlib compression");
+
+    connect(&mut client, &mut server);
+}
