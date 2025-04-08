@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: microsoft/msquic
-          ref: main
+          ref: d42a7597517a574c1c71a4634b21b23852badf8c # FIXME: Switch back to main when that compiles again.
           path: msquic
           submodules: true
           persist-credentials: false
