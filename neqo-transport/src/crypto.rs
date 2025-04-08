@@ -103,6 +103,7 @@ impl Crypto {
             // more configuration passed to server_enable_0rtt.
             c.enable_0rtt()?;
         }
+        agent.set_zlib_certificate_compression()?;
         agent.set_alpn(&protocols)?;
         agent.disable_end_of_early_data()?;
         let extension = match version {

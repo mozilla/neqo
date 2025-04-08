@@ -561,6 +561,11 @@ impl Connection {
         Ok(())
     }
 
+    // Enable using Zlib encoding/decoding certificate compression.
+    pub fn set_zlib_certificate_compression(&mut self) -> Res<()> {
+        self.crypto.tls.set_zlib_certificate_compression()?;
+        Ok(())
+    }
     /// Enable a set of ciphers.
     /// # Errors
     /// When the operation fails, which is usually due to bad inputs or bad connection state.

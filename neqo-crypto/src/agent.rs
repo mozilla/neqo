@@ -16,6 +16,7 @@
 use std::{
     cell::RefCell,
     ffi::{CStr, CString},
+    io::{Read, Write},
     mem::MaybeUninit,
     ops::{Deref, DerefMut},
     os::raw::{c_uint, c_void},
@@ -26,10 +27,12 @@ use std::{
 };
 
 use neqo_common::{hex_snip_middle, hex_with_len, qdebug, qtrace, qwarn};
+use std::ptr::NonNull;
 
 pub use crate::{
     agentio::{as_c_void, Record, RecordList},
     cert::CertificateInfo,
+    ssl::SSLCertificateCompressionAlgorithm,
 };
 use crate::{
     agentio::{AgentIo, METHODS},
@@ -40,6 +43,7 @@ use crate::{
     },
     ech,
     err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res},
+    experimental_api,
     ext::{ExtensionHandler, ExtensionTracker},
     null_safe_slice,
     p11::{self, PrivateKey, PublicKey},
@@ -49,6 +53,15 @@ use crate::{
     ssl::{self, PRBool},
     time::{Time, TimeHolder},
 };
+
+use flate2::read::ZlibDecoder;
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
+
+experimental_api!(SSL_SetCertificateCompressionAlgorithm(
+    fd: *mut ssl::PRFileDesc,
+    t: SSLCertificateCompressionAlgorithm,
+));
 
 /// The maximum number of tickets to remember for a given connection.
 const MAX_TICKETS: usize = 4;
@@ -569,6 +582,113 @@ impl SecretAgent {
                 c_uint::try_from(encoded.len())?,
             )
         })
+    }
+
+    /// `set_zlib_certificate_compression` enables using zlib encoding/decoding algorithms.
+    /// This asserts if no items are provided, or if any individual item is longer than
+    /// 255 octets in length.
+    ///
+    /// # Errors
+    ///
+    /// This returns an error if the certificate compression could not be established
+    ///
+    /// [RFC8879]: https://datatracker.ietf.org/doc/rfc8879/
+    pub fn set_zlib_certificate_compression(&mut self) -> Res<()> {
+        fn decode_zlib(bytes: &[u8]) -> std::io::Result<Vec<u8>> {
+            let mut decoder = ZlibDecoder::new(bytes);
+            let mut decompressed = Vec::new();
+            decoder.read_to_end(&mut decompressed)?;
+            Ok(decompressed)
+        }
+
+        fn encode_zlib(bytes: &[u8]) -> std::io::Result<Vec<u8>> {
+            let mut encoder: ZlibEncoder<Vec<u8>> =
+                ZlibEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(bytes)?;
+            let compressed = encoder.finish()?;
+            Ok(compressed)
+        }
+
+        // The implementation of the zlib decoding function that will be provided to NSS.
+        unsafe extern "C" fn decode_zlib_extern(
+            input: *const ssl::SECItem,
+            output: *mut ::std::os::raw::c_uchar,
+            output_len: usize,
+            used_len: *mut usize,
+        ) -> ssl::SECStatus {
+            let rv = NonNull::new(input as *mut ssl::SECItem).map(|input| {
+                if input.as_ref().data.is_null() || input.as_ref().len == 0 {
+                    return ssl::SECFailure;
+                }
+
+                let bytes_to_decode_ptr =
+                    unsafe { null_safe_slice(input.as_ref().data, input.as_ref().len) };
+                let decoded_bytes = match decode_zlib(bytes_to_decode_ptr) {
+                    Ok(bytes) => bytes,
+                    Err(_) => return ssl::SECFailure,
+                };
+
+                if decoded_bytes.len() > output_len {
+                    return ssl::SECFailure;
+                }
+
+                std::ptr::copy_nonoverlapping(decoded_bytes.as_ptr(), output, output_len);
+                *used_len = decoded_bytes.len();
+
+                ssl::SECSuccess
+            });
+            match rv {
+                None => ssl::SECFailure,
+                Some(rv) => rv,
+            }
+        }
+
+        // The implementation of the zlib encoding function that will be provided to NSS.
+        unsafe extern "C" fn encode_zlib_extern(
+            input: *const ssl::SECItem,
+            output: *mut ssl::SECItem,
+        ) -> ssl::SECStatus {
+            let rv = NonNull::new(input as *mut ssl::SECItem).map(|input| {
+                if input.as_ref().len == 0 || input.as_ref().data.is_null() {
+                    return ssl::SECFailure;
+                }
+
+                let bytes_to_encode =
+                    unsafe { null_safe_slice(input.as_ref().data, input.as_ref().len) };
+                let encoded_bytes = match encode_zlib(bytes_to_encode) {
+                    Ok(bytes) => bytes,
+                    Err(_) => return ssl::SECFailure,
+                };
+
+                //  Certificate Compression encoding function is responsible for allocating the output buffer itself.
+                let rv = p11::SECITEM_MakeItem(
+                    null_mut(),
+                    // p11::SECItem is the same as ssl::SECItem
+                    std::mem::transmute(output),
+                    encoded_bytes.as_ptr(),
+                    encoded_bytes.len().try_into().unwrap(),
+                );
+                return rv;
+            });
+            match rv {
+                None => ssl::SECFailure,
+                Some(rv) => rv,
+            }
+        }
+
+        let encoding_zlib_name = CString::new("zlib").unwrap();
+        unsafe {
+            let test_alg: SSLCertificateCompressionAlgorithm = SSLCertificateCompressionAlgorithm {
+                id: 1,
+                name: encoding_zlib_name.as_ptr() as *mut ::std::os::raw::c_char,
+                encode: Some(encode_zlib_extern),
+                decode: Some(decode_zlib_extern),
+            };
+
+            SSL_SetCertificateCompressionAlgorithm(self.fd, test_alg)?;
+        }
+
+        Ok(())
     }
 
     /// Install an extension handler.
