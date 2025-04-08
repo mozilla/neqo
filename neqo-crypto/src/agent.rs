@@ -31,8 +31,7 @@ use std::ptr::NonNull;
 
 pub use crate::{
     agentio::{as_c_void, Record, RecordList},
-    cert::CertificateInfo,
-    ssl::SSLCertificateCompressionAlgorithm,
+    cert::CertificateInfo
 };
 use crate::{
     agentio::{AgentIo, METHODS},
@@ -50,7 +49,7 @@ use crate::{
     prio,
     replay::AntiReplay,
     secrets::SecretHolder,
-    ssl::{self, PRBool},
+    ssl::{self, PRBool, SSLCertificateCompressionAlgorithm},
     time::{Time, TimeHolder},
 };
 
