@@ -97,7 +97,7 @@ jobs:
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "$TOOLCHAIN" == "nightly" ]; then
-            cargo llvm-cov nextest $BUILD_TYPE --locked --mcdc --include-ffi --features ci --profile ci --codecov --output-path codecov.json
+            cargo llvm-cov nextest $BUILD_TYPE --locked --features ci --profile ci --codecov --output-path codecov.json
           else
             cargo nextest run $BUILD_TYPE --locked --features ci --profile ci
           fi
