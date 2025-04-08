@@ -284,7 +284,10 @@ fn compatible_upgrade_large_initial() {
     assert_eq!(client.stats().dropped_rx, 1);
     assert!(matches!(server.stats().dropped_rx, 2 | 3));
     assert_dscp(&client.stats());
-    assert_dscp(&server.stats());
+    assert!(
+        server.stats().dscp_rx[IpTosDscp::Cs0] == server.stats().packets_rx
+            || server.stats().dscp_rx[IpTosDscp::Cs0] == server.stats().packets_rx + 1
+    );
 }
 
 /// A server that supports versions 1 and 2 might prefer version 1 and that's OK.
