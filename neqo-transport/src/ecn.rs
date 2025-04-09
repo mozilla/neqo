@@ -103,16 +103,16 @@ impl Count {
         Self(EnumMap::from_array([not_ect, ect1, ect0, ce]))
     }
 
-    /// Whether any of the ECN counts are non-zero.
+    /// Whether any of the ECT(0), ECT(1) or CE counts are non-zero.
     #[must_use]
     pub fn is_some(&self) -> bool {
-        self.0.iter().any(|(_, &count)| count > 0)
+        self[IpTosEcn::Ect0] > 0 || self[IpTosEcn::Ect1] > 0 || self[IpTosEcn::Ce] > 0
     }
 
-    /// Whether all of the ECN counts are zero.
+    /// Whether all of the ECN counts are zero (including Not-ECT.)
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        !self.is_some()
+        self.iter().all(|(_, count)| *count == 0)
     }
 }
 
