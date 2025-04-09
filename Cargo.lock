@@ -237,7 +237,6 @@ dependencies = [
 ]
 
 [[package]]
-=======
 name = "criterion"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

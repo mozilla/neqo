@@ -543,10 +543,10 @@ fn connection_succeeds_with_zlib() {
     let mut server = Server::new(&["key"]).expect("should create server");
     server
         .set_zlib_certificate_compression(true)
-        .expect("server is establish zlib compression");
+        .expect("server is enabled zlib compression (encoding/decoding)");
     client
     .set_zlib_certificate_compression(true)
-        .expect("client is establish zlib compression");
+        .expect("client is enabled zlib compression (encoding/decoding)");
 
     connect(&mut client, &mut server);
 }
