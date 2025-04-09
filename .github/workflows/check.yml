@@ -71,8 +71,8 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
-          components: ${{ matrix.rust-toolchain == 'nightly' && 'llvm-tools' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'nightly' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
+          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }}
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -96,8 +96,8 @@ jobs:
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
-          if [ "$TOOLCHAIN" == "nightly" ]; then
-            cargo llvm-cov nextest $BUILD_TYPE --locked --mcdc --include-ffi --features ci --profile ci --codecov --output-path codecov.json
+          if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
+            cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --locked --include-ffi --features ci --profile ci --codecov --output-path codecov.json
           else
             cargo nextest run $BUILD_TYPE --locked --features ci --profile ci
           fi
@@ -127,7 +127,7 @@ jobs:
           verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        if: ${{ matrix.type == 'debug' && matrix.rust-toolchain == 'nightly' }}
+        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
 
       - uses: codecov/test-results-action@f2dba722c67b86c6caa034178c6e4d35335f6706 # v1.1.0
         if: ${{ always() }}
