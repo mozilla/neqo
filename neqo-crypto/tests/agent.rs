@@ -537,7 +537,7 @@ fn ech_retry() {
 }
 
 #[test]
-fn connection_succeeds_with_zlib() {
+fn connection_succeeds_when_server_and_client_support_zlib() {
     fixture_init();
     let mut client = Client::new("server.example", true).expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
@@ -549,4 +549,26 @@ fn connection_succeeds_with_zlib() {
         .expect("client is enabled zlib compression (encoding/decoding)");
 
     connect(&mut client, &mut server);
+
+    assert!(client.state().is_connected());
+    assert!(server.state().is_connected());
+
+}
+
+#[test]
+fn connection_succeeds_when_only_client_supports_zlib() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    client
+    .set_zlib_certificate_compression(true)
+        .expect("client is enabled zlib compression (encoding/decoding)");
+
+    // As server does not support the compression, client will receive unencoded certificate
+    connect(&mut client, &mut server);
+
+    assert!(client.state().is_connected());
+    assert!(server.state().is_connected());
+
 }
