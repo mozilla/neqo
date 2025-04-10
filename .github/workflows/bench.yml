@@ -318,8 +318,7 @@ jobs:
           for f in *.perf; do
             # Convert for profiler.firefox.com
             # perf script -i "$f" -F +pid > "$f.fx" &
-            samply import "$f" -o "$f.samply.json.gz
-            *.syms.json" --save-only --unstable-presymbolicate &
+            samply import "$f" -o "$f.samply.json.gz" --save-only --unstable-presymbolicate &
             # Generate perf reports
             # perf report -i "$f" --no-children --stdio > "$f.txt" &
             # Generate flamegraphs
