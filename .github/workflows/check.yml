@@ -72,7 +72,7 @@ jobs:
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest, cargo-action-fmt
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -85,7 +85,7 @@ jobs:
       - name: Check
         run: |
           # shellcheck disable=SC2086
-          cargo check $BUILD_TYPE --locked --all-targets --features ci
+          cargo check $BUILD_TYPE --locked --all-targets --features ci --message-format=json | cargo-action-fmt
 
       - name: Run tests and determine coverage
         env:
