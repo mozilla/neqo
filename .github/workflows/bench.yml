@@ -317,10 +317,7 @@ jobs:
         run: |
           for f in *.perf; do
             # Convert for profiler.firefox.com
-            # perf script -i "$f" -F +pid > "$f.fx" &
             samply import "$f" -o "$f.samply.json.gz" --save-only --unstable-presymbolicate &
-            # Generate perf reports
-            # perf report -i "$f" --no-children --stdio > "$f.txt" &
             # Generate flamegraphs
             flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}" &
           done
@@ -380,8 +377,6 @@ jobs:
           name: ${{ github.event.repository.name }}-${{ github.sha }}
           path: |
             *.svg
-            *.perf
-            *.perf.fx
             *.samply.json.gz
             *.syms.json
             *.txt
