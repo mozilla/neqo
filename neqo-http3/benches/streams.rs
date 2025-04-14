@@ -6,8 +6,6 @@
 
 #![expect(clippy::unwrap_used, reason = "OK in a bench.")]
 
-use std::time::Duration;
-
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server, Priority};
@@ -81,9 +79,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     for (streams, data_size) in [(1_000, 1), (1_000, 1_000)] {
         let mut group = c.benchmark_group(format!("{streams} streams of {data_size} bytes"));
 
-        // High variance benchmark. Increase default warm-up (3s) and default
-        // sample size (100).
-        group.warm_up_time(Duration::from_secs(10));
+        // High variance benchmark. Increase default sample size (100).
         group.sample_size(500);
 
         group.bench_function("multistream", |b| {
