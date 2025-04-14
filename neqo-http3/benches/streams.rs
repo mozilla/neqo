@@ -83,7 +83,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             b.iter_batched_ref(
                 connect,
                 |(client, server)| use_streams(client, server, streams, &data),
-                BatchSize::PerIteration,
+                BatchSize::SmallInput,
             );
         });
         group.finish();
