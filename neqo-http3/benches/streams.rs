@@ -76,14 +76,7 @@ fn connect() -> (Http3Client, Http3Server) {
 fn criterion_benchmark(c: &mut Criterion) {
     fixture_init();
 
-    for (streams, data_size) in [
-        (1, 1),
-        (1000, 1),
-        (10000, 1),
-        (1, 1000),
-        (100, 1000),
-        (1000, 1000),
-    ] {
+    for (streams, data_size) in [(1_000, 1), (10_000, 1), (100, 1_000), (1_000, 1_000)] {
         let mut group = c.benchmark_group(format!("{streams} streams of {data_size} bytes"));
         group.bench_function("multistream", |b| {
             let data = vec![0; data_size];
