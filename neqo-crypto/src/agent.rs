@@ -40,15 +40,70 @@ use crate::{
     },
     ech,
     err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res},
+    experimental_api,
     ext::{ExtensionHandler, ExtensionTracker},
     null_safe_slice,
     p11::{self, PrivateKey, PublicKey},
     prio,
     replay::AntiReplay,
     secrets::SecretHolder,
-    ssl::{self, PRBool},
+    ssl::{self, PRBool, SSLCertificateCompressionAlgorithm},
     time::{Time, TimeHolder},
 };
+
+experimental_api!(SSL_SetCertificateCompressionAlgorithm(
+    fd: *mut ssl::PRFileDesc,
+    t: SSLCertificateCompressionAlgorithm,
+));
+
+/// The trait is used to represent a certificate compression data structure
+/// Used in order to enable Certificate Compression extension during TLS connection
+pub trait CertfificateCompressor {
+    /// Certificate Compression Algorithm identifier
+    /// zlib(1), brotli(2), zstd(3),
+    fn id(&self) -> u16;
+    /// Name of the certificate compression algorithm
+    fn name(&self) -> &'static str;
+
+    /// The function that's used for encoding the certificate
+    /// Arguments:
+    ///
+    /// * `input`: Pointer to SECItem containing the bytes to encode
+    /// * `output`: Pointer to SECItem to store the result
+    ///
+    /// Note:  Certificate Compression encoding function is responsible
+    /// for allocating the output buffer itself.
+
+    fn encode(
+        &self,
+    ) -> ::std::option::Option<
+        unsafe extern "C" fn(
+            input: *const ssl::SECItem,
+            output: *mut ssl::SECItem,
+        ) -> ssl::SECStatus,
+    >;
+
+    /// The function that's used for decoding the certificate
+    //// Arguments:
+    ///
+    /// * `input`: Pointer to SECItem containing the bytes to decode
+    /// * `output`: Pointer to uint8 buffer to store the output
+    /// * `outputLen`: Length of the allocated output buffer
+    /// * `usedLen`: Length of the effectively used space in the output buffer after decoding
+    ///
+    /// Note: Certificate Compression decoding function operates an output buffer allocated in NSS.
+
+    fn decode(
+        &self,
+    ) -> ::std::option::Option<
+        unsafe extern "C" fn(
+            input: *const ssl::SECItem,
+            output: *mut ::std::os::raw::c_uchar,
+            outputLen: usize,
+            usedLen: *mut usize,
+        ) -> ssl::SECStatus,
+    >;
+}
 
 /// The maximum number of tickets to remember for a given connection.
 const MAX_TICKETS: usize = 4;
@@ -569,6 +624,32 @@ impl SecretAgent {
                 c_uint::try_from(encoded.len())?,
             )
         })
+    }
+
+    /// Install a certificate compression mechanism.
+    ///
+    /// # Errors
+    ///
+    /// This returns an error if the certificate compression could not be established
+    ///
+    /// [RFC8879]: https://datatracker.ietf.org/doc/rfc8879/
+
+    pub fn set_certificate_compression(
+        &mut self,
+        encoder: Box<dyn CertfificateCompressor>,
+    ) -> Res<()> {
+        unsafe {
+            let compressor: SSLCertificateCompressionAlgorithm =
+                SSLCertificateCompressionAlgorithm {
+                    id: encoder.id(),
+                    name: encoder.name().as_ptr() as *mut ::std::os::raw::c_char,
+                    // it's possible that either of the encoder/decoder is None
+                    encode: encoder.encode(),
+                    decode: encoder.decode(),
+                };
+            SSL_SetCertificateCompressionAlgorithm(self.fd, compressor)?;
+        }
+        Ok(())
     }
 
     /// Install an extension handler.
