@@ -91,6 +91,10 @@ impl DatagramMetaData {
         self.tos
     }
 
+    pub fn set_tos(&mut self, tos: IpTos) {
+        self.tos = tos;
+    }
+
     #[must_use]
     pub const fn destination(&self) -> SocketAddr {
         self.dst
@@ -141,6 +145,15 @@ impl SendBatch {
     }
 
     #[must_use]
+    pub fn from(meta: &DatagramMetaData, data: &[u8]) -> Self {
+        Self {
+            meta: Some(meta.clone()),
+            data: data.to_vec(),
+            next: None,
+        }
+    }
+
+    #[must_use]
     pub const fn meta(&self) -> Option<&DatagramMetaData> {
         self.meta.as_ref()
     }
@@ -155,9 +168,20 @@ impl SendBatch {
         &self.data
     }
 
+    pub fn set_tos(&mut self, tos: IpTos) {
+        if let Some(meta) = &mut self.meta {
+            meta.set_tos(tos);
+        }
+    }
+
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.data.len()
     }
 
     #[must_use]
@@ -360,6 +384,10 @@ impl<S: SocketRef> Socket<S> {
         recv_buf: &'a mut RecvBuf,
     ) -> Result<DatagramIter<'a>, io::Error> {
         recv_inner(local_address, &self.state, &self.inner, recv_buf)
+    }
+
+    pub fn max_gso_segments(&self) -> usize {
+        self.state.max_gso_segments()
     }
 }
 
