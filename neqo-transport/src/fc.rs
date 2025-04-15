@@ -210,7 +210,7 @@ impl SenderFlowControl<StreamType> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ReceiverFlowControl<T>
 where
     T: Debug + Sized,
@@ -359,12 +359,6 @@ impl ReceiverFlowControl<()> {
     }
 }
 
-impl Default for ReceiverFlowControl<()> {
-    fn default() -> Self {
-        Self::new((), 0)
-    }
-}
-
 impl ReceiverFlowControl<StreamId> {
     pub fn write_frames(
         &mut self,
@@ -474,12 +468,6 @@ impl ReceiverFlowControl<StreamId> {
         let new_consumed = consumed - self.consumed;
         self.consumed = consumed;
         Ok(new_consumed)
-    }
-}
-
-impl Default for ReceiverFlowControl<StreamId> {
-    fn default() -> Self {
-        Self::new(StreamId::new(0), 0)
     }
 }
 

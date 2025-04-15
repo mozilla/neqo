@@ -16,7 +16,7 @@ use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
 use neqo_crypto::Epoch;
-use strum::EnumIter;
+use strum::{Display, EnumIter};
 
 use crate::{
     ecn,
@@ -27,10 +27,13 @@ use crate::{
     Error, Res,
 };
 
-#[derive(Debug, PartialOrd, Ord, EnumSetType, Enum, EnumIter)]
+#[derive(Debug, PartialOrd, Ord, EnumSetType, Enum, EnumIter, Display)]
 pub enum PacketNumberSpace {
+    #[strum(to_string = "in")]
     Initial,
+    #[strum(to_string = "hs")]
     Handshake,
+    #[strum(to_string = "ap")]
     ApplicationData,
 }
 
@@ -67,16 +70,6 @@ impl From<PacketType> for PacketNumberSpace {
 }
 
 pub type PacketNumberSpaceSet = EnumSet<PacketNumberSpace>;
-
-impl std::fmt::Display for PacketNumberSpace {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Initial => "in",
-            Self::Handshake => "hs",
-            Self::ApplicationData => "ap",
-        })
-    }
-}
 
 /// `InsertionResult` tracks whether something was inserted for `PacketRange::add()`.
 pub enum InsertionResult {

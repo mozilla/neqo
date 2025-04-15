@@ -27,8 +27,6 @@ mod SSLOption {
     include!(concat!(env!("OUT_DIR"), "/nss_sslopt.rs"));
 }
 
-// I clearly don't understand how bindgen operates.
-// pub enum PLArenaPool {}
 pub enum PRFileDesc {}
 
 // Remap some constants.
