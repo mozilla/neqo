@@ -213,6 +213,7 @@ pub struct ServerRunner {
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<(SocketAddr, crate::udp::Socket)>,
     recv_buf: RecvBuf,
+    batch: SendBatch,
 }
 
 impl ServerRunner {
@@ -228,6 +229,7 @@ impl ServerRunner {
             timeout: None,
             sockets,
             recv_buf: RecvBuf::new(),
+            batch: SendBatch::with_capacity(u16::MAX.into()),
         }
     }
 
@@ -250,10 +252,11 @@ impl ServerRunner {
         server: &mut Box<dyn HttpServer>,
         timeout: &mut Option<Pin<Box<Sleep>>>,
         sockets: &mut [(SocketAddr, crate::udp::Socket)],
+        batch: &mut SendBatch,
         now: &dyn Fn() -> Instant,
         mut input_dgram: Option<Datagram<&mut [u8]>>,
     ) -> Result<(), io::Error> {
-        let mut batch = SendBatch::with_capacity(u16::MAX.into());
+        let now = now();
         let mut exit = false; // Should we exit the loop on the next interation?
         let mut send = false; // Should we send on the next loop interation?
         let mut maybe_gso_failed = false;
@@ -296,7 +299,7 @@ impl ServerRunner {
                 break;
             }
 
-            exit = match server.process(input_dgram.take(), now()) {
+            exit = match server.process(input_dgram.take(), now) {
                 Output::Datagram(dgram) => {
                     send = batch.push(dgram);
                     false
@@ -328,6 +331,7 @@ impl ServerRunner {
                     &mut self.server,
                     &mut self.timeout,
                     &mut self.sockets,
+                    &mut self.batch,
                     &self.now,
                     Some(input_dgram),
                 )
@@ -343,6 +347,7 @@ impl ServerRunner {
             &mut self.server,
             &mut self.timeout,
             &mut self.sockets,
+            &mut self.batch,
             &self.now,
             None,
         )

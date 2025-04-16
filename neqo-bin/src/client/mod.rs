@@ -405,6 +405,7 @@ struct Runner<'a, H: Handler> {
     timeout: Option<Pin<Box<Sleep>>>,
     args: &'a Args,
     recv_buf: RecvBuf,
+    batch: SendBatch,
 }
 
 impl<'a, H: Handler> Runner<'a, H> {
@@ -423,6 +424,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             args,
             timeout: None,
             recv_buf: RecvBuf::new(),
+            batch: SendBatch::with_capacity(u16::MAX.into()),
         }
     }
 
@@ -462,16 +464,17 @@ impl<'a, H: Handler> Runner<'a, H> {
     }
 
     async fn process_output(&mut self) -> Result<(), io::Error> {
-        let mut batch = SendBatch::with_capacity(u16::MAX.into());
+        let now = Instant::now();
         let mut exit = false; // Should we exit the loop on the next interation?
         let mut send = false; // Should we send on the next loop interation?
         let mut maybe_gso_failed = false;
 
         'outer: loop {
             if send || exit {
-                if let Some(meta) = batch.meta() {
+                if let Some(meta) = self.batch.meta() {
                     // Send all collected datagrams as GSO-sized chunks.
-                    for gso_chunk in batch
+                    for gso_chunk in self
+                        .batch
                         .data()
                         .chunks(self.socket.max_gso_segments() * meta.len())
                     {
@@ -498,18 +501,18 @@ impl<'a, H: Handler> Runner<'a, H> {
                             }
                         }
                     }
-                    batch.switch_to_next();
+                    self.batch.switch_to_next();
                 }
             }
 
             if exit {
-                debug_assert!(batch.all_empty());
+                debug_assert!(self.batch.all_empty());
                 break;
             }
 
-            exit = match self.client.process_output(Instant::now()) {
+            exit = match self.client.process_output(now) {
                 Output::Datagram(dgram) => {
-                    send = batch.push(dgram);
+                    send = self.batch.push(dgram);
                     false
                 }
                 Output::Callback(new_timeout) => {

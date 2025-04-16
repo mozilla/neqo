@@ -14,7 +14,9 @@ use std::{
     io::{self, IoSliceMut},
     iter,
     net::SocketAddr,
+    ops::RangeTo,
     slice::{self, ChunksMut},
+    vec::Drain,
 };
 
 use log::{log_enabled, Level};
@@ -174,6 +176,10 @@ impl SendBatch {
         }
     }
 
+    pub fn drain(&mut self, range: RangeTo<usize>) -> Drain<u8> {
+        self.data.drain(range)
+    }
+
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
@@ -195,13 +201,15 @@ impl SendBatch {
     }
 
     fn set(&mut self, dgram: &Datagram) {
-        self.data = Vec::from(dgram.as_ref());
+        debug_assert!(self.data.is_empty());
+        self.data.extend_from_slice(dgram.as_ref());
         self.meta = Some(dgram.into());
     }
 
     pub fn push(&mut self, dgram: Datagram) -> bool {
         if self.is_empty() {
             // This is the first datagram we are collecting.
+            debug_assert!(self.data.capacity() >= dgram.len());
             self.set(&dgram);
             false
         } else if self
@@ -209,11 +217,21 @@ impl SendBatch {
             .as_ref()
             .is_some_and(|meta| meta == &DatagramMetaData::from(&dgram))
         {
-            // Another datagram with the same length, destination and TOS byte - collect it.
-            self.data.extend_from_slice(dgram.as_ref());
-            false
+            // Another datagram with the same length, destination and TOS byte.
+            if self.data.len() + dgram.len() > self.data.capacity() {
+                // We don't have capacity in the current batch for this datagram.
+                // Remember it for the next batch and indicate to send the current one.
+                debug_assert!(self.next.is_none());
+                self.next = Some(dgram);
+                true
+            } else {
+                // Add this datagram to the current batch.
+                self.data.extend_from_slice(dgram.as_ref());
+                false
+            }
         } else {
             // Another datagram but with different length, destination or TOS byte - remember it.
+            debug_assert!(self.next.is_none());
             self.next = Some(dgram);
             // We need to send the current batch before we can send the next one.
             true
@@ -221,10 +239,9 @@ impl SendBatch {
     }
 
     pub fn switch_to_next(&mut self) {
+        self.clear();
         if let Some(next) = self.next.take() {
             self.set(&next);
-        } else {
-            self.clear();
         }
     }
 }
