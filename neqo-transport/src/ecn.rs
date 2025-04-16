@@ -231,14 +231,14 @@ impl Info {
         }
 
         if let ValidationState::Testing {
-            probes_sent,
             initial_probes_lost: probes_lost,
+            ..
         } = &mut self.state
         {
             *probes_lost += 1;
             // If we have lost all initial probes a bunch of times, we can conclude that the path
             // is not ECN capable and likely drops all ECN marked packets.
-            if *probes_sent == *probes_lost && *probes_lost == TEST_COUNT_INITIAL_PHASE {
+            if *probes_lost == TEST_COUNT_INITIAL_PHASE {
                 qdebug!(
                     "ECN validation failed, all {probes_lost} initial marked packets were lost"
                 );
