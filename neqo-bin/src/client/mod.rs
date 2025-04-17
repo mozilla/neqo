@@ -30,7 +30,7 @@ use neqo_crypto::{
 };
 use neqo_http3::Output;
 use neqo_transport::{AppError, CloseReason, ConnectionId, Version};
-use neqo_udp::RecvBuf;
+use neqo_udp::{RecvBuf, SendBatch};
 use tokio::time::Sleep;
 use url::{Host, Origin, Url};
 
@@ -405,6 +405,7 @@ struct Runner<'a, H: Handler> {
     timeout: Option<Pin<Box<Sleep>>>,
     args: &'a Args,
     recv_buf: RecvBuf,
+    batch: SendBatch,
 }
 
 impl<'a, H: Handler> Runner<'a, H> {
@@ -423,6 +424,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             args,
             timeout: None,
             recv_buf: RecvBuf::new(),
+            batch: SendBatch::with_capacity(u16::MAX.into()),
         }
     }
 
@@ -462,31 +464,67 @@ impl<'a, H: Handler> Runner<'a, H> {
     }
 
     async fn process_output(&mut self) -> Result<(), io::Error> {
-        loop {
-            match self.client.process_output(Instant::now()) {
-                Output::Datagram(dgram) => loop {
-                    // Optimistically attempt sending datagram. In case the OS
-                    // buffer is full, wait till socket is writable then try
-                    // again.
-                    match self.socket.send(&dgram) {
-                        Ok(()) => break,
-                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                            self.socket.writable().await?;
-                            // Now try again.
+        let now = Instant::now();
+        let mut exit = false; // Should we exit the loop on the next interation?
+        let mut send = false; // Should we send on the next loop interation?
+        let mut maybe_gso_failed = false;
+
+        'outer: loop {
+            if send || exit {
+                if let Some(meta) = self.batch.meta() {
+                    // Send all collected datagrams as GSO-sized chunks.
+                    for gso_chunk in self
+                        .batch
+                        .data()
+                        .chunks(self.socket.max_gso_segments() * meta.len())
+                    {
+                        // Optimistically attempt sending datagram. In case the OS
+                        // buffer is full, wait till socket is writable then try again.
+                        loop {
+                            match self.socket.send(meta, gso_chunk) {
+                                Ok(()) => break,
+                                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                    self.socket.writable().await?;
+                                    // Now try again.
+                                }
+                                e @ Err(_) => {
+                                    // This can happen if the interface does not support GSO.
+                                    // quinn-udp will set `max_gso_segments` to 1 in this case.
+                                    if !maybe_gso_failed && self.socket.max_gso_segments() == 1 {
+                                        // Retry this once.
+                                        maybe_gso_failed = true;
+                                        qdebug!("GSO failed, retrying without");
+                                        continue 'outer;
+                                    }
+                                    return e;
+                                }
+                            }
                         }
-                        e @ Err(_) => return e,
                     }
-                },
+                    self.batch.switch_to_next();
+                }
+            }
+
+            if exit {
+                debug_assert!(self.batch.all_empty());
+                break;
+            }
+
+            exit = match self.client.process_output(now) {
+                Output::Datagram(dgram) => {
+                    send = self.batch.push(dgram);
+                    false
+                }
                 Output::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
                     self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
-                    break;
+                    true
                 }
                 Output::None => {
                     qdebug!("Output::None");
-                    break;
+                    true
                 }
-            }
+            };
         }
 
         Ok(())
