@@ -3238,8 +3238,9 @@ impl Connection {
                     RecoveryToken::Datagram(dgram_tracker) => self
                         .events
                         .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Acked),
+                    RecoveryToken::EcnEct0 => self.paths.acked_ecn(),
                     // We only worry when these are lost
-                    RecoveryToken::HandshakeDone | RecoveryToken::EcnEct0 => (),
+                    RecoveryToken::HandshakeDone => (),
                 }
             }
         }
