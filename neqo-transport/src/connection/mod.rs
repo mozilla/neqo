@@ -23,7 +23,7 @@ use neqo_common::{
     qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, IpTosEcn, Role,
 };
 use neqo_crypto::{
-    agent::CertfificateCompressor, agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus,
+    agent::CertificateCompressor, agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus,
     Cipher, Client, Group, HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo,
     SecretAgentPreInfo, Server, ZeroRttChecker,
 };
@@ -457,7 +457,7 @@ impl Connection {
 
     pub fn set_certificate_compression(
         &mut self,
-        decoder: Box<dyn CertfificateCompressor>,
+        decoder: Box<dyn CertificateCompressor>,
     ) -> Res<()> {
         self.crypto.tls.set_certificate_compression(decoder)?;
         Ok(())

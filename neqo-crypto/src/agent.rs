@@ -60,7 +60,7 @@ experimental_api!(SSL_SetCertificateCompressionAlgorithm(
 
 /// The trait is used to represent a certificate compression data structure
 /// Used in order to enable Certificate Compression extension during TLS connection
-pub trait CertfificateCompressor {
+pub trait CertificateCompressor {
     /// Certificate Compression Algorithm identifier
     /// zlib(1), brotli(2), zstd(3),
     fn id(&self) -> u16;
@@ -635,7 +635,7 @@ impl SecretAgent {
 
     pub fn set_certificate_compression(
         &mut self,
-        encoder: Box<dyn CertfificateCompressor>,
+        encoder: Box<dyn CertificateCompressor>,
     ) -> Res<()> {
         unsafe {
             let compressor: SSLCertificateCompressionAlgorithm =
