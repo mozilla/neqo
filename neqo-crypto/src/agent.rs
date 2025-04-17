@@ -30,7 +30,10 @@ use neqo_common::{hex_snip_middle, hex_with_len, qdebug, qtrace, qwarn};
 pub use crate::{
     agentio::{as_c_void, Record, RecordList},
     cert::CertificateInfo,
+    null_safe_slice,
+    ssl::{SECFailure, SECItem, SECStatus, SECSuccess},
 };
+
 use crate::{
     agentio::{AgentIo, METHODS},
     assert_initialized,
@@ -42,7 +45,6 @@ use crate::{
     err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res},
     experimental_api,
     ext::{ExtensionHandler, ExtensionTracker},
-    null_safe_slice,
     p11::{self, PrivateKey, PublicKey},
     prio,
     replay::AntiReplay,
@@ -77,10 +79,7 @@ pub trait CertfificateCompressor {
     fn encode(
         &self,
     ) -> ::std::option::Option<
-        unsafe extern "C" fn(
-            input: *const ssl::SECItem,
-            output: *mut ssl::SECItem,
-        ) -> ssl::SECStatus,
+        unsafe extern "C" fn(input: *const SECItem, output: *mut SECItem) -> SECStatus,
     >;
 
     /// The function that's used for decoding the certificate
@@ -97,11 +96,11 @@ pub trait CertfificateCompressor {
         &self,
     ) -> ::std::option::Option<
         unsafe extern "C" fn(
-            input: *const ssl::SECItem,
+            input: *const SECItem,
             output: *mut ::std::os::raw::c_uchar,
             outputLen: usize,
             usedLen: *mut usize,
-        ) -> ssl::SECStatus,
+        ) -> SECStatus,
     >;
 }
 
@@ -416,7 +415,7 @@ impl SecretAgent {
         _fd: *mut ssl::PRFileDesc,
         _check_sig: PRBool,
         _is_server: PRBool,
-    ) -> ssl::SECStatus {
+    ) -> SECStatus {
         let auth_required_ptr = arg.cast::<bool>();
         *auth_required_ptr = true;
         // NSS insists on getting SECWouldBlock here rather than accepting
@@ -980,26 +979,26 @@ impl Client {
         token: *const u8,
         len: c_uint,
         arg: *mut c_void,
-    ) -> ssl::SECStatus {
+    ) -> SECStatus {
         let mut info: MaybeUninit<ssl::SSLResumptionTokenInfo> = MaybeUninit::uninit();
         let Ok(info_len) = c_uint::try_from(size_of::<ssl::SSLResumptionTokenInfo>()) else {
-            return ssl::SECFailure;
+            return SECFailure;
         };
         let info_res = &ssl::SSL_GetResumptionTokenInfo(token, len, info.as_mut_ptr(), info_len);
         if info_res.is_err() {
             // Ignore the token.
-            return ssl::SECSuccess;
+            return SECSuccess;
         }
         let expiration_time = info.assume_init().expirationTime;
         if ssl::SSL_DestroyResumptionTokenInfo(info.as_mut_ptr()).is_err() {
             // Ignore the token.
-            return ssl::SECSuccess;
+            return SECSuccess;
         }
         let Some(resumption) = arg.cast::<Vec<ResumptionToken>>().as_mut() else {
-            return ssl::SECFailure;
+            return SECFailure;
         };
         let Ok(len) = usize::try_from(len) else {
-            return ssl::SECFailure;
+            return SECFailure;
         };
         let mut v = Vec::with_capacity(len);
         v.extend_from_slice(null_safe_slice(token, len));
@@ -1011,7 +1010,7 @@ impl Client {
         if let Ok(t) = Time::try_from(expiration_time) {
             resumption.push(ResumptionToken::new(v, *t));
         }
-        ssl::SECSuccess
+        SECSuccess
     }
 
     #[allow(
