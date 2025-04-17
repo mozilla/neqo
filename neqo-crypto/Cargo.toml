@@ -17,6 +17,7 @@ workspace = true
 
 [dependencies]
 enum-map = { workspace = true }
+flate2 = "1.1.1"
 log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 strum = { workspace = true}
