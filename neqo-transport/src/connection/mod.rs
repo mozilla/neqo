@@ -23,9 +23,9 @@ use neqo_common::{
     qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, IpTosEcn, Role,
 };
 use neqo_crypto::{
-    agent::{CertificateCompressor, CertificateInfo}, Agent, AntiReplay, AuthenticationStatus,
-    Cipher, Client, Group, HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo,
-    SecretAgentPreInfo, Server, ZeroRttChecker,
+    agent::{CertificateCompressor, CertificateInfo},
+    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
+    PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttChecker,
 };
 use smallvec::SmallVec;
 use strum::IntoEnumIterator as _;
@@ -2570,14 +2570,15 @@ impl Connection {
             // contained in the coalesced packet. This is per Section 13.4.1 of
             // RFC 9000.
             self.stats.borrow_mut().ecn_tx[pt] += IpTosEcn::from(*tos);
-
-            if space == PacketNumberSpace::Handshake
-                && self.role == Role::Server
-                && self.state == State::Confirmed
-            {
-                // We could discard handshake keys in set_state,
-                // but wait until after sending an ACK.
-                self.discard_keys(PacketNumberSpace::Handshake, now);
+            if space == PacketNumberSpace::Handshake {
+                if self.role == Role::Client {
+                    // We're sending a Handshake packet, so we can discard Initial keys.
+                    self.discard_keys(PacketNumberSpace::Initial, now);
+                } else if self.role == Role::Server && self.state == State::Confirmed {
+                    // We could discard handshake keys in set_state,
+                    // but wait until after sending an ACK.
+                    self.discard_keys(PacketNumberSpace::Handshake, now);
+                }
             }
 
             // If the client has more CRYPTO data queued up, do not coalesce if
@@ -2934,11 +2935,6 @@ impl Connection {
                 self.set_initial_limits();
             }
             if self.crypto.install_keys(self.role)? {
-                if self.role == Role::Client {
-                    // We won't acknowledge Initial packets as a result of this, but the
-                    // server can rely on implicit acknowledgment.
-                    self.discard_keys(PacketNumberSpace::Initial, now);
-                }
                 self.saved_datagrams.make_available(Epoch::Handshake);
             }
         }
