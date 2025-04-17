@@ -30,7 +30,10 @@ use neqo_common::{hex_snip_middle, hex_with_len, qdebug, qtrace, qwarn};
 pub use crate::{
     agentio::{as_c_void, Record, RecordList},
     cert::CertificateInfo,
+    null_safe_slice,
+    ssl::{SECFailure, SECItem, SECStatus, SECSuccess},
 };
+
 use crate::{
     agentio::{AgentIo, METHODS},
     assert_initialized,
@@ -40,15 +43,66 @@ use crate::{
     },
     ech,
     err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res},
+    experimental_api,
     ext::{ExtensionHandler, ExtensionTracker},
-    null_safe_slice,
     p11::{self, PrivateKey, PublicKey},
     prio,
     replay::AntiReplay,
     secrets::SecretHolder,
-    ssl::{self, PRBool},
+    ssl::{self, PRBool, SSLCertificateCompressionAlgorithm},
     time::{Time, TimeHolder},
 };
+
+experimental_api!(SSL_SetCertificateCompressionAlgorithm(
+    fd: *mut ssl::PRFileDesc,
+    t: SSLCertificateCompressionAlgorithm,
+));
+
+/// The trait is used to represent a certificate compression data structure
+/// Used in order to enable Certificate Compression extension during TLS connection
+pub trait CertificateCompressor {
+    /// Certificate Compression Algorithm identifier
+    /// zlib(1), brotli(2), zstd(3),
+    fn id(&self) -> u16;
+    /// Name of the certificate compression algorithm
+    fn name(&self) -> &'static str;
+
+    /// The function that's used for encoding the certificate
+    /// Arguments:
+    ///
+    /// * `input`: Pointer to SECItem containing the bytes to encode
+    /// * `output`: Pointer to SECItem to store the result
+    ///
+    /// Note:  Certificate Compression encoding function is responsible
+    /// for allocating the output buffer itself.
+
+    fn encode(
+        &self,
+    ) -> ::std::option::Option<
+        unsafe extern "C" fn(input: *const SECItem, output: *mut SECItem) -> SECStatus,
+    >;
+
+    /// The function that's used for decoding the certificate
+    //// Arguments:
+    ///
+    /// * `input`: Pointer to SECItem containing the bytes to decode
+    /// * `output`: Pointer to uint8 buffer to store the output
+    /// * `outputLen`: Length of the allocated output buffer
+    /// * `usedLen`: Length of the effectively used space in the output buffer after decoding
+    ///
+    /// Note: Certificate Compression decoding function operates an output buffer allocated in NSS.
+
+    fn decode(
+        &self,
+    ) -> ::std::option::Option<
+        unsafe extern "C" fn(
+            input: *const SECItem,
+            output: *mut ::std::os::raw::c_uchar,
+            outputLen: usize,
+            usedLen: *mut usize,
+        ) -> SECStatus,
+    >;
+}
 
 /// The maximum number of tickets to remember for a given connection.
 const MAX_TICKETS: usize = 4;
@@ -361,7 +415,7 @@ impl SecretAgent {
         _fd: *mut ssl::PRFileDesc,
         _check_sig: PRBool,
         _is_server: PRBool,
-    ) -> ssl::SECStatus {
+    ) -> SECStatus {
         let auth_required_ptr = arg.cast::<bool>();
         *auth_required_ptr = true;
         // NSS insists on getting SECWouldBlock here rather than accepting
@@ -569,6 +623,32 @@ impl SecretAgent {
                 c_uint::try_from(encoded.len())?,
             )
         })
+    }
+
+    /// Install a certificate compression mechanism.
+    ///
+    /// # Errors
+    ///
+    /// This returns an error if the certificate compression could not be established
+    ///
+    /// [RFC8879]: https://datatracker.ietf.org/doc/rfc8879/
+
+    pub fn set_certificate_compression(
+        &mut self,
+        encoder: Box<dyn CertificateCompressor>,
+    ) -> Res<()> {
+        unsafe {
+            let compressor: SSLCertificateCompressionAlgorithm =
+                SSLCertificateCompressionAlgorithm {
+                    id: encoder.id(),
+                    name: encoder.name().as_ptr() as *mut ::std::os::raw::c_char,
+                    // it's possible that either of the encoder/decoder is None
+                    encode: encoder.encode(),
+                    decode: encoder.decode(),
+                };
+            SSL_SetCertificateCompressionAlgorithm(self.fd, compressor)?;
+        }
+        Ok(())
     }
 
     /// Install an extension handler.
@@ -899,26 +979,26 @@ impl Client {
         token: *const u8,
         len: c_uint,
         arg: *mut c_void,
-    ) -> ssl::SECStatus {
+    ) -> SECStatus {
         let mut info: MaybeUninit<ssl::SSLResumptionTokenInfo> = MaybeUninit::uninit();
         let Ok(info_len) = c_uint::try_from(size_of::<ssl::SSLResumptionTokenInfo>()) else {
-            return ssl::SECFailure;
+            return SECFailure;
         };
         let info_res = &ssl::SSL_GetResumptionTokenInfo(token, len, info.as_mut_ptr(), info_len);
         if info_res.is_err() {
             // Ignore the token.
-            return ssl::SECSuccess;
+            return SECSuccess;
         }
         let expiration_time = info.assume_init().expirationTime;
         if ssl::SSL_DestroyResumptionTokenInfo(info.as_mut_ptr()).is_err() {
             // Ignore the token.
-            return ssl::SECSuccess;
+            return SECSuccess;
         }
         let Some(resumption) = arg.cast::<Vec<ResumptionToken>>().as_mut() else {
-            return ssl::SECFailure;
+            return SECFailure;
         };
         let Ok(len) = usize::try_from(len) else {
-            return ssl::SECFailure;
+            return SECFailure;
         };
         let mut v = Vec::with_capacity(len);
         v.extend_from_slice(null_safe_slice(token, len));
@@ -930,7 +1010,7 @@ impl Client {
         if let Ok(t) = Time::try_from(expiration_time) {
             resumption.push(ResumptionToken::new(v, *t));
         }
-        ssl::SECSuccess
+        SECSuccess
     }
 
     #[allow(
