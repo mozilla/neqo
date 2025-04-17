@@ -23,7 +23,7 @@ use neqo_common::{
     qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, IpTosEcn, Role,
 };
 use neqo_crypto::{
-    agent::CertificateCompressor, agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus,
+    agent::{CertificateCompressor, CertificateInfo}, Agent, AntiReplay, AuthenticationStatus,
     Cipher, Client, Group, HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo,
     SecretAgentPreInfo, Server, ZeroRttChecker,
 };
