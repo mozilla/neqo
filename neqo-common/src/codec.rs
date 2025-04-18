@@ -199,6 +199,7 @@ impl<'b> PartialEq<Decoder<'b>> for Decoder<'_> {
 /// Encoder is good for building data structures.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct Encoder {
+    start: usize,
     buf: Vec<u8>,
 }
 
@@ -235,10 +236,22 @@ impl Encoder {
         Self::default()
     }
 
+    /// Create a new encoder that appends to the provided buffer.
+    //
+    // TODO: Is there a cleaner way to do this?
+    #[must_use]
+    pub fn new_appending(buf: Vec<u8>) -> Self {
+        Self {
+            start: buf.len(),
+            buf,
+        }
+    }
+
     /// Construction of a buffer with a predetermined capacity.
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
+            start: 0,
             buf: Vec::with_capacity(capacity),
         }
     }
@@ -254,20 +267,20 @@ impl Encoder {
     /// been written to the buffer.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.buf.len()
+        self.buf.len() - self.start
     }
 
     /// Returns true if the encoder buffer contains no elements.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.buf.is_empty()
+        self.start == self.buf.len()
     }
 
     /// Create a view of the current contents of the buffer.
     /// Note: for a view of a slice, use `Decoder::new(&enc[s..e])`
     #[must_use]
     pub fn as_decoder(&self) -> Decoder<'_> {
-        Decoder::new(self.as_ref())
+        Decoder::new(&self.buf[self.start..])
     }
 
     /// Don't use this except in testing.
@@ -423,14 +436,25 @@ impl Encoder {
 
     /// Truncate the encoder to the given size.
     pub fn truncate(&mut self, len: usize) {
-        self.buf.truncate(len);
+        self.buf.truncate(self.start + len);
     }
 
     /// Pad the buffer to `len` with bytes set to `v`.
     pub fn pad_to(&mut self, len: usize, v: u8) {
-        if len > self.buf.len() {
-            self.buf.resize(len, v);
+        if len > self.buf.len() - self.start {
+            self.buf.resize(self.start + len, v);
         }
+    }
+
+    /// Returns the underlying buffer.
+    ///
+    /// If created with [`Encoder::new_appending`], this will return the entire
+    /// buffer.
+    ///
+    /// TODO: Still needed?
+    #[must_use]
+    pub fn into_buf(self) -> Vec<u8> {
+        self.buf
     }
 }
 
@@ -442,13 +466,13 @@ impl Debug for Encoder {
 
 impl AsRef<[u8]> for Encoder {
     fn as_ref(&self) -> &[u8] {
-        self.buf.as_ref()
+        &self.buf[self.start..]
     }
 }
 
 impl AsMut<[u8]> for Encoder {
     fn as_mut(&mut self) -> &mut [u8] {
-        self.buf.as_mut()
+        &mut self.buf[self.start..]
     }
 }
 
@@ -461,14 +485,15 @@ impl<'a> From<Decoder<'a>> for Encoder {
 impl From<&[u8]> for Encoder {
     fn from(buf: &[u8]) -> Self {
         Self {
+            start: 0,
             buf: Vec::from(buf),
         }
     }
 }
 
 impl From<Encoder> for Vec<u8> {
-    fn from(buf: Encoder) -> Self {
-        buf.buf
+    fn from(mut buf: Encoder) -> Self {
+        buf.buf.split_off(buf.start)
     }
 }
 
