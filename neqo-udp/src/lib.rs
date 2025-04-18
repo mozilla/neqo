@@ -18,7 +18,7 @@ use std::{
 };
 
 use log::{log_enabled, Level};
-use neqo_common::{qdebug, qtrace, Datagram, IpTos};
+use neqo_common::{qdebug, qtrace, Datagram, DatagramTrain, IpTos};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 
 /// Receive buffer size
@@ -81,6 +81,32 @@ pub fn send_inner(
         d.len(),
         d.source(),
         d.destination()
+    );
+
+    Ok(())
+}
+
+pub fn send_inner2(
+    state: &UdpSocketState,
+    socket: quinn_udp::UdpSockRef<'_>,
+    d: &DatagramTrain,
+) -> io::Result<()> {
+    let transmit = Transmit {
+        destination: d.dst,
+        ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos)),
+        contents: d.d.as_ref(),
+        segment_size: Some(d.segment_size),
+        src_ip: None,
+    };
+
+    state.try_send(socket, &transmit)?;
+
+    qtrace!(
+        "sent {} bytes from {} to {} segment size {}",
+        d.d.len(),
+        d.src,
+        d.dst,
+        d.segment_size
     );
 
     Ok(())
@@ -203,6 +229,16 @@ impl<S: SocketRef> Socket<S> {
     /// Send a [`Datagram`] on the given [`Socket`].
     pub fn send(&self, d: &Datagram) -> io::Result<()> {
         send_inner(&self.state, (&self.inner).into(), d)
+    }
+
+    /// Send a [`Datagram`] on the given [`Socket`].
+    pub fn send2(&self, d: &DatagramTrain) -> io::Result<()> {
+        send_inner2(&self.state, (&self.inner).into(), d)
+    }
+
+
+    pub fn max_gso_segments(&self) -> usize {
+        self.state.max_gso_segments()
     }
 
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each
