@@ -17,7 +17,7 @@ use neqo_common::{qtrace, Datagram};
 use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
-    ConnectionIdGenerator, Output,
+    ConnectionIdGenerator, Output, OutputBatch,
 };
 
 use crate::{
@@ -122,16 +122,28 @@ impl Http3Server {
         dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
         now: Instant,
     ) -> Output {
+        self.process_multiple(dgram, now, 1)
+            .try_into()
+            .expect("TODO")
+    }
+    pub fn process_multiple(
+        &mut self,
+        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        now: Instant,
+        max_datagrams: usize,
+    ) -> OutputBatch {
         qtrace!("[{self}] Process");
-        let out = self.server.process(dgram, now);
+        let out = self.server.process_multiple(dgram, now, max_datagrams);
         self.process_http3(now);
         // If we do not that a dgram already try again after process_http3.
         match out {
-            Output::Datagram(d) => {
+            OutputBatch::DatagramBatch(d) => {
                 qtrace!("[{self}] Send packet: {d:?}");
-                Output::Datagram(d)
+                OutputBatch::DatagramBatch(d)
             }
-            _ => self.server.process(Option::<Datagram>::None, now),
+            _ => self
+                .server
+                .process_multiple(Option::<Datagram>::None, now, max_datagrams),
         }
     }
 

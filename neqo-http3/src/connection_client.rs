@@ -21,8 +21,8 @@ use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken,
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
     streams::SendOrder, AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator,
-    DatagramTracking, Output, RecvStreamStats, SendStreamStats, Stats as TransportStats, StreamId,
-    StreamType, Version, ZeroRttState,
+    DatagramTracking, Output, OutputBatch, RecvStreamStats, SendStreamStats,
+    Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
 };
 
 use crate::{
@@ -942,6 +942,20 @@ impl Http3Client {
         self.process_http3(now);
 
         let out = self.conn.process_output(now);
+
+        // Update H3 for any transport state changes and events
+        self.process_http3(now);
+
+        out
+    }
+
+    pub fn process_multiple_output(&mut self, now: Instant, max_datagrams: usize) -> OutputBatch {
+        qtrace!("[{self}] Process output");
+
+        // Maybe send() stuff on http3-managed streams
+        self.process_http3(now);
+
+        let out = self.conn.process_multiple_output(now, max_datagrams);
 
         // Update H3 for any transport state changes and events
         self.process_http3(now);
