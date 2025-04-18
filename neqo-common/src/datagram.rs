@@ -14,10 +14,26 @@ use crate::{hex_with_len, IpTos};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Datagram<D = Vec<u8>> {
-    src: SocketAddr,
-    dst: SocketAddr,
-    tos: IpTos,
-    d: D,
+    pub src: SocketAddr,
+    pub dst: SocketAddr,
+    pub tos: IpTos,
+    pub d: D,
+}
+
+impl TryFrom<DatagramBatch> for Datagram {
+    type Error = ();
+
+    fn try_from(d: DatagramBatch) -> Result<Self, Self::Error> {
+        if d.d.len() != d.segment_size {
+            return Err(());
+        }
+        Ok(Self {
+            src: d.src,
+            dst: d.dst,
+            tos: d.tos,
+            d: d.d,
+        })
+    }
 }
 
 impl<D> Datagram<D> {
@@ -114,6 +130,93 @@ impl<'a> Datagram<&'a mut [u8]> {
 impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
     fn as_ref(&self) -> &[u8] {
         self.d.as_ref()
+    }
+}
+
+/// A batch of [`Datagram`]s with same metadata, e.g. destination.
+///
+/// Upholds Linux GSO requirement. That is, all but the last datagram in the
+/// batch have the same size. The last datagram may be equal or smaller.
+#[derive(Clone, PartialEq, Eq)]
+pub struct DatagramBatch {
+    src: SocketAddr,
+    dst: SocketAddr,
+    tos: IpTos,
+    segment_size: usize,
+    d: Vec<u8>,
+}
+
+impl Debug for DatagramBatch {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(
+            f,
+            "DatagramBatch {:?} {:?}->{:?} {:?}: {}",
+            self.tos,
+            self.src,
+            self.dst,
+            self.segment_size,
+            hex_with_len(&self.d)
+        )
+    }
+}
+
+impl From<Datagram<Vec<u8>>> for DatagramBatch {
+    fn from(d: Datagram<Vec<u8>>) -> Self {
+        Self {
+            src: d.src,
+            dst: d.dst,
+            tos: d.tos,
+            segment_size: d.d.len(),
+            d: d.d,
+        }
+    }
+}
+
+impl DatagramBatch {
+    pub fn new(
+        src: SocketAddr,
+        dst: SocketAddr,
+        tos: IpTos,
+        segment_size: usize,
+        d: Vec<u8>,
+    ) -> Self {
+        Self {
+            src,
+            dst,
+            tos,
+            segment_size,
+            d,
+        }
+    }
+
+    #[must_use]
+    pub const fn source(&self) -> SocketAddr {
+        self.src
+    }
+
+    #[must_use]
+    pub const fn destination(&self) -> SocketAddr {
+        self.dst
+    }
+
+    #[must_use]
+    pub const fn tos(&self) -> IpTos {
+        self.tos
+    }
+
+    #[must_use]
+    pub const fn segment_size(&self) -> usize {
+        self.segment_size
+    }
+
+    #[must_use]
+    pub fn data(&self) -> &[u8] {
+        &self.d
+    }
+
+    #[must_use]
+    pub fn num_segments(&self) -> usize {
+        self.d.len().div_ceil(self.segment_size)
     }
 }
 

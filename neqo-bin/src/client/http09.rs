@@ -24,7 +24,7 @@ use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
     CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator, EmptyConnectionIdGenerator,
-    Error, Output, RandomConnectionIdGenerator, State, StreamId, StreamType,
+    Error, OutputBatch, RandomConnectionIdGenerator, State, StreamId, StreamType,
 };
 use url::Url;
 
@@ -190,8 +190,8 @@ impl TryFrom<&State> for CloseState {
 }
 
 impl super::Client for Connection {
-    fn process_output(&mut self, now: Instant) -> Output {
-        self.process_output(now)
+    fn process_multiple_output(&mut self, now: Instant, max_datagrams: usize) -> OutputBatch {
+        self.process_multiple_output(now, max_datagrams)
     }
 
     fn process_multiple_input<'a>(
