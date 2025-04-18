@@ -18,7 +18,7 @@ use std::{
 };
 
 use log::{log_enabled, Level};
-use neqo_common::{qdebug, qtrace, Datagram, IpTos};
+use neqo_common::{qdebug, qtrace, Datagram, DatagramTrain, IpTos};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 
 /// Receive buffer size
@@ -81,6 +81,32 @@ pub fn send_inner(
         d.len(),
         d.source(),
         d.destination()
+    );
+
+    Ok(())
+}
+
+pub fn send_inner2(
+    state: &UdpSocketState,
+    socket: quinn_udp::UdpSockRef<'_>,
+    d: &DatagramTrain,
+) -> io::Result<()> {
+    let transmit = Transmit {
+        destination: d.dst,
+        ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos)),
+        contents: d.d.as_ref(),
+        segment_size: Some(d.segment_size),
+        src_ip: None,
+    };
+
+    state.try_send(socket, &transmit)?;
+
+    qtrace!(
+        "sent {} bytes from {} to {} segment size {}",
+        d.d.len(),
+        d.src,
+        d.dst,
+        d.segment_size
     );
 
     Ok(())

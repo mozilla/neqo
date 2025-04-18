@@ -1014,6 +1014,7 @@ mod tests {
         }
 
         pub fn send_profile(&mut self, now: Instant) -> SendProfile {
+            // TODO: usize::MAX isn't great.
             self.lr.send_profile(&self.path.borrow(), now)
         }
     }
