@@ -9,7 +9,7 @@ mod common;
 use common::assert_dscp;
 use neqo_common::{Datagram, Decoder, Encoder, Role};
 use neqo_transport::{
-    CloseReason, ConnectionParameters, Error, State, Version, MIN_INITIAL_PACKET_SIZE,
+    CloseReason, ConnectionParameters, Error, State, StreamType, Version, MIN_INITIAL_PACKET_SIZE
 };
 use test_fixture::{
     default_client, default_server,
@@ -25,6 +25,20 @@ fn connect() {
     let (client, server) = test_fixture::connect();
     assert_dscp(&client.stats());
     assert_dscp(&server.stats());
+}
+
+#[test]
+fn gso() {
+    let (mut client, server) = test_fixture::connect();
+
+    let stream_id2 = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(stream_id2, &[42; 2048]).unwrap();
+    client.stream_close_send(stream_id2).unwrap();
+
+    let out = client.process2(None::<Datagram<Vec<u8>>>, now()).dgram().unwrap();
+
+    assert_eq!(out.segment_size,  1232);
+    assert_eq!(out.d.len(), 2108);
 }
 
 #[test]

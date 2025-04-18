@@ -25,7 +25,7 @@ use strum::Display;
 pub use self::fuzz::write_item_to_fuzzing_corpus;
 pub use self::{
     codec::{Decoder, Encoder},
-    datagram::Datagram,
+    datagram::{Datagram, Datagram2},
     header::Header,
     incrdecoder::{IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint},
     tos::{IpTos, IpTosDscp, IpTosEcn},

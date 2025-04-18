@@ -20,7 +20,7 @@ use std::{
 
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, IpTosEcn, Role,
+    qlog::NeqoQlog, qtrace, qwarn, Datagram, Datagram2, Decoder, Encoder, IpTos, IpTosEcn, Role,
 };
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
@@ -108,6 +108,38 @@ pub enum Output {
     /// Connection requires `process_input()` be called when the `Duration`
     /// elapses.
     Callback(Duration),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Output2 {
+    /// Connection requires no action.
+    None,
+    /// Connection requires the datagram be sent.
+    Datagram(Datagram2),
+    /// Connection requires `process_input()` be called when the `Duration`
+    /// elapses.
+    Callback(Duration),
+}
+
+impl From<Output> for Output2 {
+    fn from(value: Output) -> Self {
+        match value {
+            Output::None => Self::None,
+            Output::Datagram(dg) => Self::Datagram(Datagram2::from(dg)),
+            Output::Callback(t) => Self::Callback(t),
+        }
+    }
+}
+
+impl Output2 {
+    /// Convert into an `Option<Datagram>`.
+    #[must_use]
+    pub fn dgram(self) -> Option<Datagram2> {
+        match self {
+            Self::Datagram(dg) => Some(dg),
+            _ => None,
+        }
+    }
 }
 
 impl Output {
@@ -1176,6 +1208,81 @@ impl Connection {
         let res = self.process_output(now);
         self.test_frame_writer = None;
         res
+    }
+
+    /// Process input and generate output.
+    #[must_use = "Output of the process function must be handled"]
+    pub fn process2(
+        &mut self,
+        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        now: Instant,
+    ) -> Output2 {
+        if let Some(d) = dgram {
+            self.input(d, now, now);
+            self.process_saved(now);
+        }
+        let output = self.process_output(now);
+        #[cfg(all(feature = "build-fuzzing-corpus", test))]
+        if self.test_frame_writer.is_none() {
+            if let Some(d) = output.clone().dgram() {
+                neqo_common::write_item_to_fuzzing_corpus("packet", &d);
+            }
+        }
+
+        let mut dgram: Datagram2 = match output {
+            Output::Datagram(d) => d.into(),
+            Output::Callback(c) => return Output2::Callback(c),
+            Output::None => return Output2::None,
+        };
+
+        let path = self.paths.find_path(
+            dgram.src,
+            dgram.dst,
+            &self.conn_params,
+            now,
+            &mut self.stats.borrow_mut(),
+        );
+
+        // TODO: For now, only doing GSO on established paths. Add support for
+        // handshakes as well.
+        if path.borrow().is_temporary() {
+            return Output2::Datagram(dgram);
+        }
+
+        loop {
+            // TODO: Safeguard for now to not send anything larger than 64k GSO limit.
+            if dgram.d.len() >= (u16::MAX / 2) as usize{
+                break;
+            }
+
+            match self.output_path_inner(&path, now, None, Some(dgram.segment_size)).expect("TODO") {
+                SendOption::Yes(Datagram { src, dst, tos, d }) => {
+                    assert_eq!(src, dgram.src,);
+                    assert_eq!(dst, dgram.dst);
+                    // Uphold GSO invariant.
+                    assert!(d.len() <= dgram.d.len());
+
+                    // TODO: Hack. Also, does this break ECN? What if the first one shouldn't have been marked?
+                    dgram.tos = max(tos, dgram.tos);
+
+                    // TODO: Work around mem-copy.
+                    dgram.d.extend_from_slice(&d);
+
+                    if d.len() < dgram.segment_size {
+                        break;
+                    }
+                }
+                SendOption::No(_) => break,
+            }
+        }
+
+        // check if it is a datagram
+        // get the path
+        // loop {
+        //   call output_path with the Vec of the datagram
+        // }
+
+        Output2::Datagram(dgram.into())
     }
 
     /// Process input and generate output.
@@ -2428,12 +2535,22 @@ impl Connection {
 
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
-    #[expect(clippy::too_many_lines, reason = "Yeah, that's just the way it is.")]
     fn output_path(
         &mut self,
         path: &PathRef,
         now: Instant,
         closing_frame: Option<&ClosingFrame>,
+    ) -> Res<SendOption> {
+        self.output_path_inner(path, now, closing_frame, None)
+    }
+
+    #[expect(clippy::too_many_lines, reason = "Yeah, that's just the way it is.")]
+    fn output_path_inner(
+        &mut self,
+        path: &PathRef,
+        now: Instant,
+        closing_frame: Option<&ClosingFrame>,
+        limit: Option<usize>,
     ) -> Res<SendOption> {
         let mut initial_sent = None;
         let mut packet_tos = None;
@@ -2442,7 +2559,7 @@ impl Connection {
         let version = self.version();
 
         // Determine how we are sending packets (PTO, etc..).
-        let profile = self.loss_recovery.send_profile(&path.borrow(), now);
+        let profile = self.loss_recovery.send_profile_inner(&path.borrow(), now, limit);
         qdebug!("[{self}] output_path send_profile {profile:?}");
 
         // Frames for different epochs must go in different packets, but then these
