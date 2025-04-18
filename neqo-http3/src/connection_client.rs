@@ -20,9 +20,7 @@ use neqo_common::{
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
-    streams::SendOrder, AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator,
-    DatagramTracking, Output, RecvStreamStats, SendStreamStats, Stats as TransportStats, StreamId,
-    StreamType, Version, ZeroRttState,
+    streams::SendOrder, AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, DatagramTracking, Output, Output2, RecvStreamStats, SendStreamStats, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState
 };
 
 use crate::{
@@ -854,6 +852,19 @@ impl Http3Client {
         self.process_output(now)
     }
 
+    /// This function combines  `process_input` and `process_output` function.
+    pub fn process2(
+        &mut self,
+        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        now: Instant,
+    ) -> Output2 {
+        qtrace!("[{self}] Process");
+        if let Some(d) = dgram {
+            self.process_input(d, now);
+        }
+        self.process_output2(now)
+    }
+
     /// The function should be called when there is a new UDP packet available. The function will
     /// handle the packet payload.
     ///
@@ -943,6 +954,20 @@ impl Http3Client {
         self.process_http3(now);
 
         let out = self.conn.process_output(now);
+
+        // Update H3 for any transport state changes and events
+        self.process_http3(now);
+
+        out
+    }
+
+    pub fn process_output2(&mut self, now: Instant) -> Output2 {
+        qtrace!("[{self}] Process output");
+
+        // Maybe send() stuff on http3-managed streams
+        self.process_http3(now);
+
+        let out = self.conn.process2(None::<Datagram<Vec<u8>>>, now);
 
         // Update H3 for any transport state changes and events
         self.process_http3(now);

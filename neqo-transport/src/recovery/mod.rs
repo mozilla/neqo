@@ -900,9 +900,16 @@ impl LossRecovery {
     /// what the current congestion window is, and what the pacer says.
     #[expect(clippy::option_if_let_else, reason = "Alternative is less readable.")]
     pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
+        self.send_profile_inner(path, now, None)
+    }
+    /// Check how packets should be sent, based on whether there is a PTO,
+    /// what the current congestion window is, and what the pacer says.
+    #[expect(clippy::option_if_let_else, reason = "Alternative is less readable.")]
+    pub fn send_profile_inner(&mut self, path: &Path, now: Instant, limit: Option<usize>) -> SendProfile {
         qtrace!("[{self}] get send profile {now:?}");
         let sender = path.sender();
-        let mtu = path.plpmtu();
+        // TODO: Hack. Don't leverage mtu var.
+        let mtu = min(path.plpmtu(), limit.unwrap_or(usize::MAX));
         if let Some(profile) = self
             .pto_state
             .as_mut()

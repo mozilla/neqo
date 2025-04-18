@@ -13,10 +13,32 @@ use crate::{hex_with_len, IpTos};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Datagram<D = Vec<u8>> {
-    src: SocketAddr,
-    dst: SocketAddr,
-    tos: IpTos,
-    d: D,
+    pub src: SocketAddr,
+    pub dst: SocketAddr,
+    pub tos: IpTos,
+    pub d: D,
+}
+
+// TODO: Really derive Debug?
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Datagram2{
+    pub src: SocketAddr,
+    pub dst: SocketAddr,
+    pub tos: IpTos,
+    pub segment_size: usize,
+    pub d: Vec<u8>,
+}
+
+impl From<Datagram<Vec<u8>>> for Datagram2 {
+    fn from(d: Datagram<Vec<u8>>) -> Self {
+        Self {
+            src: d.src,
+            dst: d.dst,
+            tos: d.tos,
+            segment_size: d.d.len(),
+            d: d.d,
+        }
+    }
 }
 
 impl<D> Datagram<D> {
