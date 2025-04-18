@@ -14,10 +14,55 @@ use crate::{hex_with_len, IpTos};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Datagram<D = Vec<u8>> {
-    src: SocketAddr,
-    dst: SocketAddr,
-    tos: IpTos,
-    d: D,
+    pub src: SocketAddr,
+    pub dst: SocketAddr,
+    pub tos: IpTos,
+    pub d: D,
+}
+
+impl TryFrom<DatagramTrain> for Datagram {
+    type Error = ();
+
+    fn try_from(d: DatagramTrain) -> Result<Self, Self::Error> {
+        if d.d.len() != d.segment_size {
+            return Err(());
+        }
+        Ok(Self {
+            src: d.src,
+            dst: d.dst,
+            tos: d.tos,
+            d: d.d,
+        })
+    }
+}
+
+// TODO: Really derive Debug?
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct DatagramTrain {
+    pub src: SocketAddr,
+    pub dst: SocketAddr,
+    pub tos: IpTos,
+    pub segment_size: usize,
+    pub d: Vec<u8>,
+}
+
+impl From<Datagram<Vec<u8>>> for DatagramTrain {
+    fn from(d: Datagram<Vec<u8>>) -> Self {
+        Self {
+            src: d.src,
+            dst: d.dst,
+            tos: d.tos,
+            segment_size: d.d.len(),
+            d: d.d,
+        }
+    }
+}
+
+impl DatagramTrain {
+    #[must_use]
+    pub fn num_segments(&self) -> usize {
+        self.d.len().div_ceil(self.segment_size)
+    }
 }
 
 impl<D> Datagram<D> {
