@@ -15,7 +15,7 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
+use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Buffer, Encoder, Role};
 pub use neqo_crypto::Epoch;
 use neqo_crypto::{
     hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState,
@@ -314,11 +314,11 @@ impl Crypto {
         Ok(())
     }
 
-    pub fn write_frame(
+    pub fn write_frame<B: Buffer>(
         &mut self,
         space: PacketNumberSpace,
         sni_slicing: bool,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
@@ -1506,18 +1506,18 @@ impl CryptoStreams {
         }
     }
 
-    pub fn write_frame(
+    pub fn write_frame<B: Buffer>(
         &mut self,
         space: PacketNumberSpace,
         sni_slicing: bool,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        fn write_chunk(
+        fn write_chunk<B: Buffer>(
             offset: u64,
             data: &[u8],
-            builder: &mut PacketBuilder,
+            builder: &mut PacketBuilder<B>,
         ) -> Option<(u64, usize)> {
             let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 

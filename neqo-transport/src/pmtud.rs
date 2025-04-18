@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qinfo};
+use neqo_common::{qdebug, qinfo, Buffer};
 use static_assertions::const_assert;
 
 use crate::{frame::FrameType, packet::PacketBuilder, recovery::SentPacket, Stats};
@@ -117,7 +117,7 @@ impl Pmtud {
     }
 
     /// Sends a PMTUD probe.
-    pub fn send_probe(&mut self, builder: &mut PacketBuilder, stats: &mut Stats) {
+    pub fn send_probe<B: Buffer>(&mut self, builder: &mut PacketBuilder<B>, stats: &mut Stats) {
         // The packet may include ACK-eliciting data already, but rather than check for that, it
         // seems OK to burn one byte here to simply include a PING.
         builder.encode_varint(FrameType::Ping);

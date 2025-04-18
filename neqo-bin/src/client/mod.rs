@@ -10,8 +10,9 @@ use std::{
     collections::VecDeque,
     fmt::{self, Display},
     fs::{create_dir_all, File, OpenOptions},
-    io::{self, BufWriter},
+    io::{self, BufWriter, ErrorKind},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _},
+    num::NonZeroUsize,
     path::PathBuf,
     pin::Pin,
     process::exit,
@@ -28,8 +29,7 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, Cipher, ResumptionToken,
 };
-use neqo_http3::Output;
-use neqo_transport::{AppError, CloseReason, ConnectionId, Version};
+use neqo_transport::{AppError, CloseReason, ConnectionId, OutputBatch, Version};
 use neqo_udp::RecvBuf;
 use rustc_hash::FxHashMap as HashMap;
 use tokio::time::Sleep;
@@ -385,7 +385,8 @@ enum CloseState {
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
-    fn process_output(&mut self, now: Instant) -> Output;
+    fn process_multiple_output(&mut self, now: Instant, max_datagrams: NonZeroUsize)
+        -> OutputBatch;
     fn process_multiple_input<'a>(
         &mut self,
         dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
@@ -465,26 +466,36 @@ impl<'a, H: Handler> Runner<'a, H> {
 
     async fn process_output(&mut self) -> Result<(), io::Error> {
         loop {
-            match self.client.process_output(Instant::now()) {
-                Output::Datagram(dgram) => loop {
+            let max_datagrams = self
+                .socket
+                .max_gso_segments()
+                .try_into()
+                .inspect_err(|_| qerror!("Socket return GSO size of 0"))
+                .map_err(|_| io::Error::from(ErrorKind::Unsupported))?;
+
+            match self
+                .client
+                .process_multiple_output(Instant::now(), max_datagrams)
+            {
+                OutputBatch::DatagramBatch(dgram) => loop {
                     // Optimistically attempt sending datagram. In case the OS
                     // buffer is full, wait till socket is writable then try
                     // again.
                     match self.socket.send(&dgram) {
                         Ok(()) => break,
-                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        Err(e) if e.kind() == ErrorKind::WouldBlock => {
                             self.socket.writable().await?;
                             // Now try again.
                         }
                         e @ Err(_) => return e,
                     }
                 },
-                Output::Callback(new_timeout) => {
+                OutputBatch::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
                     self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
-                Output::None => {
+                OutputBatch::None => {
                     qdebug!("Output::None");
                     break;
                 }

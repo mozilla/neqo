@@ -15,7 +15,7 @@ use std::{
     rc::Rc,
 };
 
-use neqo_common::{hex, hex_with_len, qdebug, qinfo, Decoder, Encoder};
+use neqo_common::{hex, hex_with_len, qdebug, qinfo, Buffer, Decoder, Encoder};
 use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
@@ -300,7 +300,7 @@ impl ConnectionIdEntry<[u8; 16]> {
 
     /// Write the entry out in a `NEW_CONNECTION_ID` frame.
     /// Returns `true` if the frame was written, `false` if there is insufficient space.
-    pub fn write(&self, builder: &mut PacketBuilder, stats: &mut FrameStats) -> bool {
+    pub fn write<B: Buffer>(&self, builder: &mut PacketBuilder<B>, stats: &mut FrameStats) -> bool {
         let len = 1 + Encoder::varint_len(self.seqno) + 1 + 1 + self.cid.len() + 16;
         if builder.remaining() < len {
             return false;
@@ -550,9 +550,9 @@ impl ConnectionIdManager {
         );
     }
 
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {

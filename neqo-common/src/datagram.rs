@@ -20,6 +20,22 @@ pub struct Datagram<D = Vec<u8>> {
     d: D,
 }
 
+impl TryFrom<DatagramBatch> for Datagram {
+    type Error = ();
+
+    fn try_from(d: DatagramBatch) -> Result<Self, Self::Error> {
+        if d.num_datagrams() != 1 {
+            return Err(());
+        }
+        Ok(Self {
+            src: d.src,
+            dst: d.dst,
+            tos: d.tos,
+            d: d.d,
+        })
+    }
+}
+
 impl<D> Datagram<D> {
     #[must_use]
     pub const fn source(&self) -> SocketAddr {
@@ -117,9 +133,109 @@ impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
     }
 }
 
+/// A batch of [`Datagram`]s with same metadata, e.g. destination.
+///
+/// Upholds Linux GSO requirement. That is, all but the last datagram in the
+/// batch have the same size. The last datagram may be equal or smaller.
+#[derive(Clone, PartialEq, Eq)]
+pub struct DatagramBatch {
+    src: SocketAddr,
+    dst: SocketAddr,
+    tos: IpTos,
+    segment_size: usize,
+    d: Vec<u8>,
+}
+
+impl Debug for DatagramBatch {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(
+            f,
+            "DatagramBatch {:?} {:?}->{:?} {:?}: {}",
+            self.tos,
+            self.src,
+            self.dst,
+            self.segment_size,
+            hex_with_len(&self.d)
+        )
+    }
+}
+
+impl From<Datagram<Vec<u8>>> for DatagramBatch {
+    fn from(d: Datagram<Vec<u8>>) -> Self {
+        Self {
+            src: d.src,
+            dst: d.dst,
+            tos: d.tos,
+            segment_size: d.d.len(),
+            d: d.d,
+        }
+    }
+}
+
+impl DatagramBatch {
+    /// Maximum [`DatagramBatch`] size.
+    ///
+    /// Value chosen to support batch IO system calls on all supported platforms.
+    ///
+    /// See for example Linux limit in
+    /// <https://github.com/torvalds/linux/blob/fb4d33ab452ea254e2c319bac5703d1b56d895bf/include/linux/netdevice.h#L2402>.
+    pub const MAX: usize = 65536;
+
+    #[must_use]
+    pub const fn new(
+        src: SocketAddr,
+        dst: SocketAddr,
+        tos: IpTos,
+        segment_size: usize,
+        d: Vec<u8>,
+    ) -> Self {
+        Self {
+            src,
+            dst,
+            tos,
+            segment_size,
+            d,
+        }
+    }
+
+    #[must_use]
+    pub const fn source(&self) -> SocketAddr {
+        self.src
+    }
+
+    #[must_use]
+    pub const fn destination(&self) -> SocketAddr {
+        self.dst
+    }
+
+    #[must_use]
+    pub const fn tos(&self) -> IpTos {
+        self.tos
+    }
+
+    #[must_use]
+    pub const fn datagram_size(&self) -> usize {
+        self.segment_size
+    }
+
+    #[must_use]
+    pub fn data(&self) -> &[u8] {
+        &self.d
+    }
+
+    #[must_use]
+    pub fn num_datagrams(&self) -> usize {
+        self.d.len().div_ceil(self.segment_size)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+
     use test_fixture::datagram;
+
+    use crate::{DatagramBatch, IpTos};
 
     #[test]
     fn fmt_datagram() {
@@ -135,5 +251,28 @@ mod tests {
         let d = datagram(vec![]);
         assert_eq!(d.len(), 0);
         assert!(d.is_empty());
+    }
+
+    #[test]
+    fn batch_num_datagrams() {
+        let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
+        let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
+        let tos = IpTos::default();
+
+        // 10 bytes, segment size 4 -> 3 datagrams (4+4+2)
+        let batch = DatagramBatch::new(src, dst, tos, 4, vec![0u8; 10]);
+        assert_eq!(batch.num_datagrams(), 3);
+
+        // 8 bytes, segment size 4 -> 2 datagrams (4+4)
+        let batch = DatagramBatch::new(src, dst, tos, 4, vec![0u8; 8]);
+        assert_eq!(batch.num_datagrams(), 2);
+
+        // 5 bytes, segment size 5 -> 1 datagram
+        let batch = DatagramBatch::new(src, dst, tos, 5, vec![0u8; 5]);
+        assert_eq!(batch.num_datagrams(), 1);
+
+        // 6 bytes, segment size 5 -> 2 datagrams (5+1)
+        let batch = DatagramBatch::new(src, dst, tos, 5, vec![0u8; 6]);
+        assert_eq!(batch.num_datagrams(), 2);
     }
 }

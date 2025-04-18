@@ -11,7 +11,7 @@ use neqo_common::{qdebug, qinfo, qwarn, IpTosEcn};
 
 use crate::{
     packet::{PacketNumber, PacketType},
-    recovery::{RecoveryToken, SentPacket},
+    recovery::SentPacket,
     Stats,
 };
 
@@ -194,11 +194,11 @@ impl Info {
     /// Exit ECN validation if the number of packets sent exceeds `TEST_COUNT`.
     /// We do not implement the part of the RFC that says to exit ECN validation if the time since
     /// the start of ECN validation exceeds 3 * PTO, since this seems to happen much too quickly.
-    pub(crate) fn on_packet_sent(&mut self, stats: &mut Stats) {
+    pub(crate) fn on_packet_sent(&mut self, num_datagrams: usize, stats: &mut Stats) {
         if let ValidationState::Testing { probes_sent, .. } = &mut self.state {
-            *probes_sent += 1;
+            *probes_sent += num_datagrams;
             qdebug!("ECN probing: sent {probes_sent} probes");
-            if *probes_sent == TEST_COUNT {
+            if *probes_sent >= TEST_COUNT {
                 qdebug!("ECN probing concluded with {probes_sent} probes sent");
                 self.state.set(ValidationState::Unknown, stats);
             }
@@ -346,13 +346,9 @@ impl Info {
         }
     }
 
-    /// The ECN mark to use for an outgoing UDP datagram.
-    ///
-    /// On [`IpTosEcn::Ect0`] adds a [`RecoveryToken::EcnEct0`] to `tokens` in
-    /// order to detect potential loss, then handled in [`Info::lost_ecn`].
-    pub(crate) fn ecn_mark(&self, tokens: &mut Vec<RecoveryToken>) -> IpTosEcn {
+    /// The ECN mark ([`IpTosEcn`]) to use for an outgoing UDP datagram.
+    pub(crate) const fn ecn_mark(&self) -> IpTosEcn {
         if self.is_marking() {
-            tokens.push(RecoveryToken::EcnEct0);
             IpTosEcn::Ect0
         } else {
             IpTosEcn::NotEct

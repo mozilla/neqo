@@ -19,8 +19,10 @@
 use std::{
     cell::RefCell,
     fmt::{self, Display},
-    fs, io,
+    fs,
+    io::{self},
     net::{SocketAddr, ToSocketAddrs as _},
+    num::NonZeroUsize,
     path::PathBuf,
     pin::Pin,
     process::exit,
@@ -38,7 +40,7 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init_db, AntiReplay, Cipher,
 };
-use neqo_transport::{Output, RandomConnectionIdGenerator, Version};
+use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version};
 use neqo_udp::RecvBuf;
 use tokio::time::Sleep;
 
@@ -205,7 +207,12 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
 }
 
 pub trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<Datagram<&mut [u8]>>, now: Instant) -> Output;
+    fn process_multiple(
+        &mut self,
+        dgram: Option<Datagram<&mut [u8]>>,
+        now: Instant,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }
@@ -264,9 +271,18 @@ impl ServerRunner {
         now: &dyn Fn() -> Instant,
         mut input_dgram: Option<Datagram<&mut [u8]>>,
     ) -> Result<(), io::Error> {
+        let min_max_gos_segments = sockets
+            .iter()
+            .map(|(_, socket)| socket.max_gso_segments())
+            .min()
+            .expect("At least one socket must be present")
+            .try_into()
+            .inspect_err(|_| qerror!("Socket return GSO size of 0"))
+            .map_err(|_| io::Error::from(io::ErrorKind::Unsupported))?;
+
         loop {
-            match server.process(input_dgram.take(), now()) {
-                Output::Datagram(dgram) => {
+            match server.process_multiple(input_dgram.take(), now(), min_max_gos_segments) {
+                OutputBatch::DatagramBatch(dgram) => {
                     let socket = Self::find_socket(sockets, dgram.source());
                     loop {
                         // Optimistically attempt sending datagram. In case the
@@ -282,12 +298,12 @@ impl ServerRunner {
                         }
                     }
                 }
-                Output::Callback(new_timeout) => {
+                OutputBatch::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
                     *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
-                Output::None => break,
+                OutputBatch::None => break,
             }
         }
         Ok(())
