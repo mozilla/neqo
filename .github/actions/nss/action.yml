@@ -161,8 +161,10 @@ runs:
           echo C:/msys64/usr/bin
           echo C:/msys64/mingw64/bin
         } >> "$GITHUB_PATH"
-        choco install --debug --yes --no-progress mozillabuild --version 4.0.2
-        find /c/ProgramData/Chocolatey -ls
+        mkdir -p "$HOME/bin"
+        curl -o "$HOME/bin/nsinstall" -sSf https://raw.githubusercontent.com/mozilla/gecko-dev/refs/heads/master/config/nsinstall.py
+        chmod +x "$HOME/bin/nsinstall"
+        echo "#! /usr/bin/env python3" | cat - "$HOME/bin/nsinstall" | tee "$HOME/bin/nsinstall"
         echo "gyp-next>=0.18.1" > req.txt
         python3 -m pip install -r req.txt
 
