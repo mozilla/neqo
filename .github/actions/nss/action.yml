@@ -162,6 +162,7 @@ runs:
           echo C:/msys64/mingw64/bin
         } >> "$GITHUB_PATH"
         choco install --debug --yes --no-progress mozillabuild --version 4.0.2
+        find /c/ProgramData/Chocolatey -ls
         echo "gyp-next>=0.18.1" > req.txt
         python3 -m pip install -r req.txt
 
