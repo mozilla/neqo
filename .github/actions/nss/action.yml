@@ -169,7 +169,6 @@ runs:
         for file in __init__.py mozfile.py; do
           curl -o "$HOME/bin/mozfile/$file" -sSf "https://raw.githubusercontent.com/mozilla/gecko-dev/refs/heads/master/testing/mozbase/mozfile/mozfile/$file"
         done
-        find "$HOME/bin" -ls
         echo "$HOME/bin" >> "$GITHUB_PATH"
         echo "gyp-next>=0.18.1" > req.txt
         python3 -m pip install -r req.txt
