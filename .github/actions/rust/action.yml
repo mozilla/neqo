@@ -28,6 +28,17 @@ runs:
       shell: bash
       run: echo "RUST_BACKTRACE=full" >> "$GITHUB_ENV"
 
+    # TODO: Remove once https://github.com/dtolnay/rust-toolchain/issues/143 is fixed.
+    # See https://github.com/actions/partner-runner-images/issues/77#issuecomment-2816803368
+    - name: Install rustup (Windows ARM)
+      if: ${{ runner.os == 'Windows' && runner.arch == 'ARM64' && runner.environment == 'github-hosted' }}
+      shell: bash
+      run: |
+          curl -LOs https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe
+          ./rustup-init.exe -y --default-toolchain none --no-modify-path
+          echo "$USERPROFILE/.cargo/bin" >> "$GITHUB_PATH"
+
+
     - name: Install Rust
       # TODO: Manually upate this, Dependabot will skip it because no tags associated with SHA:
       uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # zizmor: ignore[stale-action-refs]
