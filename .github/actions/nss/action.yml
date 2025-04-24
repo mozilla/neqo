@@ -161,7 +161,7 @@ runs:
           echo C:/msys64/usr/bin
           echo C:/msys64/mingw64/bin
         } >> "$GITHUB_PATH"
-        choco install -y mozillabuild --version 4.0.2
+        choco install --verbose --yes --no-progress mozillabuild --version 4.0.2
         echo "gyp-next>=0.18.1" > req.txt
         python3 -m pip install -r req.txt
 
