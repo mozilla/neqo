@@ -1,0 +1,136 @@
+name: Install Rust
+description: Install Rust and tools
+
+inputs:
+  version:
+    description: 'Rust toolchain version to install'
+    default: 'stable'
+  components:
+    description: 'Rust components to install'
+    default: ''
+  tools:
+    description: 'Additional Rust tools to install'
+    default: ''
+  token:
+    description: 'A Github PAT'
+    required: true
+  targets:
+    description: Comma-separated list of target triples to install for this toolchain
+    required: false
+  workspaces:
+    description: Newline-separated list of workspaces
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Set RUST_BACKTRACE
+      shell: bash
+      run: echo "RUST_BACKTRACE=full" >> "$GITHUB_ENV"
+
+    # TODO: Remove once https://github.com/dtolnay/rust-toolchain/issues/143 is fixed.
+    # See https://github.com/actions/partner-runner-images/issues/77#issuecomment-2816803368
+    - name: Install rustup (Windows ARM)
+      if: ${{ runner.os == 'Windows' && runner.arch == 'ARM64' && runner.environment == 'github-hosted' }}
+      shell: bash
+      run: |
+          curl -LOs https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe
+          ./rustup-init.exe -y --default-toolchain none --no-modify-path
+          echo "$USERPROFILE/.cargo/bin" >> "$GITHUB_PATH"
+
+
+    - name: Install Rust
+      # TODO: Manually upate this, Dependabot will skip it because no tags associated with SHA:
+      uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # zizmor: ignore[stale-action-refs]
+      with:
+        toolchain: ${{ inputs.version  }}
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
+
+    - name: Use sccache
+      # Apparently the action can't be installed twice in the same workflow, so check if
+      # it's already installed by checking if the SCCACHE_ENABLED environment variable is set
+      # (which every "use" of this action needs to therefore set)
+      #
+      # Only enable sccache on Mozilla's self-hosted runners, not on GitHub-hosted or
+      # CodSpeed runners (detected via runner name).
+      if: ${{ env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted' && !contains(runner.name, 'codspeed') }}
+      uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+    # See https://corrode.dev/blog/tips-for-faster-ci-builds/
+    - name: Set up build environment
+      shell: bash
+      env:
+        RUNNER_OS: ${{ runner.os }}
+      run: |
+        {
+          echo "CARGO_PROFILE_RELEASE_LTO=true"
+          echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
+        } >> "$GITHUB_ENV"
+
+    - name: Enable sccache
+      if: ${{ runner.environment != 'github-hosted' && !contains(runner.name, 'codspeed') }}
+      env:
+        RUNNER_ENVIRONMENT: ${{ runner.environment }}
+      shell: bash
+      run: |
+        echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        if [ "$RUNNER_ENVIRONMENT" == "github-hosted" ]; then
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        fi
+
+    # Enable Rust cache on GitHub-hosted runners. Minimizes cache pressure via
+    # shared-key (6 entries: 3 OS × 2 toolchains). Only saves on main for
+    # stable/MSRV; nightly changes too frequently.
+    - name: Enable Rust cache
+      if: ${{ runner.environment == 'github-hosted' }}
+      uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      with:
+        cache-bin: false  # Using binstall for tools
+        cache-all-crates: false
+        shared-key: ${{ runner.os }}-${{ inputs.version }}
+        save-if: ${{ inputs.version != 'nightly' && (github.ref == 'refs/heads/main' || github.event.merge_group.base_ref == 'refs/heads/main') }}
+
+    - name: Set up MSVC (Windows)
+      if: ${{ runner.os == 'Windows' }}
+      uses: ilammy/msvc-dev-cmd@v1 # zizmor: ignore[unpinned-uses]
+      # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
+      # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+    # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
+    - name: Set up build environment (Windows)
+      shell: bash
+      if: ${{ runner.os == 'Windows' }}
+      run: rm /usr/bin/link.exe || true
+
+    # Use cargo-binstall for faster tool installation via pre-built binaries.
+    # Previously disabled due to: (1) binstall MSRV was too high, and (2) macOS issues.
+    # Both resolved: binstall MSRV is currently 1.79.0 (below ours), and macOS issues
+    # were fixed in late 2024/2025 (cargo-bins/cargo-binstall#1953, #2049).
+    - name: Install Rust tools
+      shell: bash
+      if: ${{ inputs.tools != '' }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        TOOLS: ${{ inputs.tools }}
+        RUNNER_OS: ${{ runner.os }}
+      run: |
+        curl -L --proto '=https' --tlsv1.2 -sSf \
+          https://raw.githubusercontent.com/cargo-bins/cargo-binstall/ec80feb9e330418e014932e5982599255eff6dbb/install-from-binstall-release.sh | bash # v1.17.4
+
+        for tool in $(echo $TOOLS | tr -d ","); do
+          if [ "$tool" == "samply" ]; then
+            # TODO: Install released version once `--presymbolicate` (https://github.com/mstange/samply/pull/634) is released.
+            cargo install --git https://github.com/mstange/samply --rev f6ff5dedc73ab84a8ef45231f41cd3e721fb5cd4 samply
+          elif [ "$RUNNER_OS" != "Linux" ] && [ "$tool" == "cargo-careful" ]; then
+            # TODO: There is an issue with the binary releases of cargo-careful for non-Linux platforms.
+            cargo install cargo-careful
+          elif [ "$tool" == "cargo-fuzz" ]; then
+            # cargo-fuzz must be compiled with the same nightly toolchain used for fuzzing.
+            cargo install cargo-fuzz
+          else
+            # Use binstall for pre-built binaries; fall back to cargo install if unavailable.
+            cargo binstall --no-confirm "$tool" || cargo install --locked "$tool"
+          fi
+        done
