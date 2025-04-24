@@ -165,6 +165,10 @@ runs:
         curl -o "$HOME/bin/nsinstall" -sSf https://raw.githubusercontent.com/mozilla/gecko-dev/refs/heads/master/config/nsinstall.py
         chmod +x "$HOME/bin/nsinstall"
         echo "#! /usr/bin/env python3" | cat - "$HOME/bin/nsinstall" | tee "$HOME/bin/nsinstall"
+        mkdir -p "$HOME/bin/mozfile"
+        for file in __init__.py mozfile.py;
+          curl -o "$HOME/bin/mozfile/$file" -sSf "https://raw.githubusercontent.com/mozilla/gecko-dev/refs/heads/master/testing/mozbase/mozfile/mozfile/$file"
+        done
         echo "gyp-next>=0.18.1" > req.txt
         python3 -m pip install -r req.txt
 
