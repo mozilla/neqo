@@ -29,7 +29,6 @@ runs:
       run: |
           curl -LOs https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe
           ./rustup-init.exe -y --default-toolchain none --no-modify-path
-          echo "$USERPROFILE/.cargo/bin" >> "$GITHUB_PATH"
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
