@@ -29,7 +29,7 @@ use super::{
 };
 use crate::{
     connection::{
-        tests::{new_client, new_server},
+        tests::{exchange_ticket, new_client, new_server},
         AddressValidation,
     },
     events::ConnectionEvent,
@@ -637,8 +637,9 @@ fn reorder_1rtt() {
     now += RTT / 2;
     let s2 = server.process(c2, now).dgram();
     // The server has now received those packets, and saved them.
-    // The two additional are a Handshake and a 1-RTT (w/ NEW_CONNECTION_ID).
-    assert_eq!(server.stats().packets_rx, PACKETS + 8);
+    // The two additional are an Initial w/ACK, a Handshake w/ACK and a 1-RTT (w/
+    // NEW_CONNECTION_ID).
+    assert_eq!(server.stats().packets_rx, PACKETS * 2 + 5);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
     assert_eq!(server.stats().dropped_rx, 3);
     assert_eq!(*server.state(), State::Confirmed);
@@ -868,9 +869,9 @@ fn anti_amplification() {
     let ack = client.process(Some(s_init3), now).dgram().unwrap();
     assert!(!maybe_authenticate(&mut client)); // No need yet.
 
-    // The client sends a padded datagram, with just ACK for Handshake.
-    assert_eq!(client.stats().frame_tx.ack, ack_count + 1);
-    assert_eq!(client.stats().frame_tx.all(), frame_count + 1);
+    // The client sends a padded datagram, with just ACKs for Initial and Handshake.
+    assert_eq!(client.stats().frame_tx.ack, ack_count + 2);
+    assert_eq!(client.stats().frame_tx.all(), frame_count + 2);
     assert_ne!(ack.len(), client.plpmtu()); // Not padded (it includes Handshake).
 
     now += DEFAULT_RTT / 2;
@@ -1140,25 +1141,24 @@ fn only_server_initial() {
     let (initial, handshake) = split_datagram(&server_dgram1.unwrap());
     assert!(handshake.is_some());
 
-    // The client will not acknowledge the Initial as it discards keys.
-    // It sends a Handshake probe instead, containing just a PING frame.
-    assert_eq!(client.stats().frame_tx.ping, 0);
+    // The client sends an Initial ACK.
+    assert_eq!(client.stats().frame_tx.ack, 1);
     let probe = client.process(Some(initial), now).dgram();
-    assertions::assert_handshake(&probe.unwrap());
+    assertions::assert_initial(&probe.unwrap(), false);
     assert_eq!(client.stats().dropped_rx, 0);
-    assert_eq!(client.stats().frame_tx.ping, 1);
+    assert_eq!(client.stats().frame_tx.ack, 2);
 
     let (initial, handshake) = split_datagram(&server_dgram2.unwrap());
     assert!(handshake.is_some());
 
-    // The same happens after a PTO, even though the client will discard the Initial packet.
+    // The same happens after a PTO.
     now += AT_LEAST_PTO;
-    assert_eq!(client.stats().frame_tx.ping, 1);
+    assert_eq!(client.stats().frame_tx.ack, 2);
     let discarded = client.stats().dropped_rx;
     let probe = client.process(Some(initial), now).dgram();
-    assertions::assert_handshake(&probe.unwrap());
-    assert_eq!(client.stats().frame_tx.ping, 2);
-    assert_eq!(client.stats().dropped_rx, discarded + 1);
+    assertions::assert_initial(&probe.unwrap(), false);
+    assert_eq!(client.stats().frame_tx.ack, 3);
+    assert_eq!(client.stats().dropped_rx, discarded);
 
     // Pass the Handshake packet and complete the handshake.
     client.process_input(handshake.unwrap(), now);
@@ -1237,7 +1237,9 @@ fn implicit_rtt_server() {
     let dgram = server.process(dgram, now).dgram();
     now += RTT / 2;
     let dgram = client.process(dgram, now).dgram();
-    assertions::assert_handshake(dgram.as_ref().unwrap());
+    let (initial, handshake) = split_datagram(dgram.as_ref().unwrap());
+    assertions::assert_initial(&initial, false);
+    assertions::assert_handshake(handshake.as_ref().unwrap());
     now += RTT / 2;
     server.process_input(dgram.unwrap(), now);
 
@@ -1390,4 +1392,39 @@ fn grease_quic_bit_transport_parameter() {
             assert_eq!(server_grease, get_remote_tp(&client));
         }
     }
+}
+
+#[test]
+fn zero_rtt_with_ech() {
+    let mut server = default_server();
+    let (sk, pk) = generate_ech_keys().unwrap();
+    server
+        .server_enable_ech(ECH_CONFIG_ID, ECH_PUBLIC_NAME, &sk, &pk)
+        .unwrap();
+
+    let mut client = default_client();
+    client.client_enable_ech(server.ech_config()).unwrap();
+
+    connect(&mut client, &mut server);
+
+    assert!(client.tls_info().unwrap().ech_accepted());
+    assert!(server.tls_info().unwrap().ech_accepted());
+
+    let token = exchange_ticket(&mut client, &mut server, now());
+    let mut client = default_client();
+    client.client_enable_ech(server.ech_config()).unwrap();
+    client
+        .enable_resumption(now(), token)
+        .expect("should set token");
+
+    let mut server = resumed_server(&client);
+    server
+        .server_enable_ech(ECH_CONFIG_ID, ECH_PUBLIC_NAME, &sk, &pk)
+        .unwrap();
+
+    connect(&mut client, &mut server);
+    assert!(client.tls_info().unwrap().ech_accepted());
+    assert!(server.tls_info().unwrap().ech_accepted());
+    assert!(client.tls_info().unwrap().early_data_accepted());
+    assert!(server.tls_info().unwrap().early_data_accepted());
 }

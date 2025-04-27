@@ -68,7 +68,7 @@ pub fn convert_to_f64(v: usize) -> f64 {
     f_64
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Cubic {
     /// Maximum Window size two congestion events ago.
     ///
@@ -106,19 +106,6 @@ pub struct Cubic {
     ca_epoch_start: Option<Instant>,
     /// Number of bytes acked since the last Standard TCP congestion window increase.
     tcp_acked_bytes: f64,
-}
-
-impl Default for Cubic {
-    fn default() -> Self {
-        Self {
-            last_max_cwnd: 0.0,
-            estimated_tcp_cwnd: 0.0,
-            k: 0.0,
-            w_max: 0.0,
-            ca_epoch_start: None,
-            tcp_acked_bytes: 0.0,
-        }
-    }
 }
 
 impl Display for Cubic {

@@ -11,6 +11,7 @@ use std::fmt::Display;
 
 use neqo_common::IpTos;
 use qlog::events::quic::PacketHeader;
+use strum::Display;
 
 use super::DecryptedPacket;
 use crate::{
@@ -18,19 +19,12 @@ use crate::{
     path::PathRef,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Display)]
 pub enum Direction {
+    #[strum(to_string = "TX ->")]
     Tx,
+    #[strum(to_string = "-> RX")]
     Rx,
-}
-
-impl Display for Direction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Tx => write!(f, "TX ->"),
-            Self::Rx => write!(f, "-> RX"),
-        }
-    }
 }
 
 pub struct MetaData<'a> {
