@@ -455,8 +455,11 @@ impl Connection {
             .server_enable_0rtt(Rc::clone(&self.tps), anti_replay, zero_rtt_checker)
     }
 
+    /// # Errors
+    /// When the operation fails.
     pub fn set_certificate_compression<T: SafeCertificateCompression>(&mut self) -> Res<()> {
-        Ok(self.crypto.tls.set_certificate_compression::<T>()?)
+        self.crypto.tls.set_certificate_compression::<T>()?;
+        Ok(())
     }
 
     /// # Errors

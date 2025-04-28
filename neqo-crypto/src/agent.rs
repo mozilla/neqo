@@ -50,7 +50,11 @@ use crate::{
     time::{Time, TimeHolder},
 };
 
-// Private trait for Certificate Compression
+
+/// Private trait for Certificate Compression implementation
+/// # Safety
+///
+/// Use `SafeCertCompression` to implement an encoder/decoder instead. 
 unsafe trait UnsafeCertCompression {
     unsafe extern "C" fn decode_callback(
         input: *const ssl::SECItem,
@@ -80,16 +84,18 @@ pub trait SafeCertificateCompression {
 
     /// Certificate Compression encoding function
     /// If the implementation is not provided, we only copy the data
-    /// NB: If ENABLE_ENCODING is not set, the function pointer provided to NSS will be null
+    /// NB: If `ENABLE_ENCODING` is not set, the function pointer provided to NSS will be null
+    #[expect(clippy::must_use_candidate, reason = "Encoders are optional")]
     fn encode(data: &[u8]) -> Vec<u8> {
         data.to_vec()
     }
 
     /// Certificate Compression decoding function
+    #[must_use]
     fn decode(data: &[u8]) -> Vec<u8>;
 }
 
-/// The trait is responsible for calling SafeCertificateCompression encoding and decoding
+/// The trait is responsible for calling `SafeCertificateCompression` encoding and decoding
 /// functions using the NSS types
 unsafe impl<T: SafeCertificateCompression> UnsafeCertCompression for T {
     unsafe extern "C" fn decode_callback(
@@ -99,7 +105,7 @@ unsafe impl<T: SafeCertificateCompression> UnsafeCertCompression for T {
         used_len: *mut usize,
     ) -> ssl::SECStatus {
         unsafe {
-            match std::ptr::NonNull::new(input as *mut ssl::SECItem) {
+            match std::ptr::NonNull::new(input.cast_mut()) {
                 None => ssl::SECFailure,
                 Some(input) => {
                     if input.as_ref().data.is_null() || input.as_ref().len == 0 {
@@ -115,7 +121,7 @@ unsafe impl<T: SafeCertificateCompression> UnsafeCertCompression for T {
 
                     std::ptr::copy_nonoverlapping(decoded_bytes.as_ptr(), output, output_len);
                     *used_len = decoded_bytes.len();
-                    return ssl::SECSuccess;
+                    ssl::SECSuccess
                 }
             }
         }
@@ -126,7 +132,7 @@ unsafe impl<T: SafeCertificateCompression> UnsafeCertCompression for T {
         output: *mut ssl::SECItem,
     ) -> ssl::SECStatus {
         unsafe {
-            match std::ptr::NonNull::new(input as *mut ssl::SECItem) {
+            match std::ptr::NonNull::new(input.cast_mut()) {
                 None => ssl::SECFailure,
                 Some(input) => {
                     if input.as_ref().data.is_null() || input.as_ref().len == 0 {
@@ -139,7 +145,7 @@ unsafe impl<T: SafeCertificateCompression> UnsafeCertCompression for T {
                     p11::SECITEM_MakeItem(
                         null_mut(),
                         // p11::SECItem is the same as ssl::SECItem
-                        std::mem::transmute(output),
+                        output.cast::<p11::SECItemStr>(),
                         encoded_bytes.as_ptr(),
                         encoded_bytes.len().try_into().unwrap(),
                     )
@@ -679,7 +685,6 @@ impl SecretAgent {
     /// This returns an error if the certificate compression could not be established
     ///
     /// [RFC8879]: https://datatracker.ietf.org/doc/rfc8879/
-
     pub fn set_certificate_compression<T: SafeCertificateCompression>(&mut self) -> Res<()> {
         if T::ID == 0 {
             return Err(Error::InvalidCertificateCompressionID);
@@ -687,12 +692,9 @@ impl SecretAgent {
         let compressor: ssl::SSLCertificateCompressionAlgorithm =
             ssl::SSLCertificateCompressionAlgorithm {
                 id: T::ID,
+                #[expect(clippy::as_ptr_cast_mut, reason="requires to be const char")]
                 name: T::NAME.as_ptr() as *mut ::std::os::raw::c_char,
-                encode: if T::ENABLE_ENCODING {
-                    Some(<T as UnsafeCertCompression>::encode_callback)
-                } else {
-                    None
-                },
+                encode: T::ENABLE_ENCODING.then_some(<T as UnsafeCertCompression>::encode_callback),
                 decode: Some(<T as UnsafeCertCompression>::decode_callback),
             };
         unsafe { ssl::SSL_SetCertificateCompressionAlgorithm(self.fd, compressor) }
