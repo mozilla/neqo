@@ -5,9 +5,10 @@
 // except according to those terms.
 
 use neqo_crypto::{
-    generate_ech_keys, AuthenticationStatus, Client, Error, HandshakeState, SecretAgentPreInfo,
-    Server, ZeroRttCheckResult, ZeroRttChecker, TLS_AES_128_GCM_SHA256,
-    TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519, TLS_VERSION_1_3,
+    agent::SafeCertificateCompression, generate_ech_keys, AuthenticationStatus, Client, Error,
+    HandshakeState, SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,
+    TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
+    TLS_VERSION_1_3,
 };
 
 mod handshake;
@@ -534,4 +535,101 @@ fn ech_retry() {
     assert!(server.info().unwrap().ech_accepted());
     assert!(client.preinfo().unwrap().ech_accepted().unwrap());
     assert!(server.preinfo().unwrap().ech_accepted().unwrap());
+}
+
+#[test]
+fn connection_succeeds_when_server_and_client_support_cert_compr_copy() {
+    struct CopyCompression {}
+
+    // Implementation supports both encoder and decoder
+    impl SafeCertificateCompression for CopyCompression {
+        const ID: u16 = 0x4;
+        const NAME: &str = concat!("copy", "\0");
+        const ENABLE_ENCODING: bool = true;
+
+        fn encode(data: &[u8]) -> Vec<u8> {
+            data.to_vec()
+        }
+        fn decode(data: &[u8]) -> Vec<u8> {
+            data.to_vec()
+        }
+    }
+
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    client
+        .set_certificate_compression::<CopyCompression>()
+        .unwrap();
+    server
+        .set_certificate_compression::<CopyCompression>()
+        .unwrap();
+
+    connect(&mut client, &mut server);
+
+    assert!(client.state().is_connected());
+    assert!(server.state().is_connected());
+}
+
+struct CopyCompressionNoEncoder {}
+
+impl SafeCertificateCompression for CopyCompressionNoEncoder {
+    const ID: u16 = 0x4;
+    const NAME: &str = concat!("copy", "\0");
+
+    fn decode(data: &[u8]) -> Vec<u8> {
+        data.to_vec()
+    }
+}
+
+#[test]
+fn connection_succeeds_when_server_and_client_support_cert_compr_copy_without_encoder() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    client
+        .set_certificate_compression::<CopyCompressionNoEncoder>()
+        .unwrap();
+    server
+        .set_certificate_compression::<CopyCompressionNoEncoder>()
+        .unwrap();
+
+    connect(&mut client, &mut server);
+
+    assert!(client.state().is_connected());
+    assert!(server.state().is_connected());
+}
+
+#[test]
+fn connection_succeeds_when_only_server_support_cert_compr() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    server
+        .set_certificate_compression::<CopyCompressionNoEncoder>()
+        .unwrap();
+
+    connect(&mut client, &mut server);
+
+    assert!(client.state().is_connected());
+    assert!(server.state().is_connected());
+}
+
+#[test]
+fn connection_succeeds_when_only_client_support_cert_compr() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    client
+        .set_certificate_compression::<CopyCompressionNoEncoder>()
+        .unwrap();
+
+    connect(&mut client, &mut server);
+
+    assert!(client.state().is_connected());
+    assert!(server.state().is_connected());
 }

@@ -23,7 +23,7 @@ use neqo_common::{
     qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, IpTosEcn, Role,
 };
 use neqo_crypto::{
-    agent::{CertificateCompressor, CertificateInfo},
+    agent::{CertificateInfo, SafeCertificateCompression},
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
     PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttChecker,
 };
@@ -455,12 +455,8 @@ impl Connection {
             .server_enable_0rtt(Rc::clone(&self.tps), anti_replay, zero_rtt_checker)
     }
 
-    pub fn set_certificate_compression(
-        &mut self,
-        decoder: Box<dyn CertificateCompressor>,
-    ) -> Res<()> {
-        self.crypto.tls.set_certificate_compression(decoder)?;
-        Ok(())
+    pub fn set_certificate_compression<T: SafeCertificateCompression>(&mut self) -> Res<()> {
+        Ok(self.crypto.tls.set_certificate_compression::<T>()?)
     }
 
     /// # Errors
