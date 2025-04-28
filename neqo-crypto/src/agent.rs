@@ -31,7 +31,6 @@ pub use crate::{
     agentio::{as_c_void, Record, RecordList},
     cert::CertificateInfo,
 };
-
 use crate::{
     agentio::{AgentIo, METHODS},
     assert_initialized,
@@ -876,7 +875,7 @@ impl SecretAgent {
             let result =
                 secstatus_to_res(unsafe { ssl::SSL_AuthCertificateComplete(self.fd, err) });
             qdebug!("[{self}] SSL_AuthCertificateComplete: {result:?}");
-            // This should return ssl::SECSuccess, so don't use update_state().
+            // This should return SECSuccess, so don't use update_state().
             self.capture_error(result)?;
         }
 
