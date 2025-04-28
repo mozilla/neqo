@@ -80,7 +80,7 @@ pub trait SafeCertificateCompression {
 
     /// Certificate Compression encoding function
     /// If the implementation is not provided, we only copy the data
-    /// NB: If ENABLE_ENCODING is not set, the function pointer provided to NSS will be equal to null
+    /// NB: If ENABLE_ENCODING is not set, the function pointer provided to NSS will be null
     fn encode(data: &[u8]) -> Vec<u8> {
         data.to_vec()
     }
