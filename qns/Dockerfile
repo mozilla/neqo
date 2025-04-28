@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef@sha256:7322a275aae0104ea85f18d4c0bc7c433cab83b8a93a61850b7689df9b50de6c AS chef
+FROM lukemathwalker/cargo-chef@sha256:ca4454a0d7f0a78d1052295414692136d54986104eab9b2477d9df3cb466ed29 AS chef
 
 WORKDIR /app
 
