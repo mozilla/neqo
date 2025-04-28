@@ -50,11 +50,10 @@ use crate::{
     time::{Time, TimeHolder},
 };
 
-
 /// Private trait for Certificate Compression implementation
 /// # Safety
 ///
-/// Use `SafeCertCompression` to implement an encoder/decoder instead. 
+/// Use `SafeCertCompression` to implement an encoder/decoder instead.
 unsafe trait UnsafeCertCompression {
     unsafe extern "C" fn decode_callback(
         input: *const ssl::SECItem,
@@ -692,7 +691,7 @@ impl SecretAgent {
         let compressor: ssl::SSLCertificateCompressionAlgorithm =
             ssl::SSLCertificateCompressionAlgorithm {
                 id: T::ID,
-                #[expect(clippy::as_ptr_cast_mut, reason="requires to be const char")]
+                #[expect(clippy::as_ptr_cast_mut, reason = "requires to be const char")]
                 name: T::NAME.as_ptr() as *mut ::std::os::raw::c_char,
                 encode: T::ENABLE_ENCODING.then_some(<T as UnsafeCertCompression>::encode_callback),
                 decode: Some(<T as UnsafeCertCompression>::decode_callback),
