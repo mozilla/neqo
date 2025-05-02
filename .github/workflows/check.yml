@@ -72,7 +72,7 @@ jobs:
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} ${{ matrix.rust-toolchain == 'nightly' && 'cargo-careful, ' || '' }} cargo-nextest
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -98,6 +98,8 @@ jobs:
           # shellcheck disable=SC2086
           if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
             cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --locked --include-ffi --features ci --profile ci --codecov --output-path codecov.json
+          elif [ "${{ matrix.rust-toolchain }}" == "nightly" ]; then
+            cargo +${{ matrix.rust-toolchain }} careful nextest $BUILD_TYPE --locked --include-ffi --features ci --profile ci --codecov --output-path codecov.json
           else
             cargo nextest run $BUILD_TYPE --locked --features ci --profile ci
           fi
