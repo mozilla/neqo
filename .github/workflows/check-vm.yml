@@ -27,8 +27,8 @@ jobs:
         os: [
               freebsd,
               openbsd,
-              netbsd, # FIXME: NSS package is new enough, but test_fixture::fixture_init dies with `NssError { name: "SEC_ERROR_LEGACY_DATABASE", code: -8015, desc: "The certificate/key database is in an old, unsupported format." }`
-              solaris # FIXME: Re-enable once their NSS package is new enough.
+              # netbsd, # FIXME: NSS package is too old.
+              # solaris # FIXME: NSS package is too old.
             ]
     runs-on: ubuntu-24.04
 
@@ -76,7 +76,7 @@ jobs:
           prepare: | # This executes as root
             set -e
             # TODO: Is there a way to not pin the version of llvm? -z to pkg_add doesn't work.
-            pkg_add rust rust-clippy llvm-19.1.7p3 # rustup doesn't support OpenBSD at all
+            pkg_add rust rust-clippy llvm-19.1.7p3 nss pkgconf # rustup doesn't support OpenBSD at all
           run: | # This executes as user
             set -e
             # FIXME: We're only comparing the NSS minor version here.
