@@ -3632,23 +3632,22 @@ impl Connection {
     }
 
     fn log_packet(&self, meta: packet::MetaData, now: Instant) {
-        if !log::log_enabled!(log::Level::Debug) {
-            return;
+        if log::log_enabled!(log::Level::Debug) {
+            let mut s = String::new();
+            let mut d = Decoder::from(meta.payload());
+            while d.remaining() > 0 {
+                let Ok(f) = Frame::decode(&mut d) else {
+                    s.push_str(" [broken]...");
+                    break;
+                };
+                let x = f.dump();
+                if !x.is_empty() {
+                    _ = write!(&mut s, "\n  {} {}", meta.direction(), &x);
+                }
+            }
+            qdebug!("[{self}] {meta}{s}");
         }
 
-        let mut s = String::new();
-        let mut d = Decoder::from(meta.payload());
-        while d.remaining() > 0 {
-            let Ok(f) = Frame::decode(&mut d) else {
-                s.push_str(" [broken]...");
-                break;
-            };
-            let x = f.dump();
-            if !x.is_empty() {
-                _ = write!(&mut s, "\n  {} {}", meta.direction(), &x);
-            }
-        }
-        qdebug!("[{self}] {meta}{s}");
         qlog::packet_io(&self.qlog, meta, now);
     }
 }
