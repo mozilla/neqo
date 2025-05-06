@@ -125,6 +125,10 @@ pub struct QuicParameters {
     /// Whether to slice the SNI.
     pub no_sni_slicing: bool,
 
+    #[arg(long)]
+    /// Whether to add dummy packets before client Initial packets.
+    pub no_pre_init_noise: bool,
+
     #[arg(name = "preferred-address-v4", long)]
     /// An IPv4 address for the server preferred address.
     pub preferred_address_v4: Option<String>,
@@ -148,6 +152,7 @@ impl Default for QuicParameters {
             preferred_address_v4: None,
             preferred_address_v6: None,
             no_sni_slicing: false,
+            no_pre_init_noise: false,
         }
     }
 }
@@ -221,7 +226,8 @@ impl QuicParameters {
             .cc_algorithm(self.congestion_control)
             .pacing(!self.no_pacing)
             .pmtud(!self.no_pmtud)
-            .sni_slicing(!self.no_sni_slicing);
+            .sni_slicing(!self.no_sni_slicing)
+            .pre_init_noise(!self.no_pre_init_noise);
         params = if let Some(pa) = self.preferred_address() {
             params.preferred_address(pa)
         } else {
