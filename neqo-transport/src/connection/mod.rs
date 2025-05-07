@@ -27,7 +27,7 @@ use neqo_crypto::{
     HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
     Server, ZeroRttChecker, random, randomize,
 };
-use smallvec::{smallvec, SmallVec};
+use smallvec::SmallVec;
 use strum::IntoEnumIterator as _;
 
 use crate::{
@@ -88,10 +88,10 @@ pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, Transmissi
 /// handshake.  This is a hack, but a useful one.
 const EXTRA_INITIALS: usize = 4;
 
-/// Maximum number of dummy datagrams to send before Client Initial packets.
-const MAX_PRE_INIT_PKTS: usize = 1;
-/// Payload size range (in bytes) for pre-Initial packets.
-const PRE_INIT_PAYLOAD_LEN_RANGE: (usize, usize) = (1200, 1400);
+/// Maximum number of noise datagrams to send before Client Initial packets.
+const MAX_PRE_INIT_NOISE_PKTS: usize = 1;
+/// Payload size range (in bytes) for pre-Initial noise datagrams: to mimic real Initial packets.
+const PRE_INIT_NOISE_LEN_RANGE: RangeInclusive<usize> = RangeInclusive::new(1200, 1400);
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ZeroRttState {
@@ -358,8 +358,10 @@ impl Connection {
         );
         c.setup_handshake_path(&Rc::new(RefCell::new(path)), now);
 
-        // Generate a random number between 1 and the maximum number of pre-initial packets
-        c.pre_initial_pkts = (usize::from_ne_bytes(random::<1>()[0]) % MAX_PRE_INIT_PKTS) + 1;
+        if c.conn_params.pre_init_noise_enabled() {
+            // Generate a random number between 1 and the maximum number of pre-initial packets
+            c.pre_initial_noise_pkts = (usize::from(random::<1>()[0]) % MAX_PRE_INIT_NOISE_PKTS) + 1;
+        }
         
         Ok(c)
     }
@@ -447,7 +449,7 @@ impl Connection {
             conn_params,
             hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
             quic_datagrams,
-            pre_initial_pkts: 0,
+            pre_initial_noise_pkts: 0,
             #[cfg(test)]
             test_frame_writer: None,
         };
@@ -1154,20 +1156,23 @@ impl Connection {
         match (&self.state, self.role) {
             (State::Init, Role::Client) => {
                 // Before starting the client, send some noise
-                if self.conn_params.pre_init_noise_enabled() && self.pre_initial_pkts > 0 {
-                    self.pre_initial_pkts -= 1;
+                if self.pre_initial_noise_pkts > 0 {
                     if let Some(path) = self.paths.primary() {
-                        let v = usize::from_ne_bytes(random::<1>()[0]);
-                        let len = PRE_INIT_PAYLOAD_LEN_RANGE.0 + (v % (PRE_INIT_PAYLOAD_LEN_RANGE.1 - PRE_INIT_PAYLOAD_LEN_RANGE.0 + 1));
-                        let mut dummy_buf: SmallVec<[u8; PRE_INIT_PAYLOAD_LEN_RANGE.1]> = smallvec![0u8; len];
+                        // Choose a random payload size between the noise payload length range.
+                        let span = PRE_INIT_NOISE_LEN_RANGE.end() - PRE_INIT_NOISE_LEN_RANGE.start() + 1;
+                        let v = usize::from(random::<1>()[0]);
+                        let len  = PRE_INIT_NOISE_LEN_RANGE.start() + (v % span);
+
+                        let mut dummy_buf= vec![0u8; len];
                         randomize(&mut dummy_buf);
                         
                         let dg = Datagram::new(
                             path.borrow().local_address(),
                             path.borrow().remote_address(),
                             IpTos::default(),
-                            dummy_buf.into_vec(),
+                            dummy_buf,
                         );
+                        self.pre_initial_noise_pkts -= 1;
                         return Output::Datagram(dg);
                     }
                 }
