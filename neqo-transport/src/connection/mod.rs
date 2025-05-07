@@ -296,7 +296,7 @@ pub struct Connection {
     release_resumption_token_timer: Option<Instant>,
     conn_params: ConnectionParameters,
     hrtime: hrtime::Handle,
-    pre_initial_pkts: usize,
+    pre_initial_noise_pkts: usize,
 
     /// For testing purposes it is sometimes necessary to inject frames that wouldn't
     /// otherwise be sent, just to see how a connection handles them.  Inserting them
@@ -359,7 +359,7 @@ impl Connection {
         c.setup_handshake_path(&Rc::new(RefCell::new(path)), now);
 
         // Generate a random number between 1 and the maximum number of pre-initial packets
-        c.pre_initial_pkts = (random::<1>()[0] as usize % MAX_PRE_INIT_PKTS) + 1;
+        c.pre_initial_pkts = (usize::from_ne_bytes(random::<1>()[0]) % MAX_PRE_INIT_PKTS) + 1;
         
         Ok(c)
     }
@@ -1157,7 +1157,7 @@ impl Connection {
                 if self.conn_params.pre_init_noise_enabled() && self.pre_initial_pkts > 0 {
                     self.pre_initial_pkts -= 1;
                     if let Some(path) = self.paths.primary() {
-                        let v = random::<1>()[0] as usize;
+                        let v = usize::from_ne_bytes(random::<1>()[0]);
                         let len = PRE_INIT_PAYLOAD_LEN_RANGE.0 + (v % (PRE_INIT_PAYLOAD_LEN_RANGE.1 - PRE_INIT_PAYLOAD_LEN_RANGE.0 + 1));
                         let mut dummy_buf: SmallVec<[u8; PRE_INIT_PAYLOAD_LEN_RANGE.1]> = smallvec![0u8; len];
                         randomize(&mut dummy_buf);

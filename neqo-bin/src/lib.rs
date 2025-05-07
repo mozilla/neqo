@@ -126,7 +126,7 @@ pub struct QuicParameters {
     pub no_sni_slicing: bool,
 
     #[arg(long)]
-    /// Whether to add dummy packets before client Initial packets.
+    /// Whether to send random noise packets before client Initial packets.
     pub no_pre_init_noise: bool,
 
     #[arg(name = "preferred-address-v4", long)]
