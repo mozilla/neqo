@@ -392,3 +392,12 @@ jobs:
           name: ${{ github.workflow }}
           contents: results.md
           log-url: ${{ steps.export.outputs.artifact-url }}
+
+      - name: Fail on regression
+        run: |
+          if grep -q "Performance has regressed." results.txt; then
+            echo "Performance regression detected."
+            exit 1
+          else
+            echo "No performance regression detected."
+          fi
