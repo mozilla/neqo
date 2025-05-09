@@ -165,11 +165,12 @@ impl FrameReader {
         &mut self,
         stream_reader: &mut dyn StreamReader,
     ) -> Res<(Option<T>, bool)> {
+        let mut buf = [0; MAX_READ_SIZE];
         loop {
             let to_read = std::cmp::min(self.min_remaining(), MAX_READ_SIZE);
-            let mut buf = vec![0; to_read];
+            let buf = &mut buf[0..to_read];
             let (output, read, fin) = match stream_reader
-                .read_data(&mut buf)
+                .read_data(buf)
                 .map_err(|e| Error::map_stream_recv_errors(&e))?
             {
                 (0, f) => (None, false, f),
