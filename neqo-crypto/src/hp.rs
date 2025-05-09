@@ -99,7 +99,7 @@ impl HpKey {
                 c_uint::try_from(l.len())?,
                 mech,
                 key_size,
-                &mut secret,
+                &raw mut secret,
             )
         }?;
         let key = SymKey::from_ptr(secret).or(Err(Error::HkdfError))?;
@@ -156,7 +156,7 @@ impl HpKey {
                     PK11_CipherOp(
                         **context.borrow_mut(),
                         output.as_mut_ptr(),
-                        &mut output_len,
+                        &raw mut output_len,
                         c_int::try_from(output.len())?,
                         sample[..Self::SAMPLE_SIZE].as_ptr().cast(),
                         c_int::try_from(Self::SAMPLE_SIZE)?,
@@ -181,7 +181,7 @@ impl HpKey {
                         CK_MECHANISM_TYPE::from(CKM_CHACHA20),
                         addr_of_mut!(param_item),
                         output[..].as_mut_ptr(),
-                        &mut output_len,
+                        &raw mut output_len,
                         c_uint::try_from(output.len())?,
                         [0; Self::SAMPLE_SIZE].as_ptr(),
                         c_uint::try_from(Self::SAMPLE_SIZE)?,
