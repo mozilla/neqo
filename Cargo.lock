@@ -797,9 +797,9 @@ checksum = "903970ae2f248d7275214cf8f387f8ba0c4ea7e3d87a320e85493db60ce28616"
 
 [[package]]
 name = "mtu"
-version = "0.2.7"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ed872b029c845797879cabc6d5738a8126ea54092f07c5412a3af5345c4f56f"
+checksum = "04e61c20148fe6735f607556e139fba114fb8773dc6f61e1bcd24f18f793de2e"
 dependencies = [
  "bindgen",
  "cfg_aliases",
