@@ -99,7 +99,8 @@ jobs:
           if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
             cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --locked --include-ffi --features ci --profile ci --codecov --output-path codecov.json
           elif [ "${{ matrix.rust-toolchain }}" == "nightly" ]; then
-            cargo +${{ matrix.rust-toolchain }} careful nextest $BUILD_TYPE --locked --include-ffi --features ci --profile ci --codecov --output-path codecov.json
+            # cargo-careful nextest doesn't support --locked?
+            cargo +${{ matrix.rust-toolchain }} careful nextest $BUILD_TYPE --include-ffi --features ci --profile ci --codecov --output-path codecov.json
           else
             cargo nextest run $BUILD_TYPE --locked --features ci --profile ci
           fi
