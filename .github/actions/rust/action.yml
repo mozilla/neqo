@@ -109,4 +109,12 @@ runs:
         GITHUB_TOKEN: ${{ inputs.token }}
         TOOLS: ${{ inputs.tools }}
       # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
-      run: cargo quickinstall --force $(echo $TOOLS | tr -d ",")
+      run: |
+        for tool in $(echo $TOOLS | tr -d ","); do
+          if [ "$tool" == "samply" ]; then
+            # FIXME: Install from source for unreleased features.
+            cargo install --git https://github.com/mstange/samply samply
+          else
+            cargo quickinstall --force "$tool"
+          fi
+        done
