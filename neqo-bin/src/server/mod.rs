@@ -19,7 +19,8 @@
 use std::{
     cell::RefCell,
     fmt::{self, Display},
-    fs, io,
+    fs,
+    io::{self},
     net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     pin::Pin,
@@ -39,7 +40,7 @@ use neqo_crypto::{
     init_db, AntiReplay, Cipher,
 };
 use neqo_transport::{Output, RandomConnectionIdGenerator, Version};
-use neqo_udp::RecvBuf;
+use neqo_udp::{RecvBuf, SendBatch};
 use tokio::time::Sleep;
 
 use crate::SharedArgs;
@@ -212,6 +213,7 @@ pub struct ServerRunner {
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<(SocketAddr, crate::udp::Socket)>,
     recv_buf: RecvBuf,
+    batch: SendBatch,
 }
 
 impl ServerRunner {
@@ -227,6 +229,7 @@ impl ServerRunner {
             timeout: None,
             sockets,
             recv_buf: RecvBuf::new(),
+            batch: SendBatch::with_capacity(u16::MAX.into()),
         }
     }
 
@@ -249,35 +252,70 @@ impl ServerRunner {
         server: &mut Box<dyn HttpServer>,
         timeout: &mut Option<Pin<Box<Sleep>>>,
         sockets: &mut [(SocketAddr, crate::udp::Socket)],
+        batch: &mut SendBatch,
         now: &dyn Fn() -> Instant,
         mut input_dgram: Option<Datagram<&mut [u8]>>,
     ) -> Result<(), io::Error> {
-        loop {
-            match server.process(input_dgram.take(), now()) {
-                Output::Datagram(dgram) => {
-                    let socket = Self::find_socket(sockets, dgram.source());
-                    loop {
-                        // Optimistically attempt sending datagram. In case the
-                        // OS buffer is full, wait till socket is writable then
-                        // try again.
-                        match socket.send(&dgram) {
-                            Ok(()) => break,
-                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                                socket.writable().await?;
-                                // Now try again.
+        let now = now();
+        let mut exit = false; // Should we exit the loop on the next interation?
+        let mut send = false; // Should we send on the next loop interation?
+        let mut maybe_gso_failed = false;
+
+        'outer: loop {
+            if send || exit {
+                if let Some(meta) = batch.meta() {
+                    // Send all collected datagrams as GSO-sized chunks.
+                    let socket = Self::find_socket(sockets, meta.source());
+                    for gso_chunk in batch.data().chunks(socket.max_gso_segments() * meta.len()) {
+                        // Optimistically attempt sending datagram. In case the OS
+                        // buffer is full, wait till socket is writable then try again.
+                        loop {
+                            match socket.send(meta, gso_chunk) {
+                                Ok(()) => break,
+                                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                    socket.writable().await?;
+                                    // Now try again.
+                                }
+                                e @ Err(_) => {
+                                    // This can happen if the interface does not support GSO.
+                                    // quinn-udp will set `max_gso_segments` to 1 in this case.
+                                    if !maybe_gso_failed && socket.max_gso_segments() == 1 {
+                                        // Retry this once.
+                                        maybe_gso_failed = true;
+                                        qdebug!("GSO failed, retrying without");
+                                        continue 'outer;
+                                    }
+                                    return e;
+                                }
                             }
-                            e @ Err(_) => return e,
                         }
                     }
+                    batch.switch_to_next();
+                }
+            }
+
+            if exit {
+                debug_assert!(batch.all_empty());
+                break;
+            }
+
+            exit = match server.process(input_dgram.take(), now) {
+                Output::Datagram(dgram) => {
+                    send = batch.push(dgram);
+                    false
                 }
                 Output::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
                     *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
-                    break;
+                    true
                 }
-                Output::None => break,
-            }
+                Output::None => {
+                    qdebug!("Output::None");
+                    true
+                }
+            };
         }
+
         Ok(())
     }
 
@@ -293,6 +331,7 @@ impl ServerRunner {
                     &mut self.server,
                     &mut self.timeout,
                     &mut self.sockets,
+                    &mut self.batch,
                     &self.now,
                     Some(input_dgram),
                 )
@@ -308,6 +347,7 @@ impl ServerRunner {
             &mut self.server,
             &mut self.timeout,
             &mut self.sockets,
+            &mut self.batch,
             &self.now,
             None,
         )
