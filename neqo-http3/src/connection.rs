@@ -13,6 +13,7 @@ use neqo_transport::{
     StreamType, ZeroRttState,
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+use strum::Display;
 
 use crate::{
     client_events::Http3ClientEvents,
@@ -48,18 +49,10 @@ where
     pub priority: Priority,
 }
 
+#[derive(Display)]
 pub enum WebTransportSessionAcceptAction {
     Accept,
     Reject(Vec<Header>),
-}
-
-impl ::std::fmt::Display for WebTransportSessionAcceptAction {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        match self {
-            Self::Accept => f.write_str("Accept"),
-            Self::Reject(_) => f.write_str("Reject"),
-        }
-    }
 }
 
 #[derive(Debug)]

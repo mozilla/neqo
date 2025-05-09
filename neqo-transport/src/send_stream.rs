@@ -6,11 +6,15 @@
 
 // Buffering data to send until it is acked.
 
+#![allow(
+    clippy::module_name_repetitions,
+    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
+)]
+
 use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
     collections::{btree_map::Entry, BTreeMap, VecDeque},
-    hash::{Hash, Hasher},
     mem,
     num::NonZeroUsize,
     ops::Add,
@@ -46,7 +50,7 @@ use crate::{
 pub const MAX_SEND_BUFFER_SIZE: usize = 10 * 1024 * 1024;
 
 /// The priority that is assigned to sending data for the stream.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub enum TransmissionPriority {
     /// This stream is more important than the functioning of the connection.
     /// Don't use this priority unless the stream really is that important.
@@ -61,40 +65,10 @@ pub enum TransmissionPriority {
     /// connection operation.  They go ahead of session tickets though.
     High,
     /// The default priority.
+    #[default]
     Normal,
     /// Low priority streams get sent last.
     Low,
-}
-
-impl Default for TransmissionPriority {
-    fn default() -> Self {
-        Self::Normal
-    }
-}
-
-impl PartialOrd for TransmissionPriority {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for TransmissionPriority {
-    fn cmp(&self, other: &Self) -> Ordering {
-        if self == other {
-            return Ordering::Equal;
-        }
-        match (self, other) {
-            (Self::Critical, _) => Ordering::Greater,
-            (_, Self::Critical) => Ordering::Less,
-            (Self::Important, _) => Ordering::Greater,
-            (_, Self::Important) => Ordering::Less,
-            (Self::High, _) => Ordering::Greater,
-            (_, Self::High) => Ordering::Less,
-            (Self::Normal, _) => Ordering::Greater,
-            (_, Self::Normal) => Ordering::Less,
-            _ => unreachable!(),
-        }
-    }
 }
 
 impl Add<RetransmissionPriority> for TransmissionPriority {
@@ -658,19 +632,8 @@ impl SendStreamState {
         }
     }
 
-    const fn name(&self) -> &str {
-        match self {
-            Self::Ready { .. } => "Ready",
-            Self::Send { .. } => "Send",
-            Self::DataSent { .. } => "DataSent",
-            Self::DataRecvd { .. } => "DataRecvd",
-            Self::ResetSent { .. } => "ResetSent",
-            Self::ResetRecvd { .. } => "ResetRecvd",
-        }
-    }
-
     fn transition(&mut self, new_state: Self) {
-        qtrace!("SendStream state {} -> {}", self.name(), new_state.name());
+        qtrace!("SendStream state {:?} -> {:?}", self, new_state);
         *self = new_state;
     }
 }
@@ -734,19 +697,6 @@ pub struct SendStream {
     fair: bool,
     writable_event_low_watermark: NonZeroUsize,
 }
-
-impl Hash for SendStream {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.stream_id.hash(state);
-    }
-}
-
-impl PartialEq for SendStream {
-    fn eq(&self, other: &Self) -> bool {
-        self.stream_id == other.stream_id
-    }
-}
-impl Eq for SendStream {}
 
 impl SendStream {
     pub fn new(
@@ -1040,7 +990,7 @@ impl SendStream {
             | SendStreamState::Send { .. }
             | SendStreamState::DataSent { .. }
             | SendStreamState::DataRecvd { .. } => {
-                qtrace!("[{self}] Reset acked while in {} state?", self.state.name());
+                qtrace!("[{self}] Reset acked while in {:?} state?", self.state);
             }
             SendStreamState::ResetSent {
                 final_retired,
@@ -1189,10 +1139,7 @@ impl SendStream {
                     });
                 }
             }
-            _ => qtrace!(
-                "[{self}] mark_as_acked called from state {}",
-                self.state.name()
-            ),
+            _ => qtrace!("[{self}] mark_as_acked called from state {:?}", self.state),
         }
     }
 

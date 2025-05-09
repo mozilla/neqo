@@ -51,8 +51,6 @@ impl PartialEq for StreamHandler {
     }
 }
 
-impl Eq for StreamHandler {}
-
 impl StreamHandler {
     pub const fn stream_id(&self) -> StreamId {
         self.stream_info.stream_id()
@@ -404,8 +402,6 @@ impl PartialEq for WebTransportRequest {
         self.stream_handler == other.stream_handler
     }
 }
-
-impl Eq for WebTransportRequest {}
 
 #[derive(Debug, Clone)]
 pub enum WebTransportServerEvent {

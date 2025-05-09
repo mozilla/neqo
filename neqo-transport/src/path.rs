@@ -309,14 +309,10 @@ impl Paths {
             if p.borrow_mut().path_response(response, now, stats) {
                 // The response was accepted.  If this path is one we intend
                 // to migrate to, then migrate.
-                if self
+                if let Some(primary) = self
                     .migration_target
-                    .as_ref()
-                    .is_some_and(|target| Rc::ptr_eq(target, p))
+                    .take_if(|target| Rc::ptr_eq(target, p))
                 {
-                    let Some(primary) = self.migration_target.take() else {
-                        break;
-                    };
                     drop(self.select_primary(&primary, now));
                     return true;
                 }
@@ -409,6 +405,12 @@ impl Paths {
     pub fn acked_ack_frequency(&self, acked: &AckRate) {
         if let Some(path) = self.primary() {
             path.borrow_mut().acked_ack_frequency(acked);
+        }
+    }
+
+    pub fn acked_ecn(&self) {
+        if let Some(path) = self.primary() {
+            path.borrow_mut().acked_ecn();
         }
     }
 
@@ -828,6 +830,10 @@ impl Path {
 
     pub fn lost_ack_frequency(&mut self, lost: &AckRate) {
         self.rtt.frame_lost(lost);
+    }
+
+    pub fn acked_ecn(&mut self) {
+        self.ecn_info.acked_ecn();
     }
 
     pub fn lost_ecn(&mut self, pt: PacketType, stats: &mut Stats) {
