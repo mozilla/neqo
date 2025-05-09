@@ -203,7 +203,7 @@ fn pto_initial() {
     assert_eq!(delay, INITIAL_PTO * 3);
 }
 
-/// A complete handshake that involves a PTO in the Handshake space.
+/// A complete handshake that involves two PTOs in the Handshake space.
 #[test]
 fn pto_handshake_complete() {
     const HALF_RTT: Duration = Duration::from_millis(10);
@@ -235,12 +235,15 @@ fn pto_handshake_complete() {
 
     now += HALF_RTT;
     let pkt = client.process(pkt, now).dgram();
-    assert_handshake(pkt.as_ref().unwrap());
+    let (initial, handshake) = split_datagram(&pkt.clone().unwrap());
+    assert_initial(&initial, false);
+    assert_handshake(handshake.as_ref().unwrap());
 
     let cb = client.process_output(now).callback();
     // The client now has a single RTT estimate (20ms), so
     // the handshake PTO is set based on that.
-    assert_eq!(cb, HALF_RTT * 6);
+    let pto = HALF_RTT * 6;
+    assert_eq!(cb, pto);
 
     now += HALF_RTT;
     let pkt = server.process(pkt, now).dgram();
@@ -255,7 +258,7 @@ fn pto_handshake_complete() {
     assert_eq!(*client.state(), State::Connected);
 
     let cb = client.process_output(now).callback();
-    assert_eq!(cb, HALF_RTT * 6);
+    assert_eq!(cb, pto);
 
     let mut pto_counts = [0; MAX_PTO_COUNTS];
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
@@ -263,19 +266,24 @@ fn pto_handshake_complete() {
     // Wait for PTO to expire and resend a handshake packet.
     // Wait long enough that the 1-RTT PTO also fires.
     qdebug!("---- client: PTO");
-    now += HALF_RTT * 6;
+    now += pto;
     let pkt2 = client.process_output(now).dgram();
     assert_handshake(pkt2.as_ref().unwrap());
 
     pto_counts[0] = 1;
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
+    // PTO has been doubled.
+    let pto = 2 * pto;
+    let cb = client.process_output(now).callback();
+    assert_eq!(cb, pto);
+
     // Get a second PTO packet.
     // Add some application data to this datagram, then split the 1-RTT off.
     // We'll use that packet to force the server to acknowledge 1-RTT.
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
     client.stream_close_send(stream_id).unwrap();
-    now += HALF_RTT * 6;
+    now += pto;
     let pkt3 = client.process_output(now).dgram();
     assert_handshake(pkt3.as_ref().unwrap());
     let (pkt3_hs, pkt3_1rtt) = split_datagram(&pkt3.unwrap());
@@ -283,10 +291,14 @@ fn pto_handshake_complete() {
     assert!(pkt3_1rtt.is_some());
 
     // PTO has been doubled.
+    let pto = pto * 2;
     let cb = client.process_output(now).callback();
-    assert_eq!(cb, HALF_RTT * 12);
+    assert_eq!(cb, pto);
 
-    // We still have only a single PTO
+    // Not one but two PTOs in a row, thus resetting first bit and increasing
+    // second bit.
+    pto_counts[0] = 0;
+    pto_counts[1] = 1;
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
     qdebug!("---- server: receive FIN and send ACK");
@@ -325,8 +337,9 @@ fn pto_handshake_complete() {
     now += HALF_RTT;
 
     // Let the client receive the ACK.
-    // It should now be wait to acknowledge the HANDSHAKE_DONE.
-    let cb = client.process(ack, now).callback();
+    // The client now waits in order to delay its ACK of the HANDSHAKE_DONE.
+    let _retransmissions = client.process(ack, now);
+    let cb = client.process_output(now).callback();
     // The default ack delay is the RTT divided by the default ACK ratio of 4.
     let expected_ack_delay = HALF_RTT * 2 / 4;
     assert_eq!(cb, expected_ack_delay);

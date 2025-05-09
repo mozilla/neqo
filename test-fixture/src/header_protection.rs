@@ -4,6 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(
+    clippy::module_name_repetitions,
+    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
+)]
 #![expect(clippy::missing_panics_doc, reason = "This is test code.")]
 
 use std::ops::Range;
