@@ -14,6 +14,8 @@ use crate::{
     CloseType, Error, Http3StreamType, PushId, ReceiveOutput, RecvStream, Res, Stream,
 };
 
+const MAX_READ_SIZE: usize = 4096;
+
 pub const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
 pub const WEBTRANSPORT_UNI_STREAM: u64 = 0x54;
 pub const WEBTRANSPORT_STREAM: u64 = 0x41;
@@ -108,9 +110,10 @@ impl NewStreamHeadReader {
             reader, stream_id, ..
         } = self
         {
+            let mut buf = [0; MAX_READ_SIZE];
             loop {
-                let to_read = reader.min_remaining();
-                let mut buf = vec![0; to_read];
+                let to_read = std::cmp::min(reader.min_remaining(), MAX_READ_SIZE);
+                let buf = &mut buf[0..to_read];
                 match conn.stream_recv(*stream_id, &mut buf[..])? {
                     (0, f) => return Ok((None, f)),
                     (amount, f) => {

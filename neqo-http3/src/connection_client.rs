@@ -2735,11 +2735,11 @@ mod tests {
 
         // check request body is received.
         // Then send a response.
+        let mut buf = vec![1_u8; INITIAL_RECV_WINDOW_SIZE];
         while let Some(e) = server.conn.next_event() {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read the DATA frame.
-                    let mut buf = vec![1_u8; INITIAL_RECV_WINDOW_SIZE];
                     let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
                     assert!(fin);
                     assert_eq!(
@@ -2762,6 +2762,7 @@ mod tests {
                     server.conn.stream_close_send(stream_id).unwrap();
                 }
             }
+            buf.clear();
         }
 
         read_response(&mut client, &mut server.conn, request_stream_id);
