@@ -118,6 +118,11 @@ experimental_api!(SSL_DestroyResumptionTokenInfo(
     info: *mut SSLResumptionTokenInfo,
 ));
 
+experimental_api!(SSL_SetCertificateCompressionAlgorithm(
+    fd: *mut PRFileDesc,
+    t: SSLCertificateCompressionAlgorithm,
+));
+
 #[cfg(test)]
 mod tests {
     use super::{SSL_GetNumImplementedCiphers, SSL_NumImplementedCiphers};
