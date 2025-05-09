@@ -96,6 +96,8 @@ pub struct ConnectionParameters {
     pmtud_iface_mtu: bool,
     /// Whether the connection should use SNI slicing.
     sni_slicing: bool,
+    /// Whether the connection should enable pre-Initial noise.
+    pre_init_noise: bool,
     /// Whether to enable mlkem768nistp256-sha256.
     mlkem: bool,
 }
@@ -128,6 +130,7 @@ impl Default for ConnectionParameters {
             pmtud_iface_mtu: true,
             sni_slicing: true,
             mlkem: true,
+            pre_init_noise: true,
         }
     }
 }
@@ -407,6 +410,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn sni_slicing(mut self, sni_slicing: bool) -> Self {
         self.sni_slicing = sni_slicing;
+        self
+    }
+
+    #[must_use]
+    pub const fn pre_init_noise_enabled(&self) -> bool {
+        self.pre_init_noise
+    }
+
+    #[must_use]
+    pub const fn pre_init_noise(mut self, pre_init_noise: bool) -> Self {
+        self.pre_init_noise = pre_init_noise;
         self
     }
 
