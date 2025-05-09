@@ -31,7 +31,7 @@ use crate::{
     cid::{ConnectionId, ConnectionIdGenerator, ConnectionIdRef},
     connection::{Connection, Output, State},
     packet::{PacketBuilder, PacketType, PublicPacket, MIN_INITIAL_PACKET_SIZE},
-    ConnectionParameters, Res, Version,
+    ConnectionParameters, OutputTrain, Res, Version,
 };
 
 /// A `ServerZeroRttChecker` is a simple wrapper around a single checker.
@@ -353,7 +353,8 @@ impl Server {
         &mut self,
         mut dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
-    ) -> Output {
+        max_datagrams: usize,
+    ) -> OutputTrain {
         qtrace!("Process datagram: {}", hex(&dgram[..]));
 
         // This is only looking at the first packet header in the datagram.
@@ -364,7 +365,7 @@ impl Server {
         let res = PublicPacket::decode(&mut dgram[..], self.cid_generator.borrow().as_decoder());
         let Ok((packet, _remainder)) = res else {
             qtrace!("[{self}] Discarding {dgram:?}");
-            return Output::None;
+            return OutputTrain::None;
         };
 
         // Finding an existing connection. Should be the most common case.
@@ -373,13 +374,15 @@ impl Server {
             .iter_mut()
             .find(|c| c.borrow().is_valid_local_cid(packet.dcid()))
         {
-            return c.borrow_mut().process(Some(dgram), now);
+            return c
+                .borrow_mut()
+                .process_train(Some(dgram), now, max_datagrams);
         }
 
         if packet.packet_type() == PacketType::Short {
             // TODO send a stateless reset here.
             qtrace!("[{self}] Short header packet for an unknown connection");
-            return Output::None;
+            return OutputTrain::None;
         }
 
         if packet.packet_type() == PacketType::OtherVersion
@@ -392,7 +395,7 @@ impl Server {
         {
             if len < MIN_INITIAL_PACKET_SIZE {
                 qdebug!("[{self}] Unsupported version: too short");
-                return Output::None;
+                return OutputTrain::None;
             }
 
             qdebug!("[{self}] Unsupported version: {:x}", packet.wire_version());
@@ -419,55 +422,55 @@ impl Server {
                 now,
             );
 
-            return Output::Datagram(Datagram::new(
-                dgram.destination(),
-                dgram.source(),
-                IpTos::default(),
-                vn,
-            ));
+            return OutputTrain::Datagram(
+                Datagram::new(dgram.destination(), dgram.source(), IpTos::default(), vn).into(),
+            );
         }
 
         match packet.packet_type() {
             PacketType::Initial => {
                 if len < MIN_INITIAL_PACKET_SIZE {
                     qdebug!("[{self}] Drop initial: too short");
-                    return Output::None;
+                    return OutputTrain::None;
                 }
                 // Copy values from `packet` because they are currently still borrowing from
                 // `dgram`.
                 let initial = InitialDetails::new(&packet);
-                self.handle_initial(initial, dgram, now)
+                self.handle_initial(initial, dgram, now).into()
             }
             PacketType::ZeroRtt => {
                 let dcid = ConnectionId::from(packet.dcid());
                 qdebug!("[{self}] Dropping 0-RTT for unknown connection {dcid}");
-                Output::None
+                OutputTrain::None
             }
             PacketType::OtherVersion => unreachable!(),
             _ => {
                 qtrace!("[{self}] Not an initial packet");
-                Output::None
+                OutputTrain::None
             }
         }
     }
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
-    fn process_next_output(&mut self, now: Instant) -> Output {
+    fn process_next_output(&mut self, now: Instant, max_datagrams: usize) -> OutputTrain {
         let mut callback = None;
 
         for connection in &mut self.connections {
-            match connection.borrow_mut().process_output(now) {
-                Output::None => {}
-                d @ Output::Datagram(_) => return d,
-                Output::Callback(next) => match callback {
+            match connection
+                .borrow_mut()
+                .process_output_train(now, max_datagrams)
+            {
+                OutputTrain::None => {}
+                d @ OutputTrain::Datagram(_) => return d,
+                OutputTrain::Callback(next) => match callback {
                     Some(previous) => callback = Some(min(previous, next)),
                     None => callback = Some(next),
                 },
             }
         }
 
-        callback.map_or(Output::None, Output::Callback)
+        callback.map_or(OutputTrain::None, OutputTrain::Callback)
     }
 
     /// Short-hand for [`Server::process`] without an input datagram.
@@ -482,9 +485,20 @@ impl Server {
         dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
         now: Instant,
     ) -> Output {
+        self.process_train(dgram, now, 1).try_into().expect("TODO")
+    }
+
+    pub fn process_train(
+        &mut self,
+        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        now: Instant,
+        max_datagrams: usize,
+    ) -> OutputTrain {
         let out = dgram
-            .map_or(Output::None, |d| self.process_input(d, now))
-            .or_else(|| self.process_next_output(now));
+            .map_or(OutputTrain::None, |d| {
+                self.process_input(d, now, max_datagrams)
+            })
+            .or_else(|| self.process_next_output(now, max_datagrams));
 
         // Clean-up closed connections.
         self.connections
