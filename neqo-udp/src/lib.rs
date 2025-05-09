@@ -294,7 +294,10 @@ mod tests {
 
     /// Expect [`Socket::recv`] to handle multiple [`Datagram`]s on GRO read.
     #[test]
-    #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), ignore)]
+    #[cfg_attr(
+        not(any(target_os = "linux", target_os = "windows")),
+        ignore = "GRO not available"
+    )]
     fn many_datagrams_through_gro() -> Result<(), io::Error> {
         const SEGMENT_SIZE: usize = 128;
 
