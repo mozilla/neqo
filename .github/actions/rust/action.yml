@@ -21,16 +21,6 @@ inputs:
 runs:
   using: composite
   steps:
-    # TODO: Remove once https://github.com/dtolnay/rust-toolchain/issues/143 is fixed.
-    # See https://github.com/actions/partner-runner-images/issues/77#issuecomment-2816803368
-    - name: Install rustup (Windows ARM)
-      if: ${{ runner.os == 'Windows' && runner.arch == 'ARM64' && runner.environment == 'github-hosted' }}
-      shell: bash
-      run: |
-          curl -LOs https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe
-          ./rustup-init.exe -y --default-toolchain none --no-modify-path
-          echo "$USERPROFILE/.cargo/bin" >> "$GITHUB_PATH"
-
     - name: Install Rust
       uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
       with:
