@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use neqo_crypto::{
-    agent::SafeCertificateCompression, generate_ech_keys, AuthenticationStatus, Client, Error,
+    agent::CertificateCompression, generate_ech_keys, AuthenticationStatus, Client, Error,
     HandshakeState, SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,
     TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
     TLS_VERSION_1_3,
@@ -542,7 +542,7 @@ fn connection_succeeds_when_server_and_client_support_cert_compr_copy() {
     struct CopyCompression {}
 
     // Implementation supports both encoder and decoder
-    impl SafeCertificateCompression for CopyCompression {
+    impl CertificateCompression for CopyCompression {
         const ID: u16 = 0x4;
         const NAME: &str = concat!("copy", "\0");
         const ENABLE_ENCODING: bool = true;
@@ -574,7 +574,7 @@ fn connection_succeeds_when_server_and_client_support_cert_compr_copy() {
 
 struct CopyCompressionNoEncoder {}
 
-impl SafeCertificateCompression for CopyCompressionNoEncoder {
+impl CertificateCompression for CopyCompressionNoEncoder {
     const ID: u16 = 0x4;
     const NAME: &str = concat!("copy", "\0");
 

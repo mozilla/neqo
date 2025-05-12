@@ -70,7 +70,7 @@ unsafe trait UnsafeCertCompression {
 
 /// The trait is used to represent a certificate compression data structure
 /// Used in order to enable Certificate Compression extension during TLS connection
-pub trait SafeCertificateCompression {
+pub trait CertificateCompression {
     /// Certificate Compression identifier as in RFC8879
     const ID: u16;
     /// Certification Compression name (used only for logging/debugging)
@@ -94,9 +94,9 @@ pub trait SafeCertificateCompression {
     fn decode(data: &[u8]) -> Vec<u8>;
 }
 
-/// The trait is responsible for calling `SafeCertificateCompression` encoding and decoding
+/// The trait is responsible for calling `CertificateCompression` encoding and decoding
 /// functions using the NSS types
-unsafe impl<T: SafeCertificateCompression> UnsafeCertCompression for T {
+unsafe impl<T: CertificateCompression> UnsafeCertCompression for T {
     unsafe extern "C" fn decode_callback(
         input: *const ssl::SECItem,
         output: *mut ::std::os::raw::c_uchar,
@@ -684,7 +684,7 @@ impl SecretAgent {
     /// This returns an error if the certificate compression could not be established
     ///
     /// [RFC8879]: https://datatracker.ietf.org/doc/rfc8879/
-    pub fn set_certificate_compression<T: SafeCertificateCompression>(&mut self) -> Res<()> {
+    pub fn set_certificate_compression<T: CertificateCompression>(&mut self) -> Res<()> {
         if T::ID == 0 {
             return Err(Error::InvalidCertificateCompressionID);
         }
