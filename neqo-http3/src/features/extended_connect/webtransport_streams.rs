@@ -25,6 +25,7 @@ pub struct WebTransportRecvStream {
     session: Rc<RefCell<WebTransportSession>>,
     session_id: StreamId,
     fin: bool,
+    stream_info: Http3StreamInfo,
 }
 
 impl WebTransportRecvStream {
@@ -40,11 +41,12 @@ impl WebTransportRecvStream {
             session_id,
             session,
             fin: false,
+            stream_info: Http3StreamInfo::new(stream_id, Http3StreamType::WebTransport(session_id)),
         }
     }
 
-    fn get_info(&self) -> Http3StreamInfo {
-        Http3StreamInfo::new(self.stream_id, self.stream_type())
+    const fn get_info(&self) -> &Http3StreamInfo {
+        &self.stream_info
     }
 }
 
@@ -56,13 +58,13 @@ impl Stream for WebTransportRecvStream {
 
 impl RecvStream for WebTransportRecvStream {
     fn receive(&mut self, _conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
-        self.events.data_readable(&self.get_info());
+        self.events.data_readable(self.get_info());
         Ok((ReceiveOutput::NoOutput, false))
     }
 
     fn reset(&mut self, close_type: CloseType) -> Res<()> {
         if !matches!(close_type, CloseType::ResetApp(_)) {
-            self.events.recv_closed(&self.get_info(), close_type);
+            self.events.recv_closed(self.get_info(), close_type);
         }
         self.session.borrow_mut().remove_recv_stream(self.stream_id);
         Ok(())
@@ -121,6 +123,7 @@ pub struct WebTransportSendStream {
     events: Box<dyn SendStreamEvents>,
     session: Rc<RefCell<WebTransportSession>>,
     session_id: StreamId,
+    stream_info: Http3StreamInfo,
 }
 
 impl WebTransportSendStream {
@@ -151,17 +154,18 @@ impl WebTransportSendStream {
             events,
             session_id,
             session,
+            stream_info: Http3StreamInfo::new(stream_id, Http3StreamType::WebTransport(session_id)),
         }
     }
 
     fn set_done(&mut self, close_type: CloseType) {
         self.state = WebTransportSenderStreamState::Done;
-        self.events.send_closed(&self.get_info(), close_type);
+        self.events.send_closed(self.get_info(), close_type);
         self.session.borrow_mut().remove_send_stream(self.stream_id);
     }
 
-    fn get_info(&self) -> Http3StreamInfo {
-        Http3StreamInfo::new(self.stream_id, self.stream_type())
+    const fn get_info(&self) -> &Http3StreamInfo {
+        &self.stream_info
     }
 }
 
@@ -198,7 +202,7 @@ impl SendStream for WebTransportSendStream {
     }
 
     fn stream_writable(&self) {
-        self.events.data_writable(&self.get_info());
+        self.events.data_writable(self.get_info());
     }
 
     fn done(&self) -> bool {
