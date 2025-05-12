@@ -140,7 +140,9 @@ unsafe impl<T: CertificateCompression> UnsafeCertCompression for T {
 
                     let bytes_to_encode = null_safe_slice(input.as_ref().data, input.as_ref().len);
                     let encoded_bytes = T::encode(bytes_to_encode);
-                    let Ok(encoded_len) = c_uint::try_from(encoded_bytes.len()) else { return ssl::SECFailure; };
+                    let Ok(encoded_len) = c_uint::try_from(encoded_bytes.len()) else {
+                        return ssl::SECFailure;
+                    };
 
                     p11::SECITEM_MakeItem(
                         null_mut(),
@@ -689,11 +691,14 @@ impl SecretAgent {
         if T::ID == 0 {
             return Err(Error::InvalidCertificateCompressionID);
         }
+
         let compressor: ssl::SSLCertificateCompressionAlgorithm =
             ssl::SSLCertificateCompressionAlgorithm {
                 id: T::ID,
-                #[expect(clippy::as_ptr_cast_mut, reason = "requires to be const char")]
-                name: T::NAME.as_ptr() as *mut ::std::os::raw::c_char,
+                name: CString::new(T::NAME)
+                    .expect("CString::new failed")
+                    .as_ptr()
+                    .cast_mut(),
                 encode: T::ENABLE_ENCODING.then_some(<T as UnsafeCertCompression>::encode_callback),
                 decode: Some(<T as UnsafeCertCompression>::decode_callback),
             };
