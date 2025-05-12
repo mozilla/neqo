@@ -140,13 +140,14 @@ unsafe impl<T: CertificateCompression> UnsafeCertCompression for T {
 
                     let bytes_to_encode = null_safe_slice(input.as_ref().data, input.as_ref().len);
                     let encoded_bytes = T::encode(bytes_to_encode);
+                    let Ok(encoded_len) = c_uint::try_from(encoded_bytes.len()) else { return ssl::SECFailure; };
 
                     p11::SECITEM_MakeItem(
                         null_mut(),
                         // p11::SECItem is the same as ssl::SECItem
                         output.cast::<p11::SECItemStr>(),
                         encoded_bytes.as_ptr(),
-                        encoded_bytes.len().try_into().unwrap(),
+                        encoded_len,
                     )
                 }
             }
