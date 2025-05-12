@@ -92,16 +92,15 @@ jobs:
           RUST_LOG: trace
           RUST_BACKTRACE: 1
           TOOLCHAIN: ${{ matrix.rust-toolchain }}
+          CAREFUL: ${{ matrix.rust-toolchain == 'nightly' && 'careful' || '' }}
         run: |
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
             cargo llvm-cov nextest $BUILD_TYPE --locked --include-ffi --features ci --profile ci --codecov --output-path codecov.json
-          elif [ "${{ matrix.rust-toolchain }}" == "nightly" ]; then
-            cargo careful nextest run $BUILD_TYPE --locked --features ci --profile ci
           else
-            cargo nextest run $BUILD_TYPE --locked --features ci --profile ci
+            cargo $CAREFUL nextest run $BUILD_TYPE --locked --features ci --profile ci
           fi
 
       - name: Run client/server transfer
