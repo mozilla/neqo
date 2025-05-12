@@ -111,9 +111,9 @@ unsafe impl<T: CertificateCompression> UnsafeCertCompression for T {
                         return ssl::SECFailure;
                     }
 
-                    let bytes_to_decode_ptr =
+                    let bytes_to_decode_slice =
                         null_safe_slice(input.as_ref().data, input.as_ref().len);
-                    let decoded_bytes = T::decode(bytes_to_decode_ptr);
+                    let decoded_bytes = T::decode(bytes_to_decode_slice);
                     if decoded_bytes.len() > output_len {
                         return ssl::SECFailure;
                     }
