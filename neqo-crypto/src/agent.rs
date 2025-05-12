@@ -84,7 +84,7 @@ pub trait CertificateCompression {
     /// Certificate Compression encoding function
     /// If the implementation is not provided, we only copy the data
     /// NB: If `ENABLE_ENCODING` is not set, the function pointer provided to NSS will be null
-    #[expect(clippy::must_use_candidate, reason = "Encoders are optional")]
+    #[must_use]
     fn encode(data: &[u8]) -> Vec<u8> {
         data.to_vec()
     }
