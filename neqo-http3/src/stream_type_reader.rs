@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::cmp::min;
+
 use neqo_common::{qtrace, Decoder, IncrementalDecoderUint, Role};
 use neqo_qpack::{decoder::QPACK_UNI_STREAM_TYPE_DECODER, encoder::QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::{Connection, StreamId, StreamType};
@@ -13,8 +15,6 @@ use crate::{
     frames::{hframe::HFrameType, reader::FrameDecoder, HFrame, H3_FRAME_TYPE_HEADERS},
     CloseType, Error, Http3StreamType, PushId, ReceiveOutput, RecvStream, Res, Stream,
 };
-
-const MAX_READ_SIZE: usize = 4096;
 
 pub const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
 pub const WEBTRANSPORT_UNI_STREAM: u64 = 0x54;
@@ -110,9 +110,10 @@ impl NewStreamHeadReader {
             reader, stream_id, ..
         } = self
         {
-            let mut buf = [0; MAX_READ_SIZE];
+            // This type only exists to read at most two varints (= 16 bytes) from the stream.
+            let mut buf = [0; 2 * size_of::<u64>()];
             loop {
-                let to_read = std::cmp::min(reader.min_remaining(), MAX_READ_SIZE);
+                let to_read = min(reader.min_remaining(), buf.len());
                 let buf = &mut buf[0..to_read];
                 match conn.stream_recv(*stream_id, &mut buf[..])? {
                     (0, f) => return Ok((None, f)),
