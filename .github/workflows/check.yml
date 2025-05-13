@@ -96,8 +96,8 @@ jobs:
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
-          if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
-            cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --locked --include-ffi --features ci --profile ci --codecov --output-path codecov.json
+          if [ "$TOOLCHAIN" == "stable" ]; then
+            cargo llvm-cov nextest $BUILD_TYPE --locked --include-ffi --features ci --profile ci --codecov --output-path codecov.json
           else
             cargo nextest run $BUILD_TYPE --locked --features ci --profile ci
           fi
@@ -155,7 +155,7 @@ jobs:
       - run: cargo update -w --locked
 
   bench:
-    # needs: [check]
+    needs: [check]
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' }}
     uses: ./.github/workflows/bench.yml
 
