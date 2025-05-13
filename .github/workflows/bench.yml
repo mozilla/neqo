@@ -197,9 +197,9 @@ jobs:
           sudo ip link set dev lo mtu "$MTU"
           mkdir binaries
           for server in neqo google msquic; do
-            cp "$(${server_cmd[$server]} | cut -f1 -d' ')" binaries/
+            echo cp "$(${server_cmd[$server]} | cut -f1 -d' ')" binaries/
             for client in neqo google msquic; do
-              cp "$(${client_cmd[$client]} | cut -f1 -d' ')" binaries/
+              echo cp "$(${client_cmd[$client]} | cut -f1 -d' ')" binaries/
               # Do not run msquic against google-quiche; the latter only supports H3.
               # Also, we are not interested in google as the server, or msquic as the client, except against themselves.
               if [[ "$client" == "google" && "$server" == "msquic" ||
