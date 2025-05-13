@@ -119,8 +119,10 @@ jobs:
         run: |
           sudo ip link set dev lo mtu "$MTU"
           export NSS_DB_PATH="./test-fixture/db"
+          mkdir binaries
           for BENCH in $BENCHES; do
             NAME=$(basename "$BENCH" | cut -d- -f1)
+            cp "$BENCH" binaries/
             # shellcheck disable=SC2086
             perf $PERF_OPT -o "$NAME.perf" \
               nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec "$BENCH" -- --bench --noplot | tee -a results.txt
@@ -195,7 +197,6 @@ jobs:
 
           # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
           sudo ip link set dev lo mtu "$MTU"
-          mkdir binaries
           for server in neqo google msquic; do
             cp "$(${server_cmd[$server]} | cut -f1 -d' ')" binaries/
             for client in neqo google msquic; do
