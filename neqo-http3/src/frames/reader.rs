@@ -100,7 +100,7 @@ pub struct FrameReader {
     state: FrameReaderState,
     frame_type: HFrameType,
     frame_len: u64,
-    buffer: [u8; 2048],
+    buffer: [u8; MAX_READ_SIZE],
 }
 
 impl Default for FrameReader {
