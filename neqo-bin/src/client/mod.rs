@@ -606,9 +606,8 @@ pub async fn client(mut args: Args) -> Res<()> {
             first = false;
 
             token = if args.shared.alpn == "h3" {
-                let client =
-                    http3::create_client(&args, &real_local, &remote_addr, &hostname, token)
-                        .expect("failed to create client");
+                let client = http3::create_client(&args, real_local, remote_addr, &hostname, token)
+                    .expect("failed to create client");
 
                 let handler = http3::Handler::new(to_request, &args);
 
@@ -617,7 +616,7 @@ pub async fn client(mut args: Args) -> Res<()> {
                     .await?
             } else {
                 let client =
-                    http09::create_client(&args, &real_local, &remote_addr, &hostname, token)
+                    http09::create_client(&args, real_local, remote_addr, &hostname, token)
                         .expect("failed to create client");
 
                 let handler = http09::Handler::new(to_request, &args);

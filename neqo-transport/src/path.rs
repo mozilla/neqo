@@ -68,10 +68,14 @@ pub struct Paths {
 impl Paths {
     /// Find the path for the given addresses.
     /// This might be a temporary path.
+    #[expect(
+        clippy::large_types_passed_by_value,
+        reason = "Yes, but this wants values."
+    )]
     pub fn find_path(
         &self,
-        local: &SocketAddr,
-        remote: &SocketAddr,
+        local: SocketAddr,
+        remote: SocketAddr,
         conn_params: &ConnectionParameters,
         now: Instant,
         stats: &mut Stats,
@@ -521,9 +525,13 @@ pub struct Path {
 impl Path {
     /// Create a path from addresses and a remote connection ID.
     /// This is used for migration and for new datagrams.
+    #[expect(
+        clippy::large_types_passed_by_value,
+        reason = "Yes, but this wants values."
+    )]
     pub fn temporary(
-        local: &SocketAddr,
-        remote: &SocketAddr,
+        local: SocketAddr,
+        remote: SocketAddr,
         conn_params: &ConnectionParameters,
         qlog: NeqoQlog,
         now: Instant,
@@ -553,8 +561,8 @@ impl Path {
         let mut sender = PacketSender::new(conn_params, Pmtud::new(&remote.ip(), iface_mtu), now);
         sender.set_qlog(qlog.clone());
         Self {
-            local: *local,
-            remote: *remote,
+            local,
+            remote,
             local_cid: None,
             remote_cid: None,
             primary: false,
@@ -604,8 +612,12 @@ impl Path {
     }
 
     /// Determine if this path was the one that the provided datagram was received on.
-    fn received_on(&self, local: &SocketAddr, remote: &SocketAddr) -> bool {
-        self.local == *local && self.remote == *remote
+    #[expect(
+        clippy::large_types_passed_by_value,
+        reason = "Yes, but this wants values."
+    )]
+    fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
+        self.local == local && self.remote == remote
     }
 
     /// Update the remote port number.  Any flexibility we allow in `received_on`
@@ -696,7 +708,7 @@ impl Path {
         // update the ECN state and can hence change it - this packet should still be sent
         // with the current value.
         self.ecn_info.on_packet_sent(stats);
-        Datagram::new(&self.local, &self.remote, tos, payload.into())
+        Datagram::new(self.local, self.remote, tos, payload.into())
     }
 
     /// Get local address as `SocketAddr`

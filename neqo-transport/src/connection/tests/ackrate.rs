@@ -164,7 +164,7 @@ fn migrate_ack_delay() {
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 
     client
-        .migrate(Some(*DEFAULT_ADDR_V4), Some(*DEFAULT_ADDR_V4), true, now)
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), true, now)
         .unwrap();
 
     let client1 = send_something(&mut client, now);

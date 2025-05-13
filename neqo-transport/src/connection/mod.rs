@@ -323,8 +323,8 @@ impl Connection {
         server_name: impl Into<String>,
         protocols: &[impl AsRef<str>],
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
-        local_addr: &SocketAddr,
-        remote_addr: &SocketAddr,
+        local_addr: SocketAddr,
+        remote_addr: SocketAddr,
         conn_params: ConnectionParameters,
         now: Instant,
     ) -> Res<Self> {
@@ -1353,8 +1353,8 @@ impl Connection {
                 self.crypto.server_name().ok_or(Error::VersionNegotiation)?,
                 self.crypto.protocols(),
                 self.cid_manager.generator(),
-                &local_addr,
-                &remote_addr,
+                local_addr,
+                remote_addr,
                 conn_params,
                 now,
             )?;
@@ -1621,7 +1621,7 @@ impl Connection {
     ) -> Res<()> {
         qtrace!("[{self}] {} input {}", path.borrow(), hex(&d));
         let tos = d.tos();
-        let remote = *d.source();
+        let remote = d.source();
         let mut slc = d.as_mut();
         let mut dcid = None;
         let pto = path.borrow().rtt().pto(self.confirmed());
@@ -1954,8 +1954,8 @@ impl Connection {
         }
 
         let path = self.paths.find_path(
-            &local,
-            &remote,
+            local,
+            remote,
             &self.conn_params,
             now,
             &mut self.stats.borrow_mut(),

@@ -917,7 +917,7 @@ fn drop_initial_packet_from_wrong_address() {
 
     let p = out.dgram().unwrap();
     let dgram = Datagram::new(
-        &SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
         p.destination(),
         p.tos(),
         &p[..],
@@ -949,7 +949,7 @@ fn drop_handshake_packet_from_wrong_address() {
 
     let p = s_hs.unwrap();
     let dgram = Datagram::new(
-        &SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
         p.destination(),
         p.tos(),
         &p[..],

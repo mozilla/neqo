@@ -182,14 +182,14 @@ impl Http3Server {
                         Http3OrWebTransportStream::new(
                             conn.clone(),
                             Rc::clone(handler),
-                            &stream_info,
+                            stream_info,
                         ),
                         headers,
                         fin,
                     ),
                     Http3ServerConnEvent::DataReadable { stream_info } => {
                         prepare_data(
-                            &stream_info,
+                            stream_info,
                             &mut handler_borrowed,
                             conn,
                             handler,
@@ -199,12 +199,12 @@ impl Http3Server {
                     }
                     Http3ServerConnEvent::DataWritable { stream_info } => self
                         .events
-                        .data_writable(conn.clone(), Rc::clone(handler), &stream_info),
+                        .data_writable(conn.clone(), Rc::clone(handler), stream_info),
                     Http3ServerConnEvent::StreamReset { stream_info, error } => {
                         self.events.stream_reset(
                             conn.clone(),
                             Rc::clone(handler),
-                            &stream_info,
+                            stream_info,
                             error,
                         );
                     }
@@ -212,7 +212,7 @@ impl Http3Server {
                         self.events.stream_stop_sending(
                             conn.clone(),
                             Rc::clone(handler),
-                            &stream_info,
+                            stream_info,
                             error,
                         );
                     }
@@ -250,7 +250,7 @@ impl Http3Server {
                         .webtransport_new_stream(Http3OrWebTransportStream::new(
                             conn.clone(),
                             Rc::clone(handler),
-                            &stream_info,
+                            stream_info,
                         )),
                     Http3ServerConnEvent::ExtendedConnectDatagram {
                         session_id,
@@ -287,8 +287,13 @@ impl Http3Server {
         self.events.next_event()
     }
 }
+
+#[expect(
+    clippy::large_types_passed_by_value,
+    reason = "Yes, but this wants values."
+)]
 fn prepare_data(
-    stream_info: &Http3StreamInfo,
+    stream_info: Http3StreamInfo,
     handler_borrowed: &mut RefMut<Http3ServerHandler>,
     conn: &ConnectionRef,
     handler: &HandlerRef,

@@ -203,7 +203,7 @@ impl Server {
         let res = self
             .address_validation
             .borrow()
-            .validate(&initial.token, dgram.source(), now);
+            .validate(&initial.token, &dgram.source(), now);
         match res {
             AddressValidationResult::Invalid => Output::None,
             AddressValidationResult::Pass => self.accept_connection(initial, dgram, None, now),
@@ -215,7 +215,7 @@ impl Server {
 
                 let res = self.address_validation.borrow().generate_retry_token(
                     &initial.dst_cid,
-                    dgram.source(),
+                    &dgram.source(),
                     now,
                 );
                 let Ok(token) = res else {
@@ -359,8 +359,8 @@ impl Server {
         // This is only looking at the first packet header in the datagram.
         // All packets in the datagram are routed to the same connection.
         let len = dgram.len();
-        let destination = *dgram.destination();
-        let source = *dgram.source();
+        let destination = dgram.destination();
+        let source = dgram.source();
         let res = PublicPacket::decode(&mut dgram[..], self.cid_generator.borrow().as_decoder());
         let Ok((packet, _remainder)) = res else {
             qtrace!("[{self}] Discarding {dgram:?}");

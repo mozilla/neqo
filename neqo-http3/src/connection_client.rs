@@ -299,8 +299,8 @@ impl Http3Client {
     pub fn new(
         server_name: impl Into<String>,
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
-        local_addr: &SocketAddr,
-        remote_addr: &SocketAddr,
+        local_addr: SocketAddr,
+        remote_addr: SocketAddr,
         http3_parameters: Http3Parameters,
         now: Instant,
     ) -> Res<Self> {

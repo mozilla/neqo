@@ -59,10 +59,14 @@ impl<'a> Handler<'a> {
     }
 }
 
+#[expect(
+    clippy::large_types_passed_by_value,
+    reason = "Yes, but this wants values."
+)]
 pub fn create_client(
     args: &Args,
-    local_addr: &SocketAddr,
-    remote_addr: &SocketAddr,
+    local_addr: SocketAddr,
+    remote_addr: SocketAddr,
     hostname: &str,
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Http3Client> {

@@ -255,7 +255,7 @@ impl ServerRunner {
         loop {
             match server.process(input_dgram.take(), now()) {
                 Output::Datagram(dgram) => {
-                    let socket = Self::find_socket(sockets, dgram.source());
+                    let socket = Self::find_socket(sockets, &dgram.source());
                     loop {
                         // Optimistically attempt sending datagram. In case the
                         // OS buffer is full, wait till socket is writable then

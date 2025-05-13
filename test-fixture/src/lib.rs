@@ -108,8 +108,8 @@ pub const DEFAULT_KEYS: &[&str] = &["key"];
 pub const LONG_CERT_KEYS: &[&str] = &["A long cert"];
 pub const DEFAULT_ALPN: &[&str] = &["alpn"];
 pub const DEFAULT_ALPN_H3: &[&str] = &["h3"];
-pub const DEFAULT_ADDR: &SocketAddr = &addr();
-pub const DEFAULT_ADDR_V4: &SocketAddr = &addr_v4();
+pub const DEFAULT_ADDR: SocketAddr = addr();
+pub const DEFAULT_ADDR_V4: SocketAddr = addr_v4();
 
 // Create a default datagram with the given data.
 #[must_use]

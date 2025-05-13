@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::large_types_passed_by_value, reason = "OK in tests.")]
+
 use std::{
     cell::RefCell,
     cmp::min,
@@ -121,7 +123,7 @@ pub fn default_client() -> Connection {
     new_client(ConnectionParameters::default())
 }
 
-fn zero_len_cid_client(local_addr: &SocketAddr, remote_addr: &SocketAddr) -> Connection {
+fn zero_len_cid_client(local_addr: SocketAddr, remote_addr: SocketAddr) -> Connection {
     Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,

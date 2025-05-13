@@ -158,7 +158,7 @@ pub fn assert_no_1rtt(payload: &[u8]) {
 /// # Panics
 ///
 /// When the path doesn't use the given socket address at both ends.
-pub fn assert_path(dgram: &Datagram, path_addr: &SocketAddr) {
+pub fn assert_path(dgram: &Datagram, path_addr: SocketAddr) {
     assert_eq!(dgram.source(), path_addr);
     assert_eq!(dgram.destination(), path_addr);
 }

@@ -165,16 +165,20 @@ impl ::std::fmt::Display for Http3OrWebTransportStream {
 }
 
 impl Http3OrWebTransportStream {
+    #[expect(
+        clippy::large_types_passed_by_value,
+        reason = "Yes, but this wants values."
+    )]
     pub(crate) const fn new(
         conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
-        stream_info: &Http3StreamInfo,
+        stream_info: Http3StreamInfo,
     ) -> Self {
         Self {
             stream_handler: StreamHandler {
                 conn,
                 handler,
-                stream_info: *stream_info,
+                stream_info,
             },
         }
     }
@@ -327,7 +331,7 @@ impl WebTransportRequest {
         Ok(Http3OrWebTransportStream::new(
             self.stream_handler.conn.clone(),
             Rc::clone(&self.stream_handler.handler),
-            &Http3StreamInfo::new(id, Http3StreamType::WebTransport(session_id)),
+            Http3StreamInfo::new(id, Http3StreamType::WebTransport(session_id)),
         ))
     }
 
@@ -503,11 +507,15 @@ impl Http3ServerEvents {
     }
 
     /// Insert a `Data` event.
+    #[expect(
+        clippy::large_types_passed_by_value,
+        reason = "Yes, but this wants values."
+    )]
     pub(crate) fn data(
         &self,
         conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
-        stream_info: &Http3StreamInfo,
+        stream_info: Http3StreamInfo,
         data: Vec<u8>,
         fin: bool,
     ) {
@@ -518,22 +526,30 @@ impl Http3ServerEvents {
         });
     }
 
+    #[expect(
+        clippy::large_types_passed_by_value,
+        reason = "Yes, but this wants values."
+    )]
     pub(crate) fn data_writable(
         &self,
         conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
-        stream_info: &Http3StreamInfo,
+        stream_info: Http3StreamInfo,
     ) {
         self.insert(Http3ServerEvent::DataWritable {
             stream: Http3OrWebTransportStream::new(conn, handler, stream_info),
         });
     }
 
+    #[expect(
+        clippy::large_types_passed_by_value,
+        reason = "Yes, but this wants values."
+    )]
     pub(crate) fn stream_reset(
         &self,
         conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
-        stream_info: &Http3StreamInfo,
+        stream_info: Http3StreamInfo,
         error: AppError,
     ) {
         self.insert(Http3ServerEvent::StreamReset {
@@ -542,11 +558,15 @@ impl Http3ServerEvents {
         });
     }
 
+    #[expect(
+        clippy::large_types_passed_by_value,
+        reason = "Yes, but this wants values."
+    )]
     pub(crate) fn stream_stop_sending(
         &self,
         conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
-        stream_info: &Http3StreamInfo,
+        stream_info: Http3StreamInfo,
         error: AppError,
     ) {
         self.insert(Http3ServerEvent::StreamStopSending {
