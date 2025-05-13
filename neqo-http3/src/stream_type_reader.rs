@@ -111,7 +111,7 @@ impl NewStreamHeadReader {
         } = self
         {
             // This type only exists to read at most two varints (= 16 bytes) from the stream.
-            let mut buf = [0; 2 * size_of::<u64>()];
+            let mut buf = [0; 16];
             loop {
                 let to_read = min(reader.min_remaining(), buf.len());
                 let buf = &mut buf[0..to_read];
