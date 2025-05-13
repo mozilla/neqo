@@ -9,10 +9,12 @@ env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   TOOLCHAIN: stable
-  PERF_OPT: record -F2999 --call-graph fp -g
+  PERF_OPT: record -F4999 --call-graph fp -g
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
+  CFLAGS: -fno-omit-frame-pointer
+  CXXFLAGS: -fno-omit-frame-pointer
 
 permissions:
   contents: read
@@ -44,7 +46,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: google/quiche
-          ref: d42a7597517a574c1c71a4634b21b23852badf8c # FIXME: Switch back to main when that compiles again.
+          ref: main
           path: gquiche
           submodules: true
           persist-credentials: false
@@ -193,8 +195,11 @@ jobs:
 
           # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
           sudo ip link set dev lo mtu "$MTU"
+          mkdir binaries
           for server in neqo google msquic; do
+            cp "$(${server_cmd[$server]} | cut -f1 -d' ')" binaries/
             for client in neqo google msquic; do
+              cp "$(${client_cmd[$client]} | cut -f1 -d' ')" binaries/
               # Do not run msquic against google-quiche; the latter only supports H3.
               # Also, we are not interested in google as the server, or msquic as the client, except against themselves.
               if [[ "$client" == "google" && "$server" == "msquic" ||
@@ -384,6 +389,7 @@ jobs:
             results.*
             target/criterion
             hyperfine
+            binaries
           compression-level: 9
 
       - name: Export PR comment data
