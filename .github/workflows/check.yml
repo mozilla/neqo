@@ -97,7 +97,7 @@ jobs:
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
-          if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
+          if [ "$TOOLCHAIN" == "stable" ]; then
             cargo llvm-cov nextest $BUILD_TYPE --locked --include-ffi --features ci --profile ci --codecov --output-path codecov.json
           else
             cargo $CAREFUL nextest run $BUILD_TYPE --locked --features ci --profile ci
