@@ -68,10 +68,7 @@ pub struct Paths {
 impl Paths {
     /// Find the path for the given addresses.
     /// This might be a temporary path.
-    #[expect(
-        clippy::large_types_passed_by_value,
-        reason = "Yes, but this wants values."
-    )]
+    #[expect(clippy::large_types_passed_by_value, reason = "This wants values.")]
     pub fn find_path(
         &self,
         local: SocketAddr,
@@ -525,10 +522,7 @@ pub struct Path {
 impl Path {
     /// Create a path from addresses and a remote connection ID.
     /// This is used for migration and for new datagrams.
-    #[expect(
-        clippy::large_types_passed_by_value,
-        reason = "Yes, but this wants values."
-    )]
+    #[expect(clippy::large_types_passed_by_value, reason = "This wants values.")]
     pub fn temporary(
         local: SocketAddr,
         remote: SocketAddr,
@@ -612,10 +606,7 @@ impl Path {
     }
 
     /// Determine if this path was the one that the provided datagram was received on.
-    #[expect(
-        clippy::large_types_passed_by_value,
-        reason = "Yes, but this wants values."
-    )]
+    #[expect(clippy::large_types_passed_by_value, reason = "This wants values.")]
     fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
         self.local == local && self.remote == remote
     }

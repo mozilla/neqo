@@ -288,10 +288,7 @@ impl Http3Server {
     }
 }
 
-#[expect(
-    clippy::large_types_passed_by_value,
-    reason = "Yes, but this wants values."
-)]
+#[expect(clippy::large_types_passed_by_value, reason = "This wants values.")]
 fn prepare_data(
     stream_info: Http3StreamInfo,
     handler_borrowed: &mut RefMut<Http3ServerHandler>,

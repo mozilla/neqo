@@ -165,10 +165,7 @@ impl ::std::fmt::Display for Http3OrWebTransportStream {
 }
 
 impl Http3OrWebTransportStream {
-    #[expect(
-        clippy::large_types_passed_by_value,
-        reason = "Yes, but this wants values."
-    )]
+    #[expect(clippy::large_types_passed_by_value, reason = "This wants values.")]
     pub(crate) const fn new(
         conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
@@ -507,10 +504,7 @@ impl Http3ServerEvents {
     }
 
     /// Insert a `Data` event.
-    #[expect(
-        clippy::large_types_passed_by_value,
-        reason = "Yes, but this wants values."
-    )]
+    #[expect(clippy::large_types_passed_by_value, reason = "This wants values.")]
     pub(crate) fn data(
         &self,
         conn: ConnectionRef,
@@ -526,10 +520,7 @@ impl Http3ServerEvents {
         });
     }
 
-    #[expect(
-        clippy::large_types_passed_by_value,
-        reason = "Yes, but this wants values."
-    )]
+    #[expect(clippy::large_types_passed_by_value, reason = "This wants values.")]
     pub(crate) fn data_writable(
         &self,
         conn: ConnectionRef,
@@ -541,10 +532,7 @@ impl Http3ServerEvents {
         });
     }
 
-    #[expect(
-        clippy::large_types_passed_by_value,
-        reason = "Yes, but this wants values."
-    )]
+    #[expect(clippy::large_types_passed_by_value, reason = "This wants values.")]
     pub(crate) fn stream_reset(
         &self,
         conn: ConnectionRef,
@@ -558,10 +546,7 @@ impl Http3ServerEvents {
         });
     }
 
-    #[expect(
-        clippy::large_types_passed_by_value,
-        reason = "Yes, but this wants values."
-    )]
+    #[expect(clippy::large_types_passed_by_value, reason = "This wants values.")]
     pub(crate) fn stream_stop_sending(
         &self,
         conn: ConnectionRef,
