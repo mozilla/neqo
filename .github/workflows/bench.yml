@@ -115,18 +115,18 @@ jobs:
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
 
-      # - name: Run cargo bench
-      #   run: |
-      #     sudo ip link set dev lo mtu "$MTU"
-      #     export NSS_DB_PATH="./test-fixture/db"
-      #     mkdir binaries
-      #     for BENCH in $BENCHES; do
-      #       NAME=$(basename "$BENCH" | cut -d- -f1)
-      #       cp "$BENCH" binaries/
-      #       # shellcheck disable=SC2086
-      #       perf $PERF_OPT -o "$NAME.perf" \
-      #         nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec "$BENCH" -- --bench --noplot | tee -a results.txt
-      #     done
+      - name: Run cargo bench
+        run: |
+          sudo ip link set dev lo mtu "$MTU"
+          export NSS_DB_PATH="./test-fixture/db"
+          mkdir binaries
+          for BENCH in $BENCHES; do
+            NAME=$(basename "$BENCH" | cut -d- -f1)
+            cp "$BENCH" binaries/
+            # shellcheck disable=SC2086
+            perf $PERF_OPT -o "$NAME.perf" \
+              nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec "$BENCH" -- --bench --noplot | tee -a results.txt
+          done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
