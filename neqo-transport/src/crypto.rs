@@ -57,9 +57,9 @@ thread_local!(pub static OVERWRITE_INVOCATIONS: RefCell<Option<PacketNumber>> = 
 pub struct Crypto {
     version: Version,
     protocols: Vec<String>,
-    pub(crate) tls: Agent,
-    pub(crate) streams: CryptoStreams,
-    pub(crate) states: CryptoStates,
+    tls: Agent,
+    streams: CryptoStreams,
+    states: CryptoStates,
 }
 
 type TpHandler = Rc<RefCell<TransportParametersHandler>>;
@@ -395,6 +395,36 @@ impl Crypto {
         } else {
             unreachable!("It is a server");
         }
+    }
+
+    #[must_use]
+    pub const fn tls_mut(&mut self) -> &mut Agent {
+        &mut self.tls
+    }
+
+    #[must_use]
+    pub const fn tls(&self) -> &Agent {
+        &self.tls
+    }
+
+    #[must_use]
+    pub const fn streams(&self) -> &CryptoStreams {
+        &self.streams
+    }
+
+    #[must_use]
+    pub const fn streams_mut(&mut self) -> &mut CryptoStreams {
+        &mut self.streams
+    }
+
+    #[must_use]
+    pub const fn states(&self) -> &CryptoStates {
+        &self.states
+    }
+
+    #[must_use]
+    pub const fn states_mut(&mut self) -> &mut CryptoStates {
+        &mut self.states
     }
 }
 
