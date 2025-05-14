@@ -167,7 +167,7 @@ impl PacketBuilder {
     ///
     /// If, after calling this method, `remaining()` returns 0, then call `abort()` to get
     /// the encoder back.
-    pub fn short(mut encoder: Encoder, key_phase: bool, dcid: Option<impl AsRef<[u8]>>) -> Self {
+    pub fn short<A: AsRef<[u8]>>(mut encoder: Encoder, key_phase: bool, dcid: Option<A>) -> Self {
         let mut limit = Self::infer_limit(&encoder);
         let header_start = encoder.len();
         // Check that there is enough space for the header.
@@ -202,12 +202,12 @@ impl PacketBuilder {
     /// even if the token is empty.
     ///
     /// See `short()` for more on how to handle this in cases where there is no space.
-    pub fn long(
+    pub fn long<A: AsRef<[u8]>, A1: AsRef<[u8]>>(
         mut encoder: Encoder,
         pt: PacketType,
         version: Version,
-        mut dcid: Option<impl AsRef<[u8]>>,
-        mut scid: Option<impl AsRef<[u8]>>,
+        mut dcid: Option<A>,
+        mut scid: Option<A1>,
     ) -> Self {
         let mut limit = Self::infer_limit(&encoder);
         let header_start = encoder.len();

@@ -92,10 +92,10 @@ use std::os::fd::AsFd as SocketRef;
 use std::os::windows::io::AsSocket as SocketRef;
 
 #[expect(clippy::missing_panics_doc, reason = "OK here.")]
-pub fn recv_inner<'a>(
+pub fn recv_inner<'a, S: SocketRef>(
     local_address: SocketAddr,
     state: &UdpSocketState,
-    socket: impl SocketRef,
+    socket: S,
     recv_buf: &'a mut RecvBuf,
 ) -> Result<DatagramIter<'a>, io::Error> {
     let mut metas = [RecvMeta::default(); NUM_BUFS];

@@ -32,7 +32,7 @@ pub use self::{
 };
 
 #[must_use]
-pub fn hex(buf: impl AsRef<[u8]>) -> String {
+pub fn hex<A: AsRef<[u8]>>(buf: A) -> String {
     let mut ret = String::with_capacity(buf.as_ref().len() * 2);
     for b in buf.as_ref() {
         write!(&mut ret, "{b:02x}").unwrap();
@@ -41,7 +41,7 @@ pub fn hex(buf: impl AsRef<[u8]>) -> String {
 }
 
 #[must_use]
-pub fn hex_snip_middle(buf: impl AsRef<[u8]>) -> String {
+pub fn hex_snip_middle<A: AsRef<[u8]>>(buf: A) -> String {
     const SHOW_LEN: usize = 8;
     let buf = buf.as_ref();
     if buf.len() <= SHOW_LEN * 2 {
@@ -61,7 +61,7 @@ pub fn hex_snip_middle(buf: impl AsRef<[u8]>) -> String {
 }
 
 #[must_use]
-pub fn hex_with_len(buf: impl AsRef<[u8]>) -> String {
+pub fn hex_with_len<A: AsRef<[u8]>>(buf: A) -> String {
     let buf = buf.as_ref();
     let mut ret = String::with_capacity(10 + buf.len() * 2);
     write!(&mut ret, "[{}]: ", buf.len()).unwrap();
