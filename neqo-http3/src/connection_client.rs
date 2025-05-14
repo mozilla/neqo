@@ -422,8 +422,7 @@ impl Http3Client {
     /// connection the HTTP/3 setting will be decoded and used until the setting are received from
     /// the server.
     pub fn take_resumption_token(&mut self, now: Instant) -> Option<ResumptionToken> {
-        let t = self.conn
-            .take_resumption_token(now)?;
+        let t = self.conn.take_resumption_token(now)?;
         self.encode_resumption_token(&t)
     }
 
