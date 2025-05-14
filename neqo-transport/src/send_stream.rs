@@ -1796,7 +1796,7 @@ impl<'a> IntoIterator for &'a mut SendStreams {
 
 #[derive(Debug, Clone)]
 pub struct SendStreamRecoveryToken {
-    pub(crate) id: StreamId,
+    id: StreamId,
     offset: u64,
     length: usize,
     fin: bool,

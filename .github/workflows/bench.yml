@@ -59,7 +59,7 @@ jobs:
         uses: ./.github/actions/rust
         with:
           version: $TOOLCHAIN
-          tools: hyperfine, flamegraph
+          tools: hyperfine, flamegraph, samply
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get minimum NSS version
@@ -325,9 +325,7 @@ jobs:
         run: |
           for f in *.perf; do
             # Convert for profiler.firefox.com
-            perf script -i "$f" -F +pid > "$f.fx" &
-            # Generate perf reports
-            perf report -i "$f" --no-children --stdio > "$f.txt" &
+            samply import "$f" -o "$f.samply.json.gz" --save-only --unstable-presymbolicate &
             # Generate flamegraphs
             flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}" &
           done
@@ -387,8 +385,8 @@ jobs:
           name: ${{ github.event.repository.name }}-${{ github.sha }}
           path: |
             *.svg
-            *.perf
-            *.perf.fx
+            *.samply.json.gz
+            *.syms.json
             *.txt
             *.md
             results.*

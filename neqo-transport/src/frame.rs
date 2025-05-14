@@ -155,8 +155,8 @@ impl From<std::array::TryFromSliceError> for Error {
 
 #[derive(PartialEq, Eq, Debug, Default, Clone)]
 pub struct AckRange {
-    pub(crate) gap: u64,
-    pub(crate) range: u64,
+    gap: u64,
+    range: u64,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
