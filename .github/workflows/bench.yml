@@ -197,6 +197,7 @@ jobs:
 
           # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
           sudo ip link set dev lo mtu "$MTU"
+          mkdir binaries
           for server in neqo google msquic; do
             echo "cp "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" binaries/"
             cp "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" binaries/
