@@ -276,8 +276,8 @@ pub struct Connection {
     /// <https://datatracker.ietf.org/doc/html/draft-ietf-quic-datagram>
     quic_datagrams: QuicDatagrams,
 
-    pub(crate) crypto: Crypto,
-    pub(crate) acks: AckTracker,
+    crypto: Crypto,
+    acks: AckTracker,
     idle_timeout: IdleTimeout,
     streams: Streams,
     state_signaling: StateSignaling,
@@ -296,7 +296,7 @@ pub struct Connection {
     /// otherwise be sent, just to see how a connection handles them.  Inserting them
     /// into packets proper mean that the frames follow the entire processing path.
     #[cfg(test)]
-    pub test_frame_writer: Option<Box<dyn test_internal::FrameWriter>>,
+    test_frame_writer: Option<Box<dyn test_internal::FrameWriter>>,
 }
 
 impl Debug for Connection {
