@@ -33,7 +33,7 @@ const CONNECTION_ID_SEQNO_EMPTY: u64 = u64::MAX - 1;
 
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
 pub struct ConnectionId {
-    pub(crate) cid: SmallVec<[u8; MAX_CONNECTION_ID_LEN]>,
+    cid: SmallVec<[u8; MAX_CONNECTION_ID_LEN]>,
 }
 
 impl ConnectionId {
