@@ -199,11 +199,8 @@ jobs:
           sudo ip link set dev lo mtu "$MTU"
           mkdir binaries
           for server in neqo google msquic; do
-            echo "cp "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" binaries/"
-            cp "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" binaries/
+            cp -v "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" binaries/
             for client in neqo google msquic; do
-              echo "cp "$(echo "${client_cmd[$client]}" | cut -f1 -d' ')" binaries/"
-              cp "$(echo "${client_cmd[$client]}" | cut -f1 -d' ')" binaries/
               # Do not run msquic against google-quiche; the latter only supports H3.
               # Also, we are not interested in google as the server, or msquic as the client, except against themselves.
               if [[ "$client" == "google" && "$server" == "msquic" ||
@@ -212,6 +209,9 @@ jobs:
                     "$client" == "msquic" && "$server" != "msquic" ]]; then
                 continue
               fi
+              cp -v "$(echo "${client_cmd[$client]}" | cut -f1 -d' ')" binaries/
+              # google-quiche binaries don't have write permissions by default?!
+              chmod u+w binaries/*
               # google and msquic don't let us configure the congestion control or pacing.
               if [[ "$client" != "neqo" && "$server" != "neqo" ]]; then
                 cc_opt=("")
