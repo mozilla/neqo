@@ -198,9 +198,9 @@ jobs:
           # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
           sudo ip link set dev lo mtu "$MTU"
           for server in neqo google msquic; do
-            cp "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" binaries/
+            cp "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')")" binaries/
             for client in neqo google msquic; do
-              cp "$(echo "${client_cmd[$client]}" | cut -f1 -d' ')" binaries/
+              cp "$(basename "$(echo "${client_cmd[$client]}" | cut -f1 -d' ')")" binaries/
               # Do not run msquic against google-quiche; the latter only supports H3.
               # Also, we are not interested in google as the server, or msquic as the client, except against themselves.
               if [[ "$client" == "google" && "$server" == "msquic" ||
