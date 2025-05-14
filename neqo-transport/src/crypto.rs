@@ -398,7 +398,7 @@ impl Crypto {
     }
 
     #[must_use]
-    pub const fn tls_mut(&mut self) -> &mut Agent {
+    pub fn tls_mut(&mut self) -> &mut Agent {
         &mut self.tls
     }
 
@@ -413,7 +413,7 @@ impl Crypto {
     }
 
     #[must_use]
-    pub const fn streams_mut(&mut self) -> &mut CryptoStreams {
+    pub fn streams_mut(&mut self) -> &mut CryptoStreams {
         &mut self.streams
     }
 
@@ -423,7 +423,7 @@ impl Crypto {
     }
 
     #[must_use]
-    pub const fn states_mut(&mut self) -> &mut CryptoStates {
+    pub fn states_mut(&mut self) -> &mut CryptoStates {
         &mut self.states
     }
 }

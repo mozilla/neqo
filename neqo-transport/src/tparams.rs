@@ -710,7 +710,7 @@ impl TransportParametersHandler {
     }
 
     #[must_use]
-    pub const fn local_mut(&mut self) -> &mut TransportParameters {
+    pub fn local_mut(&mut self) -> &mut TransportParameters {
         &mut self.local
     }
 
