@@ -39,6 +39,7 @@ neqo-udp = { path = "./../neqo-udp" }
 qlog = { workspace = true }
 quinn-udp = { workspace = true }
 regex = { workspace = true, features = ["unicode-perl"] }
+rustc-hash = { workspace = true }
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt"] }
 url = { workspace = true }
 
