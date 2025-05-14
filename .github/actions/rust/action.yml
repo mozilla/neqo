@@ -108,5 +108,13 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
         TOOLS: ${{ inputs.tools }}
-      # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
-      run: cargo quickinstall --force $(echo $TOOLS | tr -d ",")
+      run: |
+        for tool in $(echo $TOOLS | tr -d ","); do
+          if [ "$tool" == "samply" ]; then
+            # TODO: Install via quickinstall once `--unstable-presymbolicate` is released.
+            cargo install --git https://github.com/mstange/samply samply
+          else
+            # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
+            cargo quickinstall --force "$tool"
+          fi
+        done
