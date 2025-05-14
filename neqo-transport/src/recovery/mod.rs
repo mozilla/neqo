@@ -507,7 +507,7 @@ impl LossRecovery {
 
     #[must_use]
     pub fn largest_acknowledged_pn(&self, pn_space: PacketNumberSpace) -> Option<PacketNumber> {
-        self.spaces.get(pn_space).and_then(|sp| sp.largest_acked)
+        self.spaces.get(pn_space)?.largest_acked
     }
 
     pub fn set_qlog(&mut self, qlog: NeqoQlog) {
@@ -780,8 +780,9 @@ impl LossRecovery {
     // Calculate PTO time for the given space.
     fn pto_time(&self, rtt: &RttEstimate, pn_space: PacketNumberSpace) -> Option<Instant> {
         self.spaces
-            .get(pn_space)
-            .and_then(|space| space.pto_base_time().map(|t| t + self.pto_period(rtt)))
+            .get(pn_space)?
+            .pto_base_time()
+            .map(|t| t + self.pto_period(rtt))
     }
 
     /// Find the earliest PTO time for all active packet number spaces.
