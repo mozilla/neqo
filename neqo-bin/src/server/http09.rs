@@ -197,6 +197,10 @@ impl super::HttpServer for HttpServer {
             reason = "ActiveConnectionRef::Hash doesn't access any of the interior mutable types"
         )]
         let active_conns = self.server.active_connections();
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over active connections in an undefined order."
+        )]
         for acr in active_conns {
             loop {
                 let event = match acr.borrow_mut().next_event() {
