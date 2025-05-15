@@ -176,7 +176,7 @@ const MAX_ACKS_PER_FRAME: usize = 32;
 #[derive(Debug, Clone)]
 pub struct AckToken {
     space: PacketNumberSpace,
-    ranges: SmallVec<[PacketRange; MAX_TRACKED_RANGES]>,
+    ranges: Box<[PacketRange]>,
 }
 
 impl AckToken {
@@ -502,7 +502,7 @@ impl RecvdPackets {
 
         tokens.push(RecoveryToken::Ack(AckToken {
             space: self.space,
-            ranges,
+            ranges: ranges.into_boxed_slice(),
         }));
     }
 }
