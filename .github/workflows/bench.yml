@@ -56,7 +56,14 @@ jobs:
         with:
           repository: cloudflare/quiche
           ref: main
-          path: quiche
+          submodules: true
+          persist-credentials: false
+
+      - name: Checkout aws/s2n-quic
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: aws/s2n-quic
+          ref: main
           submodules: true
           persist-credentials: false
 
@@ -107,8 +114,14 @@ jobs:
       - name: Build cloudflare/quiche
         run: |
           # We already changed RUSTFLAGS above; this depends on that having happened.
-          cd cloudflare/quiche
+          cd quiche
           cargo build --locked --release --bin quiche-client --bin quiche-server
+
+      - name: Build aws/s2n-quic
+        run: |
+          # We already changed RUSTFLAGS above; this depends on that having happened.
+          cd s2n-quic
+          cargo build --locked --release --bin s2n-quic-qns
 
       - name: Download cached main-branch results
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
@@ -166,12 +179,14 @@ jobs:
             ["msquic"]="msquic/build/bin/Release/quicinterop -- -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
             ["google"]="google-quiche/bazel-bin/quiche/quic_client -- --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
             ["quiche"]="quiche/target/release/quiche-client -- --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
+            ["s2n-quic"]="s2n-quic/target/release/s2n-quic-qns interop client --disable-cert-verification --download-dir . http://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server -- _cc _pacing _flags -Q 1 $HOST:$PORT"
             ["msquic"]="msquic/build/bin/Release/quicinteropserver -- -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
             ["google"]="google-quiche/bazel-bin/quiche/quic_server -- --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
             ["quiche"]="quiche/target/release/quiche-server -- --listen $HOST:$PORT --cert $TMP/cert --key $TMP/key"
+            ["s2n-quic"]="s2n-quic/target/release/s2n-quic-qns interop server --certificate $TMP/cert --private-key $TMP/key --ip $HOST --port $PORT"
           )
           # Flags to pass to neqo when it runs against another implementation.
           declare -A neqo_flags=(
@@ -179,6 +194,7 @@ jobs:
             ["msquic"]="-a hq-interop"
             ["google"]=""
             ["quiche"]=""
+            ["s2n-quic"]="-a hq-interop"
           )
 
           # Replace various placeholders in the commands with the actual values.
@@ -219,14 +235,8 @@ jobs:
           for server in neqo google msquic; do
             cp -v "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" binaries/
             for client in neqo google msquic; do
-              # Do not run msquic against google-quiche and quiche; the latter only supports H3.
-              # Also, we are not interested in google as the server, or msquic as the client, except against themselves.
-              if [[ "$client" == "google" && "$server" == "msquic" ||
-                    "$client" == "msquic" && "$server" == "google" ||
-                    "$client" == "quiche" && "$server" == "msquic" ||
-                    "$client" == "msquic" && "$server" == "quiche" ||
-                    "$client" != "google" && "$server" == "google" ||
-                    "$client" == "msquic" && "$server" != "msquic" ]]; then
+              # Do not run msquic and s2n-quic against google-quiche and quiche; the latter only support H3.
+              if [[ "$client" != "$server" && "$client" != "neqo" && "$server" != "neqo" ]]; then
                 continue
               fi
               cp -v "$(echo "${client_cmd[$client]}" | cut -f1 -d' ')" binaries/
@@ -244,12 +254,10 @@ jobs:
               for cc in "${cc_opt[@]}"; do
                 for pacing in "${pacing_opt[@]}"; do
                   # Make a tag string for this test, for the results. Highlight lines we care about.
+                  TAG="$client vs. $server ${cc:+(}$cc${pacing:+, paced}${cc:+)}"
                   if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
-                        "$client" == "msquic" && "$server" == "msquic" ||
-                        "$client" == "google" && "$server" == "google" ]]; then
-                    TAG="**$client**,**$server**,${cc:+**}$cc${cc:+**},${pacing:+**}$pacing${pacing:+**}"
-                  else
-                    TAG="$client,$server,$cc,$pacing"
+                        "$client" == "$server" && "$client" != "neqo" && "$server" != "neqo" ]]; then
+                    TAG="**$TAG**"
                   fi
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
@@ -329,8 +337,8 @@ jobs:
             echo "Transfer of $SIZE bytes over loopback, $RUNS runs. All unit-less numbers are in milliseconds."
             echo
             # shellcheck disable=SC2016
-            echo '| Client | Server | CC | Pacing | Mean ± σ | Min | Max | MiB/s ± σ | Δ `main` | Δ `main` |'
-            echo '|:---|:---|:---|---|---:|---:|---:|---:|---:|---:|'
+            echo '| Client vs. server (params) | Mean ± σ | Min | Max | MiB/s ± σ | Δ `main` | Δ `main` |'
+            echo '|:---|---:|---:|---:|---:|---:|---:|'
             cat steps.md
           } > comparison.md
           rm -r "$TMP"
