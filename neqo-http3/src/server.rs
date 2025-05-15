@@ -150,6 +150,10 @@ impl Http3Server {
                 .cloned(),
         );
 
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over active connections in an undefined order."
+        )]
         for conn in active_conns {
             self.process_events(&conn, now);
         }
