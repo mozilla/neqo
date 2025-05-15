@@ -7,7 +7,7 @@
 #![expect(
     clippy::unwrap_used,
     clippy::iter_over_hash_type,
-    reason = " OK in a build script."
+    reason = "OK in a build script."
 )]
 
 use std::{
