@@ -72,7 +72,7 @@ jobs:
       - name: Install Rust
         uses: ./.github/actions/rust
         with:
-          version: env.RUSTUP_TOOLCHAIN
+          version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: hyperfine, flamegraph, samply
           token: ${{ secrets.GITHUB_TOKEN }}
 
