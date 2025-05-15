@@ -115,7 +115,7 @@ impl<'a> Decoder<'a> {
     /// Signed types will fail if the high bit is set.
     pub fn decode_uint<T: TryFrom<u64>>(&mut self) -> Option<T> {
         let v = self.decode_n(size_of::<T>());
-        v.and_then(|v| T::try_from(v).ok())
+        T::try_from(v?).ok()
     }
 
     /// Decodes a QUIC varint.

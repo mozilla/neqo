@@ -613,9 +613,9 @@ impl TransportParameters {
 pub struct TransportParametersHandler {
     role: Role,
     versions: VersionConfig,
-    pub(crate) local: TransportParameters,
-    pub(crate) remote: Option<TransportParameters>,
-    pub(crate) remote_0rtt: Option<TransportParameters>,
+    local: TransportParameters,
+    remote_handshake: Option<TransportParameters>,
+    remote_0rtt: Option<TransportParameters>,
 }
 
 impl TransportParametersHandler {
@@ -627,7 +627,7 @@ impl TransportParametersHandler {
             role,
             versions,
             local,
-            remote: None,
+            remote_handshake: None,
             remote_0rtt: None,
         }
     }
@@ -645,7 +645,7 @@ impl TransportParametersHandler {
     /// Do not call this function if you are not also able to send data.
     #[must_use]
     pub fn remote(&self) -> &TransportParameters {
-        match (self.remote.as_ref(), self.remote_0rtt.as_ref()) {
+        match (self.remote_handshake(), self.remote_0rtt()) {
             (Some(tp), _) | (_, Some(tp)) => tp,
             _ => panic!("no transport parameters from peer"),
         }
@@ -703,6 +703,30 @@ impl TransportParametersHandler {
             Ok(())
         }
     }
+
+    #[must_use]
+    pub const fn local(&self) -> &TransportParameters {
+        &self.local
+    }
+
+    #[must_use]
+    pub fn local_mut(&mut self) -> &mut TransportParameters {
+        &mut self.local
+    }
+
+    pub fn set_remote_0rtt(&mut self, remote_0rtt: Option<TransportParameters>) {
+        self.remote_0rtt = remote_0rtt;
+    }
+
+    #[must_use]
+    pub const fn remote_0rtt(&self) -> Option<&TransportParameters> {
+        self.remote_0rtt.as_ref()
+    }
+
+    #[must_use]
+    pub const fn remote_handshake(&self) -> Option<&TransportParameters> {
+        self.remote_handshake.as_ref()
+    }
 }
 
 impl ExtensionHandler for TransportParametersHandler {
@@ -735,7 +759,7 @@ impl ExtensionHandler for TransportParametersHandler {
         match TransportParameters::decode(&mut dec) {
             Ok(tp) => {
                 if self.compatible_upgrade(&tp).is_ok() {
-                    self.remote = Some(tp);
+                    self.remote_handshake = Some(tp);
                     ExtensionHandlerResult::Ok
                 } else {
                     ExtensionHandlerResult::Alert(47)

@@ -150,6 +150,10 @@ impl QPackEncoder {
     fn recalculate_blocked_streams(&mut self) {
         let acked_inserts_cnt = self.table.get_acked_inserts_cnt();
         self.blocked_stream_cnt = 0;
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over unACKed blocks in an undefined order."
+        )]
         for hb_list in self.unacked_header_blocks.values_mut() {
             debug_assert!(!hb_list.is_empty());
             if hb_list.iter().flatten().any(|e| *e >= acked_inserts_cnt) {
@@ -171,6 +175,10 @@ impl QPackEncoder {
         let mut new_acked = self.table.get_acked_inserts_cnt();
         if let Some(hb_list) = self.unacked_header_blocks.get_mut(&stream_id) {
             if let Some(ref_list) = hb_list.pop_back() {
+                #[expect(
+                    clippy::iter_over_hash_type,
+                    reason = "OK to loop over unACKed blocks in an undefined order."
+                )]
                 for iter in ref_list {
                     self.table.remove_ref(iter);
                     if iter >= new_acked {
@@ -196,6 +204,10 @@ impl QPackEncoder {
         if let Some(mut hb_list) = self.unacked_header_blocks.remove(&stream_id) {
             debug_assert!(!hb_list.is_empty());
             while let Some(ref_list) = hb_list.pop_front() {
+                #[expect(
+                    clippy::iter_over_hash_type,
+                    reason = "OK to loop over unACKed blocks in an undefined order."
+                )]
                 for iter in ref_list {
                     self.table.remove_ref(iter);
                     was_blocker = was_blocker || (iter >= self.table.get_acked_inserts_cnt());
