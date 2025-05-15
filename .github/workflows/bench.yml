@@ -47,7 +47,16 @@ jobs:
         with:
           repository: google/quiche
           ref: main
-          path: gquiche
+          path: google-quiche
+          submodules: true
+          persist-credentials: false
+
+      - name: Checkout cloudflare/quiche
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: cloudflare/quiche
+          ref: main
+          path: quiche
           submodules: true
           persist-credentials: false
 
@@ -77,10 +86,10 @@ jobs:
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
           export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
           echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
-          cargo "+$TOOLCHAIN" bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
+          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
           BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
           echo "BENCHES=$BENCHES" >> "$GITHUB_ENV"
-          cargo "+$TOOLCHAIN" build --locked --release --bin neqo-client --bin neqo-server
+          cargo build --locked --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
         run: |
@@ -91,9 +100,15 @@ jobs:
 
       - name: Build google/quiche
         run: |
-          cd gquiche
+          cd google-quiche
           bazel build -c opt --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
           bazel shutdown
+
+      - name: Build cloudflare/quiche
+        run: |
+          # We already changed RUSTFLAGS above; this depends on that having happened.
+          cd cloudflare/quiche
+          cargo build --locked --release --bin quiche-client --bin quiche-server
 
       - name: Download cached main-branch results
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
@@ -148,18 +163,21 @@ jobs:
           declare -A client_cmd=(
             ["neqo"]="target/release/neqo-client -- _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
             ["msquic"]="msquic/build/bin/Release/quicinterop -- -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
-            ["google"]="gquiche/bazel-bin/quiche/quic_client -- --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
+            ["google"]="google-quiche/bazel-bin/quiche/quic_client -- --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
+            ["quiche"]="quiche/target/release/quiche-client -- --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server -- _cc _pacing _flags -Q 1 $HOST:$PORT"
             ["msquic"]="msquic/build/bin/Release/quicinteropserver -- -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
-            ["google"]="gquiche/bazel-bin/quiche/quic_server -- --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
+            ["google"]="google-quiche/bazel-bin/quiche/quic_server -- --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
+            ["quiche"]="quiche/target/release/quiche-server -- --listen $HOST:$PORT --cert $TMP/cert --key $TMP/key"
           )
           # Flags to pass to neqo when it runs against another implementation.
           declare -A neqo_flags=(
             ["neqo"]=""
             ["msquic"]="-a hq-interop"
             ["google"]=""
+            ["quiche"]=""
           )
 
           # Replace various placeholders in the commands with the actual values.
@@ -200,10 +218,12 @@ jobs:
           for server in neqo google msquic; do
             cp -v "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" binaries/
             for client in neqo google msquic; do
-              # Do not run msquic against google-quiche; the latter only supports H3.
+              # Do not run msquic against google-quiche and quiche; the latter only supports H3.
               # Also, we are not interested in google as the server, or msquic as the client, except against themselves.
               if [[ "$client" == "google" && "$server" == "msquic" ||
                     "$client" == "msquic" && "$server" == "google" ||
+                    "$client" == "quiche" && "$server" == "msquic" ||
+                    "$client" == "msquic" && "$server" == "quiche" ||
                     "$client" != "google" && "$server" == "google" ||
                     "$client" == "msquic" && "$server" != "msquic" ]]; then
                 continue
@@ -212,6 +232,7 @@ jobs:
               # google-quiche binaries don't have write permissions by default?!
               chmod u+w binaries/*
               # google and msquic don't let us configure the congestion control or pacing.
+              # TODO: Support quiche here.
               if [[ "$client" != "neqo" && "$server" != "neqo" ]]; then
                 cc_opt=("")
                 pacing_opt=("")
