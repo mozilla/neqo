@@ -6,7 +6,7 @@
 
 use std::{
     cell::RefCell,
-    fmt::{Debug, Display},
+    fmt::{self, Debug, Display, Formatter},
     iter,
     net::SocketAddr,
     rc::Rc,
@@ -286,7 +286,7 @@ pub struct Http3Client {
 }
 
 impl Display for Http3Client {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Http3 client")
     }
 }

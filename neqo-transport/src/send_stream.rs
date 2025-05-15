@@ -15,6 +15,7 @@ use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
     collections::{btree_map::Entry, BTreeMap, VecDeque},
+    fmt::{self, Display, Formatter},
     mem,
     num::NonZeroUsize,
     ops::Add,
@@ -1386,8 +1387,8 @@ impl SendStream {
     }
 }
 
-impl ::std::fmt::Display for SendStream {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for SendStream {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "SendStream {}", self.stream_id)
     }
 }
