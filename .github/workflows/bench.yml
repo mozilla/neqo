@@ -236,6 +236,7 @@ jobs:
             for client in "${!client_cmd[@]}"; do
               # Do not run msquic and s2n-quic against google-quiche and quiche; the latter only support H3.
               if [[ "$client" != "$server" && "$client" != "neqo" && "$server" != "neqo" ]]; then
+                echo "Skipping $client vs. $server"
                 continue
               fi
               cp -v "$(echo "${client_cmd[$client]}" | cut -f1 -d' ')" binaries/
@@ -254,10 +255,11 @@ jobs:
                 for pacing in "${pacing_opt[@]}"; do
                   # With neqo as server, just run Cubic with pacing.
                   if [[ "$server" == "neqo" && "$client" != "neqo" && "$cc" != "cubic" && "$pacing" != "on" ]]; then
+                    echo "Skipping $client vs. $server ($cc, $pacing)"
                     continue
                   fi
                   # Make a tag string for this test, for the results. Highlight lines we care about.
-                  TAG="$client vs. $server ${cc:+(}$cc${pacing:+, paced}${cc:+)}"
+                  TAG="$client vs. $server${cc:+ (}$cc${pacing:+, paced}${cc:+)}"
                   if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
                         "$client" == "$server" && "$client" != "neqo" && "$server" != "neqo" ]]; then
                     TAG="**$TAG**"
@@ -265,9 +267,11 @@ jobs:
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
+                  echo "Server command: $CMD"
                   # shellcheck disable=SC2086
                   perf $PERF_OPT -o "$FILENAME.server.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec $CMD &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
+                  echo "Client command: $CMD"
                   # shellcheck disable=SC2086
                   hyperfine --command-name "$TAG" --time-unit millisecond  \
                     --export-json "hyperfine/$FILENAME.json" \
