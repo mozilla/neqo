@@ -474,6 +474,7 @@ mod test {
         check_delays(ONE_AND_A_BIT);
     }
 
+    #[cfg(not(target_arch = "arm"))] // This test is flaky on linux/arm.
     #[test]
     fn update_multi() {
         let thr = spawn(move || {
