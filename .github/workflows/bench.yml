@@ -231,9 +231,9 @@ jobs:
 
           # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
           sudo ip link set dev lo mtu "$MTU"
-          for server in neqo google msquic; do
+          for server in "${!server_cmd[@]}"; do
             cp -v "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" binaries/
-            for client in neqo google msquic; do
+            for client in "${!client_cmd[@]}"; do
               # Do not run msquic and s2n-quic against google-quiche and quiche; the latter only support H3.
               if [[ "$client" != "$server" && "$client" != "neqo" && "$server" != "neqo" ]]; then
                 continue
@@ -252,6 +252,10 @@ jobs:
               fi
               for cc in "${cc_opt[@]}"; do
                 for pacing in "${pacing_opt[@]}"; do
+                  # With neqo as server, just run Cubic with pacing.
+                  if [[ "$server" == "neqo" && "$client" != "neqo" && "$cc" != "cubic" && "$pacing" != "on" ]]; then
+                    continue
+                  fi
                   # Make a tag string for this test, for the results. Highlight lines we care about.
                   TAG="$client vs. $server ${cc:+(}$cc${pacing:+, paced}${cc:+)}"
                   if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
@@ -287,7 +291,7 @@ jobs:
                   pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
-                    sed -E 's/`//g; s/,/ \| /g;' | cut -f1-8 -d\| | tr -d '\n' >> steps.md
+                    sed -E 's/`//g;' | cut -f1-5 -d\| | tr -d '\n' >> steps.md
 
                   # Figure out if any performance difference to `main` is statistically relevant, and indicate that.
                   BASELINE="hyperfine-main/$FILENAME.json"
