@@ -26,7 +26,7 @@ jobs:
       matrix:
         os: [
               freebsd,
-              openbsd,
+              # openbsd, # FIXME: libfuzzer/FuzzerPlatform.h:72:2: error: "Support for your platform has not been implemented"
               # netbsd, # FIXME: NSS package is too old.
               # solaris # FIXME: NSS package is too old.
             ]

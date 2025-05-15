@@ -119,6 +119,13 @@ jobs:
           RUST_LOG: warn
           BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
+      - name: CodeCov Windows workaround
+        if: matrix.os == 'windows-2025' && matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
+        run: |
+          # FIXME: Without this, the codecov/codecov-action fails. No idea why it's looking under C:/msys64 now, it shouldn't.
+          mkdir -p C:/msys64/home/runneradmin/
+          touch C:/msys64/home/runneradmin/.gitconfig
+
       - uses: codecov/codecov-action@ad3126e916f78f00edff4ed0317cf185271ccc2d # v5.4.2
         with:
           files: codecov.json
