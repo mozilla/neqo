@@ -145,7 +145,7 @@ jobs:
       #   run: |
       #     sudo ip link set dev lo mtu "$MTU"
       #     export NSS_DB_PATH="./test-fixture/db"
-      #     mkdir binaries
+      #     mkdir -p binaries
       #     for BENCH in $BENCHES; do
       #       NAME=$(basename "$BENCH" | cut -d- -f1)
       #       cp "$BENCH" binaries/
@@ -164,6 +164,7 @@ jobs:
           RUNS: 3 # FIXME 30
         run: |
           TMP=$(mktemp -d)
+          mkdir -p binaries
           touch results.txt
           # Make a cert and key for msquic and google.
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
