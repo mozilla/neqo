@@ -16,6 +16,7 @@ use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn, MAX_VARINT};
 use neqo_crypto::Epoch;
+use smallvec::SmallVec;
 use strum::{Display, EnumIter};
 
 use crate::{
@@ -448,7 +449,7 @@ impl RecvdPackets {
             .filter(|r| r.ack_needed())
             .take(max_ranges)
             .cloned()
-            .collect::<Vec<_>>();
+            .collect::<SmallVec<[_; MAX_TRACKED_RANGES]>>();
         if ranges.is_empty() {
             return;
         }
@@ -500,7 +501,7 @@ impl RecvdPackets {
 
         tokens.push(RecoveryToken::Ack(AckToken {
             space: self.space,
-            ranges,
+            ranges: ranges.into_vec(),
         }));
     }
 }
