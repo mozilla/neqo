@@ -178,7 +178,7 @@ jobs:
             ["msquic"]="msquic/build/bin/Release/quicinterop -- -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
             ["google"]="google-quiche/bazel-bin/quiche/quic_client -- --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
             ["quiche"]="quiche/target/release/quiche-client -- --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
-            ["s2n-quic"]="s2n-quic/target/release/s2n-quic-qns interop client --disable-cert-verification --download-dir . http://$HOST:$PORT/$SIZE"
+            ["s2n-quic"]="s2n-quic/target/release/s2n-quic-qns interop client --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server -- _cc _pacing _flags -Q 1 $HOST:$PORT"
