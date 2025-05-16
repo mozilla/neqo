@@ -269,11 +269,9 @@ jobs:
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
-                  echo "Server command: $CMD"
                   # shellcheck disable=SC2086
                   perf $PERF_OPT -o "$FILENAME.server.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec $CMD &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
-                  echo "Client command: $CMD"
                   # shellcheck disable=SC2086
                   hyperfine --command-name "$TAG" --time-unit millisecond  \
                     --export-json "hyperfine/$FILENAME.json" \
@@ -297,7 +295,7 @@ jobs:
                   pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
-                    sed -E 's/`//g; s/ \| /** | **/g; s/\*\*//' | cut -f1-5 -d\| | tr -d '\n' >> steps.md
+                    sed -E 's/`//g;' | cut -f1-5 -d\| | tr -d '\n' >> steps.md
 
                   # Compute throughput in MiB/s.
                   RESULT="hyperfine/$FILENAME.json"
@@ -305,7 +303,7 @@ jobs:
                   RANGE=$(grep -Po '^.*± *\K.*' < "hyperfine/$FILENAME.md" | cut -d' ' -f1)
                   MIBS=$(bc -l <<< "($SIZE / 1048576) / $MEAN")
                   MIBS_RANGE=$(bc -l <<< "($SIZE / 1048576) / $RANGE")
-                  printf "| $BOLD%.1f ± %.1f$BOLD " "$MIBS" "$MIBS_RANGE"  >> steps.md
+                  printf "| %.1f ± %.1f " "$MIBS" "$MIBS_RANGE"  >> steps.md
                   BASELINE="hyperfine-main/$FILENAME.json"
 
                   # Figure out if any performance difference to `main` is statistically relevant, and indicate that.
@@ -322,18 +320,18 @@ jobs:
                       if (( $(bc -l <<< "$DELTA > 0") )); then
                         echo "Performance has regressed: $BASELINE_MEAN -> $MEAN"
                         SYMBOL=":broken_heart:"
-                        FORMAT='*'
+                        FORMAT='**'
                       else
                         echo "Performance has improved: $BASELINE_MEAN -> $MEAN"
                         SYMBOL=":green_heart:"
-                        FORMAT='*'
+                        FORMAT='**'
                       fi
                     else
                       echo "No statistically significant change: $BASELINE_MEAN -> $MEAN"
                       SYMBOL=""
                       FORMAT=""
                     fi
-                    printf "| $BOLD%s %s%.1f%s$BOLD | $BOLD%s%.1f%%%s$BOLD |\n" "$SYMBOL" "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT" >> steps.md
+                    printf "| %s %s%.1f%s | %s%.1f%%%s |\n" "$SYMBOL" "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT" >> steps.md
                   else
                     echo No cached baseline from main found.
                     echo '| :question: | :question: |' >> steps.md
