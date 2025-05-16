@@ -247,28 +247,32 @@ jobs:
               chmod u+w binaries/*
               # google and msquic don't let us configure the congestion control or pacing.
               # TODO: Support quiche and s2n-quic here.
-              if [[ "$client" != "neqo" || "$server" != "neqo" ]]; then
-                cc_opt=("")
-                pacing_opt=("")
-              else
+              if [[ "$client" != "neqo" || "$server" == "neqo" || "$client" == "neqo" || "$server" != "neqo" ]]; then
+                cc_opt=("cubic")
+                pacing_opt=("on")
+              elif [[ "$client" == "neqo" && "$server" == "neqo" ]]; then
                 cc_opt=("reno" "cubic")
                 pacing_opt=("on" "")
+              else
+                cc_opt=("")
+                pacing_opt=("")
               fi
               for cc in "${cc_opt[@]}"; do
                 for pacing in "${pacing_opt[@]}"; do
                   # Make a tag string for this test, for the results. Highlight lines we care about.
-                  TAG="$client vs. $server${cc:+ (}$cc${pacing:+, paced}${cc:+)}"
+                  BOLD=""
                   if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
                         "$client" == "$server" && "$client" != "neqo" && "$server" != "neqo" ]]; then
-                    TAG="**$TAG**"
+                    BOLD="**"
                   fi
+                  TAG="$BOLD$client vs. $server${cc:+ (}$cc${pacing:+, paced}${cc:+)}$BOLD"
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
                   echo "Server command: $CMD"
                   # shellcheck disable=SC2086
                   perf $PERF_OPT -o "$FILENAME.server.perf" nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu2 --exec $CMD &
-                  sleep 1
+                  sleep 3
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   echo "Client command: $CMD"
                   # shellcheck disable=SC2086
@@ -296,18 +300,21 @@ jobs:
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                     sed -E 's/`//g;' | cut -f1-5 -d\| | tr -d '\n' >> steps.md
 
-                  # Figure out if any performance difference to `main` is statistically relevant, and indicate that.
+                  # Compute throughput in MiB/s.
+                  RESULT="hyperfine/$FILENAME.json"
+                  MEAN=$(jq -r '.results[0].mean' "$RESULT")
+                  RANGE=$(grep -Po '^.*± *\K.*' < "hyperfine/$FILENAME.md" | cut -d' ' -f1)
+                  MIBS=$(bc -l <<< "($SIZE / 1048576) / $MEAN")
+                  MIBS_RANGE=$(bc -l <<< "($SIZE / 1048576) / $RANGE")
+                  printf "| $BOLD%.1f ± %.1f$BOLD " "$MIBS" "$MIBS_RANGE"  >> steps.md
                   BASELINE="hyperfine-main/$FILENAME.json"
+
+                  # Figure out if any performance difference to `main` is statistically relevant, and indicate that.
                   if [ -e "$BASELINE" ]; then
-                    RESULT="hyperfine/$FILENAME.json"
                     BASELINE_MEAN=$(jq -r '.results[0].mean' "$BASELINE")
-                    MEAN=$(jq -r '.results[0].mean' "$RESULT")
                     # Even though we tell hyperfine to use milliseconds, it still outputs in seconds when dumping to JSON.
                     DELTA=$(bc -l <<< "($MEAN - $BASELINE_MEAN) * 1000")
                     PERCENT=$(bc -l <<< "(($MEAN - $BASELINE_MEAN) / $BASELINE_MEAN) * 100")
-                    MIBS=$(bc -l <<< "($SIZE / 1048576) / $MEAN")
-                    RANGE=$(grep -Po '^.*± *\K.*' < "hyperfine/$FILENAME.md" | cut -d' ' -f1)
-                    MIBS_RANGE=$(bc -l <<< "($SIZE / 1048576) / $RANGE")
 
                     # If a performance change is statistically significant, highlight it.
                     jq -r '.results[0].times[]' "$BASELINE" > baseline.txt
@@ -316,19 +323,18 @@ jobs:
                       if (( $(bc -l <<< "$DELTA > 0") )); then
                         echo "Performance has regressed: $BASELINE_MEAN -> $MEAN"
                         SYMBOL=":broken_heart:"
-                        FORMAT='**'
+                        FORMAT='*'
                       else
                         echo "Performance has improved: $BASELINE_MEAN -> $MEAN"
                         SYMBOL=":green_heart:"
-                        FORMAT='**'
+                        FORMAT='*'
                       fi
                     else
                       echo "No statistically significant change: $BASELINE_MEAN -> $MEAN"
                       SYMBOL=""
                       FORMAT=""
                     fi
-                    printf "| %.1f ± %.1f | %s %s%.1f%s | %s%.1f%%%s |\n" \
-                      "$MIBS" "$MIBS_RANGE" "$SYMBOL" "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT" >> steps.md
+                    printf "| $BOLD%s %s%.1f%s$BOLD | $BOLD%s%.1f%%%s$BOLD |\n" "$SYMBOL" "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT" >> steps.md
                   else
                     echo No cached baseline from main found.
                     echo '| :question: | :question: |' >> steps.md
