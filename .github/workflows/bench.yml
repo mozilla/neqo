@@ -156,7 +156,7 @@ jobs:
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
-      - name: Compare neqo, msquic and google/quiche
+      - name: Compare QUIC implementations
         env:
           HOST: 127.0.0.1
           PORT: 4433
@@ -276,7 +276,7 @@ jobs:
                   hyperfine --command-name "$TAG" --time-unit millisecond  \
                     --export-json "hyperfine/$FILENAME.json" \
                     --export-markdown "hyperfine/$FILENAME.md" \
-                    --output null --warmup 5 --runs "$RUNS" --prepare "sleep 2" \
+                    --output null --warmup 5 --runs "$RUNS" --prepare "sleep 5" \
                     "nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec $CMD" |
                   tee -a comparison.txt
                   echo >> comparison.txt
