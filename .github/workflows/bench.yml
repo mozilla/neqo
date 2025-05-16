@@ -151,7 +151,7 @@ jobs:
       #       cp "$BENCH" binaries/
       #       # shellcheck disable=SC2086
       #       perf $PERF_OPT -o "$NAME.perf" \
-      #         nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu23 --exec "$BENCH" -- --bench --noplot | tee -a results.txt
+      #         nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec "$BENCH" -- --bench --noplot | tee -a results.txt
       #     done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
@@ -247,7 +247,7 @@ jobs:
               chmod u+w binaries/*
               # google and msquic don't let us configure the congestion control or pacing.
               # TODO: Support quiche and s2n-quic here.
-              if [[ "$client" != "neqo" || "$server" == "neqo" || "$client" == "neqo" || "$server" != "neqo" ]]; then
+              if [[ "$client" != "neqo" && "$server" == "neqo" || "$client" == "neqo" && "$server" != "neqo" ]]; then
                 cc_opt=("cubic")
                 pacing_opt=("on")
               elif [[ "$client" == "neqo" && "$server" == "neqo" ]]; then
@@ -271,16 +271,15 @@ jobs:
                   FILENAME="$client-$server$EXT"
                   echo "Server command: $CMD"
                   # shellcheck disable=SC2086
-                  perf $PERF_OPT -o "$FILENAME.server.perf" nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu2 --exec $CMD &
-                  sleep 3
+                  perf $PERF_OPT -o "$FILENAME.server.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec $CMD &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   echo "Client command: $CMD"
                   # shellcheck disable=SC2086
                   hyperfine --command-name "$TAG" --time-unit millisecond  \
                     --export-json "hyperfine/$FILENAME.json" \
                     --export-markdown "hyperfine/$FILENAME.md" \
-                    --show-output --runs "$RUNS" \
-                    "nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu3 --exec $CMD" |
+                    --output null --warmup 5 --runs "$RUNS" --prepare "sleep 2" \
+                    "nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec $CMD" |
                   tee -a comparison.txt
                   echo >> comparison.txt
                   # Sanity check the size of the last retrieved file.
@@ -293,12 +292,12 @@ jobs:
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
                   perf $PERF_OPT -o "$FILENAME.client.perf" \
-                    nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu3 --exec $CMD > /dev/null 2>&1
+                    nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec $CMD > /dev/null 2>&1
                   # pkill only matches on the first 15 characters of the command?!
                   pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
-                    sed -E 's/`//g;' | cut -f1-5 -d\| | tr -d '\n' >> steps.md
+                    sed -E 's/`//g; s/ \| /** | **/g; s/\*\*//' | cut -f1-5 -d\| | tr -d '\n' >> steps.md
 
                   # Compute throughput in MiB/s.
                   RESULT="hyperfine/$FILENAME.json"
