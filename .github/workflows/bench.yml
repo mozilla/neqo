@@ -161,7 +161,7 @@ jobs:
           HOST: 127.0.0.1
           PORT: 4433
           SIZE: 33554432 # 32 MB
-          RUNS: 30
+          RUNS: 3
         run: |
           TMP=$(mktemp -d)
           mkdir -p binaries
@@ -276,7 +276,7 @@ jobs:
                   hyperfine --command-name "$TAG" --time-unit millisecond  \
                     --export-json "hyperfine/$FILENAME.json" \
                     --export-markdown "hyperfine/$FILENAME.md" \
-                    --warmup 5 --min-runs "$RUNS" --setup "sleep 2" \
+                    --warmup 5 --min-runs "$RUNS" --setup "sleep 5" \
                     "nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec $CMD" |
                   tee -a comparison.txt
                   echo >> comparison.txt
