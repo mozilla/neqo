@@ -454,11 +454,8 @@ impl RecvdPackets {
             return;
         }
 
-        builder.encode_varint(if self.ecn_count.is_some() {
-            FrameType::AckEcn
-        } else {
-            FrameType::Ack
-        });
+        // TODO: Send Ack and not AckEcn when no ecn counts available.
+        builder.encode_varint(FrameType::AckEcn);
         let mut iter = ranges.iter();
         let Some(first) = iter.next() else { return };
         builder.encode_varint(first.largest);
@@ -492,6 +489,10 @@ impl RecvdPackets {
             builder.encode_varint(self.ecn_count[IpTosEcn::Ect0]);
             builder.encode_varint(self.ecn_count[IpTosEcn::Ect1]);
             builder.encode_varint(self.ecn_count[IpTosEcn::Ce]);
+        } else {
+            builder.encode_varint(0u64);
+            builder.encode_varint(0u64);
+            builder.encode_varint(0u64);
         }
 
         // We've sent an ACK, reset the timer.
