@@ -718,7 +718,6 @@ mod tests {
         let mut stats = Stats::default();
         // Only application data packets are delayed.
         let mut rp = RecvdPackets::new(PacketNumberSpace::ApplicationData);
-
         assert!(rp.ack_time().is_none());
         assert!(!rp.ack_now(now(), RTT));
 
