@@ -96,12 +96,16 @@ impl super::HttpServer for HttpServer {
                 } => {
                     qdebug!("Headers (request={stream} fin={fin}): {headers:?}");
 
+                    let path = headers.find_header(":path");
+                    let response_size = path
+                        .and_then(|p| p.value().trim_matches(|p| p == '/').parse::<usize>().ok());
+
                     if headers.contains_header(":method", "POST") {
-                        self.posts.insert(stream, 0);
+                        self.posts.insert(stream, response_size.unwrap_or(0));
                         continue;
                     }
 
-                    let Some(path) = headers.find_header(":path") else {
+                    let Some(path) = path else {
                         stream
                             .cancel_fetch(neqo_http3::Error::HttpRequestIncomplete.code())
                             .unwrap();
@@ -120,9 +124,7 @@ impl super::HttpServer for HttpServer {
                                 continue;
                             }
                         }
-                    } else if let Ok(count) =
-                        path.value().trim_matches(|p| p == '/').parse::<usize>()
-                    {
+                    } else if let Some(count) = response_size {
                         SendData::zeroes(count)
                     } else {
                         SendData::from(path.value())
