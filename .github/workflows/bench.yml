@@ -270,14 +270,14 @@ jobs:
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
                   # shellcheck disable=SC2086
-                  perf $PERF_OPT -o "$FILENAME.server.perf" nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec $CMD &
+                  perf $PERF_OPT -o "$FILENAME.server.perf" nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu2 --exec $CMD &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
                   hyperfine --command-name "$TAG" --time-unit millisecond  \
                     --export-json "hyperfine/$FILENAME.json" \
                     --export-markdown "hyperfine/$FILENAME.md" \
-                    --warmup 5 --min-runs "$RUNS" --setup "sleep 5" \
-                    "nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec $CMD" |
+                    --show-output --warmup 5 --min-runs "$RUNS" --setup "sleep 5" \
+                    "nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu3 --exec $CMD" |
                   tee -a comparison.txt
                   echo >> comparison.txt
                   # Sanity check the size of the last retrieved file.
@@ -290,7 +290,7 @@ jobs:
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
                   perf $PERF_OPT -o "$FILENAME.client.perf" \
-                    nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec $CMD > /dev/null 2>&1
+                    nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu3 --exec $CMD > /dev/null 2>&1
                   # pkill only matches on the first 15 characters of the command?!
                   pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
 
