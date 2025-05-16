@@ -161,7 +161,7 @@ jobs:
           HOST: 127.0.0.1
           PORT: 4433
           SIZE: 33554432 # 32 MB
-          RUNS: 3
+          RUNS: 30
         run: |
           TMP=$(mktemp -d)
           mkdir -p binaries
@@ -348,7 +348,7 @@ jobs:
             # shellcheck disable=SC2016
             echo '| Client vs. server (params) | Mean ± σ | Min | Max | MiB/s ± σ | Δ `main` | Δ `main` |'
             echo '|:---|---:|---:|---:|---:|---:|---:|'
-            sed -e 's/ \*\*/ /' steps.md | sort | sed -E -e 's/^\|([^\|]+\*\* \|)/\| \*\*\1/'
+            sed -e 's/ \*\*/ /' steps.md | sort | sed -E -e 's/^\| ([^\|]+\*\* \|)/\| \*\*\1/'
           } > comparison.md
           rm -r "$TMP"
 
