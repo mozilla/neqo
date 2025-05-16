@@ -272,7 +272,7 @@ jobs:
                   hyperfine --command-name "$TAG" --time-unit millisecond  \
                     --export-json "hyperfine/$FILENAME.json" \
                     --export-markdown "hyperfine/$FILENAME.md" \
-                    --output null --runs "$RUNS" \
+                    --show-output --runs "$RUNS" \
                     "nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec $CMD" |
                   tee -a comparison.txt
                   echo >> comparison.txt
