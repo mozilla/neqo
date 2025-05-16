@@ -80,8 +80,11 @@ runs:
     - name: Enable Rust cache
       uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
       with:
-        cache-bin: ${{ runner.environment == 'github-hosted' }}
+        cache-bin: ${{ runner.environment != 'github-hosted' }}
+        cache-all-crates: true
         key: ${{ inputs.targets }}
+        save-if: ${{ github.ref == 'refs/heads/main' }} # Only cache runs from `main`.
+
 
     - name: Set up MSVC (Windows)
       if: ${{ runner.os == 'Windows' }}
