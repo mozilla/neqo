@@ -10,7 +10,7 @@
 
 use std::{
     cell::RefCell,
-    fmt::Display,
+    fmt::{self, Display, Formatter},
     net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
     rc::Rc,
 };
@@ -69,7 +69,7 @@ pub enum TransportParameterId {
 }
 
 impl Display for TransportParameterId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         format!("{self:?}((0x{:02x}))", u64::from(*self)).fmt(f)
     }
 }

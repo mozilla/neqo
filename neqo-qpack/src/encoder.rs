@@ -9,7 +9,11 @@
     reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
 )]
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    cmp::min,
+    collections::{HashMap, HashSet, VecDeque},
+    fmt::{self, Display, Formatter},
+};
 
 use neqo_common::{qdebug, qerror, qlog::NeqoQlog, qtrace, Header};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
@@ -103,7 +107,7 @@ impl QPackEncoder {
             self.max_table_size,
         );
 
-        let new_cap = std::cmp::min(self.max_table_size, cap);
+        let new_cap = min(self.max_table_size, cap);
         // we also set our table to the max allowed.
         self.change_capacity(new_cap);
         Ok(())
@@ -512,8 +516,8 @@ impl QPackEncoder {
     }
 }
 
-impl ::std::fmt::Display for QPackEncoder {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for QPackEncoder {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "QPackEncoder")
     }
 }

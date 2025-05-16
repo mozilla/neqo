@@ -7,7 +7,7 @@
 use std::{
     cell::RefCell,
     collections::{BTreeSet, HashMap},
-    fmt::Debug,
+    fmt::{self, Debug, Display, Formatter},
     mem,
     rc::Rc,
 };
@@ -301,8 +301,8 @@ pub struct Http3Connection {
     webtransport: ExtendedConnectFeature,
 }
 
-impl ::std::fmt::Display for Http3Connection {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Http3Connection {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Http3 connection")
     }
 }
