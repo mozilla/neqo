@@ -276,7 +276,7 @@ jobs:
                   hyperfine --command-name "$TAG" --time-unit millisecond  \
                     --export-json "hyperfine/$FILENAME.json" \
                     --export-markdown "hyperfine/$FILENAME.md" \
-                    --output null --warmup 5 --runs "$RUNS" --prepare "sleep 5" \
+                    --warmup 5 --min-runs "$RUNS" --setup "sleep 2" \
                     "nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec $CMD" |
                   tee -a comparison.txt
                   echo >> comparison.txt
@@ -343,7 +343,7 @@ jobs:
 
           # Make a single results table.
           {
-            echo "Transfer of $SIZE bytes over loopback, $RUNS runs. All unit-less numbers are in milliseconds."
+            echo "Transfer of $SIZE bytes over loopback, min. $RUNS runs. All unit-less numbers are in milliseconds."
             echo
             # shellcheck disable=SC2016
             echo '| Client vs. server (params) | Mean ± σ | Min | Max | MiB/s ± σ | Δ `main` | Δ `main` |'
