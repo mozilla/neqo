@@ -9,6 +9,7 @@
 use std::{
     cmp::min,
     collections::VecDeque,
+    fmt::{self, Display, Formatter},
     time::{Duration, Instant},
 };
 
@@ -151,8 +152,8 @@ impl PacketRange {
     }
 }
 
-impl ::std::fmt::Display for PacketRange {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for PacketRange {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{}->{}", self.largest, self.smallest)
     }
 }
@@ -505,8 +506,8 @@ impl RecvdPackets {
     }
 }
 
-impl ::std::fmt::Display for RecvdPackets {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for RecvdPackets {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Recvd-{}", self.space)
     }
 }

@@ -19,6 +19,7 @@ mod token;
 
 use std::{
     cmp::{max, min},
+    fmt::{self, Display, Formatter},
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
@@ -934,8 +935,8 @@ impl LossRecovery {
     }
 }
 
-impl ::std::fmt::Display for LossRecovery {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for LossRecovery {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "LossRecovery")
     }
 }

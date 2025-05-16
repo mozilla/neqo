@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::Debug;
+use std::fmt::{self, Debug, Formatter};
 
 use crate::hex_with_len;
 
@@ -170,7 +170,7 @@ impl<'a> AsRef<[u8]> for Decoder<'a> {
 }
 
 impl Debug for Decoder<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.write_str(&hex_with_len(self.as_ref()))
     }
 }
@@ -435,7 +435,7 @@ impl Encoder {
 }
 
 impl Debug for Encoder {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.write_str(&hex_with_len(self))
     }
 }

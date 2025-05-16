@@ -6,6 +6,7 @@
 
 use std::{
     cell::RefCell,
+    fmt::{self, Debug, Formatter},
     ops::{Deref, DerefMut},
     os::raw::c_uint,
     ptr::null_mut,
@@ -114,8 +115,8 @@ impl Clone for PublicKey {
     }
 }
 
-impl std::fmt::Debug for PublicKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl Debug for PublicKey {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         if let Ok(b) = self.key_data() {
             write!(f, "PublicKey {}", hex_with_len(b))
         } else {
@@ -168,8 +169,8 @@ impl Clone for PrivateKey {
     }
 }
 
-impl std::fmt::Debug for PrivateKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl Debug for PrivateKey {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         if let Ok(b) = self.key_data() {
             write!(f, "PrivateKey {}", hex_with_len(b))
         } else {
@@ -215,8 +216,8 @@ impl Clone for SymKey {
     }
 }
 
-impl std::fmt::Debug for SymKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl Debug for SymKey {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         if let Ok(b) = self.as_bytes() {
             write!(f, "SymKey {}", hex_with_len(b))
         } else {
