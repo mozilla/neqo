@@ -211,7 +211,7 @@ impl AddressValidationInfo {
         }
     }
 
-    pub fn generate_new_token(&self, peer_address: SocketAddr, now: Instant) -> Option<Vec<u8>> {
+    pub fn generate_new_token(&self, peer_address: &SocketAddr, now: Instant) -> Option<Vec<u8>> {
         match self {
             Self::Server(w) => w.upgrade().and_then(|validation| {
                 validation
@@ -1352,8 +1352,8 @@ impl Connection {
 
             qinfo!("[{self}] Version negotiation: trying {version:?}");
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
-            let local_addr = path.borrow().local_address();
-            let remote_addr = path.borrow().remote_address();
+            let local_addr = *path.borrow().local_address();
+            let remote_addr = *path.borrow().remote_address();
             let conn_params = self
                 .conn_params
                 .clone()
@@ -1542,7 +1542,7 @@ impl Connection {
         &mut self,
         path: &PathRef,
         tos: IpTos,
-        remote: SocketAddr,
+        remote: &SocketAddr,
         packet: &PublicPacket,
         packet_number: PacketNumber,
         migrate: bool,
@@ -1687,7 +1687,7 @@ impl Connection {
                             match self.process_packet(path, &payload, now) {
                                 Ok(migrate) => {
                                     self.postprocess_packet(
-                                        path, tos, remote, &packet, pn, migrate, now,
+                                        path, tos, &remote, &packet, pn, migrate, now,
                                     );
                                 }
                                 Err(e) => {
@@ -1945,8 +1945,8 @@ impl Connection {
         }
 
         let path = self.paths.primary().ok_or(Error::InvalidMigration)?;
-        let local = local.unwrap_or_else(|| path.borrow().local_address());
-        let remote = remote.unwrap_or_else(|| path.borrow().remote_address());
+        let local = local.unwrap_or_else(|| *path.borrow().local_address());
+        let remote = remote.unwrap_or_else(|| *path.borrow().remote_address());
 
         if mem::discriminant(&local.ip()) != mem::discriminant(&remote.ip()) {
             // Can't mix address families.
@@ -2002,7 +2002,7 @@ impl Connection {
             // has to use the existing address.  So only pay attention to a preferred
             // address from the same family as is currently in use. More thought will
             // be needed to work out how to get addresses from a different family.
-            let prev = self
+            let prev = *self
                 .paths
                 .primary()
                 .ok_or(Error::NoAvailablePath)?
@@ -2036,7 +2036,7 @@ impl Connection {
     fn handle_migration(
         &mut self,
         path: &PathRef,
-        remote: SocketAddr,
+        remote: &SocketAddr,
         migrate: bool,
         now: Instant,
     ) {
@@ -3012,7 +3012,7 @@ impl Connection {
 
                 let ranges =
                     Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
-                self.handle_ack(space, ranges, ecn_count, ack_delay, now)?;
+                self.handle_ack(space, ranges, ecn_count.as_ref(), ack_delay, now)?;
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
@@ -3208,7 +3208,7 @@ impl Connection {
         &mut self,
         space: PacketNumberSpace,
         ack_ranges: R,
-        ack_ecn: Option<ecn::Count>,
+        ack_ecn: Option<&ecn::Count>,
         ack_delay: u64,
         now: Instant,
     ) -> Res<()>

@@ -7,3 +7,5 @@ disallowed-macros = [
 allow-mixed-uninlined-format-args = false
 allow-unwrap-in-tests = true
 allow-dbg-in-tests = true
+pass-by-value-size-limit = 16
+# avoid-breaking-exported-api = false # TODO: Enable this in a follow-on PR.

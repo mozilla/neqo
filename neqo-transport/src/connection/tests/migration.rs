@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::large_types_passed_by_value, reason = "OK in tests.")]
+
 use std::{
     cell::RefCell,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -60,7 +62,7 @@ fn change_path(d: &Datagram, a: SocketAddr) -> Datagram {
     Datagram::new(a, a, d.tos(), &d[..])
 }
 
-const fn new_port(a: SocketAddr) -> SocketAddr {
+const fn new_port(a: &SocketAddr) -> SocketAddr {
     let (port, _) = a.port().overflowing_add(410);
     SocketAddr::new(a.ip(), port)
 }
@@ -91,7 +93,7 @@ fn assert_path_response(c: &Connection, d: &Datagram, before: &FrameStats) {
 }
 
 fn local_address(c: &Connection) -> SocketAddr {
-    c.paths.primary().unwrap().borrow().local_address()
+    *c.paths.primary().unwrap().borrow().local_address()
 }
 
 fn rebind(
@@ -237,7 +239,7 @@ fn inc_port(port: u16, i: usize) -> u16 {
         .0
 }
 
-fn inc_addr(ip: IpAddr, i: usize) -> IpAddr {
+fn inc_addr(ip: &IpAddr, i: usize) -> IpAddr {
     let inc: u8 = i.overflowing_mul(11).0.try_into().unwrap();
     match ip {
         IpAddr::V4(ip) => IpAddr::V4(Ipv4Addr::from(
@@ -260,7 +262,10 @@ fn change_source_port(d: &Datagram, i: usize) -> Datagram {
 
 fn change_source_address_and_port(d: &Datagram, i: usize) -> Datagram {
     Datagram::new(
-        SocketAddr::new(inc_addr(d.source().ip(), i), inc_port(d.source().port(), i)),
+        SocketAddr::new(
+            inc_addr(&d.source().ip(), i),
+            inc_port(d.source().port(), i),
+        ),
         d.destination(),
         d.tos(),
         &d[..],
@@ -806,7 +811,7 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
 #[test]
 fn preferred_address_new_port() {
     let a = DEFAULT_ADDR;
-    preferred_address(a, a, new_port(a));
+    preferred_address(a, a, new_port(&a));
 }
 
 /// Migration works for a new address too.
@@ -821,14 +826,14 @@ fn preferred_address_new_address() {
 #[test]
 fn preferred_address_new_port_v4() {
     let a = DEFAULT_ADDR_V4;
-    preferred_address(a, a, new_port(a));
+    preferred_address(a, a, new_port(&a));
 }
 
 /// Migrating to a loopback address is OK if we started there.
 #[test]
 fn preferred_address_loopback() {
     let a = loopback();
-    preferred_address(a, a, new_port(a));
+    preferred_address(a, a, new_port(&a));
 }
 
 fn expect_no_migration(client: &mut Connection, server: &mut Connection) {
@@ -880,7 +885,7 @@ fn preferred_address_disabled_client() {
 fn preferred_address_empty_cid() {
     fixture_init();
 
-    let spa = PreferredAddress::new_any(None, Some(new_port(DEFAULT_ADDR)));
+    let spa = PreferredAddress::new_any(None, Some(new_port(&DEFAULT_ADDR)));
     let res = Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,

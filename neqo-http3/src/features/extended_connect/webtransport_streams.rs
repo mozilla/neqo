@@ -25,6 +25,7 @@ pub struct WebTransportRecvStream {
     session: Rc<RefCell<WebTransportSession>>,
     session_id: StreamId,
     fin: bool,
+    stream_info: Http3StreamInfo,
 }
 
 impl WebTransportRecvStream {
@@ -40,11 +41,12 @@ impl WebTransportRecvStream {
             session_id,
             session,
             fin: false,
+            stream_info: Http3StreamInfo::new(stream_id, Http3StreamType::WebTransport(session_id)),
         }
     }
 
-    fn get_info(&self) -> Http3StreamInfo {
-        Http3StreamInfo::new(self.stream_id, self.stream_type())
+    const fn get_info(&self) -> &Http3StreamInfo {
+        &self.stream_info
     }
 }
 
@@ -121,6 +123,7 @@ pub struct WebTransportSendStream {
     events: Box<dyn SendStreamEvents>,
     session: Rc<RefCell<WebTransportSession>>,
     session_id: StreamId,
+    stream_info: Http3StreamInfo,
 }
 
 impl WebTransportSendStream {
@@ -151,6 +154,7 @@ impl WebTransportSendStream {
             events,
             session_id,
             session,
+            stream_info: Http3StreamInfo::new(stream_id, Http3StreamType::WebTransport(session_id)),
         }
     }
 
@@ -160,8 +164,8 @@ impl WebTransportSendStream {
         self.session.borrow_mut().remove_send_stream(self.stream_id);
     }
 
-    fn get_info(&self) -> Http3StreamInfo {
-        Http3StreamInfo::new(self.stream_id, self.stream_type())
+    const fn get_info(&self) -> &Http3StreamInfo {
+        &self.stream_info
     }
 }
 

@@ -86,7 +86,7 @@ impl Socket {
     /// the provided local address.
     pub fn recv<'a>(
         &self,
-        local_address: SocketAddr,
+        local_address: &'a SocketAddr,
         recv_buf: &'a mut RecvBuf,
     ) -> Result<Option<DatagramIter<'a>>, io::Error> {
         self.inner
