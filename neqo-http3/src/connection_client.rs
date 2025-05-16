@@ -396,7 +396,7 @@ impl Http3Client {
     ///
     /// Never, because clients always have this field.
     #[must_use]
-    pub fn connection_id(&self) -> &ConnectionId {
+    pub const fn connection_id(&self) -> &ConnectionId {
         self.conn.odcid().expect("Client always has odcid")
     }
 
