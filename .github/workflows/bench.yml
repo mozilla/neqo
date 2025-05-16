@@ -268,6 +268,7 @@ jobs:
                   echo "Server command: $CMD"
                   # shellcheck disable=SC2086
                   perf $PERF_OPT -o "$FILENAME.server.perf" nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu2 --exec $CMD &
+                  sleep 1
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   echo "Client command: $CMD"
                   # shellcheck disable=SC2086
