@@ -132,7 +132,9 @@ impl From<IpTos> for IpTosDscp {
 }
 
 /// The type-of-service field in an IP packet.
-#[derive(Copy, Clone, PartialEq, Eq, Default)]
+///
+/// TODO: remove partialord and ord?
+#[derive(Copy, Clone, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct IpTos(u8);
 
 impl From<IpTosEcn> for IpTos {

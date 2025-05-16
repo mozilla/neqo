@@ -38,7 +38,7 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init_db, AntiReplay, Cipher,
 };
-use neqo_transport::{Output, RandomConnectionIdGenerator, Version};
+use neqo_transport::{OutputTrain, RandomConnectionIdGenerator, Version};
 use neqo_udp::RecvBuf;
 use tokio::time::Sleep;
 
@@ -201,7 +201,12 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
 }
 
 pub trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<Datagram<&mut [u8]>>, now: Instant) -> Output;
+    fn process(
+        &mut self,
+        dgram: Option<Datagram<&mut [u8]>>,
+        now: Instant,
+        max_datagrams: usize,
+    ) -> OutputTrain;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }
@@ -253,14 +258,15 @@ impl ServerRunner {
         mut input_dgram: Option<Datagram<&mut [u8]>>,
     ) -> Result<(), io::Error> {
         loop {
-            match server.process(input_dgram.take(), now()) {
-                Output::Datagram(dgram) => {
-                    let socket = Self::find_socket(sockets, dgram.source());
+            // TODO: Hack, always using the first socket to get gso segments.
+            match server.process(input_dgram.take(), now(), sockets[0].1.max_gso_segments()) {
+                OutputTrain::Datagram(dgram) => {
+                    let socket = Self::find_socket(sockets, dgram.src);
                     loop {
                         // Optimistically attempt sending datagram. In case the
                         // OS buffer is full, wait till socket is writable then
                         // try again.
-                        match socket.send(&dgram) {
+                        match socket.send2(&dgram) {
                             Ok(()) => break,
                             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                                 socket.writable().await?;
@@ -270,12 +276,12 @@ impl ServerRunner {
                         }
                     }
                 }
-                Output::Callback(new_timeout) => {
+                OutputTrain::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
                     *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
-                Output::None => break,
+                OutputTrain::None => break,
             }
         }
         Ok(())
