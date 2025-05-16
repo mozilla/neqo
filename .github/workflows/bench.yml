@@ -178,7 +178,7 @@ jobs:
             ["msquic"]="msquic/build/bin/Release/quicinterop -- -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
             ["google"]="google-quiche/bazel-bin/quiche/quic_client -- --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
             ["quiche"]="quiche/target/release/quiche-client -- --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
-            ["s2n-quic"]="s2n-quic/target/release/s2n-quic-qns interop client --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE"
+            ["s2n-quic"]="s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server -- _cc _pacing _flags -Q 1 $HOST:$PORT"
@@ -243,8 +243,8 @@ jobs:
               # google-quiche binaries don't have write permissions by default?!
               chmod u+w binaries/*
               # google and msquic don't let us configure the congestion control or pacing.
-              # TODO: Support quiche here.
-              if [[ "$client" != "neqo" && "$server" != "neqo" ]]; then
+              # TODO: Support quiche and s2n-quic here.
+              if [[ "$client" != "neqo" || "$server" != "neqo" ]]; then
                 cc_opt=("")
                 pacing_opt=("")
               else
@@ -253,11 +253,6 @@ jobs:
               fi
               for cc in "${cc_opt[@]}"; do
                 for pacing in "${pacing_opt[@]}"; do
-                  # Only vary CC and pacing if neqo is running against itself.
-                  if [[ "$server" != "neqo" && "$client" != "neqo" && "$cc" != "cubic" && "$pacing" != "on" ]]; then
-                    echo "Skipping $client vs. $server ($cc, $pacing)"
-                    continue
-                  fi
                   # Make a tag string for this test, for the results. Highlight lines we care about.
                   TAG="$client vs. $server${cc:+ (}$cc${pacing:+, paced}${cc:+)}"
                   if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
