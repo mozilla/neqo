@@ -206,13 +206,14 @@ jobs:
             if [[ "$cc" != "" ]]; then
               CMD=${CMD//_cc/--cc $cc}
               EXT="-$cc"
+            else
+              CMD=${CMD//_cc/}
             fi
             if [[ "$pacing" == "on" ]]; then
               CMD=${CMD//_pacing/}
               EXT="$EXT-pacing"
             else
               CMD=${CMD//_pacing/--no-pacing}
-              EXT="$EXT-nopacing"
             fi
             CMD=${CMD//_flags/$flags}
           }
