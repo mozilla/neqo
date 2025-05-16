@@ -8,7 +8,6 @@
 
 use std::{
     cmp::min,
-    collections::VecDeque,
     time::{Duration, Instant},
 };
 
@@ -190,7 +189,7 @@ impl AckToken {
 #[derive(Debug)]
 pub struct RecvdPackets {
     space: PacketNumberSpace,
-    ranges: VecDeque<PacketRange>,
+    ranges: Vec<PacketRange>,
     /// The packet number of the lowest number packet that we are tracking.
     min_tracked: PacketNumber,
     /// The time we got the largest acknowledged.
@@ -222,7 +221,7 @@ impl RecvdPackets {
     pub fn new(space: PacketNumberSpace) -> Self {
         Self {
             space,
-            ranges: VecDeque::new(),
+            ranges: Vec::new(),
             min_tracked: 0,
             largest_pn_time: None,
             ack_time: None,
@@ -283,35 +282,34 @@ impl RecvdPackets {
     // A simple addition of a packet number to the tracked set.
     // This doesn't do a binary search on the assumption that
     // new packets will generally be added to the start of the list.
-    fn add(&mut self, pn: PacketNumber) -> Res<()> {
+    fn add(&mut self, pn: PacketNumber) {
         for i in 0..self.ranges.len() {
             match self.ranges[i].add(pn) {
-                InsertionResult::Largest => return Ok(()),
+                InsertionResult::Largest => return,
                 InsertionResult::Smallest => {
                     // If this was the smallest, it might have filled a gap.
                     let nxt = i + 1;
                     if (nxt < self.ranges.len()) && (pn - 1 == self.ranges[nxt].largest) {
-                        let larger = self.ranges.remove(i).ok_or(Error::InternalError)?;
+                        let larger = self.ranges.remove(i);
                         self.ranges[i].merge_larger(&larger);
                     }
-                    return Ok(());
+                    return;
                 }
                 InsertionResult::NotInserted => {
                     if self.ranges[i].largest < pn {
                         self.ranges.insert(i, PacketRange::new(pn));
-                        return Ok(());
+                        return;
                     }
                 }
             }
         }
-        self.ranges.push_back(PacketRange::new(pn));
-        Ok(())
+        self.ranges.push(PacketRange::new(pn));
     }
 
     fn trim_ranges(&mut self) -> Res<()> {
         // Limit the number of ranges that are tracked to MAX_TRACKED_RANGES.
         if self.ranges.len() > MAX_TRACKED_RANGES {
-            let oldest = self.ranges.pop_back().ok_or(Error::InternalError)?;
+            let oldest = self.ranges.pop().ok_or(Error::InternalError)?;
             if oldest.ack_needed {
                 qwarn!("[{self}] Dropping unacknowledged ACK range: {oldest}");
             // TODO(mt) Record some statistics about this so we can tune MAX_TRACKED_RANGES.
@@ -331,10 +329,10 @@ impl RecvdPackets {
         pn: PacketNumber,
         ack_eliciting: bool,
     ) -> Res<bool> {
-        let next_in_order_pn = self.ranges.front().map_or(0, |r| r.largest + 1);
+        let next_in_order_pn = self.ranges.first().map_or(0, |r| r.largest + 1);
         qtrace!("[{self}] received {pn}, next: {next_in_order_pn}");
 
-        self.add(pn)?;
+        self.add(pn);
         self.trim_ranges()?;
 
         // The new addition was the largest, so update the time we use for calculating ACK delay.
@@ -697,7 +695,7 @@ mod tests {
         }
 
         assert_eq!(rp.ranges.len(), MAX_TRACKED_RANGES);
-        assert_eq!(rp.ranges.back().unwrap().largest, 2);
+        assert_eq!(rp.ranges.last().unwrap().largest, 2);
 
         // Even though the range was dropped, we still consider it a duplicate.
         assert!(rp.is_duplicate(0));
