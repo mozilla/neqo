@@ -106,7 +106,7 @@ jobs:
       - name: Build google/quiche
         run: |
           cd google-quiche
-          bazel build -c opt --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
+          bazel build -c opt --copt "-fno-omit-frame-pointer -g" --strip never --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
           bazel shutdown
 
       - name: Build cloudflare/quiche
