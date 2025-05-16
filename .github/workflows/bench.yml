@@ -91,9 +91,9 @@ jobs:
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
           export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
           echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
-          # cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
-          # BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
-          # echo "BENCHES=$BENCHES" >> "$GITHUB_ENV"
+          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
+          BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
+          echo "BENCHES=$BENCHES" >> "$GITHUB_ENV"
           cargo build --locked --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
@@ -141,18 +141,18 @@ jobs:
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
 
-      # - name: Run cargo bench
-      #   run: |
-      #     sudo ip link set dev lo mtu "$MTU"
-      #     export NSS_DB_PATH="./test-fixture/db"
-      #     mkdir -p binaries
-      #     for BENCH in $BENCHES; do
-      #       NAME=$(basename "$BENCH" | cut -d- -f1)
-      #       cp "$BENCH" binaries/
-      #       # shellcheck disable=SC2086
-      #       perf $PERF_OPT -o "$NAME.perf" \
-      #         nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec "$BENCH" -- --bench --noplot | tee -a results.txt
-      #     done
+      - name: Run cargo bench
+        run: |
+          sudo ip link set dev lo mtu "$MTU"
+          export NSS_DB_PATH="./test-fixture/db"
+          mkdir -p binaries
+          for BENCH in $BENCHES; do
+            NAME=$(basename "$BENCH" | cut -d- -f1)
+            cp "$BENCH" binaries/
+            # shellcheck disable=SC2086
+            perf $PERF_OPT -o "$NAME.perf" \
+              nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec "$BENCH" -- --bench --noplot | tee -a results.txt
+          done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -161,7 +161,7 @@ jobs:
           HOST: 127.0.0.1
           PORT: 4433
           SIZE: 33554432 # 32 MB
-          RUNS: 3 # FIXME 30
+          RUNS: 30
         run: |
           TMP=$(mktemp -d)
           mkdir -p binaries
@@ -348,7 +348,7 @@ jobs:
             # shellcheck disable=SC2016
             echo '| Client vs. server (params) | Mean ± σ | Min | Max | MiB/s ± σ | Δ `main` | Δ `main` |'
             echo '|:---|---:|---:|---:|---:|---:|---:|'
-            cat steps.md
+            sed -e 's/ \*\*/ /' steps.md | sort | sed -E -e 's/^\|([^\|]+\*\* \|)/\| \*\*\1/'
           } > comparison.md
           rm -r "$TMP"
 
