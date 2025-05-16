@@ -178,14 +178,14 @@ jobs:
             ["msquic"]="msquic/build/bin/Release/quicinterop -- -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
             ["google"]="google-quiche/bazel-bin/quiche/quic_client -- --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
             ["quiche"]="quiche/target/release/quiche-client -- --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
-            ["s2n-quic"]="s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE"
+            ["s2n-quic"]="s2n-quic/target/release/s2n-quic-qns -- interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server -- _cc _pacing _flags -Q 1 $HOST:$PORT"
             ["msquic"]="msquic/build/bin/Release/quicinteropserver -- -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
             ["google"]="google-quiche/bazel-bin/quiche/quic_server -- --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
             ["quiche"]="quiche/target/release/quiche-server -- --root $TMP --listen $HOST:$PORT --cert $TMP/cert --key $TMP/key"
-            ["s2n-quic"]="s2n-quic/target/release/s2n-quic-qns interop server --www-dir $TMP --certificate $TMP/cert --private-key $TMP/key --ip $HOST --port $PORT"
+            ["s2n-quic"]="s2n-quic/target/release/s2n-quic-qns -- interop server --www-dir $TMP --certificate $TMP/cert --private-key $TMP/key --ip $HOST --port $PORT"
           )
           # Flags to pass to neqo when it runs against another implementation.
           declare -A neqo_flags=(
