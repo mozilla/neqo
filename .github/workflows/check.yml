@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, windows-2025]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, windows-2025, windows-11-arm]
         rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
         type: [debug]
         # Include some dynamically-linked release builds, to check that that works on all platforms.
