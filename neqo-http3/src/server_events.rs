@@ -339,7 +339,7 @@ impl WebTransportRequest {
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
-    pub fn send_datagram(&self, buf: &[u8], id: impl Into<DatagramTracking>) -> Res<()> {
+    pub fn send_datagram<I: Into<DatagramTracking>>(&self, buf: &[u8], id: I) -> Res<()> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
             .handler

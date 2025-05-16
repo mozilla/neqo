@@ -229,7 +229,7 @@ pub fn default_server_h3() -> Connection {
 ///
 /// If this doesn't work.
 #[must_use]
-pub fn new_server(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection {
+pub fn new_server<A: AsRef<str>>(alpn: &[A], params: ConnectionParameters) -> Connection {
     fixture_init();
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
