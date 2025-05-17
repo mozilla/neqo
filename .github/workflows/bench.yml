@@ -9,7 +9,7 @@ env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   RUSTUP_TOOLCHAIN: stable
-  PERF_OPT: record -F4999 --call-graph fp -g
+  PERF_OPT: record -F4999 --call-graph fp -g --branch-filter
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
@@ -151,7 +151,7 @@ jobs:
             cp "$BENCH" binaries/
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "$NAME.perf" $BENCH -bench --noplot | tee -a results.txt
+              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot | tee -a results.txt
           done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
@@ -216,8 +216,6 @@ jobs:
               EXT="$EXT-nopacing"
             fi
             CMD=${CMD//_flags/$flags}
-            # Insert "--" after executable to make cset happy.
-            CMD=${CMD/ / -- }
           }
 
           # A Welch's t-test to determine if a performance change is statistically significant.
@@ -271,15 +269,14 @@ jobs:
                   FILENAME="$client-$server$EXT"
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu2 --exec \
-                    perf $PERF_OPT -o "$FILENAME.server.perf" $CMD &
+                    perf -- $PERF_OPT -o "$FILENAME.server.perf" $CMD &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu3 --exec \
                     hyperfine -- --command-name "$TAG" --time-unit millisecond  \
                       --export-json "hyperfine/$FILENAME.json" \
                       --export-markdown "hyperfine/$FILENAME.md" \
-                      --show-output --warmup 5 --min-runs "$RUNS" --setup "sleep 5" \
-                      "$CMD" |
+                      --show-output --warmup 5 --min-runs "$RUNS" --setup "sleep 5" "$CMD" |
                     tee -a comparison.txt
                     echo >> comparison.txt
                   # Sanity check the size of the last retrieved file.
@@ -291,10 +288,10 @@ jobs:
                   # the perf profiles of those different runs.
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
-                  perf $PERF_OPT -o "$FILENAME.client.perf" \
-                    nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu3 --exec $CMD > /dev/null 2>&1
+                  nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu3 --exec \
+                    perf -- $PERF_OPT -o "$FILENAME.client.perf" $CMD > /dev/null 2>&1
                   # pkill only matches on the first 15 characters of the command?!
-                  pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
+                  sleep 1 && pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                     sed -E 's/`//g;' | cut -f1-5 -d\| | tr -d '\n' >> steps.md
