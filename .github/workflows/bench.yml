@@ -161,7 +161,7 @@ jobs:
           HOST: 127.0.0.1
           PORT: 4433
           SIZE: 33554432 # 32 MB
-          RUNS: 3
+          RUNS: 30
         run: |
           TMP=$(mktemp -d)
           mkdir -p binaries
