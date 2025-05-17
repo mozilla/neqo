@@ -22,7 +22,8 @@ runs:
   using: composite
   steps:
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
+      # TODO: Manually upate this, Dependabot will skip it because no tags associated with SHA:
+      uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # zizmor: ignore[unpinned-uses]
       with:
         toolchain: ${{ inputs.version  }}
         components: ${{ inputs.components }}
