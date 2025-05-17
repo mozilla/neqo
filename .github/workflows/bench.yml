@@ -150,8 +150,8 @@ jobs:
             NAME=$(basename "$BENCH" | cut -d- -f1)
             cp "$BENCH" binaries/
             # shellcheck disable=SC2086
-            perf $PERF_OPT -o "$NAME.perf" \
-              nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec "$BENCH" -- --bench --noplot | tee -a results.txt
+            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+              perf -- $PERF_OPT -o "$NAME.perf" $BENCH -bench --noplot | tee -a results.txt
           done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
@@ -161,7 +161,7 @@ jobs:
           HOST: 127.0.0.1
           PORT: 4433
           SIZE: 33554432 # 32 MB
-          RUNS: 30
+          RUNS: 3
         run: |
           TMP=$(mktemp -d)
           mkdir -p binaries
@@ -270,16 +270,18 @@ jobs:
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
                   # shellcheck disable=SC2086
-                  perf $PERF_OPT -o "$FILENAME.server.perf" nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu2 --exec $CMD &
+                  nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu2 --exec \
+                    perf $PERF_OPT -o "$FILENAME.server.perf" $CMD &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
-                  hyperfine --command-name "$TAG" --time-unit millisecond  \
-                    --export-json "hyperfine/$FILENAME.json" \
-                    --export-markdown "hyperfine/$FILENAME.md" \
-                    --show-output --warmup 5 --min-runs "$RUNS" --setup "sleep 5" \
-                    "nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu3 --exec $CMD" |
-                  tee -a comparison.txt
-                  echo >> comparison.txt
+                  nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu3 --exec \
+                    hyperfine -- --command-name "$TAG" --time-unit millisecond  \
+                      --export-json "hyperfine/$FILENAME.json" \
+                      --export-markdown "hyperfine/$FILENAME.md" \
+                      --show-output --warmup 5 --min-runs "$RUNS" --setup "sleep 5" \
+                      "$CMD" |
+                    tee -a comparison.txt
+                    echo >> comparison.txt
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
                   [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
