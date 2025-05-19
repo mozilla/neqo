@@ -7,6 +7,7 @@
 use std::{
     cell::RefCell,
     cmp::{max, min},
+    fmt::{self, Display, Formatter},
     mem,
     ops::{Index, IndexMut, Range},
     rc::Rc,
@@ -428,8 +429,8 @@ impl Crypto {
     }
 }
 
-impl ::std::fmt::Display for Crypto {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Crypto {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Crypto")
     }
 }
@@ -742,8 +743,8 @@ impl CryptoDxState {
     }
 }
 
-impl std::fmt::Display for CryptoDxState {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for CryptoDxState {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "epoch {} {:?}", self.epoch, self.direction)
     }
 }
@@ -1351,8 +1352,8 @@ impl CryptoStates {
     }
 }
 
-impl std::fmt::Display for CryptoStates {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for CryptoStates {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "CryptoStates")
     }
 }
