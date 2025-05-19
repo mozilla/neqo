@@ -9,7 +9,7 @@ env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   RUSTUP_TOOLCHAIN: stable
-  PERF_OPT: record -F4999 --call-graph fp -g --branch-any
+  PERF_OPT: record -F2999 --call-graph fp -g
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
@@ -141,18 +141,18 @@ jobs:
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
 
-      - name: Run cargo bench
-        run: |
-          sudo ip link set dev lo mtu "$MTU"
-          export NSS_DB_PATH="./test-fixture/db"
-          mkdir -p binaries
-          for BENCH in $BENCHES; do
-            NAME=$(basename "$BENCH" | cut -d- -f1)
-            cp "$BENCH" binaries/
-            # shellcheck disable=SC2086
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot | tee -a results.txt
-          done
+      # - name: Run cargo bench
+      #   run: |
+      #     sudo ip link set dev lo mtu "$MTU"
+      #     export NSS_DB_PATH="./test-fixture/db"
+      #     mkdir -p binaries
+      #     for BENCH in $BENCHES; do
+      #       NAME=$(basename "$BENCH" | cut -d- -f1)
+      #       cp "$BENCH" binaries/
+      #       # shellcheck disable=SC2086
+      #       nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+      #         perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot | tee -a results.txt
+      #     done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -269,13 +269,12 @@ jobs:
                   FILENAME="$client-$server$EXT"
                   echo "Server: $CMD"
                   # shellcheck disable=SC2086
-                  nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu2 --exec \
+                  nice -n -20 setarch --addr-no-randomize cset proc -v --set=cpu2 --exec \
                     perf -- $PERF_OPT -o "$FILENAME.server.perf" $CMD &
-                  ps -efww
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   echo "Client: $CMD"
                   # shellcheck disable=SC2086
-                  nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu3 --exec \
+                  nice -n -20 setarch --addr-no-randomize cset proc -v --set=cpu3 --exec \
                     hyperfine -- --command-name "$TAG" --time-unit millisecond  \
                       --export-json "hyperfine/$FILENAME.json" \
                       --export-markdown "hyperfine/$FILENAME.md" \
@@ -290,9 +289,10 @@ jobs:
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
                   # the perf profiles of those different runs.
                   CMD=${CMD//$SIZE/$BIGSIZE}
+                  echo "Client bigsize: $CMD"
                   # shellcheck disable=SC2086
-                  nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu3 --exec \
-                    perf -- $PERF_OPT -o "$FILENAME.client.perf" $CMD > /dev/null 2>&1
+                  nice -n -20 setarch --addr-no-randomize cset proc -v --set=cpu3 --exec \
+                    perf -- $PERF_OPT -o "$FILENAME.client.perf" $CMD # > /dev/null 2>&1
                   # pkill only matches on the first 15 characters of the command?!
                   sleep 1 && pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
 
@@ -350,7 +350,7 @@ jobs:
             # shellcheck disable=SC2016
             echo '| Client vs. server (params) | Mean ± σ | Min | Max | MiB/s ± σ | Δ `main` | Δ `main` |'
             echo '|:---|---:|---:|---:|---:|---:|---:|'
-            sed -e 's/ \*\*/ /' steps.md | sort | sed -E -e 's/^\| ([^\|]+\*\* \|)/\| \*\*\1/'
+            sed -e 's/^\| \*\*/\| /' steps.md | sort | sed -E -e 's/^\| ([^\|]+\*\* \|)/\| \*\*\1/'
           } > comparison.md
           rm -r "$TMP"
 
@@ -366,11 +366,10 @@ jobs:
         run: |
           for f in *.perf; do
             # Convert for profiler.firefox.com
-            samply import "$f" -o "$f.samply.json.gz" --save-only --unstable-presymbolicate &
+            samply import "$f" -o "$f.samply.json.gz" --save-only --unstable-presymbolicate
             # Generate flamegraphs
-            flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}" &
+            flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}"
           done
-          wait
           rm neqo.svg
 
       - name: Format results as Markdown
