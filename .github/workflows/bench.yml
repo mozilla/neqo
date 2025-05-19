@@ -285,8 +285,7 @@ jobs:
                   FILENAME="$client-$server$EXT"
                   echo "Server: $CMD"
                   # shellcheck disable=SC2086
-                  nice -n -20 setarch --addr-no-randomize cset proc -v --set=cpu2 --exec \
-                    perf -- $PERF_OPT -o "$FILENAME.server.perf" $CMD &
+                  nice -n -20 setarch --addr-no-randomize cset proc -v --set=cpu2 --exec $CMD &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   echo "Client: $CMD"
                   # shellcheck disable=SC2086
@@ -294,21 +293,26 @@ jobs:
                     hyperfine -- --command-name "$TAG" --time-unit millisecond  \
                       --export-json "hyperfine/$FILENAME.json" \
                       --export-markdown "hyperfine/$FILENAME.md" \
-                      --show-output --warmup 5 --min-runs "$RUNS" --setup "sleep 1" "$CMD" |
+                      --output null --warmup 5 --min-runs "$RUNS" --setup "sleep 1" "$CMD" |
                     tee -a comparison.txt
                   echo >> comparison.txt
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
                   [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
+                  # pkill only matches on the first 15 characters of the command?!
+                  sleep 1 && pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
 
-                  # Do a longer client run with perf separately. We used to just wrap the hyperfine command above in perf,
+                  # Do a longer run with perf separately. We used to just wrap the hyperfine command above in perf,
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
                   # the perf profiles of those different runs.
                   CMD=${CMD//$SIZE/$BIGSIZE}
-                  echo "Client bigsize: $CMD"
+                  # shellcheck disable=SC2086
+                  nice -n -20 setarch --addr-no-randomize cset proc -v --set=cpu2 --exec \
+                    perf -- $PERF_OPT -o "$FILENAME.server.perf" $CMD &
+                  sleep 1
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc -v --set=cpu3 --exec \
-                    perf -- $PERF_OPT -o "$FILENAME.client.perf" $CMD # > /dev/null 2>&1
+                    perf -- $PERF_OPT -o "$FILENAME.client.perf" $CMD > /dev/null 2>&1
                   # pkill only matches on the first 15 characters of the command?!
                   sleep 1 && pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
 
@@ -386,7 +390,6 @@ jobs:
             # Generate flamegraphs
             flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}"
           done
-          rm neqo.svg
 
       - name: Format results as Markdown
         id: results
@@ -471,4 +474,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r binaries hyperfine || true
+          rm -r binaries hyperfine hyperfine-main || true
