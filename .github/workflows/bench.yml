@@ -285,7 +285,7 @@ jobs:
                   FILENAME="$client-$server$EXT"
                   echo "Server: $CMD"
                   # shellcheck disable=SC2086
-                  nice -n -20 setarch --addr-no-randomize cset proc -v --set=cpu2 --exec $CMD &
+                  nice -n -20 setarch --addr-no-randomize cset proc -v --set=cpu2 --exec ${CMD/ / -- } &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   echo "Client: $CMD"
                   # shellcheck disable=SC2086
