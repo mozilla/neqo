@@ -154,19 +154,20 @@ jobs:
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
 
-      - name: Run cargo bench
-        run: |
-          sudo ip link set dev lo mtu "$MTU"
-          export NSS_DB_PATH="./test-fixture/db"
-          mkdir -p binaries
-          cd neqo
-          for BENCH in $BENCHES; do
-            NAME=$(basename "$BENCH" | cut -d- -f1)
-            cp "$BENCH" ../binaries/
-            # shellcheck disable=SC2086
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot | tee -a ../results.txt
-          done
+      # - name: Run cargo bench
+      #   env:
+      #     NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
+      #   run: |
+      #     sudo ip link set dev lo mtu "$MTU"
+      #     mkdir -p binaries
+      #     cd neqo
+      #     for BENCH in $BENCHES; do
+      #       NAME=$(basename "$BENCH" | cut -d- -f1)
+      #       cp "$BENCH" ../binaries/
+      #       # shellcheck disable=SC2086
+      #       nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+      #         perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot | tee -a ../results.txt
+      #     done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -176,6 +177,7 @@ jobs:
           PORT: 4433
           SIZE: 33554432 # 32 MB
           RUNS: 30
+          NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
         run: |
           TMP=$(mktemp -d)
           mkdir -p binaries
@@ -468,5 +470,5 @@ jobs:
       - name: Remove benchmark artifacts
         if: always()
         run: |
-          rm -- *
-          rm -r binaries
+          rm -- * || true
+          rm -r binaries hyperfine || true
