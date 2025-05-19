@@ -419,9 +419,18 @@ mod test {
 
     /// Validate the delays multiple times.  Sometimes a run can stall.
     /// Reliability in CI is more important than reliable timers.
-    /// Any failure results in enqueing two additional checks.
-    /// If the count hits `CAP`, panic.
-    fn check_delays_loop(max_lag: Duration, max_loops: usize) {
+    /// Any failure results in enqueing two additional checks,
+    /// up to a limit that is determined based on how small `max_lag` is.
+    /// If the count exceeds that limit, fail the test.
+    fn check_delays(max_lag: Duration) {
+        let max_loops = if max_lag < FIVE_MS {
+            5
+        } else if max_lag < GENEROUS {
+            3
+        } else {
+            1
+        };
+
         let mut count = 1;
         while (1..=max_loops).contains(&count) {
             if validate_delays(max_lag).is_ok() {
@@ -431,18 +440,7 @@ mod test {
             }
             sleep(Duration::from_millis(50));
         }
-        assert_eq!(0, count, "Too many failures!");
-    }
-
-    fn check_delays(max_lag: Duration) {
-        let max_loops = if max_lag < FIVE_MS {
-            5
-        } else if max_lag < GENEROUS {
-            3
-        } else {
-            1
-        };
-        check_delays_loop(max_lag, max_loops);
+        assert_eq!(0, count, "timers slipped too often");
     }
 
     /// Note that you have to run this test alone or other tests will
@@ -507,5 +505,12 @@ mod test {
     fn max() {
         let _hrt = Time::get(Duration::from_secs(1));
         check_delays(GENEROUS);
+    }
+
+    #[test]
+    #[should_panic(expected = "timers slipped too often")]
+    fn slip() {
+        // This amount of timer resolution should be unachievable.
+        check_delays(Duration::from_nanos(1));
     }
 }
