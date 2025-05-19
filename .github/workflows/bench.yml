@@ -138,7 +138,7 @@ jobs:
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: |
-            target/criterion
+            neqo/target/criterion
             hyperfine
           key: bench-results-${{ runner.name }}-${{ github.sha }}
           restore-keys: bench-results-${{ runner.name }}-
@@ -154,18 +154,19 @@ jobs:
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
 
-      # - name: Run cargo bench
-      #   run: |
-      #     sudo ip link set dev lo mtu "$MTU"
-      #     export NSS_DB_PATH="./test-fixture/db"
-      #     mkdir -p binaries
-      #     for BENCH in $BENCHES; do
-      #       NAME=$(basename "$BENCH" | cut -d- -f1)
-      #       cp "$BENCH" binaries/
-      #       # shellcheck disable=SC2086
-      #       nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-      #         perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot | tee -a results.txt
-      #     done
+      - name: Run cargo bench
+        run: |
+          sudo ip link set dev lo mtu "$MTU"
+          export NSS_DB_PATH="./test-fixture/db"
+          mkdir -p binaries
+          cd neqo
+          for BENCH in $BENCHES; do
+            NAME=$(basename "$BENCH" | cut -d- -f1)
+            cp "$BENCH" ../binaries/
+            # shellcheck disable=SC2086
+            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot | tee -a ../results.txt
+          done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -392,7 +393,7 @@ jobs:
             echo "### Benchmark results"
             echo
           } > results.md
-          SHA=$(cat target/criterion/baseline-sha.txt || true)
+          SHA=$(cat neqo/target/criterion/baseline-sha.txt || true)
           if [ -n "$SHA" ]; then
             {
               echo "Performance differences relative to $SHA."
@@ -410,7 +411,7 @@ jobs:
           {
             echo
             echo "### Client/server transfer results"
-            SHA=$(cat target/criterion/baseline-sha.txt || true)
+            SHA=$(cat neqo/target/criterion/baseline-sha.txt || true)
             if [ -n "$SHA" ]; then
               cat sha.md >> results.md
             fi
@@ -420,14 +421,14 @@ jobs:
 
       - name: Remember main-branch push URL
         if: ${{ github.ref == 'refs/heads/main' }}
-        run: echo "${{ github.sha }}" > target/criterion/baseline-sha.txt
+        run: echo "${{ github.sha }}" > neqo/target/criterion/baseline-sha.txt
 
       - name: Cache main-branch results
         if: ${{ github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: |
-            target/criterion
+            neqo/target/criterion
             hyperfine
           key: bench-results-${{ runner.name }}-${{ github.sha }}
 
@@ -443,7 +444,7 @@ jobs:
             *.txt
             *.md
             results.*
-            target/criterion
+            neqo/target/criterion
             hyperfine
             binaries
           compression-level: 9
@@ -455,9 +456,6 @@ jobs:
           contents: results.md
           log-url: ${{ steps.export.outputs.artifact-url }}
 
-      - name: Remove exported artifacts
-        run: rm -- *
-
       - name: Fail on regression
         run: |
           if grep -q "Performance has regressed." results.txt; then
@@ -466,3 +464,9 @@ jobs:
           else
             echo "No performance regression detected."
           fi
+
+      - name: Remove benchmark artifacts
+        if: always()
+        run: |
+          rm -- *
+          rm -r binaries
