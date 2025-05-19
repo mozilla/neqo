@@ -432,15 +432,18 @@ mod test {
         };
 
         let mut count = 1;
-        while (1..=max_loops).contains(&count) {
+        while count <= max_loops {
             if validate_delays(max_lag).is_ok() {
                 count -= 1;
             } else {
                 count += 1;
             }
+            if count == 0 {
+                return;
+            }
             sleep(Duration::from_millis(50));
         }
-        assert_eq!(0, count, "timers slipped too often");
+        panic!("timers slipped too often");
     }
 
     /// Note that you have to run this test alone or other tests will
