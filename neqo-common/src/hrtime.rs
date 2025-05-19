@@ -406,8 +406,8 @@ mod test {
         for d in durations {
             sleep(d);
             let e = Instant::now();
-            let actual = e - s;
-            let lag = actual - d;
+            let actual = e.saturating_duration_since(s);
+            let lag = actual.saturating_sub(d);
             println!("sleep({d:>4?}) \u{2192} {actual:>11.6?} \u{394}{lag:>10?}");
             if lag > max_lag {
                 return Err(());
