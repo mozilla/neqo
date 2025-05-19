@@ -84,8 +84,6 @@ jobs:
           tools: hyperfine, flamegraph, samply
           token: ${{ secrets.GITHUB_TOKEN }}
           workspaces: |
-            google-quiche
-            msquic
             neqo
             quiche
             s2n-quic
