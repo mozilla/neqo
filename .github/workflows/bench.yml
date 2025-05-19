@@ -267,10 +267,12 @@ jobs:
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
+                  echo "Server: $CMD"
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu2 --exec \
                     perf -- $PERF_OPT -o "$FILENAME.server.perf" $CMD &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
+                  echo "Client: $CMD"
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu3 --exec \
                     hyperfine -- --command-name "$TAG" --time-unit millisecond  \
@@ -278,7 +280,7 @@ jobs:
                       --export-markdown "hyperfine/$FILENAME.md" \
                       --show-output --warmup 5 --min-runs "$RUNS" --setup "sleep 5" "$CMD" |
                     tee -a comparison.txt
-                    echo >> comparison.txt
+                  echo >> comparison.txt
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
                   [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
