@@ -392,8 +392,9 @@ mod test {
 
     use super::Time;
 
-    const ONE: Duration = Duration::from_millis(1);
-    const ONE_AND_A_BIT: Duration = Duration::from_micros(1500);
+    const ONE_MS: Duration = Duration::from_millis(1);
+    const FIVE_MS: Duration = Duration::from_millis(5);
+    const ONE_MS_AND_A_BIT: Duration = Duration::from_micros(1500);
     /// A limit for when high resolution timers are disabled.
     const GENEROUS: Duration = Duration::from_millis(30);
 
@@ -407,7 +408,7 @@ mod test {
             let e = Instant::now();
             let actual = e - s;
             let lag = actual - d;
-            println!("sleep({d:?}) \u{2192} {actual:?} \u{394}{lag:?}");
+            println!("sleep({d:>4?}) \u{2192} {actual:>11.6?} \u{394}{lag:>10?}");
             if lag > max_lag {
                 return Err(());
             }
@@ -416,13 +417,32 @@ mod test {
         Ok(())
     }
 
-    /// Validate the delays twice.  Sometimes the first run can stall.
+    /// Validate the delays multiple times.  Sometimes a run can stall.
     /// Reliability in CI is more important than reliable timers.
-    fn check_delays(max_lag: Duration) {
-        if validate_delays(max_lag).is_err() {
+    /// Any failure results in enqueing two additional checks.
+    /// If the count hits `CAP`, panic.
+    fn check_delays_loop(max_lag: Duration, max_loops: usize) {
+        let mut count = 1;
+        while (1..=max_loops).contains(&count) {
+            if validate_delays(max_lag).is_ok() {
+                count -= 1;
+            } else {
+                count += 1;
+            }
             sleep(Duration::from_millis(50));
-            validate_delays(max_lag).unwrap();
         }
+        assert_eq!(0, count, "Too many failures!");
+    }
+
+    fn check_delays(max_lag: Duration) {
+        let max_loops = if max_lag < FIVE_MS {
+            5
+        } else if max_lag < GENEROUS {
+            3
+        } else {
+            1
+        };
+        check_delays_loop(max_lag, max_loops);
     }
 
     /// Note that you have to run this test alone or other tests will
@@ -434,8 +454,8 @@ mod test {
 
     #[test]
     fn one_ms() {
-        let _hrt = Time::get(ONE);
-        check_delays(ONE_AND_A_BIT);
+        let _hrt = Time::get(ONE_MS);
+        check_delays(ONE_MS_AND_A_BIT);
     }
 
     #[test]
@@ -462,16 +482,16 @@ mod test {
             one_ms();
         });
         let _hrt = Time::get(Duration::from_millis(4));
-        check_delays(Duration::from_millis(5));
+        check_delays(FIVE_MS);
         thr.join().unwrap();
     }
 
     #[test]
     fn update() {
         let mut hrt = Time::get(Duration::from_millis(4));
-        check_delays(Duration::from_millis(5));
-        hrt.update(ONE);
-        check_delays(ONE_AND_A_BIT);
+        check_delays(FIVE_MS);
+        hrt.update(ONE_MS);
+        check_delays(ONE_MS_AND_A_BIT);
     }
 
     #[test]
