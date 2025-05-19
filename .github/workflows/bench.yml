@@ -176,8 +176,8 @@ jobs:
           declare -A client_cmd=(
             ["neqo"]="target/release/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
             ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
-            ["google"]="google-quiche/bazel-bin/quiche/quic_client -- --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
-            ["quiche"]="quiche/target/release/quiche-client -- --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
+            ["google"]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
+            ["quiche"]="quiche/target/release/quiche-client --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
             ["s2n"]="s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
@@ -279,7 +279,7 @@ jobs:
                     hyperfine -- --command-name "$TAG" --time-unit millisecond  \
                       --export-json "hyperfine/$FILENAME.json" \
                       --export-markdown "hyperfine/$FILENAME.md" \
-                      --shell none --show-output --warmup 5 --min-runs "$RUNS" --setup "sleep 5" "$CMD" |
+                      --show-output --warmup 5 --min-runs "$RUNS" --setup "sleep 1" "$CMD" |
                     tee -a comparison.txt
                   echo >> comparison.txt
                   # Sanity check the size of the last retrieved file.
