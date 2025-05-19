@@ -31,39 +31,45 @@ jobs:
       - name: Checkout mozilla/neqo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          submodules: 'recursive'
           persist-credentials: false
+          clean: false
 
       - name: Checkout microsoft/msquic
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: microsoft/msquic
-          path: msquic
-          submodules: true
+          path: ../msquic
+          submodules: 'recursive'
           persist-credentials: false
+          clean: false
 
       - name: Checkout google/quiche
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: google/quiche
-          path: google-quiche
-          submodules: true
+          path: ../google-quiche
+          submodules: 'recursive'
           persist-credentials: false
+          clean: false
 
       - name: Checkout cloudflare/quiche
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: cloudflare/quiche
-          path: quiche
-          submodules: true
+          path: ../quiche
+          submodules: 'recursive'
           persist-credentials: false
+          clean: false
 
       - name: Checkout aws/s2n-quic
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: aws/s2n-quic
-          path: s2n-quic
-          submodules: true
+          path: ../s2n-quic
+          submodules: 'recursive'
           persist-credentials: false
+          clean: false
 
       - name: Set PATH and environment
         run: |
@@ -98,27 +104,27 @@ jobs:
 
       - name: Build msquic
         run: |
-          mkdir -p msquic/build
-          cd msquic/build
+          mkdir -p ../msquic/build
+          cd ../msquic/build
           cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
           cmake --build .
 
       - name: Build google/quiche
         run: |
-          cd google-quiche
+          cd ../google-quiche
           bazel build -c opt --copt=-fno-omit-frame-pointer --copt=-g --strip=never --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
           bazel shutdown
 
       - name: Build cloudflare/quiche
         run: |
           # We already changed RUSTFLAGS above; this depends on that having happened.
-          cd quiche
+          cd ../quiche
           cargo build --release --bin quiche-client --bin quiche-server # --locked not working
 
       - name: Build aws/s2n-quic
         run: |
           # We already changed RUSTFLAGS above; this depends on that having happened.
-          cd s2n-quic
+          cd ../s2n-quic
           cargo build --release --bin s2n-quic-qns # --locked not working
 
       - name: Download cached main-branch results
@@ -175,17 +181,17 @@ jobs:
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
             ["neqo"]="target/release/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
-            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
-            ["google"]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
-            ["quiche"]="quiche/target/release/quiche-client --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
-            ["s2n"]="s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE"
+            ["msquic"]="../msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
+            ["google"]="../google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
+            ["quiche"]="../quiche/target/release/quiche-client --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
+            ["s2n"]="../s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
-            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
-            ["google"]="google-quiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
-            ["quiche"]="quiche/target/release/quiche-server --root $TMP --listen $HOST:$PORT --cert $TMP/cert --key $TMP/key"
-            ["s2n"]="s2n-quic/target/release/s2n-quic-qns interop server --www-dir $TMP --certificate $TMP/cert --private-key $TMP/key --ip $HOST --port $PORT"
+            ["msquic"]="../msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
+            ["google"]="../google-quiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
+            ["quiche"]="../quiche/target/release/quiche-server --root $TMP --listen $HOST:$PORT --cert $TMP/cert --key $TMP/key"
+            ["s2n"]="../s2n-quic/target/release/s2n-quic-qns interop server --www-dir $TMP --certificate $TMP/cert --private-key $TMP/key --ip $HOST --port $PORT"
           )
           # Flags to pass to neqo when it runs against another implementation.
           declare -A neqo_flags=(
@@ -441,6 +447,9 @@ jobs:
           name: ${{ github.workflow }}
           contents: results.md
           log-url: ${{ steps.export.outputs.artifact-url }}
+
+      - name: Remove exported artifacts
+        run: git clean -df
 
       - name: Fail on regression
         run: |
