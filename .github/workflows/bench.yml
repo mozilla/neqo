@@ -83,6 +83,12 @@ jobs:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: hyperfine, flamegraph, samply
           token: ${{ secrets.GITHUB_TOKEN }}
+          workspaces: |
+            google-quiche
+            msquic
+            neqo
+            quiche
+            s2n-quic
 
       - name: Get minimum NSS version
         id: nss-version
@@ -452,7 +458,7 @@ jobs:
           log-url: ${{ steps.export.outputs.artifact-url }}
 
       - name: Remove exported artifacts
-        run: rm *
+        run: rm -- *
 
       - name: Fail on regression
         run: |

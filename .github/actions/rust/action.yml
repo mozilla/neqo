@@ -17,6 +17,9 @@ inputs:
   targets:
     description: Comma-separated list of target triples to install for this toolchain
     required: false
+  workspaces:
+    description: Newline-separated list of workspaces
+    required: false
 
 runs:
   using: composite
@@ -83,6 +86,7 @@ runs:
       with:
         cache-bin: ${{ runner.environment == 'github-hosted' }}
         key: ${{ inputs.targets }}
+        workspaces: ${{ inputs.workspaces }}
 
     - name: Set up MSVC (Windows)
       if: ${{ runner.os == 'Windows' }}
