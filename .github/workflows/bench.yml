@@ -90,7 +90,7 @@ jobs:
 
       - name: Get minimum NSS version
         id: nss-version
-        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+        run: echo "minimum=$(cat neqo/neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Install NSS
         id: nss
