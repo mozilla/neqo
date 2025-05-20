@@ -7,7 +7,7 @@
 // Enable just this file for logging to just see packets.
 // e.g. "RUST_LOG=neqo_transport::dump neqo-client ..."
 
-use std::fmt::Display;
+use std::fmt::{self, Display, Formatter};
 
 use neqo_common::IpTos;
 use qlog::events::quic::PacketHeader;
@@ -108,7 +108,7 @@ impl From<MetaData<'_>> for PacketHeader {
 }
 
 impl Display for MetaData<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "pn={} type={:?} {} {:?} len {}",
