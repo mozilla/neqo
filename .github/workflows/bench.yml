@@ -9,7 +9,7 @@ env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   RUSTUP_TOOLCHAIN: stable
-  PERF_OPT: record -F2999 --call-graph fp -g --no-buffering
+  PERF_OPT: record -F2999 --call-graph fp -g
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
@@ -311,7 +311,7 @@ jobs:
 
                   # pkill only matches on the first 15 characters of the command?!
                   SERVER_TAG="$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
-                  pkill -HUP -e "$SERVER_TAG"
+                  pkill "$SERVER_TAG"
 
                   # Do a longer run with perf separately. We used to just wrap the hyperfine command above in perf,
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
@@ -324,7 +324,7 @@ jobs:
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
                     perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD > /dev/null 2>&1
-                  pkill -HUP -e "$SERVER_TAG"
+                  pkill "$SERVER_TAG"
                   popd
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
