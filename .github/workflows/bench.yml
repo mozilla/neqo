@@ -185,6 +185,8 @@ jobs:
           NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
         run: |
           TMP=$(mktemp -d)
+          mkdir -p "$TMP/out"
+          echo "COMPARE_TMP=$TMP" >> "$GITHUB_ENV"
           mkdir -p binaries
           touch results.txt
           # Make a cert and key for msquic and google.
@@ -195,11 +197,11 @@ jobs:
           truncate -s "$BIGSIZE" "$TMP/$BIGSIZE"
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
-            ["neqo"]="neqo/target/release/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
-            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
-            ["google"]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
-            ["quiche"]="quiche/target/release/quiche-client --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
-            ["s2n"]="s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE"
+            ["neqo"]="neqo/target/release/neqo-client _cc _pacing --output-dir $TMP/out _flags -Q 1 https://$HOST:$PORT/$SIZE"
+            ["msquic"]="cd $TMP/out; msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
+            ["google"]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $TMP/out/$SIZE"
+            ["quiche"]="quiche/target/release/quiche-client --dump-responses $TMP/out --no-verify https://$HOST:$PORT/$SIZE"
+            ["s2n"]="s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir $TMP/out --local-ip $HOST https://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
             ["neqo"]="neqo/target/release/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
@@ -305,13 +307,11 @@ jobs:
 
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
-                  [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
-                  echo "Size of $SIZE: $(wc -c <"$SIZE")"
+                  [ "$(wc -c <"$TMP/out/$SIZE")" -ge "$SIZE" ] || exit 1
+                  echo "Size of $SIZE: $(wc -c <"$TMP/out/$SIZE")"
 
-                  ps -efww
                   # pkill only matches on the first 15 characters of the command?!
                   SERVER_TAG="$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
-                  pgrep "$SERVER_TAG" || true
                   pkill -HUP -e "$SERVER_TAG"
 
                   # Do a longer run with perf separately. We used to just wrap the hyperfine command above in perf,
@@ -327,6 +327,7 @@ jobs:
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
                     perf -- $PERF_OPT -o "$FILENAME.client.perf" $CMD > /dev/null 2>&1
+                  ps -efww
                   pgrep "$SERVER_TAG" || true
                   pkill -HUP -e "$SERVER_TAG"
 
@@ -489,4 +490,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- binaries comment-data hyperfine hyperfine-main || true
+          rm -r -- binaries comment-data hyperfine hyperfine-main "$TMP" || true
