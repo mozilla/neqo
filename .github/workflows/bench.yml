@@ -311,7 +311,7 @@ jobs:
 
                   # pkill only matches on the first 15 characters of the command?!
                   SERVER_TAG="$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
-                  pkill "$SERVER_TAG"
+                  pkill -HUP -e "$SERVER_TAG"
 
                   # Do a longer run with perf separately. We used to just wrap the hyperfine command above in perf,
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
@@ -323,8 +323,8 @@ jobs:
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
-                    perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD > /dev/null
-                  pkill "$SERVER_TAG"
+                    perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD > /dev/null 2>&1
+                  pkill -HUP -e "$SERVER_TAG"
                   popd
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
