@@ -308,8 +308,10 @@ jobs:
                   [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
                   echo "Size of $SIZE: $(wc -c <"$SIZE")"
 
-                  pgrep "$(basename "${server_cmd[$server]}")"
-                  pgrep "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
+                  basename "${server_cmd[$server]}"
+                  ps -efww
+                  pgrep "$(basename "${server_cmd[$server]}")" || true
+                  pgrep "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)" || true
                   # pkill only matches on the first 15 characters of the command?!
                   sleep 1 && pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
 
