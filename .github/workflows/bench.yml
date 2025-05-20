@@ -15,6 +15,7 @@ env:
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
+  WORKSPACE: ${{ github.workspace}}
 
 permissions:
   contents: read
@@ -185,6 +186,8 @@ jobs:
           NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
         run: |
           TMP=$(mktemp -d)
+          mkdir -p "$TMP/out"
+          echo "COMPARE_TMP=$TMP" >> "$GITHUB_ENV"
           mkdir -p binaries
           touch results.txt
           # Make a cert and key for msquic and google.
@@ -288,41 +291,41 @@ jobs:
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
-                  echo "Server: $CMD"
                   SERVER_CMD="$CMD"
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec ${CMD/ / -- } &
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
-                  echo "Client: $CMD"
                   # shellcheck disable=SC2086
+                  pushd "$TMP/out"
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
                     hyperfine -- --command-name "$TAG" --time-unit millisecond  \
-                      --export-json "hyperfine/$FILENAME.json" \
-                      --export-markdown "hyperfine/$FILENAME.md" \
-                      --output null --warmup 5 --min-runs "$RUNS" --setup "sleep 1" "$CMD" |
-                    tee -a comparison.txt
-                  echo >> comparison.txt
+                      --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
+                      --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
+                      --output null --warmup 5 --min-runs "$RUNS" --setup "sleep 1" "$WORKSPACE/$CMD" |
+                    tee -a "$WORKSPACE/comparison.txt"
+                  echo >> "$WORKSPACE/comparison.txt"
+
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
-                  [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
+                  [ "$(wc -c <"$TMP/out/$SIZE")" -ge "$SIZE" ] || exit 1
+
                   # pkill only matches on the first 15 characters of the command?!
-                  sleep 1 && pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
+                  SERVER_TAG="$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
+                  pkill "$SERVER_TAG"
 
                   # Do a longer run with perf separately. We used to just wrap the hyperfine command above in perf,
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
                   # the perf profiles of those different runs.
-                  echo "Perf run server: $SERVER_CMD"
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec \
-                    perf -- $PERF_OPT -o "$FILENAME.server.perf" $SERVER_CMD &
+                    perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.server.perf" $WORKSPACE/$SERVER_CMD &
                   sleep 1
                   CMD=${CMD//$SIZE/$BIGSIZE}
-                  echo "Perf run client: $CMD"
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
-                    perf -- $PERF_OPT -o "$FILENAME.client.perf" $CMD > /dev/null 2>&1
-                  # pkill only matches on the first 15 characters of the command?!
-                  sleep 1 && pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
+                    perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD > /dev/null 2>&1
+                  pkill "$SERVER_TAG"
+                  popd
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                     sed -E 's/`//g;' | cut -f1-5 -d\| | tr -d '\n' >> steps.md
@@ -470,6 +473,7 @@ jobs:
           log-url: ${{ steps.export.outputs.artifact-url }}
 
       - name: Fail on regression
+        if: ${{ github.ref != 'refs/heads/main' }} # Don't check for regressions when running on main.
         run: |
           if grep -q "Performance has regressed." results.txt; then
             echo "Performance regression detected."
@@ -482,4 +486,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- binaries comment-data hyperfine hyperfine-main || true
+          rm -r -- binaries comment-data hyperfine hyperfine-main "$COMPARE_TMP" || true
