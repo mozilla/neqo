@@ -96,8 +96,8 @@ jobs:
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
-          if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
-            cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --locked --include-ffi --features ci --profile ci --codecov --output-path codecov.json
+          if [ "$TOOLCHAIN" == "stable" ]; then
+            cargo llvm-cov nextest $BUILD_TYPE --locked --include-ffi --features ci --profile ci --codecov --output-path codecov.json
           else
             cargo nextest run $BUILD_TYPE --locked --features ci --profile ci
           fi
@@ -119,7 +119,14 @@ jobs:
           RUST_LOG: warn
           BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
-      - uses: codecov/codecov-action@ad3126e916f78f00edff4ed0317cf185271ccc2d # v5.4.2
+      - name: CodeCov Windows workaround
+        if: matrix.os == 'windows-2025' && matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
+        run: |
+          # FIXME: Without this, the codecov/codecov-action fails. No idea why it's looking under C:/msys64 now, it shouldn't.
+          mkdir -p C:/msys64/home/runneradmin/
+          touch C:/msys64/home/runneradmin/.gitconfig
+
+      - uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24 # v5.4.3
         with:
           files: codecov.json
           fail_ci_if_error: false
@@ -156,7 +163,7 @@ jobs:
 
   bench:
     needs: [check]
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' && github.event_name != 'merge_group' }}
     uses: ./.github/workflows/bench.yml
 
   check-android:
