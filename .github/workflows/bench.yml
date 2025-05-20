@@ -482,4 +482,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- binaries hyperfine hyperfine-main || true
+          rm -r -- binaries comment-data hyperfine hyperfine-main || true
