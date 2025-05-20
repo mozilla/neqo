@@ -9,7 +9,7 @@ env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   RUSTUP_TOOLCHAIN: stable
-  PERF_OPT: record -F2999 --call-graph fp -g
+  PERF_OPT: record -F2999 --call-graph fp -g --no-buffering
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
