@@ -39,9 +39,9 @@ const RECV_BUF_SIZE: usize = u16::MAX as usize;
 /// - Linux/Android: use segmentation offloading via GRO
 /// - Windows: use segmentation offloading via URO (caveat see <https://github.com/quinn-rs/quinn/issues/2041>)
 /// - Apple: no segmentation offloading available, use multiple buffers
-#[cfg(not(apple))]
+#[cfg(not(all(apple, feature = "fast-apple-datapath")))]
 const NUM_BUFS: usize = 1;
-#[cfg(apple)]
+#[cfg(all(apple, feature = "fast-apple-datapath"))]
 // Value approximated based on neqo-bin "Download" benchmark only.
 const NUM_BUFS: usize = 16;
 

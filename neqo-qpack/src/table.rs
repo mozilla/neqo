@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    fmt::{self, Display, Formatter},
+};
 
 use neqo_common::qtrace;
 
@@ -87,8 +90,8 @@ pub struct HeaderTable {
     acked_inserts_cnt: u64,
 }
 
-impl ::std::fmt::Display for HeaderTable {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for HeaderTable {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
             "HeaderTable for (base={} acked_inserts_cnt={} capacity={})",

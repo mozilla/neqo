@@ -26,7 +26,7 @@ jobs:
       matrix:
         os: [
               freebsd,
-              openbsd,
+              # openbsd, # FIXME: libfuzzer/FuzzerPlatform.h:72:2: error: "Support for your platform has not been implemented"
               # netbsd, # FIXME: NSS package is too old.
               # solaris # FIXME: NSS package is too old.
             ]
@@ -164,7 +164,7 @@ jobs:
             cargo test --locked --no-fail-fast --release
             rm -rf target # Don't sync this back to host
 
-      - uses: codecov/codecov-action@ad3126e916f78f00edff4ed0317cf185271ccc2d # v5.4.2
+      - uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24 # v5.4.3
         with:
           files: lcov.info
           fail_ci_if_error: false

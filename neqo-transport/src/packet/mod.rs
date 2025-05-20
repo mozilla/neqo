@@ -783,7 +783,7 @@ impl<'a> PublicPacket<'a> {
 
     #[must_use]
     pub fn version(&self) -> Option<Version> {
-        self.version.and_then(|v| Version::try_from(v).ok())
+        Version::try_from(self.version?).ok()
     }
 
     #[must_use]

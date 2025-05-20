@@ -51,6 +51,7 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [features]
 bench = ["neqo-bin/bench", "neqo-http3/bench", "neqo-transport/bench"]
+fast-apple-datapath = ["quinn-udp/fast-apple-datapath"]
 draft-29 = []
 
 [package.metadata.cargo-machete]
