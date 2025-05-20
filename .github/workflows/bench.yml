@@ -303,9 +303,9 @@ jobs:
                     hyperfine -- --command-name "$TAG" --time-unit millisecond  \
                       --export-json "$PWD/hyperfine/$FILENAME.json" \
                       --export-markdown "$PWD/hyperfine/$FILENAME.md" \
-                      --output null --warmup 5 --min-runs "$RUNS" --setup "sleep 1" "$CMD" |
-                    tee -a $PWD/comparison.txt
-                  echo >> $PWD/comparison.txt
+                      --output null --warmup 5 --min-runs "$RUNS" --setup "sleep 1" "$PWD/$CMD" |
+                    tee -a "$PWD/comparison.txt"
+                  echo >> "$PWD/comparison.txt"
 
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
@@ -322,13 +322,13 @@ jobs:
                   echo "Perf run server: $SERVER_CMD"
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec \
-                    perf -- $PERF_OPT -o "$PWD/$FILENAME.server.perf" $SERVER_CMD &
+                    perf -- $PERF_OPT -o "$PWD/$FILENAME.server.perf" $PWD/$SERVER_CMD &
                   sleep 1
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   echo "Perf run client: $CMD"
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
-                    perf -- $PERF_OPT -o "$PWD/$FILENAME.client.perf" $CMD > /dev/null 2>&1
+                    perf -- $PERF_OPT -o "$PWD/$FILENAME.client.perf" $PWD/$CMD > /dev/null 2>&1
                   ps -efww
                   pgrep "$SERVER_TAG" || true
                   pkill -HUP -e "$SERVER_TAG"
