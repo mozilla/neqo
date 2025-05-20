@@ -197,11 +197,11 @@ jobs:
           truncate -s "$BIGSIZE" "$TMP/$BIGSIZE"
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
-            ["neqo"]="neqo/target/release/neqo-client _cc _pacing --output-dir $TMP/out _flags -Q 1 https://$HOST:$PORT/$SIZE"
-            ["msquic"]="cd $TMP/out; msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
-            ["google"]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $TMP/out/$SIZE"
-            ["quiche"]="quiche/target/release/quiche-client --dump-responses $TMP/out --no-verify https://$HOST:$PORT/$SIZE"
-            ["s2n"]="s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir $TMP/out --local-ip $HOST https://$HOST:$PORT/$SIZE"
+            ["neqo"]="neqo/target/release/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
+            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
+            ["google"]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
+            ["quiche"]="quiche/target/release/quiche-client --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
+            ["s2n"]="s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
             ["neqo"]="neqo/target/release/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
@@ -297,13 +297,15 @@ jobs:
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   echo "Client: $CMD"
                   # shellcheck disable=SC2086
+                  PWD=$(pwd)
+                  pushd "$TMP/out"
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
                     hyperfine -- --command-name "$TAG" --time-unit millisecond  \
-                      --export-json "hyperfine/$FILENAME.json" \
-                      --export-markdown "hyperfine/$FILENAME.md" \
+                      --export-json "$PWD/hyperfine/$FILENAME.json" \
+                      --export-markdown "$PWD/hyperfine/$FILENAME.md" \
                       --output null --warmup 5 --min-runs "$RUNS" --setup "sleep 1" "$CMD" |
-                    tee -a comparison.txt
-                  echo >> comparison.txt
+                    tee -a $PWD/comparison.txt
+                  echo >> $PWD/comparison.txt
 
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
@@ -320,16 +322,17 @@ jobs:
                   echo "Perf run server: $SERVER_CMD"
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec \
-                    perf -- $PERF_OPT -o "$FILENAME.server.perf" $SERVER_CMD &
+                    perf -- $PERF_OPT -o "$PWD/$FILENAME.server.perf" $SERVER_CMD &
                   sleep 1
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   echo "Perf run client: $CMD"
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
-                    perf -- $PERF_OPT -o "$FILENAME.client.perf" $CMD > /dev/null 2>&1
+                    perf -- $PERF_OPT -o "$PWD/$FILENAME.client.perf" $CMD > /dev/null 2>&1
                   ps -efww
                   pgrep "$SERVER_TAG" || true
                   pkill -HUP -e "$SERVER_TAG"
+                  popd
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                     sed -E 's/`//g;' | cut -f1-5 -d\| | tr -d '\n' >> steps.md
