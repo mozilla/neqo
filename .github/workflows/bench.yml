@@ -302,9 +302,14 @@ jobs:
                       --output null --warmup 5 --min-runs "$RUNS" --setup "sleep 1" "$CMD" |
                     tee -a comparison.txt
                   echo >> comparison.txt
+
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
                   [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
+                  echo "Size of $SIZE: $(wc -c <"$SIZE")"
+
+                  pgrep -e "$(basename "${server_cmd[$server]}")"
+                  pgrep -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
                   # pkill only matches on the first 15 characters of the command?!
                   sleep 1 && pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
 
@@ -322,6 +327,8 @@ jobs:
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
                     perf -- $PERF_OPT -o "$FILENAME.client.perf" $CMD > /dev/null 2>&1
                   # pkill only matches on the first 15 characters of the command?!
+                  pgrep -e "$(basename "${server_cmd[$server]}")"
+                  pgrep -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
                   sleep 1 && pkill -e "$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
@@ -470,6 +477,7 @@ jobs:
           log-url: ${{ steps.export.outputs.artifact-url }}
 
       - name: Fail on regression
+        if: ${{ github.ref != 'refs/heads/main' }} # Don't check for regressions when running on main.
         run: |
           if grep -q "Performance has regressed." results.txt; then
             echo "Performance regression detected."
