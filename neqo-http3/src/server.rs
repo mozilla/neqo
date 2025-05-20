@@ -6,6 +6,7 @@
 
 use std::{
     cell::{RefCell, RefMut},
+    fmt::{self, Display, Formatter},
     path::PathBuf,
     rc::Rc,
     time::Instant,
@@ -41,8 +42,8 @@ pub struct Http3Server {
     events: Http3ServerEvents,
 }
 
-impl ::std::fmt::Display for Http3Server {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Http3Server {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Http3 server ")
     }
 }
@@ -150,6 +151,10 @@ impl Http3Server {
                 .cloned(),
         );
 
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over active connections in an undefined order."
+        )]
         for conn in active_conns {
             self.process_events(&conn, now);
         }

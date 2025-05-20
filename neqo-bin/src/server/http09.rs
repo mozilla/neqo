@@ -6,7 +6,13 @@
 
 #![expect(clippy::unwrap_used, reason = "This is example code.")]
 
-use std::{borrow::Cow, cell::RefCell, fmt::Display, rc::Rc, time::Instant};
+use std::{
+    borrow::Cow,
+    cell::RefCell,
+    fmt::{self, Display, Formatter},
+    rc::Rc,
+    time::Instant,
+};
 
 use neqo_common::{event::Provider as _, hex, qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay};
@@ -198,6 +204,10 @@ impl super::HttpServer for HttpServer {
             reason = "ActiveConnectionRef::Hash doesn't access any of the interior mutable types"
         )]
         let active_conns = self.server.active_connections();
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over active connections in an undefined order."
+        )]
         for acr in active_conns {
             loop {
                 let event = match acr.borrow_mut().next_event() {
@@ -236,7 +246,7 @@ impl super::HttpServer for HttpServer {
 }
 
 impl Display for HttpServer {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Http 0.9 server ")
     }
 }

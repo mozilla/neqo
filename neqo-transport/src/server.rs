@@ -9,6 +9,7 @@
 use std::{
     cell::RefCell,
     cmp::min,
+    fmt::{self, Display, Formatter},
     ops::{Deref, DerefMut},
     path::PathBuf,
     rc::Rc,
@@ -553,8 +554,8 @@ impl PartialEq for ConnectionRef {
 
 impl Eq for ConnectionRef {}
 
-impl ::std::fmt::Display for Server {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Server {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Server")
     }
 }
