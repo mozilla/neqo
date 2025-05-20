@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{collections::VecDeque, fmt::{self, Display, Formatter}};
+use std::{
+    collections::VecDeque,
+    fmt::{self, Display, Formatter},
+};
 
 use neqo_common::{qtrace, Encoder};
 use neqo_transport::{Connection, StreamId, StreamType};

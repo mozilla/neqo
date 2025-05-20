@@ -392,6 +392,10 @@ impl Http3Connection {
     /// Control and QPACK streams are handled differently and are never added to the list.
     fn send_non_control_streams(&mut self, conn: &mut Connection) -> Res<()> {
         let to_send = mem::take(&mut self.streams_with_pending_data);
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over active streams in an undefined order."
+        )]
         for stream_id in to_send {
             let done = if let Some(s) = &mut self.send_streams.get_mut(&stream_id) {
                 s.send(conn)?;
@@ -1523,6 +1527,10 @@ impl Http3Connection {
     ) {
         let (recv, send) = wt.borrow_mut().take_sub_streams();
 
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over active streams in an undefined order."
+        )]
         for id in recv {
             qtrace!("Remove the extended connect sub receiver stream {id}");
             // Use CloseType::ResetRemote so that an event will be sent. CloseType::LocalError would
@@ -1532,6 +1540,10 @@ impl Http3Connection {
             }
             drop(conn.stream_stop_sending(id, Error::HttpRequestCancelled.code()));
         }
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over active streams in an undefined order."
+        )]
         for id in send {
             qtrace!("Remove the extended connect sub send stream {id}");
             if let Some(mut s) = self.send_streams.remove(&id) {
