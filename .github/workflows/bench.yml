@@ -155,25 +155,25 @@ jobs:
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
 
-      # - name: Run cargo bench
-      #   env:
-      #     NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
-      #   run: |
-      #     sudo ip link set dev lo mtu "$MTU"
-      #     mkdir -p binaries
-      #     cd neqo
-      #     for BENCH in $BENCHES; do
-      #       NAME=$(basename "$BENCH" | cut -d- -f1)
-      #       cp "$BENCH" ../binaries/
-      #       # Run it twice, once without perf for baseline comparison, and once with perf for profiling.
-      #       # (Perf seems to introduce some variability in the results.)
-      #       # shellcheck disable=SC2086
-      #       nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-      #         $BENCH -- --bench | tee -a ../results.txt
-      #       # shellcheck disable=SC2086
-      #       nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-      #         perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline
-      #     done
+      - name: Run cargo bench
+        env:
+          NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
+        run: |
+          sudo ip link set dev lo mtu "$MTU"
+          mkdir -p binaries
+          cd neqo
+          for BENCH in $BENCHES; do
+            NAME=$(basename "$BENCH" | cut -d- -f1)
+            cp "$BENCH" ../binaries/
+            # Run it twice, once without perf for baseline comparison, and once with perf for profiling.
+            # (Perf seems to introduce some variability in the results.)
+            # shellcheck disable=SC2086
+            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+              $BENCH -- --bench | tee -a ../results.txt
+            # shellcheck disable=SC2086
+            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline
+          done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
