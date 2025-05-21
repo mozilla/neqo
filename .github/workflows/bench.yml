@@ -3,8 +3,8 @@ on:
   workflow_call:
   workflow_dispatch:
   schedule:
-    # Run at minute 0 past every 8th hour, so there is a `main`-branch baseline in the cache.
-    - cron: '0 */8 * * *'
+    # Run at minute 0 past every 4th hour, so there is a `main`-branch baseline in the cache.
+    - cron: '0 */4 * * *'
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
@@ -38,7 +38,24 @@ jobs:
           persist-credentials: false
           clean: false
 
+      - name: Download cached main-branch results
+        id: cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            neqo/target/criterion
+            hyperfine
+          key: bench-results-${{ runner.name }}-${{ github.sha }}
+          restore-keys: bench-results-${{ runner.name }}-
+
+      - id: run
+        env:
+          RUN_NEEDED: ${{ github.ref != 'refs/heads/main' || steps.cache.outputs.cache-hit == 'false' }}
+        run: |
+            [ "$RUN_NEEDED" == "true" ] && echo "needed=true" >> "$GITHUB_OUTPUT"
+
       - name: Checkout microsoft/msquic
+        if: steps.run.outputs.needed == 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: microsoft/msquic
@@ -48,6 +65,7 @@ jobs:
           clean: false
 
       - name: Checkout google/quiche
+        if: steps.run.outputs.needed == 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: google/quiche
@@ -57,6 +75,7 @@ jobs:
           clean: false
 
       - name: Checkout cloudflare/quiche
+        if: steps.run.outputs.needed == 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: cloudflare/quiche
@@ -66,6 +85,7 @@ jobs:
           clean: false
 
       - name: Checkout aws/s2n-quic
+        if: steps.run.outputs.needed == 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: aws/s2n-quic
@@ -75,10 +95,12 @@ jobs:
           clean: false
 
       - name: Set PATH and environment
+        if: steps.run.outputs.needed == 'true'
         run: |
           echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
+        if: steps.run.outputs.needed == 'true'
         uses: ./neqo/.github/actions/rust
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
@@ -90,16 +112,19 @@ jobs:
             s2n-quic
 
       - name: Get minimum NSS version
+        if: steps.run.outputs.needed == 'true'
         id: nss-version
         run: echo "minimum=$(cat neqo/neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Install NSS
+        if: steps.run.outputs.needed == 'true'
         id: nss
         uses: ./neqo/.github/actions/nss
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - name: Build neqo
+        if: steps.run.outputs.needed == 'true'
         run: |
           cd neqo
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
@@ -111,6 +136,7 @@ jobs:
           cargo build --locked --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
+        if: steps.run.outputs.needed == 'true'
         run: |
           mkdir -p msquic/build
           cd msquic/build
@@ -118,33 +144,28 @@ jobs:
           cmake --build .
 
       - name: Build google/quiche
+        if: steps.run.outputs.needed == 'true'
         run: |
           cd google-quiche
           bazel build -c opt --copt=-fno-omit-frame-pointer --copt=-g --strip=never --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
           bazel shutdown
 
       - name: Build cloudflare/quiche
+        if: steps.run.outputs.needed == 'true'
         run: |
           # We already changed RUSTFLAGS above; this depends on that having happened.
           cd quiche
           cargo build --release --bin quiche-client --bin quiche-server # --locked not working
 
       - name: Build aws/s2n-quic
+        if: steps.run.outputs.needed == 'true'
         run: |
           # We already changed RUSTFLAGS above; this depends on that having happened.
           cd s2n-quic
           cargo build --release --bin s2n-quic-qns # --locked not working
 
-      - name: Download cached main-branch results
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: |
-            neqo/target/criterion
-            hyperfine
-          key: bench-results-${{ runner.name }}-${{ github.sha }}
-          restore-keys: bench-results-${{ runner.name }}-
-
       - name: Move cached hyperfine results
+        if: steps.run.outputs.needed == 'true'
         run: |
           mv hyperfine hyperfine-main || true
           mkdir -p hyperfine
@@ -153,9 +174,11 @@ jobs:
       # Also creates "cpu23", "cpu2" and "cpu3" CPU sets for use with cset.
       # On the bencher, logical cores 2 and 3 have been isolated for use by the benchmarks.
       - name: Prepare machine
+        if: steps.run.outputs.needed == 'true'
         run: sudo /root/bin/prep.sh
 
       - name: Run cargo bench
+        if: steps.run.outputs.needed == 'true'
         env:
           NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
         run: |
@@ -178,6 +201,7 @@ jobs:
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
       - name: Compare QUIC implementations
+        if: steps.run.outputs.needed == 'true'
         env:
           HOST: 127.0.0.1
           PORT: 4433
@@ -387,13 +411,14 @@ jobs:
 
       # Re-enable turboboost, hyperthreading and use powersave governor. Remove all CPU sets.
       - name: Restore machine
+        if: success() || failure() || cancelled()
         run: |
           sudo /root/bin/unprep.sh
           # In case the previous test failed:
           sudo ip link set dev lo mtu 65536
-        if: ${{ success() || failure() || cancelled() }}
 
       - name: Post-process perf data
+        if: steps.run.outputs.needed == 'true'
         run: |
           for f in *.perf; do
             # Convert for profiler.firefox.com
@@ -403,6 +428,7 @@ jobs:
           done
 
       - name: Format results as Markdown
+        if: steps.run.outputs.needed == 'true'
         id: results
         run: |
           {
@@ -436,11 +462,11 @@ jobs:
           cat results.md > "$GITHUB_STEP_SUMMARY"
 
       - name: Remember main-branch push URL
-        if: ${{ github.ref == 'refs/heads/main' }}
+        if: github.ref == 'refs/heads/main' && steps.run.outputs.needed == 'true'
         run: echo "${{ github.sha }}" > neqo/target/criterion/baseline-sha.txt
 
       - name: Cache main-branch results
-        if: ${{ github.ref == 'refs/heads/main' }}
+        if: github.ref == 'refs/heads/main' && steps.run.outputs.needed == 'true'
         uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: |
@@ -449,6 +475,7 @@ jobs:
           key: bench-results-${{ runner.name }}-${{ github.sha }}
 
       - name: Export perf data
+        if: steps.run.outputs.needed == 'true'
         id: export
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -466,6 +493,7 @@ jobs:
           compression-level: 9
 
       - name: Export PR comment data
+        if: steps.run.outputs.needed == 'true'
         uses: ./neqo/.github/actions/pr-comment-data-export
         with:
           name: ${{ github.workflow }}
@@ -473,7 +501,8 @@ jobs:
           log-url: ${{ steps.export.outputs.artifact-url }}
 
       - name: Fail on regression
-        if: ${{ github.ref != 'refs/heads/main' }} # Don't check for regressions when running on main.
+        # Don't check for regressions when running on main.
+        if: github.ref != 'refs/heads/main' && steps.run.outputs.needed == 'true'
         run: |
           if grep -q "Performance has regressed." results.txt; then
             echo "Performance regression detected."
