@@ -199,11 +199,6 @@ enum AddressValidationInfo {
 }
 
 impl AddressValidationInfo {
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     pub fn token(&self) -> &[u8] {
         match self {
             Self::NewToken(token) | Self::Retry { token, .. } => token,
@@ -213,12 +208,11 @@ impl AddressValidationInfo {
 
     pub fn generate_new_token(&self, peer_address: SocketAddr, now: Instant) -> Option<Vec<u8>> {
         match self {
-            Self::Server(w) => w.upgrade().and_then(|validation| {
-                validation
-                    .borrow()
-                    .generate_new_token(peer_address, now)
-                    .ok()
-            }),
+            Self::Server(w) => w
+                .upgrade()?
+                .borrow()
+                .generate_new_token(peer_address, now)
+                .ok(),
             Self::None => None,
             _ => unreachable!("called a server function on a client"),
         }
@@ -842,11 +836,6 @@ impl Connection {
         }
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     #[must_use]
     pub fn tls_info(&self) -> Option<&SecretAgentInfo> {
         self.crypto.tls().info()

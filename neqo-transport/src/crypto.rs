@@ -131,11 +131,6 @@ impl Crypto {
     }
 
     /// Get the set of enabled protocols.
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     pub fn protocols(&self) -> &[String] {
         &self.protocols
     }

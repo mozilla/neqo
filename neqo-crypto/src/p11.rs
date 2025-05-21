@@ -47,7 +47,11 @@ macro_rules! scoped_ptr {
             /// # Errors
             ///
             /// When passed a null pointer generates an error.
-            #[allow(clippy::allow_attributes, dead_code, reason = "False positive.")]
+            #[allow(
+                clippy::allow_attributes,
+                dead_code,
+                reason = "False positive; is used in code calling the macro."
+            )]
             pub fn from_ptr(ptr: *mut $target) -> Result<Self, $crate::err::Error> {
                 if ptr.is_null() {
                     Err($crate::err::Error::last_nss_error())
