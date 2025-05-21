@@ -146,15 +146,12 @@ impl HFrame {
                 element_id,
                 priority,
             } => {
-                let mut update_frame = Encoder::new();
-                update_frame.encode_varint(*element_id);
-
-                let mut priority_enc: Vec<u8> = Vec::new();
-                write!(priority_enc, "{priority}").unwrap();
-
-                update_frame.encode(&priority_enc);
-                enc.encode_varint(update_frame.len() as u64);
-                enc.encode(update_frame.as_ref());
+                enc.encode_vvec_with(|enc_inner| {
+                    enc_inner.encode_varint(*element_id);
+                    enc_inner
+                        .write_all(format!("{priority}").as_bytes())
+                        .expect("write OK");
+                });
             }
         }
     }
