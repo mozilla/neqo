@@ -12,6 +12,7 @@ use std::{
     collections::HashMap,
     fmt::{self, Display, Formatter},
     rc::Rc,
+    slice, str,
     time::Instant,
 };
 
@@ -50,8 +51,8 @@ impl HttpServer {
     ) -> Result<Self, Error> {
         let mut server = Server::new(
             args.now(),
-            &[args.key.clone()],
-            &[args.shared.alpn.clone()],
+            slice::from_ref(&args.key),
+            slice::from_ref(&args.shared.alpn),
             anti_replay,
             Box::new(AllowZeroRtt {}),
             cid_manager,
@@ -125,7 +126,7 @@ impl HttpServer {
             },
         );
 
-        let Ok(msg) = std::str::from_utf8(&buf[..]) else {
+        let Ok(msg) = str::from_utf8(&buf[..]) else {
             self.save_partial(stream_id, buf.to_vec(), conn);
             return;
         };
@@ -210,9 +211,8 @@ impl super::HttpServer for HttpServer {
         )]
         for acr in active_conns {
             loop {
-                let event = match acr.borrow_mut().next_event() {
-                    None => break,
-                    Some(e) => e,
+                let Some(event) = acr.borrow_mut().next_event() else {
+                    break;
                 };
                 match event {
                     ConnectionEvent::NewStream { stream_id } => {

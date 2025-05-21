@@ -72,11 +72,6 @@ fn transfer(c: &mut Criterion) {
     done_sender.send(()).unwrap();
 }
 
-#[allow(
-    clippy::allow_attributes,
-    clippy::redundant_pub_crate,
-    reason = "TODO: Bug in clippy nursery?"
-)]
 fn spawn_server() -> tokio::sync::oneshot::Sender<()> {
     let (done_sender, mut done_receiver) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
