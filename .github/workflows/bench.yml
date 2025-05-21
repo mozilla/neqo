@@ -218,7 +218,7 @@ jobs:
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
           # Make test files to serve.
           truncate -s "$SIZE" "$TMP/$SIZE"
-          BIGSIZE=$(bc -l <<< "$SIZE * $RUNS")
+          BIGSIZE=$(bc -l <<< "$SIZE * 20")
           truncate -s "$BIGSIZE" "$TMP/$BIGSIZE"
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
