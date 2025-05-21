@@ -4,10 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    fmt::{self, Debug, Formatter},
-    io::{self, Write},
-};
+use std::fmt::{self, Debug, Formatter, Write};
 
 use crate::hex_with_len;
 
@@ -476,12 +473,8 @@ impl From<Encoder> for Vec<u8> {
 }
 
 impl Write for Encoder {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.buf.extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.buf.extend_from_slice(s.as_bytes());
         Ok(())
     }
 }

@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{fmt::Debug, io::Write as _};
+use std::fmt::{Debug, Write as _};
 
 use neqo_common::{Decoder, Encoder};
 use neqo_crypto::random;
@@ -148,9 +148,7 @@ impl HFrame {
             } => {
                 enc.encode_vvec_with(|enc_inner| {
                     enc_inner.encode_varint(*element_id);
-                    enc_inner
-                        .write_all(format!("{priority}").as_bytes())
-                        .expect("write OK");
+                    write!(enc_inner, "{priority}").expect("write OK");
                 });
             }
         }
