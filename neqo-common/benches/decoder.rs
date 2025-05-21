@@ -6,7 +6,9 @@
 
 #![expect(clippy::unwrap_used, reason = "OK in a bench.")]
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, Criterion};
 use neqo_common::Decoder;
 use neqo_crypto::{init, randomize};
 
