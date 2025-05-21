@@ -260,13 +260,12 @@ impl Simulator {
             n.init(Rc::clone(&self.rng), start);
         }
 
-        let setup_start = Instant::now();
         let now = self.process_loop(start, start);
-        let setup_time = now - start;
         qinfo!(
             "{t}: Setup took {wall:?} (wall) {setup_time:?} (simulated)",
             t = self.name,
-            wall = setup_start.elapsed(),
+            wall = Instant::now().elapsed(),
+            setup_time = now - start,
         );
 
         for n in &mut self.nodes {
@@ -306,13 +305,12 @@ impl ReadySimulator {
         reason = "run duration only needed in some tests"
     )]
     pub fn run(mut self) -> Duration {
-        let real_start = Instant::now();
         let end = self.sim.process_loop(self.start, self.now);
         let sim_time = end - self.now;
         qinfo!(
             "{t}: Simulation took {wall:?} (wall) {sim_time:?} (simulated)",
             t = self.sim.name,
-            wall = real_start.elapsed(),
+            wall = Instant::now().elapsed(),
         );
         self.sim.print_summary();
         sim_time

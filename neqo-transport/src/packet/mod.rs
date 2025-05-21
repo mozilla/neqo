@@ -425,13 +425,11 @@ impl PacketBuilder {
             self.write_len(crypto.expansion());
         }
 
-        let hdr = &self.encoder.as_ref()[self.header.clone()];
-        let body = &self.encoder.as_ref()[self.header.end..];
         qtrace!(
             "Packet build pn={} hdr={} body={}",
             self.pn,
-            hex(hdr),
-            hex(body)
+            hex(&self.encoder.as_ref()[self.header.clone()]),
+            hex(&self.encoder.as_ref()[self.header.end..])
         );
 
         // Add space for crypto expansion.

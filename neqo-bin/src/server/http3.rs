@@ -63,8 +63,7 @@ impl HttpServer {
             server
                 .enable_ech(random::<1>()[0], "public.example", &sk, &pk)
                 .unwrap();
-            let cfg = server.ech_config();
-            qinfo!("ECHConfigList: {}", hex(cfg));
+            qinfo!("ECHConfigList: {}", hex(server.ech_config()));
         }
         Self {
             server,
