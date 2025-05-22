@@ -51,8 +51,7 @@ jobs:
       - id: run
         env:
           RUN_NEEDED: ${{ github.ref != 'refs/heads/main' || steps.cache.outputs.cache-hit == 'false' }}
-        run: |
-            [ "$RUN_NEEDED" == "true" ] && echo "needed=true" >> "$GITHUB_OUTPUT"
+        run: echo "needed=$RUN_NEEDED" >> "$GITHUB_OUTPUT"
 
       - name: Checkout microsoft/msquic
         if: steps.run.outputs.needed == 'true'
@@ -326,7 +325,7 @@ jobs:
                     hyperfine -- --command-name "$TAG" --time-unit millisecond  \
                       --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
                       --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
-                      --output null --warmup 5 --min-runs "$RUNS" \
+                      --show-output --warmup 5 --min-runs "$RUNS" \
                       --setup "nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu2 --exec $WORKSPACE/${SERVER_CMD/ / -- } & sleep 1" \
                       --conclude "pkill $SERVER_TAG" \
                       "$WORKSPACE/$CMD" |
