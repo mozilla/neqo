@@ -314,21 +314,20 @@ jobs:
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
-                  SERVER_CMD="$WORKSPACE/${CMD/ / -- }"
+                  SERVER_CMD="$CMD"
                   echo "Server command: $SERVER_CMD"
                   # pkill only matches on the first 15 characters of the command?!
                   SERVER_TAG="$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
-                  CMD="$WORKSPACE/${CMD/ / -- }"
                   echo "Client command: $CMD"
                   pushd "$TMP/out"
                   nice -n -20 setarch --addr-no-randomize hyperfine --command-name "$TAG" --time-unit millisecond  \
                     --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
                     --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
-                    --show-output --warmup 5 --min-runs "$RUNS" \
-                    --prepare "cset proc -v -v --set=cpu2 --exec $SERVER_CMD & sleep 1" \
+                    ---output null --warmup 5 --min-runs "$RUNS" \
+                    --prepare "cset proc --set=cpu2 --exec $WORKSPACE/${SERVER_CMD/ / -- } & sleep 1" \
                     --conclude "pkill -e $SERVER_TAG; sleep 1" \
-                    "cset proc -v -v --set=cpu3 --exec $CMD" |
+                    "cset proc --set=cpu3 --exec $WORKSPACE/${CMD/ / -- }" |
                   tee -a "$WORKSPACE/comparison.txt"
                   echo >> "$WORKSPACE/comparison.txt"
 
