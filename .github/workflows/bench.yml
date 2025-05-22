@@ -223,7 +223,7 @@ jobs:
           declare -A client_cmd=(
             ["neqo"]="neqo/target/release/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
             ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
-            ["google"]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE | tee $SIZE"
+            ["google"]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
             ["quiche"]="quiche/target/release/quiche-client --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
             ["s2n"]="s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE"
           )
@@ -325,9 +325,9 @@ jobs:
                     --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
                     --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
                     --show-output --warmup 5 --min-runs "$RUNS" \
-                    --setup "cset proc -v -v --set=cpu2 --exec $WORKSPACE/${SERVER_CMD/ / -- } & sleep 1; ps -efww" \
+                    --setup "cset proc -v -v --set=cpu2 --exec $WORKSPACE/$SERVER_CMD & sleep 1; ps -efww" \
                     --conclude "pkill $SERVER_TAG" \
-                    "echo $CMD; cset proc -v -v --set=cpu3 --exec $WORKSPACE/${CMD/ / -- }" |
+                    "cset proc -v -v --set=cpu3 --exec $WORKSPACE/$CMD" |
                   tee -a "$WORKSPACE/comparison.txt"
                   echo >> "$WORKSPACE/comparison.txt"
 
