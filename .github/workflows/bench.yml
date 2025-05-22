@@ -325,8 +325,8 @@ jobs:
                     --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
                     --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
                     --output null --warmup 5 --min-runs "$RUNS" \
-                    --prepare "cset proc --set=cpu2 --exec $WORKSPACE/${SERVER_CMD/ / -- } & sleep 1" \
-                    --conclude "pkill -e $SERVER_TAG; sleep 1" \
+                    --prepare "cset proc --set=cpu2 --exec $WORKSPACE/${SERVER_CMD/ / -- } & sleep 0.1" \
+                    --conclude "pkill -e $SERVER_TAG" \
                     "cset proc --set=cpu3 --exec $WORKSPACE/${CMD/ / -- }" |
                   tee -a "$WORKSPACE/comparison.txt"
                   echo >> "$WORKSPACE/comparison.txt"
@@ -341,7 +341,7 @@ jobs:
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec \
                     perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.server.perf" $WORKSPACE/$SERVER_CMD &
-                  sleep 1
+                  sleep 0.1
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
