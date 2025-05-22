@@ -326,7 +326,7 @@ jobs:
                     --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
                     --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
                     --show-output --warmup 5 --min-runs "$RUNS" \
-                    --setup "echo SETUP; cset proc -v -v --set=cpu2 --exec $SERVER_CMD & sleep 1; ps -efww" \
+                    --prepare "echo SETUP; cset proc -v -v --set=cpu2 --exec $SERVER_CMD & sleep 1; ps -efww" \
                     --conclude "echo CONCLUDE; pkill $SERVER_TAG; sleep 1; ps -efww" \
                     "cset proc -v -v --set=cpu3 --exec $CMD" |
                   tee -a "$WORKSPACE/comparison.txt"
