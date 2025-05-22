@@ -324,7 +324,7 @@ jobs:
                   nice -n -20 setarch --addr-no-randomize hyperfine --command-name "$TAG" --time-unit millisecond  \
                     --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
                     --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
-                    ---output null --warmup 5 --min-runs "$RUNS" \
+                    --output null --warmup 5 --min-runs "$RUNS" \
                     --prepare "cset proc --set=cpu2 --exec $WORKSPACE/${SERVER_CMD/ / -- } & sleep 1" \
                     --conclude "pkill -e $SERVER_TAG; sleep 1" \
                     "cset proc --set=cpu3 --exec $WORKSPACE/${CMD/ / -- }" |
