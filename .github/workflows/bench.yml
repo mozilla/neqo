@@ -323,9 +323,9 @@ jobs:
                     --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
                     --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
                     --output null --warmup 5 --min-runs "$RUNS" \
-                    --prepare "sh -c \"echo $$ > /cpusets/cpu2/tasks && $WORKSPACE/$SERVER_CMD & sleep 0.1\"" \
+                    --prepare "echo $$ > /cpusets/cpu2/tasks && $WORKSPACE/$SERVER_CMD & sleep 0.1" \
                     --conclude "pkill $SERVER_TAG" \
-                    "sh -c \"echo $$ > /cpusets/cpu3/tasks && $WORKSPACE/$CMD\"" |
+                    "echo $$ > /cpusets/cpu3/tasks && $WORKSPACE/$CMD" |
                   tee -a "$WORKSPACE/comparison.txt"
                   echo >> "$WORKSPACE/comparison.txt"
 
