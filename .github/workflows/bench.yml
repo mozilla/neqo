@@ -280,14 +280,14 @@ jobs:
           # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
           sudo ip link set dev lo mtu "$MTU"
           for server in "${!server_cmd[@]}"; do
-            cp -v "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" binaries/
+            cp "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" binaries/
             for client in "${!client_cmd[@]}"; do
               # Do not run msquic and s2n-quic against google-quiche and quiche; the latter only support H3.
               if [[ "$client" != "$server" && "$client" != "neqo" && "$server" != "neqo" ]]; then
                 echo "Skipping $client vs. $server"
                 continue
               fi
-              cp -v "$(echo "${client_cmd[$client]}" | cut -f1 -d' ')" binaries/
+              cp "$(echo "${client_cmd[$client]}" | cut -f1 -d' ')" binaries/
               # google-quiche binaries don't have write permissions by default?!
               chmod u+w binaries/*
               # google and msquic don't let us configure the congestion control or pacing.
@@ -315,19 +315,17 @@ jobs:
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
                   SERVER_CMD="$CMD"
-                  echo "Server command: $SERVER_CMD"
                   # pkill only matches on the first 15 characters of the command?!
                   SERVER_TAG="$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
-                  echo "Client command: $CMD"
-                  pushd "$TMP/out"
+                  cd "$TMP/out"
                   nice -n -20 setarch --addr-no-randomize hyperfine --command-name "$TAG" --time-unit millisecond  \
                     --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
                     --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
                     --output null --warmup 5 --min-runs "$RUNS" \
-                    --prepare "cset proc --set=cpu2 --exec $WORKSPACE/${SERVER_CMD/ / -- } & sleep 0.1" \
-                    --conclude "pkill -e $SERVER_TAG" \
-                    "cset proc --set=cpu3 --exec $WORKSPACE/${CMD/ / -- }" |
+                    --prepare "echo $$ > /cpusets/cpu2/tasks && $WORKSPACE/$SERVER_CMD & sleep 0.1" \
+                    --conclude "pkill $SERVER_TAG" \
+                    "echo $$ > /cpusets/cpu3/tasks && $WORKSPACE/$CMD" |
                   tee -a "$WORKSPACE/comparison.txt"
                   echo >> "$WORKSPACE/comparison.txt"
 
@@ -346,8 +344,8 @@ jobs:
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
                     perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD > /dev/null 2>&1
-                  pkill -e "$SERVER_TAG"
-                  popd
+                  pkill "$SERVER_TAG"
+                  cd "$WORKSPACE"
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                     sed -E 's/`//g;' | cut -f1-5 -d\| | tr -d '\n' >> steps.md
