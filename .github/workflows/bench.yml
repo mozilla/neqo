@@ -321,15 +321,14 @@ jobs:
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   echo "Client command: $CMD"
                   pushd "$TMP/out"
-                  nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu3 --exec \
-                    hyperfine -- --command-name "$TAG" --time-unit millisecond  \
-                      --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
-                      --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
-                      --show-output --warmup 5 --min-runs "$RUNS" \
-                      --setup "nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu2 --exec $WORKSPACE/${SERVER_CMD/ / -- } & sleep 1; ps -efww" \
-                      --conclude "pkill $SERVER_TAG" \
-                      "$WORKSPACE/$CMD" |
-                    tee -a "$WORKSPACE/comparison.txt"
+                  hyperfine --command-name "$TAG" --time-unit millisecond  \
+                    --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
+                    --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
+                    --show-output --warmup 5 --min-runs "$RUNS" \
+                    --setup "nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu2 --exec $WORKSPACE/${SERVER_CMD/ / -- } & sleep 1; ps -efww" \
+                    --conclude "pkill $SERVER_TAG" \
+                    "nice -n -20 setarch --addr-no-randomize cset proc -v -v --set=cpu3 --exec $WORKSPACE/${CMD/ / -- }" |
+                  tee -a "$WORKSPACE/comparison.txt"
                   echo >> "$WORKSPACE/comparison.txt"
 
                   # Sanity check the size of the last retrieved file.
