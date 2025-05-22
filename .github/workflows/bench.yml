@@ -176,26 +176,26 @@ jobs:
         if: steps.run.outputs.needed == 'true'
         run: sudo /root/bin/prep.sh
 
-      # - name: Run cargo bench
-      #   if: steps.run.outputs.needed == 'true'
-      #   env:
-      #     NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
-      #   run: |
-      #     sudo ip link set dev lo mtu "$MTU"
-      #     mkdir -p binaries
-      #     cd neqo
-      #     for BENCH in $BENCHES; do
-      #       NAME=$(basename "$BENCH" | cut -d- -f1)
-      #       cp "$BENCH" ../binaries/
-      #       # Run it twice, once without perf for baseline comparison, and once with perf for profiling.
-      #       # (Perf seems to introduce some variability in the results.)
-      #       # shellcheck disable=SC2086
-      #       nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-      #         $BENCH -- --bench | tee -a ../results.txt
-      #       # shellcheck disable=SC2086
-      #       nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-      #         perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline
-      #     done
+      - name: Run cargo bench
+        if: steps.run.outputs.needed == 'true'
+        env:
+          NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
+        run: |
+          sudo ip link set dev lo mtu "$MTU"
+          mkdir -p binaries
+          cd neqo
+          for BENCH in $BENCHES; do
+            NAME=$(basename "$BENCH" | cut -d- -f1)
+            cp "$BENCH" ../binaries/
+            # Run it twice, once without perf for baseline comparison, and once with perf for profiling.
+            # (Perf seems to introduce some variability in the results.)
+            # shellcheck disable=SC2086
+            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+              $BENCH -- --bench | tee -a ../results.txt
+            # shellcheck disable=SC2086
+            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline
+          done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -319,11 +319,12 @@ jobs:
                   SERVER_TAG="$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   cd "$TMP/out"
-                  nice -n -20 setarch --addr-no-randomize hyperfine --command-name "$TAG" --time-unit millisecond  \
+                  nice -n -20 setarch --addr-no-randomize hyperfine \
+                    --command-name "$TAG" --time-unit millisecond  \
                     --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
                     --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
-                    --show-output --warmup 5 --min-runs "$RUNS" \
-                    --prepare "$WORKSPACE/$SERVER_CMD & echo \$! >> /cpusets/cpu2/tasks; sleep 0.3" \
+                    --output null --warmup 5 --min-runs "$RUNS" \
+                    --prepare "$WORKSPACE/$SERVER_CMD & echo \$! >> /cpusets/cpu2/tasks; sleep 0.1" \
                     --conclude "pkill $SERVER_TAG" \
                     "echo \$\$ >> /cpusets/cpu3/tasks; $WORKSPACE/$CMD" |
                   tee -a "$WORKSPACE/comparison.txt"
