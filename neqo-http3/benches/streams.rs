@@ -88,7 +88,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             let data = vec![0; data_size];
             b.iter_batched_ref(
                 connect,
-                |(client, server)| black_box(use_streams(client, server, streams, &data)),
+                |_| black_box(|(client, server)| use_streams(client, server, streams, &data)),
                 BatchSize::SmallInput,
             );
         });
