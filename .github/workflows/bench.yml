@@ -51,8 +51,7 @@ jobs:
       - id: run
         env:
           RUN_NEEDED: ${{ github.ref != 'refs/heads/main' || steps.cache.outputs.cache-hit == 'false' }}
-        run: |
-            [ "$RUN_NEEDED" == "true" ] && echo "needed=true" >> "$GITHUB_OUTPUT"
+        run: echo "needed=$RUN_NEEDED" >> "$GITHUB_OUTPUT"
 
       - name: Checkout microsoft/msquic
         if: steps.run.outputs.needed == 'true'
@@ -206,7 +205,7 @@ jobs:
           HOST: 127.0.0.1
           PORT: 4433
           SIZE: 33554432 # 32 MB
-          RUNS: 30
+          RUNS: 100
           NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
         run: |
           TMP=$(mktemp -d)
@@ -218,7 +217,7 @@ jobs:
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
           # Make test files to serve.
           truncate -s "$SIZE" "$TMP/$SIZE"
-          BIGSIZE=$(bc -l <<< "$SIZE * $RUNS")
+          BIGSIZE=$(bc -l <<< "$SIZE * 20")
           truncate -s "$BIGSIZE" "$TMP/$BIGSIZE"
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
@@ -281,14 +280,14 @@ jobs:
           # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
           sudo ip link set dev lo mtu "$MTU"
           for server in "${!server_cmd[@]}"; do
-            cp -v "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" binaries/
+            cp "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" binaries/
             for client in "${!client_cmd[@]}"; do
               # Do not run msquic and s2n-quic against google-quiche and quiche; the latter only support H3.
               if [[ "$client" != "$server" && "$client" != "neqo" && "$server" != "neqo" ]]; then
                 echo "Skipping $client vs. $server"
                 continue
               fi
-              cp -v "$(echo "${client_cmd[$client]}" | cut -f1 -d' ')" binaries/
+              cp "$(echo "${client_cmd[$client]}" | cut -f1 -d' ')" binaries/
               # google-quiche binaries don't have write permissions by default?!
               chmod u+w binaries/*
               # google and msquic don't let us configure the congestion control or pacing.
@@ -316,26 +315,24 @@ jobs:
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
                   SERVER_CMD="$CMD"
-                  # shellcheck disable=SC2086
-                  nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec ${CMD/ / -- } &
+                  # pkill only matches on the first 15 characters of the command?!
+                  SERVER_TAG="$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
-                  # shellcheck disable=SC2086
-                  pushd "$TMP/out"
-                  nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
-                    hyperfine -- --command-name "$TAG" --time-unit millisecond  \
-                      --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
-                      --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
-                      --output null --warmup 5 --min-runs "$RUNS" --setup "sleep 1" "$WORKSPACE/$CMD" |
-                    tee -a "$WORKSPACE/comparison.txt"
+                  cd "$TMP/out"
+                  nice -n -20 setarch --addr-no-randomize hyperfine \
+                    --command-name "$TAG" --time-unit millisecond  \
+                    --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
+                    --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
+                    --output null --warmup 5 --min-runs "$RUNS" \
+                    --prepare "$WORKSPACE/$SERVER_CMD & echo \$! >> /cpusets/cpu2/tasks; sleep 0.1" \
+                    --conclude "pkill $SERVER_TAG" \
+                    "echo \$\$ >> /cpusets/cpu3/tasks; $WORKSPACE/$CMD" |
+                  tee -a "$WORKSPACE/comparison.txt"
                   echo >> "$WORKSPACE/comparison.txt"
 
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
                   [ "$(wc -c <"$TMP/out/$SIZE")" -ge "$SIZE" ] || exit 1
-
-                  # pkill only matches on the first 15 characters of the command?!
-                  SERVER_TAG="$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
-                  pkill "$SERVER_TAG"
 
                   # Do a longer run with perf separately. We used to just wrap the hyperfine command above in perf,
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
@@ -349,7 +346,7 @@ jobs:
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
                     perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD > /dev/null 2>&1
                   pkill "$SERVER_TAG"
-                  popd
+                  cd "$WORKSPACE"
 
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                     sed -E 's/`//g;' | cut -f1-5 -d\| | tr -d '\n' >> steps.md
