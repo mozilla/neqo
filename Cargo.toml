@@ -134,3 +134,6 @@ debug = true
 [profile.profiling]
 inherits = "release"
 debug = true
+
+[patch.crates-io]
+backtrace = { git = "https://github.com/erichdongubler-contrib/backtrace-rs", branch = "windows-targets-0.53" }
