@@ -125,6 +125,7 @@ impl super::Handler for Handler<'_> {
     }
 }
 
+#[expect(clippy::large_types_passed_by_value, reason = "This wants values.")]
 pub fn create_client(
     args: &Args,
     local_addr: SocketAddr,

@@ -93,7 +93,7 @@ use std::os::windows::io::AsSocket as SocketRef;
 
 #[expect(clippy::missing_panics_doc, reason = "OK here.")]
 pub fn recv_inner<'a>(
-    local_address: SocketAddr,
+    local_address: &'a SocketAddr,
     state: &UdpSocketState,
     socket: impl SocketRef,
     recv_buf: &'a mut RecvBuf,
@@ -137,7 +137,7 @@ pub struct DatagramIter<'a> {
     remaining_buffers:
         iter::Take<iter::Zip<array::IntoIter<RecvMeta, NUM_BUFS>, slice::IterMut<'a, Vec<u8>>>>,
     /// The local address of the UDP socket used to receive the datagrams.
-    local_address: SocketAddr,
+    local_address: &'a SocketAddr,
 }
 
 impl<'a> Iterator for DatagramIter<'a> {
@@ -153,7 +153,7 @@ impl<'a> Iterator for DatagramIter<'a> {
             {
                 return Some(Datagram::from_slice(
                     meta.addr,
-                    self.local_address,
+                    *self.local_address,
                     meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
                     d,
                 ));
@@ -209,7 +209,7 @@ impl<S: SocketRef> Socket<S> {
     /// set with the provided local address.
     pub fn recv<'a>(
         &self,
-        local_address: SocketAddr,
+        local_address: &'a SocketAddr,
         recv_buf: &'a mut RecvBuf,
     ) -> Result<DatagramIter<'a>, io::Error> {
         recv_inner(local_address, &self.state, &self.inner, recv_buf)
@@ -242,7 +242,7 @@ mod tests {
 
         sender.send_to(&[], receiver.inner.local_addr()?)?;
         let mut recv_buf = RecvBuf::new();
-        let mut datagrams = receiver.recv(receiver_addr, &mut recv_buf)?;
+        let mut datagrams = receiver.recv(&receiver_addr, &mut recv_buf)?;
 
         assert_eq!(datagrams.next(), None);
 
@@ -266,7 +266,7 @@ mod tests {
 
         let mut recv_buf = RecvBuf::new();
         let mut received_datagrams = receiver
-            .recv(receiver_addr, &mut recv_buf)
+            .recv(&receiver_addr, &mut recv_buf)
             .expect("receive to succeed");
 
         // Assert that the ECN is correct.
@@ -327,7 +327,7 @@ mod tests {
         let mut recv_buf = RecvBuf::new();
         while num_received < max_gso_segments {
             receiver
-                .recv(receiver_addr, &mut recv_buf)
+                .recv(&receiver_addr, &mut recv_buf)
                 .expect("receive to succeed")
                 .for_each(|d| {
                     assert_eq!(

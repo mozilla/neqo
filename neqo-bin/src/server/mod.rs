@@ -231,14 +231,14 @@ impl ServerRunner {
     }
 
     /// Tries to find a socket, but then just falls back to sending from the first.
-    fn find_socket(
-        sockets: &mut [(SocketAddr, crate::udp::Socket)],
-        addr: SocketAddr,
-    ) -> &mut crate::udp::Socket {
+    fn find_socket<'a>(
+        sockets: &'a mut [(SocketAddr, crate::udp::Socket)],
+        addr: &SocketAddr,
+    ) -> &'a mut crate::udp::Socket {
         let ((_host, first_socket), rest) = sockets.split_first_mut().unwrap();
         rest.iter_mut()
             .map(|(_host, socket)| socket)
-            .find(|socket| socket.local_addr().is_ok_and(|a| a == addr))
+            .find(|socket| socket.local_addr().is_ok_and(|a| a == *addr))
             .unwrap_or(first_socket)
     }
 
@@ -255,7 +255,7 @@ impl ServerRunner {
         loop {
             match server.process(input_dgram.take(), now()) {
                 Output::Datagram(dgram) => {
-                    let socket = Self::find_socket(sockets, dgram.source());
+                    let socket = Self::find_socket(sockets, &dgram.source());
                     loop {
                         // Optimistically attempt sending datagram. In case the
                         // OS buffer is full, wait till socket is writable then
@@ -284,7 +284,8 @@ impl ServerRunner {
     async fn read_and_process(&mut self, sockets_index: usize) -> Result<(), io::Error> {
         loop {
             let (host, socket) = &mut self.sockets[sockets_index];
-            let Some(input_dgrams) = socket.recv(*host, &mut self.recv_buf)? else {
+            let host = *host;
+            let Some(input_dgrams) = socket.recv(&host, &mut self.recv_buf)? else {
                 break;
             };
 

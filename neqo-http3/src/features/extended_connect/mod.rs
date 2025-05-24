@@ -56,7 +56,7 @@ pub(crate) trait ExtendedConnectEvents: Debug {
         reason: SessionCloseReason,
         headers: Option<Vec<Header>>,
     );
-    fn extended_connect_new_stream(&self, stream_info: Http3StreamInfo) -> Res<()>;
+    fn extended_connect_new_stream(&self, stream_info: &Http3StreamInfo) -> Res<()>;
     fn new_datagram(&self, session_id: StreamId, datagram: Vec<u8>);
 }
 

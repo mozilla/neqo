@@ -181,13 +181,13 @@ pub(crate) struct Info {
 
 impl Info {
     /// Set the baseline (= the ECN counts from the last ACK Frame).
-    pub(crate) fn set_baseline(&mut self, baseline: Count) {
-        self.baseline = baseline;
+    pub(crate) fn set_baseline(&mut self, baseline: &Count) {
+        self.baseline = *baseline;
     }
 
     /// Expose the current baseline.
-    pub(crate) const fn baseline(&self) -> Count {
-        self.baseline
+    pub(crate) const fn baseline(&self) -> &Count {
+        &self.baseline
     }
 
     /// Count the number of packets sent out on this path during ECN validation.
@@ -216,7 +216,7 @@ impl Info {
     pub(crate) fn on_packets_acked(
         &mut self,
         acked_packets: &[SentPacket],
-        ack_ecn: Option<Count>,
+        ack_ecn: Option<&Count>,
         stats: &mut Stats,
     ) -> bool {
         let prev_baseline = self.baseline;
@@ -266,7 +266,7 @@ impl Info {
     fn validate_ack_ecn_and_update(
         &mut self,
         acked_packets: &[SentPacket],
-        ack_ecn: Option<Count>,
+        ack_ecn: Option<&Count>,
         stats: &mut Stats,
     ) {
         // RFC 9000, Section 13.4.2.1:
@@ -303,7 +303,7 @@ impl Info {
             self.disable_ecn(stats, ValidationError::Bleaching);
             return;
         };
-        stats.ecn_tx_acked[largest_acked.packet_type()] = ack_ecn;
+        stats.ecn_tx_acked[largest_acked.packet_type()] = *ack_ecn;
 
         // We always mark with ECT(0) - if at all - so we only need to check for that.
         //
@@ -321,7 +321,7 @@ impl Info {
             self.disable_ecn(stats, ValidationError::Bleaching);
             return;
         }
-        let ecn_diff = ack_ecn - self.baseline;
+        let ecn_diff = *ack_ecn - self.baseline;
         let sum_inc = ecn_diff[IpTosEcn::Ect0] + ecn_diff[IpTosEcn::Ce];
         if sum_inc < newly_acked_sent_with_ect0 {
             qwarn!(
@@ -335,7 +335,7 @@ impl Info {
             qinfo!("ECN validation succeeded, path is capable");
             self.state.set(ValidationState::Capable, stats);
         }
-        self.baseline = ack_ecn;
+        self.baseline = *ack_ecn;
         self.largest_acked = largest_acked.pn();
     }
 
