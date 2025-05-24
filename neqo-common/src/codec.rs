@@ -277,7 +277,7 @@ impl Encoder {
     /// When `s` contains non-hex values or an odd number of values.
     #[cfg(any(test, feature = "test-fixture"))]
     #[must_use]
-    pub fn from_hex(s: impl AsRef<str>) -> Self {
+    pub fn from_hex<A: AsRef<str>>(s: A) -> Self {
         let s = s.as_ref();
         assert_eq!(s.len() % 2, 0, "Needs to be even length");
 
