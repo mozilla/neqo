@@ -9,7 +9,6 @@
 use std::{
     borrow::Cow,
     cell::RefCell,
-    collections::HashMap,
     fmt::{self, Display, Formatter},
     rc::Rc,
     slice, str,
@@ -24,6 +23,7 @@ use neqo_transport::{
     ConnectionEvent, ConnectionIdGenerator, Output, State, StreamId,
 };
 use regex::Regex;
+use rustc_hash::FxHashMap as HashMap;
 
 use super::{qns_read_response, Args};
 use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};
@@ -75,8 +75,8 @@ impl HttpServer {
         let is_qns_test = args.shared.qns_test.is_some();
         Ok(Self {
             server,
-            write_state: HashMap::new(),
-            read_state: HashMap::new(),
+            write_state: HashMap::default(),
+            read_state: HashMap::default(),
             is_qns_test,
             regex: if is_qns_test {
                 Regex::new(r"GET +/(\S+)(?:\r)?\n").map_err(|_| Error::Internal)?

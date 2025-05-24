@@ -8,7 +8,6 @@
 
 use std::{
     cell::RefCell,
-    collections::HashMap,
     fmt::{self, Display},
     rc::Rc,
     slice,
@@ -21,6 +20,7 @@ use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
 };
 use neqo_transport::{server::ValidateAddress, ConnectionIdGenerator};
+use rustc_hash::FxHashMap as HashMap;
 
 use super::{qns_read_response, Args};
 use crate::send_data::SendData;
@@ -68,8 +68,8 @@ impl HttpServer {
         }
         Self {
             server,
-            remaining_data: HashMap::new(),
-            posts: HashMap::new(),
+            remaining_data: HashMap::default(),
+            posts: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
         }
     }
