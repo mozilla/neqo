@@ -58,9 +58,8 @@ checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
 name = "backtrace"
-version = "0.3.74"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d82cb332cdfaed17ae235a638438ac4d4839913cc2af585c3c6746e8f8bee1a"
+version = "0.3.75"
+source = "git+https://github.com/erichdongubler-contrib/backtrace-rs?branch=windows-targets-0.53#ce6b65717238dea8c9b461c93aae19fd05c9ea0a"
 dependencies = [
  "addr2line",
  "cfg-if",
