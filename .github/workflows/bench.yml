@@ -54,7 +54,7 @@ jobs:
           CACHE_HIT: ${{ steps.cache.outputs.cache-hit == 'true' }}
         run: |
           # Always run benchmarks on PRs or when there isn't a cache hit.
-          if [[ "$IS_MAIN" != "true" || "$CACHE_HIT" == "false" ]]; then
+          if [[ "$IS_MAIN" == "false" || "$CACHE_HIT" == "false" ]]; then
             RUN_NEEDED=true
           else
             RUN_NEEDED=false
