@@ -59,10 +59,13 @@ pub struct ConnectionNode {
 }
 
 impl ConnectionNode {
-    pub fn new_client(
+    pub fn new_client<
+        I: IntoIterator<Item = Box<dyn ConnectionGoal>>,
+        I1: IntoIterator<Item = Box<dyn ConnectionGoal>>,
+    >(
         params: ConnectionParameters,
-        setup: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
-        goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
+        setup: I,
+        goals: I1,
     ) -> Self {
         Self {
             c: crate::new_client(params),
@@ -71,10 +74,13 @@ impl ConnectionNode {
         }
     }
 
-    pub fn new_server(
+    pub fn new_server<
+        I: IntoIterator<Item = Box<dyn ConnectionGoal>>,
+        I1: IntoIterator<Item = Box<dyn ConnectionGoal>>,
+    >(
         params: ConnectionParameters,
-        setup: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
-        goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
+        setup: I,
+        goals: I1,
     ) -> Self {
         Self {
             c: crate::new_server(crate::DEFAULT_ALPN, params),
@@ -83,7 +89,7 @@ impl ConnectionNode {
         }
     }
 
-    pub fn default_client(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
+    pub fn default_client<I: IntoIterator<Item = Box<dyn ConnectionGoal>>>(goals: I) -> Self {
         Self::new_client(
             // Simulator logic does not work with multi-packet MLKEM crypto flights.
             ConnectionParameters::default().pmtud(true).mlkem(false),
@@ -92,7 +98,7 @@ impl ConnectionNode {
         )
     }
 
-    pub fn default_server(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
+    pub fn default_server<I: IntoIterator<Item = Box<dyn ConnectionGoal>>>(goals: I) -> Self {
         Self::new_server(
             // Simulator logic does not work with multi-packet MLKEM crypto flights.
             ConnectionParameters::default().pmtud(true).mlkem(false),
