@@ -9,11 +9,13 @@
 use std::{
     cmp::min,
     collections::VecDeque,
+    fmt::{self, Display, Formatter},
     time::{Duration, Instant},
 };
 
 use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
+use log::{log_enabled, Level};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn, MAX_VARINT};
 use neqo_crypto::Epoch;
 use strum::{Display, EnumIter};
@@ -151,8 +153,8 @@ impl PacketRange {
     }
 }
 
-impl ::std::fmt::Display for PacketRange {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for PacketRange {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{}->{}", self.largest, self.smallest)
     }
 }
@@ -505,8 +507,8 @@ impl RecvdPackets {
     }
 }
 
-impl ::std::fmt::Display for RecvdPackets {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for RecvdPackets {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Recvd-{}", self.space)
     }
 }
@@ -554,13 +556,13 @@ impl AckTracker {
 
     /// Determine the earliest time that an ACK might be needed.
     pub fn ack_time(&self, now: Instant) -> Option<Instant> {
-        #[cfg(debug_assertions)]
-        for (space, recvd) in &self.spaces {
-            if let Some(recvd) = recvd {
-                qtrace!("ack_time for {space} = {:?}", recvd.ack_time());
+        if log_enabled!(Level::Trace) {
+            for (space, recvd) in &self.spaces {
+                if let Some(recvd) = recvd {
+                    qtrace!("ack_time for {space} = {:?}", recvd.ack_time());
+                }
             }
         }
-
         if self.spaces[PacketNumberSpace::Initial].is_none()
             && self.spaces[PacketNumberSpace::Handshake].is_none()
         {

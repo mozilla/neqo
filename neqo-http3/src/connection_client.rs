@@ -6,7 +6,7 @@
 
 use std::{
     cell::RefCell,
-    fmt::{Debug, Display},
+    fmt::{self, Debug, Display, Formatter},
     iter,
     net::SocketAddr,
     rc::Rc,
@@ -286,7 +286,7 @@ pub struct Http3Client {
 }
 
 impl Display for Http3Client {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Http3 client")
     }
 }
@@ -422,9 +422,8 @@ impl Http3Client {
     /// connection the HTTP/3 setting will be decoded and used until the setting are received from
     /// the server.
     pub fn take_resumption_token(&mut self, now: Instant) -> Option<ResumptionToken> {
-        self.conn
-            .take_resumption_token(now)
-            .and_then(|t| self.encode_resumption_token(&t))
+        let t = self.conn.take_resumption_token(now)?;
+        self.encode_resumption_token(&t)
     }
 
     /// This may be call if an application has a resumption token. This must be called before

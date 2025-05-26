@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::fmt::{self, Display, Formatter};
+
 use neqo_transport::{Connection, StreamId};
 
 use crate::{qlog, Res};
@@ -18,8 +20,8 @@ pub enum BufferedStream {
     },
 }
 
-impl ::std::fmt::Display for BufferedStream {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for BufferedStream {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "BufferedStream {:?}", Option::<StreamId>::from(self))
     }
 }

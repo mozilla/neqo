@@ -17,12 +17,16 @@ inputs:
   targets:
     description: Comma-separated list of target triples to install for this toolchain
     required: false
+  workspaces:
+    description: Newline-separated list of workspaces
+    required: false
 
 runs:
   using: composite
   steps:
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
+      # TODO: Manually upate this, Dependabot will skip it because no tags associated with SHA:
+      uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # zizmor: ignore[stale-action-refs]
       with:
         toolchain: ${{ inputs.version  }}
         components: ${{ inputs.components }}
@@ -80,8 +84,11 @@ runs:
     - name: Enable Rust cache
       uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
       with:
-        cache-bin: ${{ runner.environment == 'github-hosted' }}
+        cache-bin: ${{ runner.environment != 'github-hosted' }}
+        cache-all-crates: true
         key: ${{ inputs.targets }}
+        workspaces: ${{ inputs.workspaces }}
+        save-if: ${{ github.ref == 'refs/heads/main' }} # Only cache runs from `main`.
 
     - name: Set up MSVC (Windows)
       if: ${{ runner.os == 'Windows' }}

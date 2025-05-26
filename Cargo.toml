@@ -20,7 +20,7 @@ description = "Neqo, the Mozilla implementation of QUIC in Rust."
 keywords = ["quic", "http3", "neqo", "mozilla", "ietf", "firefox"]
 categories = ["network-programming", "web-programming"]
 readme = "README.md"
-version = "0.13.2"
+version = "0.13.4"
 # Keep in sync with `.rustfmt.toml` `edition`.
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -34,7 +34,7 @@ enumset = { version = "1.1", default-features = false }
 hex = { version = "0.4", default-features = false }
 log = { version = "0.4", default-features = false }
 qlog = { version = "0.15.1", default-features = false }
-quinn-udp = { version = "0.5.11", default-features = false, features = ["direct-log", "fast-apple-datapath"] }
+quinn-udp = { version = "0.5.11", default-features = false, features = ["direct-log"] }
 regex = { version = "1.9", default-features = false }
 static_assertions = { version = "1.1", default-features = false }
 strum = { version = "0.27", default-features = false, features = ["derive"] }
@@ -76,6 +76,7 @@ get_unwrap = "warn"
 if_then_some_else_none = "warn"
 impl_trait_in_params = "warn"
 infinite_loop = "warn"
+iter_over_hash_type = "warn"
 large_include_file = "warn"
 let_underscore_must_use = "warn"
 let_underscore_untyped = "warn"
@@ -92,13 +93,16 @@ mutex_integer = "warn"
 needless_raw_strings = "warn"
 partial_pub_fields = "warn"
 pathbuf_init_then_push = "warn"
+precedence_bits = "warn"
 pub_without_shorthand = "warn"
 rc_buffer = "warn"
 rc_mutex = "warn"
+redundant_test_prefix = "warn"
 redundant_type_annotations = "warn"
 ref_patterns = "warn"
 renamed_function_params = "warn"
 rest_pat_in_fully_bound_structs = "warn"
+return_and_then = "warn"
 self_named_module_files = "warn"
 semicolon_inside_block = "warn"
 string_lit_chars_any = "warn"

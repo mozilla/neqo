@@ -9,7 +9,7 @@
 use std::{
     cell::{OnceCell, RefCell},
     cmp::max,
-    fmt::Display,
+    fmt::{self, Display, Formatter},
     io::{self, Cursor, Result, Write},
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -432,16 +432,16 @@ impl Write for SharedVec {
 }
 
 impl Display for SharedVec {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(
             &String::from_utf8(
                 self.buf
                     .lock()
-                    .map_err(|_| std::fmt::Error)?
+                    .map_err(|_| fmt::Error)?
                     .clone()
                     .into_inner(),
             )
-            .map_err(|_| std::fmt::Error)?,
+            .map_err(|_| fmt::Error)?,
         )
     }
 }

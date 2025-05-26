@@ -15,6 +15,7 @@ use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
     collections::{btree_map::Entry, BTreeMap, VecDeque},
+    fmt::{self, Display, Formatter},
     mem,
     num::NonZeroUsize,
     ops::Add,
@@ -851,7 +852,8 @@ impl SendStream {
         match self.state {
             SendStreamState::Send {
                 ref mut send_buf, ..
-            } => send_buf.next_bytes().and_then(|(offset, slice)| {
+            } => {
+                let (offset, slice) = send_buf.next_bytes()?;
                 if retransmission_only {
                     qtrace!(
                         "next_bytes apply retransmission limit at {}",
@@ -867,7 +869,7 @@ impl SendStream {
                 } else {
                     Some((offset, slice))
                 }
-            }),
+            }
             SendStreamState::DataSent {
                 ref mut send_buf,
                 fin_sent,
@@ -1386,8 +1388,8 @@ impl SendStream {
     }
 }
 
-impl ::std::fmt::Display for SendStream {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for SendStream {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "SendStream {}", self.stream_id)
     }
 }
