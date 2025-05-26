@@ -59,7 +59,7 @@ jobs:
           else
             RUN_NEEDED=false
           fi
-          echo "run_needed=$RUN_NEEDED" >> "$GITHUB_OUTPUT"
+          echo "needed=$RUN_NEEDED" >> "$GITHUB_OUTPUT"
 
       - name: Checkout microsoft/msquic
         if: steps.run.outputs.needed == 'true'
