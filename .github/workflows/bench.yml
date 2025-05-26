@@ -53,8 +53,7 @@ jobs:
           IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
           CACHE_HIT: ${{ steps.cache.outputs.cache-hit == 'true' }}
         run: |
-          # If this is a main-branch run, we always need to run the benchmarks.
-          # If this is not a main-branch run, we only need to run the benchmarks if there is no cached result.
+          # Always run benchmarks on PRs or when there isn't a cache hit.
           if [[ "$IS_MAIN" != "true" || "$CACHE_HIT" == "false" ]]; then
             RUN_NEEDED=true
           else
