@@ -406,11 +406,11 @@ impl WebTransportSession {
     /// # Errors
     ///
     /// Returns an error if the datagram exceeds the remote datagram size limit.
-    pub fn send_datagram(
+    pub fn send_datagram<I: Into<DatagramTracking>>(
         &self,
         conn: &mut Connection,
         buf: &[u8],
-        id: impl Into<DatagramTracking>,
+        id: I,
     ) -> Res<()> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state == SessionState::Active {

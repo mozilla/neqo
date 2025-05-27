@@ -199,11 +199,6 @@ enum AddressValidationInfo {
 }
 
 impl AddressValidationInfo {
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     pub fn token(&self) -> &[u8] {
         match self {
             Self::NewToken(token) | Self::Retry { token, .. } => token,
@@ -213,12 +208,11 @@ impl AddressValidationInfo {
 
     pub fn generate_new_token(&self, peer_address: SocketAddr, now: Instant) -> Option<Vec<u8>> {
         match self {
-            Self::Server(w) => w.upgrade().and_then(|validation| {
-                validation
-                    .borrow()
-                    .generate_new_token(peer_address, now)
-                    .ok()
-            }),
+            Self::Server(w) => w
+                .upgrade()?
+                .borrow()
+                .generate_new_token(peer_address, now)
+                .ok(),
             Self::None => None,
             _ => unreachable!("called a server function on a client"),
         }
@@ -319,9 +313,9 @@ impl Connection {
     /// Create a new QUIC connection with Client role.
     /// # Errors
     /// When NSS fails and an agent cannot be created.
-    pub fn new_client(
-        server_name: impl Into<String>,
-        protocols: &[impl AsRef<str>],
+    pub fn new_client<I: Into<String>, A: AsRef<str>>(
+        server_name: I,
+        protocols: &[A],
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
@@ -357,9 +351,9 @@ impl Connection {
     /// Create a new QUIC connection with Server role.
     /// # Errors
     /// When NSS fails and an agent cannot be created.
-    pub fn new_server(
-        certs: &[impl AsRef<str>],
-        protocols: &[impl AsRef<str>],
+    pub fn new_server<A1: AsRef<str>, A2: AsRef<str>>(
+        certs: &[A1],
+        protocols: &[A2],
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
         conn_params: ConnectionParameters,
     ) -> Res<Self> {
@@ -446,10 +440,10 @@ impl Connection {
 
     /// # Errors
     /// When the operation fails.
-    pub fn server_enable_0rtt(
+    pub fn server_enable_0rtt<Z: ZeroRttChecker + 'static>(
         &mut self,
         anti_replay: &AntiReplay,
-        zero_rtt_checker: impl ZeroRttChecker + 'static,
+        zero_rtt_checker: Z,
     ) -> Res<()> {
         self.crypto
             .server_enable_0rtt(Rc::clone(&self.tps), anti_replay, zero_rtt_checker)
@@ -475,7 +469,7 @@ impl Connection {
 
     /// # Errors
     /// When the operation fails.
-    pub fn client_enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
+    pub fn client_enable_ech<A: AsRef<[u8]>>(&mut self, ech_config_list: A) -> Res<()> {
         self.crypto.client_enable_ech(ech_config_list)
     }
 
@@ -561,7 +555,7 @@ impl Connection {
     /// higher preference.
     /// # Errors
     /// When the operation fails, which is usually due to bad inputs or bad connection state.
-    pub fn set_alpn(&mut self, protocols: &[impl AsRef<str>]) -> Res<()> {
+    pub fn set_alpn<A: AsRef<str>>(&mut self, protocols: &[A]) -> Res<()> {
         self.crypto.tls_mut().set_alpn(protocols)?;
         Ok(())
     }
@@ -727,7 +721,7 @@ impl Connection {
     ///
     /// # Errors
     /// When the operation fails, which is usually due to bad inputs or bad connection state.
-    pub fn enable_resumption(&mut self, now: Instant, token: impl AsRef<[u8]>) -> Res<()> {
+    pub fn enable_resumption<A: AsRef<[u8]>>(&mut self, now: Instant, token: A) -> Res<()> {
         if self.state != State::Init {
             qerror!("[{self}] set token in state {:?}", self.state);
             return Err(Error::ConnectionState);
@@ -842,11 +836,6 @@ impl Connection {
         }
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     #[must_use]
     pub fn tls_info(&self) -> Option<&SecretAgentInfo> {
         self.crypto.tls().info()
@@ -1045,14 +1034,17 @@ impl Connection {
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_input(&mut self, d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>, now: Instant) {
+    pub fn process_input<A: AsRef<[u8]> + AsMut<[u8]>>(&mut self, d: Datagram<A>, now: Instant) {
         self.process_multiple_input(iter::once(d), now);
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_multiple_input(
+    pub fn process_multiple_input<
+        A: AsRef<[u8]> + AsMut<[u8]>,
+        I: IntoIterator<Item = Datagram<A>>,
+    >(
         &mut self,
-        dgrams: impl IntoIterator<Item = Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        dgrams: I,
         now: Instant,
     ) {
         let mut dgrams = dgrams.into_iter().peekable();
@@ -1185,9 +1177,9 @@ impl Connection {
 
     /// Process input and generate output.
     #[must_use = "Output of the process function must be handled"]
-    pub fn process(
+    pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
-        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
         if let Some(d) = dgram {
@@ -2674,7 +2666,7 @@ impl Connection {
     }
 
     /// Close the connection.
-    pub fn close(&mut self, now: Instant, app_error: AppError, msg: impl AsRef<str>) {
+    pub fn close<A: AsRef<str>>(&mut self, now: Instant, app_error: AppError, msg: A) {
         let error = CloseReason::Application(app_error);
         let timeout = self.get_closing_period_time(now);
         if let Some(path) = self.paths.primary() {
@@ -3639,7 +3631,7 @@ impl Connection {
     /// to check the estimated max datagram size and to use smaller datagrams.
     /// `max_datagram_size` is just a current estimate and will change over
     /// time depending on the encoded size of the packet number, ack frames, etc.
-    pub fn send_datagram(&mut self, buf: Vec<u8>, id: impl Into<DatagramTracking>) -> Res<()> {
+    pub fn send_datagram<I: Into<DatagramTracking>>(&mut self, buf: Vec<u8>, id: I) -> Res<()> {
         self.quic_datagrams
             .add_datagram(buf, id.into(), &mut self.stats.borrow_mut())
     }

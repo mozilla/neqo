@@ -53,10 +53,10 @@ impl Http3Server {
     ///
     /// Making a `neqo_transport::Server` may produce an error. This can only be a crypto error if
     /// the socket can't be created or configured.
-    pub fn new(
+    pub fn new<A: AsRef<str>, A1: AsRef<str>>(
         now: Instant,
-        certs: &[impl AsRef<str>],
-        protocols: &[impl AsRef<str>],
+        certs: &[A],
+        protocols: &[A1],
         anti_replay: AntiReplay,
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
         http3_parameters: Http3Parameters,
@@ -87,7 +87,7 @@ impl Http3Server {
         self.server.set_validation(v);
     }
 
-    pub fn set_ciphers(&mut self, ciphers: impl AsRef<[Cipher]>) {
+    pub fn set_ciphers<A: AsRef<[Cipher]>>(&mut self, ciphers: A) {
         self.server.set_ciphers(ciphers);
     }
 
@@ -117,9 +117,9 @@ impl Http3Server {
         self.process(None::<Datagram>, now)
     }
 
-    pub fn process(
+    pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
-        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
         qtrace!("[{self}] Process");

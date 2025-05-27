@@ -15,13 +15,13 @@ use std::{
 
 use common::{assert_dscp, connected_server, default_server, generate_ticket};
 use neqo_common::{hex_with_len, qdebug, qtrace, Datagram, Encoder, Role};
-use neqo_crypto::AuthenticationStatus;
+use neqo_crypto::{generate_ech_keys, AuthenticationStatus};
 use neqo_transport::{
     server::ValidateAddress, CloseReason, ConnectionParameters, Error, State, StreamType,
     MIN_INITIAL_PACKET_SIZE,
 };
 use test_fixture::{
-    assertions, datagram, default_client,
+    assertions, damage_ech_config, datagram, default_client,
     header_protection::{
         apply_header_protection, decode_initial_header, initial_aead_and_hp,
         remove_header_protection,
@@ -59,6 +59,53 @@ fn retry_basic() {
     assert!(dgram.is_some()); // Note that this packet will be dropped...
     connected_server(&server);
     assert_dscp(&client.stats());
+}
+
+/// Verify that ECH fallback works, even when there is a retry.
+///
+/// This is necessary to demonstrate that the transport parameters
+/// in the outer `ClientHello` are sufficient to establish a connection.
+#[test]
+fn retry_ech_fallback() {
+    const CONFIG_ID: u8 = 12;
+    const PUBLIC_NAME: &str = "public.name.example";
+
+    let mut server = default_server();
+    server.set_validation(ValidateAddress::Always);
+    let mut client = default_client();
+
+    let (sk, pk) = generate_ech_keys().unwrap();
+    server.enable_ech(CONFIG_ID, PUBLIC_NAME, &sk, &pk).unwrap();
+    client
+        .client_enable_ech(damage_ech_config(server.ech_config()))
+        .unwrap();
+
+    let dgram = client.process_output(now()).dgram(); // Initial
+    let dgram2 = client.process_output(now()).dgram(); // Initial
+    assert!(dgram.is_some() && dgram2.is_some());
+    _ = server.process(dgram, now()).dgram().unwrap(); // Retry
+    let dgram = server.process(dgram2, now()).dgram().unwrap(); // Retry
+    assertions::assert_retry(&dgram);
+
+    let dgram = client.process(Some(dgram), now()).dgram(); // Initial w/token
+    let dgram2 = client.process_output(now()).dgram(); // Initial
+    assert!(dgram.is_some() && dgram2.is_some());
+    _ = server.process(dgram, now()).dgram().unwrap();
+    let dgram = server.process(dgram2, now()).dgram();
+    let dgram = client.process(dgram, now()).dgram();
+    let dgram = server.process(dgram, now()).dgram(); // Initial, HS
+    assert!(dgram.is_some());
+    drop(client.process(dgram, now()).dgram()); // Ingest, drop any ACK.
+    client.authenticated(AuthenticationStatus::Ok, now());
+    let dgram = client.process_output(now()).dgram(); // Send Finished
+    assert!(dgram.is_some());
+    let State::Closing { error: err, .. } = client.state() else {
+        panic!("client should be closing");
+    };
+    let CloseReason::Transport(Error::EchRetry(fallback_config)) = err else {
+        panic!("client should provide fallback config");
+    };
+    assert_eq!(fallback_config, server.ech_config());
 }
 
 /// Receiving a Retry is enough to infer something about the RTT.
