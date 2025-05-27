@@ -734,7 +734,8 @@ impl TransportParametersHandler {
         self.remote_handshake.as_ref()
     }
 
-    /// Filter to retain only those transport parameters that are necessary for an outer `ClientHello`.
+    /// Filter to retain only those transport parameters that are necessary for an outer
+    /// `ClientHello`.
     ///
     /// We don't need the connection for long if we are forced into an ECH fallback,
     /// we only need it around long enough to get a fresh ECH config; and no data is exchanged.
@@ -745,8 +746,8 @@ impl TransportParametersHandler {
     ///
     /// Also, we include any parameters that might affect the configuration of the connection
     /// in ways that might adversely affect operation.
-    /// That saves us from having to swap in a different configuration (i.e., `ConnectionParameters`)
-    /// if the outer `ClientHello` is used.
+    /// That saves us from having to swap in a different configuration (i.e.,
+    /// `ConnectionParameters`) if the outer `ClientHello` is used.
     /// These probably aren't strictly necessary, even then:
     /// * ACK-related parameters only affect RTT estimation, which won't matter much; and
     /// * UDP datagram sizes will look like a path MTU restriction.

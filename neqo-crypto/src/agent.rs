@@ -989,11 +989,12 @@ impl Client {
             unsafe { ech::SSL_EnableTls13GreaseEch(self.agent.fd, PRBool::from(true)) }
         } else {
             unsafe {
-                // Allow writing of different transport parameters to the inner and outer ClientHello.
-                // Avoid setting this otherwise, as the transport parameter extension handler
-                // filters out essential values from the outer ClientHello.
-                // Under normal operation, NSS reports to extension writers that an ordinary,
-                // non-ECH ClientHello is an outer ClientHello, resulting in unwanted filtering.
+                // Allow writing of different transport parameters to the inner and outer
+                // ClientHello. Avoid setting this otherwise, as the transport
+                // parameter extension handler filters out essential values from the
+                // outer ClientHello. Under normal operation, NSS reports to
+                // extension writers that an ordinary, non-ECH ClientHello is an
+                // outer ClientHello, resulting in unwanted filtering.
                 SSL_CallExtensionWriterOnEchInner(self.fd, PRBool::from(true))?;
                 ech::SSL_SetClientEchConfigs(
                     self.agent.fd,
