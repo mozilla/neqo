@@ -369,10 +369,21 @@ impl TransportParameters {
         Ok(tps)
     }
 
+    const fn retain_all(_tp: TransportParameterId, _v: Option<&TransportParameter>) -> bool {
+        true
+    }
+
     pub(crate) fn encode(&self, enc: &mut Encoder) {
-        for (tipe, tp) in &self.params {
-            if let Some(tp) = tp {
-                tp.encode(enc, tipe);
+        self.encode_filtered(Self::retain_all, enc);
+    }
+
+    fn encode_filtered<F>(&self, f: F, enc: &mut Encoder)
+    where
+        F: Fn(TransportParameterId, Option<&TransportParameter>) -> bool,
+    {
+        for (i, v) in self.params.iter().filter(|(i, v)| f(*i, v.as_ref())) {
+            if let Some(tp) = v {
+                tp.encode(enc, i);
             }
         }
     }
@@ -722,10 +733,49 @@ impl TransportParametersHandler {
     pub const fn remote_handshake(&self) -> Option<&TransportParameters> {
         self.remote_handshake.as_ref()
     }
+
+    /// Filter to retain only those transport parameters that are necessary for an outer
+    /// `ClientHello`.
+    ///
+    /// We don't need the connection for long if we are forced into an ECH fallback,
+    /// we only need it around long enough to get a fresh ECH config; and no data is exchanged.
+    ///
+    /// However, we do need to ensure that the connection attempt works.
+    /// That motivates the inclusion of version negotiation and connection ID parameters,
+    /// which would break the connection if they were dropped.
+    ///
+    /// Also, we include any parameters that might affect the configuration of the connection
+    /// in ways that might adversely affect operation.
+    /// That saves us from having to swap in a different configuration (i.e.,
+    /// `ConnectionParameters`) if the outer `ClientHello` is used.
+    /// These probably aren't strictly necessary, even then:
+    /// * ACK-related parameters only affect RTT estimation, which won't matter much; and
+    /// * UDP datagram sizes will look like a path MTU restriction.
+    ///
+    /// There is no privacy harm to including them as the values are fixed (maximum ACK delay)
+    /// or not set (ACK delay exponent and UDP payload size) in our code.
+    const fn filter_ch_outer(tp: TransportParameterId, _v: Option<&TransportParameter>) -> bool {
+        matches!(
+            tp,
+            TransportParameterId::OriginalDestinationConnectionId
+                | TransportParameterId::StatelessResetToken
+                | TransportParameterId::InitialSourceConnectionId
+                | TransportParameterId::RetrySourceConnectionId
+                | TransportParameterId::VersionInformation
+                | TransportParameterId::AckDelayExponent
+                | TransportParameterId::MaxAckDelay
+                | TransportParameterId::MaxUdpPayloadSize
+        )
+    }
 }
 
 impl ExtensionHandler for TransportParametersHandler {
-    fn write(&mut self, msg: HandshakeMessage, d: &mut [u8]) -> ExtensionWriterResult {
+    fn write(
+        &mut self,
+        msg: HandshakeMessage,
+        ch_outer: bool,
+        d: &mut [u8],
+    ) -> ExtensionWriterResult {
         if !matches!(msg, TLS_HS_CLIENT_HELLO | TLS_HS_ENCRYPTED_EXTENSIONS) {
             return ExtensionWriterResult::Skip;
         }
@@ -734,7 +784,13 @@ impl ExtensionHandler for TransportParametersHandler {
 
         // TODO(ekr@rtfm.com): Modify to avoid a copy.
         let mut enc = Encoder::default();
-        self.local.encode(&mut enc);
+        let f = if ch_outer {
+            debug_assert_eq!(msg, TLS_HS_CLIENT_HELLO);
+            Self::filter_ch_outer
+        } else {
+            TransportParameters::retain_all
+        };
+        self.local.encode_filtered(f, &mut enc);
         assert!(enc.len() <= d.len());
         d[..enc.len()].copy_from_slice(enc.as_ref());
         ExtensionWriterResult::Write(enc.len())

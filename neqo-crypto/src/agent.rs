@@ -41,7 +41,7 @@ use crate::{
     },
     ech,
     err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res},
-    ext::{ExtensionHandler, ExtensionTracker},
+    ext::{ExtensionHandler, ExtensionTracker, SSL_CallExtensionWriterOnEchInner},
     null_safe_slice,
     p11::{self, PrivateKey, PublicKey},
     prio,
@@ -61,7 +61,7 @@ pub enum HandshakeState {
     AuthenticationPending,
     /// When encrypted client hello is enabled, the server might engage a fallback.
     /// This is the status that is returned.  The included value is the public
-    /// name of the server, which should be used to validated the certificate.
+    /// name of the server, which should be used to validate the certificate.
     EchFallbackAuthenticationPending(String),
     Authenticated(PRErrorCode),
     Complete(SecretAgentInfo),
@@ -586,7 +586,7 @@ impl SecretAgent {
         ext: Extension,
         handler: Rc<RefCell<dyn ExtensionHandler>>,
     ) -> Res<()> {
-        let tracker = unsafe { ExtensionTracker::new(self.fd, ext, handler) }?;
+        let tracker = unsafe { ExtensionTracker::new(self.fd, ext, handler)? };
         self.extension_handlers.push(tracker);
         Ok(())
     }
@@ -639,8 +639,8 @@ impl SecretAgent {
 
     /// Return any fatal alert that the TLS stack might have sent.
     #[must_use]
-    pub fn alert(&self) -> Option<&Alert> {
-        (*self.alert).as_ref()
+    pub fn alert(&self) -> Option<Alert> {
+        *self.alert
     }
 
     /// Call this function to mark the peer as authenticated.
@@ -769,7 +769,7 @@ impl SecretAgent {
         }
         #[expect(
             clippy::branches_sharing_code,
-            reason = "Moving the PR_Close call after the conditional crashes things?!"
+            reason = "The PR_Close calls cannot be run after dropping the returned values."
         )]
         if self.raw == Some(true) {
             // Need to hold the record list in scope until the close is done.
@@ -989,6 +989,13 @@ impl Client {
             unsafe { ech::SSL_EnableTls13GreaseEch(self.agent.fd, PRBool::from(true)) }
         } else {
             unsafe {
+                // Allow writing of different transport parameters to the inner and outer
+                // ClientHello. Avoid setting this otherwise, as the transport
+                // parameter extension handler filters out essential values from the
+                // outer ClientHello. Under normal operation, NSS reports to
+                // extension writers that an ordinary, non-ECH ClientHello is an
+                // outer ClientHello, resulting in unwanted filtering.
+                SSL_CallExtensionWriterOnEchInner(self.fd, PRBool::from(true))?;
                 ech::SSL_SetClientEchConfigs(
                     self.agent.fd,
                     config.as_ptr(),
