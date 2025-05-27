@@ -735,6 +735,20 @@ impl TransportParametersHandler {
     }
 
     /// Filter to retain only those transport parameters that are necessary for an outer `ClientHello`.
+    ///
+    /// We don't need the connection for long if we are forced into an ECH fallback,
+    /// we only need it around long enough to get a fresh ECH config; and no data is exchanged.
+    ///
+    /// However, we do need to ensure that the connection attempt works.
+    /// That motivates the inclusion of version negotiation and connection ID parameters,
+    /// which would break the connection if they were dropped.
+    ///
+    /// Also, we include any parameters that might affect the configuration of the connection
+    /// in ways that might adversely affect operation.
+    /// These probably aren't all necessary: ACK-related parameters only affect RTT estimation,
+    /// and UDP datagram sizes will look like a path MTU restriction.
+    /// There is no privacy harm there as long as the values are fixed (like maximum ACK delay)
+    /// or not set in our code (ACK delay exponent and UDP payload size).
     const fn filter_ch_outer(tp: TransportParameterId, _v: Option<&TransportParameter>) -> bool {
         matches!(
             tp,
@@ -745,6 +759,7 @@ impl TransportParametersHandler {
                 | TransportParameterId::VersionInformation
                 | TransportParameterId::AckDelayExponent
                 | TransportParameterId::MaxAckDelay
+                | TransportParameterId::MaxUdpPayloadSize
         )
     }
 }
