@@ -41,12 +41,12 @@ impl NeqoQlog {
     /// # Errors
     ///
     /// Will return `qlog::Error` if it cannot write to the new file.
-    pub fn enabled_with_file(
+    pub fn enabled_with_file<D: Display>(
         mut qlog_path: PathBuf,
         role: Role,
         title: Option<String>,
         description: Option<String>,
-        file_prefix: impl Display,
+        file_prefix: D,
     ) -> Result<Self, qlog::Error> {
         qlog_path.push(format!("{file_prefix}.sqlog"));
 
