@@ -60,7 +60,7 @@ pub trait ExtensionHandler {
     /// to both the `ClientHello` and `EncryptedExtensions` message.
     ///
     /// The value of `ch_outer` is only relevant when ECH is enabled;
-    /// it will `false` when ECH is disabled or for the inner `ClientHello`.
+    /// it will be `false` when ECH is disabled or for the inner `ClientHello`.
     /// For ECH, where `msg == TLS_HS_CLIENT_HELLO`,
     /// you can write different values to the inner and outer extensions;
     /// if they are different, NSS won't compress them.
