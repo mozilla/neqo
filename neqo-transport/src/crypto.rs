@@ -207,7 +207,7 @@ impl Crypto {
                 Err(self
                     .tls
                     .alert()
-                    .map_or(Error::CryptoError(e), |a| Error::CryptoAlert(*a)))
+                    .map_or(Error::CryptoError(e), Error::CryptoAlert))
             }
         }
     }
