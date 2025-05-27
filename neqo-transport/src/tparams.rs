@@ -745,10 +745,14 @@ impl TransportParametersHandler {
     ///
     /// Also, we include any parameters that might affect the configuration of the connection
     /// in ways that might adversely affect operation.
-    /// These probably aren't all necessary: ACK-related parameters only affect RTT estimation,
-    /// and UDP datagram sizes will look like a path MTU restriction.
-    /// There is no privacy harm there as long as the values are fixed (like maximum ACK delay)
-    /// or not set in our code (ACK delay exponent and UDP payload size).
+    /// That saves us from having to swap in a different configuration (i.e., `ConnectionParameters`)
+    /// if the outer `ClientHello` is used.
+    /// These probably aren't strictly necessary, even then:
+    /// * ACK-related parameters only affect RTT estimation, which won't matter much; and
+    /// * UDP datagram sizes will look like a path MTU restriction.
+    ///
+    /// There is no privacy harm to including them as the values are fixed (maximum ACK delay)
+    /// or not set (ACK delay exponent and UDP payload size) in our code.
     const fn filter_ch_outer(tp: TransportParameterId, _v: Option<&TransportParameter>) -> bool {
         matches!(
             tp,
