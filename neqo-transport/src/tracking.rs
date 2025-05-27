@@ -15,6 +15,7 @@ use std::{
 
 use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
+use log::{log_enabled, Level};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn, MAX_VARINT};
 use neqo_crypto::Epoch;
 use strum::{Display, EnumIter};
@@ -555,13 +556,13 @@ impl AckTracker {
 
     /// Determine the earliest time that an ACK might be needed.
     pub fn ack_time(&self, now: Instant) -> Option<Instant> {
-        #[cfg(debug_assertions)]
-        for (space, recvd) in &self.spaces {
-            if let Some(recvd) = recvd {
-                qtrace!("ack_time for {space} = {:?}", recvd.ack_time());
+        if log_enabled!(Level::Trace) {
+            for (space, recvd) in &self.spaces {
+                if let Some(recvd) = recvd {
+                    qtrace!("ack_time for {space} = {:?}", recvd.ack_time());
+                }
             }
         }
-
         if self.spaces[PacketNumberSpace::Initial].is_none()
             && self.spaces[PacketNumberSpace::Handshake].is_none()
         {

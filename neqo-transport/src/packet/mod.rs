@@ -91,15 +91,16 @@ impl PacketType {
     }
 }
 
-#[expect(clippy::fallible_impl_from, reason = "TODO: Use strum.")]
-impl From<PacketType> for Epoch {
-    fn from(v: PacketType) -> Self {
+impl TryFrom<PacketType> for Epoch {
+    type Error = Error;
+
+    fn try_from(v: PacketType) -> Res<Self> {
         match v {
-            PacketType::Initial => Self::Initial,
-            PacketType::ZeroRtt => Self::ZeroRtt,
-            PacketType::Handshake => Self::Handshake,
-            PacketType::Short => Self::ApplicationData,
-            _ => panic!("shouldn't be here"),
+            PacketType::Initial => Ok(Self::Initial),
+            PacketType::ZeroRtt => Ok(Self::ZeroRtt),
+            PacketType::Handshake => Ok(Self::Handshake),
+            PacketType::Short => Ok(Self::ApplicationData),
+            _ => Err(Error::InvalidPacket),
         }
     }
 }
@@ -167,7 +168,7 @@ impl PacketBuilder {
     ///
     /// If, after calling this method, `remaining()` returns 0, then call `abort()` to get
     /// the encoder back.
-    pub fn short(mut encoder: Encoder, key_phase: bool, dcid: Option<impl AsRef<[u8]>>) -> Self {
+    pub fn short<A: AsRef<[u8]>>(mut encoder: Encoder, key_phase: bool, dcid: Option<A>) -> Self {
         let mut limit = Self::infer_limit(&encoder);
         let header_start = encoder.len();
         // Check that there is enough space for the header.
@@ -202,12 +203,12 @@ impl PacketBuilder {
     /// even if the token is empty.
     ///
     /// See `short()` for more on how to handle this in cases where there is no space.
-    pub fn long(
+    pub fn long<A: AsRef<[u8]>, A1: AsRef<[u8]>>(
         mut encoder: Encoder,
         pt: PacketType,
         version: Version,
-        mut dcid: Option<impl AsRef<[u8]>>,
-        mut scid: Option<impl AsRef<[u8]>>,
+        mut dcid: Option<A>,
+        mut scid: Option<A1>,
     ) -> Self {
         let mut limit = Self::infer_limit(&encoder);
         let header_start = encoder.len();
@@ -425,13 +426,11 @@ impl PacketBuilder {
             self.write_len(crypto.expansion());
         }
 
-        let hdr = &self.encoder.as_ref()[self.header.clone()];
-        let body = &self.encoder.as_ref()[self.header.end..];
         qtrace!(
             "Packet build pn={} hdr={} body={}",
             self.pn,
-            hex(hdr),
-            hex(body)
+            hex(&self.encoder.as_ref()[self.header.clone()]),
+            hex(&self.encoder.as_ref()[self.header.end..])
         );
 
         // Add space for crypto expansion.
@@ -771,11 +770,6 @@ impl<'a> PublicPacket<'a> {
             .as_cid_ref()
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     #[must_use]
     pub fn token(&self) -> &[u8] {
         &self.token
@@ -881,7 +875,7 @@ impl<'a> PublicPacket<'a> {
         crypto: &mut CryptoStates,
         release_at: Instant,
     ) -> Res<DecryptedPacket> {
-        let epoch: Epoch = self.packet_type.into();
+        let epoch: Epoch = self.packet_type.try_into()?;
         // When we don't have a version, the crypto code doesn't need a version
         // for lookup, so use the default, but fix it up if decryption succeeds.
         let version = self.version().unwrap_or_default();
