@@ -115,9 +115,9 @@ impl Version {
         ]
     }
 
-    pub fn compatible<'a>(
+    pub fn compatible<'a, I: IntoIterator<Item = &'a Self>>(
         self,
-        all: impl IntoIterator<Item = &'a Self>,
+        all: I,
     ) -> impl Iterator<Item = &'a Self> {
         all.into_iter().filter(move |&v| self.is_compatible(*v))
     }

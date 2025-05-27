@@ -205,12 +205,12 @@ impl Http3ServerHandler {
         )
     }
 
-    pub fn webtransport_send_datagram(
+    pub fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         conn: &mut Connection,
         session_id: StreamId,
         buf: &[u8],
-        id: impl Into<DatagramTracking>,
+        id: I,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler

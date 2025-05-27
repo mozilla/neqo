@@ -144,7 +144,7 @@ pub struct Simulator {
 }
 
 impl Simulator {
-    pub fn new(name: impl AsRef<str>, nodes: impl IntoIterator<Item = Box<dyn Node>>) -> Self {
+    pub fn new<A: AsRef<str>, I: IntoIterator<Item = Box<dyn Node>>>(name: A, nodes: I) -> Self {
         let name = String::from(name.as_ref());
         // The first node is marked as Active, the rest are idle.
         let mut it = nodes.into_iter();
@@ -185,7 +185,7 @@ impl Simulator {
     /// Seed from a hex string.
     /// # Panics
     /// When the provided string is not 32 bytes of hex (64 characters).
-    pub fn seed_str(&mut self, seed: impl AsRef<str>) {
+    pub fn seed_str<A: AsRef<str>>(&mut self, seed: A) {
         let seed = <[u8; 32]>::try_from(Encoder::from_hex(seed).as_ref()).unwrap();
         self.rng = Rc::new(RefCell::new(Random::new(&seed)));
     }
