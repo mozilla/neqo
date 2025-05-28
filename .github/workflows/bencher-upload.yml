@@ -1,0 +1,69 @@
+name: Bencher Upload
+
+on:
+  workflow_run:
+    workflows: ["Bench"]
+    types:
+      - completed # zizmor: ignore[dangerous-triggers]
+
+permissions:
+  contents: read
+
+jobs:
+  track_fork_pr_branch:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      BENCHMARK_RESULTS: results
+      PR_EVENT: event.json
+      BENCHER_PROJECT: ${{ github.repository}}
+      BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+      BENCHER_BRANCH: ${{ github.ref_name}}
+    steps:
+      - name: Download benchmark results
+        uses: dawidd6/action-download-artifact@07ab29fd4a977ae4d2b275087cf67563dfdf0295 # v9
+        with:
+          name: ${{ env.BENCHMARK_RESULTS }}
+          run_id: ${{ github.event.workflow_run.id }}
+      - name: Download PR event
+        uses: dawidd6/action-download-artifact@07ab29fd4a977ae4d2b275087cf67563dfdf0295 # v9
+        with:
+          name: ${{ env.PR_EVENT }}
+          run_id: ${{ github.event.workflow_run.id }}
+      - name: Export PR event data
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            let fs = require('fs');
+            let prEvent = JSON.parse(fs.readFileSync(process.env.PR_EVENT, {encoding: 'utf8'}));
+            core.exportVariable("PR_HEAD", prEvent.pull_request.head.ref);
+            core.exportVariable("PR_BASE", prEvent.pull_request.base.ref);
+            core.exportVariable("PR_BASE_SHA", prEvent.pull_request.base.sha);
+            core.exportVariable("PR_NUMBER", prEvent.number);
+      - uses: bencherdev/bencher@54d78b95feda17a1b2761d3332c488d37261ca4e #v0.5.1
+      - name: Track benchmarks with Bencher
+        env:
+          BENCHER_TESTBED: ${{ runner.name }}
+        run: |
+          bencher run \
+            --start-point "$PR_BASE" \
+            --start-point-hash "$PR_BASE_SHA" \
+            --start-point-clone-thresholds \
+            --start-point-reset \
+            --err \
+            --adapter rust_criterion \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            --ci-number "$PR_NUMBER" \
+            --file "neqo/target/criterion"
+          for file in hyperfine/*.json; do
+            bencher run \
+              --start-point "$PR_BASE" \
+              --start-point-hash "$PR_BASE_SHA" \
+              --start-point-clone-thresholds \
+              --start-point-reset \
+              --err \
+              --adapter shell_hyperfine \
+              --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+              --ci-number "$PR_NUMBER" \
+              --file "$file"
+          done
