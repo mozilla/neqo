@@ -99,10 +99,8 @@ runs:
 
     - name: Checkout NSPR
       if: ${{ !steps.nss.outputs.use_system_nss }}
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      with:
-        repository: nss-dev/nspr
-        path: nspr
+      shell: bash
+      run: hg clone https://hg.mozilla.org/projects/nspr
 
     - name: Get head revisions
       id: heads
@@ -110,7 +108,7 @@ runs:
       shell: bash
       run: |
         NSS_HEAD=$(git -C nss rev-parse HEAD)
-        NSPR_HEAD=$(git -C nspr rev-parse HEAD)
+        NSPR_HEAD=$(cd nspr && hg tip | head -n1 | tr -d ' ' | cut -d: -f2-)
         echo "nss_head=$NSS_HEAD" >> "$GITHUB_OUTPUT"
         echo "nspr_head=$NSPR_HEAD" >> "$GITHUB_OUTPUT"
 

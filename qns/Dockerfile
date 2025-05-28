@@ -23,7 +23,7 @@ ENV NSS_DIR=/nss \
     LD_LIBRARY_PATH=/dist/Release/lib
 
 RUN set -eux; \
-    git clone --depth=1 https://github.com/nss-dev/nspr "$NSPR_DIR"; \
+    hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"; \
     git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
 
 RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -o
