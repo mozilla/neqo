@@ -28,7 +28,7 @@ jobs:
       run:
         shell: bash
     env:
-      BENCHER_PROJECT: ${{ github.repository}}
+      BENCHER_PROJECT: neqo
       BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
       BENCHER_BRANCH: ${{ github.ref_name}}
 
