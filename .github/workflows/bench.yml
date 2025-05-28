@@ -181,7 +181,7 @@ jobs:
             NAME=$(basename "$BENCH" | cut -d- -f1)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --bench --baseline main
+              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --baseline main
           done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
