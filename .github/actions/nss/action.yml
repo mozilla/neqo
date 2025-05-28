@@ -159,7 +159,7 @@ runs:
           echo C:/msys64/usr/bin
           echo C:/msys64/mingw64/bin
         } >> "$GITHUB_PATH"
-        /c/msys64/usr/bin/pacman -S --noconfirm python3-pip nsinstall
+        /c/msys64/usr/bin/pacman -S --noconfirm python3-pip nsinstall mercurial
         echo "gyp-next>=0.18.1" > req.txt
         python3 -m pip install -r req.txt
 
