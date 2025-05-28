@@ -98,6 +98,7 @@ runs:
         path: nss
 
     - name: Retrieve NSPR
+      id: nspr
       if: ${{ !steps.nss.outputs.use_system_nss }}
       shell: bash
       env:
@@ -105,17 +106,15 @@ runs:
       run: |
         curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz | \n
           tar xz --strip-components=1
-        echo "NSPR_VERSION=$NSPR_VERSION" >> "$GITHUB_ENV"
+        echo "nspr_version=$NSPR_VERSION" >> "$GITHUB_OUTPUT"
 
-    - name: Store NSS and NSPR versions
-      id: versions
+    - name: Store NSS version
+      id: nss
       if: ${{ !steps.nss.outputs.use_system_nss }}
       shell: bash
       run: |
         NSS_HEAD=$(git -C nss rev-parse HEAD)
-        NSPR_HEAD=$(git -C nspr rev-parse HEAD)
         echo "nss_version=$NSS_HEAD" >> "$GITHUB_OUTPUT"
-        echo "nspr_version=$NSPR_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Cache NSS
       id: cache
@@ -123,7 +122,7 @@ runs:
       uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: dist
-        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.versions.outputs.nss_version }}-${{ steps.versions.outputs.nspr_version }}
+        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.nss.outputs.nss_version }}-${{ steps.nspr.outputs.nspr_version }}
 
     - name: Check if build is needed
       id: check_build
