@@ -101,8 +101,7 @@ runs:
     - name: Retrieve NSPR
       if: ${{ !steps.nss.outputs.use_system_nss }}
       shell: bash
-      run: curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz | \
-          tar xz --strip-components=1
+      run: curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz | tar xz --strip-components=1
 
     - name: Store NSS and NSPR versions
       id: versions
