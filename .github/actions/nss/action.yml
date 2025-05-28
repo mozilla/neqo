@@ -32,7 +32,7 @@ runs:
         brew install nss
 
     - name: Check system NSS version
-      id: nss
+      id: system_nss
       env:
         MIN_VERSION: ${{ inputs.minimum-version }}
       shell: bash
@@ -60,7 +60,7 @@ runs:
           exit 0
         fi
         echo "System NSS is suitable: $NSS_VERSION"
-        echo "use_system_nss=1" >> "$GITHUB_OUTPUT"
+        echo "suitable=1" >> "$GITHUB_OUTPUT"
 
     - name: Use sccache
       # Apparently the action can't be installed twice in the same workflow, so check if
@@ -69,11 +69,11 @@ runs:
       #
       # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
       # is too small for this to be effective there.
-      if: ${{ env.SCCACHE_ENABLED != '1' && !steps.nss.outputs.use_system_nss && runner.environment != 'github-hosted' }}
+      if: ${{ env.SCCACHE_ENABLED != '1' && !steps.system_nss.outputs.suitable && runner.environment != 'github-hosted' }}
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
     - name: Enable sscache
-      if: ${{ !steps.nss.outputs.use_system_nss && runner.environment != 'github-hosted' }}
+      if: ${{ !steps.system_nss.outputs.suitable && runner.environment != 'github-hosted' }}
       env:
         RUNNER_ENVIRONMENT: ${{ runner.environment }}
       shell: bash
@@ -91,7 +91,7 @@ runs:
         fi
 
     - name: Checkout NSS
-      if: ${{ !steps.nss.outputs.use_system_nss }}
+      if: ${{ !steps.system_nss.outputs.suitable }}
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
         repository: nss-dev/nss
@@ -99,7 +99,7 @@ runs:
 
     - name: Retrieve NSPR
       id: nspr
-      if: ${{ !steps.nss.outputs.use_system_nss }}
+      if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
       env:
         NSPR_VERSION: 4.36 # This changes so rarely that we can hardcode it.
@@ -110,7 +110,7 @@ runs:
 
     - name: Store NSS version
       id: nss
-      if: ${{ !steps.nss.outputs.use_system_nss }}
+      if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
       run: |
         NSS_HEAD=$(git -C nss rev-parse HEAD)
@@ -118,7 +118,7 @@ runs:
 
     - name: Cache NSS
       id: cache
-      if: ${{ !steps.nss.outputs.use_system_nss && runner.environment == 'github-hosted' }}
+      if: ${{ !steps.system_nss.outputs.suitable && runner.environment == 'github-hosted' }}
       uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: dist
@@ -126,7 +126,7 @@ runs:
 
     - name: Check if build is needed
       id: check_build
-      if: ${{ !steps.nss.outputs.use_system_nss }}
+      if: ${{ !steps.system_nss.outputs.suitable }}
       env:
         CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
         RUNNER_ENVIRONMENT: ${{ runner.environment }}
@@ -187,7 +187,7 @@ runs:
 
     - name: Set up environment
       shell: bash
-      if: ${{ !steps.nss.outputs.use_system_nss }}
+      if: ${{ !steps.system_nss.outputs.suitable }}
       env:
         NSS_TARGET: ${{ inputs.type }}
         NSS_TYPE: ${{ inputs.type }}
