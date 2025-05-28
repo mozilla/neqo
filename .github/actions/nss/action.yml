@@ -38,6 +38,7 @@ runs:
       shell: bash
       if: inputs.target == ''
       run: |
+        echo "runner_os=$(uname -srm)" >> "$GITHUB_OUTPUT"
         if ! command -v pkg-config &> /dev/null; then
           echo "pkg-config: not found"
           exit 0
@@ -61,8 +62,6 @@ runs:
         fi
         echo "System NSS is suitable: $NSS_VERSION"
         echo "suitable=1" >> "$GITHUB_OUTPUT"
-        echo "runner_os=$(uname -srm)" >> "$GITHUB_OUTPUT"
-
 
     - name: Use sccache
       # Apparently the action can't be installed twice in the same workflow, so check if
@@ -124,7 +123,7 @@ runs:
       uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: dist
-        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ steps.system_nss.outputs.runner_os }}-${{ inputs.type }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
+        key: nss-${{ inputs.target && inputs.target || steps.system_nss.outputs.runner_os }}-${{ inputs.type }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
 
     - name: Check if build is needed
       id: check_build
