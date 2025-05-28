@@ -189,12 +189,14 @@ jobs:
           sudo ip link set dev lo mtu "$MTU"
           mkdir -p binaries
           cd neqo-main
+          rm -rf target/criterion
           for BENCH in $BENCHES; do
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               $BENCH -- --bench --save-baseline main
           done
           cd ../neqo
+          rm -rf target/criterion
           cp -r ../neqo-main/target/criterion target/
           for BENCH in $BENCHES; do
             cp "$BENCH" ../binaries/
