@@ -20,15 +20,13 @@ ENV NSS_DIR=/nss \
     NSS_TARGET=Release \
     NSS_PREBUILT=1 \
     NSPR_DIR=/nspr \
-    LD_LIBRARY_PATH=/dist/Release/lib
+    LD_LIBRARY_PATH=/dist/Release/lib \
+    NSPR_VERSION=4.36
 
-WORKDIR /
-ADD ./neqo-crypto/min_version.txt min_version.txt
 RUN set -eux; \
-    MIN_VERSION=$(cat min_version.txt); \
-    MIN_VERSION_UNDERSCORE=$(echo "$MIN_VERSION" | sed -e 's/\./_/g'); \
-    NSPR_VERSION="4.36"; \
-    curl -L "https://ftp.mozilla.org/pub/security/nss/releases/NSS_${MIN_VERSION_UNDERSCORE}_RTM/src/nss-$MIN_VERSION-with-nspr-$NSPR_VERSION.tar.gz" | tar xz --strip-components=1;
+    mkdir -p "$NSPR_DIR"; \
+    curl -L "https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz" | tar xz --strip-components=2 -C "$NSPR_DIR"; \
+    git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
 RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -o
 
 COPY --from=planner /app/recipe.json recipe.json

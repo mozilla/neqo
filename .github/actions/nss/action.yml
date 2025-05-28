@@ -20,6 +20,7 @@ runs:
       if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && inputs.target == '' }}
       env:
         DEBIAN_FRONTEND: noninteractive
+        NSPR_VERSION: 4.36 # This changes so rarely that we can hardcode it.
       run: |
         [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
         sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config
@@ -90,16 +91,27 @@ runs:
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
 
-    - name: Retrieve NSS and NSPR
-      id: nss
+    - name: Checkout NSS
       if: ${{ !steps.nss.outputs.use_system_nss }}
-      env:
-        MIN_VERSION: ${{ inputs.minimum-version }}
-        NSPR_VERSION: 4.36 # This changes so rarely that we can hardcode it.
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        repository: nss-dev/nss
+        path: nss
+
+    - name: Retrieve NSPR
+      if: ${{ !steps.nss.outputs.use_system_nss }}
+      shell: bash
+      run: curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz | \
+          tar xz --strip-components=1
+
+    - name: Store NSS and NSPR versions
+      id: versions
+      if: ${{ !steps.nss.outputs.use_system_nss }}
       shell: bash
       run: |
-        curl -L https://ftp.mozilla.org/pub/security/nss/releases/NSS_${MIN_VERSION//./_}/src/nss-$MIN_VERSION-with-nspr-$NSPR_VERSION.tar.gz | tar xz --strip-components=1
-        echo "nss_version=$MIN_VERSION" >> "$GITHUB_OUTPUT"
+        NSS_HEAD=$(git -C nss rev-parse HEAD)
+        NSPR_HEAD=$(git -C nspr rev-parse HEAD)
+        echo "nss_version=$NSS_HEAD" >> "$GITHUB_OUTPUT"
         echo "nspr_version=$NSPR_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Cache NSS
@@ -108,7 +120,7 @@ runs:
       uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: dist
-        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.nss.outputs.nss_version }}-${{ steps.nss.outputs.nspr_version }}
+        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.versions.outputs.nss_version }}-${{ steps.versions.outputs.nspr_version }}
 
     - name: Check if build is needed
       id: check_build
