@@ -20,7 +20,6 @@ runs:
       if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && inputs.target == '' }}
       env:
         DEBIAN_FRONTEND: noninteractive
-        NSPR_VERSION: 4.36 # This changes so rarely that we can hardcode it.
       run: |
         [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
         sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config
@@ -101,7 +100,12 @@ runs:
     - name: Retrieve NSPR
       if: ${{ !steps.nss.outputs.use_system_nss }}
       shell: bash
-      run: curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz | tar xz --strip-components=1
+      env:
+        NSPR_VERSION: 4.36 # This changes so rarely that we can hardcode it.
+      run: |
+        curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz | \n
+          tar xz --strip-components=1
+        echo "NSPR_VERSION=$NSPR_VERSION" >> "$GITHUB_ENV"
 
     - name: Store NSS and NSPR versions
       id: versions
