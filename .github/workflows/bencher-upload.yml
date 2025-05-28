@@ -40,7 +40,7 @@ jobs:
             core.exportVariable("PR_BASE", prEvent.pull_request.base.ref);
             core.exportVariable("PR_BASE_SHA", prEvent.pull_request.base.sha);
             core.exportVariable("PR_NUMBER", prEvent.number);
-      - uses: bencherdev/bencher@v0.5.1 # bencherdev/bencher@54d78b95feda17a1b2761d3332c488d37261ca4e #v0.5.1
+      - uses: bencherdev/bencher@v0.5.1 # zizmor: ignore[unpinned-uses] bencherdev/bencher@54d78b95feda17a1b2761d3332c488d37261ca4e #v0.5.1
       - name: Track benchmarks with Bencher
         env:
           BENCHER_TESTBED: ${{ runner.name }}

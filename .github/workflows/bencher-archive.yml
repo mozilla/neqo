@@ -17,5 +17,5 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - uses: bencherdev/bencher@v0.5.1 # bencherdev/bencher@54d78b95feda17a1b2761d3332c488d37261ca4e #v0.5.1
+      - uses: bencherdev/bencher@v0.5.1 # zizmor: ignore[unpinned-uses] bencherdev/bencher@54d78b95feda17a1b2761d3332c488d37261ca4e #v0.5.1
       - run: bencher archive
