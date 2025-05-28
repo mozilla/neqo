@@ -104,9 +104,9 @@ runs:
       env:
         NSPR_VERSION: 4.36 # This changes so rarely that we can hardcode it.
       run: |
-        curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz | \n
+        curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz |
           tar xz --strip-components=1
-        echo "nspr_version=$NSPR_VERSION" >> "$GITHUB_OUTPUT"
+        echo "version=$NSPR_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Store NSS version
       id: nss
@@ -114,7 +114,7 @@ runs:
       shell: bash
       run: |
         NSS_HEAD=$(git -C nss rev-parse HEAD)
-        echo "nss_version=$NSS_HEAD" >> "$GITHUB_OUTPUT"
+        echo "version=$NSS_HEAD" >> "$GITHUB_OUTPUT"
 
     - name: Cache NSS
       id: cache
@@ -122,7 +122,7 @@ runs:
       uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: dist
-        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.nss.outputs.nss_version }}-${{ steps.nspr.outputs.nspr_version }}
+        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
 
     - name: Check if build is needed
       id: check_build
