@@ -90,6 +90,11 @@ runs:
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
 
+    - name: Install Mercurial (Windows)
+      if: ${{ runner.os == 'Windows' && !steps.nss.outputs.use_system_nss }}
+      shell: bash
+      run: /c/msys64/usr/bin/pacman -S --noconfirm mercurial
+
     - name: Checkout NSS
       if: ${{ !steps.nss.outputs.use_system_nss }}
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -159,7 +164,7 @@ runs:
           echo C:/msys64/usr/bin
           echo C:/msys64/mingw64/bin
         } >> "$GITHUB_PATH"
-        /c/msys64/usr/bin/pacman -S --noconfirm python3-pip nsinstall mercurial
+        /c/msys64/usr/bin/pacman -S --noconfirm python3-pip nsinstall
         echo "gyp-next>=0.18.1" > req.txt
         python3 -m pip install -r req.txt
 
