@@ -113,7 +113,7 @@ fn spawn_server() -> (tokio::sync::oneshot::Sender<()>, SocketAddr) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().warm_up_time(Duration::from_secs(5)).measurement_time(Duration::from_secs(60));
+    config = Criterion::default(); //.warm_up_time(Duration::from_secs(5)).measurement_time(Duration::from_secs(60));
     targets = transfer
 }
 criterion_main!(benches);
