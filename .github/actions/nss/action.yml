@@ -90,32 +90,17 @@ runs:
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
 
-    - name: Install Mercurial (Windows)
-      if: ${{ runner.os == 'Windows' && !steps.nss.outputs.use_system_nss }}
-      shell: bash
-      run: /c/msys64/usr/bin/pacman -S --noconfirm mercurial
-
-    - name: Checkout NSS
+    - name: Retrieve NSS and NSPR
+      id: nss
       if: ${{ !steps.nss.outputs.use_system_nss }}
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      with:
-        repository: nss-dev/nss
-        path: nss
-
-    - name: Checkout NSPR
-      if: ${{ !steps.nss.outputs.use_system_nss }}
-      shell: bash
-      run: hg clone https://hg.mozilla.org/projects/nspr
-
-    - name: Get head revisions
-      id: heads
-      if: ${{ !steps.nss.outputs.use_system_nss }}
+      env:
+        MIN_VERSION: ${{ inputs.minimum-version }}
+        NSPR_VERSION: 4.36 # This changes so rarely that we can hardcode it.
       shell: bash
       run: |
-        NSS_HEAD=$(git -C nss rev-parse HEAD)
-        NSPR_HEAD=$(cd nspr && hg tip | head -n1 | tr -d ' ' | cut -d: -f2-)
-        echo "nss_head=$NSS_HEAD" >> "$GITHUB_OUTPUT"
-        echo "nspr_head=$NSPR_HEAD" >> "$GITHUB_OUTPUT"
+        curl -L https://ftp.mozilla.org/pub/security/nss/releases/NSS_${MIN_VERSION//./_}/src/nss-$MIN_VERSION-with-nspr-$NSPR_VERSION.tar.gz | tar xz --strip-components=1
+        echo "nss_version=$MIN_VERSION" >> "$GITHUB_OUTPUT"
+        echo "nspr_version=$NSPR_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Cache NSS
       id: cache
@@ -123,7 +108,7 @@ runs:
       uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: dist
-        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.heads.outputs.nss_head }}-${{ steps.heads.outputs.nspr_head }}
+        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.nss.outputs.nss_version }}-${{ steps.nss.outputs.nspr_version }}
 
     - name: Check if build is needed
       id: check_build
