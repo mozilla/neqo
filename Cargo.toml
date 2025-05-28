@@ -28,7 +28,7 @@ license = "MIT OR Apache-2.0"
 # https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
 # In addition, currently Mozilla CI uses a Rust fork before the official Rust 1.82.0 release, thus stay on 1.81.0 for now.
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1968057#c1
-rust-version = "1.80.0"
+rust-version = "1.81.0"
 
 [workspace.dependencies]
 enum-map = { version = "2.7", default-features = false }
