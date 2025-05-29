@@ -25,9 +25,7 @@ impl QpackData {
     }
 
     pub fn encode_varint(&mut self, i: u64) {
-        let mut enc = Encoder::default();
-        enc.encode_varint(i);
-        self.buf.append(&mut enc.into());
+        Encoder::new_borrowed_vec(&mut self.buf).encode_varint(i);
     }
 
     pub(crate) fn encode_prefixed_encoded_int(&mut self, prefix: Prefix, mut val: u64) -> usize {
