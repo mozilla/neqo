@@ -552,8 +552,11 @@ fn connection_succeeds_when_server_and_client_support_cert_compr_copy() {
         fn encode(data: &[u8]) -> Vec<u8> {
             data.to_vec()
         }
-        fn decode(data: &[u8]) -> Vec<u8> {
-            data.to_vec()
+
+        fn decode(input: &[u8], output: &mut [u8]) -> usize {
+            let len = std::cmp::min(input.len(), output.len());
+            output[..len].copy_from_slice(&input[..len]);
+            len
         }
     }
 
@@ -580,8 +583,10 @@ impl CertificateCompression for CopyCompressionNoEncoder {
     const ID: u16 = 0x4;
     const NAME: &CStr = c"copy";
 
-    fn decode(data: &[u8]) -> Vec<u8> {
-        data.to_vec()
+    fn decode(input: &[u8], output: &mut [u8]) -> usize {
+        let len = std::cmp::min(input.len(), output.len());
+        output[..len].copy_from_slice(&input[..len]);
+        len
     }
 }
 

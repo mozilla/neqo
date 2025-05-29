@@ -20,7 +20,7 @@ use std::{
     ops::{Deref, DerefMut},
     os::raw::{c_uint, c_void},
     pin::Pin,
-    ptr::{null, null_mut},
+    ptr::{null, null_mut, NonNull},
     rc::Rc,
     time::Instant,
 };
@@ -91,7 +91,7 @@ pub trait CertificateCompression {
 
     /// Certificate Compression decoding function
     #[must_use]
-    fn decode(data: &[u8]) -> Vec<u8>;
+    fn decode(input: &[u8], output: &mut [u8]) -> usize;
 }
 
 /// The trait is responsible for calling `CertificateCompression` encoding and decoding
@@ -104,22 +104,22 @@ unsafe impl<T: CertificateCompression> UnsafeCertCompression for T {
         used_len: *mut usize,
     ) -> ssl::SECStatus {
         unsafe {
-            match std::ptr::NonNull::new(input.cast_mut()) {
+            match NonNull::new(input.cast_mut()) {
                 None => ssl::SECFailure,
                 Some(input) => {
                     if input.as_ref().data.is_null() || input.as_ref().len == 0 {
                         return ssl::SECFailure;
                     }
 
-                    let bytes_to_decode_slice =
-                        null_safe_slice(input.as_ref().data, input.as_ref().len);
-                    let decoded_bytes = T::decode(bytes_to_decode_slice);
-                    if decoded_bytes.len() > output_len {
+                    let input_slice = null_safe_slice(input.as_ref().data, input.as_ref().len);
+                    let output_slice: &mut [u8] =
+                        core::slice::from_raw_parts_mut(output, output_len);
+                    let decoded_len = T::decode(input_slice, output_slice);
+                    if decoded_len > output_len {
                         return ssl::SECFailure;
                     }
 
-                    std::ptr::copy_nonoverlapping(decoded_bytes.as_ptr(), output, output_len);
-                    *used_len = decoded_bytes.len();
+                    *used_len = decoded_len;
                     ssl::SECSuccess
                 }
             }
@@ -131,7 +131,7 @@ unsafe impl<T: CertificateCompression> UnsafeCertCompression for T {
         output: *mut ssl::SECItem,
     ) -> ssl::SECStatus {
         unsafe {
-            match std::ptr::NonNull::new(input.cast_mut()) {
+            match NonNull::new(input.cast_mut()) {
                 None => ssl::SECFailure,
                 Some(input) => {
                     if input.as_ref().data.is_null() || input.as_ref().len == 0 {
