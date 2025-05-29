@@ -4,7 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::{self, Debug, Formatter, Write};
+use std::{
+    fmt::{self, Debug, Formatter, Write},
+    io::Cursor,
+};
+
+use smallvec::SmallVec;
 
 use crate::hex_with_len;
 
@@ -197,110 +202,35 @@ impl<'b> PartialEq<Decoder<'b>> for Decoder<'_> {
 }
 
 /// Encoder is good for building data structures.
-#[derive(Clone, Default, PartialEq, Eq)]
-pub struct Encoder {
-    buf: Vec<u8>,
+#[derive(Clone, PartialEq, Eq)]
+pub struct Encoder<B = Vec<u8>> {
+    buf: B,
 }
 
-impl Encoder {
-    /// Static helper function for previewing the results of encoding without doing it.
-    ///
-    /// # Panics
-    ///
-    /// When `v` is too large.
-    #[must_use]
-    pub const fn varint_len(v: u64) -> usize {
-        match () {
-            () if v < (1 << 6) => 1,
-            () if v < (1 << 14) => 2,
-            () if v < (1 << 30) => 4,
-            () if v < (1 << 62) => 8,
-            () => panic!("Varint value too large"),
-        }
+impl Default for Encoder {
+    fn default() -> Self {
+        Self { buf: Vec::new() }
     }
+}
 
-    /// Static helper to determine how long a varint-prefixed array encodes to.
-    ///
-    /// # Panics
-    ///
-    /// When `len` doesn't fit in a `u64`.
-    #[must_use]
-    pub fn vvec_len(len: usize) -> usize {
-        Self::varint_len(u64::try_from(len).expect("usize should fit into u64")) + len
-    }
-
-    /// Default construction of an empty buffer.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Construction of a buffer with a predetermined capacity.
-    #[must_use]
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self {
-            buf: Vec::with_capacity(capacity),
-        }
-    }
-
-    /// Get the capacity of the underlying buffer: the number of bytes that can be
-    /// written without causing an allocation to occur.
-    #[must_use]
-    pub fn capacity(&self) -> usize {
-        self.buf.capacity()
-    }
-
-    /// Get the length of the underlying buffer: the number of bytes that have
-    /// been written to the buffer.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.buf.len()
-    }
-
-    /// Returns true if the encoder buffer contains no elements.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.buf.is_empty()
-    }
-
-    /// Create a view of the current contents of the buffer.
-    /// Note: for a view of a slice, use `Decoder::new(&enc[s..e])`
-    #[must_use]
-    pub fn as_decoder(&self) -> Decoder {
-        Decoder::new(self.as_ref())
-    }
-
-    /// Don't use this except in testing.
-    ///
-    /// # Panics
-    ///
-    /// When `s` contains non-hex values or an odd number of values.
-    #[cfg(any(test, feature = "test-fixture"))]
-    #[must_use]
-    pub fn from_hex<A: AsRef<str>>(s: A) -> Self {
-        let s = s.as_ref();
-        assert_eq!(s.len() % 2, 0, "Needs to be even length");
-
-        let cap = s.len() / 2;
-        let mut enc = Self::with_capacity(cap);
-
-        for i in 0..cap {
-            #[expect(clippy::unwrap_used, reason = "Only used in tests.")]
-            let v = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).unwrap();
-            enc.encode_byte(v);
-        }
-        enc
-    }
-
+impl<B: std::io::Write> Encoder<B> {
     /// Generic encode routine for arbitrary data.
+    ///
+    /// # Panics
+    ///
+    /// When writing to the underlying buffer fails.
     pub fn encode(&mut self, data: &[u8]) -> &mut Self {
-        self.buf.extend_from_slice(data.as_ref());
+        self.buf.write_all(data).expect("TODO");
         self
     }
 
     /// Encode a single byte.
+    ///
+    /// # Panics
+    ///
+    /// When writing to the underlying buffer fails.
     pub fn encode_byte(&mut self, data: u8) -> &mut Self {
-        self.buf.push(data);
+        self.buf.write_all(&[data]).expect("TODO");
         self
     }
 
@@ -348,6 +278,126 @@ impl Encoder {
         .encode(v)
     }
 
+    /// Encode a vector with a varint length.
+    ///
+    /// # Panics
+    ///
+    /// When `v` is longer than 2^64.
+    pub fn encode_vvec(&mut self, v: &[u8]) -> &mut Self {
+        self.encode_varint(u64::try_from(v.as_ref().len()).expect("v is longer than 2^64"))
+            .encode(v)
+    }
+
+    /// Encode a vector with a varint length using a closure.
+    ///
+    /// # Panics
+    ///
+    /// When `f()` writes more than 2^62 bytes.
+    ///
+    /// TODO: Worse performance than previous implementation. Worth optimizing?
+    pub fn encode_vvec_with<F: FnOnce(&mut Encoder<&mut SmallVec<[u8; 128]>>)>(
+        &mut self,
+        f: F,
+    ) -> &mut Self {
+        let mut data = SmallVec::new();
+        let mut encoder = Encoder { buf: &mut data };
+        f(&mut encoder);
+        self.encode_vvec(&data);
+        self
+    }
+}
+
+// TODO: Encoder::len and Vec::len need to stay in sync.
+impl Encoder<Vec<u8>> {
+    /// Get the length of the underlying buffer: the number of bytes that have
+    /// been written to the buffer.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.buf.len()
+    }
+
+    /// Static helper function for previewing the results of encoding without doing it.
+    ///
+    /// # Panics
+    ///
+    /// When `v` is too large.
+    #[must_use]
+    pub const fn varint_len(v: u64) -> usize {
+        match () {
+            () if v < (1 << 6) => 1,
+            () if v < (1 << 14) => 2,
+            () if v < (1 << 30) => 4,
+            () if v < (1 << 62) => 8,
+            () => panic!("Varint value too large"),
+        }
+    }
+
+    /// Static helper to determine how long a varint-prefixed array encodes to.
+    ///
+    /// # Panics
+    ///
+    /// When `len` doesn't fit in a `u64`.
+    #[must_use]
+    pub fn vvec_len(len: usize) -> usize {
+        Self::varint_len(u64::try_from(len).expect("usize should fit into u64")) + len
+    }
+
+    /// Default construction of an empty buffer.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Construction of a buffer with a predetermined capacity.
+    #[must_use]
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            buf: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Get the capacity of the underlying buffer: the number of bytes that can be
+    /// written without causing an allocation to occur.
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.buf.capacity()
+    }
+
+    /// Returns true if the encoder buffer contains no elements.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.buf.is_empty()
+    }
+
+    /// Create a view of the current contents of the buffer.
+    /// Note: for a view of a slice, use `Decoder::new(&enc[s..e])`
+    #[must_use]
+    pub fn as_decoder(&self) -> Decoder {
+        Decoder::new(self.as_ref())
+    }
+
+    /// Don't use this except in testing.
+    ///
+    /// # Panics
+    ///
+    /// When `s` contains non-hex values or an odd number of values.
+    #[cfg(any(test, feature = "test-fixture"))]
+    #[must_use]
+    pub fn from_hex<A: AsRef<str>>(s: A) -> Self {
+        let s = s.as_ref();
+        assert_eq!(s.len() % 2, 0, "Needs to be even length");
+
+        let cap = s.len() / 2;
+        let mut enc = Self::with_capacity(cap);
+
+        for i in 0..cap {
+            #[expect(clippy::unwrap_used, reason = "Only used in tests.")]
+            let v = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).unwrap();
+            enc.encode_byte(v);
+        }
+        enc
+    }
+
     /// Encode a vector in TLS style using a closure for the contents.
     ///
     /// # Panics
@@ -366,58 +416,6 @@ impl Encoder {
         for i in 0..n {
             self.buf[start + i] = ((len >> (8 * (n - i - 1))) & 0xff) as u8;
         }
-        self
-    }
-
-    /// Encode a vector with a varint length.
-    ///
-    /// # Panics
-    ///
-    /// When `v` is longer than 2^64.
-    pub fn encode_vvec(&mut self, v: &[u8]) -> &mut Self {
-        self.encode_varint(u64::try_from(v.as_ref().len()).expect("v is longer than 2^64"))
-            .encode(v)
-    }
-
-    /// Encode a vector with a varint length using a closure.
-    ///
-    /// # Panics
-    ///
-    /// When `f()` writes more than 2^62 bytes.
-    pub fn encode_vvec_with<F: FnOnce(&mut Self)>(&mut self, f: F) -> &mut Self {
-        let start = self.buf.len();
-        // Optimize for short buffers, reserve a single byte for the length.
-        self.buf.resize(self.buf.len() + 1, 0);
-        f(self);
-        let len = self.buf.len() - start - 1;
-
-        // Now to insert a varint for `len` before the encoded block.
-        //
-        // We now have one zero byte at `start`, followed by `len` encoded bytes:
-        //   |  0  | ... encoded ... |
-        // We are going to encode a varint by putting the low bytes in that spare byte.
-        // Any additional bytes for the varint are put after the encoded blob:
-        //   | low | ... encoded ... | varint high |
-        // Then we will rotate that entire piece right, by however many bytes we add:
-        //   | varint high | low | ... encoded ... |
-        // As long as encoding more than 63 bytes is rare, this won't cost much relative
-        // to the convenience of being able to use this function.
-
-        let v = u64::try_from(len).expect("encoded value fits in a u64");
-        // The lower order byte fits before the inserted block of bytes.
-        self.buf[start] = (v & 0xff) as u8;
-        let (count, bits) = match () {
-            // Great.  The byte we have is enough.
-            () if v < (1 << 6) => return self,
-            () if v < (1 << 14) => (1, 1 << 6),
-            () if v < (1 << 30) => (3, 2 << 22),
-            () if v < (1 << 62) => (7, 3 << 54),
-            () => panic!("Varint value too large"),
-        };
-        // Now, we need to encode the high bits after the main block, ...
-        self.encode_uint(count, (v >> 8) | bits);
-        // ..., then rotate the entire thing right by the same amount.
-        self.buf[start..].rotate_right(count);
         self
     }
 
@@ -472,10 +470,42 @@ impl From<Encoder> for Vec<u8> {
     }
 }
 
-impl Write for Encoder {
+#[expect(
+    clippy::unwrap_in_result,
+    reason = "successful writing to buffer needs to be guaranteed by caller"
+)]
+impl<B: std::io::Write> Write for Encoder<B> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.buf.extend_from_slice(s.as_bytes());
+        self.buf.write_all(s.as_bytes()).expect("TODO");
         Ok(())
+    }
+}
+
+#[expect(clippy::unnecessary_safety_doc, reason = "relevant for created object")]
+impl<'a> Encoder<Cursor<&'a mut [u8]>> {
+    /// # Safety
+    ///
+    /// Any mutable method on [`Encoder<Cursor<&mut [u8]>>`] assumes the
+    /// underlying buffer has enough capacity for the called operation. This
+    /// invariant needs to be upheld by the caller.
+    #[must_use]
+    pub fn new_borrowed_slice(buf: &'a mut [u8]) -> Self {
+        Encoder {
+            buf: Cursor::new(buf),
+        }
+    }
+
+    #[expect(clippy::missing_panics_doc, reason = "safe conversion")]
+    #[must_use]
+    pub fn len(&self) -> usize {
+        usize::try_from(self.buf.position()).expect("memory allocation not to exceed usize")
+    }
+}
+
+impl<'a> Encoder<&'a mut Vec<u8>> {
+    #[must_use]
+    pub fn new_borrowed_vec(buf: &'a mut Vec<u8>) -> Self {
+        Encoder { buf }
     }
 }
 

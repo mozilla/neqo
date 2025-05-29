@@ -94,7 +94,7 @@ impl HFrame {
         }
     }
 
-    pub fn encode(&self, enc: &mut Encoder) {
+    pub fn encode<B: std::io::Write>(&self, enc: &mut Encoder<B>) {
         enc.encode_varint(self.get_type());
 
         match self {
