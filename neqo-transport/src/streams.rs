@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qtrace, qwarn, Role};
+use neqo_common::{qtrace, qwarn, Buffer, Role};
 
 use crate::{
     fc::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl},
@@ -209,9 +209,9 @@ impl Streams {
         Ok(())
     }
 
-    pub fn write_maintenance_frames(
+    pub fn write_maintenance_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
         now: Instant,
@@ -252,10 +252,10 @@ impl Streams {
         self.local_stream_limits[StreamType::UniDi].write_frames(builder, tokens, stats);
     }
 
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {

@@ -19,8 +19,8 @@ use std::{
 
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, DatagramBatch, Decoder, Encoder, IpTos, IpTosEcn,
-    Role,
+    qlog::NeqoQlog, qtrace, qwarn, Buffer, Datagram, DatagramBatch, Decoder, Encoder, IpTos,
+    IpTosEcn, Role,
 };
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
@@ -228,14 +228,12 @@ impl Default for SendOptionTrain {
 /// Used by inner functions like `Connection::output`.
 enum SendOption {
     /// Yes, please send this datagram.
-    Yes(Encoder),
+    Yes,
     /// Don't send.
-    No {
+    No(
         /// Whether this was blocked on the pacer.
-        paced: bool,
-        // TODO: Hack?
-        encoder: Encoder,
-    },
+        bool,
+    ),
 }
 
 /// Used by `Connection::preprocess` to determine what to do
@@ -2193,16 +2191,16 @@ impl Connection {
     }
 
     #[expect(clippy::too_many_arguments, reason = "no easy way to simplify")]
-    fn build_packet_header(
+    fn build_packet_header<'a>(
         path: &Path,
         epoch: Epoch,
-        encoder: Encoder,
+        encoder: Encoder<&'a mut Vec<u8>>,
         tx: &CryptoDxState,
         address_validation: &AddressValidationInfo,
         version: Version,
         grease_quic_bit: bool,
         limit: usize,
-    ) -> (PacketType, PacketBuilder) {
+    ) -> (PacketType, PacketBuilder<&'a mut Vec<u8>>) {
         let pt = PacketType::from(epoch);
         let mut builder = if pt == PacketType::Short {
             qdebug!("Building Short dcid {:?}", path.remote_cid());
@@ -2234,7 +2232,7 @@ impl Connection {
 
     #[must_use]
     fn add_packet_number(
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<&mut Vec<u8>>,
         tx: &CryptoDxState,
         largest_acknowledged: Option<PacketNumber>,
     ) -> PacketNumber {
@@ -2266,9 +2264,9 @@ impl Connection {
 
     /// Write the frames that are exchanged in the application data space.
     /// The order of calls here determines the relative priority of frames.
-    fn write_appdata_frames(
+    fn write_appdata_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         now: Instant,
     ) {
@@ -2357,16 +2355,17 @@ impl Connection {
 
         #[cfg(test)]
         if let Some(w) = &mut self.test_frame_writer {
-            w.write_frames(builder);
+            todo!()
+            // w.write_frames(builder);
         }
     }
 
     // Maybe send a probe.  Return true if the packet was ack-eliciting.
-    fn maybe_probe(
+    fn maybe_probe<B: Buffer>(
         &mut self,
         path: &PathRef,
         force_probe: bool,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         ack_end: usize,
         tokens: &mut Vec<RecoveryToken>,
         now: Instant,
@@ -2418,7 +2417,7 @@ impl Connection {
         path: &PathRef,
         space: PacketNumberSpace,
         profile: &SendProfile,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<&mut Vec<u8>>,
         coalesced: bool, // Whether this packet is coalesced behind another one.
         now: Instant,
     ) -> (Vec<RecoveryToken>, bool, bool) {
@@ -2509,7 +2508,7 @@ impl Connection {
     fn write_closing_frames(
         &mut self,
         close: &ClosingFrame,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<&mut Vec<u8>>,
         space: PacketNumberSpace,
         now: Instant,
         path: &PathRef,
@@ -2575,9 +2574,8 @@ impl Connection {
             // Determine how we are sending packets (PTO, etc..).
             let profile = self.loss_recovery.send_profile(&path.borrow(), now);
             qdebug!("[{self}] output_path send_profile {profile:?}");
-            send_buffer.reserve(profile.limit());
 
-            let encoder = Encoder::new_appending(mem::take(&mut send_buffer));
+            let encoder = Encoder::new_borrowed_vec(&mut send_buffer);
             match self.output_dgram_on_path(
                 &path,
                 now,
@@ -2586,11 +2584,10 @@ impl Connection {
                 encoder,
                 packet_tos,
             )? {
-                SendOption::Yes(encoder) => {
-                    send_buffer = encoder.into_buf();
+                SendOption::Yes => {
                     num_segments += 1;
                     let segment_size = *segment_size.get_or_insert(send_buffer.len());
-                    if (send_buffer.len() % segment_size) > 0 {
+                    if ((send_buffer.len()) % segment_size) > 0 {
                         // GSO requires that all packets in a train are of equal
                         // size (i.e. segment size). Only the last packet can be
                         // smaller. This packet was smaller. Make sure it was
@@ -2598,13 +2595,12 @@ impl Connection {
                         break;
                     }
                 }
-                SendOption::No { encoder, paced } => {
+                SendOption::No(paced) => {
                     if num_segments == 0 {
                         // TODO: Safe?
-                        assert!(encoder.len() == 0);
+                        assert!(send_buffer.len() == 0);
                         return Ok(SendOptionTrain::No(paced));
                     }
-                    send_buffer = encoder.into_buf();
                     break;
                 }
             }
@@ -2631,9 +2627,10 @@ impl Connection {
         now: Instant,
         closing_frame: Option<&ClosingFrame>,
         profile: SendProfile,
-        mut encoder: Encoder,
+        mut encoder: Encoder<&mut Vec<u8>>,
         packet_tos: IpTos,
     ) -> Res<SendOption> {
+        let start = encoder.len();
         let mut initial_sent = None;
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
@@ -2693,12 +2690,14 @@ impl Connection {
             if let Some(close) = closing_frame {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
+                // TODO: Cleanup
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, space, &profile, &mut builder, header_start != 0, now);
+                    self.write_frames(path, space, &profile, &mut builder, header_start - start != 0, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();
+
                 continue;
             }
 
@@ -2783,12 +2782,11 @@ impl Connection {
             }
         }
 
-        if encoder.is_empty() {
+        // TODO
+        if encoder.len() == start {
+
             qdebug!("TX blocked, profile={profile:?}");
-            Ok(SendOption::No {
-                paced: profile.paced(),
-                encoder,
-            })
+            Ok(SendOption::No(profile.paced()))
         } else {
             // Perform additional padding for Initial packets as necessary.
             if let Some(mut initial) = initial_sent.take() {
@@ -2806,7 +2804,7 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, initial, now);
             }
             path.borrow_mut().add_sent(encoder.len());
-            Ok(SendOption::Yes(encoder))
+            Ok(SendOption::Yes)
         }
     }
 
@@ -3779,7 +3777,8 @@ impl Connection {
         };
         let path = self.paths.primary().ok_or(Error::NotAvailable)?;
         let mtu = path.borrow().plpmtu();
-        let encoder = Encoder::default();
+        let mut buffer = Vec::new();
+        let encoder = Encoder::new_borrowed_vec(&mut buffer);
 
         let (_, mut builder) = Self::build_packet_header(
             &path.borrow(),

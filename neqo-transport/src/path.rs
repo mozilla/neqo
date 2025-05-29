@@ -13,7 +13,7 @@ use std::{
 };
 
 use neqo_common::{
-    hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn, DatagramBatch, Encoder, IpTos,
+    hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn, Buffer, DatagramBatch, Encoder, IpTos
 };
 use neqo_crypto::random;
 
@@ -367,9 +367,9 @@ impl Paths {
     }
 
     /// Write out any `RETIRE_CONNECTION_ID` frames that are outstanding.
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
@@ -774,9 +774,9 @@ impl Path {
         self.challenge.is_some() || self.state.probe_needed()
     }
 
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         stats: &mut FrameStats,
         mtu: bool, // Whether the packet we're writing into will be a full MTU.
         now: Instant,
@@ -824,9 +824,9 @@ impl Path {
     }
 
     /// Write `ACK_FREQUENCY` frames.
-    pub fn write_cc_frames(
+    pub fn write_cc_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
