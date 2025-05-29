@@ -11,6 +11,8 @@ use neqo_crypto::{
     TLS_VERSION_1_3,
 };
 
+use std::ffi::CStr;
+
 mod handshake;
 use test_fixture::{fixture_init, now};
 
@@ -544,7 +546,7 @@ fn connection_succeeds_when_server_and_client_support_cert_compr_copy() {
     // Implementation supports both encoder and decoder
     impl CertificateCompression for CopyCompression {
         const ID: u16 = 0x4;
-        const NAME: &str = "copy";
+        const NAME: &CStr = c"copy";
         const ENABLE_ENCODING: bool = true;
 
         fn encode(data: &[u8]) -> Vec<u8> {
@@ -576,7 +578,7 @@ struct CopyCompressionNoEncoder {}
 
 impl CertificateCompression for CopyCompressionNoEncoder {
     const ID: u16 = 0x4;
-    const NAME: &str = "copy";
+    const NAME: &CStr = c"copy";
 
     fn decode(data: &[u8]) -> Vec<u8> {
         data.to_vec()

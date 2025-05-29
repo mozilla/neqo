@@ -74,7 +74,7 @@ pub trait CertificateCompression {
     /// Certificate Compression identifier as in RFC8879
     const ID: u16;
     /// Certification Compression name (used only for logging/debugging)
-    const NAME: &str;
+    const NAME: &CStr;
     /// Certificate Compression could be used to encode and decode a certificate
     /// though the encoding is not frequently used
     /// Enable decoding field is used to signal to the implementation
@@ -695,10 +695,7 @@ impl SecretAgent {
         let compressor: ssl::SSLCertificateCompressionAlgorithm =
             ssl::SSLCertificateCompressionAlgorithm {
                 id: T::ID,
-                name: CString::new(T::NAME)
-                    .expect("CString::new failed")
-                    .as_ptr()
-                    .cast_mut(),
+                name: T::NAME.as_ptr().cast_mut(),
                 encode: T::ENABLE_ENCODING.then_some(<T as UnsafeCertCompression>::encode_callback),
                 decode: Some(<T as UnsafeCertCompression>::decode_callback),
             };
