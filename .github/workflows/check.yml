@@ -183,6 +183,8 @@ jobs:
   bench:
     needs: [check]
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' && github.event_name != 'merge_group' }}
+    permissions:
+      pull-requests: write
     uses: ./.github/workflows/bench.yml
     secrets:
       BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
