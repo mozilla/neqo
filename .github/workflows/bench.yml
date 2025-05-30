@@ -1,6 +1,9 @@
 name: Bench
 on:
   workflow_call:
+    secrets:
+      BENCHER_API_TOKEN:
+        required: true
   workflow_dispatch:
   schedule:
     # Run at minute 0 past every 4th hour, so there is a `main`-branch baseline in the cache.
@@ -17,6 +20,7 @@ env:
   CXXFLAGS: -fno-omit-frame-pointer
   WORKSPACE: ${{ github.workspace}}
   BENCHER_PROJECT: neqo
+  BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
   BENCHER_BRANCH: ${{ github.ref_name}}
 
 permissions:
@@ -205,7 +209,6 @@ jobs:
             # (Perf seems to introduce some variability in the results.)
             # shellcheck disable=SC2086
             bencher run \
-              --token '${{ secrets.BENCHER_API_TOKEN }}' \
               --threshold-measure latency \
               --threshold-test t_test \
               --threshold-max-sample-size 64 \
@@ -345,7 +348,6 @@ jobs:
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   cd "$TMP/out"
                   bencher run \
-                    --token '${{ secrets.BENCHER_API_TOKEN }}' \
                     --threshold-measure latency \
                     --threshold-test t_test \
                     --threshold-max-sample-size 64 \
