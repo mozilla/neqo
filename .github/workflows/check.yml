@@ -184,6 +184,7 @@ jobs:
     needs: [check]
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' && github.event_name != 'merge_group' }}
     permissions:
+      contents: read
       pull-requests: write
     uses: ./.github/workflows/bench.yml
     secrets:
