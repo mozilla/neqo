@@ -541,13 +541,13 @@ impl TxBuffer {
         self.ranges.mark_acked(offset, len);
 
         // Any newly-retired bytes can be dropped from the buffer.
-        let new_retirable = self.retired() - prev_retired;
-        debug_assert!(new_retirable <= self.buffered() as u64);
-        let keep = self.buffered() - usize::try_from(new_retirable).expect("u64 fits in usize");
+        let new_retirable = usize::try_from(self.retired() - prev_retired).expect("u64 fits in usize");
+        debug_assert!(new_retirable <= self.buffered());
 
         // Truncate front
-        self.send_buf.rotate_left(self.buffered() - keep);
-        self.send_buf.truncate(keep);
+        //
+        // TODO: use `VecDeque::truncate_front` once stable. https://github.com/rust-lang/rust/issues/140667
+        self.send_buf.drain(..new_retirable);
     }
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize) {
