@@ -191,6 +191,10 @@ impl Args {
     pub fn set_qlog_dir(&mut self, dir: PathBuf) {
         self.shared.qlog_dir = Some(dir);
     }
+
+    pub fn set_hosts(&mut self, hosts: Vec<String>) {
+        self.hosts = hosts;
+    }
 }
 
 fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
@@ -228,6 +232,14 @@ impl ServerRunner {
             sockets,
             recv_buf: RecvBuf::new(),
         }
+    }
+
+    #[must_use]
+    pub fn local_addresses(&self) -> Vec<SocketAddr> {
+        self.sockets
+            .iter()
+            .map(|(_, s)| s.local_addr().unwrap())
+            .collect()
     }
 
     /// Tries to find a socket, but then just falls back to sending from the first.
@@ -360,7 +372,7 @@ enum Ready {
     Timeout,
 }
 
-pub async fn server(mut args: Args) -> Res<()> {
+pub fn server(mut args: Args) -> Res<ServerRunner> {
     neqo_common::log::init(
         args.shared
             .verbose
@@ -414,7 +426,7 @@ pub async fn server(mut args: Args) -> Res<()> {
         qerror!("No valid hosts defined");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts").into());
     }
-    let sockets = hosts
+    let sockets: Vec<(SocketAddr, crate::udp::Socket)> = hosts
         .into_iter()
         .map(|host| {
             let socket = crate::udp::Socket::bind(host)?;
@@ -440,7 +452,9 @@ pub async fn server(mut args: Args) -> Res<()> {
         )
     };
 
-    ServerRunner::new(Box::new(move || args.now()), server, sockets)
-        .run()
-        .await
+    Ok(ServerRunner::new(
+        Box::new(move || args.now()),
+        server,
+        sockets,
+    ))
 }
