@@ -1838,7 +1838,11 @@ impl Connection {
                 self.paths.make_permanent(path, None, cid, now);
                 Ok(())
             } else if let Some(primary) = self.paths.primary() {
-                if primary.borrow().remote_cid().is_none_or(|id| id.is_empty()) {
+                if primary
+                    .borrow()
+                    .remote_cid()
+                    .map_or(true, |id| id.is_empty())
+                {
                     self.paths
                         .make_permanent(path, None, ConnectionIdEntry::empty_remote(), now);
                     Ok(())
