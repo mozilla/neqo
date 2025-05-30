@@ -6,7 +6,7 @@
 
 #![expect(clippy::unwrap_used, reason = "OK in a bench.")]
 
-use std::{env, hint::black_box, path::PathBuf, str::FromStr as _, time::Duration};
+use std::{env, hint::black_box, path::PathBuf, str::FromStr as _};
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use neqo_bin::{client, server};
@@ -92,9 +92,5 @@ fn spawn_server() -> tokio::sync::oneshot::Sender<()> {
     done_sender
 }
 
-criterion_group! {
-    name = benches;
-    config = Criterion::default().warm_up_time(Duration::from_secs(5)).measurement_time(Duration::from_secs(60));
-    targets = transfer
-}
+criterion_group!(benches, transfer);
 criterion_main!(benches);

@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{hint::black_box, time::Duration};
+use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BatchSize::SmallInput, Criterion};
 use neqo_transport::{ConnectionParameters, State};
@@ -84,7 +84,7 @@ fn benchmark_transfer_fixed(c: &mut Criterion) {
 
 criterion_group! {
     name = transfer;
-    config = Criterion::default().warm_up_time(Duration::from_secs(5)).measurement_time(Duration::from_secs(60));
+    config = Criterion::default().warm_up_time(Duration::from_secs(5)).measurement_time(Duration::from_secs(15));
     targets = benchmark_transfer_variable, benchmark_transfer_fixed
 }
 criterion_main!(transfer);
