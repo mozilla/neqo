@@ -336,15 +336,15 @@ jobs:
                   cd "$TMP/out"
                   if [[ "$client" == "neqo" || "$server" == "neqo" ]]; then
                     echo "Generate main-branch results for comparison."
-                    echo "Server command: ${SERVER_CMD//neqo/neqo-main}"
-                    echo "Client command: ${CMD//neqo/neqo-main}"
+                    echo "Server command: ${SERVER_CMD/neqo/neqo-main}"
+                    echo "Client command: ${CMD/neqo/neqo-main}"
                     nice -n -20 setarch --addr-no-randomize hyperfine \
                       --command-name "$TAG" --time-unit millisecond  \
                       --export-json "$WORKSPACE/hyperfine-main/$FILENAME.json" \
                       --output null --warmup 5 --min-runs "$RUNS" \
-                      --prepare "$WORKSPACE/${SERVER_CMD//neqo/neqo-main} & echo \$! >> /cpusets/cpu2/tasks; sleep 0.1" \
+                      --prepare "$WORKSPACE/${SERVER_CMD/neqo/neqo-main} & echo \$! >> /cpusets/cpu2/tasks; sleep 0.1" \
                       --conclude "pkill $SERVER_TAG" \
-                      "echo \$\$ >> /cpusets/cpu3/tasks; $WORKSPACE/${CMD//neqo/neqo-main}"
+                      "echo \$\$ >> /cpusets/cpu3/tasks; $WORKSPACE/${CMD/neqo/neqo-main}"
                   fi
 
                   nice -n -20 setarch --addr-no-randomize hyperfine \
