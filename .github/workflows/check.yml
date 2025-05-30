@@ -126,9 +126,9 @@ jobs:
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "$TOOLCHAIN" == "stable" ]; then
-            cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --profile ci --codecov --output-path codecov.json
+            cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
-            cargo test $BUILD_TYPE --locked --features ci --profile ci
+            cargo test $BUILD_TYPE --locked --features ci
           fi
           # shellcheck disable=SC2086
           junit-test $BUILD_TYPE
