@@ -183,7 +183,7 @@ jobs:
             NAME=$(basename "$BENCH" | cut -d- -f1)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --baseline main
+              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline
           done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
@@ -310,7 +310,9 @@ jobs:
                   echo "Client command: $CMD"
                   cd "$TMP/out"
                   if [[ "$client" == "neqo" || "$server" == "neqo" ]]; then
-                    # Generate main-branch results for comparison.
+                    echo "Generate main-branch results for comparison."
+                    echo "Server command: ${SERVER_CMD//neqo/neqo-main}"
+                    echo "Client command: ${CMD//neqo/neqo-main}"
                     nice -n -20 setarch --addr-no-randomize hyperfine \
                       --command-name "$TAG" --time-unit millisecond  \
                       --export-json "$WORKSPACE/hyperfine-main/$FILENAME.json" \
