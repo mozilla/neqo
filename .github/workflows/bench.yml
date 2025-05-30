@@ -30,6 +30,8 @@ jobs:
   bench:
     name: Benchmark
     runs-on: self-hosted # zizmor: ignore[self-hosted-runner]
+    permissions:
+      pull-requests: write
     defaults:
       run:
         shell: bash
@@ -218,7 +220,7 @@ jobs:
               --adapter rust_criterion \
               --github-actions '${{ secrets.GITHUB_TOKEN }}' \
               nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-                $BENCH -- --bench | tee -a ../results.txt
+                $BENCH -- --bench | grep -v '^cset:' | tee -a ../results.txt
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline
@@ -478,7 +480,6 @@ jobs:
             } | tee sha.md >> results.md
           fi
           sed -E -e 's/^                 //gi' \
-                 -e '/cset:.*last message/d' \
                  -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
             perl -p -0777 -e 's/(.*?)\n(.*?)(((No change|Change within|Performance has).*?)(\nFound .*?)?)?\n\n/<details><summary>$1: $4<\/summary><pre>\n$2$6<\/pre><\/details>\n/gs' |\
             sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
