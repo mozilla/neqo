@@ -84,7 +84,7 @@ fn benchmark_transfer_fixed(c: &mut Criterion) {
 
 criterion_group! {
     name = transfer;
-    config = Criterion::default(); //.warm_up_time(Duration::from_secs(5)).measurement_time(Duration::from_secs(60));
+    config = Criterion::default().warm_up_time(Duration::from_secs(5)).measurement_time(Duration::from_secs(60));
     targets = benchmark_transfer_variable, benchmark_transfer_fixed
 }
 criterion_main!(transfer);

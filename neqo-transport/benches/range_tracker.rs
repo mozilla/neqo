@@ -52,7 +52,7 @@ fn benchmark_coalesce(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default(); //.warm_up_time(Duration::from_secs(5)).measurement_time(Duration::from_secs(60));
+    config = Criterion::default().warm_up_time(Duration::from_secs(5)).measurement_time(Duration::from_secs(60));
     targets = benchmark_coalesce
 }
 criterion_main!(benches);
