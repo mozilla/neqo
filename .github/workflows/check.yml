@@ -13,6 +13,13 @@ on:
         required: false
         default: false
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUST_TEST_TIME_UNIT: 10,30
+  RUST_TEST_TIME_INTEGRATION: 10,30
+  RUST_TEST_TIME_DOCTEST: 10,30
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
@@ -91,7 +98,7 @@ jobs:
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} junit-test
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -110,16 +117,21 @@ jobs:
         env:
           RUST_LOG: trace
           RUST_BACKTRACE: 1
+          RUST_TEST_TIME_UNIT: 10,30
+          RUST_TEST_TIME_INTEGRATION: 10,30
+          RUST_TEST_TIME_DOCTEST: 10,30
           TOOLCHAIN: ${{ matrix.rust-toolchain }}
         run: |
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "$TOOLCHAIN" == "stable" ]; then
-            cargo llvm-cov nextest $BUILD_TYPE --locked --include-ffi --features ci --profile ci --codecov --output-path codecov.json
+            cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --profile ci --codecov --output-path codecov.json
           else
-            cargo nextest run $BUILD_TYPE --locked --features ci --profile ci
+            cargo test $BUILD_TYPE --locked --features ci --profile ci
           fi
+          # shellcheck disable=SC2086
+          junit-test $BUILD_TYPE
 
       - name: Run client/server transfer
         run: |
@@ -158,7 +170,7 @@ jobs:
       - uses: codecov/test-results-action@47f89e9acb64b76debcd5ea40642d25a4adced9f # v1.1.1
         if: ${{ always() }}
         with:
-          files: target/nextest/ci/junit.xml
+          files: junit.xml
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
