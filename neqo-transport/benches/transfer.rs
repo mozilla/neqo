@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::hint::black_box;
+use std::{hint::black_box, time::Duration};
 
 use criterion::{criterion_group, criterion_main, BatchSize::SmallInput, Criterion};
 use neqo_transport::{ConnectionParameters, State};
