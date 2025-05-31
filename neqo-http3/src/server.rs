@@ -6,7 +6,6 @@
 
 use std::{
     cell::{RefCell, RefMut},
-    collections::HashMap,
     fmt::{self, Display, Formatter},
     path::PathBuf,
     rc::Rc,
@@ -19,6 +18,7 @@ use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
     ConnectionIdGenerator, Output,
 };
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     connection::Http3State,
@@ -74,7 +74,7 @@ impl Http3Server {
                 http3_parameters.get_connection_parameters().clone(),
             )?,
             http3_parameters,
-            http3_handlers: HashMap::new(),
+            http3_handlers: HashMap::default(),
             events: Http3ServerEvents::default(),
         })
     }
