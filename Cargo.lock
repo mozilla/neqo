@@ -832,6 +832,7 @@ dependencies = [
  "neqo-crypto",
  "qlog",
  "regex",
+ "smallvec",
  "strum",
  "test-fixture",
  "windows",

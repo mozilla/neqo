@@ -6,6 +6,7 @@
 
 use std::fmt::{self, Display, Formatter};
 
+use neqo_common::Encoder;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{qlog, Res};
@@ -44,6 +45,15 @@ impl BufferedStream {
             stream_id,
             buf: Vec::new(),
         };
+    }
+
+    pub fn encoder(&mut self) -> Encoder<&mut Vec<u8>> {
+        if let Self::Initialized { buf, .. } = self {
+            Encoder::new_borrowed_vec(buf)
+        } else {
+            // TODO: Should we handle this case?
+            panic!("Do not use encoder before the stream is initialized");
+        }
     }
 
     /// # Panics
