@@ -399,7 +399,7 @@ trait Client {
 }
 
 struct Runner<'a, H: Handler> {
-    local_addr: SocketAddr,
+    local_addr: &'a SocketAddr,
     socket: &'a mut crate::udp::Socket,
     client: H::Client,
     handler: H,
@@ -410,7 +410,7 @@ struct Runner<'a, H: Handler> {
 
 impl<'a, H: Handler> Runner<'a, H> {
     fn new(
-        local_addr: SocketAddr,
+        local_addr: &'a SocketAddr,
         socket: &'a mut crate::udp::Socket,
         client: H::Client,
         handler: H,
@@ -612,7 +612,7 @@ pub async fn client(mut args: Args) -> Res<()> {
 
                 let handler = http3::Handler::new(to_request, &args);
 
-                Runner::new(real_local, &mut socket, client, handler, &args)
+                Runner::new(&real_local, &mut socket, client, handler, &args)
                     .run()
                     .await?
             } else {
@@ -622,7 +622,7 @@ pub async fn client(mut args: Args) -> Res<()> {
 
                 let handler = http09::Handler::new(to_request, &args);
 
-                Runner::new(real_local, &mut socket, client, handler, &args)
+                Runner::new(&real_local, &mut socket, client, handler, &args)
                     .run()
                     .await?
             };
