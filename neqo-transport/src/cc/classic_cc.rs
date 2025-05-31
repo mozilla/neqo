@@ -552,6 +552,10 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             self.acked_bytes,
             self.max_datagram_size(),
         );
+        // UPDATE: Add condition for `self.cc_algorithm == cubic` here to set `ssthresh` and
+        // `congestion_window` according to RFC 9438.
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9438#figure-5>
         self.congestion_window = max(cwnd, self.cwnd_min());
         self.acked_bytes = acked_bytes;
         self.ssthresh = self.congestion_window;
