@@ -196,6 +196,7 @@ jobs:
           cd neqo
           for BENCH in $BENCHES; do
             NAME=$(basename "$BENCH" | cut -d- -f1)
+            echo "Running $NAME"
             cp "$BENCH" ../binaries/
             # Run it twice, once without perf for baseline comparison, and once with perf for profiling.
             # (Perf seems to introduce some variability in the results.)
@@ -204,7 +205,7 @@ jobs:
               $BENCH -- --bench | grep -v '^cset' | tee -a ../results.txt
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline
+              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline | grep -v '^cset'
           done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
