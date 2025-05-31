@@ -196,15 +196,16 @@ jobs:
           cd neqo
           for BENCH in $BENCHES; do
             NAME=$(basename "$BENCH" | cut -d- -f1)
+            echo "Running $NAME"
             cp "$BENCH" ../binaries/
             # Run it twice, once without perf for baseline comparison, and once with perf for profiling.
             # (Perf seems to introduce some variability in the results.)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench | tee -a ../results.txt
+              $BENCH -- --bench | grep -v '^cset' | tee -a ../results.txt
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline
+              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline | grep -v '^cset'
           done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
@@ -396,9 +397,11 @@ jobs:
                       FORMAT=""
                     fi
                     printf "| %s %s%.1f%s | %s%.1f%%%s |\n" "$SYMBOL" "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT" >> steps.md
-                  else
+                  elif [ "$client" == "neqo" ] || [ "$server" == "neqo" ]; then
                     echo No cached baseline from main found.
                     echo '| :question: | :question: |' >> steps.md
+                  else
+                    echo '| | |' >> steps.md
                   fi
                 done
               done
@@ -450,7 +453,6 @@ jobs:
             } | tee sha.md >> results.md
           fi
           sed -E -e 's/^                 //gi' \
-                 -e '/cset:.*last message/d' \
                  -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
             perl -p -0777 -e 's/(.*?)\n(.*?)(((No change|Change within|Performance has).*?)(\nFound .*?)?)?\n\n/<details><summary>$1: $4<\/summary><pre>\n$2$6<\/pre><\/details>\n/gs' |\
             sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
@@ -480,6 +482,21 @@ jobs:
             neqo/target/criterion
             hyperfine
           key: bench-results-${{ runner.name }}-${{ github.sha }}
+
+      - name: Upload benchmark results for bencher.dev
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: results
+          path: |
+            results.txt
+            neqo/target/criterion
+            hyperfine
+
+      - name: Upload GitHub event for bencher.dev
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: event.json
+          path: ${{ github.event_path }}
 
       - name: Export perf data
         if: steps.run.outputs.needed == 'true'
