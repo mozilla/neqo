@@ -51,7 +51,8 @@ jobs:
       - id: run
         env:
           IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
-          CACHE_HIT: ${{ steps.cache.outputs.cache-hit == 'true' }}
+          # See https://github.com/actions/cache#outputs; we are OK with inexact hits.
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit != '' }}
         run: |
           # Always run benchmarks on PRs or when there isn't a cache hit.
           if [[ "$IS_MAIN" == "false" || "$CACHE_HIT" == "false" ]]; then
