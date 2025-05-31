@@ -1787,7 +1787,12 @@ impl Connection {
             .acks
             .get_mut(PacketNumberSpace::from(packet.packet_type()))
         {
-            space.set_received(now, packet.pn(), ack_eliciting)?
+            space.set_received(
+                now,
+                packet.pn(),
+                ack_eliciting,
+                &mut self.stats.borrow_mut(),
+            )?
         } else {
             qdebug!(
                 "[{self}] processed a {:?} packet without tracking it",
