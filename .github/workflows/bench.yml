@@ -1,9 +1,6 @@
 name: Bench
 on:
   workflow_call:
-    secrets:
-      BENCHER_API_TOKEN:
-        required: true
   workflow_dispatch:
   schedule:
     # Run at minute 0 past every 4th hour, so there is a `main`-branch baseline in the cache.
@@ -19,9 +16,6 @@ env:
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
   WORKSPACE: ${{ github.workspace}}
-  BENCHER_PROJECT: neqo
-  BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
-  BENCHER_BRANCH: ${{ github.ref_name}}
 
 permissions:
   contents: read
@@ -30,15 +24,11 @@ jobs:
   bench:
     name: Benchmark
     runs-on: self-hosted # zizmor: ignore[self-hosted-runner]
-    permissions:
-      pull-requests: write
     defaults:
       run:
         shell: bash
 
     steps:
-      - uses: bencherdev/bencher@v0.5.1 # zizmor: ignore[unpinned-uses] bencherdev/bencher@54d78b95feda17a1b2761d3332c488d37261ca4e #v0.5.1
-
       - name: Checkout mozilla/neqo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -199,7 +189,6 @@ jobs:
         if: steps.run.outputs.needed == 'true'
         env:
           NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
-          BENCHER_TESTBED: ${{ runner.name }}
         run: |
           sudo ip link set dev lo mtu "$MTU"
           mkdir -p binaries
@@ -210,17 +199,8 @@ jobs:
             # Run it twice, once without perf for baseline comparison, and once with perf for profiling.
             # (Perf seems to introduce some variability in the results.)
             # shellcheck disable=SC2086
-            bencher run \
-              --threshold-measure latency \
-              --threshold-test t_test \
-              --threshold-max-sample-size 64 \
-              --threshold-upper-boundary 0.99 \
-              --thresholds-reset \
-              --err \
-              --adapter rust_criterion \
-              --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-              nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-                $BENCH -- --bench | grep -v '^cset:' | tee -a ../results.txt
+            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+              $BENCH -- --bench | grep -v '^cset' | tee -a ../results.txt
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline
@@ -236,7 +216,6 @@ jobs:
           SIZE: 33554432 # 32 MB
           RUNS: 100
           NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
-          BENCHER_TESTBED: ${{ runner.name }}
         run: |
           TMP=$(mktemp -d)
           mkdir -p "$TMP/out"
@@ -349,25 +328,15 @@ jobs:
                   SERVER_TAG="$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   cd "$TMP/out"
-                  bencher run \
-                    --threshold-measure latency \
-                    --threshold-test t_test \
-                    --threshold-max-sample-size 64 \
-                    --threshold-upper-boundary 0.99 \
-                    --thresholds-reset \
-                    --err \
-                    --adapter shell_hyperfine \
-                    --file "$WORKSPACE/hyperfine/$FILENAME.json" \
-                    --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-                    nice -n -20 setarch --addr-no-randomize hyperfine \
-                      --command-name "$TAG" --time-unit millisecond  \
-                      --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
-                      --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
-                      --output null --warmup 5 --min-runs "$RUNS" \
-                      --prepare "$WORKSPACE/$SERVER_CMD & echo \$! >> /cpusets/cpu2/tasks; sleep 0.1" \
-                      --conclude "pkill $SERVER_TAG" \
-                      "echo \$\$ >> /cpusets/cpu3/tasks; $WORKSPACE/$CMD" |
-                    tee -a "$WORKSPACE/comparison.txt"
+                  nice -n -20 setarch --addr-no-randomize hyperfine \
+                    --command-name "$TAG" --time-unit millisecond  \
+                    --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
+                    --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
+                    --output null --warmup 5 --min-runs "$RUNS" \
+                    --prepare "$WORKSPACE/$SERVER_CMD & echo \$! >> /cpusets/cpu2/tasks; sleep 0.1" \
+                    --conclude "pkill $SERVER_TAG" \
+                    "echo \$\$ >> /cpusets/cpu3/tasks; $WORKSPACE/$CMD" |
+                  tee -a "$WORKSPACE/comparison.txt"
                   echo >> "$WORKSPACE/comparison.txt"
 
                   # Sanity check the size of the last retrieved file.
@@ -510,15 +479,16 @@ jobs:
             hyperfine
           key: bench-results-${{ runner.name }}-${{ github.sha }}
 
-      - name: Upload benchmark results
+      - name: Upload benchmark results for bencher.dev
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: results
           path: |
+            results.txt
             neqo/target/criterion
             hyperfine
 
-      - name: Upload GitHub event
+      - name: Upload GitHub event for bencher.dev
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: event.json
