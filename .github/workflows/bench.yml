@@ -196,11 +196,11 @@ jobs:
             # (Perf seems to introduce some variability in the results.)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench | grep -v '^cset' | tee -a ../results.txt
+              $BENCH -- --bench | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
             echo "Running $NAME with perf"
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline # | grep -v '^cset'
+              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
           done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
