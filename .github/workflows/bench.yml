@@ -205,7 +205,7 @@ jobs:
             # (Perf seems to introduce some variability in the results.)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench | grep -v '^cset' | tee -a ../results.txt
+              $BENCH -- --bench | tee -a ../results.txt # | grep -v '^cset'
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline | grep -v '^cset'
