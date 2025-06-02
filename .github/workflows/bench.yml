@@ -44,17 +44,6 @@ jobs:
           persist-credentials: false
           clean: false
 
-
-      - name: Checkout mozilla/neqo@main
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          repository: mozilla/neqo
-          ref: main
-          path: neqo-main
-          submodules: 'recursive'
-          persist-credentials: false
-          clean: false
-
       - name: Checkout microsoft/msquic
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
