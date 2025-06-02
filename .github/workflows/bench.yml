@@ -198,6 +198,8 @@ jobs:
             NAME=$(basename "$BENCH" | cut -d- -f1)
             echo "Running $NAME ($BENCH)"
             cp -v "$BENCH" ../binaries/
+            echo copied
+            ls -l ../binaries/
             # Run it twice, once without perf for baseline comparison, and once with perf for profiling.
             # (Perf seems to introduce some variability in the results.)
             # shellcheck disable=SC2086
