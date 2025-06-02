@@ -6,7 +6,7 @@
 
 #![expect(clippy::unwrap_used, reason = "OK in a bench.")]
 
-use std::{hint::black_box, iter::repeat_with, time::Duration};
+use std::{hint::black_box, iter::repeat_with};
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use neqo_crypto::AuthenticationStatus;
@@ -96,9 +96,5 @@ fn criterion_benchmark(c: &mut Criterion) {
     }
 }
 
-criterion_group! {
-    name = benches;
-    config = Criterion::default().warm_up_time(Duration::from_secs(5)).measurement_time(Duration::from_secs(60));
-    targets = criterion_benchmark
-}
+criterion_group!(benches, criterion_benchmark);
 criterion_main!(benches);
