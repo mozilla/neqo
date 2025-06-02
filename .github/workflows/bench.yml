@@ -193,6 +193,7 @@ jobs:
         run: |
           sudo ip link set dev lo mtu "$MTU"
           mkdir -p binaries
+          touch results.txt
           cd neqo
           for BENCH in $BENCHES; do
             NAME=$(basename "$BENCH" | cut -d- -f1)
