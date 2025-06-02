@@ -196,6 +196,7 @@ jobs:
           touch results.txt
           cd neqo
           for BENCH in $BENCHES; do
+            echo "Running $BENCH"
             NAME=$(basename "$BENCH" | cut -d- -f1)
             echo "Running $NAME ($BENCH)"
             cp -v "$BENCH" ../binaries/
@@ -205,10 +206,11 @@ jobs:
             # (Perf seems to introduce some variability in the results.)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench | tee -a ../results.txt # | grep -v '^cset'
+              $BENCH -- --bench | grep -v '^cset' | tee -a ../results.txt
             # shellcheck disable=SC2086
+            echo "Running $NAME with perf"
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline | grep -v '^cset'
+              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline # | grep -v '^cset'
           done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
