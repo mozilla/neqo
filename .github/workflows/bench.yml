@@ -442,7 +442,7 @@ jobs:
       - name: Format results as Markdown
         id: results
         run: |
-          SHA=$(cd neqo && git log -1 --format=%H)
+          SHA=$(cd neqo-main && git log -1 --format=%H)
           {
             echo "Performance differences relative to $SHA."
             echo
