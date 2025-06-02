@@ -400,9 +400,11 @@ jobs:
                       FORMAT=""
                     fi
                     printf "| %s %s%.1f%s | %s%.1f%%%s |\n" "$SYMBOL" "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT" >> steps.md
-                  else
+                  elif [ "$client" == "neqo" ] || [ "$server" == "neqo" ]; then
                     echo No cached baseline from main found.
                     echo '| :question: | :question: |' >> steps.md
+                  else
+                    echo '| | |' >> steps.md
                   fi
                 done
               done
