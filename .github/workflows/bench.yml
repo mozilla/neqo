@@ -130,6 +130,8 @@ jobs:
           cd neqo-main
           cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
           cargo build --locked --release --bin neqo-client --bin neqo-server
+          BENCHES_MAIN=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
+          echo "BENCHES_MAIN=$BENCHES_MAIN" >> "$GITHUB_ENV"
           cd ../neqo
           cp -r ../neqo-main/target .
           cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
@@ -176,7 +178,7 @@ jobs:
           mkdir -p binaries
           cd neqo-main
           rm -rf target/criterion
-          for BENCH in $BENCHES; do
+          for BENCH in $BENCHES_MAIN; do
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               $BENCH -- --bench --save-baseline main
