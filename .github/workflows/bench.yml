@@ -117,10 +117,11 @@ jobs:
           export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
           echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
           cd neqo-main
+          cargo clean
           cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
           cargo build --locked --release --bin neqo-client --bin neqo-server
           cd ../neqo
-          cp -r ../neqo-main/target .
+          cargo clean
           cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
           cargo build --locked --release --bin neqo-client --bin neqo-server
           BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
@@ -180,6 +181,8 @@ jobs:
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               $BENCH -- --bench --baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
+          done
+          for BENCH in $BENCHES; do
             NAME=$(basename "$BENCH" | cut -d- -f1)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
