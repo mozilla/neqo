@@ -167,8 +167,7 @@ jobs:
           rm -rf target/criterion
           for BENCH in $BENCHES; do
             # shellcheck disable=SC2086
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --save-baseline main
+            cset proc --set=cpu23 --exec $BENCH -- --bench --save-baseline main
           done
           cd ../neqo
           rm -rf target/criterion
@@ -178,11 +177,11 @@ jobs:
             # Run it twice, once without perf for baseline comparison, and once with perf for profiling.
             # (Perf seems to introduce some variability in the results.)
             # shellcheck disable=SC2086
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+            cset proc --set=cpu23 --exec \
               $BENCH -- --bench --baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
             NAME=$(basename "$BENCH" | cut -d- -f1)
             # shellcheck disable=SC2086
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+            cset proc --set=cpu23 --exec \
               perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
           done
 
@@ -313,7 +312,7 @@ jobs:
                     echo "Generate main-branch results for comparison."
                     echo "Server command: ${SERVER_CMD/neqo/neqo-main}"
                     echo "Client command: ${CMD/neqo/neqo-main}"
-                    nice -n -20 setarch --addr-no-randomize hyperfine \
+                    hyperfine \
                       --command-name "$TAG" --time-unit millisecond  \
                       --export-json "$WORKSPACE/hyperfine-main/$FILENAME.json" \
                       --output null --warmup 5 --min-runs "$RUNS" \
@@ -322,7 +321,7 @@ jobs:
                       "echo \$\$ >> /cpusets/cpu3/tasks; $WORKSPACE/${CMD/neqo/neqo-main}"
                   fi
 
-                  nice -n -20 setarch --addr-no-randomize hyperfine \
+                  hyperfine \
                     --command-name "$TAG" --time-unit millisecond  \
                     --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
                     --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
@@ -341,12 +340,12 @@ jobs:
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
                   # the perf profiles of those different runs.
                   # shellcheck disable=SC2086
-                  nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec \
+                  cset proc --set=cpu2 --exec \
                     perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.server.perf" $WORKSPACE/$SERVER_CMD &
                   sleep 1
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
-                  nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
+                  cset proc --set=cpu3 --exec \
                     perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD > /dev/null 2>&1
                   pkill "$SERVER_TAG"
                   cd "$WORKSPACE"
