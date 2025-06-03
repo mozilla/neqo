@@ -175,10 +175,12 @@ jobs:
           NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
         run: |
           sudo ip link set dev lo mtu "$MTU"
-          mkdir -p binaries
+          mkdir -p binaries/neqo-main
+          mkdir -p binaries/neqo
           cd neqo-main
           rm -rf target/criterion
           for BENCH in $BENCHES_MAIN; do
+            cp "$BENCH" ../binaries/neqo-main/
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               $BENCH -- --bench --save-baseline main
@@ -187,7 +189,7 @@ jobs:
           rm -rf target/criterion
           cp -r ../neqo-main/target/criterion target/
           for BENCH in $BENCHES; do
-            cp "$BENCH" ../binaries/
+            cp "$BENCH" ../binaries/neqo/
             # Run it twice, once without perf for baseline comparison, and once with perf for profiling.
             # (Perf seems to introduce some variability in the results.)
             # shellcheck disable=SC2086
