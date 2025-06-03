@@ -3,8 +3,8 @@ name: bencher.dev Upload
 on:
   workflow_run:
     workflows: ["CI"]
-    types:
-      - completed # zizmor: ignore[dangerous-triggers]
+    # SAFETY: We are not running any code from the triggering PR, so this is safe.
+    types: [completed] # zizmor: ignore[dangerous-triggers]
 
 permissions:
   contents: read
