@@ -163,7 +163,6 @@ jobs:
         run: |
           sudo ip link set dev lo mtu "$MTU"
           mkdir -p binaries
-          touch results.txt
           cd neqo-main
           rm -rf target/criterion
           for BENCH in $BENCHES; do
@@ -175,18 +174,13 @@ jobs:
           rm -rf target/criterion
           cp -r ../neqo-main/target/criterion target/
           for BENCH in $BENCHES; do
-            echo "Running $BENCH"
-            NAME=$(basename "$BENCH" | cut -d- -f1)
-            echo "Running $NAME ($BENCH)"
-            cp -v "$BENCH" ../binaries/
-            echo copied
-            ls -l ../binaries/
+            cp "$BENCH" ../binaries/
             # Run it twice, once without perf for baseline comparison, and once with perf for profiling.
             # (Perf seems to introduce some variability in the results.)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
-            echo "Running $NAME with perf"
+              $BENCH -- --bench --baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
+            NAME=$(basename "$BENCH" | cut -d- -f1)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
@@ -461,16 +455,18 @@ jobs:
             cat comparison.md
           } >> results.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
+          echo "$runner.name" > testbed.txt
 
       - name: Upload benchmark results for bencher.dev
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: results
           path: |
-            results.txt
             neqo/target/criterion
             neqo-main/target/criterion
             hyperfine
+            hyperfine-main
+            testbed.txt
 
       - name: Upload GitHub event for bencher.dev
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
