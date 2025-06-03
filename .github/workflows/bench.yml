@@ -44,17 +44,6 @@ jobs:
           persist-credentials: false
           clean: false
 
-
-      - name: Checkout mozilla/neqo@main
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          repository: mozilla/neqo
-          ref: main
-          path: neqo-main
-          submodules: 'recursive'
-          persist-credentials: false
-          clean: false
-
       - name: Checkout microsoft/msquic
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -194,11 +183,11 @@ jobs:
             # (Perf seems to introduce some variability in the results.)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --baseline main | tee -a ../results.txt
+              $BENCH -- --bench --baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
             NAME=$(basename "$BENCH" | cut -d- -f1)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline
+              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
           done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
@@ -446,7 +435,7 @@ jobs:
       - name: Format results as Markdown
         id: results
         run: |
-          SHA=$(cd neqo && git log -1 --format=%H)
+          SHA=$(cd neqo-main && git log -1 --format=%H)
           {
             echo "Performance differences relative to $SHA."
             echo
@@ -470,6 +459,24 @@ jobs:
             cat comparison.md
           } >> results.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
+          echo "$runner.name" > testbed.txt
+
+      - name: Upload benchmark results for bencher.dev
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: results
+          path: |
+            neqo/target/criterion
+            neqo-main/target/criterion
+            hyperfine
+            hyperfine-main
+            testbed.txt
+
+      - name: Upload GitHub event for bencher.dev
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: event.json
+          path: ${{ github.event_path }}
 
       - name: Export perf data
         id: export
