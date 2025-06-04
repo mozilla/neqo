@@ -26,11 +26,7 @@ runs:
       run: echo "number=$(cat pr-number)" >> "$GITHUB_OUTPUT"
 
     - shell: bash
-      run: |
-        if [ -s log-url ]; then
-          echo "" >> contents
-          echo "[:arrow_down: Download logs]($(cat log-url))" >> contents
-        fi
+      run: cat log-md >> contents || true
 
     - uses: thollander/actions-comment-pull-request@fabd468d3a1a0b97feee5f6b9e499eab0dd903f6 # v2.5.0
       with:

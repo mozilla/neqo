@@ -456,7 +456,7 @@ jobs:
           cat results.md > "$GITHUB_STEP_SUMMARY"
           echo "$runner.name" > testbed.txt
 
-      - name: Upload benchmark results for bencher.dev
+      - name: Export benchmark results for bencher.dev
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: results
@@ -466,28 +466,36 @@ jobs:
             hyperfine-main
             testbed.txt
 
-      - name: Upload GitHub event for bencher.dev
+      - name: Export GitHub event for bencher.dev
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: event.json
           path: ${{ github.event_path }}
 
-      - name: Export perf data
-        id: export
+      - name: Export profiler.firefox.com data
+        id: export_samply
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}
+          name: ${{ github.event.repository.name }}-${{ github.sha }}-samply
           path: |
-            *.svg
             *.samply.json.gz
             *.syms.json
+            binaries
+          compression-level: 9
+
+      - name: Export performance data
+        id: export_perf
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ github.event.repository.name }}-${{ github.sha }}-perf
+          path: |
+            *.svg
             *.txt
             *.md
             results.*
             neqo/target/criterion
             hyperfine
             hyperfine-main
-            binaries
           compression-level: 9
 
       - name: Export PR comment data
@@ -495,7 +503,7 @@ jobs:
         with:
           name: ${{ github.workflow }}
           contents: results.md
-          log-url: ${{ steps.export.outputs.artifact-url }}
+          log-md: ${{ format('\n[Download data for `profiler.firefox.com`]({0}) or [download performance comparison data]({1}).', steps.export_samply.outputs.artifact-url, steps.export_perf.outputs.artifact-url) }}
 
       - name: Fail on regression
         # Don't check for regressions when running on main.
