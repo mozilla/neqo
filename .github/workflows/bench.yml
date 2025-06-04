@@ -32,15 +32,9 @@ jobs:
           path: neqo
           submodules: 'recursive'
           persist-credentials: false
-
-      - name: Checkout mozilla/neqo@main
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          repository: mozilla/neqo
-          ref: main
-          path: neqo-main
-          submodules: 'recursive'
-          persist-credentials: false
+      - run: |
+          cd neqo
+          git fetch --no-tags --depth=1 origin main
 
       - name: Checkout microsoft/msquic
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -91,15 +85,15 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           workspaces: |
             neqo
-            neqo-main
             quiche
             s2n-quic
 
       - name: Get minimum NSS version
         id: nss-version
         run: |
-          cat neqo/neqo-crypto/min_version.txt > versions.txt
-          cat neqo-main/neqo-crypto/min_version.txt >> versions.txt
+          cd neqo
+          cat neqo-crypto/min_version.txt > versions.txt
+          git show origin/main:neqo-crypto/min_version.txt >> versions.txt
           # Use the maximum version from both branches.
           echo "minimum=$(sort -u versions.txt | tail -n1)" >> "$GITHUB_OUTPUT"
 
@@ -114,14 +108,14 @@ jobs:
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
           export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
           echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
-          cd neqo-main
+          cd neqo
           cargo clean
-          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
+          git checkout origin/main
+          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches-main.txt
           cargo build --locked --release --bin neqo-client --bin neqo-server
-          BENCHES_MAIN=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
+          BENCHES_MAIN=$(grep Executable benches-main.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
           echo "BENCHES_MAIN=$BENCHES_MAIN" >> "$GITHUB_ENV"
-          cd ../neqo
-          cargo clean
+          git checkout -
           cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
           cargo build --locked --release --bin neqo-client --bin neqo-server
           BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
@@ -165,17 +159,16 @@ jobs:
           sudo ip link set dev lo mtu "$MTU"
           mkdir -p binaries/neqo-main
           mkdir -p binaries/neqo
-          cd neqo-main
+          cd neqo
           rm -rf target/criterion
+          git checkout origin/main
           for BENCH in $BENCHES_MAIN; do
             cp "$BENCH" ../binaries/neqo-main/
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               $BENCH -- --bench --save-baseline main
           done
-          cd ../neqo
-          rm -rf target/criterion
-          cp -r ../neqo-main/target/criterion target/
+          git checkout -
           for BENCH in $BENCHES; do
             cp "$BENCH" ../binaries/neqo/
             # Run it twice, once without perf for baseline comparison, and once with perf for profiling.
@@ -437,7 +430,7 @@ jobs:
       - name: Format results as Markdown
         id: results
         run: |
-          SHA=$(cd neqo-main && git log -1 --format=%H)
+          SHA=$(git log origin/main -1 --format=%H)
           {
             echo "Performance differences relative to $SHA."
             echo
@@ -469,7 +462,6 @@ jobs:
           name: results
           path: |
             neqo/target/criterion
-            neqo-main/target/criterion
             hyperfine
             hyperfine-main
             testbed.txt
@@ -493,7 +485,6 @@ jobs:
             *.md
             results.*
             neqo/target/criterion
-            neqo-main/target/criterion
             hyperfine
             hyperfine-main
             binaries
