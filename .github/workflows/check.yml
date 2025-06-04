@@ -193,8 +193,7 @@ jobs:
       - run: cargo update -w --locked
 
   bench:
-    # TODO
-    # needs: [check]
+    needs: [check]
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' && github.event_name != 'merge_group' }}
     uses: ./.github/workflows/bench.yml
 
