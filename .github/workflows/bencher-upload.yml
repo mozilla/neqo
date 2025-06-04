@@ -82,7 +82,7 @@ jobs:
               --file "$file"
           done
 
-          if [ "$PR_HEAD" ] && [ "$PR_BASE" ] && [ "$PR_BASE_SHA" ]; then
+          if [ "$PR_HEAD" ] && [ "$PR_BASE" ] && [ "$PR_BASE_SHA" ] && [ "$PR_NUMBER" ]; then
             # Upload PR branch results if available.
             bencher run \
               --branch "$PR_HEAD" \
