@@ -34,6 +34,10 @@ jobs:
           name: ${{ env.PR_EVENT }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - run: |
+          ls -lt
+          cat event.json
+
       - name: Export PR event data
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
@@ -50,33 +54,7 @@ jobs:
         run: |
           BENCHER_TESTBED=$(cat testbed.txt)
 
-          # Upload PR branch results
-          bencher run \
-            --branch "$PR_HEAD" \
-            --start-point "$PR_BASE" \
-            --start-point-hash "$PR_BASE_SHA" \
-            --start-point-clone-thresholds \
-            --start-point-reset \
-            --err \
-            --adapter rust_criterion \
-            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            --ci-number "$PR_NUMBER" \
-            --file "neqo/target/criterion"
-          for file in hyperfine/*.json; do
-            bencher run \
-              --branch "$PR_HEAD" \
-              --start-point "$PR_BASE" \
-              --start-point-hash "$PR_BASE_SHA" \
-              --start-point-clone-thresholds \
-              --start-point-reset \
-              --err \
-              --adapter shell_hyperfine \
-              --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-              --ci-number "$PR_NUMBER" \
-              --file "$file"
-          done
-
-          # Now upload main branch results
+          # Always upload main branch results.
           bencher run \
             --branch main \
             --testbed "$BENCHER_TESTBED" \
@@ -103,3 +81,31 @@ jobs:
               --github-actions '${{ secrets.GITHUB_TOKEN }}' \
               --file "$file"
           done
+
+          if [ "$PR_HEAD" && "PR_BASE" && "PR_BASE_SHA" ]; then
+            # Upload PR branch results if available.
+            bencher run \
+              --branch "$PR_HEAD" \
+              --start-point "$PR_BASE" \
+              --start-point-hash "$PR_BASE_SHA" \
+              --start-point-clone-thresholds \
+              --start-point-reset \
+              --err \
+              --adapter rust_criterion \
+              --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+              --ci-number "$PR_NUMBER" \
+              --file "neqo/target/criterion"
+            for file in hyperfine/*.json; do
+              bencher run \
+                --branch "$PR_HEAD" \
+                --start-point "$PR_BASE" \
+                --start-point-hash "$PR_BASE_SHA" \
+                --start-point-clone-thresholds \
+                --start-point-reset \
+                --err \
+                --adapter shell_hyperfine \
+                --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+                --ci-number "$PR_NUMBER" \
+                --file "$file"
+            done
+          fi
