@@ -57,7 +57,6 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: google/quiche
-          ref: 23785904d54861f341ffef0ce5513b6c0a5beebc # TODO: Unpin when `main` compiles again.
           path: google-quiche
           submodules: 'recursive'
           persist-credentials: false
