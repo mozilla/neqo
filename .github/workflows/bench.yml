@@ -189,6 +189,7 @@ jobs:
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
       - name: Compare QUIC implementations
+        if: false
         env:
           HOST: 127.0.0.1
           PORT: 4433
