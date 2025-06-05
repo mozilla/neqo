@@ -57,7 +57,7 @@ jobs:
           for file in hyperfine-main/*.json; do
             bencher run \
               --branch main \
-              --testbed "$BENCHER_TESTBED" \
+              --testbed "$(cat testbed.txt)" \
               --threshold-measure latency \
               --threshold-test t_test \
               --threshold-max-sample-size 64 \
@@ -74,6 +74,7 @@ jobs:
         run: |
           bencher run \
             --branch "$PR_HEAD" \
+            --testbed "$(cat testbed.txt)" \
             --start-point "$PR_BASE" \
             --start-point-hash "$PR_BASE_SHA" \
             --start-point-clone-thresholds \
@@ -86,6 +87,7 @@ jobs:
           for file in hyperfine/*.json; do
             bencher run \
               --branch "$PR_HEAD" \
+              --testbed "$(cat testbed.txt)" \
               --start-point "$PR_BASE" \
               --start-point-hash "$PR_BASE_SHA" \
               --start-point-clone-thresholds \
