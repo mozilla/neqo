@@ -7,6 +7,7 @@
 use std::{
     cell::RefCell,
     cmp::{max, min},
+    fmt::{self, Display, Formatter},
     mem,
     ops::{Index, IndexMut, Range},
     rc::Rc,
@@ -57,9 +58,9 @@ thread_local!(pub static OVERWRITE_INVOCATIONS: RefCell<Option<PacketNumber>> = 
 pub struct Crypto {
     version: Version,
     protocols: Vec<String>,
-    pub(crate) tls: Agent,
-    pub(crate) streams: CryptoStreams,
-    pub(crate) states: CryptoStates,
+    tls: Agent,
+    streams: CryptoStreams,
+    states: CryptoStates,
 }
 
 type TpHandler = Rc<RefCell<TransportParametersHandler>>;
@@ -130,20 +131,15 @@ impl Crypto {
     }
 
     /// Get the set of enabled protocols.
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     pub fn protocols(&self) -> &[String] {
         &self.protocols
     }
 
-    pub fn server_enable_0rtt(
+    pub fn server_enable_0rtt<Z: ZeroRttChecker + 'static>(
         &mut self,
         tphandler: TpHandler,
         anti_replay: &AntiReplay,
-        zero_rtt_checker: impl ZeroRttChecker + 'static,
+        zero_rtt_checker: Z,
     ) -> Res<()> {
         if let Agent::Server(s) = &mut self.tls {
             Ok(s.enable_0rtt(
@@ -171,7 +167,7 @@ impl Crypto {
         }
     }
 
-    pub fn client_enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
+    pub fn client_enable_ech<A: AsRef<[u8]>>(&mut self, ech_config_list: A) -> Res<()> {
         if let Agent::Client(c) = &mut self.tls {
             c.enable_ech(ech_config_list)?;
             Ok(())
@@ -211,7 +207,7 @@ impl Crypto {
                 Err(self
                     .tls
                     .alert()
-                    .map_or(Error::CryptoError(e), |a| Error::CryptoAlert(*a)))
+                    .map_or(Error::CryptoError(e), Error::CryptoAlert))
             }
         }
     }
@@ -242,9 +238,10 @@ impl Crypto {
     }
 
     /// Lock in a compatible upgrade.
-    pub fn confirm_version(&mut self, confirmed: Version) {
-        _ = self.states.confirm_version(self.version, confirmed);
+    pub fn confirm_version(&mut self, confirmed: Version) -> Res<()> {
+        self.states.confirm_version(self.version, confirmed)?;
         self.version = confirmed;
+        Ok(())
     }
 
     /// Returns true if new handshake keys were installed.
@@ -395,10 +392,40 @@ impl Crypto {
             unreachable!("It is a server");
         }
     }
+
+    #[must_use]
+    pub fn tls_mut(&mut self) -> &mut Agent {
+        &mut self.tls
+    }
+
+    #[must_use]
+    pub const fn tls(&self) -> &Agent {
+        &self.tls
+    }
+
+    #[must_use]
+    pub const fn streams(&self) -> &CryptoStreams {
+        &self.streams
+    }
+
+    #[must_use]
+    pub fn streams_mut(&mut self) -> &mut CryptoStreams {
+        &mut self.streams
+    }
+
+    #[must_use]
+    pub const fn states(&self) -> &CryptoStates {
+        &self.states
+    }
+
+    #[must_use]
+    pub fn states_mut(&mut self) -> &mut CryptoStates {
+        &mut self.states
+    }
 }
 
-impl ::std::fmt::Display for Crypto {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Crypto {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Crypto")
     }
 }
@@ -711,8 +738,8 @@ impl CryptoDxState {
     }
 }
 
-impl std::fmt::Display for CryptoDxState {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for CryptoDxState {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "epoch {} {:?}", self.epoch, self.direction)
     }
 }
@@ -1320,8 +1347,8 @@ impl CryptoStates {
     }
 }
 
-impl std::fmt::Display for CryptoStates {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for CryptoStates {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "CryptoStates")
     }
 }
@@ -1436,7 +1463,7 @@ impl CryptoStreams {
     }
 
     pub fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
-        self.get_mut(space).is_none_or(|cs| cs.tx.is_empty())
+        self.get_mut(space).map_or(true, |cs| cs.tx.is_empty())
     }
 
     const fn get(&self, space: PacketNumberSpace) -> Option<&CryptoStream> {

@@ -4,6 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(
+    clippy::module_name_repetitions,
+    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
+)]
+
 use enum_map::Enum;
 use neqo_common::qdebug;
 
@@ -12,23 +17,19 @@ use crate::{Error, Res};
 pub type WireVersion = u32;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Enum)]
+#[repr(u32)]
 pub enum Version {
-    Version2,
+    Version2 = 0x6b33_43cf,
     #[default]
-    Version1,
+    Version1 = 1,
     #[cfg(feature = "draft-29")]
-    Draft29,
+    Draft29 = 0xff00_0000 + 29,
 }
 
 impl Version {
     #[must_use]
     pub const fn wire_version(self) -> WireVersion {
-        match self {
-            Self::Version2 => 0x6b33_43cf,
-            Self::Version1 => 1,
-            #[cfg(feature = "draft-29")]
-            Self::Draft29 => 0xff00_0000 + 29,
-        }
+        self as u32
     }
 
     pub(crate) const fn initial_salt(self) -> &'static [u8] {
@@ -114,9 +115,9 @@ impl Version {
         ]
     }
 
-    pub fn compatible<'a>(
+    pub fn compatible<'a, I: IntoIterator<Item = &'a Self>>(
         self,
-        all: impl IntoIterator<Item = &'a Self>,
+        all: I,
     ) -> impl Iterator<Item = &'a Self> {
         all.into_iter().filter(move |&v| self.is_compatible(*v))
     }
@@ -180,11 +181,6 @@ impl VersionConfig {
         self.initial
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     #[must_use]
     pub fn all(&self) -> &[Version] {
         &self.all

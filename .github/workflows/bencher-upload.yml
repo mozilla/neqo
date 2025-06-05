@@ -1,0 +1,108 @@
+name: bencher.dev Upload
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    # SAFETY: We are not running any code from the triggering PR, so this is safe.
+    types: [completed] # zizmor: ignore[dangerous-triggers]
+
+permissions:
+  contents: read
+
+jobs:
+  bencher_upload:
+    # The bench workflow fails when a regression is detected, but we want to upload results regardless.
+    if: (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure')
+    permissions:
+      pull-requests: write
+    runs-on: ubuntu-latest
+    env:
+      BENCHER_PROJECT: ${{ github.event.repository.name }}
+      BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+    steps:
+      - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          EVENT: toJson(github.event)
+        with:
+          script: |
+            let prEvent = JSON.parse(core.importVariable('EVENT'));
+            console.log('PR event:', prEvent);
+
+      - name: Download benchmark results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          name: ${{ github.event.repository.name }}-${{ github.event.workflow_run.head_sha }}-perf
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Export PR event data
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            let fs = require('fs');
+            let prEvent = JSON.parse(fs.readFileSync('event.json', {encoding: 'utf8'}));
+            core.exportVariable("PR_HEAD", prEvent.pull_request.head.ref || '');
+            core.exportVariable("PR_BASE", prEvent.pull_request.base.ref || '');
+            core.exportVariable("PR_BASE_SHA", prEvent.pull_request.base.sha || '');
+            core.exportVariable("PR_NUMBER", prEvent.number || '');
+
+      - uses: bencherdev/bencher@v0.5.1 # zizmor: ignore[unpinned-uses]
+
+      - name: Upload main-branch results to bencher.dev
+        run: |
+          bencher run \
+            --branch main \
+            --testbed "$(cat testbed.txt)" \
+            --threshold-measure latency \
+            --threshold-test t_test \
+            --threshold-max-sample-size 64 \
+            --threshold-upper-boundary 0.99 \
+            --thresholds-reset \
+            --err \
+            --adapter rust_criterion \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            --file "neqo-main/target/criterion"
+          for file in hyperfine-main/*.json; do
+            bencher run \
+              --branch main \
+              --testbed "$(cat testbed.txt)" \
+              --threshold-measure latency \
+              --threshold-test t_test \
+              --threshold-max-sample-size 64 \
+              --threshold-upper-boundary 0.99 \
+              --thresholds-reset \
+              --err \
+              --adapter shell_hyperfine \
+              --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+              --file "$file"
+          done
+
+      - name: Upload PR results to bencher.dev
+        if: env.PR_HEAD != '' && env.PR_BASE != '' && env.PR_BASE_SHA != '' && env.PR_NUMBER != ''
+        run: |
+          bencher run \
+            --branch "$PR_HEAD" \
+            --testbed "$(cat testbed.txt)" \
+            --start-point "$PR_BASE" \
+            --start-point-hash "$PR_BASE_SHA" \
+            --start-point-clone-thresholds \
+            --start-point-reset \
+            --err \
+            --adapter rust_criterion \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            --ci-number "$PR_NUMBER" \
+            --file "neqo/target/criterion"
+          for file in hyperfine/*.json; do
+            bencher run \
+              --branch "$PR_HEAD" \
+              --testbed "$(cat testbed.txt)" \
+              --start-point "$PR_BASE" \
+              --start-point-hash "$PR_BASE_SHA" \
+              --start-point-clone-thresholds \
+              --start-point-reset \
+              --err \
+              --adapter shell_hyperfine \
+              --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+              --ci-number "$PR_NUMBER" \
+              --file "$file"
+          done

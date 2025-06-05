@@ -8,13 +8,21 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use neqo_common::event::Provider as _;
+use neqo_common::{event::Provider as _, IpTosDscp};
 use neqo_crypto::{AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
-    Connection, ConnectionEvent, ConnectionParameters, State,
+    Connection, ConnectionEvent, ConnectionParameters, State, Stats,
 };
 use test_fixture::{default_client, now, CountingConnectionIdGenerator};
+
+/// # Panics
+///
+/// When the count of received packets doesn't match the count of received packets with the
+/// (default) DSCP.
+pub fn assert_dscp(stats: &Stats) {
+    assert_eq!(stats.dscp_rx[IpTosDscp::Cs0], stats.packets_rx);
+}
 
 /// Create a server.  This is different than the one in the fixture, which is a single connection.
 pub fn new_server(params: ConnectionParameters) -> Server {
@@ -82,7 +90,7 @@ pub fn connect(client: &mut Connection, server: &mut Server) -> ConnectionRef {
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_none());
     assert_eq!(*client.state(), State::Confirmed);
-
+    assert_dscp(&client.stats());
     connected_server(server)
 }
 

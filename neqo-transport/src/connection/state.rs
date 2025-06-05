@@ -4,12 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    cmp::{min, Ordering},
-    mem,
-    rc::Rc,
-    time::Instant,
-};
+use std::{cmp::min, rc::Rc, time::Instant};
 
 use neqo_common::Encoder;
 
@@ -18,7 +13,7 @@ use crate::{
     Error,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// The state of the Connection.
 pub enum State {
     /// A newly created connection.
@@ -74,40 +69,6 @@ impl State {
     #[must_use]
     pub const fn closing(&self) -> bool {
         matches!(self, Self::Closing { .. } | Self::Draining { .. })
-    }
-}
-
-// Implement `PartialOrd` so that we can enforce monotonic state progression.
-impl PartialOrd for State {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for State {
-    fn cmp(&self, other: &Self) -> Ordering {
-        if mem::discriminant(self) == mem::discriminant(other) {
-            return Ordering::Equal;
-        }
-        match (self, other) {
-            (Self::Init, _) => Ordering::Less,
-            (_, Self::Init) => Ordering::Greater,
-            (Self::WaitInitial, _) => Ordering::Less,
-            (_, Self::WaitInitial) => Ordering::Greater,
-            (Self::WaitVersion, _) => Ordering::Less,
-            (_, Self::WaitVersion) => Ordering::Greater,
-            (Self::Handshaking, _) => Ordering::Less,
-            (_, Self::Handshaking) => Ordering::Greater,
-            (Self::Connected, _) => Ordering::Less,
-            (_, Self::Connected) => Ordering::Greater,
-            (Self::Confirmed, _) => Ordering::Less,
-            (_, Self::Confirmed) => Ordering::Greater,
-            (Self::Closing { .. }, _) => Ordering::Less,
-            (_, Self::Closing { .. }) => Ordering::Greater,
-            (Self::Draining { .. }, _) => Ordering::Less,
-            (_, Self::Draining { .. }) => Ordering::Greater,
-            (Self::Closed(_), _) => unreachable!(),
-        }
     }
 }
 
@@ -223,24 +184,24 @@ impl StateSignaling {
         })
     }
 
-    pub fn close(
+    pub fn close<A: AsRef<str>>(
         &mut self,
         path: PathRef,
         error: CloseReason,
         frame_type: FrameType,
-        message: impl AsRef<str>,
+        message: A,
     ) {
         if !matches!(self, Self::Reset) {
             *self = Self::Closing(ClosingFrame::new(path, error, frame_type, message));
         }
     }
 
-    pub fn drain(
+    pub fn drain<A: AsRef<str>>(
         &mut self,
         path: PathRef,
         error: CloseReason,
         frame_type: FrameType,
-        message: impl AsRef<str>,
+        message: A,
     ) {
         if !matches!(self, Self::Reset) {
             *self = Self::Draining(ClosingFrame::new(path, error, frame_type, message));

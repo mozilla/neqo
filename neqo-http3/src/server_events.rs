@@ -7,6 +7,7 @@
 use std::{
     cell::RefCell,
     collections::VecDeque,
+    fmt::{self, Display, Formatter},
     ops::{Deref, DerefMut},
     rc::Rc,
 };
@@ -30,8 +31,8 @@ pub struct StreamHandler {
     pub stream_info: Http3StreamInfo,
 }
 
-impl ::std::fmt::Display for StreamHandler {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for StreamHandler {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let conn: &Connection = &self.conn.borrow();
         write!(f, "conn={conn} stream_info={:?}", self.stream_info)
     }
@@ -50,8 +51,6 @@ impl PartialEq for StreamHandler {
         self.conn == other.conn && self.stream_info.stream_id() == other.stream_info.stream_id()
     }
 }
-
-impl Eq for StreamHandler {}
 
 impl StreamHandler {
     pub const fn stream_id(&self) -> StreamId {
@@ -160,8 +159,8 @@ pub struct Http3OrWebTransportStream {
     stream_handler: StreamHandler,
 }
 
-impl ::std::fmt::Display for Http3OrWebTransportStream {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Http3OrWebTransportStream {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Stream server {:?}", self.stream_handler)
     }
 }
@@ -244,8 +243,8 @@ pub struct WebTransportRequest {
     stream_handler: StreamHandler,
 }
 
-impl ::std::fmt::Display for WebTransportRequest {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for WebTransportRequest {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "WebTransport session {}", self.stream_handler)
     }
 }
@@ -340,7 +339,7 @@ impl WebTransportRequest {
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
-    pub fn send_datagram(&self, buf: &[u8], id: impl Into<DatagramTracking>) -> Res<()> {
+    pub fn send_datagram<I: Into<DatagramTracking>>(&self, buf: &[u8], id: I) -> Res<()> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
             .handler
@@ -404,8 +403,6 @@ impl PartialEq for WebTransportRequest {
         self.stream_handler == other.stream_handler
     }
 }
-
-impl Eq for WebTransportRequest {}
 
 #[derive(Debug, Clone)]
 pub enum WebTransportServerEvent {

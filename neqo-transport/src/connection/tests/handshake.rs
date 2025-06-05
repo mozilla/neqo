@@ -18,7 +18,8 @@ use neqo_crypto::{
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
 use test_fixture::{
-    assertions, assertions::assert_coalesced_0rtt, fixture_init, now, split_datagram, DEFAULT_ADDR,
+    assertions, assertions::assert_coalesced_0rtt, damage_ech_config, fixture_init, now,
+    split_datagram, DEFAULT_ADDR,
 };
 
 use super::{
@@ -29,7 +30,7 @@ use super::{
 };
 use crate::{
     connection::{
-        tests::{new_client, new_server},
+        tests::{exchange_ticket, new_client, new_server},
         AddressValidation,
     },
     events::ConnectionEvent,
@@ -346,8 +347,11 @@ fn reorder_05rtt() {
 
     // We can't use the standard facility to complete the handshake, so
     // drive it as aggressively as possible.
+    assert_eq!(client.stats().saved_datagrams, 0);
+    assert_eq!(client.stats().packets_rx, 0);
     client.process_input(s2, now());
     assert_eq!(client.stats().saved_datagrams, 1);
+    assert_eq!(client.stats().packets_rx, 0);
 
     // After processing the first packet, the client should go back and
     // process the 0.5-RTT packet data, which should make data available.
@@ -492,7 +496,7 @@ fn coalesce_05rtt() {
     drop(client.process(s2, now).dgram());
     // This packet will contain an ACK, but we can ignore it.
     assert_eq!(client.stats().dropped_rx, 0);
-    assert_eq!(client.stats().packets_rx, 4);
+    assert_eq!(client.stats().packets_rx, 3);
     assert_eq!(client.stats().saved_datagrams, 1);
 
     // After (successful) authentication, the packet is processed.
@@ -500,7 +504,7 @@ fn coalesce_05rtt() {
     let c3 = client.process_output(now).dgram();
     assert!(c3.is_some());
     assert_eq!(client.stats().dropped_rx, 0); // No Initial padding.
-    assert_eq!(client.stats().packets_rx, 5);
+    assert_eq!(client.stats().packets_rx, 4);
     assert_eq!(client.stats().saved_datagrams, 1);
     assert!(client.stats().frame_rx.padding > 0); // Padding uses frames.
 
@@ -548,7 +552,7 @@ fn reorder_handshake() {
     let dgram = client.process(s_hs, now).dgram();
     assertions::assert_initial(dgram.as_ref().unwrap(), false);
     assert_eq!(client.stats().saved_datagrams, 1);
-    assert_eq!(client.stats().packets_rx, 2);
+    assert_eq!(client.stats().packets_rx, 1);
 
     // Get the server to try again.
     // Though we currently allow the server to arm its PTO timer, use
@@ -566,11 +570,11 @@ fn reorder_handshake() {
     now += RTT / 2;
     client.process_input(s_hs.unwrap(), now);
     assert_eq!(client.stats().saved_datagrams, 2);
-    assert_eq!(client.stats().packets_rx, 3);
+    assert_eq!(client.stats().packets_rx, 1);
 
     client.process_input(s_init, now);
     // Each saved packet should now be "received" again.
-    assert_eq!(client.stats().packets_rx, 8);
+    assert_eq!(client.stats().packets_rx, 6);
     maybe_authenticate(&mut client);
     let c3 = client.process_output(now).dgram();
     assert!(c3.is_some());
@@ -627,15 +631,16 @@ fn reorder_1rtt() {
     }
     // The server has now received those packets, and saved them.
     // The six extra received are Initial + the junk we use for padding.
-    assert_eq!(server.stats().packets_rx, PACKETS + 6);
+    assert_eq!(server.stats().packets_rx, PACKETS + 2);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
     assert_eq!(server.stats().dropped_rx, 3);
 
     now += RTT / 2;
     let s2 = server.process(c2, now).dgram();
     // The server has now received those packets, and saved them.
-    // The two additional are a Handshake and a 1-RTT (w/ NEW_CONNECTION_ID).
-    assert_eq!(server.stats().packets_rx, PACKETS * 2 + 8);
+    // The two additional are an Initial w/ACK, a Handshake w/ACK and a 1-RTT (w/
+    // NEW_CONNECTION_ID).
+    assert_eq!(server.stats().packets_rx, PACKETS * 2 + 5);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
     assert_eq!(server.stats().dropped_rx, 3);
     assert_eq!(*server.state(), State::Confirmed);
@@ -865,9 +870,9 @@ fn anti_amplification() {
     let ack = client.process(Some(s_init3), now).dgram().unwrap();
     assert!(!maybe_authenticate(&mut client)); // No need yet.
 
-    // The client sends a padded datagram, with just ACK for Handshake.
-    assert_eq!(client.stats().frame_tx.ack, ack_count + 1);
-    assert_eq!(client.stats().frame_tx.all(), frame_count + 1);
+    // The client sends a padded datagram, with just ACKs for Initial and Handshake.
+    assert_eq!(client.stats().frame_tx.ack, ack_count + 2);
+    assert_eq!(client.stats().frame_tx.all(), frame_count + 2);
     assert_ne!(ack.len(), client.plpmtu()); // Not padded (it includes Handshake).
 
     now += DEFAULT_RTT / 2;
@@ -974,17 +979,6 @@ fn ech() {
     assert!(server.tls_preinfo().unwrap().ech_accepted().unwrap());
 }
 
-fn damaged_ech_config(config: &[u8]) -> Vec<u8> {
-    let mut cfg = Vec::from(config);
-    // Ensure that the version and config_id is correct.
-    assert_eq!(cfg[2], 0xfe);
-    assert_eq!(cfg[3], 0x0d);
-    assert_eq!(cfg[6], ECH_CONFIG_ID);
-    // Change the config_id so that the server doesn't recognize it.
-    cfg[6] ^= 0x94;
-    cfg
-}
-
 #[test]
 fn ech_retry() {
     fixture_init();
@@ -996,7 +990,7 @@ fn ech_retry() {
 
     let mut client = default_client();
     client
-        .client_enable_ech(damaged_ech_config(server.ech_config()))
+        .client_enable_ech(damage_ech_config(server.ech_config()))
         .unwrap();
 
     let dgram = client.process_output(now()).dgram();
@@ -1055,7 +1049,7 @@ fn ech_retry_fallback_rejected() {
 
     let mut client = default_client();
     client
-        .client_enable_ech(damaged_ech_config(server.ech_config()))
+        .client_enable_ech(damage_ech_config(server.ech_config()))
         .unwrap();
 
     let dgram = client.process_output(now()).dgram();
@@ -1137,25 +1131,24 @@ fn only_server_initial() {
     let (initial, handshake) = split_datagram(&server_dgram1.unwrap());
     assert!(handshake.is_some());
 
-    // The client will not acknowledge the Initial as it discards keys.
-    // It sends a Handshake probe instead, containing just a PING frame.
-    assert_eq!(client.stats().frame_tx.ping, 0);
+    // The client sends an Initial ACK.
+    assert_eq!(client.stats().frame_tx.ack, 1);
     let probe = client.process(Some(initial), now).dgram();
-    assertions::assert_handshake(&probe.unwrap());
+    assertions::assert_initial(&probe.unwrap(), false);
     assert_eq!(client.stats().dropped_rx, 0);
-    assert_eq!(client.stats().frame_tx.ping, 1);
+    assert_eq!(client.stats().frame_tx.ack, 2);
 
     let (initial, handshake) = split_datagram(&server_dgram2.unwrap());
     assert!(handshake.is_some());
 
-    // The same happens after a PTO, even though the client will discard the Initial packet.
+    // The same happens after a PTO.
     now += AT_LEAST_PTO;
-    assert_eq!(client.stats().frame_tx.ping, 1);
+    assert_eq!(client.stats().frame_tx.ack, 2);
     let discarded = client.stats().dropped_rx;
     let probe = client.process(Some(initial), now).dgram();
-    assertions::assert_handshake(&probe.unwrap());
-    assert_eq!(client.stats().frame_tx.ping, 2);
-    assert_eq!(client.stats().dropped_rx, discarded + 1);
+    assertions::assert_initial(&probe.unwrap(), false);
+    assert_eq!(client.stats().frame_tx.ack, 3);
+    assert_eq!(client.stats().dropped_rx, discarded);
 
     // Pass the Handshake packet and complete the handshake.
     client.process_input(handshake.unwrap(), now);
@@ -1234,7 +1227,9 @@ fn implicit_rtt_server() {
     let dgram = server.process(dgram, now).dgram();
     now += RTT / 2;
     let dgram = client.process(dgram, now).dgram();
-    assertions::assert_handshake(dgram.as_ref().unwrap());
+    let (initial, handshake) = split_datagram(dgram.as_ref().unwrap());
+    assertions::assert_initial(&initial, false);
+    assertions::assert_handshake(handshake.as_ref().unwrap());
     now += RTT / 2;
     server.process_input(dgram.unwrap(), now);
 
@@ -1370,7 +1365,7 @@ fn grease_quic_bit_transport_parameter() {
     fn get_remote_tp(conn: &Connection) -> bool {
         conn.tps
             .borrow()
-            .remote
+            .remote_handshake()
             .as_ref()
             .unwrap()
             .get_empty(GreaseQuicBit)
@@ -1387,4 +1382,39 @@ fn grease_quic_bit_transport_parameter() {
             assert_eq!(server_grease, get_remote_tp(&client));
         }
     }
+}
+
+#[test]
+fn zero_rtt_with_ech() {
+    let mut server = default_server();
+    let (sk, pk) = generate_ech_keys().unwrap();
+    server
+        .server_enable_ech(ECH_CONFIG_ID, ECH_PUBLIC_NAME, &sk, &pk)
+        .unwrap();
+
+    let mut client = default_client();
+    client.client_enable_ech(server.ech_config()).unwrap();
+
+    connect(&mut client, &mut server);
+
+    assert!(client.tls_info().unwrap().ech_accepted());
+    assert!(server.tls_info().unwrap().ech_accepted());
+
+    let token = exchange_ticket(&mut client, &mut server, now());
+    let mut client = default_client();
+    client.client_enable_ech(server.ech_config()).unwrap();
+    client
+        .enable_resumption(now(), token)
+        .expect("should set token");
+
+    let mut server = resumed_server(&client);
+    server
+        .server_enable_ech(ECH_CONFIG_ID, ECH_PUBLIC_NAME, &sk, &pk)
+        .unwrap();
+
+    connect(&mut client, &mut server);
+    assert!(client.tls_info().unwrap().ech_accepted());
+    assert!(server.tls_info().unwrap().ech_accepted());
+    assert!(client.tls_info().unwrap().early_data_accepted());
+    assert!(server.tls_info().unwrap().early_data_accepted());
 }

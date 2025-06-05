@@ -4,6 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(
+    clippy::module_name_repetitions,
+    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
+)]
+
 use std::{
     cell::RefCell,
     fmt::{self, Display},
@@ -36,12 +41,12 @@ impl NeqoQlog {
     /// # Errors
     ///
     /// Will return `qlog::Error` if it cannot write to the new file.
-    pub fn enabled_with_file(
+    pub fn enabled_with_file<D: Display>(
         mut qlog_path: PathBuf,
         role: Role,
         title: Option<String>,
         description: Option<String>,
-        file_prefix: impl Display,
+        file_prefix: D,
     ) -> Result<Self, qlog::Error> {
         qlog_path.push(format!("{file_prefix}.sqlog"));
 

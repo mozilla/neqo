@@ -45,7 +45,6 @@ jobs:
         with:
           version: nightly
           components: rust-src
-          tools: cargo-nextest
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -79,11 +78,11 @@ jobs:
             PWD=$(pwd)
             export LSAN_OPTIONS="suppressions=$PWD/suppressions.txt"
           fi
-          cargo nextest run --locked -Z build-std --features ci --profile ci --target "$TARGET"
+          cargo test --locked -Z build-std --features ci --target "$TARGET"
 
       - name: Save simulation seeds artifact
         if: ${{ env.DUMP_SIMULATION_SEEDS }}
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: simulation-seeds-${{ matrix.os }}-sanitizer-${{ matrix.sanitizer }}
           path: ${{ env.DUMP_SIMULATION_SEEDS }}

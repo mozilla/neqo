@@ -5,6 +5,12 @@
 // except according to those terms.
 
 // Encoding and decoding packets off the wire.
+
+#![allow(
+    clippy::module_name_repetitions,
+    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
+)]
+
 use std::{
     cmp::min,
     fmt,
@@ -12,14 +18,17 @@ use std::{
     time::Instant,
 };
 
+use enum_map::Enum;
 use neqo_common::{hex, hex_with_len, qtrace, qwarn, Decoder, Encoder};
 use neqo_crypto::random;
+use strum::{EnumIter, FromRepr};
 
 use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
     crypto::{CryptoDxState, CryptoStates, Epoch},
     frame::FrameType,
     recovery::SendProfile,
+    tracking::PacketNumberSpace,
     version::{Version, WireVersion},
     Error, Pmtud, Res,
 };
@@ -48,53 +57,50 @@ pub use metadata::MetaData;
 
 pub type PacketNumber = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, EnumIter, FromRepr)]
+#[repr(u8)]
 pub enum PacketType {
-    VersionNegotiation,
-    Initial,
-    Handshake,
-    ZeroRtt,
-    Retry,
+    Initial = 0,
+    ZeroRtt = 1,
+    Handshake = 2,
+    Retry = 3,
     Short,
     OtherVersion,
+    VersionNegotiation,
 }
 
 impl PacketType {
     #[must_use]
     fn from_byte(t: u8, v: Version) -> Self {
         // Version2 adds one to the type, modulo 4
-        match t.wrapping_sub(u8::from(v == Version::Version2)) & 3 {
-            0 => Self::Initial,
-            1 => Self::ZeroRtt,
-            2 => Self::Handshake,
-            3 => Self::Retry,
-            _ => panic!("packet type out of range"),
-        }
+        Self::from_repr(t.wrapping_sub(u8::from(v == Version::Version2)) & 3)
+            .expect("packet type in range")
     }
 
     #[must_use]
     fn to_byte(self, v: Version) -> u8 {
-        let t = match self {
-            Self::Initial => 0,
-            Self::ZeroRtt => 1,
-            Self::Handshake => 2,
-            Self::Retry => 3,
-            _ => panic!("not a long header packet type"),
-        };
+        assert!(
+            matches!(
+                self,
+                Self::Initial | Self::ZeroRtt | Self::Handshake | Self::Retry
+            ),
+            "is a long header packet type"
+        );
         // Version2 adds one to the type, modulo 4
-        (t + u8::from(v == Version::Version2)) & 3
+        (self as u8 + u8::from(v == Version::Version2)) & 3
     }
 }
 
-#[expect(clippy::fallible_impl_from, reason = "TODO: Use strum.")]
-impl From<PacketType> for Epoch {
-    fn from(v: PacketType) -> Self {
+impl TryFrom<PacketType> for Epoch {
+    type Error = Error;
+
+    fn try_from(v: PacketType) -> Res<Self> {
         match v {
-            PacketType::Initial => Self::Initial,
-            PacketType::ZeroRtt => Self::ZeroRtt,
-            PacketType::Handshake => Self::Handshake,
-            PacketType::Short => Self::ApplicationData,
-            _ => panic!("shouldn't be here"),
+            PacketType::Initial => Ok(Self::Initial),
+            PacketType::ZeroRtt => Ok(Self::ZeroRtt),
+            PacketType::Handshake => Ok(Self::Handshake),
+            PacketType::Short => Ok(Self::ApplicationData),
+            _ => Err(Error::InvalidPacket),
         }
     }
 }
@@ -106,6 +112,16 @@ impl From<Epoch> for PacketType {
             Epoch::ZeroRtt => Self::ZeroRtt,
             Epoch::Handshake => Self::Handshake,
             Epoch::ApplicationData => Self::Short,
+        }
+    }
+}
+
+impl From<PacketNumberSpace> for PacketType {
+    fn from(space: PacketNumberSpace) -> Self {
+        match space {
+            PacketNumberSpace::Initial => Self::Initial,
+            PacketNumberSpace::Handshake => Self::Handshake,
+            PacketNumberSpace::ApplicationData => Self::Short,
         }
     }
 }
@@ -152,7 +168,7 @@ impl PacketBuilder {
     ///
     /// If, after calling this method, `remaining()` returns 0, then call `abort()` to get
     /// the encoder back.
-    pub fn short(mut encoder: Encoder, key_phase: bool, dcid: Option<impl AsRef<[u8]>>) -> Self {
+    pub fn short<A: AsRef<[u8]>>(mut encoder: Encoder, key_phase: bool, dcid: Option<A>) -> Self {
         let mut limit = Self::infer_limit(&encoder);
         let header_start = encoder.len();
         // Check that there is enough space for the header.
@@ -187,12 +203,12 @@ impl PacketBuilder {
     /// even if the token is empty.
     ///
     /// See `short()` for more on how to handle this in cases where there is no space.
-    pub fn long(
+    pub fn long<A: AsRef<[u8]>, A1: AsRef<[u8]>>(
         mut encoder: Encoder,
         pt: PacketType,
         version: Version,
-        mut dcid: Option<impl AsRef<[u8]>>,
-        mut scid: Option<impl AsRef<[u8]>>,
+        mut dcid: Option<A>,
+        mut scid: Option<A1>,
     ) -> Self {
         let mut limit = Self::infer_limit(&encoder);
         let header_start = encoder.len();
@@ -410,13 +426,11 @@ impl PacketBuilder {
             self.write_len(crypto.expansion());
         }
 
-        let hdr = &self.encoder.as_ref()[self.header.clone()];
-        let body = &self.encoder.as_ref()[self.header.end..];
         qtrace!(
             "Packet build pn={} hdr={} body={}",
             self.pn,
-            hex(hdr),
-            hex(body)
+            hex(&self.encoder.as_ref()[self.header.clone()]),
+            hex(&self.encoder.as_ref()[self.header.end..])
         );
 
         // Add space for crypto expansion.
@@ -756,11 +770,6 @@ impl<'a> PublicPacket<'a> {
             .as_cid_ref()
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     #[must_use]
     pub fn token(&self) -> &[u8] {
         &self.token
@@ -768,7 +777,7 @@ impl<'a> PublicPacket<'a> {
 
     #[must_use]
     pub fn version(&self) -> Option<Version> {
-        self.version.and_then(|v| Version::try_from(v).ok())
+        Version::try_from(self.version?).ok()
     }
 
     #[must_use]
@@ -866,7 +875,7 @@ impl<'a> PublicPacket<'a> {
         crypto: &mut CryptoStates,
         release_at: Instant,
     ) -> Res<DecryptedPacket> {
-        let epoch: Epoch = self.packet_type.into();
+        let epoch: Epoch = self.packet_type.try_into()?;
         // When we don't have a version, the crypto code doesn't need a version
         // for lookup, so use the default, but fix it up if decryption succeeds.
         let version = self.version().unwrap_or_default();

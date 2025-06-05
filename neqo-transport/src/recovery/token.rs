@@ -58,4 +58,6 @@ pub enum RecoveryToken {
     RetireConnectionId(u64),
     AckFrequency(AckRate),
     Datagram(DatagramTracking),
+    /// A packet marked with [`neqo_common::IpTosEcn::Ect0`].
+    EcnEct0,
 }

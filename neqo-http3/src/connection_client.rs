@@ -6,7 +6,7 @@
 
 use std::{
     cell::RefCell,
-    fmt::{Debug, Display},
+    fmt::{self, Debug, Display, Formatter},
     iter,
     net::SocketAddr,
     rc::Rc,
@@ -286,7 +286,7 @@ pub struct Http3Client {
 }
 
 impl Display for Http3Client {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Http3 client")
     }
 }
@@ -296,8 +296,8 @@ impl Http3Client {
     ///
     /// Making a `neqo-transport::connection` may produce an error. This can only be a crypto error
     /// if the crypto context can't be created or configured.
-    pub fn new(
-        server_name: impl Into<String>,
+    pub fn new<I: Into<String>>(
+        server_name: I,
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
@@ -352,7 +352,7 @@ impl Http3Client {
     /// The function returns the current state of the connection.
     #[must_use]
     pub fn state(&self) -> Http3State {
-        self.base_handler.state()
+        self.base_handler.state().clone()
     }
 
     #[must_use]
@@ -384,7 +384,7 @@ impl Http3Client {
     /// # Errors
     ///
     /// Fails when the configuration provided is bad.
-    pub fn enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
+    pub fn enable_ech<A: AsRef<[u8]>>(&mut self, ech_config_list: A) -> Res<()> {
         self.conn.client_enable_ech(ech_config_list)?;
         Ok(())
     }
@@ -422,9 +422,8 @@ impl Http3Client {
     /// connection the HTTP/3 setting will be decoded and used until the setting are received from
     /// the server.
     pub fn take_resumption_token(&mut self, now: Instant) -> Option<ResumptionToken> {
-        self.conn
-            .take_resumption_token(now)
-            .and_then(|t| self.encode_resumption_token(&t))
+        let t = self.conn.take_resumption_token(now)?;
+        self.encode_resumption_token(&t)
     }
 
     /// This may be call if an application has a resumption token. This must be called before
@@ -440,8 +439,8 @@ impl Http3Client {
     /// # Panics
     ///
     /// On closing if the base handler can't handle it (debug only).
-    pub fn enable_resumption(&mut self, now: Instant, token: impl AsRef<[u8]>) -> Res<()> {
-        if self.base_handler.state != Http3State::Initializing {
+    pub fn enable_resumption<A: AsRef<[u8]>>(&mut self, now: Instant, token: A) -> Res<()> {
+        if self.base_handler.state() != &Http3State::Initializing {
             return Err(Error::InvalidState);
         }
         let mut dec = Decoder::from(token.as_ref());
@@ -470,7 +469,7 @@ impl Http3Client {
             self.base_handler
                 .set_0rtt_settings(&mut self.conn, settings)?;
             self.events
-                .connection_state_change(self.base_handler.state());
+                .connection_state_change(self.base_handler.state().clone());
             self.push_handler
                 .borrow_mut()
                 .maybe_send_max_push_id_frame(&mut self.base_handler);
@@ -485,14 +484,14 @@ impl Http3Client {
     {
         qinfo!("[{self}] Close the connection error={error} msg={msg}");
         if !matches!(
-            self.base_handler.state,
+            self.base_handler.state(),
             Http3State::Closing(_) | Http3State::Closed(_)
         ) {
             self.push_handler.borrow_mut().clear();
             self.conn.close(now, error, msg);
             self.base_handler.close(error);
             self.events
-                .connection_state_change(self.base_handler.state());
+                .connection_state_change(self.base_handler.state().clone());
         }
     }
 
@@ -623,7 +622,7 @@ impl Http3Client {
             buf.len()
         );
         self.base_handler
-            .send_streams
+            .send_streams_mut()
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .send_data(&mut self.conn, buf)
@@ -761,11 +760,11 @@ impl Http3Client {
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
-    pub fn webtransport_send_datagram(
+    pub fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         session_id: StreamId,
         buf: &[u8],
-        id: impl Into<DatagramTracking>,
+        id: I,
     ) -> Res<()> {
         qtrace!("webtransport_send_datagram session:{session_id:?}");
         self.base_handler
@@ -822,7 +821,7 @@ impl Http3Client {
     /// `InvalidStreamId` if the stream does not exist.
     pub fn webtransport_send_stream_stats(&mut self, stream_id: StreamId) -> Res<SendStreamStats> {
         self.base_handler
-            .send_streams
+            .send_streams_mut()
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .stats(&mut self.conn)
@@ -835,16 +834,16 @@ impl Http3Client {
     /// `InvalidStreamId` if the stream does not exist.
     pub fn webtransport_recv_stream_stats(&mut self, stream_id: StreamId) -> Res<RecvStreamStats> {
         self.base_handler
-            .recv_streams
+            .recv_streams_mut()
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .stats(&mut self.conn)
     }
 
     /// This function combines  `process_input` and `process_output` function.
-    pub fn process(
+    pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
-        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
         qtrace!("[{self}] Process");
@@ -864,13 +863,20 @@ impl Http3Client {
     /// packets need to be sent or if a timer needs to be updated.
     ///
     /// [1]: ../neqo_transport/enum.ConnectionEvent.html
-    pub fn process_input(&mut self, dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>, now: Instant) {
+    pub fn process_input<A: AsRef<[u8]> + AsMut<[u8]>>(
+        &mut self,
+        dgram: Datagram<A>,
+        now: Instant,
+    ) {
         self.process_multiple_input(iter::once(dgram), now);
     }
 
-    pub fn process_multiple_input(
+    pub fn process_multiple_input<
+        A: AsRef<[u8]> + AsMut<[u8]>,
+        I: IntoIterator<Item = Datagram<A>>,
+    >(
         &mut self,
-        dgrams: impl IntoIterator<Item = Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        dgrams: I,
         now: Instant,
     ) {
         let mut dgrams = dgrams.into_iter().peekable();
@@ -1000,7 +1006,7 @@ impl Http3Client {
                     self.base_handler.add_new_stream(stream_id);
                 }
                 ConnectionEvent::SendStreamWritable { stream_id } => {
-                    if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id) {
+                    if let Some(s) = self.base_handler.send_streams_mut().get_mut(&stream_id) {
                         s.stream_writable();
                     }
                 }
@@ -1035,7 +1041,7 @@ impl Http3Client {
                         .handle_state_change(&mut self.conn, &state)?
                     {
                         self.events
-                            .connection_state_change(self.base_handler.state());
+                            .connection_state_change(self.base_handler.state().clone());
                     }
                 }
                 ConnectionEvent::ZeroRttRejected => {
@@ -1156,7 +1162,7 @@ impl Http3Client {
                     stream_id,
                     first_frame_type: None,
                 },
-                Rc::clone(&self.base_handler.qpack_decoder),
+                Rc::clone(self.base_handler.qpack_decoder()),
                 Box::new(RecvPushEvents::new(push_id, Rc::clone(&self.push_handler))),
                 None,
                 // TODO: think about the right priority for the push streams.
@@ -1177,9 +1183,10 @@ impl Http3Client {
             return Err(Error::HttpId);
         }
 
-        match self.base_handler.state {
+        match self.base_handler.state_mut() {
             Http3State::Connected => {
-                self.base_handler.state = Http3State::GoingAway(goaway_stream_id);
+                self.base_handler
+                    .set_state(Http3State::GoingAway(goaway_stream_id));
             }
             Http3State::GoingAway(ref mut stream_id) => {
                 if goaway_stream_id > *stream_id {
@@ -1194,7 +1201,7 @@ impl Http3Client {
         // Issue reset events for streams >= goaway stream id
         let send_ids: Vec<StreamId> = self
             .base_handler
-            .send_streams
+            .send_streams()
             .iter()
             .filter_map(id_gte(goaway_stream_id))
             .collect();
@@ -1209,7 +1216,7 @@ impl Http3Client {
 
         let recv_ids: Vec<StreamId> = self
             .base_handler
-            .recv_streams
+            .recv_streams()
             .iter()
             .filter_map(id_gte(goaway_stream_id))
             .collect();
@@ -1240,12 +1247,12 @@ impl Http3Client {
 
     #[must_use]
     pub fn qpack_decoder_stats(&self) -> QpackStats {
-        self.base_handler.qpack_decoder.borrow().stats()
+        self.base_handler.qpack_decoder().borrow().stats()
     }
 
     #[must_use]
     pub fn qpack_encoder_stats(&self) -> QpackStats {
-        self.base_handler.qpack_encoder.borrow().stats()
+        self.base_handler.qpack_encoder().borrow().stats()
     }
 
     #[must_use]
@@ -1284,7 +1291,7 @@ mod tests {
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::{
         CloseReason, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
-        Version, MIN_INITIAL_PACKET_SIZE, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
+        Version, INITIAL_RECV_WINDOW_SIZE, MIN_INITIAL_PACKET_SIZE,
     };
     use test_fixture::{
         anti_replay, default_server_h3, fixture_init, new_server, now,
@@ -2739,7 +2746,7 @@ mod tests {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read the DATA frame.
-                    let mut buf = vec![1_u8; RECV_BUFFER_SIZE];
+                    let mut buf = vec![1_u8; INITIAL_RECV_WINDOW_SIZE];
                     let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
                     assert!(fin);
                     assert_eq!(
@@ -2812,7 +2819,7 @@ mod tests {
         assert_eq!(sent, Ok(first_frame.len()));
 
         // The second frame cannot fit.
-        let sent = client.send_data(request_stream_id, &vec![0_u8; SEND_BUFFER_SIZE]);
+        let sent = client.send_data(request_stream_id, &vec![0_u8; INITIAL_RECV_WINDOW_SIZE]);
         assert_eq!(sent, Ok(expected_second_data_frame.len()));
 
         // Close stream.
@@ -2821,7 +2828,7 @@ mod tests {
         let mut out = client.process_output(now());
         // We need to loop a bit until all data has been sent. Once for every 1K
         // of data.
-        for _i in 0..SEND_BUFFER_SIZE / 1000 {
+        for _i in 0..INITIAL_RECV_WINDOW_SIZE / 1000 {
             out = server.conn.process(out.dgram(), now());
             out = client.process(out.dgram(), now());
         }
@@ -2831,7 +2838,7 @@ mod tests {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read DATA frames.
-                    let mut buf = vec![1_u8; RECV_BUFFER_SIZE];
+                    let mut buf = vec![1_u8; INITIAL_RECV_WINDOW_SIZE];
                     let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
                     assert!(fin);
                     assert_eq!(
@@ -2884,7 +2891,7 @@ mod tests {
     // After the first frame there is exactly 63+2 bytes left in the send buffer.
     #[test]
     fn fetch_two_data_frame_second_63bytes() {
-        let (buf, hdr) = alloc_buffer(SEND_BUFFER_SIZE - 88);
+        let (buf, hdr) = alloc_buffer(INITIAL_RECV_WINDOW_SIZE - 88);
         fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x3f], &[0_u8; 63]);
     }
 
@@ -2893,7 +2900,7 @@ mod tests {
     // but we can only send 63 bytes.
     #[test]
     fn fetch_two_data_frame_second_63bytes_place_for_66() {
-        let (buf, hdr) = alloc_buffer(SEND_BUFFER_SIZE - 89);
+        let (buf, hdr) = alloc_buffer(INITIAL_RECV_WINDOW_SIZE - 89);
         fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x3f], &[0_u8; 63]);
     }
 
@@ -2902,7 +2909,7 @@ mod tests {
     // but we can only send 64 bytes.
     #[test]
     fn fetch_two_data_frame_second_64bytes_place_for_67() {
-        let (buf, hdr) = alloc_buffer(SEND_BUFFER_SIZE - 90);
+        let (buf, hdr) = alloc_buffer(INITIAL_RECV_WINDOW_SIZE - 90);
         fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x40, 0x40], &[0_u8; 64]);
     }
 
@@ -2910,7 +2917,7 @@ mod tests {
     // After the first frame there is exactly 16383+3 bytes left in the send buffer.
     #[test]
     fn fetch_two_data_frame_second_16383bytes() {
-        let (buf, hdr) = alloc_buffer(SEND_BUFFER_SIZE - 16409);
+        let (buf, hdr) = alloc_buffer(INITIAL_RECV_WINDOW_SIZE - 16409);
         fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x7f, 0xff], &[0_u8; 16383]);
     }
 
@@ -2919,7 +2926,7 @@ mod tests {
     // send 16383 bytes.
     #[test]
     fn fetch_two_data_frame_second_16383bytes_place_for_16387() {
-        let (buf, hdr) = alloc_buffer(SEND_BUFFER_SIZE - 16410);
+        let (buf, hdr) = alloc_buffer(INITIAL_RECV_WINDOW_SIZE - 16410);
         fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x7f, 0xff], &[0_u8; 16383]);
     }
 
@@ -2928,7 +2935,7 @@ mod tests {
     // send 16383 bytes.
     #[test]
     fn fetch_two_data_frame_second_16383bytes_place_for_16388() {
-        let (buf, hdr) = alloc_buffer(SEND_BUFFER_SIZE - 16411);
+        let (buf, hdr) = alloc_buffer(INITIAL_RECV_WINDOW_SIZE - 16411);
         fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x7f, 0xff], &[0_u8; 16383]);
     }
 
@@ -2937,7 +2944,7 @@ mod tests {
     // 16384 bytes.
     #[test]
     fn fetch_two_data_frame_second_16384bytes_place_for_16389() {
-        let (buf, hdr) = alloc_buffer(SEND_BUFFER_SIZE - 16412);
+        let (buf, hdr) = alloc_buffer(INITIAL_RECV_WINDOW_SIZE - 16412);
         fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x80, 0x0, 0x40, 0x0], &[0_u8; 16384]);
     }
 

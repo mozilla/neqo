@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::fmt::{self, Display, Formatter};
+
 use neqo_common::qwarn;
 use neqo_crypto::Error as CryptoError;
 
@@ -67,8 +69,8 @@ pub use self::{
     packet::MIN_INITIAL_PACKET_SIZE,
     pmtud::Pmtud,
     quic_datagrams::DatagramTracking,
-    recv_stream::{RecvStreamStats, RECV_BUFFER_SIZE},
-    send_stream::{SendStreamStats, SEND_BUFFER_SIZE},
+    recv_stream::{RecvStreamStats, INITIAL_RECV_WINDOW_SIZE},
+    send_stream::SendStreamStats,
     sni::find_sni,
     stats::Stats,
     stream_id::{StreamId, StreamType},
@@ -206,8 +208,8 @@ impl ::std::error::Error for Error {
     }
 }
 
-impl ::std::fmt::Display for Error {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Transport error: {self:?}")
     }
 }

@@ -8,7 +8,6 @@
 
 use std::time::Duration;
 
-use neqo_common::IpTosEcn;
 use test_fixture::now;
 
 use super::{IP_ADDR, MTU, RTT};
@@ -43,7 +42,6 @@ fn issue_876() {
         SentPacket::new(
             PacketType::Short,
             1,
-            IpTosEcn::default(),
             before,
             true,
             Vec::new(),
@@ -52,7 +50,6 @@ fn issue_876() {
         SentPacket::new(
             PacketType::Short,
             2,
-            IpTosEcn::default(),
             before,
             true,
             Vec::new(),
@@ -61,7 +58,6 @@ fn issue_876() {
         SentPacket::new(
             PacketType::Short,
             3,
-            IpTosEcn::default(),
             before,
             true,
             Vec::new(),
@@ -70,7 +66,6 @@ fn issue_876() {
         SentPacket::new(
             PacketType::Short,
             4,
-            IpTosEcn::default(),
             before,
             true,
             Vec::new(),
@@ -79,7 +74,6 @@ fn issue_876() {
         SentPacket::new(
             PacketType::Short,
             5,
-            IpTosEcn::default(),
             before,
             true,
             Vec::new(),
@@ -88,7 +82,6 @@ fn issue_876() {
         SentPacket::new(
             PacketType::Short,
             6,
-            IpTosEcn::default(),
             before,
             true,
             Vec::new(),
@@ -97,7 +90,6 @@ fn issue_876() {
         SentPacket::new(
             PacketType::Short,
             7,
-            IpTosEcn::default(),
             after,
             true,
             Vec::new(),
@@ -153,7 +145,6 @@ fn issue_1465() {
         let p = SentPacket::new(
             PacketType::Short,
             pn,
-            IpTosEcn::default(),
             now,
             true,
             Vec::new(),

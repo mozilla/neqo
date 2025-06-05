@@ -5,7 +5,12 @@
 // except according to those terms.
 
 // Stream management for a connection.
-use std::{cell::RefCell, cmp::Ordering, rc::Rc};
+use std::{
+    cell::RefCell,
+    cmp::Ordering,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use neqo_common::{qtrace, qwarn, Role};
 
@@ -69,8 +74,8 @@ pub struct Streams {
     receiver_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
     remote_stream_limits: RemoteStreamLimits,
     local_stream_limits: LocalStreamLimits,
-    pub(crate) send: SendStreams,
-    pub(crate) recv: RecvStreams,
+    send: SendStreams,
+    recv: RecvStreams,
 }
 
 impl Streams {
@@ -79,9 +84,9 @@ impl Streams {
         role: Role,
         events: ConnectionEvents,
     ) -> Self {
-        let limit_bidi = tps.borrow().local.get_integer(InitialMaxStreamsBidi);
-        let limit_uni = tps.borrow().local.get_integer(InitialMaxStreamsUni);
-        let max_data = tps.borrow().local.get_integer(InitialMaxData);
+        let limit_bidi = tps.borrow().local().get_integer(InitialMaxStreamsBidi);
+        let limit_uni = tps.borrow().local().get_integer(InitialMaxStreamsUni);
+        let max_data = tps.borrow().local().get_integer(InitialMaxData);
         Self {
             role,
             tps,
@@ -104,11 +109,11 @@ impl Streams {
         self.clear_streams();
         debug_assert_eq!(
             self.remote_stream_limits[StreamType::BiDi].max_active(),
-            self.tps.borrow().local.get_integer(InitialMaxStreamsBidi)
+            self.tps.borrow().local().get_integer(InitialMaxStreamsBidi)
         );
         debug_assert_eq!(
             self.remote_stream_limits[StreamType::UniDi].max_active(),
-            self.tps.borrow().local.get_integer(InitialMaxStreamsUni)
+            self.tps.borrow().local().get_integer(InitialMaxStreamsUni)
         );
         self.local_stream_limits = LocalStreamLimits::new(self.role);
     }
@@ -204,11 +209,13 @@ impl Streams {
         Ok(())
     }
 
-    fn write_maintenance_frames(
+    pub fn write_maintenance_frames(
         &mut self,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
+        now: Instant,
+        rtt: Duration,
     ) {
         // Send `DATA_BLOCKED` as necessary.
         self.sender_fc
@@ -226,7 +233,7 @@ impl Streams {
             return;
         }
 
-        self.recv.write_frames(builder, tokens, stats);
+        self.recv.write_frames(builder, tokens, stats, now, rtt);
 
         self.remote_stream_limits[StreamType::BiDi].write_frames(builder, tokens, stats);
         if builder.is_full() {
@@ -252,13 +259,6 @@ impl Streams {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        if priority == TransmissionPriority::Important {
-            self.write_maintenance_frames(builder, tokens, stats);
-            if builder.is_full() {
-                return;
-            }
-        }
-
         self.send.write_frames(priority, builder, tokens, stats);
     }
 
@@ -353,7 +353,7 @@ impl Streams {
             StreamType::BiDi => InitialMaxStreamDataBidiRemote,
             StreamType::UniDi => InitialMaxStreamDataUni,
         };
-        let recv_initial_max_stream_data = self.tps.borrow().local.get_integer(tp);
+        let recv_initial_max_stream_data = self.tps.borrow().local().get_integer(tp);
 
         while self.remote_stream_limits[stream_id.stream_type()].is_new_stream(stream_id)? {
             let next_stream_id =
@@ -462,7 +462,7 @@ impl Streams {
                     let recv_initial_max_stream_data = self
                         .tps
                         .borrow()
-                        .local
+                        .local()
                         .get_integer(InitialMaxStreamDataBidiLocal);
 
                     self.recv.insert(

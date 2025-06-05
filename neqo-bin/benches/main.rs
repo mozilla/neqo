@@ -6,11 +6,11 @@
 
 #![expect(clippy::unwrap_used, reason = "OK in a bench.")]
 
-use std::{env, path::PathBuf, str::FromStr as _};
+use std::{env, hint::black_box, net::SocketAddr, path::PathBuf, str::FromStr as _};
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use neqo_bin::{client, server};
-use tokio::runtime::Runtime;
+use tokio::runtime::Builder;
 
 struct Benchmark {
     name: String,
@@ -21,7 +21,6 @@ struct Benchmark {
 fn transfer(c: &mut Criterion) {
     neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap()).unwrap();
 
-    let done_sender = spawn_server();
     let mtu = env::var("MTU").map_or_else(|_| String::new(), |mtu| format!("/mtu-{mtu}"));
     for Benchmark {
         name,
@@ -44,7 +43,7 @@ fn transfer(c: &mut Criterion) {
             upload: false,
         },
         Benchmark {
-            name: format!("1-conn/1-100mb-resp{mtu} (aka. Upload)"),
+            name: format!("1-conn/1-100mb-req{mtu} (aka. Upload)"),
             requests: vec![100 * 1024 * 1024],
             upload: true,
         },
@@ -57,37 +56,57 @@ fn transfer(c: &mut Criterion) {
             Throughput::Elements(requests.len() as u64)
         });
         group.bench_function("client", |b| {
-            b.to_async(Runtime::new().unwrap()).iter_batched(
-                || client::client(client::Args::new(&requests, upload)),
-                |client| async move {
-                    client.await.unwrap();
-                },
-                BatchSize::PerIteration,
-            );
+            b.to_async(Builder::new_current_thread().enable_all().build().unwrap())
+                .iter_batched(
+                    || {
+                        let (server_handle, server_addr) = spawn_server();
+                        let client =
+                            client::client(client::Args::new(Some(server_addr), &requests, upload));
+                        (server_handle, client)
+                    },
+                    |(server_handle, client)| {
+                        black_box(async move {
+                            client.await.unwrap();
+                            // Tell server to shut down.
+                            server_handle.send(()).unwrap();
+                        })
+                    },
+                    BatchSize::PerIteration,
+                );
         });
         group.finish();
     }
-
-    done_sender.send(()).unwrap();
 }
 
-#[allow(
-    clippy::allow_attributes,
-    clippy::redundant_pub_crate,
-    reason = "TODO: Bug in clippy nursery?"
-)]
-fn spawn_server() -> tokio::sync::oneshot::Sender<()> {
+fn spawn_server() -> (tokio::sync::oneshot::Sender<()>, SocketAddr) {
     let (done_sender, mut done_receiver) = tokio::sync::oneshot::channel();
+    let (addr_sender, addr_receiver) = std::sync::mpsc::channel::<SocketAddr>();
     std::thread::spawn(move || {
-        Runtime::new().unwrap().block_on(async {
-            let mut server = Box::pin(server::server(server::Args::default()));
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+
+        let mut args = server::Args::default();
+        args.set_hosts(vec!["[::]:0".to_string()]);
+        let server = runtime.block_on(async { server::server(args).unwrap() });
+
+        addr_sender
+            .send(
+                server
+                    .local_addresses()
+                    .into_iter()
+                    .find(SocketAddr::is_ipv6)
+                    .unwrap(),
+            )
+            .unwrap();
+
+        runtime.block_on(async {
+            let mut server = Box::pin(server.run());
             tokio::select! {
                 _ = &mut done_receiver => {}
                 res = &mut server  => panic!("expect server not to terminate: {res:?}"),
             };
         });
     });
-    done_sender
+    (done_sender, addr_receiver.recv().unwrap())
 }
 
 criterion_group!(benches, transfer);

@@ -4,15 +4,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::Debug;
+#![allow(
+    clippy::module_name_repetitions,
+    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
+)]
+
+use std::fmt::{self, Debug, Formatter};
 
 use enum_map::Enum;
-use strum::FromRepr;
+use strum::{EnumIter, FromRepr};
 
 /// ECN (Explicit Congestion Notification) codepoints mapped to the
 /// lower 2 bits of the TOS field.
 /// <https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml>
-#[derive(Copy, Clone, PartialEq, Eq, Enum, Default, Debug, FromRepr)]
+#[derive(Copy, Clone, PartialEq, Eq, Enum, Default, Debug, FromRepr, EnumIter)]
 #[repr(u8)]
 pub enum IpTosEcn {
     #[default]
@@ -167,7 +172,7 @@ impl From<u8> for IpTos {
 }
 
 impl Debug for IpTos {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_tuple("IpTos")
             .field(&IpTosDscp::from(*self))
             .field(&IpTosEcn::from(*self))

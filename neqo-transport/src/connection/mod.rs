@@ -9,7 +9,7 @@
 use std::{
     cell::RefCell,
     cmp::{max, min},
-    fmt::{self, Debug, Write as _},
+    fmt::{self, Debug, Display, Formatter, Write as _},
     iter, mem,
     net::{IpAddr, SocketAddr},
     num::NonZeroUsize,
@@ -20,7 +20,7 @@ use std::{
 
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, Role,
+    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, IpTosEcn, Role,
 };
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
@@ -150,6 +150,12 @@ impl Output {
     }
 }
 
+impl From<Option<Datagram>> for Output {
+    fn from(value: Option<Datagram>) -> Self {
+        value.map_or(Self::None, Self::Datagram)
+    }
+}
+
 /// Used by inner functions like `Connection::output`.
 enum SendOption {
     /// Yes, please send this datagram.
@@ -193,11 +199,6 @@ enum AddressValidationInfo {
 }
 
 impl AddressValidationInfo {
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     pub fn token(&self) -> &[u8] {
         match self {
             Self::NewToken(token) | Self::Retry { token, .. } => token,
@@ -207,12 +208,11 @@ impl AddressValidationInfo {
 
     pub fn generate_new_token(&self, peer_address: SocketAddr, now: Instant) -> Option<Vec<u8>> {
         match self {
-            Self::Server(w) => w.upgrade().and_then(|validation| {
-                validation
-                    .borrow()
-                    .generate_new_token(peer_address, now)
-                    .ok()
-            }),
+            Self::Server(w) => w
+                .upgrade()?
+                .borrow()
+                .generate_new_token(peer_address, now)
+                .ok(),
             Self::None => None,
             _ => unreachable!("called a server function on a client"),
         }
@@ -245,7 +245,7 @@ pub struct Connection {
     cid_manager: ConnectionIdManager,
     address_validation: AddressValidationInfo,
     /// The connection IDs that were provided by the peer.
-    connection_ids: ConnectionIdStore<[u8; 16]>,
+    cids: ConnectionIdStore<[u8; 16]>,
 
     /// The source connection ID that this endpoint uses for the handshake.
     /// Since we need to communicate this to our peer in tparams, setting this
@@ -270,8 +270,8 @@ pub struct Connection {
     /// <https://datatracker.ietf.org/doc/html/draft-ietf-quic-datagram>
     quic_datagrams: QuicDatagrams,
 
-    pub(crate) crypto: Crypto,
-    pub(crate) acks: AckTracker,
+    crypto: Crypto,
+    acks: AckTracker,
     idle_timeout: IdleTimeout,
     streams: Streams,
     state_signaling: StateSignaling,
@@ -290,11 +290,11 @@ pub struct Connection {
     /// otherwise be sent, just to see how a connection handles them.  Inserting them
     /// into packets proper mean that the frames follow the entire processing path.
     #[cfg(test)]
-    pub test_frame_writer: Option<Box<dyn test_internal::FrameWriter>>,
+    test_frame_writer: Option<Box<dyn test_internal::FrameWriter>>,
 }
 
 impl Debug for Connection {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
             "{:?} Connection: {:?} {:?}",
@@ -313,9 +313,9 @@ impl Connection {
     /// Create a new QUIC connection with Client role.
     /// # Errors
     /// When NSS fails and an agent cannot be created.
-    pub fn new_client(
-        server_name: impl Into<String>,
-        protocols: &[impl AsRef<str>],
+    pub fn new_client<I: Into<String>, A: AsRef<str>>(
+        server_name: I,
+        protocols: &[A],
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
@@ -330,7 +330,7 @@ impl Connection {
             protocols,
             conn_params,
         )?;
-        c.crypto.states.init(
+        c.crypto.states_mut().init(
             c.conn_params.get_versions().compatible(),
             Role::Client,
             &dcid,
@@ -351,9 +351,9 @@ impl Connection {
     /// Create a new QUIC connection with Server role.
     /// # Errors
     /// When NSS fails and an agent cannot be created.
-    pub fn new_server(
-        certs: &[impl AsRef<str>],
-        protocols: &[impl AsRef<str>],
+    pub fn new_server<A1: AsRef<str>, A2: AsRef<str>>(
+        certs: &[A1],
+        protocols: &[A2],
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
         conn_params: ConnectionParameters,
     ) -> Res<Self> {
@@ -381,7 +381,7 @@ impl Connection {
         let mut cid_manager =
             ConnectionIdManager::new(cid_generator, local_initial_source_cid.clone());
         let mut tps = conn_params.create_transport_parameter(role, &mut cid_manager)?;
-        tps.local
+        tps.local_mut()
             .set_bytes(InitialSourceConnectionId, local_initial_source_cid.to_vec());
 
         let tphandler = Rc::new(RefCell::new(tps));
@@ -420,7 +420,7 @@ impl Connection {
             acks: AckTracker::default(),
             idle_timeout: IdleTimeout::new(conn_params.get_idle_timeout()),
             streams: Streams::new(tphandler, role, events.clone()),
-            connection_ids: ConnectionIdStore::default(),
+            cids: ConnectionIdStore::default(),
             state_signaling: StateSignaling::Idle,
             loss_recovery: LossRecovery::new(stats.clone(), conn_params.get_fast_pto()),
             events,
@@ -440,10 +440,10 @@ impl Connection {
 
     /// # Errors
     /// When the operation fails.
-    pub fn server_enable_0rtt(
+    pub fn server_enable_0rtt<Z: ZeroRttChecker + 'static>(
         &mut self,
         anti_replay: &AntiReplay,
-        zero_rtt_checker: impl ZeroRttChecker + 'static,
+        zero_rtt_checker: Z,
     ) -> Res<()> {
         self.crypto
             .server_enable_0rtt(Rc::clone(&self.tps), anti_replay, zero_rtt_checker)
@@ -469,7 +469,7 @@ impl Connection {
 
     /// # Errors
     /// When the operation fails.
-    pub fn client_enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
+    pub fn client_enable_ech<A: AsRef<[u8]>>(&mut self, ech_config_list: A) -> Res<()> {
         self.crypto.client_enable_ech(ech_config_list)
     }
 
@@ -508,7 +508,7 @@ impl Connection {
         value: tparams::TransportParameter,
     ) -> Res<()> {
         if *self.state() == State::Init {
-            self.tps.borrow_mut().local.set(tp, value);
+            self.tps.borrow_mut().local_mut().set(tp, value);
             Ok(())
         } else {
             qerror!("Current state: {:?}", self.state());
@@ -530,9 +530,14 @@ impl Connection {
         debug_assert_eq!(self.role, Role::Server);
         qtrace!("[{self}] Retry CIDs: odcid={odcid} remote={remote_cid} retry={retry_cid}");
         // We advertise "our" choices in transport parameters.
-        let local_tps = &mut self.tps.borrow_mut().local;
-        local_tps.set_bytes(OriginalDestinationConnectionId, odcid.to_vec());
-        local_tps.set_bytes(RetrySourceConnectionId, retry_cid.to_vec());
+        self.tps
+            .borrow_mut()
+            .local_mut()
+            .set_bytes(OriginalDestinationConnectionId, odcid.to_vec());
+        self.tps
+            .borrow_mut()
+            .local_mut()
+            .set_bytes(RetrySourceConnectionId, retry_cid.to_vec());
 
         // ...and save their choices for later validation.
         self.remote_initial_source_cid = Some(remote_cid);
@@ -541,7 +546,7 @@ impl Connection {
     fn retry_sent(&self) -> bool {
         self.tps
             .borrow()
-            .local
+            .local()
             .get_bytes(RetrySourceConnectionId)
             .is_some()
     }
@@ -550,8 +555,8 @@ impl Connection {
     /// higher preference.
     /// # Errors
     /// When the operation fails, which is usually due to bad inputs or bad connection state.
-    pub fn set_alpn(&mut self, protocols: &[impl AsRef<str>]) -> Res<()> {
-        self.crypto.tls.set_alpn(protocols)?;
+    pub fn set_alpn<A: AsRef<str>>(&mut self, protocols: &[A]) -> Res<()> {
+        self.crypto.tls_mut().set_alpn(protocols)?;
         Ok(())
     }
 
@@ -563,7 +568,7 @@ impl Connection {
             qerror!("[{self}] Cannot enable ciphers in state {:?}", self.state);
             return Err(Error::ConnectionState);
         }
-        self.crypto.tls.set_ciphers(ciphers)?;
+        self.crypto.tls_mut().set_ciphers(ciphers)?;
         Ok(())
     }
 
@@ -575,7 +580,7 @@ impl Connection {
             qerror!("[{self}] Cannot enable groups in state {:?}", self.state);
             return Err(Error::ConnectionState);
         }
-        self.crypto.tls.set_groups(groups)?;
+        self.crypto.tls_mut().set_groups(groups)?;
         Ok(())
     }
 
@@ -587,7 +592,7 @@ impl Connection {
             qerror!("[{self}] Cannot enable groups in state {:?}", self.state);
             return Err(Error::ConnectionState);
         }
-        self.crypto.tls.send_additional_key_shares(count)?;
+        self.crypto.tls_mut().send_additional_key_shares(count)?;
         Ok(())
     }
 
@@ -620,7 +625,7 @@ impl Connection {
                 self.new_token.take_token(),
                 self.tps
                     .borrow()
-                    .remote
+                    .remote_handshake()
                     .as_ref()
                     .expect("should have transport parameters"),
                 self.version,
@@ -710,9 +715,13 @@ impl Connection {
     /// This can only be called once and only on the client.
     /// After calling the function, it should be possible to attempt 0-RTT
     /// if the token supports that.
+    ///
+    /// This function starts the TLS stack, which means that any configuration change
+    /// to that stack needs to occur prior to calling this.
+    ///
     /// # Errors
     /// When the operation fails, which is usually due to bad inputs or bad connection state.
-    pub fn enable_resumption(&mut self, now: Instant, token: impl AsRef<[u8]>) -> Res<()> {
+    pub fn enable_resumption<A: AsRef<[u8]>>(&mut self, now: Instant, token: A) -> Res<()> {
         if self.state != State::Init {
             qerror!("[{self}] set token in state {:?}", self.state);
             return Err(Error::ConnectionState);
@@ -751,7 +760,7 @@ impl Connection {
         let tok = dec.decode_remainder();
         qtrace!("[{self}]   TLS token {}", hex(tok));
 
-        match self.crypto.tls {
+        match self.crypto.tls_mut() {
             Agent::Client(ref mut c) => {
                 let res = c.enable_resumption(tok);
                 if let Err(e) = res {
@@ -765,7 +774,7 @@ impl Connection {
         self.version = version;
         self.conn_params.get_versions_mut().set_initial(version);
         self.tps.borrow_mut().set_version(version);
-        self.tps.borrow_mut().remote_0rtt = Some(tp);
+        self.tps.borrow_mut().set_remote_0rtt(Some(tp));
         if !init_token.is_empty() {
             self.address_validation = AddressValidationInfo::NewToken(init_token.to_vec());
         }
@@ -798,10 +807,10 @@ impl Connection {
         }
 
         let tps = &self.tps;
-        if let Agent::Server(ref mut s) = self.crypto.tls {
+        if let Agent::Server(ref mut s) = self.crypto.tls_mut() {
             let mut enc = Encoder::default();
             enc.encode_vvec_with(|enc_inner| {
-                tps.borrow().local.encode(enc_inner);
+                tps.borrow().local().encode(enc_inner);
             });
             enc.encode(extra);
             let records = s.send_ticket(now, enc.as_ref())?;
@@ -827,26 +836,21 @@ impl Connection {
         }
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     #[must_use]
     pub fn tls_info(&self) -> Option<&SecretAgentInfo> {
-        self.crypto.tls.info()
+        self.crypto.tls().info()
     }
 
     /// # Errors
     /// When there is no information to obtain.
     pub fn tls_preinfo(&self) -> Res<SecretAgentPreInfo> {
-        Ok(self.crypto.tls.preinfo()?)
+        Ok(self.crypto.tls().preinfo()?)
     }
 
     /// Get the peer's certificate chain and other info.
     #[must_use]
     pub fn peer_certificate(&self) -> Option<CertificateInfo> {
-        self.crypto.tls.peer_certificate()
+        self.crypto.tls().peer_certificate()
     }
 
     /// Call by application when the peer cert has been verified.
@@ -857,7 +861,7 @@ impl Connection {
     /// exchanged, it's not OK.
     pub fn authenticated(&mut self, status: AuthenticationStatus, now: Instant) {
         qdebug!("[{self}] Authenticated {status:?}");
-        self.crypto.tls.authenticated(status);
+        self.crypto.tls_mut().authenticated(status);
         let res = self.handshake(now, self.version, PacketNumberSpace::Handshake, None);
         self.absorb_error(now, res);
         self.process_saved(now);
@@ -1001,7 +1005,7 @@ impl Connection {
 
         self.streams.cleanup_closed_streams();
 
-        let res = self.crypto.states.check_key_update(now);
+        let res = self.crypto.states_mut().check_key_update(now);
         self.absorb_error(now, res);
 
         if let Some(path) = self.paths.primary() {
@@ -1030,14 +1034,17 @@ impl Connection {
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_input(&mut self, d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>, now: Instant) {
+    pub fn process_input<A: AsRef<[u8]> + AsMut<[u8]>>(&mut self, d: Datagram<A>, now: Instant) {
         self.process_multiple_input(iter::once(d), now);
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_multiple_input(
+    pub fn process_multiple_input<
+        A: AsRef<[u8]> + AsMut<[u8]>,
+        I: IntoIterator<Item = Datagram<A>>,
+    >(
         &mut self,
-        dgrams: impl IntoIterator<Item = Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        dgrams: I,
         now: Instant,
     ) {
         let mut dgrams = dgrams.into_iter().peekable();
@@ -1102,7 +1109,7 @@ impl Connection {
             }
         }
 
-        if let Some(key_update_time) = self.crypto.states.update_time() {
+        if let Some(key_update_time) = self.crypto.states().update_time() {
             qtrace!("[{self}] Key update timer {key_update_time:?}");
             delays.push(key_update_time);
         }
@@ -1170,9 +1177,9 @@ impl Connection {
 
     /// Process input and generate output.
     #[must_use = "Output of the process function must be handled"]
-    pub fn process(
+    pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
-        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
         if let Some(d) = dgram {
@@ -1229,7 +1236,7 @@ impl Connection {
         let lost_packets = self.loss_recovery.retry(&path, now);
         self.handle_lost_packets(&lost_packets);
 
-        self.crypto.states.init(
+        self.crypto.states_mut().init(
             self.conn_params.get_versions().compatible(),
             self.role,
             &retry_scid,
@@ -1290,7 +1297,11 @@ impl Connection {
     fn process_saved(&mut self, now: Instant) {
         while let Some(epoch) = self.saved_datagrams.available() {
             qdebug!("[{self}] process saved for epoch {epoch:?}");
-            debug_assert!(self.crypto.states.rx_hp(self.version, epoch).is_some());
+            debug_assert!(self
+                .crypto
+                .states_mut()
+                .rx_hp(self.version, epoch)
+                .is_some());
             for saved in self.saved_datagrams.take_saved() {
                 qtrace!("[{self}] input saved @{:?}: {:?}", saved.t, saved.d);
                 self.input(saved.d, saved.t, now);
@@ -1319,6 +1330,9 @@ impl Connection {
         );
         self.saved_datagrams.save(epoch, d, now);
         self.stats.borrow_mut().saved_datagrams += 1;
+        // We already counted the datagram as received in [`input_path`]. We
+        // will do so again when we (re-)process it, so reduce the count now.
+        self.stats.borrow_mut().packets_rx -= 1;
     }
 
     /// Perform version negotiation.
@@ -1413,7 +1427,7 @@ impl Connection {
                 // Record the client's selected CID so that it can be accepted until
                 // the client starts using a real connection ID.
                 let dcid = ConnectionId::from(packet.dcid());
-                self.crypto.states.init_server(version, &dcid)?;
+                self.crypto.states_mut().init_server(version, &dcid)?;
                 self.original_destination_cid = Some(dcid);
                 self.set_state(State::WaitInitial, now);
 
@@ -1423,7 +1437,7 @@ impl Connection {
                 if !self.retry_sent() {
                     self.tps
                         .borrow_mut()
-                        .local
+                        .local_mut()
                         .set_bytes(OriginalDestinationConnectionId, packet.dcid().to_vec());
                 }
             }
@@ -1515,20 +1529,32 @@ impl Connection {
     }
 
     /// After a Initial, Handshake, `ZeroRtt`, or Short packet is successfully processed.
+    #[expect(clippy::too_many_arguments, reason = "Yes, but they're needed.")]
     fn postprocess_packet(
         &mut self,
         path: &PathRef,
         tos: IpTos,
         remote: SocketAddr,
         packet: &PublicPacket,
+        packet_number: PacketNumber,
         migrate: bool,
         now: Instant,
     ) {
+        let ecn_mark = IpTosEcn::from(tos);
+        let mut stats = self.stats.borrow_mut();
+        stats.ecn_rx[packet.packet_type()] += ecn_mark;
+        if let Some(last_ecn_mark) = stats.ecn_last_mark.filter(|&last_ecn_mark| {
+            last_ecn_mark != ecn_mark && stats.ecn_rx_transition[last_ecn_mark][ecn_mark].is_none()
+        }) {
+            stats.ecn_rx_transition[last_ecn_mark][ecn_mark] =
+                Some((packet.packet_type(), packet_number));
+        }
+
+        stats.ecn_last_mark = Some(ecn_mark);
+        drop(stats);
         let space = PacketNumberSpace::from(packet.packet_type());
         if let Some(space) = self.acks.get_mut(space) {
-            let space_ecn_marks = space.ecn_marks();
-            *space_ecn_marks += tos.into();
-            self.stats.borrow_mut().ecn_rx = *space_ecn_marks;
+            *space.ecn_marks() += ecn_mark;
         } else {
             qtrace!("Not tracking ECN for dropped packet number space");
         }
@@ -1614,6 +1640,7 @@ impl Connection {
                         break;
                     }
                 };
+            self.stats.borrow_mut().dscp_rx[tos.into()] += 1;
             match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
                 PreprocessResult::Continue => (),
                 PreprocessResult::Next => break,
@@ -1623,9 +1650,10 @@ impl Connection {
             qtrace!("[{self}] Received unverified packet {packet:?}");
 
             let packet_len = packet.len();
-            match packet.decrypt(&mut self.crypto.states, now + pto) {
+            match packet.decrypt(self.crypto.states_mut(), now + pto) {
                 Ok(payload) => {
                     // OK, we have a valid packet.
+                    let pn = payload.pn();
                     self.idle_timeout.on_packet_received(now);
                     self.log_packet(
                         packet::MetaData::new_in(path, tos, packet_len, &payload),
@@ -1644,14 +1672,14 @@ impl Connection {
 
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if let Some(space) = self.acks.get_mut(space) {
-                        if space.is_duplicate(payload.pn()) {
-                            qdebug!("Duplicate packet {space}-{}", payload.pn());
+                        if space.is_duplicate(pn) {
+                            qdebug!("Duplicate packet {space}-{}", pn);
                             self.stats.borrow_mut().dups_rx += 1;
                         } else {
                             match self.process_packet(path, &payload, now) {
                                 Ok(migrate) => {
                                     self.postprocess_packet(
-                                        path, tos, remote, &packet, migrate, now,
+                                        path, tos, remote, &packet, pn, migrate, now,
                                     );
                                 }
                                 Err(e) => {
@@ -1727,7 +1755,7 @@ impl Connection {
         // packet number to verify the ACK against.
         let next_pn = self
             .crypto
-            .states
+            .states()
             .select_tx(self.version, PacketNumberSpace::from(packet.packet_type()))
             .map_or(0, |(_, tx)| tx.next_pn());
 
@@ -1806,11 +1834,15 @@ impl Connection {
             // If there isn't a connection ID to use for this path, the packet
             // will be processed, but it won't be attributed to a path.  That means
             // no path probes or PATH_RESPONSE.  But it's not fatal.
-            if let Some(cid) = self.connection_ids.next() {
+            if let Some(cid) = self.cids.next() {
                 self.paths.make_permanent(path, None, cid, now);
                 Ok(())
             } else if let Some(primary) = self.paths.primary() {
-                if primary.borrow().remote_cid().is_none_or(|id| id.is_empty()) {
+                if primary
+                    .borrow()
+                    .remote_cid()
+                    .map_or(true, |id| id.is_empty())
+                {
                     self.paths
                         .make_permanent(path, None, ConnectionIdEntry::empty_remote(), now);
                     Ok(())
@@ -1867,7 +1899,7 @@ impl Connection {
     fn has_version(&self) -> bool {
         if self.role == Role::Server {
             // The server knows the final version if it has remote transport parameters.
-            self.tps.borrow().remote.is_some()
+            self.tps.borrow().remote_handshake().is_some()
         } else {
             // The client knows the final version if it processed a CRYPTO frame.
             self.stats.borrow().frame_rx.crypto > 0
@@ -1960,7 +1992,7 @@ impl Connection {
         };
         if let Some((addr, cid)) = spa {
             // The connection ID isn't special, so just save it.
-            self.connection_ids.add_remote(cid)?;
+            self.cids.add_remote(cid)?;
 
             // The preferred address doesn't dictate what the local address is, so this
             // has to use the existing address.  So only pay attention to a preferred
@@ -2114,13 +2146,13 @@ impl Connection {
 
     fn can_grease_quic_bit(&self) -> bool {
         let tph = self.tps.borrow();
-        if let Some(r) = &tph.remote {
-            r.get_empty(GreaseQuicBit)
-        } else if let Some(r) = &tph.remote_0rtt {
-            r.get_empty(GreaseQuicBit)
-        } else {
-            false
-        }
+        tph.remote_handshake().as_ref().map_or_else(
+            || {
+                tph.remote_0rtt()
+                    .is_some_and(|r| r.get_empty(GreaseQuicBit))
+            },
+            |r| r.get_empty(GreaseQuicBit),
+        )
     }
 
     /// Write the frames that are exchanged in the application data space.
@@ -2129,7 +2161,13 @@ impl Connection {
         &mut self,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
+        now: Instant,
     ) {
+        let rtt = self.paths.primary().map_or_else(
+            || RttEstimate::default().estimate(),
+            |p| p.borrow().rtt().estimate(),
+        );
+
         let stats = &mut self.stats.borrow_mut();
         let frame_stats = &mut stats.frame_tx;
         if self.role == Role::Server {
@@ -2139,15 +2177,26 @@ impl Connection {
             }
         }
 
-        for prio in [
-            TransmissionPriority::Critical,
+        self.streams
+            .write_frames(TransmissionPriority::Critical, builder, tokens, frame_stats);
+        if builder.is_full() {
+            return;
+        }
+
+        self.streams
+            .write_maintenance_frames(builder, tokens, frame_stats, now, rtt);
+        if builder.is_full() {
+            return;
+        }
+
+        self.streams.write_frames(
             TransmissionPriority::Important,
-        ] {
-            self.streams
-                .write_frames(prio, builder, tokens, frame_stats);
-            if builder.is_full() {
-                return;
-            }
+            builder,
+            tokens,
+            frame_stats,
+        );
+        if builder.is_full() {
+            return;
         }
 
         // NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, and ACK_FREQUENCY.
@@ -2314,7 +2363,7 @@ impl Connection {
                         .send_probe(builder, &mut self.stats.borrow_mut());
                     ack_eliciting = true;
                 }
-                self.write_appdata_frames(builder, &mut tokens);
+                self.write_appdata_frames(builder, &mut tokens, now);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
                 self.crypto.write_frame(
@@ -2392,6 +2441,7 @@ impl Connection {
         closing_frame: Option<&ClosingFrame>,
     ) -> Res<SendOption> {
         let mut initial_sent = None;
+        let mut packet_tos = None;
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
@@ -2405,7 +2455,8 @@ impl Connection {
         let mut encoder = Encoder::with_capacity(profile.limit());
         for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
-            let Some((epoch, tx)) = self.crypto.states.select_tx_mut(self.version, space) else {
+            let Some((epoch, tx)) = self.crypto.states_mut().select_tx_mut(self.version, space)
+            else {
                 continue;
             };
 
@@ -2462,6 +2513,9 @@ impl Connection {
                 continue;
             }
 
+            // If we don't have a TOS for this UDP datagram yet (i.e. `tos` is `None`), get it,
+            // adding a `RecoveryToken::EcnEct0` to `tokens` in case of loss.
+            let tos = packet_tos.get_or_insert_with(|| path.borrow().tos(&mut tokens));
             self.log_packet(
                 packet::MetaData::new_out(
                     path,
@@ -2469,6 +2523,7 @@ impl Connection {
                     pn,
                     builder.len() + aead_expansion,
                     &builder.as_ref()[payload_start..],
+                    *tos,
                 ),
                 now,
             );
@@ -2476,11 +2531,11 @@ impl Connection {
             self.stats.borrow_mut().packets_tx += 1;
             let tx = self
                 .crypto
-                .states
+                .states_mut()
                 .tx_mut(self.version, epoch)
                 .ok_or(Error::InternalError)?;
             encoder = builder.build(tx)?;
-            self.crypto.states.auto_update()?;
+            self.crypto.states_mut().auto_update()?;
 
             if ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
@@ -2488,7 +2543,6 @@ impl Connection {
             let sent = SentPacket::new(
                 pt,
                 pn,
-                path.borrow().tos().into(),
                 now,
                 ack_eliciting,
                 tokens,
@@ -2509,13 +2563,20 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, sent, now);
             }
 
-            if space == PacketNumberSpace::Handshake
-                && self.role == Role::Server
-                && self.state == State::Confirmed
-            {
-                // We could discard handshake keys in set_state,
-                // but wait until after sending an ACK.
-                self.discard_keys(PacketNumberSpace::Handshake, now);
+            // Track which packet types are sent with which ECN codepoints. For
+            // coalesced packets, this increases the counts for each packet type
+            // contained in the coalesced packet. This is per Section 13.4.1 of
+            // RFC 9000.
+            self.stats.borrow_mut().ecn_tx[pt] += IpTosEcn::from(*tos);
+            if space == PacketNumberSpace::Handshake {
+                if self.role == Role::Client {
+                    // We're sending a Handshake packet, so we can discard Initial keys.
+                    self.discard_keys(PacketNumberSpace::Initial, now);
+                } else if self.role == Role::Server && self.state == State::Confirmed {
+                    // We could discard handshake keys in set_state,
+                    // but wait until after sending an ACK.
+                    self.discard_keys(PacketNumberSpace::Handshake, now);
+                }
             }
 
             // If the client has more CRYPTO data queued up, do not coalesce if
@@ -2525,7 +2586,7 @@ impl Connection {
             // decrypt yet.
             if self.role == Role::Client
                 && space == PacketNumberSpace::Initial
-                && !self.crypto.streams.is_empty(space)
+                && !self.crypto.streams_mut().is_empty(space)
             {
                 break;
             }
@@ -2552,10 +2613,11 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, initial, now);
             }
             path.borrow_mut().add_sent(packets.len());
-            Ok(SendOption::Yes(
-                path.borrow_mut()
-                    .datagram(packets, &mut self.stats.borrow_mut()),
-            ))
+            Ok(SendOption::Yes(path.borrow_mut().datagram(
+                packets,
+                packet_tos.unwrap_or_default(),
+                &mut self.stats.borrow_mut(),
+            )))
         }
     }
 
@@ -2567,7 +2629,7 @@ impl Connection {
                 .loss_recovery
                 .largest_acknowledged_pn(PacketNumberSpace::ApplicationData);
             qinfo!("[{self}] Initiating key update");
-            self.crypto.states.initiate_key_update(la)
+            self.crypto.states_mut().initiate_key_update(la)
         } else {
             Err(Error::KeyUpdateBlocked)
         }
@@ -2576,7 +2638,7 @@ impl Connection {
     #[cfg(test)]
     #[must_use]
     pub fn get_epochs(&self) -> (Option<usize>, Option<usize>) {
-        self.crypto.states.get_epochs()
+        self.crypto.states().get_epochs()
     }
 
     fn client_start(&mut self, now: Instant) -> Res<()> {
@@ -2608,7 +2670,7 @@ impl Connection {
     }
 
     /// Close the connection.
-    pub fn close(&mut self, now: Instant, app_error: AppError, msg: impl AsRef<str>) {
+    pub fn close<A: AsRef<str>>(&mut self, now: Instant, app_error: AppError, msg: A) {
         let error = CloseReason::Application(app_error);
         let timeout = self.get_closing_period_time(now);
         if let Some(path) = self.paths.primary() {
@@ -2647,7 +2709,9 @@ impl Connection {
         self.validate_versions()?;
         {
             let tps = self.tps.borrow();
-            let remote = tps.remote.as_ref().ok_or(Error::TransportParameterError)?;
+            let remote = tps
+                .remote_handshake()
+                .ok_or(Error::TransportParameterError)?;
 
             // If the peer provided a preferred address, then we have to be a client
             // and they have to be using a non-empty connection ID.
@@ -2692,7 +2756,9 @@ impl Connection {
 
     fn validate_cids(&self) -> Res<()> {
         let tph = self.tps.borrow();
-        let remote_tps = tph.remote.as_ref().ok_or(Error::TransportParameterError)?;
+        let remote_tps = tph
+            .remote_handshake()
+            .ok_or(Error::TransportParameterError)?;
 
         let tp = remote_tps.get_bytes(InitialSourceConnectionId);
         if self
@@ -2749,7 +2815,9 @@ impl Connection {
     /// Validate the `version_negotiation` transport parameter from the peer.
     fn validate_versions(&self) -> Res<()> {
         let tph = self.tps.borrow();
-        let remote_tps = tph.remote.as_ref().ok_or(Error::TransportParameterError)?;
+        let remote_tps = tph
+            .remote_handshake()
+            .ok_or(Error::TransportParameterError)?;
         // `current` and `other` are the value from the peer's transport parameters.
         // We're checking that these match our expectations.
         if let Some((current, other)) = remote_tps.get_versions() {
@@ -2801,12 +2869,13 @@ impl Connection {
         }
     }
 
-    fn confirm_version(&mut self, v: Version) {
+    fn confirm_version(&mut self, v: Version) -> Res<()> {
         if self.version != v {
             qdebug!("[{self}] Compatible upgrade {:?} ==> {v:?}", self.version);
         }
-        self.crypto.confirm_version(v);
+        self.crypto.confirm_version(v)?;
         self.version = v;
+        Ok(())
     }
 
     fn compatible_upgrade(&mut self, packet_version: Version) -> Res<()> {
@@ -2815,15 +2884,15 @@ impl Connection {
         }
 
         if self.role == Role::Client {
-            self.confirm_version(packet_version);
-        } else if self.tps.borrow().remote.is_some() {
+            self.confirm_version(packet_version)?;
+        } else if self.tps.borrow().remote_handshake().is_some() {
             let version = self.tps.borrow().version();
             let dcid = self
                 .original_destination_cid
                 .as_ref()
                 .ok_or(Error::ProtocolViolation)?;
-            self.crypto.states.init_server(version, dcid)?;
-            self.confirm_version(version);
+            self.crypto.states_mut().init_server(version, dcid)?;
+            self.confirm_version(version)?;
         }
         Ok(())
     }
@@ -2838,7 +2907,7 @@ impl Connection {
         qtrace!("[{self}] Handshake space={space} data={data:0x?}");
 
         let was_authentication_pending =
-            *self.crypto.tls.state() == HandshakeState::AuthenticationPending;
+            *self.crypto.tls().state() == HandshakeState::AuthenticationPending;
         let try_update = data.is_some();
         match self.crypto.handshake(now, space, data)? {
             HandshakeState::Authenticated(_) | HandshakeState::InProgress => (),
@@ -2866,15 +2935,10 @@ impl Connection {
         if try_update {
             self.compatible_upgrade(packet_version)?;
             // We have transport parameters, it's go time.
-            if self.tps.borrow().remote.is_some() {
+            if self.tps.borrow().remote_handshake().is_some() {
                 self.set_initial_limits();
             }
             if self.crypto.install_keys(self.role)? {
-                if self.role == Role::Client {
-                    // We won't acknowledge Initial packets as a result of this, but the
-                    // server can rely on implicit acknowledgment.
-                    self.discard_keys(PacketNumberSpace::Initial, now);
-                }
                 self.saved_datagrams.make_available(Epoch::Handshake);
             }
         }
@@ -2952,10 +3016,12 @@ impl Connection {
                     &data
                 );
                 self.stats.borrow_mut().frame_rx.crypto += 1;
-                self.crypto.streams.inbound_frame(space, offset, data)?;
-                if self.crypto.streams.data_ready(space) {
+                self.crypto
+                    .streams_mut()
+                    .inbound_frame(space, offset, data)?;
+                if self.crypto.streams().data_ready(space) {
                     let mut buf = Vec::new();
-                    let read = self.crypto.streams.read_to_end(space, &mut buf);
+                    let read = self.crypto.streams_mut().read_to_end(space, &mut buf);
                     qdebug!("Read {read:?} bytes");
                     self.handshake(now, packet_version, space, Some(&buf))?;
                     self.create_resumption_token(now);
@@ -2981,14 +3047,13 @@ impl Connection {
                 retire_prior,
             } => {
                 self.stats.borrow_mut().frame_rx.new_connection_id += 1;
-                self.connection_ids.add_remote(ConnectionIdEntry::new(
+                self.cids.add_remote(ConnectionIdEntry::new(
                     sequence_number,
                     ConnectionId::from(connection_id),
                     stateless_reset_token.to_owned(),
                 ))?;
-                self.paths
-                    .retire_cids(retire_prior, &mut self.connection_ids);
-                if self.connection_ids.len() >= LOCAL_ACTIVE_CID_LIMIT {
+                self.paths.retire_cids(retire_prior, &mut self.cids);
+                if self.cids.len() >= LOCAL_ACTIVE_CID_LIMIT {
                     qinfo!("[{self}] received too many connection IDs");
                     return Err(Error::ConnectionIdLimitExceeded);
                 }
@@ -3108,6 +3173,9 @@ impl Connection {
                             .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Lost);
                         self.stats.borrow_mut().datagram_tx.lost += 1;
                     }
+                    RecoveryToken::EcnEct0 => self
+                        .paths
+                        .lost_ecn(lost.packet_type(), &mut self.stats.borrow_mut()),
                 }
             }
         }
@@ -3116,7 +3184,7 @@ impl Connection {
     fn decode_ack_delay(&self, v: u64) -> Res<Duration> {
         // If we have remote transport parameters, use them.
         // Otherwise, ack delay should be zero (because it's the handshake).
-        self.tps.borrow().remote.as_ref().map_or_else(
+        self.tps.borrow().remote_handshake().map_or_else(
             || Ok(Duration::default()),
             |r| {
                 let exponent = u32::try_from(r.get_integer(AckDelayExponent))?;
@@ -3172,6 +3240,7 @@ impl Connection {
                     RecoveryToken::Datagram(dgram_tracker) => self
                         .events
                         .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Acked),
+                    RecoveryToken::EcnEct0 => self.paths.acked_ecn(),
                     // We only worry when these are lost
                     RecoveryToken::HandshakeDone => (),
                 }
@@ -3203,13 +3272,19 @@ impl Connection {
         qdebug!("[{self}] 0-RTT rejected");
         self.resend_0rtt(now);
         self.streams.zero_rtt_rejected();
-        self.crypto.states.discard_0rtt_keys();
+        self.crypto.states_mut().discard_0rtt_keys();
         self.events.client_0rtt_rejected();
     }
 
     fn set_connected(&mut self, now: Instant) -> Res<()> {
         qdebug!("[{self}] TLS connection complete");
-        if self.crypto.tls.info().map(SecretAgentInfo::alpn).is_none() {
+        if self
+            .crypto
+            .tls()
+            .info()
+            .map(SecretAgentInfo::alpn)
+            .is_none()
+        {
             qwarn!("[{self}] No ALPN, closing connection");
             // 120 = no_application_protocol
             return Err(Error::CryptoAlert(120));
@@ -3225,7 +3300,7 @@ impl Connection {
         } else {
             self.zero_rtt_state = if self
                 .crypto
-                .tls
+                .tls()
                 .info()
                 .ok_or(Error::InternalError)?
                 .early_data_accepted()
@@ -3247,7 +3322,7 @@ impl Connection {
         self.saved_datagrams.make_available(Epoch::ApplicationData);
         self.stats.borrow_mut().resumed = self
             .crypto
-            .tls
+            .tls()
             .info()
             .ok_or(Error::InternalError)?
             .resumed();
@@ -3518,7 +3593,7 @@ impl Connection {
         let version = self.version();
         let Some((epoch, tx)) = self
             .crypto
-            .states
+            .states()
             .select_tx(self.version, PacketNumberSpace::ApplicationData)
         else {
             return Err(Error::NotAvailable);
@@ -3560,7 +3635,7 @@ impl Connection {
     /// to check the estimated max datagram size and to use smaller datagrams.
     /// `max_datagram_size` is just a current estimate and will change over
     /// time depending on the encoded size of the packet number, ack frames, etc.
-    pub fn send_datagram(&mut self, buf: Vec<u8>, id: impl Into<DatagramTracking>) -> Res<()> {
+    pub fn send_datagram<I: Into<DatagramTracking>>(&mut self, buf: Vec<u8>, id: I) -> Res<()> {
         self.quic_datagrams
             .add_datagram(buf, id.into(), &mut self.stats.borrow_mut())
     }
@@ -3577,23 +3652,22 @@ impl Connection {
     }
 
     fn log_packet(&self, meta: packet::MetaData, now: Instant) {
-        if !log::log_enabled!(log::Level::Debug) {
-            return;
+        if log::log_enabled!(log::Level::Debug) {
+            let mut s = String::new();
+            let mut d = Decoder::from(meta.payload());
+            while d.remaining() > 0 {
+                let Ok(f) = Frame::decode(&mut d) else {
+                    s.push_str(" [broken]...");
+                    break;
+                };
+                let x = f.dump();
+                if !x.is_empty() {
+                    _ = write!(&mut s, "\n  {} {}", meta.direction(), &x);
+                }
+            }
+            qdebug!("[{self}] {meta}{s}");
         }
 
-        let mut s = String::new();
-        let mut d = Decoder::from(meta.payload());
-        while d.remaining() > 0 {
-            let Ok(f) = Frame::decode(&mut d) else {
-                s.push_str(" [broken]...");
-                break;
-            };
-            let x = f.dump();
-            if !x.is_empty() {
-                _ = write!(&mut s, "\n  {} {}", meta.direction(), &x);
-            }
-        }
-        qdebug!("[{self}] {meta}{s}");
         qlog::packet_io(&self.qlog, meta, now);
     }
 }
@@ -3614,11 +3688,11 @@ impl EventProvider for Connection {
     }
 }
 
-impl ::std::fmt::Display for Connection {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Connection {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{:?} ", self.role)?;
         if let Some(cid) = self.odcid() {
-            fmt::Display::fmt(&cid, f)
+            Display::fmt(&cid, f)
         } else {
             write!(f, "...")
         }

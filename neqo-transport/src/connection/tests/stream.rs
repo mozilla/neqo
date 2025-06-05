@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cmp::max, collections::HashMap};
+use std::{cmp::max, collections::HashMap, fmt::Debug};
 
 use neqo_common::{event::Provider as _, qdebug};
 use test_fixture::now;
@@ -18,8 +18,8 @@ use crate::{
     events::ConnectionEvent,
     frame::FrameType,
     packet::PacketBuilder,
-    recv_stream::RECV_BUFFER_SIZE,
-    send_stream::{OrderGroup, SendStreamState, SEND_BUFFER_SIZE},
+    recv_stream::INITIAL_RECV_WINDOW_SIZE,
+    send_stream::{OrderGroup, SendStreamState},
     streams::{SendOrder, StreamOrder},
     tparams::{TransportParameter, TransportParameterId::*},
     CloseReason, Connection, ConnectionParameters, Error, StreamId, StreamType,
@@ -224,7 +224,7 @@ fn fairness_test<S, R>(source: S, number_iterates: usize, truncate_to: usize, re
 where
     S: IntoIterator,
     S::Item: Into<StreamId>,
-    R: IntoIterator + std::fmt::Debug,
+    R: IntoIterator + Debug,
     R::Item: Into<StreamId>,
     Vec<u64>: PartialEq<R>,
 {
@@ -438,18 +438,7 @@ fn max_data() {
     client.streams.handle_max_data(100_000_000);
     assert_eq!(
         client.stream_avail_send_space(stream_id).unwrap(),
-        SEND_BUFFER_SIZE - SMALL_MAX_DATA
-    );
-
-    // Increase max stream data. Avail space now limited by tx buffer
-    client
-        .streams
-        .get_send_stream_mut(stream_id)
-        .unwrap()
-        .set_max_stream_data(100_000_000);
-    assert_eq!(
-        client.stream_avail_send_space(stream_id).unwrap(),
-        SEND_BUFFER_SIZE - SMALL_MAX_DATA + 4096
+        INITIAL_RECV_WINDOW_SIZE - SMALL_MAX_DATA
     );
 
     let evts = client.events().collect::<Vec<_>>();
@@ -898,7 +887,7 @@ fn stream_data_blocked_generates_max_stream_data() {
         }
         written += amount;
     }
-    assert_eq!(written, RECV_BUFFER_SIZE);
+    assert_eq!(written, INITIAL_RECV_WINDOW_SIZE);
 }
 
 /// See <https://github.com/mozilla/neqo/issues/871>

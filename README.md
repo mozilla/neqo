@@ -54,6 +54,13 @@ target/debug/neqo-client 'https://[::]:12345/' --qlog-dir .
 You can of course specify a different directory for the QLOG files.
 You can upload QLOG files to [qvis][QVIS] to visualize the flows.
 
+To export QLOG files for [Neqo Simulator](./test-fixture/src/sim) runs, set the
+environment variable `QLOGDIR`. For example:
+
+```shell
+QLOGDIR=/tmp/qlog cargo bench --profile=dev --bench min_bandwidth --features bench
+```
+
 ### Using `SSLKEYLOGFILE` to decrypt Wireshark logs
 
 You can export TLS keys by setting the `SSLKEYLOGFILE` environment variable

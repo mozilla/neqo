@@ -56,7 +56,7 @@ impl SendData {
         &self.data[self.offset..end]
     }
 
-    pub fn send(&mut self, mut f: impl FnMut(&[u8]) -> usize) -> bool {
+    pub fn send<F: FnMut(&[u8]) -> usize>(&mut self, mut f: F) -> bool {
         while self.remaining > 0 {
             match f(self.slice()) {
                 0 => {

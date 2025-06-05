@@ -4,7 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, collections::BTreeSet, mem, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::BTreeSet,
+    fmt::{self, Display, Formatter},
+    mem,
+    rc::Rc,
+};
 
 use neqo_common::{qtrace, Encoder, Header, MessageType, Role};
 use neqo_qpack::{QPackDecoder, QPackEncoder};
@@ -48,8 +54,8 @@ pub struct WebTransportSession {
     role: Role,
 }
 
-impl ::std::fmt::Display for WebTransportSession {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for WebTransportSession {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "WebTransportSession session={}", self.session_id)
     }
 }
@@ -400,11 +406,11 @@ impl WebTransportSession {
     /// # Errors
     ///
     /// Returns an error if the datagram exceeds the remote datagram size limit.
-    pub fn send_datagram(
+    pub fn send_datagram<I: Into<DatagramTracking>>(
         &self,
         conn: &mut Connection,
         buf: &[u8],
-        id: impl Into<DatagramTracking>,
+        id: I,
     ) -> Res<()> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state == SessionState::Active {

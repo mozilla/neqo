@@ -6,6 +6,11 @@
 
 // Tracking of sent packets and detecting their loss.
 
+#![allow(
+    clippy::module_name_repetitions,
+    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
+)]
+
 #[cfg(feature = "bench")]
 pub mod sent;
 #[cfg(not(feature = "bench"))]
@@ -14,6 +19,7 @@ mod token;
 
 use std::{
     cmp::{max, min},
+    fmt::{self, Display, Formatter},
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
@@ -41,7 +47,6 @@ pub const PACKET_THRESHOLD: u64 = 3;
 /// If the congestion window is this small, we will only send ACK frames.
 pub const ACK_ONLY_SIZE_LIMIT: usize = 256;
 /// The maximum number of packets we send on a PTO.
-/// And the maximum number to declare lost when the PTO timer is hit.
 pub const MAX_PTO_PACKET_COUNT: usize = 2;
 /// The preferred limit on the number of packets that are tracked.
 /// If we exceed this number, we start sending `PING` frames sooner to
@@ -178,16 +183,13 @@ impl LossRecoverySpace {
         self.in_flight_outstanding > 0
     }
 
-    pub fn pto_packets(&mut self, count: usize) -> impl Iterator<Item = &SentPacket> {
-        self.sent_packets
-            .iter_mut()
-            .filter_map(|sent| {
-                sent.pto().then(|| {
-                    qtrace!("PTO: marking packet {} lost ", sent.pn());
-                    &*sent
-                })
+    pub fn pto_packets(&mut self) -> impl Iterator<Item = &SentPacket> {
+        self.sent_packets.iter_mut().filter_map(|sent| {
+            sent.pto().then(|| {
+                qtrace!("PTO: marking packet {} lost ", sent.pn());
+                &*sent
             })
-            .take(count)
+        })
     }
 
     #[must_use]
@@ -333,7 +335,7 @@ impl LossRecoverySpace {
             .sent_packets
             .iter_mut()
             // BTreeMap iterates in order of ascending PN
-            .take_while(|p| p.pn() < largest_acked.unwrap_or(PacketNumber::MAX))
+            .take_while(|p| largest_acked.is_some_and(|largest_ack| p.pn() < largest_ack))
         {
             // Packets sent before now - loss_delay are deemed lost.
             if packet.time_sent() + loss_delay <= now {
@@ -429,7 +431,6 @@ struct PtoState {
 
 impl PtoState {
     /// The number of packets we send on a PTO.
-    /// And the number to declare lost when the PTO timer is hit.
     fn pto_packet_count(space: PacketNumberSpace) -> usize {
         if space == PacketNumberSpace::ApplicationData {
             MAX_PTO_PACKET_COUNT
@@ -507,7 +508,7 @@ impl LossRecovery {
 
     #[must_use]
     pub fn largest_acknowledged_pn(&self, pn_space: PacketNumberSpace) -> Option<PacketNumber> {
-        self.spaces.get(pn_space).and_then(|sp| sp.largest_acked)
+        self.spaces.get(pn_space)?.largest_acked
     }
 
     pub fn set_qlog(&mut self, qlog: NeqoQlog) {
@@ -620,7 +621,7 @@ impl LossRecovery {
         }
 
         qdebug!(
-            "[{self}] ACK for {pn_space} - largest_acked={}",
+            "[{self}] ACK for {pn_space:?} - largest_acked={}",
             largest_acked_pkt.pn()
         );
 
@@ -705,7 +706,7 @@ impl LossRecovery {
 
     /// Discard state for a given packet number space.
     pub fn discard(&mut self, primary_path: &PathRef, space: PacketNumberSpace, now: Instant) {
-        qdebug!("[{self}] Reset loss recovery state for {space}");
+        qdebug!("[{self}] Reset loss recovery state for {space:?}");
         let mut path = primary_path.borrow_mut();
         for p in self.spaces.drop_space(space) {
             path.discard_packet(&p, now, &mut self.stats.borrow_mut());
@@ -780,8 +781,9 @@ impl LossRecovery {
     // Calculate PTO time for the given space.
     fn pto_time(&self, rtt: &RttEstimate, pn_space: PacketNumberSpace) -> Option<Instant> {
         self.spaces
-            .get(pn_space)
-            .and_then(|space| space.pto_base_time().map(|t| t + self.pto_period(rtt)))
+            .get(pn_space)?
+            .pto_base_time()
+            .map(|t| t + self.pto_period(rtt))
     }
 
     /// Find the earliest PTO time for all active packet number spaces.
@@ -817,28 +819,44 @@ impl LossRecovery {
     }
 
     /// This checks whether the PTO timer has fired and fires it if needed.
-    /// When it has, mark a few packets as "lost" for the purposes of having frames
+    /// When it has, mark packets as "lost" for the purposes of having frames
     /// regenerated in subsequent packets.  The packets aren't truly lost, so
     /// we have to clone the `SentPacket` instance.
-    fn maybe_fire_pto(&mut self, rtt: &RttEstimate, now: Instant, lost: &mut Vec<SentPacket>) {
+    fn maybe_fire_pto(&mut self, primary_path: &PathRef, now: Instant, lost: &mut Vec<SentPacket>) {
         let mut pto_space = None;
         // The spaces in which we will allow probing.
         let mut allow_probes = PacketNumberSpaceSet::default();
         for pn_space in PacketNumberSpace::iter() {
-            if let Some(t) = self.pto_time(rtt, pn_space) {
-                allow_probes.insert(pn_space);
-                if t <= now {
-                    qdebug!("[{self}] PTO timer fired for {pn_space}");
-                    if let Some(space) = self.spaces.get_mut(pn_space) {
-                        lost.extend(
-                            space
-                                .pto_packets(PtoState::pto_packet_count(pn_space))
-                                .cloned(),
-                        );
-                        pto_space = pto_space.or(Some(pn_space));
-                    }
-                }
+            let Some(t) = self.pto_time(primary_path.borrow().rtt(), pn_space) else {
+                continue;
+            };
+            allow_probes.insert(pn_space);
+            if t > now {
+                continue;
             }
+            qdebug!("[{self}] PTO timer fired for {pn_space:?}");
+            let Some(space) = self.spaces.get_mut(pn_space) else {
+                continue;
+            };
+            let mut size = 0;
+            let mtu = primary_path.borrow().plpmtu();
+            lost.extend(
+                space
+                    .pto_packets()
+                    // Do not consider all packets for retransmission on PTO. On
+                    // a high bandwidth delay connection, that would be a lot of
+                    // `SentPacket`s to clone.
+                    //
+                    // Given that we are sending at most `MAX_PTO_PACKET_COUNT`
+                    // packets on PTO, consider as many packets for
+                    // retransmission as would fit into those PTO packets.
+                    .take_while(move |p| {
+                        size += p.len();
+                        size <= MAX_PTO_PACKET_COUNT * mtu
+                    })
+                    .cloned(),
+            );
+            pto_space = pto_space.or(Some(pn_space));
         }
 
         // This has to happen outside the loop. Increasing the PTO count here causes the
@@ -876,7 +894,7 @@ impl LossRecovery {
         }
         self.stats.borrow_mut().lost += lost_packets.len();
 
-        self.maybe_fire_pto(primary_path.borrow().rtt(), now, &mut lost_packets);
+        self.maybe_fire_pto(primary_path, now, &mut lost_packets);
         lost_packets
     }
 
@@ -887,6 +905,11 @@ impl LossRecovery {
         qtrace!("[{self}] get send profile {now:?}");
         let sender = path.sender();
         let mtu = path.plpmtu();
+        #[allow(
+            clippy::allow_attributes,
+            clippy::return_and_then,
+            reason = "TODO: False positive on nightly; function isn't returning Option or Result"
+        )]
         if let Some(profile) = self
             .pto_state
             .as_mut()
@@ -917,8 +940,8 @@ impl LossRecovery {
     }
 }
 
-impl ::std::fmt::Display for LossRecovery {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for LossRecovery {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "LossRecovery")
     }
 }
@@ -932,7 +955,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{qlog::NeqoQlog, IpTosEcn};
+    use neqo_common::qlog::NeqoQlog;
     use test_fixture::{now, DEFAULT_ADDR};
 
     use super::{
@@ -1113,7 +1136,6 @@ mod tests {
                 SentPacket::new(
                     PacketType::Short,
                     pn,
-                    IpTosEcn::default(),
                     pn_time(pn),
                     true,
                     Vec::new(),
@@ -1141,7 +1163,6 @@ mod tests {
             lrs.on_packet_sent(SentPacket::new(
                 PacketType::Short,
                 pn,
-                IpTosEcn::default(),
                 pn_time(pn),
                 true,
                 Vec::new(),
@@ -1266,7 +1287,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Short,
                 0,
-                IpTosEcn::default(),
                 pn_time(0),
                 true,
                 Vec::new(),
@@ -1278,7 +1298,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Short,
                 1,
-                IpTosEcn::default(),
                 pn_time(0) + TEST_RTT / 4,
                 true,
                 Vec::new(),
@@ -1377,7 +1396,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Initial,
                 0,
-                IpTosEcn::default(),
                 pn_time(0),
                 true,
                 Vec::new(),
@@ -1389,7 +1407,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Handshake,
                 0,
-                IpTosEcn::default(),
                 pn_time(1),
                 true,
                 Vec::new(),
@@ -1401,7 +1418,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Short,
                 0,
-                IpTosEcn::default(),
                 pn_time(2),
                 true,
                 Vec::new(),
@@ -1416,15 +1432,7 @@ mod tests {
             PacketType::Handshake,
             PacketType::Short,
         ] {
-            let sent_pkt = SentPacket::new(
-                *sp,
-                1,
-                IpTosEcn::default(),
-                pn_time(3),
-                true,
-                Vec::new(),
-                ON_SENT_SIZE,
-            );
+            let sent_pkt = SentPacket::new(*sp, 1, pn_time(3), true, Vec::new(), ON_SENT_SIZE);
             let pn_space = PacketNumberSpace::from(sent_pkt.packet_type());
             lr.on_packet_sent(sent_pkt, Instant::now());
             lr.on_ack_received(
@@ -1456,7 +1464,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Initial,
                 0,
-                IpTosEcn::default(),
                 pn_time(3),
                 true,
                 Vec::new(),
@@ -1474,7 +1481,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Initial,
                 0,
-                IpTosEcn::default(),
                 now(),
                 true,
                 Vec::new(),
@@ -1497,7 +1503,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Handshake,
                 0,
-                IpTosEcn::default(),
                 now(),
                 true,
                 Vec::new(),
@@ -1506,15 +1511,7 @@ mod tests {
             Instant::now(),
         );
         lr.on_packet_sent(
-            SentPacket::new(
-                PacketType::Short,
-                0,
-                IpTosEcn::default(),
-                now(),
-                true,
-                Vec::new(),
-                ON_SENT_SIZE,
-            ),
+            SentPacket::new(PacketType::Short, 0, now(), true, Vec::new(), ON_SENT_SIZE),
             Instant::now(),
         );
 
@@ -1550,7 +1547,6 @@ mod tests {
             SentPacket::new(
                 PacketType::Initial,
                 0,
-                IpTosEcn::default(),
                 now(),
                 true,
                 Vec::new(),
