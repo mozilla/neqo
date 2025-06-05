@@ -21,7 +21,7 @@ jobs:
       BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
     steps:
       - env:
-          EVENT: toJson(github.event)
+          EVENT: ${{ toJson(github.event) }}
         run: |
            echo "$EVENT"
            echo "$EVENT" | jq .
