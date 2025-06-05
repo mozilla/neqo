@@ -1,10 +1,6 @@
 name: Bench
 on:
   workflow_call:
-  workflow_dispatch:
-  schedule:
-    # Run at minute 0 past every 4th hour, so there is a `main`-branch baseline in the cache.
-    - cron: '0 */4 * * *'
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
@@ -38,31 +34,17 @@ jobs:
           persist-credentials: false
           clean: false
 
-      - name: Download cached main-branch results
-        id: cache
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      - name: Checkout mozilla/neqo@main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          path: |
-            neqo/target/criterion
-            hyperfine
-          key: bench-results-${{ runner.name }}-${{ github.sha }}
-          restore-keys: bench-results-${{ runner.name }}-
-
-      - id: run
-        env:
-          IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
-          CACHE_HIT: ${{ steps.cache.outputs.cache-hit == 'true' }}
-        run: |
-          # Always run benchmarks on PRs or when there isn't a cache hit.
-          if [[ "$IS_MAIN" == "false" || "$CACHE_HIT" == "false" ]]; then
-            RUN_NEEDED=true
-          else
-            RUN_NEEDED=false
-          fi
-          echo "needed=$RUN_NEEDED" >> "$GITHUB_OUTPUT"
+          repository: mozilla/neqo
+          ref: main
+          path: neqo-main
+          submodules: 'recursive'
+          persist-credentials: false
+          clean: false
 
       - name: Checkout microsoft/msquic
-        if: steps.run.outputs.needed == 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: microsoft/msquic
@@ -72,17 +54,16 @@ jobs:
           clean: false
 
       - name: Checkout google/quiche
-        if: steps.run.outputs.needed == 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: google/quiche
+          ref: 23785904d54861f341ffef0ce5513b6c0a5beebc # TODO: Unpin when `main` compiles again.
           path: google-quiche
           submodules: 'recursive'
           persist-credentials: false
           clean: false
 
       - name: Checkout cloudflare/quiche
-        if: steps.run.outputs.needed == 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: cloudflare/quiche
@@ -92,7 +73,6 @@ jobs:
           clean: false
 
       - name: Checkout aws/s2n-quic
-        if: steps.run.outputs.needed == 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: aws/s2n-quic
@@ -102,12 +82,10 @@ jobs:
           clean: false
 
       - name: Set PATH and environment
-        if: steps.run.outputs.needed == 'true'
         run: |
           echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
-        if: steps.run.outputs.needed == 'true'
         uses: ./neqo/.github/actions/rust
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
@@ -115,35 +93,42 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           workspaces: |
             neqo
+            neqo-main
             quiche
             s2n-quic
 
       - name: Get minimum NSS version
-        if: steps.run.outputs.needed == 'true'
         id: nss-version
-        run: echo "minimum=$(cat neqo/neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+        run: |
+          cat neqo/neqo-crypto/min_version.txt > versions.txt
+          cat neqo-main/neqo-crypto/min_version.txt >> versions.txt
+          # Use the maximum version from both branches.
+          echo "minimum=$(sort -u versions.txt | tail -n1)" >> "$GITHUB_OUTPUT"
 
       - name: Install NSS
-        if: steps.run.outputs.needed == 'true'
         id: nss
         uses: ./neqo/.github/actions/nss
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - name: Build neqo
-        if: steps.run.outputs.needed == 'true'
         run: |
-          cd neqo
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
           export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
           echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
+          cd neqo-main
           cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
+          cargo build --locked --release --bin neqo-client --bin neqo-server
+          BENCHES_MAIN=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
+          echo "BENCHES_MAIN=$BENCHES_MAIN" >> "$GITHUB_ENV"
+          cd ../neqo
+          cp -r ../neqo-main/target .
+          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
+          cargo build --locked --release --bin neqo-client --bin neqo-server
           BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
           echo "BENCHES=$BENCHES" >> "$GITHUB_ENV"
-          cargo build --locked --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
-        if: steps.run.outputs.needed == 'true'
         run: |
           mkdir -p msquic/build
           cd msquic/build
@@ -151,64 +136,63 @@ jobs:
           cmake --build .
 
       - name: Build google/quiche
-        if: steps.run.outputs.needed == 'true'
         run: |
           cd google-quiche
           bazel build -c opt --copt=-fno-omit-frame-pointer --copt=-g --strip=never --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
           bazel shutdown
 
       - name: Build cloudflare/quiche
-        if: steps.run.outputs.needed == 'true'
         run: |
           # We already changed RUSTFLAGS above; this depends on that having happened.
           cd quiche
           cargo build --release --bin quiche-client --bin quiche-server # --locked not working
 
       - name: Build aws/s2n-quic
-        if: steps.run.outputs.needed == 'true'
         run: |
           # We already changed RUSTFLAGS above; this depends on that having happened.
           cd s2n-quic
           cargo build --release --bin s2n-quic-qns # --locked not working
 
-      - name: Move cached hyperfine results
-        if: steps.run.outputs.needed == 'true'
-        run: |
-          mv hyperfine hyperfine-main || true
-          mkdir -p hyperfine
-
       # Disable turboboost, hyperthreading and use performance governor.
       # Also creates "cpu23", "cpu2" and "cpu3" CPU sets for use with cset.
       # On the bencher, logical cores 2 and 3 have been isolated for use by the benchmarks.
       - name: Prepare machine
-        if: steps.run.outputs.needed == 'true'
         run: sudo /root/bin/prep.sh
 
       - name: Run cargo bench
-        if: steps.run.outputs.needed == 'true'
         env:
           NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
         run: |
           sudo ip link set dev lo mtu "$MTU"
-          mkdir -p binaries
-          cd neqo
+          mkdir -p binaries/neqo-main
+          mkdir -p binaries/neqo
+          cd neqo-main
+          rm -rf target/criterion
+          for BENCH in $BENCHES_MAIN; do
+            cp "$BENCH" ../binaries/neqo-main/
+            # shellcheck disable=SC2086
+            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+              $BENCH -- --bench --save-baseline main
+          done
+          cd ../neqo
+          rm -rf target/criterion
+          cp -r ../neqo-main/target/criterion target/
           for BENCH in $BENCHES; do
-            NAME=$(basename "$BENCH" | cut -d- -f1)
-            cp "$BENCH" ../binaries/
+            cp "$BENCH" ../binaries/neqo/
             # Run it twice, once without perf for baseline comparison, and once with perf for profiling.
             # (Perf seems to introduce some variability in the results.)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench | tee -a ../results.txt
+              $BENCH -- --bench --baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
+            NAME=$(basename "$BENCH" | cut -d- -f1)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline
+              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
           done
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
       - name: Compare QUIC implementations
-        if: steps.run.outputs.needed == 'true'
         env:
           HOST: 127.0.0.1
           PORT: 4433
@@ -219,7 +203,7 @@ jobs:
           TMP=$(mktemp -d)
           mkdir -p "$TMP/out"
           echo "COMPARE_TMP=$TMP" >> "$GITHUB_ENV"
-          mkdir -p binaries
+          mkdir -p binaries hyperfine hyperfine-main
           touch results.txt
           # Make a cert and key for msquic and google.
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
@@ -323,10 +307,25 @@ jobs:
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
                   SERVER_CMD="$CMD"
+                  echo "Server command: $SERVER_CMD"
                   # pkill only matches on the first 15 characters of the command?!
                   SERVER_TAG="$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
+                  echo "Client command: $CMD"
                   cd "$TMP/out"
+                  if [[ "$client" == "neqo" || "$server" == "neqo" ]]; then
+                    echo "Generate main-branch results for comparison."
+                    echo "Server command: ${SERVER_CMD/neqo/neqo-main}"
+                    echo "Client command: ${CMD/neqo/neqo-main}"
+                    nice -n -20 setarch --addr-no-randomize hyperfine \
+                      --command-name "$TAG" --time-unit millisecond  \
+                      --export-json "$WORKSPACE/hyperfine-main/$FILENAME.json" \
+                      --output null --warmup 5 --min-runs "$RUNS" \
+                      --prepare "$WORKSPACE/${SERVER_CMD/neqo/neqo-main} & echo \$! >> /cpusets/cpu2/tasks; sleep 0.1" \
+                      --conclude "pkill $SERVER_TAG" \
+                      "echo \$\$ >> /cpusets/cpu3/tasks; $WORKSPACE/${CMD/neqo/neqo-main}"
+                  fi
+
                   nice -n -20 setarch --addr-no-randomize hyperfine \
                     --command-name "$TAG" --time-unit millisecond  \
                     --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
@@ -394,9 +393,11 @@ jobs:
                       FORMAT=""
                     fi
                     printf "| %s %s%.1f%s | %s%.1f%%%s |\n" "$SYMBOL" "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT" >> steps.md
-                  else
+                  elif [ "$client" == "neqo" ] || [ "$server" == "neqo" ]; then
                     echo No cached baseline from main found.
                     echo '| :question: | :question: |' >> steps.md
+                  else
+                    echo '| | |' >> steps.md
                   fi
                 done
               done
@@ -423,7 +424,6 @@ jobs:
           sudo ip link set dev lo mtu 65536
 
       - name: Post-process perf data
-        if: steps.run.outputs.needed == 'true'
         run: |
           for f in *.perf; do
             # Convert for profiler.firefox.com
@@ -433,81 +433,75 @@ jobs:
           done
 
       - name: Format results as Markdown
-        if: steps.run.outputs.needed == 'true'
         id: results
+        env:
+          EVENT_PATH: ${{ github.event_path }}
         run: |
+          SHA=$(cd neqo-main && git log -1 --format=%H)
+          {
+            echo "Performance differences relative to $SHA."
+            echo
+          } > sha.md
           {
             echo "### Benchmark results"
             echo
-          } > results.md
-          SHA=$(cat neqo/target/criterion/baseline-sha.txt || true)
-          if [ -n "$SHA" ]; then
-            {
-              echo "Performance differences relative to $SHA."
-              echo
-            } | tee sha.md >> results.md
-          fi
-          sed -E -e 's/^                 //gi' \
-                 -e '/cset:.*last message/d' \
-                 -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
-            perl -p -0777 -e 's/(.*?)\n(.*?)(((No change|Change within|Performance has).*?)(\nFound .*?)?)?\n\n/<details><summary>$1: $4<\/summary><pre>\n$2$6<\/pre><\/details>\n/gs' |\
-            sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
-                   -e 's/(Performance has improved.)/:green_heart: <b>\1<\/b>/gi' \
-                   -e 's/^ +((<\/pre>|Found).*)/\1/gi' \
-                   -e 's/^<details>(.*Performance has.*)/<details open>\1/gi' >> results.md
-          {
+            cat sha.md
+            sed -E -e 's/^                 //gi' \
+                  -e '/cset:.*last message/d' \
+                  -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
+              perl -p -0777 -e 's/(.*?)\n(.*?)(((No change|Change within|Performance has).*?)(\nFound .*?)?)?\n\n/<details><summary>$1: $4<\/summary><pre>\n$2$6<\/pre><\/details>\n/gs' |\
+              sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
+                    -e 's/(Performance has improved.)/:green_heart: <b>\1<\/b>/gi' \
+                    -e 's/^ +((<\/pre>|Found).*)/\1/gi' \
+                    -e 's/^<details>(.*Performance has.*)/<details open>\1/gi'
             echo
             echo "### Client/server transfer results"
-            SHA=$(cat neqo/target/criterion/baseline-sha.txt || true)
-            if [ -n "$SHA" ]; then
-              cat sha.md >> results.md
-            fi
+            echo
+            cat sha.md
             cat comparison.md
           } >> results.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
+          echo "$runner.name" > testbed.txt
+          cp "$EVENT_PATH" event.json
 
-      - name: Remember main-branch push URL
-        if: github.ref == 'refs/heads/main' && steps.run.outputs.needed == 'true'
-        run: echo "${{ github.sha }}" > neqo/target/criterion/baseline-sha.txt
-
-      - name: Cache main-branch results
-        if: github.ref == 'refs/heads/main' && steps.run.outputs.needed == 'true'
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: |
-            neqo/target/criterion
-            hyperfine
-          key: bench-results-${{ runner.name }}-${{ github.sha }}
-
-      - name: Export perf data
-        if: steps.run.outputs.needed == 'true'
-        id: export
+      - name: Export profiler.firefox.com data
+        id: export_samply
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}
+          name: ${{ github.event.repository.name }}-${{ github.sha }}-samply
           path: |
-            *.svg
             *.samply.json.gz
             *.syms.json
-            *.txt
-            *.md
-            results.*
-            neqo/target/criterion
-            hyperfine
             binaries
           compression-level: 9
 
+      - name: Export performance data
+        id: export_perf
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ github.event.repository.name }}-${{ github.sha }}-perf
+          path: |
+            *.svg
+            *.txt
+            *.md
+            event.json
+            results.*
+            neqo/target/criterion
+            neqo-main/target/criterion
+            hyperfine
+            hyperfine-main
+          compression-level: 9
+
       - name: Export PR comment data
-        if: steps.run.outputs.needed == 'true'
         uses: ./neqo/.github/actions/pr-comment-data-export
         with:
           name: ${{ github.workflow }}
           contents: results.md
-          log-url: ${{ steps.export.outputs.artifact-url }}
+          log-md: ${{ format('[Download data for `profiler.firefox.com`]({0}) or [download performance comparison data]({1}).', steps.export_samply.outputs.artifact-url, steps.export_perf.outputs.artifact-url) }}
 
       - name: Fail on regression
         # Don't check for regressions when running on main.
-        if: github.ref != 'refs/heads/main' && steps.run.outputs.needed == 'true'
+        if: github.ref != 'refs/heads/main'
         run: |
           if grep -q "Performance has regressed." results.txt; then
             echo "Performance regression detected."

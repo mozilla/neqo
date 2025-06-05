@@ -23,7 +23,7 @@ indexmap = { version = "2.2", default-features = false } # See https://github.co
 log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
-mtu = { version = "0.2", default-features = false } # neqo is only user currently, can bump freely
+mtu = { version = "0.2.9", default-features = false } # neqo is only user currently, can bump freely
 qlog = { workspace = true }
 rustc-hash = { workspace = true }
 smallvec = { version = "1.13", default-features = false, features = ["union", "const_generics"] }

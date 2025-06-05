@@ -185,13 +185,14 @@ impl Args {
     #[must_use]
     #[cfg(any(test, feature = "bench"))]
     #[expect(clippy::missing_panics_doc, reason = "This is example code.")]
-    pub fn new(requests: &[usize], upload: bool) -> Self {
+    pub fn new(server_addr: Option<SocketAddr>, requests: &[usize], upload: bool) -> Self {
         use std::str::FromStr as _;
+        let addr = server_addr.map_or("[::1]:12345".into(), |a| format!("[::1]:{}", a.port()));
         Self {
             shared: SharedArgs::default(),
             urls: requests
                 .iter()
-                .map(|r| Url::from_str(&format!("http://[::1]:12345/{r}")).unwrap())
+                .map(|r| Url::from_str(&format!("http://{addr}/{r}")).unwrap())
                 .collect(),
             method: if upload { "POST".into() } else { "GET".into() },
             header: vec![],

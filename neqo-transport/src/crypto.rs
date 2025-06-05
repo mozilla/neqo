@@ -1463,7 +1463,7 @@ impl CryptoStreams {
     }
 
     pub fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
-        self.get_mut(space).is_none_or(|cs| cs.tx.is_empty())
+        self.get_mut(space).map_or(true, |cs| cs.tx.is_empty())
     }
 
     const fn get(&self, space: PacketNumberSpace) -> Option<&CryptoStream> {

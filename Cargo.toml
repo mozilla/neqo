@@ -26,7 +26,9 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 # Don't increase beyond what Firefox is currently using:
 # https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
-rust-version = "1.82.0"
+# In addition, currently Mozilla CI uses a Rust fork before the official Rust 1.82.0 release, thus stay on 1.81.0 for now.
+# https://bugzilla.mozilla.org/show_bug.cgi?id=1968057#c1
+rust-version = "1.81.0"
 
 [workspace.dependencies]
 enum-map = { version = "2.7", default-features = false }
@@ -43,12 +45,16 @@ url = { version = "2.5", default-features = false, features = ["std"] }
 
 [workspace.lints.rust]
 absolute_paths_not_starting_with_crate = "warn"
-ambiguous_negative_literals = "warn"
+# TODO: Re-activate with MSRV 1.82.0. See
+# https://github.com/mozilla/neqo/pull/2661 for details.
+# ambiguous_negative_literals = "warn"
 explicit_outlives_requirements = "warn"
 macro_use_extern_crate = "warn"
 missing_abi = "warn"
 non_ascii_idents = "warn"
-redundant_imports = "warn"
+# TODO: Re-activate with MSRV 1.82.0. See
+# https://github.com/mozilla/neqo/pull/2661 for details.
+# redundant_imports = "warn"
 redundant_lifetimes = "warn"
 trivial_numeric_casts = "warn"
 unit_bindings = "warn"
@@ -75,7 +81,9 @@ float_cmp_const = "warn"
 fn_to_numeric_cast_any = "warn"
 get_unwrap = "warn"
 if_then_some_else_none = "warn"
-impl_trait_in_params = "warn"
+# TODO: Re-activate with MSRV 1.82.0. See
+# https://github.com/mozilla/neqo/pull/2661 for details.
+# impl_trait_in_params = "warn"
 infinite_loop = "warn"
 iter_over_hash_type = "warn"
 large_include_file = "warn"
