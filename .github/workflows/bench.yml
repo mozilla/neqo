@@ -510,7 +510,7 @@ jobs:
         with:
           name: ${{ github.workflow }}
           contents: results.md
-          log-md: ${{ format('\n[Download data for `profiler.firefox.com`]({0}) or [download performance comparison data]({1}).', steps.export_samply.outputs.artifact-url, steps.export_perf.outputs.artifact-url) }}
+          log-md: ${{ format('[Download data for `profiler.firefox.com`]({0}) or [download performance comparison data]({1}).', steps.export_samply.outputs.artifact-url, steps.export_perf.outputs.artifact-url) }}
 
       - name: Fail on regression
         # Don't check for regressions when running on main.

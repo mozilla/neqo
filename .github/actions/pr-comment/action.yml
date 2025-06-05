@@ -26,7 +26,11 @@ runs:
       run: echo "number=$(cat pr-number)" >> "$GITHUB_OUTPUT"
 
     - shell: bash
-      run: cat log-md >> contents || true
+      run: |
+        {
+          echo
+          cat log-md
+        } >> contents || true
 
     - uses: thollander/actions-comment-pull-request@fabd468d3a1a0b97feee5f6b9e499eab0dd903f6 # v2.5.0
       with:
