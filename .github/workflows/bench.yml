@@ -169,6 +169,9 @@ jobs:
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               $BENCH -- --bench --save-baseline main
           done
+          # Copy the main branch results to a separate directory for bencher.dev.
+          rm -rf ../neqo-main/ && mkdir -p ../neqo-main/
+          cp -r target/criterion ../neqo-main/
           git checkout -
           # Run pull request builds twice, once without perf for baseline comparison, and once with perf for profiling.
           # (Perf seems to introduce some variability in the results.)
@@ -462,6 +465,7 @@ jobs:
           name: results
           path: |
             neqo/target/criterion
+            neqo-main/target/criterion
             hyperfine
             hyperfine-main
             testbed.txt
