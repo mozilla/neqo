@@ -434,6 +434,8 @@ jobs:
 
       - name: Format results as Markdown
         id: results
+        env:
+          EVENT_PATH: ${{ github.event_path }}
         run: |
           SHA=$(cd neqo-main && git log -1 --format=%H)
           {
@@ -460,23 +462,7 @@ jobs:
           } >> results.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
           echo "$runner.name" > testbed.txt
-
-      - name: Export benchmark results for bencher.dev
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: results
-          path: |
-            neqo/target/criterion
-            neqo-main/target/criterion
-            hyperfine
-            hyperfine-main
-            testbed.txt
-
-      - name: Export GitHub event for bencher.dev
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: event.json
-          path: ${{ github.event_path }}
+          cp "$EVENT_PATH" event.json
 
       - name: Export profiler.firefox.com data
         id: export_samply
@@ -498,6 +484,7 @@ jobs:
             *.svg
             *.txt
             *.md
+            event.json
             results.*
             neqo/target/criterion
             neqo-main/target/criterion
