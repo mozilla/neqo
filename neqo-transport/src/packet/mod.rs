@@ -27,10 +27,9 @@ use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
     crypto::{CryptoDxState, CryptoStates, Epoch},
     frame::FrameType,
-    recovery::SendProfile,
     tracking::PacketNumberSpace,
     version::{Version, WireVersion},
-    Error, Pmtud, Res,
+    Error, Res,
 };
 
 /// `MIN_INITIAL_PACKET_SIZE` is the smallest packet that can be used to establish
@@ -151,14 +150,6 @@ impl PacketBuilder {
     /// The minimum useful frame size.  If space is less than this, we will claim to be full.
     pub const MINIMUM_FRAME_SIZE: usize = 2;
 
-    fn infer_limit(encoder: &Encoder) -> usize {
-        if encoder.capacity() > 64 {
-            encoder.capacity()
-        } else {
-            2048
-        }
-    }
-
     /// Start building a short header packet.
     ///
     /// This doesn't fail if there isn't enough space; instead it returns a builder that
@@ -168,8 +159,9 @@ impl PacketBuilder {
     ///
     /// If, after calling this method, `remaining()` returns 0, then call `abort()` to get
     /// the encoder back.
-    pub fn short<A: AsRef<[u8]>>(mut encoder: Encoder, key_phase: bool, dcid: Option<A>) -> Self {
-        let mut limit = Self::infer_limit(&encoder);
+    pub fn short<A: AsRef<[u8]>>(mut encoder: Encoder, key_phase: bool, dcid: Option<A>, limit: Option<usize>) -> Self {
+        let mut limit =  limit.unwrap_or(2048);
+
         let header_start = encoder.len();
         // Check that there is enough space for the header.
         // 5 = 1 (first byte) + 4 (packet number)
@@ -209,8 +201,10 @@ impl PacketBuilder {
         version: Version,
         mut dcid: Option<A>,
         mut scid: Option<A1>,
+        limit: Option<usize>,
     ) -> Self {
-        let mut limit = Self::infer_limit(&encoder);
+        let mut limit = limit.unwrap_or(2048);
+
         let header_start = encoder.len();
         // Check that there is enough space for the header.
         // 11 = 1 (first byte) + 4 (version) + 2 (dcid+scid length) + 4 (packet number)
@@ -252,24 +246,6 @@ impl PacketBuilder {
     /// is only used voluntarily by users of the builder, through `remaining()`.
     pub fn set_limit(&mut self, limit: usize) {
         self.limit = limit;
-    }
-
-    /// Set the initial limit for the packet, based on the profile and the PMTUD state.
-    /// Returns true if the packet needs padding.
-    pub fn set_initial_limit(
-        &mut self,
-        profile: &SendProfile,
-        aead_expansion: usize,
-        pmtud: &Pmtud,
-    ) -> bool {
-        if pmtud.needs_probe() {
-            debug_assert!(pmtud.probe_size() >= profile.limit());
-            self.limit = pmtud.probe_size() - aead_expansion;
-            true
-        } else {
-            self.limit = profile.limit() - aead_expansion;
-            false
-        }
     }
 
     /// Get the current limit.
