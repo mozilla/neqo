@@ -103,13 +103,6 @@ runs:
       if: ${{ runner.os == 'Windows' }}
       run: rm /usr/bin/link.exe || true
 
-    - name: Install cargo-quickinstall
-      shell: bash
-      if: ${{ inputs.tools != '' }}
-      env:
-        GITHUB_TOKEN: ${{ inputs.token }}
-      run: cargo install --locked cargo-quickinstall
-
     - name: Install Rust tools
       shell: bash
       if: ${{ inputs.tools != '' }}
@@ -119,10 +112,10 @@ runs:
       run: |
         for tool in $(echo $TOOLS | tr -d ","); do
           if [ "$tool" == "samply" ]; then
-            # TODO: Install via quickinstall once `--unstable-presymbolicate` is released.
+            # TODO: Install released version once `--unstable-presymbolicate` is released.
             cargo install --git https://github.com/mstange/samply samply
           else
             # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
-            cargo quickinstall --force "$tool"
+            cargo install --locked --force "$tool"
           fi
         done

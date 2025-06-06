@@ -10,5 +10,5 @@ use clap::Parser as _;
 async fn main() -> Result<(), neqo_bin::server::Error> {
     let args = neqo_bin::server::Args::parse();
 
-    neqo_bin::server::server(args).await
+    neqo_bin::server::server(args)?.run().await
 }
