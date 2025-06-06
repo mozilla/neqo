@@ -75,8 +75,9 @@ pub const CUBIC_BETA_USIZE_DIVISOR: usize = 10;
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
 ///
-/// UPDATE: no change to fast convergence ratio.
-pub const CUBIC_FAST_CONVERGENCE: f64 = 0.85; // (1.0 + CUBIC_BETA) / 2.0;
+/// This is the factor that is used by fast convergence to further reduce the next `W_max` when a
+/// congestion event occurs while `cwnd < W_max` to further speed up the bandwidth release.
+pub const CUBIC_FAST_CONVERGENCE_FACTOR: f64 = (1.0 + 0.7) / 2.0; // with CUBIC_BETA = 0.7
 
 /// The minimum number of multiples of the datagram size that need
 /// to be received to cause an increase in the congestion window.
@@ -129,9 +130,7 @@ pub struct Cubic {
     /// > region to achieve at least the same throughput as Reno.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
-    ///
-    /// ACTION: Rename to `w_est` to conform with spec.
-    estimated_tcp_cwnd: f64,
+    w_est: f64,
     /// > The time period in seconds it takes to increase the congestion window size
     /// > at the beginning of the current congestion avoidance stage to `w_max`.
     ///
@@ -162,9 +161,7 @@ pub struct Cubic {
     /// > The time in seconds at which the current congestion avoidance stage started.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-variables-of-interest>
-    ///
-    /// UPDATE/ACTION: Rename to `t_epoch` to adhere to spec.
-    ca_epoch_start: Option<Instant>,
+    t_epoch: Option<Instant>,
     /// Number of bytes acked since the last Standard TCP congestion window increase.
     ///
     /// UPDATE: We are using bytes but the spec recommends using segments.
@@ -186,7 +183,7 @@ impl Display for Cubic {
         write!(
             f,
             "Cubic [last_max_cwnd: {}, k: {}, w_max: {}, ca_epoch_start: {:?}]",
-            self.last_max_cwnd, self.k, self.w_max, self.ca_epoch_start
+            self.last_max_cwnd, self.k, self.w_max, self.t_epoch
         )?;
         Ok(())
     }
@@ -194,34 +191,20 @@ impl Display for Cubic {
 
 #[expect(clippy::doc_markdown, reason = "Not doc items; names from RFC.")]
 impl Cubic {
-    /// Original equations is:
-    /// K = cubic_root(W_max*(1-beta_cubic)/C) (Eq. 2 RFC8312)
-    /// W_max is number of segments of the maximum segment size (MSS).
-    ///
-    /// K is actually the time that W_cubic(t) = C*(t-K)^3 + W_max (Eq. 1) would
-    /// take to increase to W_max. We use bytes not MSS units, therefore this
-    /// equation will be: W_cubic(t) = C*MSS*(t-K)^3 + W_max.
-    ///
-    /// From that equation we can calculate K as:
-    /// K = cubic_root((W_max - W_cubic) / C / MSS);
-    ///
-    /// <https://www.rfc-editor.org/rfc/rfc8312#section-4.1>
-    ///
-    /// UPDATE: Formula for K changed.
-    ///
     /// Original equation is:
-    /// `k = cubic_root((w_max - cwnd_epoch)/C)` with `cwnd_epoch` being the congestion
-    /// window at the start of the current congestion avoidance stage (so at time t_epoch).
+    ///
+    /// `k = cubic_root((w_max - cwnd_epoch)/C)`
+    ///
+    /// with `cwnd_epoch` being the congestion window at the start of the current congestion
+    /// avoidance stage (so at time `t_epoch`).
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#figure-2>
     ///
     /// Taking into account that we're using bytes not MSS units, the formula becomes:
     ///
     /// `k = cubic_root((w_max - cwnd_epoch)/C/MSS)`
-    ///
-    /// ACTION: change `calc_k`, add `cwnd_epoch`
-    fn calc_k(&self, curr_cwnd: f64, max_datagram_size: usize) -> f64 {
-        ((self.w_max - curr_cwnd) / CUBIC_C / convert_to_f64(max_datagram_size)).cbrt()
+    fn calc_k(&self, cwnd_epoch: f64, max_datagram_size: usize) -> f64 {
+        ((self.w_max - cwnd_epoch) / CUBIC_C / convert_to_f64(max_datagram_size)).cbrt()
     }
 
     /// `w_cubic(t) = C*(t-K)^3 + w_max`
@@ -256,10 +239,10 @@ impl Cubic {
         max_datagram_size: usize,
         now: Instant,
     ) {
-        self.ca_epoch_start = Some(now);
+        self.t_epoch = Some(now);
         // reset tcp_acked_bytes and estimated_tcp_cwnd;
         self.tcp_acked_bytes = new_acked_f64;
-        self.estimated_tcp_cwnd = curr_cwnd_f64;
+        self.w_est = curr_cwnd_f64;
         if self.last_max_cwnd <= curr_cwnd_f64 {
             self.w_max = curr_cwnd_f64;
             self.k = 0.0;
@@ -287,7 +270,7 @@ impl WindowAdjustment for Cubic {
     ) -> usize {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
         let new_acked_f64 = convert_to_f64(new_acked_bytes);
-        if self.ca_epoch_start.is_none() {
+        if self.t_epoch.is_none() {
             // This is a start of a new congestion avoidance phase.
             self.start_epoch(curr_cwnd_f64, new_acked_f64, max_datagram_size, now);
         } else {
@@ -318,7 +301,7 @@ impl WindowAdjustment for Cubic {
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#name-convex-region>
         let time_ca = self
-            .ca_epoch_start
+            .t_epoch
             .map_or(min_rtt, |t| {
                 if now + min_rtt < t {
                     // This only happens when processing old packets
@@ -348,11 +331,11 @@ impl WindowAdjustment for Cubic {
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-11>
         let max_datagram_size = convert_to_f64(max_datagram_size);
-        let tcp_cnt = self.estimated_tcp_cwnd / CUBIC_ALPHA;
+        let tcp_cnt = self.w_est / CUBIC_ALPHA;
         let incr = (self.tcp_acked_bytes / tcp_cnt).floor();
         if incr > 0.0 {
             self.tcp_acked_bytes -= incr * tcp_cnt;
-            self.estimated_tcp_cwnd += incr * max_datagram_size;
+            self.w_est += incr * max_datagram_size;
         }
 
         // Take the larger cwnd of Cubic concave or convex and Cubic Reno-friendly region.
@@ -372,7 +355,7 @@ impl WindowAdjustment for Cubic {
         // 3.a. Either get `acked_to_increase` from `target` (with `target - cwnd / cwnd`) OR
         // 3.b. Get `acked_to_increase` from `w_est` by calculating the difference between
         // `curr_cwnd` and `w_est`.
-        let target_cwnd = target_cubic.max(self.estimated_tcp_cwnd);
+        let target_cwnd = target_cubic.max(self.w_est);
 
         // Calculate the number of bytes that would need to be acknowledged for an increase
         // of `max_datagram_size` to match the increase of `target - cwnd / cwnd` as defined
@@ -457,11 +440,11 @@ impl WindowAdjustment for Cubic {
         // <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
         self.last_max_cwnd =
             if curr_cwnd_f64 + convert_to_f64(max_datagram_size) < self.last_max_cwnd {
-                curr_cwnd_f64 * CUBIC_FAST_CONVERGENCE
+                curr_cwnd_f64 * CUBIC_FAST_CONVERGENCE_FACTOR
             } else {
                 curr_cwnd_f64
             };
-        self.ca_epoch_start = None;
+        self.t_epoch = None;
         (
             curr_cwnd * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
             acked_bytes * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
@@ -471,7 +454,7 @@ impl WindowAdjustment for Cubic {
     fn on_app_limited(&mut self) {
         // Reset ca_epoch_start. Let it start again when the congestion controller
         // exits the app-limited period.
-        self.ca_epoch_start = None;
+        self.t_epoch = None;
     }
 
     #[cfg(test)]
