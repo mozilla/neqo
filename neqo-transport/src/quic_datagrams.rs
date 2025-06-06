@@ -158,7 +158,7 @@ impl QuicDatagrams {
             self.conn_events.datagram_outcome(
                 self.datagrams
                     .pop_front()
-                    .ok_or(Error::InternalError)?
+                    .ok_or(Error::Internal)?
                     .tracking(),
                 OutgoingDatagramOutcome::DroppedQueueFull,
             );

@@ -129,10 +129,10 @@ impl SelfEncrypt {
     #[expect(clippy::similar_names, reason = "aad is similar to aead.")]
     pub fn open(&self, aad: &[u8], ciphertext: &[u8]) -> Res<Vec<u8>> {
         if ciphertext[0] != Self::VERSION {
-            return Err(Error::SelfEncryptFailure);
+            return Err(Error::SelfEncrypt);
         }
         let Some(key) = self.select_key(ciphertext[1]) else {
-            return Err(Error::SelfEncryptFailure);
+            return Err(Error::SelfEncrypt);
         };
         let offset = 2 + Self::SALT_LENGTH;
 

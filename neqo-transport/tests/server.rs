@@ -503,7 +503,7 @@ fn bad_client_initial() {
     assert_ne!(delay, Duration::from_secs(0));
     assert!(matches!(
         *client.state(),
-        State::Draining { error: CloseReason::Transport(Error::PeerError(code)), .. } if code == Error::ProtocolViolation.code()
+        State::Draining { error: CloseReason::Transport(Error::Peer(code)), .. } if code == Error::ProtocolViolation.code()
     ));
 
     #[expect(
@@ -769,7 +769,7 @@ fn can_create_streams(c: &mut Connection, t: StreamType, n: u64) {
     for _ in 0..n {
         c.stream_create(t).unwrap();
     }
-    assert_eq!(c.stream_create(t), Err(Error::StreamLimitError));
+    assert_eq!(c.stream_create(t), Err(Error::StreamLimit));
 }
 
 #[test]

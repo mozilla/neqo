@@ -48,20 +48,20 @@ impl<'a> BitReader<'a> {
 
     pub fn verify_ending(&mut self, i: u8) -> Res<()> {
         if (i + self.current_bit) > 7 {
-            return Err(Error::HuffmanDecompressionFailed);
+            return Err(Error::HuffmanDecompression);
         }
 
         if self.input.is_empty() {
             Ok(())
         } else if self.offset != self.input.len() {
-            Err(Error::HuffmanDecompressionFailed)
+            Err(Error::HuffmanDecompression)
         } else if self.input[self.input.len() - 1] & ((0x1 << (i + self.current_bit)) - 1)
             == ((0x1 << (i + self.current_bit)) - 1)
         {
             self.current_bit = 0;
             Ok(())
         } else {
-            Err(Error::HuffmanDecompressionFailed)
+            Err(Error::HuffmanDecompression)
         }
     }
 
@@ -85,7 +85,7 @@ pub fn decode_huffman(input: &[u8]) -> Res<Vec<u8>> {
     let mut output = Vec::new();
     while reader.has_more_data() {
         if let Some(c) = decode_character(&mut reader)? {
-            output.push(u8::try_from(c).map_err(|_| Error::HuffmanDecompressionFailed)?);
+            output.push(u8::try_from(c).map_err(|_| Error::HuffmanDecompression)?);
         }
     }
 
@@ -257,9 +257,6 @@ mod tests {
 
     #[test]
     fn decoder_error_wrong_ending() {
-        assert_eq!(
-            decode_huffman(WRONG_END),
-            Err(Error::HuffmanDecompressionFailed)
-        );
+        assert_eq!(decode_huffman(WRONG_END), Err(Error::HuffmanDecompression));
     }
 }

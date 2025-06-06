@@ -19,6 +19,10 @@ pub const AEAD_NULL_TAG: &[u8] = &[0x0a; 16];
 pub struct AeadNull {}
 
 impl AeadNull {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "Need to replicate the API of aead::RealAead."
+    )]
     pub const fn new(
         _version: Version,
         _cipher: Cipher,
@@ -29,10 +33,15 @@ impl AeadNull {
     }
 
     #[must_use]
+    #[expect(clippy::unused_self, reason = "We may need this in the future.")]
     pub const fn expansion(&self) -> usize {
         AEAD_NULL_TAG.len()
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "Need to replicate the API of aead::RealAead."
+    )]
     pub fn encrypt<'a>(
         &self,
         _count: u64,
@@ -46,6 +55,10 @@ impl AeadNull {
         Ok(&output[..l + self.expansion()])
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "Need to replicate the API of aead::RealAead."
+    )]
     pub fn encrypt_in_place<'a>(
         &self,
         _count: u64,
