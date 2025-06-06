@@ -74,7 +74,7 @@ impl<'a> BitReader<'a> {
 ///
 /// # Errors
 ///
-/// This function may return `HuffmanDecompressionFailed` if `input` is not a correct
+/// This function may return `Error::HuffmanDecompression` if `input` is not a correct
 /// huffman-encoded array of bits.
 ///
 /// # Panics

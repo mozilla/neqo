@@ -63,9 +63,9 @@ impl<'a> ReceiverConnWrapper<'a> {
     }
 }
 
-/// This is only used by header decoder therefore all errors are `DecompressionFailed`.
+/// This is only used by header decoder therefore all errors are `Error::Decompression`.
 /// A header block is read entirely before decoding it, therefore if there is not enough
-/// data in the buffer an error `DecompressionFailed` will be return.
+/// data in the buffer an error `Error::Decompression` will be return.
 pub(crate) struct ReceiverBufferWrapper<'a> {
     buf: &'a [u8],
     offset: usize,
@@ -104,7 +104,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
     /// byte.
     /// `ReceiverBufferWrapper` is only used for decoding header blocks. The header blocks are read
     /// entirely before a decoding starts, therefore any incomplete varint because of reaching the
-    /// end of a buffer will be treated as the `DecompressionFailed` error.
+    /// end of a buffer will be treated as the `Error::Decompression` error.
     pub fn read_prefixed_int(&mut self, prefix_len: u8) -> Res<u64> {
         debug_assert!(prefix_len < 8);
 
@@ -123,7 +123,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
     ///
     /// `ReceiverBufferWrapper` is only used for decoding header blocks. The header blocks are read
     /// entirely before a decoding starts, therefore any incomplete varint or literal because of
-    /// reaching the end of a buffer will be treated as the `DecompressionFailed` error.
+    /// reaching the end of a buffer will be treated as the `Error::Decompression` error.
     pub fn read_literal_from_buffer(&mut self, prefix_len: u8) -> Res<String> {
         debug_assert!(prefix_len < 7);
 
@@ -328,7 +328,7 @@ impl LiteralReader {
 }
 
 /// This is a helper function used only by `ReceiverBufferWrapper`, therefore it returns
-/// `DecompressionFailed` if any error happens.
+/// `Error::Decompression` if any error happens.
 ///
 /// # Errors
 ///
