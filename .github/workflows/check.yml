@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, windows-2025]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
         rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
         type: [debug]
         # Include some dynamically-linked release builds, to check that that works on all platforms.
@@ -60,7 +60,7 @@ jobs:
           - os: ubuntu-24.04
             rust-toolchain: stable
             type: release
-          - os: macos-14
+          - os: macos-15
             rust-toolchain: stable
             type: release
           - os: windows-2025
@@ -198,7 +198,7 @@ jobs:
     uses: ./.github/workflows/bench.yml
 
   check-android:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       # https://searchfox.org/mozilla-central/search?q=NDK_VERSION =&path=python/mozboot/mozboot/android.py
       NDK_VERSION: 27.2.12479018 # r27c
