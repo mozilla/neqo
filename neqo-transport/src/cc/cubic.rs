@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! CUBIC congestion control
+//! CUBIC congestion control (RFC 9438)
 
 use std::{
     fmt::{self, Display},
@@ -15,19 +15,18 @@ use neqo_common::qtrace;
 
 use crate::cc::classic_cc::WindowAdjustment;
 
-/// > Constant that determines the aggressiveness of CUBIC in
-/// > competing with other congestion control algorithms in high-BDP networks.
+/// > Constant that determines the aggressiveness of CUBIC in competing with other congestion
+/// > control algorithms in high-BDP networks.
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
 ///
-/// See section 5.1 for discussion on how to set the concrete value.
+/// See section 5.1 of RFC9438 for discussion on how to set the concrete value:
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fairness-to-reno>
-///
-/// UPDATE: no change to C.
 pub const CUBIC_C: f64 = 0.4;
 
-/// > CUBIC additive increase factor used in the Reno-friendly region
+/// > CUBIC additive increase factor used in the Reno-friendly region \[to achieve approximately the
+/// > same average congestion window size as Reno\].
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
 ///
@@ -37,32 +36,42 @@ pub const CUBIC_C: f64 = 0.4;
 /// > levels of rate fairness between CUBIC and Reno flows.
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
-///
-/// UPDATE: no change to alpha.
 pub const CUBIC_ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7); // with CUBIC_BETA = 0.7
 
 /// > CUBIC multiplicative decrease factor
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
 ///
-/// > Principle 4: To balance between the scalability and convergence speed,
-/// > CUBIC sets the multiplicative window decrease factor to 0.7 while Standard
-/// > TCP uses 0.5.  While this improves the scalability of CUBIC, a side effect
-/// > of this decision is slower convergence, especially under low statistical
+/// > To balance between the scalability and convergence speed, CUBIC sets the multiplicative window
+/// > decrease factor to 0.7 while Standard TCP uses 0.5. While this improves the scalability of
+/// > CUBIC, a side effect of this decision is slower convergence, especially under low statistical
 /// > multiplexing environments.
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9438#name-principle-4-for-the-cubic-d>
 ///
-/// `CUBIC_BETA` = 0.7;
-///
-/// UPDATE: no change to beta.
+/// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing to
+/// construct `CUBIC_BETA = 0.7`
+// TODO: Check use of f64 vs usize here (and in our CCA in general)
 pub const CUBIC_BETA_USIZE_DIVIDEND: usize = 7;
+/// > CUBIC multiplicative decrease factor
+///
+/// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
+///
+/// > To balance between the scalability and convergence speed, CUBIC sets the multiplicative window
+/// > decrease factor to 0.7 while Standard TCP uses 0.5. While this improves the scalability of
+/// > CUBIC, a side effect of this decision is slower convergence, especially under low statistical
+/// > multiplexing environments.
+///
+/// <https://datatracker.ietf.org/doc/html/rfc9438#name-principle-4-for-the-cubic-d>
+///
+/// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing to
+/// construct `CUBIC_BETA = 0.7`
 pub const CUBIC_BETA_USIZE_DIVISOR: usize = 10;
 
-/// The fast convergence ratio further reduces the next `W_max` when a
-/// congestion event occurs while `cwnd < W_max`.
-///
-/// See formula defined below.
+/// > When a new flow joins the network, existing flows need to give up some of their bandwidth to
+/// > allow the new flow some room for growth if the existing flows have been using all the network
+/// > bandwidth. To speed up this bandwidth release by existing flows, the following fast
+/// > convergence mechanism SHOULD be implemented.
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
 ///
@@ -75,14 +84,14 @@ pub const CUBIC_FAST_CONVERGENCE: f64 = 0.85; // (1.0 + CUBIC_BETA) / 2.0;
 /// this value reduces the magnitude of the resulting growth by a constant factor.
 /// A value of 1.0 would mean a return to the rate used in slow start.
 ///
-/// UPDATE: Not found in RFC. I don't exactly understand why we're doing this?
+/// UPDATE/TODO: This makes sure we have to ack at least 2 datagrams to increase by 1 MSS, which
+/// means we can at most increase cwnd * 1.5 per RTT. That's equivalent for the `target = 1.5 *
+/// target` cap in the new RFC.
 const EXPONENTIAL_GROWTH_REDUCTION: f64 = 2.0;
 
 /// Convert an integer congestion window value into a floating point value.
 /// This has the effect of reducing larger values to `1<<53`.
 /// If you have a congestion window that large, something is probably wrong.
-///
-/// UPDATE: not part of RFC.
 pub fn convert_to_f64(v: usize) -> f64 {
     let mut f_64 = f64::from(u32::try_from(v >> 21).unwrap_or(u32::MAX));
     f_64 *= 2_097_152.0; // f_64 <<= 21
@@ -110,14 +119,14 @@ pub struct Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
     last_max_cwnd: f64,
-    /// > An estimate for the congestion window in segments in the Reno-friendly region -- that
+    /// > An estimate for the congestion window \[...\] in the Reno-friendly region -- that
     /// > is, an estimate for the congestion window of Reno.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-variables-of-interest>
     ///
-    /// > Reno performs well in certain types of networks -- for example, under short RTTs and small
-    /// > bandwidths (or small BDPs). In these networks, CUBIC remains in the Reno-friendly region to
-    /// > achieve at least the same throughput as Reno.
+    /// > Reno performs well in certain types of networks -- for example, under short RTTs and
+    /// > small bandwidths (or small BDPs). In these networks, CUBIC remains in the Reno-friendly
+    /// > region to achieve at least the same throughput as Reno.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
     ///
@@ -128,7 +137,9 @@ pub struct Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-variables-of-interest>
     ///
-    /// For formula definition see:
+    /// Formula:
+    ///
+    /// `k = cubic_root((w_max - cwnd_epoch) / C)`
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-window-increase-function>
     k: f64,
@@ -142,7 +153,9 @@ pub struct Cubic {
     /// This acts as the plateau for the cubic function where it switches from the concave to the
     /// convex region.
     ///
-    /// For formula definition see:
+    /// Formula:
+    ///
+    /// `w_max = cwnd * FAST_CONVERGENCE_FACTOR`
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
     w_max: f64,
@@ -163,9 +176,11 @@ pub struct Cubic {
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-definitions>
     ///
     /// ACTIONS: Discuss if we want to switch to segments, confirm we are doing all conversions.
+    /// Research why this is prefaced with `tcp_` and clean up docs.
     tcp_acked_bytes: f64,
 }
 
+// TODO: Maybe adjust after done
 impl Display for Cubic {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
@@ -215,9 +230,9 @@ impl Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#figure-1>
     ///
-    /// We're using bytes not MSS units so we need to convert.
+    /// Taking into account that we're using bytes not MSS units, the formula becomes:
     ///
-    /// UPDATE: Nothing changed.
+    /// `w_cubic(t) = (C*(t-K)^3) * MSS + w_max`
     fn w_cubic(&self, t: f64, max_datagram_size: usize) -> f64 {
         (CUBIC_C * (t - self.k).powi(3)).mul_add(convert_to_f64(max_datagram_size), self.w_max)
     }
@@ -320,8 +335,9 @@ impl WindowAdjustment for Cubic {
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
         //
-        // UPDATE/QUESTION: This is handled differently in the new RFC, but our implementation is also
-        // different from the original RFC. Still need to understand what exactly is going on here.
+        // UPDATE/QUESTION: This is handled differently in the new RFC, but our implementation is
+        // also different from the original RFC. Still need to understand what exactly is
+        // going on here.
         //
         // Also note:
         //
@@ -343,7 +359,8 @@ impl WindowAdjustment for Cubic {
         //
         // > When receiving a new ACK in congestion avoidance (where cwnd could be greater than
         // > or less than w_max), CUBIC checks whether W_cubic(t) is less than w_est.  If so, CUBIC
-        // > is in the Reno-friendly region and cwnd SHOULD be set to w_est at each reception of a new ACK.
+        // > is in the Reno-friendly region and cwnd SHOULD be set to w_est at each reception of a
+        // > new ACK.
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-8>
         //
@@ -380,9 +397,9 @@ impl WindowAdjustment for Cubic {
     // > ssthresh = bytes_in_flight * CUBIC_BETA
     // > cwnd_prior = cwnd
     // > if (reduction_on_loss) {
-    // >     cwnd = max(ssthresh, 2*MSS)
+    // > cwnd = max(ssthresh, 2*MSS)
     // > } else if (reduction_on_ece) {
-    // >     cwnd = max(ssthresh, 1*MSS)
+    // > cwnd = max(ssthresh, 1*MSS)
     // > }
     // > ssthresh = max(ssthresh, 2*MSS)
     //
@@ -400,15 +417,15 @@ impl WindowAdjustment for Cubic {
     //
     // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.6>
     //
-    // We are setting ssthresh in `on_congestion_event()` in `classic_cc.rs` after having returned `cwnd`
-    // from `reduce_cwnd()` below. That is code that isn't CUBIC specific though, so we can add a condition
-    // there to check which cc algorithm we're using and do the `ssthresh|cwnd = max(...)` outlined above
-    // for CUBIC only.
+    // We are setting ssthresh in `on_congestion_event()` in `classic_cc.rs` after having returned
+    // `cwnd` from `reduce_cwnd()` below. That is code that isn't CUBIC specific though, so we
+    // can add a condition there to check which cc algorithm we're using and do the
+    // `ssthresh|cwnd = max(...)` outlined above for CUBIC only.
     //
-    // (or maybe don't do it at all because QUIC has a minimum congestion window of 2*MSS, as mentioned
-    // further below)
-    // QUESTION: Which takes precedence? The minimum congestion window of 2*MSS for QUIC or CUBIC wanting to set
-    // cwnd to 1*MSS on reduction by ECE?
+    // (or maybe don't do it at all because QUIC has a minimum congestion window of 2*MSS, as
+    // mentioned further below)
+    // QUESTION: Which takes precedence? The minimum congestion window of 2*MSS for QUIC or CUBIC
+    // wanting to set cwnd to 1*MSS on reduction by ECE?
     fn reduce_cwnd(
         &mut self,
         curr_cwnd: usize,

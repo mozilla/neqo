@@ -245,6 +245,11 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                 self.max_datagram_size(),
                 now,
             );
+            // TODO: We increase possibly `2 * max_datagram_size` per acked packet here. RFC 9002
+            // states "A sender in congestion avoidance [...] MUST limit the increase to the
+            // congestion window to at most one maximum datagram size for each congestion window
+            // that is acknowledged."
+            // We should change to increasing once.
             debug_assert!(bytes_for_increase > 0);
             // If enough credit has been accumulated already, apply them gradually.
             // If we have sudden increase in allowed rate we actually increase cwnd gently.
@@ -255,11 +260,14 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             self.acked_bytes += new_acked;
             if self.acked_bytes >= bytes_for_increase {
                 self.acked_bytes -= bytes_for_increase;
-                self.congestion_window += self.max_datagram_size(); // or is this the current MTU?
+                self.congestion_window += self.max_datagram_size();
             }
             // The number of bytes we require can go down over time with Cubic.
             // That might result in an excessive rate of increase, so limit the number of unused
             // acknowledged bytes after increasing the congestion window twice.
+            // TODO: What is this based on? E.g. quiche does not limit their unused credits. Should
+            // maybe gather some data on it.
+            // Ref: <https://github.com/cloudflare/quiche/blob/a5311660df1b990a845757a5720d8506950fa30f/quiche/src/recovery/congestion/cubic.rs#L323-L326>
             self.acked_bytes = min(bytes_for_increase, self.acked_bytes);
         }
         qlog::metrics_updated(
