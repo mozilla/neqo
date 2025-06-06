@@ -12,7 +12,7 @@ permissions:
 jobs:
   bencher_upload:
     # The bench workflow fails when a regression is detected, but we want to upload results regardless.
-    if: (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure')
+    if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
     permissions:
       pull-requests: write
     runs-on: ubuntu-latest
@@ -20,6 +20,10 @@ jobs:
       BENCHER_PROJECT: ${{ github.event.repository.name }}
       BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
     steps:
+      - env:
+          EVENT: ${{ toJson(github.event) }}
+        run: echo "$EVENT"
+
       - name: Download benchmark results
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
