@@ -33,16 +33,9 @@ jobs:
           submodules: 'recursive'
           persist-credentials: false
           clean: false
-
-      - name: Checkout mozilla/neqo@main
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          repository: mozilla/neqo
-          ref: main
-          path: neqo-main
-          submodules: 'recursive'
-          persist-credentials: false
-          clean: false
+      - run: |
+          cd neqo
+          git fetch --no-tags --depth=1 origin main
 
       - name: Checkout microsoft/msquic
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -93,15 +86,15 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           workspaces: |
             neqo
-            neqo-main
             quiche
             s2n-quic
 
       - name: Get minimum NSS version
         id: nss-version
         run: |
-          cat neqo/neqo-crypto/min_version.txt > versions.txt
-          cat neqo-main/neqo-crypto/min_version.txt >> versions.txt
+          cd neqo
+          cat neqo-crypto/min_version.txt > versions.txt
+          git show origin/main:neqo-crypto/min_version.txt >> versions.txt
           # Use the maximum version from both branches.
           echo "minimum=$(sort -u versions.txt | tail -n1)" >> "$GITHUB_OUTPUT"
 
@@ -116,17 +109,23 @@ jobs:
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
           export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
           echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
-          cd neqo-main
-          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
-          cargo build --locked --release --bin neqo-client --bin neqo-server
-          BENCHES_MAIN=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
+          mkdir -p binaries/neqo-main
+          mkdir -p binaries/neqo
+          cd neqo
+          git checkout origin/main
+          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches-main.txt
+          BENCHES_MAIN=$(grep Executable benches-main.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
           echo "BENCHES_MAIN=$BENCHES_MAIN" >> "$GITHUB_ENV"
-          cd ../neqo
-          cp -r ../neqo-main/target .
-          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
           cargo build --locked --release --bin neqo-client --bin neqo-server
+          cp target/release/neqo-client ../binaries/neqo-main/
+          cp target/release/neqo-server ../binaries/neqo-main/
+          git checkout -
+          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
           BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
           echo "BENCHES=$BENCHES" >> "$GITHUB_ENV"
+          cargo build --locked --release --bin neqo-client --bin neqo-server
+          cp target/release/neqo-client ../binaries/neqo/
+          cp target/release/neqo-server ../binaries/neqo/
 
       - name: Build msquic
         run: |
@@ -164,26 +163,29 @@ jobs:
           NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
         run: |
           sudo ip link set dev lo mtu "$MTU"
-          mkdir -p binaries/neqo-main
-          mkdir -p binaries/neqo
-          cd neqo-main
+          cd neqo
           rm -rf target/criterion
+          git checkout origin/main
+          # Run the builds from the main branch first, to establish a baseline.
           for BENCH in $BENCHES_MAIN; do
             cp "$BENCH" ../binaries/neqo-main/
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               $BENCH -- --bench --save-baseline main
           done
-          cd ../neqo
-          rm -rf target/criterion
-          cp -r ../neqo-main/target/criterion target/
+          # Copy the main branch results to a separate directory for bencher.dev.
+          rm -rf ../neqo-main/ && mkdir -p ../neqo-main/
+          cp -r target/criterion ../neqo-main/
+          git checkout -
+          # Run pull request builds twice, once without perf for baseline comparison, and once with perf for profiling.
+          # (Perf seems to introduce some variability in the results.)
           for BENCH in $BENCHES; do
             cp "$BENCH" ../binaries/neqo/
-            # Run it twice, once without perf for baseline comparison, and once with perf for profiling.
-            # (Perf seems to introduce some variability in the results.)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               $BENCH -- --bench --baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
+          done
+          for BENCH in $BENCHES; do
             NAME=$(basename "$BENCH" | cut -d- -f1)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
@@ -213,14 +215,14 @@ jobs:
           truncate -s "$BIGSIZE" "$TMP/$BIGSIZE"
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
-            ["neqo"]="neqo/target/release/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
+            ["neqo"]="binaries/neqo/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
             ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
             ["google"]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
             ["quiche"]="quiche/target/release/quiche-client --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
             ["s2n"]="s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
-            ["neqo"]="neqo/target/release/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
+            ["neqo"]="binaries/neqo/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
             ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
             ["google"]="google-quiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
             ["quiche"]="quiche/target/release/quiche-server --root $TMP --listen $HOST:$PORT --cert $TMP/cert --key $TMP/key"
@@ -437,7 +439,7 @@ jobs:
         env:
           EVENT_PATH: ${{ github.event_path }}
         run: |
-          SHA=$(cd neqo-main && git log -1 --format=%H)
+          SHA=$(cd neqo && git log origin/main -1 --format=%H)
           {
             echo "Performance differences relative to $SHA."
             echo
@@ -487,7 +489,6 @@ jobs:
             event.json
             results.*
             neqo/target/criterion
-            neqo-main/target/criterion
             hyperfine
             hyperfine-main
           compression-level: 9
