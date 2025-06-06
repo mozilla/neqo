@@ -109,17 +109,23 @@ jobs:
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
           export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
           echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
+          mkdir -p binaries/neqo-main
+          mkdir -p binaries/neqo
           cd neqo
           git checkout origin/main
           cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches-main.txt
-          cargo build --locked --release --bin neqo-client --bin neqo-server
           BENCHES_MAIN=$(grep Executable benches-main.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
           echo "BENCHES_MAIN=$BENCHES_MAIN" >> "$GITHUB_ENV"
+          cargo build --locked --release --bin neqo-client --bin neqo-server
+          cp target/release/neqo-client ../binaries/neqo-main/
+          cp target/release/neqo-server ../binaries/neqo-main/
           git checkout -
           cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
-          cargo build --locked --release --bin neqo-client --bin neqo-server
           BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
           echo "BENCHES=$BENCHES" >> "$GITHUB_ENV"
+          cargo build --locked --release --bin neqo-client --bin neqo-server
+          cp target/release/neqo-client ../binaries/neqo/
+          cp target/release/neqo-server ../binaries/neqo/
 
       - name: Build msquic
         run: |
@@ -157,8 +163,6 @@ jobs:
           NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
         run: |
           sudo ip link set dev lo mtu "$MTU"
-          mkdir -p binaries/neqo-main
-          mkdir -p binaries/neqo
           cd neqo
           rm -rf target/criterion
           git checkout origin/main
@@ -211,14 +215,14 @@ jobs:
           truncate -s "$BIGSIZE" "$TMP/$BIGSIZE"
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
-            ["neqo"]="neqo/target/release/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
+            ["neqo"]="binaries/neqo/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
             ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
             ["google"]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
             ["quiche"]="quiche/target/release/quiche-client --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
             ["s2n"]="s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
-            ["neqo"]="neqo/target/release/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
+            ["neqo"]="binaries/neqo/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
             ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
             ["google"]="google-quiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
             ["quiche"]="quiche/target/release/quiche-server --root $TMP --listen $HOST:$PORT --cert $TMP/cert --key $TMP/key"
