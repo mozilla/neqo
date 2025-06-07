@@ -6,6 +6,8 @@
 
 // Transport parameters. See -transport section 7.3.
 
+#[cfg(test)]
+use std::net::SocketAddr;
 use std::{
     cell::RefCell,
     fmt::{self, Display, Formatter},
@@ -109,9 +111,7 @@ impl PreferredAddress {
     /// When the addresses are the wrong type.
     #[must_use]
     #[cfg(test)]
-    pub fn new_any(v4: Option<std::net::SocketAddr>, v6: Option<std::net::SocketAddr>) -> Self {
-        use std::net::SocketAddr;
-
+    pub fn new_any(v4: Option<SocketAddr>, v6: Option<SocketAddr>) -> Self {
         let v4 = v4.map(|v4| {
             let SocketAddr::V4(v4) = v4 else {
                 panic!("not v4");

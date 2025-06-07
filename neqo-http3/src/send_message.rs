@@ -115,6 +115,7 @@ pub struct SendMessage {
     stream: BufferedStream,
     encoder: Rc<RefCell<QPackEncoder>>,
     conn_events: Box<dyn SendStreamEvents>,
+    stream_info: Http3StreamInfo,
 }
 
 impl SendMessage {
@@ -133,6 +134,7 @@ impl SendMessage {
             stream: BufferedStream::new(stream_id),
             encoder,
             conn_events,
+            stream_info: Http3StreamInfo::new(stream_id, stream_type),
         }
     }
 
@@ -160,8 +162,8 @@ impl SendMessage {
         Option::<StreamId>::from(&self.stream).expect("stream has ID")
     }
 
-    fn get_stream_info(&self) -> Http3StreamInfo {
-        Http3StreamInfo::new(self.stream_id(), Http3StreamType::Http)
+    const fn get_stream_info(&self) -> &Http3StreamInfo {
+        &self.stream_info
     }
 }
 

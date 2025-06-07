@@ -204,7 +204,7 @@ impl Server {
         let res = self
             .address_validation
             .borrow()
-            .validate(&initial.token, dgram.source(), now);
+            .validate(&initial.token, &dgram.source(), now);
         match res {
             AddressValidationResult::Invalid => Output::None,
             AddressValidationResult::Pass => self.accept_connection(initial, dgram, None, now),
@@ -216,7 +216,7 @@ impl Server {
 
                 let res = self.address_validation.borrow().generate_retry_token(
                     &initial.dst_cid,
-                    dgram.source(),
+                    &dgram.source(),
                     now,
                 );
                 let Ok(token) = res else {

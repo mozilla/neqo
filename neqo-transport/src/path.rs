@@ -68,6 +68,7 @@ pub struct Paths {
 impl Paths {
     /// Find the path for the given addresses.
     /// This might be a temporary path.
+    #[expect(clippy::large_types_passed_by_value, reason = "This wants values.")]
     pub fn find_path(
         &self,
         local: SocketAddr,
@@ -186,10 +187,10 @@ impl Paths {
     ) -> bool {
         debug_assert!(!self.is_temporary(path));
         let baseline = self.primary().map_or_else(
-            || ecn::Info::default().baseline(),
-            |p| p.borrow().ecn_info.baseline(),
+            || *ecn::Info::default().baseline(),
+            |p| *p.borrow().ecn_info.baseline(),
         );
-        path.borrow_mut().set_ecn_baseline(baseline);
+        path.borrow_mut().set_ecn_baseline(&baseline);
         if force || path.borrow().is_valid() {
             path.borrow_mut().set_valid(now);
             drop(self.select_primary(path, now));
@@ -267,7 +268,7 @@ impl Paths {
     pub fn handle_migration(
         &mut self,
         path: &PathRef,
-        remote: SocketAddr,
+        remote: &SocketAddr,
         now: Instant,
         stats: &mut Stats,
     ) {
@@ -521,6 +522,7 @@ pub struct Path {
 impl Path {
     /// Create a path from addresses and a remote connection ID.
     /// This is used for migration and for new datagrams.
+    #[expect(clippy::large_types_passed_by_value, reason = "This wants values.")]
     pub fn temporary(
         local: SocketAddr,
         remote: SocketAddr,
@@ -550,7 +552,7 @@ impl Path {
         } else {
             None
         };
-        let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip(), iface_mtu), now);
+        let mut sender = PacketSender::new(conn_params, Pmtud::new(&remote.ip(), iface_mtu), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
@@ -570,7 +572,7 @@ impl Path {
         }
     }
 
-    pub fn set_ecn_baseline(&mut self, baseline: ecn::Count) {
+    pub fn set_ecn_baseline(&mut self, baseline: &ecn::Count) {
         self.ecn_info.set_baseline(baseline);
     }
 
@@ -604,6 +606,7 @@ impl Path {
     }
 
     /// Determine if this path was the one that the provided datagram was received on.
+    #[expect(clippy::large_types_passed_by_value, reason = "This wants values.")]
     fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
         self.local == local && self.remote == remote
     }
@@ -700,13 +703,13 @@ impl Path {
     }
 
     /// Get local address as `SocketAddr`
-    pub const fn local_address(&self) -> SocketAddr {
-        self.local
+    pub const fn local_address(&self) -> &SocketAddr {
+        &self.local
     }
 
     /// Get remote address as `SocketAddr`
-    pub const fn remote_address(&self) -> SocketAddr {
-        self.remote
+    pub const fn remote_address(&self) -> &SocketAddr {
+        &self.remote
     }
 
     /// Whether the path has been validated.
@@ -979,7 +982,7 @@ impl Path {
     pub fn on_packets_acked(
         &mut self,
         acked_pkts: &[SentPacket],
-        ack_ecn: Option<ecn::Count>,
+        ack_ecn: Option<&ecn::Count>,
         now: Instant,
         stats: &mut Stats,
     ) {
