@@ -22,7 +22,7 @@ macro_rules! experimental_api {
                 ExperimentalAPI($crate::ssl::SSL_GetExperimentalAPI(n.as_ptr()))
             });
             if f.0.is_null() {
-                return Err($crate::err::Error::InternalError);
+                return Err($crate::err::Error::Internal);
             }
             let f: unsafe extern "C" fn( $( $t ),* ) -> $crate::ssl::SECStatus = ::std::mem::transmute(f.0);
             let rv = f( $( $a ),* );

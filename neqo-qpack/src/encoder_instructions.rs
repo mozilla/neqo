@@ -524,7 +524,7 @@ mod test {
         let mut decoder = EncoderInstructionReader::new();
         assert_eq!(
             decoder.read_instructions(&mut test_receiver),
-            Err(Error::HuffmanDecompressionFailed)
+            Err(Error::HuffmanDecompression)
         );
     }
 }

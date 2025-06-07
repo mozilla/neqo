@@ -26,20 +26,20 @@ fn no_datagrams() {
 
     assert_eq!(
         wt_session.max_datagram_size(),
-        Err(Error::TransportError(TransportError::NotAvailable))
+        Err(Error::Transport(TransportError::NotAvailable))
     );
     assert_eq!(
         wt.max_datagram_size(wt_session.stream_id()),
-        Err(Error::TransportError(TransportError::NotAvailable))
+        Err(Error::Transport(TransportError::NotAvailable))
     );
 
     assert_eq!(
         wt_session.send_datagram(DGRAM, None),
-        Err(Error::TransportError(TransportError::TooMuchData))
+        Err(Error::Transport(TransportError::TooMuchData))
     );
     assert_eq!(
         wt.send_datagram(wt_session.stream_id(), DGRAM),
-        Err(Error::TransportError(TransportError::TooMuchData))
+        Err(Error::Transport(TransportError::TooMuchData))
     );
 
     wt.exchange_packets();
@@ -84,7 +84,7 @@ fn datagrams_server_only() {
 
     assert_eq!(
         wt_session.max_datagram_size(),
-        Err(Error::TransportError(TransportError::NotAvailable))
+        Err(Error::Transport(TransportError::NotAvailable))
     );
     assert_eq!(
         wt.max_datagram_size(wt_session.stream_id()),
@@ -94,7 +94,7 @@ fn datagrams_server_only() {
 
     assert_eq!(
         wt_session.send_datagram(DGRAM, None),
-        Err(Error::TransportError(TransportError::TooMuchData))
+        Err(Error::Transport(TransportError::TooMuchData))
     );
     assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(()));
 
@@ -118,13 +118,13 @@ fn datagrams_client_only() {
     );
     assert_eq!(
         wt.max_datagram_size(wt_session.stream_id()),
-        Err(Error::TransportError(TransportError::NotAvailable))
+        Err(Error::Transport(TransportError::NotAvailable))
     );
 
     assert_eq!(wt_session.send_datagram(DGRAM, None), Ok(()));
     assert_eq!(
         wt.send_datagram(wt_session.stream_id(), DGRAM),
-        Err(Error::TransportError(TransportError::TooMuchData))
+        Err(Error::Transport(TransportError::TooMuchData))
     );
 
     wt.exchange_packets();

@@ -51,41 +51,41 @@ mod http3;
 
 #[derive(Debug)]
 pub enum Error {
-    ArgumentError(&'static str),
-    Http3Error(neqo_http3::Error),
-    IoError(io::Error),
-    QlogError,
-    TransportError(neqo_transport::Error),
-    CryptoError(neqo_crypto::Error),
+    Argument(&'static str),
+    Http3(neqo_http3::Error),
+    Io(io::Error),
+    Qlog,
+    Transport(neqo_transport::Error),
+    Crypto(neqo_crypto::Error),
 }
 
 impl From<neqo_crypto::Error> for Error {
     fn from(err: neqo_crypto::Error) -> Self {
-        Self::CryptoError(err)
+        Self::Crypto(err)
     }
 }
 
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
-        Self::IoError(err)
+        Self::Io(err)
     }
 }
 
 impl From<neqo_http3::Error> for Error {
     fn from(err: neqo_http3::Error) -> Self {
-        Self::Http3Error(err)
+        Self::Http3(err)
     }
 }
 
 impl From<qlog::Error> for Error {
     fn from(_err: qlog::Error) -> Self {
-        Self::QlogError
+        Self::Qlog
     }
 }
 
 impl From<neqo_transport::Error> for Error {
     fn from(err: neqo_transport::Error) -> Self {
-        Self::TransportError(err)
+        Self::Transport(err)
     }
 }
 

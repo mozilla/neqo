@@ -35,11 +35,11 @@ impl FrameDecoder<Self> for WebTransportFrame {
             let mut dec = Decoder::from(payload);
             if frame_type == HFrameType(WT_FRAME_CLOSE_SESSION) {
                 if frame_len > WT_FRAME_CLOSE_MAX_MESSAGE_SIZE + 4 {
-                    return Err(Error::HttpMessageError);
+                    return Err(Error::HttpMessage);
                 }
-                let error = dec.decode_uint().ok_or(Error::HttpMessageError)?;
+                let error = dec.decode_uint().ok_or(Error::HttpMessage)?;
                 let Ok(message) = String::from_utf8(dec.decode_remainder().to_vec()) else {
-                    return Err(Error::HttpMessageError);
+                    return Err(Error::HttpMessage);
                 };
                 Ok(Some(Self::CloseSession { error, message }))
             } else {

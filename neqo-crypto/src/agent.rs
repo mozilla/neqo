@@ -112,7 +112,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
             chosen.truncate(usize::try_from(chosen_len)?);
             Some(match String::from_utf8(chosen) {
                 Ok(a) => a,
-                Err(_) => return Err(Error::InternalError),
+                Err(_) => return Err(Error::Internal),
             })
         }
         _ => None,
@@ -443,7 +443,7 @@ impl SecretAgent {
     pub fn set_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
         if self.state != HandshakeState::New {
             qwarn!("[{self}] Cannot enable ciphers in state {:?}", self.state);
-            return Err(Error::InternalError);
+            return Err(Error::Internal);
         }
 
         let all_ciphers = unsafe { ssl::SSL_GetImplementedCiphers() };
@@ -555,7 +555,7 @@ impl SecretAgent {
 
         // NSS inherited an idiosyncratic API as a result of having implemented NPN
         // before ALPN.  For that reason, we need to put the "best" option last.
-        let (first, rest) = protocols.split_first().ok_or(Error::InternalError)?;
+        let (first, rest) = protocols.split_first().ok_or(Error::Internal)?;
         for v in rest {
             add(v.as_ref());
         }

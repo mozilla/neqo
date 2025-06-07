@@ -50,7 +50,7 @@ fn connection_close() {
     assert_eq!(stats_after.ack, stats_before.ack + 1);
 
     server.process_input(out.dgram().unwrap(), now);
-    assert_draining(&server, &Error::PeerApplicationError(42));
+    assert_draining(&server, &Error::PeerApplication(42));
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn connection_close_with_long_reason_string() {
     assert_eq!(stats_after.ack, stats_before.ack + 1);
 
     server.process_input(out.dgram().unwrap(), now);
-    assert_draining(&server, &Error::PeerApplicationError(42));
+    assert_draining(&server, &Error::PeerApplication(42));
 }
 
 // During the handshake, an application close should be sanitized.
@@ -95,7 +95,7 @@ fn early_application_close() {
     assert!(dgram.is_some());
 
     client.process_input(dgram.unwrap(), now());
-    assert_draining(&client, &Error::PeerError(ERROR_APPLICATION_CLOSE));
+    assert_draining(&client, &Error::Peer(ERROR_APPLICATION_CLOSE));
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn bad_tls_version() {
     );
     assert!(dgram.is_some());
     client.process_input(dgram.unwrap(), now());
-    assert_draining(&client, &Error::PeerError(Error::ProtocolViolation.code()));
+    assert_draining(&client, &Error::Peer(Error::ProtocolViolation.code()));
 }
 
 /// Test the interaction between the loss recovery timer
@@ -201,9 +201,7 @@ fn closing_and_draining() {
     assert_eq!(end, Output::None);
     assert_eq!(
         *server.state(),
-        State::Closed(CloseReason::Transport(Error::PeerApplicationError(
-            APP_ERROR
-        )))
+        State::Closed(CloseReason::Transport(Error::PeerApplication(APP_ERROR)))
     );
 }
 

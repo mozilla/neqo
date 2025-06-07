@@ -192,7 +192,7 @@ type Res<T> = Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
-    HttpNoError,
+    HttpNone,
     HttpGeneralProtocol,
     HttpGeneralProtocolStream, /* this is the same as the above but it should only close a
                                 * stream not a connection. */
@@ -212,13 +212,13 @@ pub enum Error {
     HttpRequestIncomplete,
     HttpConnect,
     HttpVersionFallback,
-    HttpMessageError,
-    QpackError(neqo_qpack::Error),
+    HttpMessage,
+    Qpack(neqo_qpack::Error),
 
     // Internal errors from here.
     AlreadyClosed,
     AlreadyInitialized,
-    FatalError,
+    Fatal,
     HttpGoaway,
     Internal,
     InvalidHeader,
@@ -229,8 +229,8 @@ pub enum Error {
     InvalidStreamId,
     NoMoreData,
     NotEnoughData,
-    StreamLimitError,
-    TransportError(TransportError),
+    StreamLimit,
+    Transport(TransportError),
     TransportStreamDoesNotExist,
     Unavailable,
     Unexpected,
@@ -240,7 +240,7 @@ impl Error {
     #[must_use]
     pub const fn code(&self) -> AppError {
         match self {
-            Self::HttpNoError => 0x100,
+            Self::HttpNone => 0x100,
             Self::HttpGeneralProtocol | Self::HttpGeneralProtocolStream | Self::InvalidHeader => {
                 0x101
             }
@@ -256,10 +256,10 @@ impl Error {
             Self::HttpRequestRejected => 0x10b,
             Self::HttpRequestCancelled => 0x10c,
             Self::HttpRequestIncomplete => 0x10d,
-            Self::HttpMessageError => 0x10e,
+            Self::HttpMessage => 0x10e,
             Self::HttpConnect => 0x10f,
             Self::HttpVersionFallback => 0x110,
-            Self::QpackError(e) => e.code(),
+            Self::Qpack(e) => e.code(),
             // These are all internal errors.
             _ => 3,
         }
@@ -279,7 +279,7 @@ impl Error {
                 | Self::HttpId
                 | Self::HttpSettings
                 | Self::HttpMissingSettings
-                | Self::QpackError(QpackError::EncoderStream | QpackError::DecoderStream)
+                | Self::Qpack(QpackError::EncoderStream | QpackError::DecoderStream)
         )
     }
 
@@ -294,10 +294,10 @@ impl Error {
     #[must_use]
     pub fn map_stream_send_errors(err: &Self) -> Self {
         match err {
-            Self::TransportError(
-                TransportError::InvalidStreamId | TransportError::FinalSizeError,
-            ) => Self::TransportStreamDoesNotExist,
-            Self::TransportError(TransportError::InvalidInput) => Self::InvalidInput,
+            Self::Transport(TransportError::InvalidStreamId | TransportError::FinalSize) => {
+                Self::TransportStreamDoesNotExist
+            }
+            Self::Transport(TransportError::InvalidInput) => Self::InvalidInput,
             _ => {
                 debug_assert!(false, "Unexpected error");
                 Self::TransportStreamDoesNotExist
@@ -312,7 +312,7 @@ impl Error {
     pub fn map_stream_create_errors(err: &TransportError) -> Self {
         match err {
             TransportError::ConnectionState => Self::Unavailable,
-            TransportError::StreamLimitError => Self::StreamLimitError,
+            TransportError::StreamLimit => Self::StreamLimit,
             _ => {
                 debug_assert!(false, "Unexpected error");
                 Self::TransportStreamDoesNotExist
@@ -326,13 +326,13 @@ impl Error {
     #[must_use]
     pub fn map_stream_recv_errors(err: &Self) -> Self {
         match err {
-            Self::TransportError(TransportError::NoMoreData) => {
+            Self::Transport(TransportError::NoMoreData) => {
                 debug_assert!(
                     false,
                     "Do not call stream_recv if FIN has been previously read"
                 );
             }
-            Self::TransportError(TransportError::InvalidStreamId) => {}
+            Self::Transport(TransportError::InvalidStreamId) => {}
             _ => {
                 debug_assert!(false, "Unexpected error");
             }
@@ -366,7 +366,7 @@ impl Error {
 
 impl From<TransportError> for Error {
     fn from(err: TransportError) -> Self {
-        Self::TransportError(err)
+        Self::Transport(err)
     }
 }
 
@@ -374,7 +374,7 @@ impl From<QpackError> for Error {
     fn from(err: QpackError) -> Self {
         match err {
             QpackError::ClosedCriticalStream => Self::HttpClosedCriticalStream,
-            e => Self::QpackError(e),
+            e => Self::Qpack(e),
         }
     }
 }
@@ -382,7 +382,7 @@ impl From<QpackError> for Error {
 impl From<AppError> for Error {
     fn from(error: AppError) -> Self {
         match error {
-            0x100 => Self::HttpNoError,
+            0x100 => Self::HttpNone,
             0x101 => Self::HttpGeneralProtocol,
             0x103 => Self::HttpStreamCreation,
             0x104 => Self::HttpClosedCriticalStream,
@@ -397,9 +397,9 @@ impl From<AppError> for Error {
             0x10d => Self::HttpRequestIncomplete,
             0x10f => Self::HttpConnect,
             0x110 => Self::HttpVersionFallback,
-            0x200 => Self::QpackError(QpackError::DecompressionFailed),
-            0x201 => Self::QpackError(QpackError::EncoderStream),
-            0x202 => Self::QpackError(QpackError::DecoderStream),
+            0x200 => Self::Qpack(QpackError::Decompression),
+            0x201 => Self::Qpack(QpackError::EncoderStream),
+            0x202 => Self::Qpack(QpackError::DecoderStream),
             _ => Self::HttpInternal(0),
         }
     }
@@ -408,8 +408,8 @@ impl From<AppError> for Error {
 impl ::std::error::Error for Error {
     fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
         match self {
-            Self::TransportError(e) => Some(e),
-            Self::QpackError(e) => Some(e),
+            Self::Transport(e) => Some(e),
+            Self::Qpack(e) => Some(e),
             _ => None,
         }
     }

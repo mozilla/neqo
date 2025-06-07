@@ -58,7 +58,7 @@ impl ConnectionId {
     }
 
     #[must_use]
-    pub fn as_cid_ref(&self) -> ConnectionIdRef {
+    pub fn as_cid_ref(&self) -> ConnectionIdRef<'_> {
         ConnectionIdRef::from(&self.cid[..])
     }
 }
@@ -482,7 +482,7 @@ impl ConnectionIdManager {
         Rc::clone(&self.generator)
     }
 
-    pub fn decoder(&self) -> ConnectionIdDecoderRef {
+    pub fn decoder(&self) -> ConnectionIdDecoderRef<'_> {
         ConnectionIdDecoderRef {
             generator: self.generator.deref().borrow(),
         }

@@ -51,7 +51,7 @@ impl From<IpTos> for IpTosEcn {
 
 impl IpTosEcn {
     #[must_use]
-    pub const fn is_ecn_marked(&self) -> bool {
+    pub const fn is_ecn_marked(self) -> bool {
         match self {
             Self::Ect0 | Self::Ect1 | Self::Ce => true,
             Self::NotEct => false,
@@ -190,8 +190,8 @@ impl IpTos {
     }
 
     #[must_use]
-    pub fn is_ecn_marked(&self) -> bool {
-        IpTosEcn::from(*self).is_ecn_marked()
+    pub fn is_ecn_marked(self) -> bool {
+        IpTosEcn::from(self).is_ecn_marked()
     }
 }
 

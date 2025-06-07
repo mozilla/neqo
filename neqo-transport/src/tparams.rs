@@ -205,7 +205,7 @@ impl TransportParameter {
         let v4port = d.decode_uint::<u16>().ok_or(Error::NoMoreData)?;
         // Can't have non-zero IP and zero port, or vice versa.
         if v4ip.is_unspecified() ^ (v4port == 0) {
-            return Err(Error::TransportParameterError);
+            return Err(Error::TransportParameter);
         }
         let v4 = if v4port == 0 {
             None
@@ -219,7 +219,7 @@ impl TransportParameter {
         )?);
         let v6port = d.decode_uint().ok_or(Error::NoMoreData)?;
         if v6ip.is_unspecified() ^ (v6port == 0) {
-            return Err(Error::TransportParameterError);
+            return Err(Error::TransportParameter);
         }
         let v6 = if v6port == 0 {
             None
@@ -228,13 +228,13 @@ impl TransportParameter {
         };
         // Need either v4 or v6 to be present.
         if v4.is_none() && v6.is_none() {
-            return Err(Error::TransportParameterError);
+            return Err(Error::TransportParameter);
         }
 
         // Connection ID (non-zero length)
         let cid = ConnectionId::from(d.decode_vec(1).ok_or(Error::NoMoreData)?);
         if cid.is_empty() || cid.len() > MAX_CONNECTION_ID_LEN {
-            return Err(Error::TransportParameterError);
+            return Err(Error::TransportParameter);
         }
 
         // Stateless reset token
@@ -248,7 +248,7 @@ impl TransportParameter {
         fn dv(dec: &mut Decoder) -> Res<WireVersion> {
             let v = dec.decode_uint::<WireVersion>().ok_or(Error::NoMoreData)?;
             if v == 0 {
-                Err(Error::TransportParameterError)
+                Err(Error::TransportParameter)
             } else {
                 Ok(v)
             }
@@ -282,7 +282,7 @@ impl TransportParameter {
             }
             TransportParameterId::StatelessResetToken => {
                 if d.remaining() != 16 {
-                    return Err(Error::TransportParameterError);
+                    return Err(Error::TransportParameter);
                 }
                 Self::Bytes(d.decode_remainder().to_vec())
             }
@@ -294,24 +294,24 @@ impl TransportParameter {
             | TransportParameterId::MaxAckDelay
             | TransportParameterId::MaxDatagramFrameSize => match d.decode_varint() {
                 Some(v) => Self::Integer(v),
-                None => return Err(Error::TransportParameterError),
+                None => return Err(Error::TransportParameter),
             },
             TransportParameterId::InitialMaxStreamsBidi
             | TransportParameterId::InitialMaxStreamsUni => match d.decode_varint() {
                 Some(v) if v <= (1 << 60) => Self::Integer(v),
-                _ => return Err(Error::StreamLimitError),
+                _ => return Err(Error::StreamLimit),
             },
             TransportParameterId::MaxUdpPayloadSize => match d.decode_varint() {
                 Some(v) if v >= MIN_INITIAL_PACKET_SIZE.try_into()? => Self::Integer(v),
-                _ => return Err(Error::TransportParameterError),
+                _ => return Err(Error::TransportParameter),
             },
             TransportParameterId::AckDelayExponent => match d.decode_varint() {
                 Some(v) if v <= 20 => Self::Integer(v),
-                _ => return Err(Error::TransportParameterError),
+                _ => return Err(Error::TransportParameter),
             },
             TransportParameterId::ActiveConnectionIdLimit => match d.decode_varint() {
                 Some(v) if v >= 2 => Self::Integer(v),
-                _ => return Err(Error::TransportParameterError),
+                _ => return Err(Error::TransportParameter),
             },
             TransportParameterId::DisableMigration | TransportParameterId::GreaseQuicBit => {
                 Self::Empty
@@ -319,7 +319,7 @@ impl TransportParameter {
             TransportParameterId::PreferredAddress => Self::decode_preferred_address(&mut d)?,
             TransportParameterId::MinAckDelay => match d.decode_varint() {
                 Some(v) if v < (1 << 24) => Self::Integer(v),
-                _ => return Err(Error::TransportParameterError),
+                _ => return Err(Error::TransportParameter),
             },
             TransportParameterId::VersionInformation => Self::decode_versions(&mut d)?,
             #[cfg(test)]
@@ -679,7 +679,7 @@ impl TransportParametersHandler {
                         "Chosen version {current:x} is not compatible with initial version {:x}",
                         self.versions.initial().wire_version(),
                     );
-                    Err(Error::TransportParameterError)
+                    Err(Error::TransportParameter)
                 }
             } else {
                 if current != self.versions.initial().wire_version() {
@@ -687,7 +687,7 @@ impl TransportParametersHandler {
                         "Current version {current:x} != own version {:x}",
                         self.versions.initial().wire_version(),
                     );
-                    return Err(Error::TransportParameterError);
+                    return Err(Error::TransportParameter);
                 }
 
                 if let Some(preferred) = self.versions.preferred_compatible(other) {
@@ -702,7 +702,7 @@ impl TransportParametersHandler {
                     Ok(())
                 } else {
                     qinfo!("Unable to find any compatible version");
-                    Err(Error::TransportParameterError)
+                    Err(Error::TransportParameter)
                 }
             }
         } else {
@@ -981,7 +981,7 @@ mod tests {
         spa.encode(&mut enc, PreferredAddress);
         assert_eq!(
             TransportParameter::decode(&mut enc.as_decoder()).unwrap_err(),
-            Error::TransportParameterError
+            Error::TransportParameter
         );
     }
 
@@ -1212,12 +1212,12 @@ mod tests {
         let mut dec = Decoder::from(&ZERO1);
         assert_eq!(
             TransportParameter::decode(&mut dec).unwrap_err(),
-            Error::TransportParameterError
+            Error::TransportParameter
         );
         let mut dec = Decoder::from(&ZERO2);
         assert_eq!(
             TransportParameter::decode(&mut dec).unwrap_err(),
-            Error::TransportParameterError
+            Error::TransportParameter
         );
     }
 

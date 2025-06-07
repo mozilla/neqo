@@ -106,7 +106,7 @@ impl ClosingFrame {
             // error code needs to be sent in an Initial or Handshake packet.
             Some(Self {
                 path: Rc::clone(&self.path),
-                error: CloseReason::Transport(Error::ApplicationError),
+                error: CloseReason::Transport(Error::Application),
                 frame_type: FrameType::Padding,
                 reason_phrase: Vec::new(),
             })

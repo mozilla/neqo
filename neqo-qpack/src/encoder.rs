@@ -72,7 +72,7 @@ impl QPackEncoder {
     pub fn new(qpack_settings: &QpackSettings, use_huffman: bool) -> Self {
         Self {
             table: HeaderTable::new(true),
-            max_table_size: qpack_settings.max_table_size_encoder,
+            max_table_size: qpack_settings.table_size_encoder,
             max_entries: 0,
             instruction_reader: DecoderInstructionReader::new(),
             local_stream: LocalStreamState::NoStream,
@@ -323,7 +323,7 @@ impl QPackEncoder {
                     false,
                     "can_evict_to should have checked and make sure this operation is possible"
                 );
-                return Err(Error::InternalError);
+                return Err(Error::Internal);
             }
             self.max_entries = cap / 32;
             self.next_capacity = None;
@@ -532,12 +532,10 @@ fn map_error(err: &Error) -> Error {
 
 fn map_stream_send_atomic_error(err: &TransportError) -> Error {
     match err {
-        TransportError::InvalidStreamId | TransportError::FinalSizeError => {
-            Error::ClosedCriticalStream
-        }
+        TransportError::InvalidStreamId | TransportError::FinalSize => Error::ClosedCriticalStream,
         _ => {
             debug_assert!(false, "Unexpected error");
-            Error::InternalError
+            Error::Internal
         }
     }
 }
@@ -621,9 +619,9 @@ mod tests {
         // create an encoder
         let mut encoder = QPackEncoder::new(
             &QpackSettings {
-                max_table_size_encoder: 1500,
-                max_table_size_decoder: 0,
-                max_blocked_streams: 0,
+                table_size_encoder: 1500,
+                table_size_decoder: 0,
+                blocked_streams: 0,
             },
             huffman,
         );

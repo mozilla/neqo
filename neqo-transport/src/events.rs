@@ -313,9 +313,7 @@ mod tests {
 
         evts.send_stream_writable(9.into());
         evts.send_stream_stop_sending(10.into(), 55);
-        evts.connection_state_change(State::Closed(CloseReason::Transport(
-            Error::StreamStateError,
-        )));
+        evts.connection_state_change(State::Closed(CloseReason::Transport(Error::StreamState)));
         assert_eq!(evts.events().count(), 1);
     }
 }

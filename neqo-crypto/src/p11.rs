@@ -206,7 +206,7 @@ impl SymKey {
         let key_item = unsafe { PK11_GetKeyData(self.ptr) };
         // This is accessing a value attached to the key, so we can treat this as a borrow.
         match unsafe { key_item.as_mut() } {
-            None => Err(Error::InternalError),
+            None => Err(Error::Internal),
             Some(key) => Ok(unsafe { null_safe_slice(key.data, key.len) }),
         }
     }

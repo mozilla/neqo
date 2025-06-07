@@ -30,24 +30,24 @@ type Res<T> = Result<T, Error>;
 
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
 pub struct QpackSettings {
-    pub max_table_size_decoder: u64,
-    pub max_table_size_encoder: u64,
-    pub max_blocked_streams: u16,
+    pub table_size_decoder: u64,
+    pub table_size_encoder: u64,
+    pub blocked_streams: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
-    DecompressionFailed,
+    Decompression,
     EncoderStream,
     DecoderStream,
     ClosedCriticalStream,
-    InternalError,
+    Internal,
 
     // These are internal errors, they will be transformed into one of the above.
     NeedMoreData, /* Return when an input stream does not have more data that a decoder
                    * needs.(It does not mean that a stream is closed.) */
     HeaderLookup,
-    HuffmanDecompressionFailed,
+    HuffmanDecompression,
     BadUtf8,
     ChangeCapacity,
     DynamicTableFull,
@@ -56,17 +56,16 @@ pub enum Error {
     WrongStreamCount,
     Decoding, // Decoding internal error that is not one of the above.
     EncoderStreamBlocked,
-    Internal,
 
-    TransportError(neqo_transport::Error),
-    QlogError,
+    Transport(neqo_transport::Error),
+    Qlog,
 }
 
 impl Error {
     #[must_use]
     pub const fn code(&self) -> neqo_transport::AppError {
         match self {
-            Self::DecompressionFailed => 0x200,
+            Self::Decompression => 0x200,
             Self::EncoderStream => 0x201,
             Self::DecoderStream => 0x202,
             Self::ClosedCriticalStream => 0x104,
@@ -92,7 +91,7 @@ impl Error {
 impl ::std::error::Error for Error {
     fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
         match self {
-            Self::TransportError(e) => Some(e),
+            Self::Transport(e) => Some(e),
             _ => None,
         }
     }
@@ -106,12 +105,12 @@ impl Display for Error {
 
 impl From<neqo_transport::Error> for Error {
     fn from(err: neqo_transport::Error) -> Self {
-        Self::TransportError(err)
+        Self::Transport(err)
     }
 }
 
 impl From<::qlog::Error> for Error {
     fn from(_err: ::qlog::Error) -> Self {
-        Self::QlogError
+        Self::Qlog
     }
 }

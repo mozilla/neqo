@@ -108,7 +108,7 @@ impl StreamId {
 
     /// Return the stream index for this stream ID.
     #[must_use]
-    pub const fn index(&self) -> u64 {
+    pub const fn index(self) -> u64 {
         self.0 >> 2
     }
 
