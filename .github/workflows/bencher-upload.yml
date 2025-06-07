@@ -53,7 +53,7 @@ jobs:
             --err \
             --adapter rust_criterion \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            --file "criterion-main"
+            --file results-main.txt
           for file in hyperfine-main/*.json; do
             bencher run \
               --branch main \
@@ -83,7 +83,7 @@ jobs:
             --adapter rust_criterion \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
             --ci-number "$PR_NUMBER" \
-            --file "criterion"
+            --file results.txt
           for file in hyperfine/*.json; do
             bencher run \
               --branch "$PR_HEAD" \
