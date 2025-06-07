@@ -28,8 +28,7 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, Cipher, ResumptionToken,
 };
-use neqo_http3::Output;
-use neqo_transport::{AppError, CloseReason, ConnectionId, Version};
+use neqo_transport::{AppError, CloseReason, ConnectionId, OutputBatch, Version};
 use neqo_udp::RecvBuf;
 use tokio::time::Sleep;
 use url::{Host, Origin, Url};
@@ -384,7 +383,7 @@ enum CloseState {
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
-    fn process_output(&mut self, now: Instant) -> Output;
+    fn process_multiple_output(&mut self, now: Instant, max_datagrams: usize) -> OutputBatch;
     fn process_multiple_input<'a>(
         &mut self,
         dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
@@ -464,12 +463,15 @@ impl<'a, H: Handler> Runner<'a, H> {
 
     async fn process_output(&mut self) -> Result<(), io::Error> {
         loop {
-            match self.client.process_output(Instant::now()) {
-                Output::Datagram(dgram) => loop {
+            match self
+                .client
+                .process_multiple_output(Instant::now(), self.socket.max_gso_segments())
+            {
+                OutputBatch::DatagramBatch(dgram) => loop {
                     // Optimistically attempt sending datagram. In case the OS
                     // buffer is full, wait till socket is writable then try
                     // again.
-                    match self.socket.send(&dgram) {
+                    match self.socket.send2(&dgram) {
                         Ok(()) => break,
                         Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                             self.socket.writable().await?;
@@ -478,12 +480,12 @@ impl<'a, H: Handler> Runner<'a, H> {
                         e @ Err(_) => return e,
                     }
                 },
-                Output::Callback(new_timeout) => {
+                OutputBatch::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
                     self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
-                Output::None => {
+                OutputBatch::None => {
                     qdebug!("Output::None");
                     break;
                 }
