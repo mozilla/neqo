@@ -86,7 +86,7 @@ impl HSettings {
             .map_or_else(|| hsetting_default(setting), |v| v.value)
     }
 
-    pub fn encode_frame_contents(&self, enc: &mut Encoder) {
+    pub fn encode_frame_contents<B: std::io::Write>(&self, enc: &mut Encoder<B>) {
         enc.encode_vvec_with(|enc_inner| {
             for iter in &self.settings {
                 match iter.setting_type {

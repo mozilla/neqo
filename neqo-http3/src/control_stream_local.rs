@@ -40,9 +40,7 @@ impl ControlStreamLocal {
 
     /// Add a new frame that needs to be send.
     pub fn queue_frame(&mut self, f: &HFrame) {
-        let mut enc = Encoder::default();
-        f.encode(&mut enc);
-        self.stream.buffer(enc.as_ref());
+        f.encode(&mut self.stream.encoder());
     }
 
     pub fn queue_update_priority(&mut self, stream_id: StreamId) {
