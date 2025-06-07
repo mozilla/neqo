@@ -171,11 +171,10 @@ jobs:
             cp "$BENCH" ../binaries/neqo-main/
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --save-baseline main
+              $BENCH -- --bench --save-baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results-main.txt
           done
           # Copy the main branch results to a separate directory for bencher.dev.
-          rm -rf ../neqo-main/ && mkdir -p ../neqo-main/
-          cp -r target/criterion ../neqo-main/
+          cp -r target/criterion ../criterion-main
           git checkout -
           # Run pull request builds twice, once without perf for baseline comparison, and once with perf for profiling.
           # (Perf seems to introduce some variability in the results.)
@@ -191,6 +190,7 @@ jobs:
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
           done
+          cp -r target/criterion ../criterion
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -305,7 +305,6 @@ jobs:
                     BOLD="**"
                   fi
                   TAG="$BOLD$client vs. $server${cc:+ (}$cc${pacing:+, paced}${cc:+)}$BOLD"
-                  echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
                   SERVER_CMD="$CMD"
@@ -335,9 +334,7 @@ jobs:
                     --output null --warmup 5 --min-runs "$RUNS" \
                     --prepare "$WORKSPACE/$SERVER_CMD & echo \$! >> /cpusets/cpu2/tasks; sleep 0.1" \
                     --conclude "pkill $SERVER_TAG" \
-                    "echo \$\$ >> /cpusets/cpu3/tasks; $WORKSPACE/$CMD" |
-                  tee -a "$WORKSPACE/comparison.txt"
-                  echo >> "$WORKSPACE/comparison.txt"
+                    "echo \$\$ >> /cpusets/cpu3/tasks; $WORKSPACE/$CMD"
 
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
@@ -394,6 +391,7 @@ jobs:
                       SYMBOL=""
                       FORMAT=""
                     fi
+                    rm result.txt baseline.txt
                     printf "| %s %s%.1f%s | %s%.1f%%%s |\n" "$SYMBOL" "$FORMAT" "$DELTA" "$FORMAT" "$FORMAT" "$PERCENT" "$FORMAT" >> steps.md
                   elif [ "$client" == "neqo" ] || [ "$server" == "neqo" ]; then
                     echo No cached baseline from main found.
@@ -438,6 +436,7 @@ jobs:
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
+          RUNNER_NAME: ${{ runner.name }}
         run: |
           SHA=$(cd neqo && git log origin/main -1 --format=%H)
           {
@@ -462,8 +461,9 @@ jobs:
             cat sha.md
             cat comparison.md
           } >> results.md
+          rm sha.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
-          echo "$runner.name" > testbed.txt
+          echo "$RUNNER_NAME" > testbed.txt
           cp "$EVENT_PATH" event.json
 
       - name: Export profiler.firefox.com data
@@ -488,7 +488,9 @@ jobs:
             *.md
             event.json
             results.*
-            neqo/target/criterion
+            results-main.*
+            criterion
+            criterion-main
             hyperfine
             hyperfine-main
           compression-level: 9
@@ -515,4 +517,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- binaries comment-data hyperfine hyperfine-main "$COMPARE_TMP" || true
+          rm -r -- binaries comment-data hyperfine hyperfine-main criterion criterion-main "$COMPARE_TMP" || true
