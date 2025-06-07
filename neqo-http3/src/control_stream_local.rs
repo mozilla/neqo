@@ -5,12 +5,13 @@
 // except according to those terms.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     fmt::{self, Display, Formatter},
 };
 
 use neqo_common::{qtrace, Encoder};
 use neqo_transport::{Connection, StreamId, StreamType};
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{frames::HFrame, BufferedStream, Error, Http3StreamType, RecvStream, Res};
 

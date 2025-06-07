@@ -10,7 +10,7 @@
 
 use std::{
     cell::RefCell,
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     fmt::Display,
     fs::File,
     io::{BufWriter, Write as _},
@@ -26,6 +26,7 @@ use neqo_transport::{
     CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator, EmptyConnectionIdGenerator,
     Error, Output, RandomConnectionIdGenerator, State, StreamId, StreamType,
 };
+use rustc_hash::FxHashMap as HashMap;
 use url::Url;
 
 use super::{get_output_file, qlog_new, Args, CloseState, Res};
@@ -227,7 +228,7 @@ impl super::Client for Connection {
 impl<'b> Handler<'b> {
     pub fn new(url_queue: VecDeque<Url>, args: &'b Args) -> Self {
         Self {
-            streams: HashMap::new(),
+            streams: HashMap::default(),
             url_queue,
             handled_urls: Vec::new(),
             all_paths: Vec::new(),
