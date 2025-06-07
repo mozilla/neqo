@@ -23,7 +23,7 @@ use crate::{
         classic_cc::ClassicCongestionControl,
         cubic::{
             convert_to_f64, Cubic, CUBIC_ALPHA, CUBIC_BETA_USIZE_DIVIDEND,
-            CUBIC_BETA_USIZE_DIVISOR, CUBIC_C, CUBIC_FAST_CONVERGENCE,
+            CUBIC_BETA_USIZE_DIVISOR, CUBIC_C, CUBIC_FAST_CONVERGENCE_FACTOR,
         },
         CongestionControl as _,
     },
@@ -328,7 +328,7 @@ fn congestion_event_congestion_avoidance_2() {
 
     assert_within(
         cubic.last_max_cwnd(),
-        cwnd_initial_f64 * CUBIC_FAST_CONVERGENCE,
+        cwnd_initial_f64 * CUBIC_FAST_CONVERGENCE_FACTOR,
         f64::EPSILON,
     );
     assert_eq!(cubic.cwnd(), cwnd_after_loss(cubic.cwnd_initial()));
