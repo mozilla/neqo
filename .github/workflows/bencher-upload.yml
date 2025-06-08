@@ -49,7 +49,6 @@ jobs:
             --testbed "$(cat testbed.txt)" \
             --threshold-measure latency \
             --threshold-test t_test \
-            --threshold-max-sample-size 64 \
             --threshold-upper-boundary 0.99 \
             --thresholds-reset \
             --err \
@@ -62,7 +61,6 @@ jobs:
               --testbed "$(cat testbed.txt)" \
               --threshold-measure latency \
               --threshold-test t_test \
-              --threshold-max-sample-size 64 \
               --threshold-upper-boundary 0.99 \
               --thresholds-reset \
               --err \
@@ -86,7 +84,7 @@ jobs:
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
             --ci-number "$PR_NUMBER" \
             --file results.txt
-          for file in hyperfine/*.json; do
+          for file in hyperfine/*neqo*.json; do
             bencher run \
               --branch "$PR_HEAD" \
               --testbed "$(cat testbed.txt)" \
