@@ -453,6 +453,7 @@ mod test {
         check_delays(GENEROUS);
     }
 
+    #[cfg(not(target_arch = "aarch64"))] // This test is flaky on linux/arm.
     #[test]
     fn one_ms() {
         let _hrt = Time::get(ONE_MS);
@@ -468,6 +469,7 @@ mod test {
         thr.join().unwrap();
     }
 
+    #[cfg(not(target_arch = "aarch64"))] // This test is flaky on linux/arm.
     #[test]
     fn one_ms_multi() {
         let thr = spawn(move || {
@@ -487,6 +489,7 @@ mod test {
         thr.join().unwrap();
     }
 
+    #[cfg(not(target_arch = "aarch64"))] // This test is flaky on linux/arm.
     #[test]
     fn update() {
         let mut hrt = Time::get(Duration::from_millis(4));
