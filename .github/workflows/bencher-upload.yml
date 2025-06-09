@@ -46,6 +46,7 @@ jobs:
         run: |
           bencher run \
             --branch main \
+            --sha "$(cat main-sha.txt)" \
             --testbed "$(cat testbed.txt)" \
             --threshold-measure latency \
             --threshold-test t_test \
@@ -58,6 +59,7 @@ jobs:
           for file in hyperfine-main/*.json; do
             bencher run \
               --branch main \
+              --sha "$(cat main-sha.txt)" \
               --testbed "$(cat testbed.txt)" \
               --threshold-measure latency \
               --threshold-test t_test \
