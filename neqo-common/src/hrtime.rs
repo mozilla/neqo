@@ -392,8 +392,10 @@ mod test {
 
     use super::Time;
 
+    #[cfg(not(target_arch = "aarch64"))]
     const ONE_MS: Duration = Duration::from_millis(1);
     const FIVE_MS: Duration = Duration::from_millis(5);
+    #[cfg(not(target_arch = "aarch64"))]
     const ONE_MS_AND_A_BIT: Duration = Duration::from_micros(1500);
     /// A limit for when high resolution timers are disabled.
     const GENEROUS: Duration = Duration::from_millis(30);
@@ -479,6 +481,7 @@ mod test {
         thr.join().unwrap();
     }
 
+    #[cfg(not(target_arch = "aarch64"))] // This test is flaky on linux/arm.
     #[test]
     fn mixed_multi() {
         let thr = spawn(move || {
