@@ -44,6 +44,7 @@ jobs:
 
       - name: Upload main-branch results to bencher.dev
         run: |
+          ls -la
           bencher run \
             --branch main \
             --sha "$(cat main-sha.txt)" \
