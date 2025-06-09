@@ -439,7 +439,7 @@ jobs:
           RUNNER_NAME: ${{ runner.name }}
         run: |
           SHA=$(cd neqo && git log origin/main -1 --format=%H)
-          echo "SHA=$SHA" > main-sha.txt
+          echo "$SHA" > main-sha.txt
           {
             echo "Performance differences relative to $SHA."
             echo
