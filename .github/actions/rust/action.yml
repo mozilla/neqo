@@ -58,13 +58,14 @@ runs:
       shell: bash
       env:
         TARGETS: ${{ inputs.targets }}
+        RUNNER_OS: ${{ runner.os }}
       run: |
         {
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
-          if [[ "${{ runner.os }}" == "Linux" && "$TARGETS" == "" && "$(command -v mold)" ]]; then
+          if [[ "$RUNNER_OS" == "Linux" && "$TARGETS" == "" && "$(command -v mold)" ]]; then
             echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold $RUSTFLAGS"
-          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
             echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld $RUSTFLAGS"
           fi
           echo "RUNNER_OS=$(uname -srm)"
