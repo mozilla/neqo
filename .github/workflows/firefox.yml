@@ -73,6 +73,9 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Bootstrap Firefox
+        env:
+          RUNNER_OS: ${{ runner.os }}
+          MATRIX_TYPE: ${{ matrix.type }}
         run: |
           cd mozilla-unified
           {
@@ -80,10 +83,10 @@ jobs:
             echo "ac_add_options --with-ccache=sccache"
             echo "ac_add_options --enable-application=browser"
             # Work around https://bugzilla.mozilla.org/show_bug.cgi?id=1894031
-            if [ "${{ runner.os }}" != "Windows" ] || [ "${{ matrix.type}}" != "debug" ]; then
+            if [ "$RUNNER_OS" != "Windows" ] || [ "$MATRIX_TYPE" != "debug" ]; then
               echo "ac_add_options --disable-tests"
             fi
-            echo "ac_add_options --enable-${{ matrix.type }}"
+            echo "ac_add_options --enable-$MATRIX_TYPE"
           } >> mozconfig
           ./mach bootstrap --application-choice browser
 
@@ -134,11 +137,12 @@ jobs:
           NAME: ${{ runner.os == 'macOS' && 'Nightly' || 'bin' }}
           TYPE: ${{ runner.os == 'macOS' && matrix.type == 'debug' && 'Debug' || '' }}
           EXT: ${{ runner.os == 'macOS' && '.app' || '' }}
+          RUNNER_OS: ${{ runner.os }}
         run: |
           cd mozilla-unified
           # Work around "ERROR: WINDOWSSDKDIR cannot be set when using the bootstrapped WINSYSROOT"
           # (Capitalization "WindowsSdkDir" matters)
-          [ "${{ runner.os }}" == "Windows" ] && unset WindowsSdkDir
+          [ "$RUNNER_OS" == "Windows" ] && unset WindowsSdkDir
           ./mach build && tar -cf "../$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT"
 
       - name: Export binary
@@ -182,7 +186,7 @@ jobs:
             for os in Linux macOS Windows; do
               echo -n "* **$os**:"
               for type in debug release; do
-                artifact="artifacts/artifact-$os-${{ env.FIREFOX }}-$type/artifact"
+                artifact="artifacts/artifact-$os-$FIREFOX-$type/artifact"
                 if [ -e "$artifact" ]; then
                   echo -n " [${type^}]($(cat $artifact))"
                 else

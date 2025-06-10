@@ -21,6 +21,8 @@ jobs:
       BENCHER_PROJECT: ${{ github.event.repository.name }}
       BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
       GITHUB_EVENT_PATH: event.json
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     steps:
       - name: Download benchmark results
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -55,7 +57,7 @@ jobs:
             --thresholds-reset \
             --err \
             --adapter rust_criterion \
-            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            --github-actions "$GITHUB_TOKEN" \
             --file results-main.txt
           for file in hyperfine-main/*.json; do
             bencher run \
@@ -68,7 +70,7 @@ jobs:
               --thresholds-reset \
               --err \
               --adapter shell_hyperfine \
-              --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+              --github-actions "$GITHUB_TOKEN" \
               --file "$file"
           done
 
@@ -84,7 +86,7 @@ jobs:
             --start-point-reset \
             --err \
             --adapter rust_criterion \
-            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            --github-actions "$GITHUB_TOKEN" \
             --ci-number "$PR_NUMBER" \
             --file results.txt
           for file in hyperfine/*neqo*.json; do
@@ -97,7 +99,7 @@ jobs:
               --start-point-reset \
               --err \
               --adapter shell_hyperfine \
-              --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+              --github-actions "$GITHUB_TOKEN" \
               --ci-number "$PR_NUMBER" \
               --file "$file"
           done

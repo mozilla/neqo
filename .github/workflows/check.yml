@@ -230,7 +230,7 @@ jobs:
           java-version: 23
 
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
-      - run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+      - run: sdkmanager --install "ndk;$NDK_VERSION"
 
       - uses: ./.github/actions/rust
         with:
@@ -247,7 +247,9 @@ jobs:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
           target: ${{ matrix.target }}
 
-      - run: cargo ndk --bindgen --platform "$API_LEVEL" --target ${{ matrix.target }} test --no-run
+      - env:
+          MATRIX_TARGET: ${{ matrix.target }}
+        run: cargo ndk --bindgen --platform "$API_LEVEL" --target $MATRIX_TARGET test --no-run
 
       - env:
           TARGET: ${{ matrix.target }}
