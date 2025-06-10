@@ -158,6 +158,10 @@ unsafe impl<T: CertificateCompressor> UnsafeCertCompression for T {
 
                     let encoded_len: usize = T::encode(input_slice, output_slice);
 
+                    if encoded_len == 0 {
+                        return ssl::SECFailure;
+                    }
+
                     let rv = p11::SECITEM_ReallocItem(
                         null_mut(),
                         output.cast::<p11::SECItemStr>(),
