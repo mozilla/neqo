@@ -188,7 +188,7 @@ jobs:
               for type in debug release; do
                 artifact="artifacts/artifact-$os-$FIREFOX-$type/artifact"
                 if [ -e "$artifact" ]; then
-                  echo -n " [${type^}]($(cat $artifact))"
+                  echo -n " [${type^}]($(cat "$artifact"))"
                 else
                   echo -n " ~~${type^}~~"
                 fi
