@@ -19,8 +19,8 @@ pub struct Decoder<'a> {
 impl<'a> Decoder<'a> {
     /// Make a new view of the provided slice.
     #[must_use]
-    pub const fn new(buf: &[u8]) -> Decoder<'_> {
-        Decoder { buf, offset: 0 }
+    pub const fn new(buf: &'a [u8]) -> Self {
+        Self { buf, offset: 0 }
     }
 
     /// Get the number of bytes remaining until the end.
