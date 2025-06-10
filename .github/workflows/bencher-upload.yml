@@ -15,10 +15,12 @@ jobs:
     if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
     permissions:
       pull-requests: write
+      checks: write
     runs-on: ubuntu-24.04
     env:
       BENCHER_PROJECT: ${{ github.event.repository.name }}
       BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+      GITHUB_EVENT_PATH: event.json
     steps:
       - name: Download benchmark results
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -42,25 +44,26 @@ jobs:
 
       - name: Upload main-branch results to bencher.dev
         run: |
+          ls -la
           bencher run \
             --branch main \
+            --hash "$(cat main-sha.txt)" \
             --testbed "$(cat testbed.txt)" \
             --threshold-measure latency \
             --threshold-test t_test \
-            --threshold-max-sample-size 64 \
             --threshold-upper-boundary 0.99 \
             --thresholds-reset \
             --err \
             --adapter rust_criterion \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            --file "criterion-main"
+            --file results-main.txt
           for file in hyperfine-main/*.json; do
             bencher run \
               --branch main \
+              --hash "$(cat main-sha.txt)" \
               --testbed "$(cat testbed.txt)" \
               --threshold-measure latency \
               --threshold-test t_test \
-              --threshold-max-sample-size 64 \
               --threshold-upper-boundary 0.99 \
               --thresholds-reset \
               --err \
@@ -83,8 +86,8 @@ jobs:
             --adapter rust_criterion \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
             --ci-number "$PR_NUMBER" \
-            --file "criterion"
-          for file in hyperfine/*.json; do
+            --file results.txt
+          for file in hyperfine/*neqo*.json; do
             bencher run \
               --branch "$PR_HEAD" \
               --testbed "$(cat testbed.txt)" \
