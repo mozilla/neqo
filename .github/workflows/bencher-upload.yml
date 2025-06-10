@@ -44,7 +44,6 @@ jobs:
 
       - name: Upload main-branch results to bencher.dev
         run: |
-          ls -la
           bencher run \
             --branch main \
             --hash "$(cat main-sha.txt)" \
@@ -58,6 +57,7 @@ jobs:
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
             --file results-main.txt
           for file in hyperfine-main/*.json; do
+            jq 'walk(if type == "object" and has("command") and .command[0:2] == "**" then.command |= .[2:-2] else . end)' < "$file" > stripped.json
             bencher run \
               --branch main \
               --hash "$(cat main-sha.txt)" \
@@ -69,7 +69,7 @@ jobs:
               --err \
               --adapter shell_hyperfine \
               --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-              --file "$file"
+              --file stripped.json
           done
 
       - name: Upload PR results to bencher.dev
@@ -88,6 +88,7 @@ jobs:
             --ci-number "$PR_NUMBER" \
             --file results.txt
           for file in hyperfine/*neqo*.json; do
+            jq 'walk(if type == "object" and has("command") and .command[0:2] == "**" then.command |= .[2:-2] else . end)' < "$file" > stripped.json
             bencher run \
               --branch "$PR_HEAD" \
               --testbed "$(cat testbed.txt)" \
@@ -99,5 +100,5 @@ jobs:
               --adapter shell_hyperfine \
               --github-actions '${{ secrets.GITHUB_TOKEN }}' \
               --ci-number "$PR_NUMBER" \
-              --file "$file"
+              --file stripped.json
           done
