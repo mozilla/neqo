@@ -76,10 +76,11 @@ runs:
       if: ${{ !steps.system_nss.outputs.suitable && runner.environment != 'github-hosted' }}
       env:
         RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        RUNNER_OS: ${{ runner.os }}
       shell: bash
       run: |
         echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
-        if [ "${{ runner.os }}" != "Windows" ]; then
+        if [ "$RUNNER_OS" != "Windows" ]; then
           # TODO: Figure out how to make this work on Windows
           echo "SCCACHE_CC=sccache cc" >> "$GITHUB_ENV"
           echo "SCCACHE_CXX=sccache c++" >> "$GITHUB_ENV"
@@ -192,8 +193,10 @@ runs:
         NSS_TARGET: ${{ inputs.type }}
         NSS_TYPE: ${{ inputs.type }}
         NSS_DIR: ${{ github.workspace }}/nss
-      run: |
-        NSS_OUT="${{ github.workspace }}/dist/$NSS_TARGET"
+        RUNNER_OS: ${{ runner.os }}
+        WORKSPACE: ${{ github.workspace }}
+      run: | # zizmor: ignore[github-env] We need to write to GITHUB_PATH on Windows.
+        NSS_OUT="$WORKSPACE/dist/$NSS_TARGET"
         {
           echo "LD_LIBRARY_PATH=$NSS_OUT/lib"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib"
@@ -201,7 +204,7 @@ runs:
           echo "NSS_DIR=$NSS_DIR"
           echo "NSS_PREBUILT=1"
         } >> "$GITHUB_ENV"
-        if [ "${{ runner.os }}" == "Windows" ]; then
+        if [ "$RUNNER_OS" == "Windows" ]; then
           echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         fi
 
@@ -210,13 +213,14 @@ runs:
       if: ${{ steps.check_build.outputs.build_nss }}
       env:
         TARGET_PLATFORM: ${{ inputs.target }}
+        RUNNER_OS: ${{ runner.os }}
       run: |
         if [ "$NSS_TARGET" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
           # we also want debug symbols and frame pointers for that, which the normal optimized NSS
           # build process doesn't provide.
           OPT="-o"
-          [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
+          [ "$RUNNER_OS" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
         if [[ $TARGET_PLATFORM == *-android* ]]; then
           for file in build-nss-android.sh build-android-common.sh; do

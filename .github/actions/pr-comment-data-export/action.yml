@@ -26,11 +26,12 @@ runs:
         CONTENTS: ${{ inputs.contents }}
         NAME: ${{ inputs.name }}
         LOG_MD: ${{ inputs.log-md }}
+        EVENT_NUMBER: ${{ github.event.number }}
       run: |
         mkdir comment-data
         cp "$CONTENTS" comment-data/contents
         echo "$NAME" > comment-data/name
-        echo "${{ github.event.number }}" > comment-data/pr-number
+        echo "$EVENT_NUMBER" > comment-data/pr-number
         echo "$LOG_MD" > comment-data/log-md
     - if: ${{ github.event_name == 'pull_request' }}
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
