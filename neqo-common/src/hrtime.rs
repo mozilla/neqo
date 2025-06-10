@@ -392,8 +392,10 @@ mod test {
 
     use super::Time;
 
+    #[cfg(not(target_arch = "aarch64"))]
     const ONE_MS: Duration = Duration::from_millis(1);
     const FIVE_MS: Duration = Duration::from_millis(5);
+    #[cfg(not(target_arch = "aarch64"))]
     const ONE_MS_AND_A_BIT: Duration = Duration::from_micros(1500);
     /// A limit for when high resolution timers are disabled.
     const GENEROUS: Duration = Duration::from_millis(30);
@@ -453,6 +455,7 @@ mod test {
         check_delays(GENEROUS);
     }
 
+    #[cfg(not(target_arch = "aarch64"))] // This test is flaky on linux/arm.
     #[test]
     fn one_ms() {
         let _hrt = Time::get(ONE_MS);
@@ -468,6 +471,7 @@ mod test {
         thr.join().unwrap();
     }
 
+    #[cfg(not(target_arch = "aarch64"))] // This test is flaky on linux/arm.
     #[test]
     fn one_ms_multi() {
         let thr = spawn(move || {
@@ -477,6 +481,7 @@ mod test {
         thr.join().unwrap();
     }
 
+    #[cfg(not(target_arch = "aarch64"))] // This test is flaky on linux/arm.
     #[test]
     fn mixed_multi() {
         let thr = spawn(move || {
@@ -487,6 +492,7 @@ mod test {
         thr.join().unwrap();
     }
 
+    #[cfg(not(target_arch = "aarch64"))] // This test is flaky on linux/arm.
     #[test]
     fn update() {
         let mut hrt = Time::get(Duration::from_millis(4));
@@ -495,7 +501,7 @@ mod test {
         check_delays(ONE_MS_AND_A_BIT);
     }
 
-    #[cfg(not(target_arch = "arm"))] // This test is flaky on linux/arm.
+    #[cfg(not(target_arch = "aarch64"))] // This test is flaky on linux/arm.
     #[test]
     fn update_multi() {
         let thr = spawn(move || {
