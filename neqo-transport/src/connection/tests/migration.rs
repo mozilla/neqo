@@ -611,7 +611,7 @@ fn migrate_same_fail() {
 
 /// This gets the connection ID from a datagram using the default
 /// connection ID generator/decoder.
-pub fn get_cid(d: &Datagram) -> ConnectionIdRef {
+pub fn get_cid(d: &Datagram) -> ConnectionIdRef<'_> {
     let gen = CountingConnectionIdGenerator::default();
     assert_eq!(d[0] & 0x80, 0); // Only support short packets for now.
     gen.decode_cid(&mut Decoder::from(&d[1..])).unwrap()
