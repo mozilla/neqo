@@ -70,7 +70,7 @@ unsafe trait UnsafeCertCompression {
 
 /// The trait is used to represent a certificate compression data structure
 /// Used in order to enable Certificate Compression extension during TLS connection
-pub trait CertificateCompression {
+pub trait CertificateCompressor {
     /// Certificate Compression identifier as in RFC8879
     const ID: u16;
     /// Certification Compression name (used only for logging/debugging)
@@ -85,18 +85,21 @@ pub trait CertificateCompression {
     /// If the implementation is not provided, we only copy the data
     /// NB: If `ENABLE_ENCODING` is not set, the function pointer provided to NSS will be null
     #[must_use]
-    fn encode(data: &[u8]) -> Vec<u8> {
-        data.to_vec()
+    fn encode(input: &[u8], output: &mut [u8]) -> usize {
+        let len = std::cmp::min(input.len(), output.len());
+        output[..len].copy_from_slice(&input[..len]);
+        len
     }
 
-    /// Certificate Compression decoding function
+    /// Certificate Compression decoding function. Returns the length of the decoded buffer,
+    /// or 0 if an error has occured.
     #[must_use]
     fn decode(input: &[u8], output: &mut [u8]) -> usize;
 }
 
 /// The trait is responsible for calling `CertificateCompression` encoding and decoding
 /// functions using the NSS types
-unsafe impl<T: CertificateCompression> UnsafeCertCompression for T {
+unsafe impl<T: CertificateCompressor> UnsafeCertCompression for T {
     unsafe extern "C" fn decode_callback(
         input: *const ssl::SECItem,
         output: *mut ::std::os::raw::c_uchar,
@@ -115,7 +118,7 @@ unsafe impl<T: CertificateCompression> UnsafeCertCompression for T {
                     let output_slice: &mut [u8] =
                         core::slice::from_raw_parts_mut(output, output_len);
                     let decoded_len = T::decode(input_slice, output_slice);
-                    if decoded_len > output_len {
+                    if decoded_len != output_len {
                         return ssl::SECFailure;
                     }
 
@@ -138,19 +141,35 @@ unsafe impl<T: CertificateCompression> UnsafeCertCompression for T {
                         return ssl::SECFailure;
                     }
 
-                    let bytes_to_encode = null_safe_slice(input.as_ref().data, input.as_ref().len);
-                    let encoded_bytes = T::encode(bytes_to_encode);
-                    let Ok(encoded_len) = c_uint::try_from(encoded_bytes.len()) else {
-                        return ssl::SECFailure;
-                    };
+                    let input_len = input.as_ref().len;
 
-                    p11::SECITEM_MakeItem(
+                    p11::SECITEM_AllocItem(
                         null_mut(),
                         // p11::SECItem is the same as ssl::SECItem
                         output.cast::<p11::SECItemStr>(),
-                        encoded_bytes.as_ptr(),
-                        encoded_len,
-                    )
+                        input_len + 1,
+                    );
+
+                    let input_slice = null_safe_slice(input.as_ref().data, input_len);
+                    let output_slice: &mut [u8] = core::slice::from_raw_parts_mut(
+                        (*output).data,
+                        (*output).len.try_into().unwrap(),
+                    );
+
+                    let encoded_len: usize = T::encode(input_slice, output_slice);
+
+                    let rv = p11::SECITEM_ReallocItem(
+                        null_mut(),
+                        output.cast::<p11::SECItemStr>(),
+                        (*output).len,
+                        encoded_len.try_into().unwrap(),
+                    );
+
+                    if rv != ssl::SECSuccess {
+                        return ssl::SECFailure;
+                    }
+
+                    ssl::SECSuccess
                 }
             }
         }
@@ -687,7 +706,7 @@ impl SecretAgent {
     /// This returns an error if the certificate compression could not be established
     ///
     /// [RFC8879]: https://datatracker.ietf.org/doc/rfc8879/
-    pub fn set_certificate_compression<T: CertificateCompression>(&mut self) -> Res<()> {
+    pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
         if T::ID == 0 {
             return Err(Error::InvalidCertificateCompressionID);
         }
