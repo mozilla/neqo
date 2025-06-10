@@ -12,27 +12,23 @@ permissions:
 jobs:
   bencher_upload:
     # The bench workflow fails when a regression is detected, but we want to upload results regardless.
-    if: (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure')
+    if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
     permissions:
       pull-requests: write
-    runs-on: ubuntu-latest
+      checks: write
+    runs-on: ubuntu-24.04
     env:
       BENCHER_PROJECT: ${{ github.event.repository.name }}
       BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
-    steps:
-      - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
-        env:
-          EVENT: toJson(github.event)
-        with:
-          script: |
-            let prEvent = JSON.parse(core.importVariable('EVENT'));
-            console.log('PR event:', prEvent);
+      GITHUB_EVENT_PATH: event.json
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+    steps:
       - name: Download benchmark results
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           run-id: ${{ github.event.workflow_run.id }}
-          name: ${{ github.event.repository.name }}-${{ github.event.workflow_run.head_sha }}-perf
+          name: ${{ github.event.repository.name }}-${{ github.event.workflow_run.referenced_workflows[0].sha }}-perf
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Export PR event data
@@ -50,30 +46,31 @@ jobs:
 
       - name: Upload main-branch results to bencher.dev
         run: |
+          ls -la
           bencher run \
             --branch main \
+            --hash "$(cat main-sha.txt)" \
             --testbed "$(cat testbed.txt)" \
             --threshold-measure latency \
             --threshold-test t_test \
-            --threshold-max-sample-size 64 \
             --threshold-upper-boundary 0.99 \
             --thresholds-reset \
             --err \
             --adapter rust_criterion \
-            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            --file "neqo-main/target/criterion"
+            --github-actions "$GITHUB_TOKEN" \
+            --file results-main.txt
           for file in hyperfine-main/*.json; do
             bencher run \
               --branch main \
+              --hash "$(cat main-sha.txt)" \
               --testbed "$(cat testbed.txt)" \
               --threshold-measure latency \
               --threshold-test t_test \
-              --threshold-max-sample-size 64 \
               --threshold-upper-boundary 0.99 \
               --thresholds-reset \
               --err \
               --adapter shell_hyperfine \
-              --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+              --github-actions "$GITHUB_TOKEN" \
               --file "$file"
           done
 
@@ -89,10 +86,10 @@ jobs:
             --start-point-reset \
             --err \
             --adapter rust_criterion \
-            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            --github-actions "$GITHUB_TOKEN" \
             --ci-number "$PR_NUMBER" \
-            --file "neqo/target/criterion"
-          for file in hyperfine/*.json; do
+            --file results.txt
+          for file in hyperfine/*neqo*.json; do
             bencher run \
               --branch "$PR_HEAD" \
               --testbed "$(cat testbed.txt)" \
@@ -102,7 +99,7 @@ jobs:
               --start-point-reset \
               --err \
               --adapter shell_hyperfine \
-              --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+              --github-actions "$GITHUB_TOKEN" \
               --ci-number "$PR_NUMBER" \
               --file "$file"
           done

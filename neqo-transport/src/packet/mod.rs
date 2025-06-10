@@ -736,7 +736,7 @@ impl<'a> PublicPacket<'a> {
     }
 
     #[must_use]
-    pub fn dcid(&self) -> ConnectionIdRef {
+    pub fn dcid(&self) -> ConnectionIdRef<'_> {
         self.dcid.as_cid_ref()
     }
 
@@ -744,7 +744,7 @@ impl<'a> PublicPacket<'a> {
     ///
     /// This will panic if called for a short header packet.
     #[must_use]
-    pub fn scid(&self) -> ConnectionIdRef {
+    pub fn scid(&self) -> ConnectionIdRef<'_> {
         self.scid
             .as_ref()
             .expect("should only be called for long header packets")
@@ -855,7 +855,7 @@ impl<'a> PublicPacket<'a> {
         &mut self,
         crypto: &mut CryptoStates,
         release_at: Instant,
-    ) -> Res<DecryptedPacket> {
+    ) -> Res<DecryptedPacket<'_>> {
         let epoch: Epoch = self.packet_type.try_into()?;
         // When we don't have a version, the crypto code doesn't need a version
         // for lookup, so use the default, but fix it up if decryption succeeds.
