@@ -352,6 +352,8 @@ jobs:
                   if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
                         "$client" == "$server" && "$client" != "neqo" && "$server" != "neqo" ]]; then
                     BOLD="**"
+                  else
+                    BOLD=""
                   fi
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
                     sed -E -e 's/`//g;' -e "s/(^\| )([^\|]*) \|/\1$BOLD\2$BOLD \|/" | \
