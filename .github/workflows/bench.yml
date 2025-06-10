@@ -298,13 +298,6 @@ jobs:
               fi
               for cc in "${cc_opt[@]}"; do
                 for pacing in "${pacing_opt[@]}"; do
-                  # Make a tag string for this test, for the results. Highlight lines we care about.
-                  BOLD=""
-                  if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
-                        "$client" == "$server" && "$client" != "neqo" && "$server" != "neqo" ]]; then
-                    BOLD="**"
-                  fi
-                  TAG="$BOLD$client vs. $server${cc:+ (}$cc${pacing:+, paced}${cc:+)}$BOLD"
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   FILENAME="$client-$server$EXT"
                   SERVER_CMD="$CMD"
@@ -314,12 +307,14 @@ jobs:
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   echo "Client command: $CMD"
                   cd "$TMP/out"
+                  # Make a tag string for this test.
+                  COMMAND="$client vs. $server${cc:+ (}$cc${pacing:+, paced}${cc:+)}"
                   if [[ "$client" == "neqo" || "$server" == "neqo" ]]; then
                     echo "Generate main-branch results for comparison."
                     echo "Server command: ${SERVER_CMD/neqo/neqo-main}"
                     echo "Client command: ${CMD/neqo/neqo-main}"
                     nice -n -20 setarch --addr-no-randomize hyperfine \
-                      --command-name "$TAG" --time-unit millisecond  \
+                      --command-name "$COMMAND" --time-unit millisecond  \
                       --export-json "$WORKSPACE/hyperfine-main/$FILENAME.json" \
                       --output null --warmup 5 --min-runs "$RUNS" \
                       --prepare "$WORKSPACE/${SERVER_CMD/neqo/neqo-main} & echo \$! >> /cpusets/cpu2/tasks; sleep 0.1" \
@@ -328,7 +323,7 @@ jobs:
                   fi
 
                   nice -n -20 setarch --addr-no-randomize hyperfine \
-                    --command-name "$TAG" --time-unit millisecond  \
+                    --command-name "$COMMAND" --time-unit millisecond  \
                     --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
                     --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
                     --output null --warmup 5 --min-runs "$RUNS" \
@@ -354,8 +349,15 @@ jobs:
                   pkill "$SERVER_TAG"
                   cd "$WORKSPACE"
 
+                  if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
+                        "$client" == "$server" && "$client" != "neqo" && "$server" != "neqo" ]]; then
+                    BOLD="**"
+                  else
+                    BOLD=""
+                  fi
                   grep -Ev '^\|(:| Command)' < "hyperfine/$FILENAME.md" | \
-                    sed -E 's/`//g;' | cut -f1-5 -d\| | tr -d '\n' >> steps.md
+                    sed -E -e 's/`//g;' -e "s/(^\| )([^\|]*) \|/\1$BOLD\2$BOLD \|/" | \
+                    cut -f1-5 -d\| | tr -d '\n' >> steps.md
 
                   # Compute throughput in MiB/s.
                   RESULT="hyperfine/$FILENAME.json"
