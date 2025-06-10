@@ -151,7 +151,10 @@ fn tcp_phase() {
     // Make sure that the increase is not according to TCP equation, i.e., that it took
     // less than RTT / CUBIC_ALPHA.
     let expected_ack_tcp_increase = expected_tcp_acks(cwnd_rtt_start, cubic.max_datagram_size());
-    assert!(num_acks < expected_ack_tcp_increase);
+    assert!(
+        num_acks < expected_ack_tcp_increase,
+        "num_acks: {num_acks}, expected_ack_tcp_increase: {expected_ack_tcp_increase}",
+    );
 
     // This first increase after a TCP phase may be shorter than what it would take by a regular
     // cubic phase, because of the proper byte counting and the credit it already had before
@@ -176,7 +179,10 @@ fn tcp_phase() {
 
     let expected_ack_tcp_increase2 =
         expected_tcp_acks(cwnd_rtt_start_after_tcp, cubic.max_datagram_size());
-    assert!(num_acks2 < expected_ack_tcp_increase2);
+    assert!(
+        num_acks2 < expected_ack_tcp_increase2,
+        "num_acks: {num_acks2}, expected_ack_tcp_increase2: {expected_ack_tcp_increase2}"
+    );
 
     // The time needed to increase cwnd by MAX_DATAGRAM_SIZE using the cubic equation will be
     // calculated from: W_cubic(elapsed_time + t_to_increase) - W_cubic(elapsed_time) =
@@ -200,9 +206,9 @@ fn tcp_phase() {
 fn cubic_phase() {
     let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
-    // Set last_max_cwnd to a higher number make sure that cc is the cubic phase (cwnd is calculated
+    // Set w_max to a higher number make sure that cc is the cubic phase (cwnd is calculated
     // by the cubic equation).
-    cubic.set_last_max_cwnd(cwnd_initial_f64 * 10.0);
+    cubic.set_w_max(cwnd_initial_f64 * 10.0);
     // Set ssthresh to something small to make sure that cc is in the congection avoidance phase.
     cubic.set_ssthresh(1);
     let mut now = now();
@@ -258,7 +264,7 @@ fn congestion_event_slow_start() {
     _ = fill_cwnd(&mut cubic, 0, now());
     ack_packet(&mut cubic, 0, now());
 
-    assert_within(cubic.last_max_cwnd(), 0.0, f64::EPSILON);
+    assert_within(cubic.w_max(), 0.0, f64::EPSILON);
 
     // cwnd is increased by 1 in slow start phase, after an ack.
     assert_eq!(
@@ -269,10 +275,10 @@ fn congestion_event_slow_start() {
     // Trigger a congestion_event in slow start phase
     packet_lost(&mut cubic, 1);
 
-    // last_max_cwnd is equal to cwnd before decrease.
+    // After congestion_event w_max is equal to the cwnd before the decrease.
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
     assert_within(
-        cubic.last_max_cwnd(),
+        cubic.w_max(),
         cwnd_initial_f64 + convert_to_f64(cubic.max_datagram_size()),
         f64::EPSILON,
     );
@@ -289,9 +295,9 @@ fn congestion_event_congestion_avoidance() {
     // Set ssthresh to something small to make sure that cc is in the congection avoidance phase.
     cubic.set_ssthresh(1);
 
-    // Set last_max_cwnd to something smaller than cwnd so that the fast convergence is not
+    // Set w_max to something smaller than cwnd so that the fast convergence is not
     // triggered.
-    cubic.set_last_max_cwnd(3.0 * convert_to_f64(cubic.max_datagram_size()));
+    cubic.set_w_max(3.0 * convert_to_f64(cubic.max_datagram_size()));
 
     _ = fill_cwnd(&mut cubic, 0, now());
     ack_packet(&mut cubic, 0, now());
@@ -299,35 +305,36 @@ fn congestion_event_congestion_avoidance() {
     assert_eq!(cubic.cwnd(), cubic.cwnd_initial());
 
     // Trigger a congestion_event in slow start phase
+    // TODO: Shouldn't this be in congestion avoidance?
     packet_lost(&mut cubic, 1);
 
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
-    assert_within(cubic.last_max_cwnd(), cwnd_initial_f64, f64::EPSILON);
+    assert_within(cubic.w_max(), cwnd_initial_f64, f64::EPSILON);
     assert_eq!(cubic.cwnd(), cwnd_after_loss(cubic.cwnd_initial()));
 }
 
 #[test]
-fn congestion_event_congestion_avoidance_2() {
+fn congestion_event_congestion_avoidance_fast_convergence() {
     let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
 
     // Set ssthresh to something small to make sure that cc is in the congection avoidance phase.
     cubic.set_ssthresh(1);
 
-    // Set last_max_cwnd to something higher than cwnd so that the fast convergence is triggered.
+    // Set w_max to something higher than cwnd so that the fast convergence is triggered.
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
-    cubic.set_last_max_cwnd(cwnd_initial_f64 * 10.0);
+    cubic.set_w_max(cwnd_initial_f64 * 10.0);
 
     _ = fill_cwnd(&mut cubic, 0, now());
     ack_packet(&mut cubic, 0, now());
 
-    assert_within(cubic.last_max_cwnd(), cwnd_initial_f64 * 10.0, f64::EPSILON);
+    assert_within(cubic.w_max(), cwnd_initial_f64 * 10.0, f64::EPSILON);
     assert_eq!(cubic.cwnd(), cubic.cwnd_initial());
 
     // Trigger a congestion_event.
     packet_lost(&mut cubic, 1);
 
     assert_within(
-        cubic.last_max_cwnd(),
+        cubic.w_max(),
         cwnd_initial_f64 * CUBIC_FAST_CONVERGENCE_FACTOR,
         f64::EPSILON,
     );
@@ -342,16 +349,18 @@ fn congestion_event_congestion_avoidance_no_overflow() {
     // Set ssthresh to something small to make sure that cc is in the congection avoidance phase.
     cubic.set_ssthresh(1);
 
-    // Set last_max_cwnd to something higher than cwnd so that the fast convergence is triggered.
+    // Set w_max to something higher than cwnd so that the fast convergence is triggered.
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
-    cubic.set_last_max_cwnd(cwnd_initial_f64 * 10.0);
+    cubic.set_w_max(cwnd_initial_f64 * 10.0);
 
     _ = fill_cwnd(&mut cubic, 0, now());
     ack_packet(&mut cubic, 1, now());
 
-    assert_within(cubic.last_max_cwnd(), cwnd_initial_f64 * 10.0, f64::EPSILON);
+    assert_within(cubic.w_max(), cwnd_initial_f64 * 10.0, f64::EPSILON);
     assert_eq!(cubic.cwnd(), cubic.cwnd_initial());
 
     // Now ack packet that was send earlier.
     ack_packet(&mut cubic, 0, now().checked_sub(PTO).unwrap());
+
+    // TODO: This test never asserts anything after the initial setup??
 }

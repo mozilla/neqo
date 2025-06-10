@@ -68,16 +68,14 @@ pub const CUBIC_BETA_USIZE_DIVIDEND: usize = 7;
 /// construct `CUBIC_BETA = 0.7`
 pub const CUBIC_BETA_USIZE_DIVISOR: usize = 10;
 
-/// > When a new flow joins the network, existing flows need to give up some of their bandwidth to
-/// > allow the new flow some room for growth if the existing flows have been using all the network
-/// > bandwidth. To speed up this bandwidth release by existing flows, the following fast
-/// > convergence mechanism SHOULD be implemented.
+/// This is the factor that is used by fast convergence to further reduce the next `W_max` when a
+/// congestion event occurs while `cwnd < W_max`. This speeds up the bandwidth release for when a
+/// new flow joins the network.
+///
+/// The calculation assumes `CUBIC_BETA = 0.7`.
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
-///
-/// This is the factor that is used by fast convergence to further reduce the next `W_max` when a
-/// congestion event occurs while `cwnd < W_max` to further speed up the bandwidth release.
-pub const CUBIC_FAST_CONVERGENCE_FACTOR: f64 = (1.0 + 0.7) / 2.0; // with CUBIC_BETA = 0.7
+pub const CUBIC_FAST_CONVERGENCE_FACTOR: f64 = (1.0 + 0.7) / 2.0;
 
 /// The minimum number of multiples of the datagram size that need
 /// to be received to cause an increase in the congestion window.
@@ -104,22 +102,6 @@ pub fn convert_to_f64(v: usize) -> f64 {
 
 #[derive(Debug, Default)]
 pub struct Cubic {
-    /// Maximum Window size two congestion events ago.
-    ///
-    /// > With fast convergence, when a congestion event occurs, before the
-    /// > window reduction of the congestion window, a flow remembers the last
-    /// > value of W_max before it updates W_max for the current congestion
-    /// > event.
-    ///
-    /// <https://datatracker.ietf.org/doc/html/rfc8312#section-4.6>
-    ///
-    /// UPDATE: The algorithm for fast convergence was improved in RFC 9438
-    /// to not need the extra variable anymore.
-    ///
-    /// ACTION: Delete variable when algorithm is adapted.
-    ///
-    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
-    last_max_cwnd: f64,
     /// > An estimate for the congestion window \[...\] in the Reno-friendly region -- that
     /// > is, an estimate for the congestion window of Reno.
     ///
@@ -142,19 +124,24 @@ pub struct Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-window-increase-function>
     k: f64,
-    /// > Size of `cwnd` in segments just before `cwnd` was reduced in the last congestion
-    /// > event when fast convergence is disabled (same as `cwnd_prior` on a congestion event).
-    /// > However, if fast convergence is enabled, `w_max` may be further reduced based on
+    /// > Size of `cwnd` in \[bytes\] just before `cwnd` was reduced in the last congestion
+    /// > event \[...\]. \[With\] fast convergence enabled, `w_max` may be further reduced based on
     /// > the current saturation point.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-variables-of-interest>
     ///
-    /// This acts as the plateau for the cubic function where it switches from the concave to the
-    /// convex region.
+    /// `w_max` acts as the plateau for the cubic function where it switches from the concave to
+    /// the convex region.
     ///
-    /// Formula:
+    /// It is calculated with the following logic:
     ///
-    /// `w_max = cwnd * FAST_CONVERGENCE_FACTOR`
+    /// ```pseudo
+    /// if (w_max > cwnd) {
+    ///     w_max = cwnd * FAST_CONVERGENCE_FACTOR;
+    /// } else {
+    ///     w_max = cwnd;
+    /// }
+    /// ```
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
     w_max: f64,
@@ -177,13 +164,14 @@ pub struct Cubic {
     tcp_acked_bytes: f64,
 }
 
-// TODO: Maybe adjust after done
+// TODO: Maybe add `cwnd_prior` variable so we can record it here (we recorded last_max_cwnd before,
+// but that was removed with RFC 9438)
 impl Display for Cubic {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "Cubic [last_max_cwnd: {}, k: {}, w_max: {}, ca_epoch_start: {:?}]",
-            self.last_max_cwnd, self.k, self.w_max, self.t_epoch
+            "Cubic [k: {}, w_max: {}, t_epoch: {:?}]",
+            self.k, self.w_max, self.t_epoch
         )?;
         Ok(())
     }
@@ -220,36 +208,36 @@ impl Cubic {
         (CUBIC_C * (t - self.k).powi(3)).mul_add(convert_to_f64(max_datagram_size), self.w_max)
     }
 
-    /// > w_est is set equal to cwnd_epoch at the start of the congestion avoidance stage.
+    /// This function resets all relevant parameters at the start of a new epoch (new congestion
+    /// avoidance stage) according to RFC 9438. The `w_max` variable is set in `reduce_cwnd()` as it
+    /// needs the prior congestion window for it's calculation. It also initializes `k` and `w_max`
+    /// if we start an epoch without having ever had a congestion event.
     ///
-    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
+    /// > `w_est` is set equal to `cwnd_epoch` at the start of the congestion avoidance stage.
     ///
-    /// UPDATE: With the change to fast convergence, we can remove the `last_max_cwnd` logic here.
-    /// We also must set `w_max` and `k`. I think `k` should be here but `w_max` should happen in
-    /// `reduce_cwnd()` where we currently do fast convergence. Also need to set `w_est` here,
-    /// see above. I don't think we need a `cwnd_epoch` variable, as it's only used here and equals
-    /// `curr_cwnd_f64`. Might rename the parameter.
-    ///
-    /// Not sure about the `last_max_cwnd <= curr_cwnd_f64` logic and how that relates to the new
-    /// fast convergence. Need to look into that.
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-9>
     fn start_epoch(
         &mut self,
-        curr_cwnd_f64: f64,
+        cwnd_epoch: f64,
         new_acked_f64: f64,
         max_datagram_size: usize,
         now: Instant,
     ) {
         self.t_epoch = Some(now);
-        // reset tcp_acked_bytes and estimated_tcp_cwnd;
+        self.w_est = cwnd_epoch;
         self.tcp_acked_bytes = new_acked_f64;
-        self.w_est = curr_cwnd_f64;
-        if self.last_max_cwnd <= curr_cwnd_f64 {
-            self.w_max = curr_cwnd_f64;
-            self.k = 0.0;
+        // If `w_max > cwnd_epoch` we take the cubic root from a negative value in `calc_k()`. That
+        // could only happen if somehow `cwnd` get's increased between calling `reduce_cwnd()` and
+        // `start_epoch()`, which is only possible if we go through slow start in between. It could
+        // also happen if we never had a congestion event, so never called `reduce_cwnd()` thus
+        // `w_max` was never set (so is still it's default `0.0` value). In any
+        // case we reset/initialize `w_max` and `k` here.
+        self.k = if self.w_max < cwnd_epoch {
+            self.w_max = cwnd_epoch;
+            0.0
         } else {
-            self.w_max = self.last_max_cwnd;
-            self.k = self.calc_k(curr_cwnd_f64, max_datagram_size);
-        }
+            self.calc_k(cwnd_epoch, max_datagram_size)
+        };
         qtrace!("[{self}] New epoch");
     }
 }
@@ -426,24 +414,22 @@ impl WindowAdjustment for Cubic {
         // > plateau earlier. This allows more time for the new flow to catch up to its
         // > congestion window size.
         //
-        // Check cwnd + MAX_DATAGRAM_SIZE instead of cwnd because with cwnd in bytes, cwnd may be
-        // slightly off.
-        //
-        // UPDATE: New logic for fast convergence.
-        //
-        // if (cwnd < w_max AND fast_convergence_enabled) {
-        //     w_max = cwnd * CUBIC_FAST_CONVERGENCE;
-        // } else {
-        //     w_max = cwnd;
-        // }
-        //
         // <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
-        self.last_max_cwnd =
-            if curr_cwnd_f64 + convert_to_f64(max_datagram_size) < self.last_max_cwnd {
-                curr_cwnd_f64 * CUBIC_FAST_CONVERGENCE_FACTOR
-            } else {
-                curr_cwnd_f64
-            };
+        //
+        // TODO: From the old implementation:
+        //
+        // "Check cwnd + MAX_DATAGRAM_SIZE instead of cwnd because with cwnd in bytes, cwnd may be
+        // slightly off."
+        //
+        // Implemented it like that, too. Maybe should be double checked if it really is necessary
+        // and how that statement was reasoned.
+        self.w_max = if curr_cwnd_f64 + convert_to_f64(max_datagram_size) < self.w_max {
+            curr_cwnd_f64 * CUBIC_FAST_CONVERGENCE_FACTOR
+        } else {
+            curr_cwnd_f64
+        };
+
+        // Reducing the congestion window and resetting time
         self.t_epoch = None;
         (
             curr_cwnd * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
@@ -458,13 +444,13 @@ impl WindowAdjustment for Cubic {
     }
 
     #[cfg(test)]
-    fn last_max_cwnd(&self) -> f64 {
-        self.last_max_cwnd
+    fn w_max(&self) -> f64 {
+        self.w_max
     }
 
     #[cfg(test)]
-    fn set_last_max_cwnd(&mut self, last_max_cwnd: f64) {
-        self.last_max_cwnd = last_max_cwnd;
+    fn set_w_max(&mut self, w_max: f64) {
+        self.w_max = w_max;
     }
 }
 

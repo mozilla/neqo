@@ -100,10 +100,15 @@ pub trait WindowAdjustment: Display + Debug {
     ) -> (usize, usize);
     /// Cubic needs this signal to reset its epoch.
     fn on_app_limited(&mut self);
+
+    // Those are only needed as helpers for CUBIC tests and are properly implemented in `cubic.rs`
     #[cfg(test)]
-    fn last_max_cwnd(&self) -> f64;
+    fn w_max(&self) -> f64 {
+        0.0
+    }
+
     #[cfg(test)]
-    fn set_last_max_cwnd(&mut self, last_max_cwnd: f64);
+    fn set_w_max(&mut self, _w_max: f64) {}
 }
 
 #[derive(Debug)]
@@ -438,13 +443,13 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     }
 
     #[cfg(test)]
-    pub fn last_max_cwnd(&self) -> f64 {
-        self.cc_algorithm.last_max_cwnd()
+    pub fn w_max(&self) -> f64 {
+        self.cc_algorithm.w_max()
     }
 
     #[cfg(test)]
-    pub fn set_last_max_cwnd(&mut self, last_max_cwnd: f64) {
-        self.cc_algorithm.set_last_max_cwnd(last_max_cwnd);
+    pub fn set_w_max(&mut self, w_max: f64) {
+        self.cc_algorithm.set_w_max(w_max);
     }
 
     #[cfg(test)]
