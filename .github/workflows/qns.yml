@@ -164,7 +164,7 @@ jobs:
           name: '${{ env.LATEST }} Docker image'
           path: /tmp
 
-      - run: docker load --input /tmp/$LATEST.tar
+      - run: docker load --input "/tmp/$LATEST.tar"
 
       - id: depair
         env:
