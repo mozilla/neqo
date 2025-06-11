@@ -2482,7 +2482,7 @@ impl Connection {
             }
 
             // Configure the limits and padding for this packet.
-            let aead_expansion = tx.expansion();
+            let aead_expansion = CryptoDxState::expansion();
             needs_padding |= builder.set_initial_limit(
                 &profile,
                 aead_expansion,
@@ -3609,7 +3609,7 @@ impl Connection {
         );
 
         let data_len_possible =
-            u64::try_from(mtu.saturating_sub(tx.expansion() + builder.len() + 1))?;
+            u64::try_from(mtu.saturating_sub(CryptoDxState::expansion() + builder.len() + 1))?;
         Ok(min(data_len_possible, max_dgram_size))
     }
 
