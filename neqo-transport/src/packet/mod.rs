@@ -20,7 +20,7 @@ use std::{
 
 use enum_map::Enum;
 use neqo_common::{hex, hex_with_len, qtrace, qwarn, Decoder, Encoder};
-use neqo_crypto::random;
+use neqo_crypto::{random, Aead};
 use strum::{EnumIter, FromRepr};
 
 use crate::{
@@ -379,12 +379,12 @@ impl PacketBuilder {
         self.encoder.as_mut()[self.offsets.len + 1] = (len & 0xff) as u8;
     }
 
-    fn pad_for_crypto(&mut self, crypto: &CryptoDxState) {
+    fn pad_for_crypto(&mut self) {
         // Make sure that there is enough data in the packet.
         // The length of the packet number plus the payload length needs to
         // be at least 4 (MAX_PACKET_NUMBER_LEN) plus any amount by which
         // the header protection sample exceeds the AEAD expansion.
-        let crypto_pad = crypto.extra_padding();
+        let crypto_pad = CryptoDxState::extra_padding();
         self.encoder.pad_to(
             self.offsets.pn.start + MAX_PACKET_NUMBER_LEN + crypto_pad,
             0,
@@ -418,12 +418,12 @@ impl PacketBuilder {
         if self.len() > self.limit {
             qwarn!("Packet contents are more than the limit");
             debug_assert!(false);
-            return Err(Error::InternalError);
+            return Err(Error::Internal);
         }
 
-        self.pad_for_crypto(crypto);
+        self.pad_for_crypto();
         if self.offsets.len > 0 {
-            self.write_len(crypto.expansion());
+            self.write_len(CryptoDxState::expansion());
         }
 
         qtrace!(
@@ -435,13 +435,13 @@ impl PacketBuilder {
 
         // Add space for crypto expansion.
         let data_end = self.encoder.len();
-        self.pad_to(data_end + crypto.expansion(), 0);
+        self.pad_to(data_end + CryptoDxState::expansion(), 0);
 
         // Calculate the mask.
         let ciphertext = crypto.encrypt(self.pn, self.header.clone(), self.encoder.as_mut())?;
         let offset = SAMPLE_OFFSET - self.offsets.pn.len();
         if offset + SAMPLE_SIZE > ciphertext.len() {
-            return Err(Error::InternalError);
+            return Err(Error::Internal);
         }
         let sample = &ciphertext[offset..offset + SAMPLE_SIZE];
         let mask = crypto.compute_mask(sample)?;
@@ -499,7 +499,7 @@ impl PacketBuilder {
         debug_assert_ne!(token.len(), 0);
         encoder.encode(token);
         let tag = retry::use_aead(version, |aead| {
-            let mut buf = vec![0; aead.expansion()];
+            let mut buf = vec![0; Aead::expansion()];
             Ok(aead.encrypt(0, encoder.as_ref(), &[], &mut buf)?.to_vec())
         })?;
         encoder.encode(&tag);
@@ -889,7 +889,7 @@ impl<'a> PublicPacket<'a> {
             let (key_phase, pn, header) = self.decrypt_header(rx)?;
             qtrace!("[{rx}] decoded header: {header:?}");
             let Some(rx) = crypto.rx(version, epoch, key_phase) else {
-                return Err(Error::DecryptError);
+                return Err(Error::Decrypt);
             };
             let version = rx.version(); // Version fixup; see above.
             let d = rx.decrypt(pn, header, self.data)?;
@@ -1029,7 +1029,7 @@ mod tests {
         // So burn an encryption:
         let mut burn = [0; 16];
         prot.encrypt(0, 0..0, &mut burn).expect("burn OK");
-        assert_eq!(burn.len(), prot.expansion());
+        assert_eq!(burn.len(), CryptoDxState::expansion());
 
         let mut builder = PacketBuilder::long(
             Encoder::new(),

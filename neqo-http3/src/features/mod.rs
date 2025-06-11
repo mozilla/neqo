@@ -30,7 +30,7 @@ pub enum NegotiationState {
         listener: Option<Http3ClientEvents>,
     },
     Negotiated,
-    NegotiationFailed,
+    Failed,
 }
 
 impl NegotiationState {
@@ -71,7 +71,7 @@ impl NegotiationState {
             *self = if settings.get(ft) == 1 {
                 Self::Negotiated
             } else {
-                Self::NegotiationFailed
+                Self::Failed
             };
             if let Some(l) = cb {
                 l.negotiation_done(ft, self.enabled());
