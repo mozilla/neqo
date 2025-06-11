@@ -54,11 +54,11 @@ impl QPackDecoder {
             instruction_reader: EncoderInstructionReader::new(),
             table: HeaderTable::new(false),
             acked_inserts: 0,
-            max_entries: qpack_settings.table_size_decoder >> 5,
+            max_entries: qpack_settings.max_table_size_decoder >> 5,
             send_buf,
             local_stream_id: None,
-            max_table_size: qpack_settings.table_size_decoder,
-            max_blocked_streams: usize::from(qpack_settings.blocked_streams),
+            max_table_size: qpack_settings.max_table_size_decoder,
+            max_blocked_streams: usize::from(qpack_settings.max_blocked_streams),
             blocked_streams: Vec::new(),
             stats: Stats::default(),
         }
@@ -317,9 +317,9 @@ mod tests {
 
         // create a decoder
         let mut decoder = QPackDecoder::new(&QpackSettings {
-            table_size_encoder: 0,
-            table_size_decoder: 300,
-            blocked_streams: 100,
+            max_table_size_encoder: 0,
+            max_table_size_decoder: 300,
+            max_blocked_streams: 100,
         });
         decoder.add_send_stream(send_stream_id);
 

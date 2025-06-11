@@ -349,16 +349,16 @@ mod tests {
     use crate::{Error, HFrame, Header, Http3Parameters, Priority};
 
     const DEFAULT_SETTINGS: QpackSettings = QpackSettings {
-        table_size_encoder: 100,
-        table_size_decoder: 100,
-        blocked_streams: 100,
+        max_table_size_encoder: 100,
+        max_table_size_decoder: 100,
+        max_blocked_streams: 100,
     };
 
     fn http3params(qpack_settings: QpackSettings) -> Http3Parameters {
         Http3Parameters::default()
-            .max_table_size_encoder(qpack_settings.table_size_encoder)
-            .max_table_size_decoder(qpack_settings.table_size_decoder)
-            .max_blocked_streams(qpack_settings.blocked_streams)
+            .max_table_size_encoder(qpack_settings.max_table_size_encoder)
+            .max_table_size_decoder(qpack_settings.max_table_size_decoder)
+            .max_blocked_streams(qpack_settings.max_blocked_streams)
     }
 
     pub fn create_server(conn_params: Http3Parameters) -> Http3Server {
@@ -568,9 +568,9 @@ mod tests {
         assert_eq!(sent, Ok(9));
         let mut encoder = QPackEncoder::new(
             &QpackSettings {
-                table_size_encoder: 100,
-                table_size_decoder: 0,
-                blocked_streams: 0,
+                max_table_size_encoder: 100,
+                max_table_size_decoder: 0,
+                max_blocked_streams: 0,
             },
             true,
         );
@@ -1205,7 +1205,7 @@ mod tests {
     fn zero_rtt_larger_decoder_table() {
         zero_rtt_with_settings(
             http3params(QpackSettings {
-                table_size_decoder: DEFAULT_SETTINGS.table_size_decoder + 1,
+                max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder + 1,
                 ..DEFAULT_SETTINGS
             }),
             ZeroRttState::AcceptedClient,
@@ -1217,7 +1217,7 @@ mod tests {
     fn zero_rtt_smaller_decoder_table() {
         zero_rtt_with_settings(
             http3params(QpackSettings {
-                table_size_decoder: DEFAULT_SETTINGS.table_size_decoder - 1,
+                max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder - 1,
                 ..DEFAULT_SETTINGS
             }),
             ZeroRttState::Rejected,
@@ -1229,7 +1229,7 @@ mod tests {
     fn zero_rtt_more_blocked_streams() {
         zero_rtt_with_settings(
             http3params(QpackSettings {
-                blocked_streams: DEFAULT_SETTINGS.blocked_streams + 1,
+                max_blocked_streams: DEFAULT_SETTINGS.max_blocked_streams + 1,
                 ..DEFAULT_SETTINGS
             }),
             ZeroRttState::AcceptedClient,
@@ -1241,7 +1241,7 @@ mod tests {
     fn zero_rtt_fewer_blocked_streams() {
         zero_rtt_with_settings(
             http3params(QpackSettings {
-                blocked_streams: DEFAULT_SETTINGS.blocked_streams - 1,
+                max_blocked_streams: DEFAULT_SETTINGS.max_blocked_streams - 1,
                 ..DEFAULT_SETTINGS
             }),
             ZeroRttState::Rejected,
@@ -1253,7 +1253,7 @@ mod tests {
     fn zero_rtt_smaller_encoder_table() {
         zero_rtt_with_settings(
             http3params(QpackSettings {
-                table_size_encoder: DEFAULT_SETTINGS.table_size_encoder - 1,
+                max_table_size_encoder: DEFAULT_SETTINGS.max_table_size_encoder - 1,
                 ..DEFAULT_SETTINGS
             }),
             ZeroRttState::AcceptedClient,

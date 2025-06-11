@@ -72,7 +72,7 @@ impl QPackEncoder {
     pub fn new(qpack_settings: &QpackSettings, use_huffman: bool) -> Self {
         Self {
             table: HeaderTable::new(true),
-            max_table_size: qpack_settings.table_size_encoder,
+            max_table_size: qpack_settings.max_table_size_encoder,
             max_entries: 0,
             instruction_reader: DecoderInstructionReader::new(),
             local_stream: LocalStreamState::NoStream,
@@ -619,9 +619,9 @@ mod tests {
         // create an encoder
         let mut encoder = QPackEncoder::new(
             &QpackSettings {
-                table_size_encoder: 1500,
-                table_size_decoder: 0,
-                blocked_streams: 0,
+                max_table_size_encoder: 1500,
+                max_table_size_decoder: 0,
+                max_blocked_streams: 0,
             },
             huffman,
         );

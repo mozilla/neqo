@@ -29,10 +29,11 @@ pub use stats::Stats;
 type Res<T> = Result<T, Error>;
 
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
+#[expect(clippy::struct_field_names, reason = "That's how they are called.")]
 pub struct QpackSettings {
-    pub table_size_decoder: u64,
-    pub table_size_encoder: u64,
-    pub blocked_streams: u16,
+    pub max_table_size_decoder: u64,
+    pub max_table_size_encoder: u64,
+    pub max_blocked_streams: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

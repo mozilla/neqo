@@ -30,9 +30,9 @@ impl Default for Http3Parameters {
         Self {
             conn_params: ConnectionParameters::default(),
             qpack_settings: QpackSettings {
-                table_size_encoder: QPACK_MAX_TABLE_SIZE_DEFAULT,
-                table_size_decoder: QPACK_MAX_TABLE_SIZE_DEFAULT,
-                blocked_streams: QPACK_MAX_BLOCKED_STREAMS_DEFAULT,
+                max_table_size_encoder: QPACK_MAX_TABLE_SIZE_DEFAULT,
+                max_table_size_decoder: QPACK_MAX_TABLE_SIZE_DEFAULT,
+                max_blocked_streams: QPACK_MAX_BLOCKED_STREAMS_DEFAULT,
             },
             max_concurrent_push_streams: MAX_PUSH_STREAM_DEFAULT,
             webtransport: WEBTRANSPORT_DEFAULT,
@@ -60,13 +60,13 @@ impl Http3Parameters {
     pub fn max_table_size_encoder(mut self, mut max_table: u64) -> Self {
         assert!(max_table <= QPACK_TABLE_SIZE_LIMIT);
         max_table = min(max_table, QPACK_TABLE_SIZE_LIMIT);
-        self.qpack_settings.table_size_encoder = max_table;
+        self.qpack_settings.max_table_size_encoder = max_table;
         self
     }
 
     #[must_use]
     pub const fn get_max_table_size_encoder(&self) -> u64 {
-        self.qpack_settings.table_size_encoder
+        self.qpack_settings.max_table_size_encoder
     }
 
     /// # Panics
@@ -76,24 +76,24 @@ impl Http3Parameters {
     pub fn max_table_size_decoder(mut self, mut max_table: u64) -> Self {
         assert!(max_table <= QPACK_TABLE_SIZE_LIMIT);
         max_table = min(max_table, QPACK_TABLE_SIZE_LIMIT);
-        self.qpack_settings.table_size_decoder = max_table;
+        self.qpack_settings.max_table_size_decoder = max_table;
         self
     }
 
     #[must_use]
     pub const fn get_max_table_size_decoder(&self) -> u64 {
-        self.qpack_settings.table_size_decoder
+        self.qpack_settings.max_table_size_decoder
     }
 
     #[must_use]
     pub const fn max_blocked_streams(mut self, max_blocked: u16) -> Self {
-        self.qpack_settings.blocked_streams = max_blocked;
+        self.qpack_settings.max_blocked_streams = max_blocked;
         self
     }
 
     #[must_use]
     pub const fn get_max_blocked_streams(&self) -> u16 {
-        self.qpack_settings.blocked_streams
+        self.qpack_settings.max_blocked_streams
     }
 
     #[must_use]
