@@ -166,7 +166,7 @@ pub fn create_client(
     client.set_qlog(qlog_new(
         args,
         hostname,
-        client.odcid().ok_or(Error::InternalError)?,
+        client.odcid().ok_or(Error::Internal)?,
     )?);
 
     Ok(client)
@@ -276,7 +276,7 @@ impl<'b> Handler<'b> {
                 self.handled_urls.push(url);
                 true
             }
-            Err(e @ (Error::StreamLimitError | Error::ConnectionState)) => {
+            Err(e @ (Error::StreamLimit | Error::ConnectionState)) => {
                 qwarn!("Cannot create stream {e:?}");
                 self.url_queue.push_front(url);
                 false

@@ -912,8 +912,8 @@ fn preferred_address_server_empty_cid() {
     connect_fail(
         &mut client,
         &mut server,
-        Error::TransportParameterError,
-        Error::PeerError(Error::TransportParameterError.code()),
+        Error::TransportParameter,
+        Error::Peer(Error::TransportParameter.code()),
     );
 }
 
@@ -933,8 +933,8 @@ fn preferred_address_client() {
     connect_fail(
         &mut client,
         &mut server,
-        Error::PeerError(Error::TransportParameterError.code()),
-        Error::TransportParameterError,
+        Error::Peer(Error::TransportParameter.code()),
+        Error::TransportParameter,
     );
 }
 

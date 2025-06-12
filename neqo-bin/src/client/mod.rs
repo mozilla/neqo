@@ -44,50 +44,50 @@ const BUFWRITER_BUFFER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug)]
 pub enum Error {
-    ArgumentError(&'static str),
-    Http3Error(neqo_http3::Error),
-    IoError(io::Error),
-    QlogError(qlog::Error),
-    TransportError(neqo_transport::Error),
-    ApplicationError(AppError),
-    CryptoError(neqo_crypto::Error),
+    Argument(&'static str),
+    Http3(neqo_http3::Error),
+    Io(io::Error),
+    Qlog(qlog::Error),
+    Transport(neqo_transport::Error),
+    Application(AppError),
+    Crypto(neqo_crypto::Error),
 }
 
 impl From<neqo_crypto::Error> for Error {
     fn from(err: neqo_crypto::Error) -> Self {
-        Self::CryptoError(err)
+        Self::Crypto(err)
     }
 }
 
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
-        Self::IoError(err)
+        Self::Io(err)
     }
 }
 
 impl From<neqo_http3::Error> for Error {
     fn from(err: neqo_http3::Error) -> Self {
-        Self::Http3Error(err)
+        Self::Http3(err)
     }
 }
 
 impl From<qlog::Error> for Error {
     fn from(err: qlog::Error) -> Self {
-        Self::QlogError(err)
+        Self::Qlog(err)
     }
 }
 
 impl From<neqo_transport::Error> for Error {
     fn from(err: neqo_transport::Error) -> Self {
-        Self::TransportError(err)
+        Self::Transport(err)
     }
 }
 
 impl From<CloseReason> for Error {
     fn from(err: CloseReason) -> Self {
         match err {
-            CloseReason::Transport(e) => Self::TransportError(e),
-            CloseReason::Application(e) => Self::ApplicationError(e),
+            CloseReason::Transport(e) => Self::Transport(e),
+            CloseReason::Application(e) => Self::Application(e),
         }
     }
 }
@@ -527,7 +527,7 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
         Some("Neqo client qlog".to_string()),
         format!("client-{hostname}-{cid}"),
     )
-    .map_err(Error::QlogError)
+    .map_err(Error::Qlog)
 }
 
 const fn local_addr_for(remote_addr: &SocketAddr, local_port: u16) -> SocketAddr {

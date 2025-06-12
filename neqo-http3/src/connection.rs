@@ -427,7 +427,7 @@ impl Http3Connection {
             Ok(())
             | Err(neqo_qpack::Error::EncoderStreamBlocked | neqo_qpack::Error::DynamicTableFull) => {
             }
-            Err(e) => return Err(Error::QpackError(e)),
+            Err(e) => return Err(Error::Qpack(e)),
         }
         Ok(())
     }
@@ -1423,7 +1423,7 @@ impl Http3Connection {
                     match st {
                         HSettingType::MaxTableCapacity => {
                             if zero_rtt_value != 0 {
-                                return Err(Error::QpackError(neqo_qpack::Error::DecoderStream));
+                                return Err(Error::Qpack(neqo_qpack::Error::DecoderStream));
                             }
                             qpack_changed = true;
                         }

@@ -342,7 +342,7 @@ impl StreamHandler for UploadStreamHandler {
             Ok(())
         } else {
             qerror!("Unexpected data [{stream_id}]: 0x{}", hex(data));
-            Err(crate::client::Error::Http3Error(Error::InvalidInput))
+            Err(crate::client::Error::Http3(Error::InvalidInput))
         }
     }
 
@@ -420,8 +420,8 @@ impl UrlHandler<'_> {
                 true
             }
             Err(
-                Error::TransportError(TransportError::StreamLimitError)
-                | Error::StreamLimitError
+                Error::Transport(TransportError::StreamLimit)
+                | Error::StreamLimit
                 | Error::Unavailable,
             ) => {
                 self.url_queue.push_front(url);

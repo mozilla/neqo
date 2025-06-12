@@ -977,9 +977,7 @@ mod tests {
                     check_request_header(&headers);
                     assert!(!fin);
                     headers_frames += 1;
-                    stream
-                        .stream_stop_sending(Error::HttpNoError.code())
-                        .unwrap();
+                    stream.stream_stop_sending(Error::HttpNone.code()).unwrap();
                     stream
                         .send_headers(&[
                             Header::new(":status", "200"),
@@ -1102,7 +1100,7 @@ mod tests {
     fn server_reset_control_stream() {
         let (mut hconn, mut peer_conn) = connect();
         peer_conn
-            .stream_reset_send(CLIENT_SIDE_CONTROL_STREAM_ID, Error::HttpNoError.code())
+            .stream_reset_send(CLIENT_SIDE_CONTROL_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
@@ -1115,7 +1113,7 @@ mod tests {
     fn server_reset_client_side_encoder_stream() {
         let (mut hconn, mut peer_conn) = connect();
         peer_conn
-            .stream_reset_send(CLIENT_SIDE_ENCODER_STREAM_ID, Error::HttpNoError.code())
+            .stream_reset_send(CLIENT_SIDE_ENCODER_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
@@ -1128,7 +1126,7 @@ mod tests {
     fn server_reset_client_side_decoder_stream() {
         let (mut hconn, mut peer_conn) = connect();
         peer_conn
-            .stream_reset_send(CLIENT_SIDE_DECODER_STREAM_ID, Error::HttpNoError.code())
+            .stream_reset_send(CLIENT_SIDE_DECODER_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
@@ -1142,7 +1140,7 @@ mod tests {
         let (mut hconn, mut peer_conn) = connect();
 
         peer_conn
-            .stream_stop_sending(SERVER_SIDE_CONTROL_STREAM_ID, Error::HttpNoError.code())
+            .stream_stop_sending(SERVER_SIDE_CONTROL_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
@@ -1155,7 +1153,7 @@ mod tests {
     fn server_stop_sending_encoder_stream() {
         let (mut hconn, mut peer_conn) = connect();
         peer_conn
-            .stream_stop_sending(SERVER_SIDE_ENCODER_STREAM_ID, Error::HttpNoError.code())
+            .stream_stop_sending(SERVER_SIDE_ENCODER_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
@@ -1168,7 +1166,7 @@ mod tests {
     fn server_stop_sending_decoder_stream() {
         let (mut hconn, mut peer_conn) = connect();
         peer_conn
-            .stream_stop_sending(SERVER_SIDE_DECODER_STREAM_ID, Error::HttpNoError.code())
+            .stream_stop_sending(SERVER_SIDE_DECODER_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());

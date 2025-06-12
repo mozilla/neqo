@@ -65,14 +65,14 @@ experimental_api!(SSL_EncodeEchConfigId(
 
 /// Convert any result that contains an ECH error into a result with an `EchRetry`.
 pub fn convert_ech_error(fd: *mut PRFileDesc, err: Error) -> Error {
-    if let Error::NssError {
+    if let Error::Nss {
         code: SSL_ERROR_ECH_RETRY_WITH_ECH,
         ..
     } = &err
     {
         let mut item = Item::make_empty();
         if unsafe { SSL_GetEchRetryConfigs(fd, &mut item).is_err() } {
-            return Error::InternalError;
+            return Error::Internal;
         }
         let buf = unsafe {
             let slc = null_safe_slice(item.data, item.len);
@@ -99,7 +99,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
     let slot = Slot::internal()?;
 
     let oid_data = unsafe { p11::SECOID_FindOIDByTag(p11::SECOidTag::SEC_OID_CURVE25519) };
-    let oid = unsafe { oid_data.as_ref() }.ok_or(Error::InternalError)?;
+    let oid = unsafe { oid_data.as_ref() }.ok_or(Error::Internal)?;
     let oid_slc = unsafe { null_safe_slice(oid.oid.data, oid.oid.len) };
     let mut params: Vec<u8> = Vec::with_capacity(oid_slc.len() + 2);
     params.push(u8::try_from(p11::SEC_ASN1_OBJECT_ID)?);
