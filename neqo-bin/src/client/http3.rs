@@ -294,12 +294,14 @@ impl StreamHandler for DownloadStreamHandler {
                 out_file.write_all(data)?;
             }
             return Ok(());
-        } else if !output_read_data {
-            qdebug!("READ[{stream_id}]: {} bytes", data.len());
-        } else if let Ok(txt) = std::str::from_utf8(data) {
-            qdebug!("READ[{stream_id}]: {txt}");
-        } else {
-            qdebug!("READ[{stream_id}]: 0x{}", hex(data));
+        } else if log::log_enabled!(log::Level::Debug) {
+            if !output_read_data {
+                qdebug!("READ[{stream_id}]: {} bytes", data.len());
+            } else if let Ok(txt) = std::str::from_utf8(data) {
+                qdebug!("READ[{stream_id}]: {txt}");
+            } else {
+                qdebug!("READ[{stream_id}]: 0x{}", hex(data));
+            }
         }
 
         if fin {
