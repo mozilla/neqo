@@ -174,20 +174,13 @@ jobs:
           done
           # Copy the main branch results to a separate directory for bencher.dev.
           cp -r target/criterion ../criterion-main
+          # Run the builds from the PR branch and compare to baseline.
           git checkout -
-          # Run pull request builds twice, once without perf for baseline comparison, and once with perf for profiling.
-          # (Perf seems to introduce some variability in the results.)
-          for BENCH in $BENCHES; do
-            cp "$BENCH" ../binaries/neqo/
-            # shellcheck disable=SC2086
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
-          done
           for BENCH in $BENCHES; do
             NAME=$(basename "$BENCH" | cut -d- -f1)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
+              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
           done
           cp -r target/criterion ../criterion
 
