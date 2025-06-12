@@ -63,9 +63,9 @@ impl<'a> ReceiverConnWrapper<'a> {
     }
 }
 
-/// This is only used by header decoder therefore all errors are `DecompressionFailed`.
+/// This is only used by header decoder therefore all errors are `Error::Decompression`.
 /// A header block is read entirely before decoding it, therefore if there is not enough
-/// data in the buffer an error `DecompressionFailed` will be return.
+/// data in the buffer an error `Error::Decompression` will be return.
 pub(crate) struct ReceiverBufferWrapper<'a> {
     buf: &'a [u8],
     offset: usize,
@@ -74,7 +74,7 @@ pub(crate) struct ReceiverBufferWrapper<'a> {
 impl ReadByte for ReceiverBufferWrapper<'_> {
     fn read_byte(&mut self) -> Res<u8> {
         if self.offset == self.buf.len() {
-            Err(Error::DecompressionFailed)
+            Err(Error::Decompression)
         } else {
             let b = self.buf[self.offset];
             self.offset += 1;
@@ -90,7 +90,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
 
     pub const fn peek(&self) -> Res<u8> {
         if self.offset == self.buf.len() {
-            Err(Error::DecompressionFailed)
+            Err(Error::Decompression)
         } else {
             Ok(self.buf[self.offset])
         }
@@ -104,7 +104,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
     /// byte.
     /// `ReceiverBufferWrapper` is only used for decoding header blocks. The header blocks are read
     /// entirely before a decoding starts, therefore any incomplete varint because of reaching the
-    /// end of a buffer will be treated as the `DecompressionFailed` error.
+    /// end of a buffer will be treated as the `Error::Decompression` error.
     pub fn read_prefixed_int(&mut self, prefix_len: u8) -> Res<u64> {
         debug_assert!(prefix_len < 8);
 
@@ -123,7 +123,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
     ///
     /// `ReceiverBufferWrapper` is only used for decoding header blocks. The header blocks are read
     /// entirely before a decoding starts, therefore any incomplete varint or literal because of
-    /// reaching the end of a buffer will be treated as the `DecompressionFailed` error.
+    /// reaching the end of a buffer will be treated as the `Error::Decompression` error.
     pub fn read_literal_from_buffer(&mut self, prefix_len: u8) -> Res<String> {
         debug_assert!(prefix_len < 7);
 
@@ -133,7 +133,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
         let length: usize = int_reader
             .read(self)?
             .try_into()
-            .or(Err(Error::DecompressionFailed))?;
+            .or(Err(Error::Decompression))?;
         if use_huffman {
             Ok(parse_utf8(&decode_huffman(self.slice(length)?)?)?.to_string())
         } else {
@@ -143,7 +143,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
 
     fn slice(&mut self, len: usize) -> Res<&[u8]> {
         if self.offset + len > self.buf.len() {
-            Err(Error::DecompressionFailed)
+            Err(Error::Decompression)
         } else {
             let start = self.offset;
             self.offset += len;
@@ -328,7 +328,7 @@ impl LiteralReader {
 }
 
 /// This is a helper function used only by `ReceiverBufferWrapper`, therefore it returns
-/// `DecompressionFailed` if any error happens.
+/// `Error::Decompression` if any error happens.
 ///
 /// # Errors
 ///
@@ -588,7 +588,7 @@ mod tests {
         let (buf, prefix_len, _) = &TEST_CASES_NUMBERS[4];
         let mut buffer = ReceiverBufferWrapper::new(&buf[..1]);
         let mut reader = IntReader::new(buffer.read_byte().unwrap(), *prefix_len);
-        assert_eq!(reader.read(&mut buffer), Err(Error::DecompressionFailed));
+        assert_eq!(reader.read(&mut buffer), Err(Error::Decompression));
     }
 
     #[test]
@@ -597,7 +597,7 @@ mod tests {
         let mut buffer = ReceiverBufferWrapper::new(&buf[..6]);
         assert_eq!(
             buffer.read_literal_from_buffer(*prefix_len),
-            Err(Error::DecompressionFailed)
+            Err(Error::Decompression)
         );
     }
 }

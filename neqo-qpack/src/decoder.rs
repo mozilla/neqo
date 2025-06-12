@@ -200,7 +200,7 @@ impl QPackDecoder {
 
     /// # Errors
     ///
-    /// May return `DecompressionFailed` if header block is incorrect or incomplete.
+    /// May return `Error::Decompression` if header block is incorrect or incomplete.
     pub fn refers_dynamic_table(&self, buf: &[u8]) -> Res<bool> {
         HeaderDecoder::new(buf).refers_dynamic_table(self.max_entries, self.table.base())
     }
@@ -210,7 +210,7 @@ impl QPackDecoder {
     ///
     /// # Errors
     ///
-    /// May return `DecompressionFailed` if header block is incorrect or incomplete.
+    /// May return `Error::Decompression` if header block is incorrect or incomplete.
     ///
     /// # Panics
     ///
@@ -226,7 +226,7 @@ impl QPackDecoder {
         match decoder.decode_header_block(&self.table, self.max_entries, self.table.base()) {
             Ok(HeaderDecoderResult::Blocked(req_insert_cnt)) => {
                 if self.blocked_streams.len() > self.max_blocked_streams {
-                    Err(Error::DecompressionFailed)
+                    Err(Error::Decompression)
                 } else {
                     let r = self
                         .blocked_streams
@@ -249,7 +249,7 @@ impl QPackDecoder {
                 }
                 Ok(Some(h))
             }
-            Err(_) => Err(Error::DecompressionFailed),
+            Err(_) => Err(Error::Decompression),
         }
     }
 
