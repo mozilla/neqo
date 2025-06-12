@@ -260,7 +260,6 @@ pub struct Stats {
     /// for retransmission when the PTO timer popped.
     pub pto_ack: usize,
     /// Number of times we had to drop an unacknowledged ACK range.
-    // TODO: Export this via glean.
     pub unacked_range_dropped: usize,
     /// Number of PMTUD probes sent.
     pub pmtud_tx: usize,
