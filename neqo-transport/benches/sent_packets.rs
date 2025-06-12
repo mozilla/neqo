@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::time::Instant;
+use std::{hint::black_box, time::Instant};
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use neqo_transport::{
@@ -40,7 +40,7 @@ fn take_ranges(c: &mut Criterion) {
         b.iter_batched_ref(
             sent_packets,
             // Take the first 90 packets, minus some gaps.
-            |pkts| pkts.take_ranges([70..=89, 40..=59, 10..=29]),
+            |pkts| black_box(pkts.take_ranges([70..=89, 40..=59, 10..=29])),
             criterion::BatchSize::SmallInput,
         );
     });

@@ -106,7 +106,7 @@ impl ClosingFrame {
             // error code needs to be sent in an Initial or Handshake packet.
             Some(Self {
                 path: Rc::clone(&self.path),
-                error: CloseReason::Transport(Error::ApplicationError),
+                error: CloseReason::Transport(Error::Application),
                 frame_type: FrameType::Padding,
                 reason_phrase: Vec::new(),
             })
@@ -184,24 +184,24 @@ impl StateSignaling {
         })
     }
 
-    pub fn close(
+    pub fn close<A: AsRef<str>>(
         &mut self,
         path: PathRef,
         error: CloseReason,
         frame_type: FrameType,
-        message: impl AsRef<str>,
+        message: A,
     ) {
         if !matches!(self, Self::Reset) {
             *self = Self::Closing(ClosingFrame::new(path, error, frame_type, message));
         }
     }
 
-    pub fn drain(
+    pub fn drain<A: AsRef<str>>(
         &mut self,
         path: PathRef,
         error: CloseReason,
         frame_type: FrameType,
-        message: impl AsRef<str>,
+        message: A,
     ) {
         if !matches!(self, Self::Reset) {
             *self = Self::Draining(ClosingFrame::new(path, error, frame_type, message));

@@ -32,7 +32,7 @@ runs:
         brew install nss
 
     - name: Check system NSS version
-      id: nss
+      id: system_nss
       env:
         MIN_VERSION: ${{ inputs.minimum-version }}
       shell: bash
@@ -60,7 +60,7 @@ runs:
           exit 0
         fi
         echo "System NSS is suitable: $NSS_VERSION"
-        echo "use_system_nss=1" >> "$GITHUB_OUTPUT"
+        echo "suitable=1" >> "$GITHUB_OUTPUT"
 
     - name: Use sccache
       # Apparently the action can't be installed twice in the same workflow, so check if
@@ -69,17 +69,18 @@ runs:
       #
       # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
       # is too small for this to be effective there.
-      if: ${{ env.SCCACHE_ENABLED != '1' && !steps.nss.outputs.use_system_nss && runner.environment != 'github-hosted' }}
+      if: ${{ env.SCCACHE_ENABLED != '1' && !steps.system_nss.outputs.suitable && runner.environment != 'github-hosted' }}
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
     - name: Enable sscache
-      if: ${{ !steps.nss.outputs.use_system_nss && runner.environment != 'github-hosted' }}
+      if: ${{ !steps.system_nss.outputs.suitable && runner.environment != 'github-hosted' }}
       env:
         RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        RUNNER_OS: ${{ runner.os }}
       shell: bash
       run: |
         echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
-        if [ "${{ runner.os }}" != "Windows" ]; then
+        if [ "$RUNNER_OS" != "Windows" ]; then
           # TODO: Figure out how to make this work on Windows
           echo "SCCACHE_CC=sccache cc" >> "$GITHUB_ENV"
           echo "SCCACHE_CXX=sccache c++" >> "$GITHUB_ENV"
@@ -91,40 +92,42 @@ runs:
         fi
 
     - name: Checkout NSS
-      if: ${{ !steps.nss.outputs.use_system_nss }}
+      if: ${{ !steps.system_nss.outputs.suitable }}
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
         repository: nss-dev/nss
         path: nss
 
-    - name: Checkout NSPR
-      if: ${{ !steps.nss.outputs.use_system_nss }}
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      with:
-        repository: nss-dev/nspr
-        path: nspr
+    - name: Retrieve NSPR
+      id: nspr
+      if: ${{ !steps.system_nss.outputs.suitable }}
+      shell: bash
+      env:
+        NSPR_VERSION: 4.36 # This changes so rarely that we can hardcode it.
+      run: |
+        curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz |
+          tar xz --strip-components=1
+        echo "version=$NSPR_VERSION" >> "$GITHUB_OUTPUT"
 
-    - name: Get head revisions
-      id: heads
-      if: ${{ !steps.nss.outputs.use_system_nss }}
+    - name: Store NSS version
+      id: nss
+      if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
       run: |
         NSS_HEAD=$(git -C nss rev-parse HEAD)
-        NSPR_HEAD=$(git -C nspr rev-parse HEAD)
-        echo "nss_head=$NSS_HEAD" >> "$GITHUB_OUTPUT"
-        echo "nspr_head=$NSPR_HEAD" >> "$GITHUB_OUTPUT"
+        echo "version=$NSS_HEAD" >> "$GITHUB_OUTPUT"
 
     - name: Cache NSS
       id: cache
-      if: ${{ !steps.nss.outputs.use_system_nss && runner.environment == 'github-hosted' }}
+      if: ${{ !steps.system_nss.outputs.suitable && runner.environment == 'github-hosted' }}
       uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: dist
-        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.heads.outputs.nss_head }}-${{ steps.heads.outputs.nspr_head }}
+        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
 
     - name: Check if build is needed
       id: check_build
-      if: ${{ !steps.nss.outputs.use_system_nss }}
+      if: ${{ !steps.system_nss.outputs.suitable }}
       env:
         CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
         RUNNER_ENVIRONMENT: ${{ runner.environment }}
@@ -185,13 +188,15 @@ runs:
 
     - name: Set up environment
       shell: bash
-      if: ${{ !steps.nss.outputs.use_system_nss }}
+      if: ${{ !steps.system_nss.outputs.suitable }}
       env:
         NSS_TARGET: ${{ inputs.type }}
         NSS_TYPE: ${{ inputs.type }}
         NSS_DIR: ${{ github.workspace }}/nss
-      run: |
-        NSS_OUT="${{ github.workspace }}/dist/$NSS_TARGET"
+        RUNNER_OS: ${{ runner.os }}
+        WORKSPACE: ${{ github.workspace }}
+      run: | # zizmor: ignore[github-env] We need to write to GITHUB_PATH on Windows.
+        NSS_OUT="$WORKSPACE/dist/$NSS_TARGET"
         {
           echo "LD_LIBRARY_PATH=$NSS_OUT/lib"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib"
@@ -199,7 +204,7 @@ runs:
           echo "NSS_DIR=$NSS_DIR"
           echo "NSS_PREBUILT=1"
         } >> "$GITHUB_ENV"
-        if [ "${{ runner.os }}" == "Windows" ]; then
+        if [ "$RUNNER_OS" == "Windows" ]; then
           echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         fi
 
@@ -208,13 +213,14 @@ runs:
       if: ${{ steps.check_build.outputs.build_nss }}
       env:
         TARGET_PLATFORM: ${{ inputs.target }}
+        RUNNER_OS: ${{ runner.os }}
       run: |
         if [ "$NSS_TARGET" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
           # we also want debug symbols and frame pointers for that, which the normal optimized NSS
           # build process doesn't provide.
           OPT="-o"
-          [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
+          [ "$RUNNER_OS" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
         if [[ $TARGET_PLATFORM == *-android* ]]; then
           for file in build-nss-android.sh build-android-common.sh; do

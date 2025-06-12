@@ -37,6 +37,11 @@ experimental_api!(SSL_InstallExtensionHooks(
     handler_arg: *mut c_void,
 ));
 
+experimental_api!(SSL_CallExtensionWriterOnEchInner(
+    fd: *mut PRFileDesc,
+    enabled: PRBool,
+));
+
 pub enum ExtensionWriterResult {
     Write(usize),
     Skip,
@@ -48,7 +53,23 @@ pub enum ExtensionHandlerResult {
 }
 
 pub trait ExtensionHandler {
-    fn write(&mut self, msg: HandshakeMessage, _d: &mut [u8]) -> ExtensionWriterResult {
+    /// Write an extension to the given buffer.
+    /// NSS will call back when it needs an extension.
+    /// Supply the bytes of the extension (without a type and length);
+    /// the default implementation writes a zero-length extension
+    /// to both the `ClientHello` and `EncryptedExtensions` message.
+    ///
+    /// The value of `ch_outer` is only relevant when ECH is enabled;
+    /// it will be `false` when ECH is disabled or for the inner `ClientHello`.
+    /// For ECH, where `msg == TLS_HS_CLIENT_HELLO`,
+    /// you can write different values to the inner and outer extensions;
+    /// if they are different, NSS won't compress them.
+    fn write(
+        &mut self,
+        msg: HandshakeMessage,
+        _ch_outer: bool,
+        _d: &mut [u8],
+    ) -> ExtensionWriterResult {
         match msg {
             TLS_HS_CLIENT_HELLO | TLS_HS_ENCRYPTED_EXTENSIONS => ExtensionWriterResult::Write(0),
             _ => ExtensionWriterResult::Skip,
@@ -89,21 +110,23 @@ impl ExtensionTracker {
         max_len: c_uint,
         arg: *mut c_void,
     ) -> PRBool {
+        // The input message type is larger than the `u8` range of `SSLHandshakeType`.
+        // The only valid value outside that range is for ECH outer ClientHello,
+        // which we need to have special handling for.
+        let (msg, ch_outer) = HandshakeMessage::try_from(message).map_or_else(
+            |_| {
+                debug_assert_eq!(message, SSLHandshakeType::ssl_hs_ech_outer_client_hello);
+                (TLS_HS_CLIENT_HELLO, true)
+            },
+            |msg| (msg, false),
+        );
         let d = std::slice::from_raw_parts_mut(data, max_len as usize);
-        Self::wrap_handler_call(arg, |handler| {
-            #[allow(
-                clippy::allow_attributes,
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                reason = "Cast is safe here because the message type is always part of the enum."
-            )]
-            match handler.write(message as HandshakeMessage, d) {
-                ExtensionWriterResult::Write(sz) => {
-                    *len = c_uint::try_from(sz).expect("integer overflow from extension writer");
-                    1
-                }
-                ExtensionWriterResult::Skip => 0,
+        Self::wrap_handler_call(arg, |handler| match handler.write(msg, ch_outer, d) {
+            ExtensionWriterResult::Write(sz) => {
+                *len = c_uint::try_from(sz).expect("integer overflow from extension writer");
+                1
             }
+            ExtensionWriterResult::Skip => 0,
         })
     }
 

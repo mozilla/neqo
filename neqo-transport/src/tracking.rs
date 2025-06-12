@@ -15,6 +15,7 @@ use std::{
 
 use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
+use log::{log_enabled, Level};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn, MAX_VARINT};
 use neqo_crypto::Epoch;
 use strum::{Display, EnumIter};
@@ -292,7 +293,7 @@ impl RecvdPackets {
                     // If this was the smallest, it might have filled a gap.
                     let nxt = i + 1;
                     if (nxt < self.ranges.len()) && (pn - 1 == self.ranges[nxt].largest) {
-                        let larger = self.ranges.remove(i).ok_or(Error::InternalError)?;
+                        let larger = self.ranges.remove(i).ok_or(Error::Internal)?;
                         self.ranges[i].merge_larger(&larger);
                     }
                     return Ok(());
@@ -312,7 +313,7 @@ impl RecvdPackets {
     fn trim_ranges(&mut self) -> Res<()> {
         // Limit the number of ranges that are tracked to MAX_TRACKED_RANGES.
         if self.ranges.len() > MAX_TRACKED_RANGES {
-            let oldest = self.ranges.pop_back().ok_or(Error::InternalError)?;
+            let oldest = self.ranges.pop_back().ok_or(Error::Internal)?;
             if oldest.ack_needed {
                 qwarn!("[{self}] Dropping unacknowledged ACK range: {oldest}");
             // TODO(mt) Record some statistics about this so we can tune MAX_TRACKED_RANGES.
@@ -555,13 +556,13 @@ impl AckTracker {
 
     /// Determine the earliest time that an ACK might be needed.
     pub fn ack_time(&self, now: Instant) -> Option<Instant> {
-        #[cfg(debug_assertions)]
-        for (space, recvd) in &self.spaces {
-            if let Some(recvd) = recvd {
-                qtrace!("ack_time for {space} = {:?}", recvd.ack_time());
+        if log_enabled!(Level::Trace) {
+            for (space, recvd) in &self.spaces {
+                if let Some(recvd) = recvd {
+                    qtrace!("ack_time for {space} = {:?}", recvd.ack_time());
+                }
             }
         }
-
         if self.spaces[PacketNumberSpace::Initial].is_none()
             && self.spaces[PacketNumberSpace::Handshake].is_none()
         {

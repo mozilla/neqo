@@ -38,11 +38,6 @@ pub struct MetaData<'a> {
 }
 
 impl MetaData<'_> {
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     pub fn new_in<'a>(
         path: &'a PathRef,
         tos: IpTos,

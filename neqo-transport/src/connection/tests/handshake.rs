@@ -18,7 +18,8 @@ use neqo_crypto::{
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
 use test_fixture::{
-    assertions, assertions::assert_coalesced_0rtt, fixture_init, now, split_datagram, DEFAULT_ADDR,
+    assertions, assertions::assert_coalesced_0rtt, damage_ech_config, fixture_init, now,
+    split_datagram, DEFAULT_ADDR,
 };
 
 use super::{
@@ -141,7 +142,7 @@ fn handshake_failed_authentication() {
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_error(&client, &CloseReason::Transport(Error::CryptoAlert(44)));
-    assert_error(&server, &CloseReason::Transport(Error::PeerError(300)));
+    assert_error(&server, &CloseReason::Transport(Error::Peer(300)));
 }
 
 #[test]
@@ -978,17 +979,6 @@ fn ech() {
     assert!(server.tls_preinfo().unwrap().ech_accepted().unwrap());
 }
 
-fn damaged_ech_config(config: &[u8]) -> Vec<u8> {
-    let mut cfg = Vec::from(config);
-    // Ensure that the version and config_id is correct.
-    assert_eq!(cfg[2], 0xfe);
-    assert_eq!(cfg[3], 0x0d);
-    assert_eq!(cfg[6], ECH_CONFIG_ID);
-    // Change the config_id so that the server doesn't recognize it.
-    cfg[6] ^= 0x94;
-    cfg
-}
-
 #[test]
 fn ech_retry() {
     fixture_init();
@@ -1000,7 +990,7 @@ fn ech_retry() {
 
     let mut client = default_client();
     client
-        .client_enable_ech(damaged_ech_config(server.ech_config()))
+        .client_enable_ech(damage_ech_config(server.ech_config()))
         .unwrap();
 
     let dgram = client.process_output(now()).dgram();
@@ -1022,7 +1012,7 @@ fn ech_retry() {
     server.process_input(dgram.unwrap(), now());
     assert_eq!(
         server.state().error(),
-        Some(&CloseReason::Transport(Error::PeerError(0x100 + 121)))
+        Some(&CloseReason::Transport(Error::Peer(0x100 + 121)))
     );
 
     let Some(CloseReason::Transport(Error::EchRetry(updated_config))) = client.state().error()
@@ -1059,7 +1049,7 @@ fn ech_retry_fallback_rejected() {
 
     let mut client = default_client();
     client
-        .client_enable_ech(damaged_ech_config(server.ech_config()))
+        .client_enable_ech(damage_ech_config(server.ech_config()))
         .unwrap();
 
     let dgram = client.process_output(now()).dgram();
@@ -1085,13 +1075,13 @@ fn ech_retry_fallback_rejected() {
     server.process_input(dgram.unwrap(), now());
     assert_eq!(
         server.state().error(),
-        Some(&CloseReason::Transport(Error::PeerError(298)))
+        Some(&CloseReason::Transport(Error::Peer(298)))
     ); // A bad_certificate alert.
 }
 
 #[test]
 fn bad_min_ack_delay() {
-    const EXPECTED_ERROR: CloseReason = CloseReason::Transport(Error::TransportParameterError);
+    const EXPECTED_ERROR: CloseReason = CloseReason::Transport(Error::TransportParameter);
     let mut server = default_server();
     let max_ad = u64::try_from(DEFAULT_LOCAL_ACK_DELAY.as_micros()).unwrap();
     server
@@ -1113,8 +1103,8 @@ fn bad_min_ack_delay() {
     server.process_input(dgram.unwrap(), now());
     assert_eq!(
         server.state().error(),
-        Some(&CloseReason::Transport(Error::PeerError(
-            Error::TransportParameterError.code()
+        Some(&CloseReason::Transport(Error::Peer(
+            Error::TransportParameter.code()
         )))
     );
 }
