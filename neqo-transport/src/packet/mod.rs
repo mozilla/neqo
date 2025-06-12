@@ -27,10 +27,9 @@ use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
     crypto::{CryptoDxState, CryptoStates, Epoch},
     frame::FrameType,
-    recovery::SendProfile,
     tracking::PacketNumberSpace,
     version::{Version, WireVersion},
-    Error, Pmtud, Res,
+    Error, Res,
 };
 
 /// `MIN_INITIAL_PACKET_SIZE` is the smallest packet that can be used to establish
@@ -151,14 +150,6 @@ impl PacketBuilder {
     /// The minimum useful frame size.  If space is less than this, we will claim to be full.
     pub const MINIMUM_FRAME_SIZE: usize = 2;
 
-    fn infer_limit(encoder: &Encoder) -> usize {
-        if encoder.capacity() > 64 {
-            encoder.capacity()
-        } else {
-            2048
-        }
-    }
-
     /// Start building a short header packet.
     ///
     /// This doesn't fail if there isn't enough space; instead it returns a builder that
@@ -168,8 +159,14 @@ impl PacketBuilder {
     ///
     /// If, after calling this method, `remaining()` returns 0, then call `abort()` to get
     /// the encoder back.
-    pub fn short<A: AsRef<[u8]>>(mut encoder: Encoder, key_phase: bool, dcid: Option<A>) -> Self {
-        let mut limit = Self::infer_limit(&encoder);
+    pub fn short<A: AsRef<[u8]>>(
+        mut encoder: Encoder,
+        key_phase: bool,
+        dcid: Option<A>,
+        limit: usize,
+    ) -> Self {
+        let mut limit = limit;
+
         let header_start = encoder.len();
         // Check that there is enough space for the header.
         // 5 = 1 (first byte) + 4 (packet number)
@@ -209,8 +206,10 @@ impl PacketBuilder {
         version: Version,
         mut dcid: Option<A>,
         mut scid: Option<A1>,
+        limit: usize,
     ) -> Self {
-        let mut limit = Self::infer_limit(&encoder);
+        let mut limit = limit;
+
         let header_start = encoder.len();
         // Check that there is enough space for the header.
         // 11 = 1 (first byte) + 4 (version) + 2 (dcid+scid length) + 4 (packet number)
@@ -252,24 +251,6 @@ impl PacketBuilder {
     /// is only used voluntarily by users of the builder, through `remaining()`.
     pub fn set_limit(&mut self, limit: usize) {
         self.limit = limit;
-    }
-
-    /// Set the initial limit for the packet, based on the profile and the PMTUD state.
-    /// Returns true if the packet needs padding.
-    pub fn set_initial_limit(
-        &mut self,
-        profile: &SendProfile,
-        aead_expansion: usize,
-        pmtud: &Pmtud,
-    ) -> bool {
-        if pmtud.needs_probe() {
-            debug_assert!(pmtud.probe_size() >= profile.limit());
-            self.limit = pmtud.probe_size() - aead_expansion;
-            true
-        } else {
-            self.limit = profile.limit() - aead_expansion;
-            false
-        }
     }
 
     /// Get the current limit.
@@ -975,6 +956,9 @@ impl Deref for DecryptedPacket<'_> {
     }
 }
 
+#[cfg(test)]
+pub const PACKET_LIMIT: usize = 2048;
+
 #[cfg(all(test, not(feature = "disable-encryption")))]
 #[cfg(test)]
 mod tests {
@@ -986,7 +970,7 @@ mod tests {
         crypto::{CryptoDxState, CryptoStates},
         packet::{
             PacketBuilder, PacketType, PublicPacket, PACKET_BIT_FIXED_QUIC, PACKET_BIT_LONG,
-            PACKET_BIT_SPIN,
+            PACKET_BIT_SPIN, PACKET_LIMIT,
         },
         ConnectionId, EmptyConnectionIdGenerator, RandomConnectionIdGenerator, Version,
     };
@@ -1037,6 +1021,7 @@ mod tests {
             Version::default(),
             None::<&[u8]>,
             Some(ConnectionId::from(SERVER_CID)),
+            PACKET_LIMIT,
         );
         builder.initial_token(&[]);
         builder.pn(1, 2);
@@ -1098,8 +1083,12 @@ mod tests {
     #[test]
     fn build_short() {
         fixture_init();
-        let mut builder =
-            PacketBuilder::short(Encoder::new(), true, Some(ConnectionId::from(SERVER_CID)));
+        let mut builder = PacketBuilder::short(
+            Encoder::new(),
+            true,
+            Some(ConnectionId::from(SERVER_CID)),
+            PACKET_LIMIT,
+        );
         builder.pn(0, 1);
         builder.encode(SAMPLE_SHORT_PAYLOAD); // Enough payload for sampling.
         let packet = builder
@@ -1113,8 +1102,12 @@ mod tests {
         fixture_init();
         let mut firsts = Vec::new();
         for _ in 0..64 {
-            let mut builder =
-                PacketBuilder::short(Encoder::new(), true, Some(ConnectionId::from(SERVER_CID)));
+            let mut builder = PacketBuilder::short(
+                Encoder::new(),
+                true,
+                Some(ConnectionId::from(SERVER_CID)),
+                PACKET_LIMIT,
+            );
             builder.scramble(true);
             builder.pn(0, 1);
             firsts.push(builder.as_ref()[0]);
@@ -1182,6 +1175,7 @@ mod tests {
             Version::default(),
             Some(ConnectionId::from(SERVER_CID)),
             Some(ConnectionId::from(CLIENT_CID)),
+            PACKET_LIMIT,
         );
         builder.pn(0, 1);
         builder.encode(&[0; 3]);
@@ -1189,8 +1183,12 @@ mod tests {
         assert_eq!(encoder.len(), 45);
         let first = encoder.clone();
 
-        let mut builder =
-            PacketBuilder::short(encoder, false, Some(ConnectionId::from(SERVER_CID)));
+        let mut builder = PacketBuilder::short(
+            encoder,
+            false,
+            Some(ConnectionId::from(SERVER_CID)),
+            PACKET_LIMIT,
+        );
         builder.pn(1, 3);
         builder.encode(&[0]); // Minimal size (packet number is big enough).
         let encoder = builder.build(&mut prot).expect("build");
@@ -1217,6 +1215,7 @@ mod tests {
             Version::default(),
             None::<&[u8]>,
             None::<&[u8]>,
+            PACKET_LIMIT,
         );
         builder.pn(0, 1);
         builder.encode(&[1, 2, 3]);
@@ -1236,6 +1235,7 @@ mod tests {
                 Version::default(),
                 None::<&[u8]>,
                 None::<&[u8]>,
+                PACKET_LIMIT,
             );
             builder.pn(0, 1);
             builder.scramble(true);
@@ -1257,6 +1257,7 @@ mod tests {
             Version::default(),
             None::<&[u8]>,
             Some(ConnectionId::from(SERVER_CID)),
+            PACKET_LIMIT,
         );
         assert_ne!(builder.remaining(), 0);
         builder.initial_token(&[]);
@@ -1269,21 +1270,26 @@ mod tests {
 
     #[test]
     fn build_insufficient_space() {
+        const LIMIT: usize = 100;
+        // Pad first short packet, but not up to the full limit. Leave enough
+        // space for the AEAD expansion and some extra of the second long
+        // packet, but not for an entire long header.
+        const LIMIT_FIRST: usize = LIMIT - 25;
         fixture_init();
 
         let mut builder = PacketBuilder::short(
-            Encoder::with_capacity(100),
+            Encoder::new(),
             true,
             Some(ConnectionId::from(SERVER_CID)),
+            LIMIT_FIRST,
         );
         builder.pn(0, 1);
-        // Pad, but not up to the full capacity. Leave enough space for the
-        // AEAD expansion and some extra, but not for an entire long header.
-        builder.set_limit(75);
         builder.enable_padding(true);
         assert!(builder.pad());
         let encoder = builder.build(&mut CryptoDxState::test_default()).unwrap();
         let encoder_copy = encoder.clone();
+
+        let limit_second = LIMIT - encoder.len();
 
         let builder = PacketBuilder::long(
             encoder,
@@ -1291,6 +1297,7 @@ mod tests {
             Version::default(),
             Some(ConnectionId::from(SERVER_CID)),
             Some(ConnectionId::from(SERVER_CID)),
+            limit_second,
         );
         assert_eq!(builder.remaining(), 0);
         assert_eq!(builder.abort(), encoder_copy);
