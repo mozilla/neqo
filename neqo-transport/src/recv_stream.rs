@@ -142,6 +142,9 @@ pub struct RxStreamOrderer {
     data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
     retired: u64,                        // Number of bytes the application has read
     received: u64,                       // The number of bytes stored in `data_ranges`
+    // Cached value of bytes ready to read.
+    // TODO: Don't cache, maintain an accurate count.
+    bytes_ready: Option<usize>,
 }
 
 impl RxStreamOrderer {
@@ -211,6 +214,7 @@ impl RxStreamOrderer {
             false
         };
 
+        self.bytes_ready = None; // Reset cached value
         let mut to_add = new_data;
         if self
             .data_ranges
@@ -287,28 +291,33 @@ impl RxStreamOrderer {
     }
 
     /// How many bytes are readable?
-    fn bytes_ready(&self) -> usize {
-        let mut prev_end = self.retired;
-        self.data_ranges
-            .iter()
-            .map(|(start_offset, data)| {
-                // All ranges don't overlap but we could have partially
-                // retired some of the first entry's data.
-                let data_len = data.len() as u64 - self.retired.saturating_sub(*start_offset);
-                (start_offset, data_len)
-            })
-            .take_while(|(start_offset, data_len)| {
-                if **start_offset <= prev_end {
-                    prev_end += data_len;
-                    true
-                } else {
-                    false
-                }
-            })
-            // Accumulate, but saturate at usize::MAX.
-            .fold(0, |acc: usize, (_, data_len)| {
-                acc.saturating_add(usize::try_from(data_len).unwrap_or(usize::MAX))
-            })
+    fn bytes_ready(&mut self) -> usize {
+        self.bytes_ready.unwrap_or_else(|| {
+            let mut prev_end = self.retired;
+            let bytes_ready = self
+                .data_ranges
+                .iter()
+                .map(|(start_offset, data)| {
+                    // All ranges don't overlap but we could have partially
+                    // retired some of the first entry's data.
+                    let data_len = data.len() as u64 - self.retired.saturating_sub(*start_offset);
+                    (start_offset, data_len)
+                })
+                .take_while(|(start_offset, data_len)| {
+                    if **start_offset <= prev_end {
+                        prev_end += data_len;
+                        true
+                    } else {
+                        false
+                    }
+                })
+                // Accumulate, but saturate at usize::MAX.
+                .fold(0, |acc: usize, (_, data_len)| {
+                    acc.saturating_add(usize::try_from(data_len).unwrap_or(usize::MAX))
+                });
+            self.bytes_ready = Some(bytes_ready);
+            bytes_ready
+        })
     }
 
     /// Bytes read by the application.
@@ -365,11 +374,13 @@ impl RxStreamOrderer {
             if keep {
                 let mut keep = self.data_ranges.split_off(&range_start);
                 mem::swap(&mut self.data_ranges, &mut keep);
+                self.bytes_ready = None; // Reset cached value
                 return copied;
             }
         }
 
         self.data_ranges.clear();
+        self.bytes_ready = Some(0);
         copied
     }
 
