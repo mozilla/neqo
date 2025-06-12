@@ -333,7 +333,7 @@ impl Stats {
         self.info = info;
     }
 
-    pub fn pkt_dropped(&mut self, reason: impl AsRef<str>) {
+    pub fn pkt_dropped<A: AsRef<str>>(&mut self, reason: A) {
         self.dropped_rx += 1;
         qwarn!(
             "[{}] Dropped received packet: {}; Total: {}",

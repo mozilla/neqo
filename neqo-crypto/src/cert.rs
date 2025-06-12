@@ -30,7 +30,7 @@ pub struct CertificateInfo {
 
 fn peer_certificate_chain(fd: *mut PRFileDesc) -> Option<ItemArray> {
     let mut chain_ptr: *mut SECItemArray = std::ptr::null_mut();
-    let rv = unsafe { SSL_PeerCertificateChainDER(fd, &raw mut chain_ptr) };
+    let rv = unsafe { SSL_PeerCertificateChainDER(fd, &mut chain_ptr) };
     if rv.is_ok() {
         ItemArray::from_ptr(chain_ptr).ok()
     } else {
@@ -95,12 +95,12 @@ impl CertificateInfo {
     }
 
     #[must_use]
-    pub const fn stapled_ocsp_responses(&self) -> &Option<Vec<Vec<u8>>> {
-        &self.stapled_ocsp_responses
+    pub const fn stapled_ocsp_responses(&self) -> Option<&Vec<Vec<u8>>> {
+        self.stapled_ocsp_responses.as_ref()
     }
 
     #[must_use]
-    pub const fn signed_cert_timestamp(&self) -> &Option<Vec<u8>> {
-        &self.signed_cert_timestamp
+    pub const fn signed_cert_timestamp(&self) -> Option<&Vec<u8>> {
+        self.signed_cert_timestamp.as_ref()
     }
 }

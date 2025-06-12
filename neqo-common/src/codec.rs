@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::{self, Debug, Formatter};
+use std::fmt::{self, Debug, Formatter, Write};
 
 use crate::hex_with_len;
 
@@ -19,8 +19,8 @@ pub struct Decoder<'a> {
 impl<'a> Decoder<'a> {
     /// Make a new view of the provided slice.
     #[must_use]
-    pub const fn new(buf: &[u8]) -> Decoder {
-        Decoder { buf, offset: 0 }
+    pub const fn new(buf: &'a [u8]) -> Self {
+        Self { buf, offset: 0 }
     }
 
     /// Get the number of bytes remaining until the end.
@@ -266,7 +266,7 @@ impl Encoder {
     /// Create a view of the current contents of the buffer.
     /// Note: for a view of a slice, use `Decoder::new(&enc[s..e])`
     #[must_use]
-    pub fn as_decoder(&self) -> Decoder {
+    pub fn as_decoder(&self) -> Decoder<'_> {
         Decoder::new(self.as_ref())
     }
 
@@ -277,7 +277,7 @@ impl Encoder {
     /// When `s` contains non-hex values or an odd number of values.
     #[cfg(any(test, feature = "test-fixture"))]
     #[must_use]
-    pub fn from_hex(s: impl AsRef<str>) -> Self {
+    pub fn from_hex<A: AsRef<str>>(s: A) -> Self {
         let s = s.as_ref();
         assert_eq!(s.len() % 2, 0, "Needs to be even length");
 
@@ -469,6 +469,13 @@ impl From<&[u8]> for Encoder {
 impl From<Encoder> for Vec<u8> {
     fn from(buf: Encoder) -> Self {
         buf.buf
+    }
+}
+
+impl Write for Encoder {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.buf.extend_from_slice(s.as_bytes());
+        Ok(())
     }
 }
 

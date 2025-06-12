@@ -107,16 +107,14 @@ impl TryFrom<PRTime> for Time {
     type Error = Error;
     fn try_from(prtime: PRTime) -> Res<Self> {
         let base = get_base();
-        let delta = prtime
-            .checked_sub(base.prtime)
-            .ok_or(Error::TimeTravelError)?;
+        let delta = prtime.checked_sub(base.prtime).ok_or(Error::TimeTravel)?;
         let d = Duration::from_micros(u64::try_from(delta.abs())?);
         let t = if delta >= 0 {
             base.instant.checked_add(d)
         } else {
             base.instant.checked_sub(d)
         };
-        let t = t.ok_or(Error::TimeTravelError)?;
+        let t = t.ok_or(Error::TimeTravel)?;
         Ok(Self { t })
     }
 }
@@ -130,13 +128,13 @@ impl TryInto<PRTime> for Time {
             || {
                 // Try to go backwards from the base time.
                 let backwards = base.instant - self.t; // infallible
-                PRTime::try_from(backwards.as_micros()).map_or(Err(Error::TimeTravelError), |d| {
-                    base.prtime.checked_sub(d).ok_or(Error::TimeTravelError)
+                PRTime::try_from(backwards.as_micros()).map_or(Err(Error::TimeTravel), |d| {
+                    base.prtime.checked_sub(d).ok_or(Error::TimeTravel)
                 })
             },
             |delta| {
-                PRTime::try_from(delta.as_micros()).map_or(Err(Error::TimeTravelError), |d| {
-                    d.checked_add(base.prtime).ok_or(Error::TimeTravelError)
+                PRTime::try_from(delta.as_micros()).map_or(Err(Error::TimeTravel), |d| {
+                    d.checked_add(base.prtime).ok_or(Error::TimeTravel)
                 })
             },
         )

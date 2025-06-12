@@ -58,7 +58,7 @@ impl ConnectionId {
     }
 
     #[must_use]
-    pub fn as_cid_ref(&self) -> ConnectionIdRef {
+    pub fn as_cid_ref(&self) -> ConnectionIdRef<'_> {
         ConnectionIdRef::from(&self.cid[..])
     }
 }
@@ -315,11 +315,6 @@ impl ConnectionIdEntry<[u8; 16]> {
         true
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     pub fn is_empty(&self) -> bool {
         self.seqno == CONNECTION_ID_SEQNO_EMPTY || self.cid.is_empty()
     }
@@ -487,7 +482,7 @@ impl ConnectionIdManager {
         Rc::clone(&self.generator)
     }
 
-    pub fn decoder(&self) -> ConnectionIdDecoderRef {
+    pub fn decoder(&self) -> ConnectionIdDecoderRef<'_> {
         ConnectionIdDecoderRef {
             generator: self.generator.deref().borrow(),
         }

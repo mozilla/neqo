@@ -99,10 +99,10 @@ impl HpKey {
                 c_uint::try_from(l.len())?,
                 mech,
                 key_size,
-                &raw mut secret,
+                &mut secret,
             )
         }?;
-        let key = SymKey::from_ptr(secret).or(Err(Error::HkdfError))?;
+        let key = SymKey::from_ptr(secret).or(Err(Error::Hkdf))?;
 
         let res = match cipher {
             TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => {
@@ -114,7 +114,7 @@ impl HpKey {
                         &Item::wrap(&ZERO[..0])?, // Borrow a zero-length slice of ZERO.
                     )
                 };
-                let context = Context::from_ptr(context_ptr).or(Err(Error::CipherInitFailure))?;
+                let context = Context::from_ptr(context_ptr).or(Err(Error::CipherInit))?;
                 Self::Aes(Rc::new(RefCell::new(context)))
             }
             TLS_CHACHA20_POLY1305_SHA256 => Self::Chacha(key),
@@ -156,7 +156,7 @@ impl HpKey {
                     PK11_CipherOp(
                         **context.borrow_mut(),
                         output.as_mut_ptr(),
-                        &raw mut output_len,
+                        &mut output_len,
                         c_int::try_from(output.len())?,
                         sample[..Self::SAMPLE_SIZE].as_ptr().cast(),
                         c_int::try_from(Self::SAMPLE_SIZE)?,
@@ -181,7 +181,7 @@ impl HpKey {
                         CK_MECHANISM_TYPE::from(CKM_CHACHA20),
                         addr_of_mut!(param_item),
                         output[..].as_mut_ptr(),
-                        &raw mut output_len,
+                        &mut output_len,
                         c_uint::try_from(output.len())?,
                         [0; Self::SAMPLE_SIZE].as_ptr(),
                         c_uint::try_from(Self::SAMPLE_SIZE)?,

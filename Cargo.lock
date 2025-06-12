@@ -80,7 +80,7 @@ dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
- "itertools",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "proc-macro2",
@@ -223,24 +223,20 @@ checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
 
 [[package]]
 name = "criterion"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2b12d017a929603d80db1831cd3a24082f8137ce19c69e6447f54f5fc8d692f"
+checksum = "3bf7af66b0989381bd0be551bd7cc91912a655a58c6918420c9527b1fd8b4679"
 dependencies = [
  "anes",
  "cast",
  "ciborium",
  "clap",
  "criterion-plot",
- "futures",
- "is-terminal",
- "itertools",
+ "itertools 0.13.0",
  "num-traits",
- "once_cell",
  "oorandom",
  "regex",
  "serde",
- "serde_derive",
  "serde_json",
  "tinytemplate",
  "tokio",
@@ -254,7 +250,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b50826342786a51a89e2da3a28f1c32b06e387201bc2d19791f622c673706b1"
 dependencies = [
  "cast",
- "itertools",
+ "itertools 0.10.5",
 ]
 
 [[package]]
@@ -455,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -503,12 +499,6 @@ name = "hermit-abi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d231dfb89cfffdbc30e7fc41579ed6066ad03abda9e567ccafae602b97ec5024"
-
-[[package]]
-name = "hermit-abi"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbf6a919d6cf397374f7dfeeea91d974c7c0a7221d0d0f4f20d859d329e53fcc"
 
 [[package]]
 name = "hex"
@@ -672,21 +662,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "is-terminal"
-version = "0.4.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "261f68e344040fbd0edea105bef17c66edf46f984ddb1115b775ce31be948f4b"
-dependencies = [
- "hermit-abi 0.4.0",
- "libc",
- "windows-sys",
-]
-
-[[package]]
 name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
 dependencies = [
  "either",
 ]
@@ -783,7 +771,7 @@ version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4569e456d394deccd22ce1c1913e6ea0e54519f577285001215d33557431afe4"
 dependencies = [
- "hermit-abi 0.3.9",
+ "hermit-abi",
  "libc",
  "wasi",
  "windows-sys",
@@ -797,9 +785,9 @@ checksum = "903970ae2f248d7275214cf8f387f8ba0c4ea7e3d87a320e85493db60ce28616"
 
 [[package]]
 name = "mtu"
-version = "0.2.8"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04e61c20148fe6735f607556e139fba114fb8773dc6f61e1bcd24f18f793de2e"
+checksum = "3e3124fb16267c5a77ce8cd015bcb5bb3f8aab28ec32d89d65f6a31c5c1306a0"
 dependencies = [
  "bindgen",
  "cfg_aliases",
@@ -811,7 +799,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "clap",
  "clap-verbosity-flag",
@@ -834,7 +822,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-common"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "criterion",
  "enum-map",
@@ -851,7 +839,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-crypto"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "bindgen",
  "enum-map",
@@ -868,7 +856,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-http3"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "criterion",
  "enumset",
@@ -887,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-qpack"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "log",
  "neqo-common",
@@ -899,7 +887,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-transport"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "criterion",
  "enum-map",
@@ -919,7 +907,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-udp"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "cfg_aliases",
  "log",
@@ -1262,7 +1250,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "log",
  "neqo-common",

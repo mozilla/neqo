@@ -20,7 +20,7 @@ use std::{
 
 use enum_map::Enum;
 use neqo_common::{hex, hex_with_len, qtrace, qwarn, Decoder, Encoder};
-use neqo_crypto::random;
+use neqo_crypto::{random, Aead};
 use strum::{EnumIter, FromRepr};
 
 use crate::{
@@ -91,15 +91,16 @@ impl PacketType {
     }
 }
 
-#[expect(clippy::fallible_impl_from, reason = "TODO: Use strum.")]
-impl From<PacketType> for Epoch {
-    fn from(v: PacketType) -> Self {
+impl TryFrom<PacketType> for Epoch {
+    type Error = Error;
+
+    fn try_from(v: PacketType) -> Res<Self> {
         match v {
-            PacketType::Initial => Self::Initial,
-            PacketType::ZeroRtt => Self::ZeroRtt,
-            PacketType::Handshake => Self::Handshake,
-            PacketType::Short => Self::ApplicationData,
-            _ => panic!("shouldn't be here"),
+            PacketType::Initial => Ok(Self::Initial),
+            PacketType::ZeroRtt => Ok(Self::ZeroRtt),
+            PacketType::Handshake => Ok(Self::Handshake),
+            PacketType::Short => Ok(Self::ApplicationData),
+            _ => Err(Error::InvalidPacket),
         }
     }
 }
@@ -167,7 +168,7 @@ impl PacketBuilder {
     ///
     /// If, after calling this method, `remaining()` returns 0, then call `abort()` to get
     /// the encoder back.
-    pub fn short(mut encoder: Encoder, key_phase: bool, dcid: Option<impl AsRef<[u8]>>) -> Self {
+    pub fn short<A: AsRef<[u8]>>(mut encoder: Encoder, key_phase: bool, dcid: Option<A>) -> Self {
         let mut limit = Self::infer_limit(&encoder);
         let header_start = encoder.len();
         // Check that there is enough space for the header.
@@ -202,12 +203,12 @@ impl PacketBuilder {
     /// even if the token is empty.
     ///
     /// See `short()` for more on how to handle this in cases where there is no space.
-    pub fn long(
+    pub fn long<A: AsRef<[u8]>, A1: AsRef<[u8]>>(
         mut encoder: Encoder,
         pt: PacketType,
         version: Version,
-        mut dcid: Option<impl AsRef<[u8]>>,
-        mut scid: Option<impl AsRef<[u8]>>,
+        mut dcid: Option<A>,
+        mut scid: Option<A1>,
     ) -> Self {
         let mut limit = Self::infer_limit(&encoder);
         let header_start = encoder.len();
@@ -378,12 +379,12 @@ impl PacketBuilder {
         self.encoder.as_mut()[self.offsets.len + 1] = (len & 0xff) as u8;
     }
 
-    fn pad_for_crypto(&mut self, crypto: &CryptoDxState) {
+    fn pad_for_crypto(&mut self) {
         // Make sure that there is enough data in the packet.
         // The length of the packet number plus the payload length needs to
         // be at least 4 (MAX_PACKET_NUMBER_LEN) plus any amount by which
         // the header protection sample exceeds the AEAD expansion.
-        let crypto_pad = crypto.extra_padding();
+        let crypto_pad = CryptoDxState::extra_padding();
         self.encoder.pad_to(
             self.offsets.pn.start + MAX_PACKET_NUMBER_LEN + crypto_pad,
             0,
@@ -417,32 +418,30 @@ impl PacketBuilder {
         if self.len() > self.limit {
             qwarn!("Packet contents are more than the limit");
             debug_assert!(false);
-            return Err(Error::InternalError);
+            return Err(Error::Internal);
         }
 
-        self.pad_for_crypto(crypto);
+        self.pad_for_crypto();
         if self.offsets.len > 0 {
-            self.write_len(crypto.expansion());
+            self.write_len(CryptoDxState::expansion());
         }
 
-        let hdr = &self.encoder.as_ref()[self.header.clone()];
-        let body = &self.encoder.as_ref()[self.header.end..];
         qtrace!(
             "Packet build pn={} hdr={} body={}",
             self.pn,
-            hex(hdr),
-            hex(body)
+            hex(&self.encoder.as_ref()[self.header.clone()]),
+            hex(&self.encoder.as_ref()[self.header.end..])
         );
 
         // Add space for crypto expansion.
         let data_end = self.encoder.len();
-        self.pad_to(data_end + crypto.expansion(), 0);
+        self.pad_to(data_end + CryptoDxState::expansion(), 0);
 
         // Calculate the mask.
         let ciphertext = crypto.encrypt(self.pn, self.header.clone(), self.encoder.as_mut())?;
         let offset = SAMPLE_OFFSET - self.offsets.pn.len();
         if offset + SAMPLE_SIZE > ciphertext.len() {
-            return Err(Error::InternalError);
+            return Err(Error::Internal);
         }
         let sample = &ciphertext[offset..offset + SAMPLE_SIZE];
         let mask = crypto.compute_mask(sample)?;
@@ -500,7 +499,7 @@ impl PacketBuilder {
         debug_assert_ne!(token.len(), 0);
         encoder.encode(token);
         let tag = retry::use_aead(version, |aead| {
-            let mut buf = vec![0; aead.expansion()];
+            let mut buf = vec![0; Aead::expansion()];
             Ok(aead.encrypt(0, encoder.as_ref(), &[], &mut buf)?.to_vec())
         })?;
         encoder.encode(&tag);
@@ -756,7 +755,7 @@ impl<'a> PublicPacket<'a> {
     }
 
     #[must_use]
-    pub fn dcid(&self) -> ConnectionIdRef {
+    pub fn dcid(&self) -> ConnectionIdRef<'_> {
         self.dcid.as_cid_ref()
     }
 
@@ -764,18 +763,13 @@ impl<'a> PublicPacket<'a> {
     ///
     /// This will panic if called for a short header packet.
     #[must_use]
-    pub fn scid(&self) -> ConnectionIdRef {
+    pub fn scid(&self) -> ConnectionIdRef<'_> {
         self.scid
             .as_ref()
             .expect("should only be called for long header packets")
             .as_cid_ref()
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     #[must_use]
     pub fn token(&self) -> &[u8] {
         &self.token
@@ -880,8 +874,8 @@ impl<'a> PublicPacket<'a> {
         &mut self,
         crypto: &mut CryptoStates,
         release_at: Instant,
-    ) -> Res<DecryptedPacket> {
-        let epoch: Epoch = self.packet_type.into();
+    ) -> Res<DecryptedPacket<'_>> {
+        let epoch: Epoch = self.packet_type.try_into()?;
         // When we don't have a version, the crypto code doesn't need a version
         // for lookup, so use the default, but fix it up if decryption succeeds.
         let version = self.version().unwrap_or_default();
@@ -895,7 +889,7 @@ impl<'a> PublicPacket<'a> {
             let (key_phase, pn, header) = self.decrypt_header(rx)?;
             qtrace!("[{rx}] decoded header: {header:?}");
             let Some(rx) = crypto.rx(version, epoch, key_phase) else {
-                return Err(Error::DecryptError);
+                return Err(Error::Decrypt);
             };
             let version = rx.version(); // Version fixup; see above.
             let d = rx.decrypt(pn, header, self.data)?;
@@ -1035,7 +1029,7 @@ mod tests {
         // So burn an encryption:
         let mut burn = [0; 16];
         prot.encrypt(0, 0..0, &mut burn).expect("burn OK");
-        assert_eq!(burn.len(), prot.expansion());
+        assert_eq!(burn.len(), CryptoDxState::expansion());
 
         let mut builder = PacketBuilder::long(
             Encoder::new(),

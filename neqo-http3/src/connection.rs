@@ -423,7 +423,7 @@ impl Http3Connection {
             Ok(())
             | Err(neqo_qpack::Error::EncoderStreamBlocked | neqo_qpack::Error::DynamicTableFull) => {
             }
-            Err(e) => return Err(Error::QpackError(e)),
+            Err(e) => return Err(Error::Qpack(e)),
         }
         Ok(())
     }
@@ -1337,12 +1337,12 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub fn webtransport_send_datagram(
+    pub fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         session_id: StreamId,
         conn: &mut Connection,
         buf: &[u8],
-        id: impl Into<DatagramTracking>,
+        id: I,
     ) -> Res<()> {
         self.recv_streams
             .get_mut(&session_id)
@@ -1419,7 +1419,7 @@ impl Http3Connection {
                     match st {
                         HSettingType::MaxTableCapacity => {
                             if zero_rtt_value != 0 {
-                                return Err(Error::QpackError(neqo_qpack::Error::DecoderStream));
+                                return Err(Error::Qpack(neqo_qpack::Error::DecoderStream));
                             }
                             qpack_changed = true;
                         }

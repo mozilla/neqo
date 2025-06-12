@@ -28,7 +28,7 @@ strum = { workspace = true}
 url = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "0.5", default-features = false }
+criterion = { version = "0.6", default-features = false, features = ["cargo_bench_support"] }
 neqo-http3 = { path = ".", features = ["draft-29"] }
 neqo-transport = { path = "./../neqo-transport", features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }

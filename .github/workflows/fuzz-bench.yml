@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14] # FIXME: ubuntu-24.04-arm has issues
+        os: [ubuntu-24.04, macos-15] # FIXME: ubuntu-24.04-arm has issues
         check: [fuzz, bench]
     runs-on: ${{ matrix.os }}
 
