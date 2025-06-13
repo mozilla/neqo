@@ -157,7 +157,7 @@ impl RxStreamOrderer {
     /// Only when `u64` values cannot be converted to `usize`, which only
     /// happens on 32-bit machines that hold far too much data at the same time.
     pub fn inbound_frame(&mut self, mut new_start: u64, mut new_data: &[u8]) {
-        const MAX_RANGE: usize = 64 * 1024; // 64 KB is the maximum length of a range.
+        const MAX_RANGE: usize = 256 * 1024; // 256 KB is the maximum length of a range.
 
         qtrace!("Inbound data offset={new_start} len={}", new_data.len());
 
