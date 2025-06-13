@@ -9,7 +9,7 @@
     reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
 )]
 
-use std::fmt::Debug;
+use std::fmt::{self, Debug, Formatter};
 
 use enum_map::Enum;
 use strum::{EnumIter, FromRepr};
@@ -51,7 +51,7 @@ impl From<IpTos> for IpTosEcn {
 
 impl IpTosEcn {
     #[must_use]
-    pub const fn is_ecn_marked(&self) -> bool {
+    pub const fn is_ecn_marked(self) -> bool {
         match self {
             Self::Ect0 | Self::Ect1 | Self::Ce => true,
             Self::NotEct => false,
@@ -172,7 +172,7 @@ impl From<u8> for IpTos {
 }
 
 impl Debug for IpTos {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_tuple("IpTos")
             .field(&IpTosDscp::from(*self))
             .field(&IpTosEcn::from(*self))
@@ -190,8 +190,8 @@ impl IpTos {
     }
 
     #[must_use]
-    pub fn is_ecn_marked(&self) -> bool {
-        IpTosEcn::from(*self).is_ecn_marked()
+    pub fn is_ecn_marked(self) -> bool {
+        IpTosEcn::from(self).is_ecn_marked()
     }
 }
 

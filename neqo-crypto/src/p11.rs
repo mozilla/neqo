@@ -6,6 +6,7 @@
 
 use std::{
     cell::RefCell,
+    fmt::{self, Debug, Formatter},
     ops::{Deref, DerefMut},
     os::raw::c_uint,
     ptr::null_mut,
@@ -46,7 +47,11 @@ macro_rules! scoped_ptr {
             /// # Errors
             ///
             /// When passed a null pointer generates an error.
-            #[allow(clippy::allow_attributes, dead_code, reason = "False positive.")]
+            #[allow(
+                clippy::allow_attributes,
+                dead_code,
+                reason = "False positive; is used in code calling the macro."
+            )]
             pub fn from_ptr(ptr: *mut $target) -> Result<Self, $crate::err::Error> {
                 if ptr.is_null() {
                     Err($crate::err::Error::last_nss_error())
@@ -97,7 +102,7 @@ impl PublicKey {
             PK11_HPKE_Serialize(
                 **self,
                 buf.as_mut_ptr(),
-                &raw mut len,
+                &mut len,
                 c_uint::try_from(buf.len())?,
             )
         })?;
@@ -114,8 +119,8 @@ impl Clone for PublicKey {
     }
 }
 
-impl std::fmt::Debug for PublicKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl Debug for PublicKey {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         if let Ok(b) = self.key_data() {
             write!(f, "PublicKey {}", hex_with_len(b))
         } else {
@@ -144,7 +149,7 @@ impl PrivateKey {
                 PK11ObjectType::PK11_TypePrivKey,
                 (**self).cast(),
                 CK_ATTRIBUTE_TYPE::from(CKA_VALUE),
-                &raw mut key_item,
+                &mut key_item,
             )
         })?;
         let slc = unsafe { null_safe_slice(key_item.data, key_item.len) };
@@ -153,7 +158,7 @@ impl PrivateKey {
         // use the scoped `Item` implementation.  This is OK as long as nothing
         // panics between `PK11_ReadRawAttribute` succeeding and here.
         unsafe {
-            SECITEM_FreeItem(&raw mut key_item, PRBool::from(false));
+            SECITEM_FreeItem(&mut key_item, PRBool::from(false));
         }
         Ok(key)
     }
@@ -168,8 +173,8 @@ impl Clone for PrivateKey {
     }
 }
 
-impl std::fmt::Debug for PrivateKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl Debug for PrivateKey {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         if let Ok(b) = self.key_data() {
             write!(f, "PrivateKey {}", hex_with_len(b))
         } else {
@@ -201,7 +206,7 @@ impl SymKey {
         let key_item = unsafe { PK11_GetKeyData(self.ptr) };
         // This is accessing a value attached to the key, so we can treat this as a borrow.
         match unsafe { key_item.as_mut() } {
-            None => Err(Error::InternalError),
+            None => Err(Error::Internal),
             Some(key) => Ok(unsafe { null_safe_slice(key.data, key.len) }),
         }
     }
@@ -215,8 +220,8 @@ impl Clone for SymKey {
     }
 }
 
-impl std::fmt::Debug for SymKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl Debug for SymKey {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         if let Ok(b) = self.as_bytes() {
             write!(f, "SymKey {}", hex_with_len(b))
         } else {

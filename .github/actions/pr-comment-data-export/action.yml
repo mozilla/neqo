@@ -13,8 +13,8 @@ inputs:
   contents:
     description: 'A filename with a comment (in Markdown) to be added to the PR.'
     required: true
-  log-url:
-    description: 'A URL to a log to be linked from the PR comment.'
+  log-md:
+    description: 'A Markdown string to append to the PR comment.'
     required: false
 
 runs:
@@ -25,15 +25,14 @@ runs:
       env:
         CONTENTS: ${{ inputs.contents }}
         NAME: ${{ inputs.name }}
-        LOG_URL: ${{ inputs.log-url }}
+        LOG_MD: ${{ inputs.log-md }}
+        EVENT_NUMBER: ${{ github.event.number }}
       run: |
         mkdir comment-data
         cp "$CONTENTS" comment-data/contents
         echo "$NAME" > comment-data/name
-        echo "${{ github.event.number }}" > comment-data/pr-number
-        if [ -n "$LOG_URL" ]; then
-          echo "$LOG_URL" > comment-data/log-url
-        fi
+        echo "$EVENT_NUMBER" > comment-data/pr-number
+        echo "$LOG_MD" > comment-data/log-md
     - if: ${{ github.event_name == 'pull_request' }}
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:

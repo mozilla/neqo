@@ -11,7 +11,7 @@ use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
 use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
 use neqo_common::{qtrace, Datagram, Decoder, Encoder, Role};
 use neqo_crypto::{
-    generate_ech_keys, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
+    generate_ech_keys, Aead, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
 };
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
@@ -457,11 +457,11 @@ fn bad_client_initial() {
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + 1).unwrap())
+        .encode_varint(u64::try_from(payload_enc.len() + Aead::expansion() + 1).unwrap())
         .encode_byte(u8::try_from(pn).unwrap());
 
     let mut ciphertext = header_enc.as_ref().to_vec();
-    ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
+    ciphertext.resize(header_enc.len() + payload_enc.len() + Aead::expansion(), 0);
     let v = aead
         .encrypt(
             pn,
@@ -503,9 +503,13 @@ fn bad_client_initial() {
     assert_ne!(delay, Duration::from_secs(0));
     assert!(matches!(
         *client.state(),
-        State::Draining { error: CloseReason::Transport(Error::PeerError(code)), .. } if code == Error::ProtocolViolation.code()
+        State::Draining { error: CloseReason::Transport(Error::Peer(code)), .. } if code == Error::ProtocolViolation.code()
     ));
 
+    #[expect(
+        clippy::iter_over_hash_type,
+        reason = "OK to loop over active connections in an undefined order."
+    )]
     for server in server.active_connections() {
         assert_eq!(
             *server.borrow().state(),
@@ -539,11 +543,11 @@ fn bad_client_initial_connection_close() {
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + 1).unwrap())
+        .encode_varint(u64::try_from(payload_enc.len() + Aead::expansion() + 1).unwrap())
         .encode_byte(u8::try_from(pn).unwrap());
 
     let mut ciphertext = header_enc.as_ref().to_vec();
-    ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
+    ciphertext.resize(header_enc.len() + payload_enc.len() + Aead::expansion(), 0);
     let v = aead
         .encrypt(
             pn,
@@ -765,7 +769,7 @@ fn can_create_streams(c: &mut Connection, t: StreamType, n: u64) {
     for _ in 0..n {
         c.stream_create(t).unwrap();
     }
-    assert_eq!(c.stream_create(t), Err(Error::StreamLimitError));
+    assert_eq!(c.stream_create(t), Err(Error::StreamLimit));
 }
 
 #[test]
