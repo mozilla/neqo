@@ -44,10 +44,6 @@ impl WebTransportRecvStream {
             fin: false,
         }
     }
-
-    const fn get_info(&self) -> &Http3StreamInfo {
-        &self.stream_info
-    }
 }
 
 impl Stream for WebTransportRecvStream {
@@ -58,13 +54,13 @@ impl Stream for WebTransportRecvStream {
 
 impl RecvStream for WebTransportRecvStream {
     fn receive(&mut self, _conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
-        self.events.data_readable(self.get_info());
+        self.events.data_readable(&self.stream_info);
         Ok((ReceiveOutput::NoOutput, false))
     }
 
     fn reset(&mut self, close_type: CloseType) -> Res<()> {
         if !matches!(close_type, CloseType::ResetApp(_)) {
-            self.events.recv_closed(self.get_info(), close_type);
+            self.events.recv_closed(&self.stream_info, close_type);
         }
         self.session.borrow_mut().remove_recv_stream(self.stream_id);
         Ok(())
@@ -160,12 +156,8 @@ impl WebTransportSendStream {
 
     fn set_done(&mut self, close_type: CloseType) {
         self.state = WebTransportSenderStreamState::Done;
-        self.events.send_closed(self.get_info(), close_type);
+        self.events.send_closed(&self.stream_info, close_type);
         self.session.borrow_mut().remove_send_stream(self.stream_id);
-    }
-
-    const fn get_info(&self) -> &Http3StreamInfo {
-        &self.stream_info
     }
 }
 
@@ -202,7 +194,7 @@ impl SendStream for WebTransportSendStream {
     }
 
     fn stream_writable(&self) {
-        self.events.data_writable(self.get_info());
+        self.events.data_writable(&self.stream_info);
     }
 
     fn done(&self) -> bool {

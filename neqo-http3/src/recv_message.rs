@@ -106,7 +106,7 @@ impl RecvMessage {
                         FrameReader::new_with_type(HFrameType(frame_type))
                     }),
             },
-            stream_info:Http3StreamInfo::new(message_info.stream_id, Http3StreamType::Http),
+            stream_info: Http3StreamInfo::new(message_info.stream_id, Http3StreamType::Http),
             message_type: message_info.message_type,
             stream_type: message_info.stream_type,
             qpack_decoder,
