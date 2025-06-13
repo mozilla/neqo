@@ -82,8 +82,20 @@ impl Display for HttpServer {
 }
 
 impl super::HttpServer for HttpServer {
-    fn process(&mut self, dgram: Option<Datagram<&mut [u8]>>, now: Instant) -> neqo_http3::Output {
-        self.server.process(dgram, now)
+    fn new(
+        args: &Args,
+        anti_replay: AntiReplay,
+        cid_mgr: Rc<RefCell<dyn ConnectionIdGenerator>>,
+    ) -> Self {
+        Self::new(args, anti_replay, cid_mgr)
+    }
+
+    fn process<'a>(
+        &mut self,
+        dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
+        now: Instant,
+    ) -> neqo_http3::Output {
+        self.server.process(dgrams, now)
     }
 
     fn process_events(&mut self, _now: Instant) {
