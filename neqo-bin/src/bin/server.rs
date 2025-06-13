@@ -10,5 +10,13 @@ use clap::Parser as _;
 async fn main() -> Result<(), neqo_bin::server::Error> {
     let args = neqo_bin::server::Args::parse();
 
-    neqo_bin::server::server(args)?.run().await
+    if args.get_shared().get_alpn() == "h3" {
+        neqo_bin::server::server::<neqo_bin::server::http3::HttpServer>(args)?
+            .run()
+            .await
+    } else {
+        neqo_bin::server::server::<neqo_bin::server::http09::HttpServer>(args)?
+            .run()
+            .await
+    }
 }

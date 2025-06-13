@@ -32,7 +32,7 @@ use crate::{
     addr_valid::{AddressValidation, AddressValidationResult},
     cid::{ConnectionId, ConnectionIdGenerator, ConnectionIdRef},
     connection::{Connection, Output, State},
-    packet::{self, MIN_INITIAL_PACKET_SIZE},
+    packet::{self, Public, MIN_INITIAL_PACKET_SIZE},
     ConnectionParameters, OutputBatch, Res, Version,
 };
 
@@ -67,7 +67,7 @@ struct InitialDetails {
 }
 
 impl InitialDetails {
-    fn new(packet: &packet::Public) -> Self {
+    fn new(packet: &Public) -> Self {
         Self {
             src_cid: ConnectionId::from(packet.scid()),
             dst_cid: ConnectionId::from(packet.dcid()),
@@ -351,108 +351,111 @@ impl Server {
         }
     }
 
-    fn process_input(
+    fn process_input<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
         &mut self,
-        mut dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
+        dgrams: I,
         now: Instant,
-        max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
-        qtrace!("Process datagram: {}", hex(&dgram[..]));
+        for mut dgram in dgrams {
+            qtrace!("Process datagram: {}", hex(&dgram[..]));
 
-        // This is only looking at the first packet header in the datagram.
-        // All packets in the datagram are routed to the same connection.
-        let len = dgram.len();
-        let destination = dgram.destination();
-        let source = dgram.source();
-        let res = packet::Public::decode(&mut dgram[..], self.cid_generator.borrow().as_decoder());
-        let Ok((packet, _remainder)) = res else {
-            qtrace!("[{self}] Discarding {dgram:?}");
-            return OutputBatch::None;
-        };
+            // This is only looking at the first packet header in the datagram.
+            // All packets in the datagram are routed to the same connection.
+            let len = dgram.len();
+            let destination = dgram.destination();
+            let source = dgram.source();
+            let res =
+                Public::decode(&mut dgram[..], self.cid_generator.borrow().as_decoder());
+            let Ok((packet, _remainder)) = res else {
+                qtrace!("[{self}] Discarding {dgram:?}");
+                continue;
+            };
 
-        // Finding an existing connection. Should be the most common case.
-        if let Some(c) = self
-            .connections
-            .iter_mut()
-            .find(|c| c.borrow().is_valid_local_cid(packet.dcid()))
-        {
-            return c
-                .borrow_mut()
-                .process_multiple(Some(dgram), now, max_datagrams);
-        }
-
-        if packet.packet_type() == packet::Type::Short {
-            // TODO send a stateless reset here.
-            qtrace!("[{self}] Short header packet for an unknown connection");
-            return OutputBatch::None;
-        }
-
-        if packet.packet_type() == packet::Type::OtherVersion
-            || (packet.packet_type() == packet::Type::Initial
-                && !self
-                    .conn_params
-                    .get_versions()
-                    .all()
-                    .contains(&packet.version().expect("packet has version")))
-        {
-            if len < MIN_INITIAL_PACKET_SIZE {
-                qdebug!("[{self}] Unsupported version: too short");
-                return OutputBatch::None;
+            // Finding an existing connection. Should be the most common case.
+            if let Some(c) = self
+                .connections
+                .iter_mut()
+                .find(|c| c.borrow().is_valid_local_cid(packet.dcid()))
+            {
+                c.borrow_mut().process_input(dgram, now);
+                continue;
             }
 
-            qdebug!("[{self}] Unsupported version: {:x}", packet.wire_version());
-            let vn = packet::Builder::version_negotiation(
-                &packet.scid()[..],
-                &packet.dcid()[..],
-                packet.wire_version(),
-                self.conn_params.get_versions().all(),
-            );
-            qdebug!(
-                "[{self}] type={:?} path:{} {}->{} {:?} len {}",
-                packet::Type::VersionNegotiation,
-                packet.dcid(),
-                destination,
-                source,
-                Tos::default(),
-                vn.len(),
-            );
+            if packet.packet_type() == packet::Type::Short {
+                // TODO send a stateless reset here.
+                qtrace!("[{self}] Short header packet for an unknown connection");
+                continue;
+            }
 
-            crate::qlog::server_version_information_failed(
-                &self.create_qlog_trace(packet.dcid()),
-                self.conn_params.get_versions().all(),
-                packet.wire_version(),
-                now,
-            );
-
-            return OutputBatch::DatagramBatch(
-                Datagram::new(destination, source, Tos::default(), vn).into(),
-            );
-        }
-
-        match packet.packet_type() {
-            packet::Type::Initial => {
+            if packet.packet_type() == packet::Type::OtherVersion
+                || (packet.packet_type() == packet::Type::Initial
+                    && !self
+                        .conn_params
+                        .get_versions()
+                        .all()
+                        .contains(&packet.version().expect("packet has version")))
+            {
                 if len < MIN_INITIAL_PACKET_SIZE {
-                    qdebug!("[{self}] Drop initial: too short");
-                    return OutputBatch::None;
+                    qdebug!("[{self}] Unsupported version: too short");
+                    continue;
                 }
-                // Copy values from `packet` because they are currently still borrowing from
-                // `dgram`.
-                let initial = InitialDetails::new(&packet);
-                self.handle_initial(initial, dgram, now).into()
-            }
-            packet::Type::ZeroRtt => {
-                qdebug!(
-                    "[{self}] Dropping 0-RTT for unknown connection {}",
-                    ConnectionId::from(packet.dcid())
+
+                qdebug!("[{self}] Unsupported version: {:x}", packet.wire_version());
+                let vn = packet::Builder::version_negotiation(
+                    &packet.scid()[..],
+                    &packet.dcid()[..],
+                    packet.wire_version(),
+                    self.conn_params.get_versions().all(),
                 );
-                OutputBatch::None
+                qdebug!(
+                    "[{self}] type={:?} path:{} {}->{} {:?} len {}",
+                    packet::Type::VersionNegotiation,
+                    packet.dcid(),
+                    destination,
+                    source,
+                    Tos::default(),
+                    vn.len(),
+                );
+
+                crate::qlog::server_version_information_failed(
+                    &self.create_qlog_trace(packet.dcid()),
+                    self.conn_params.get_versions().all(),
+                    packet.wire_version(),
+                    now,
+                );
+
+                // Server implementation isn't meant for production. Dropping
+                // remaining `dgrams` isn't ideal, but OK.
+                return OutputBatch::DatagramBatch(Datagram::new(destination, source, Tos::default(), vn).into());
             }
-            packet::Type::OtherVersion => unreachable!(),
-            _ => {
-                qtrace!("[{self}] Not an initial packet");
-                OutputBatch::None
+
+            match packet.packet_type() {
+                packet::Type::Initial => {
+                    if len < MIN_INITIAL_PACKET_SIZE {
+                        qdebug!("[{self}] Drop initial: too short");
+                        continue;
+                    }
+                    // Copy values from `packet` because they are currently still borrowing from
+                    // `dgram`.
+                    let initial = InitialDetails::new(&packet);
+                    if let o @ Output::Datagram(_) = self.handle_initial(initial, dgram, now) {
+                        return o.into();
+                    }
+                }
+                packet::Type::ZeroRtt => {
+                    qdebug!(
+                        "[{self}] Dropping 0-RTT for unknown connection {}",
+                        ConnectionId::from(packet.dcid())
+                    );
+                }
+                packet::Type::OtherVersion => unreachable!(),
+                _ => {
+                    qtrace!("[{self}] Not an initial packet");
+                }
             }
         }
+
+        OutputBatch::None
     }
 
     /// Iterate through the pending connections looking for any that might want
@@ -487,26 +490,24 @@ impl Server {
     /// datagram only.
     #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     #[must_use]
-    pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
+    pub fn process<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
         &mut self,
-        dgram: Option<Datagram<A>>,
+        dgrams: I,
         now: Instant,
     ) -> Output {
-        self.process_multiple(dgram, now, 1.try_into().expect(">0"))
+        self.process_multiple(dgrams, now, 1.try_into().expect(">0"))
             .try_into()
             .expect("max_datagrams is 1")
     }
 
-    pub fn process_multiple(
+    pub fn process_multiple<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
         &mut self,
-        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        dgrams: I,
         now: Instant,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
-        let out = dgram
-            .map_or(OutputBatch::None, |d| {
-                self.process_input(d, now, max_datagrams)
-            })
+        let out = self
+            .process_input(dgrams, now)
             .or_else(|| self.process_next_output(now, max_datagrams));
 
         // Clean-up closed connections.
