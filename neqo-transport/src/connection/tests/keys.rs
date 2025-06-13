@@ -305,7 +305,7 @@ fn exhaust_read_keys() {
     assert!(matches!(
         client.state(),
         State::Draining {
-            error: CloseReason::Transport(Error::PeerError(ERROR_AEAD_LIMIT_REACHED)),
+            error: CloseReason::Transport(Error::Peer(ERROR_AEAD_LIMIT_REACHED)),
             ..
         }
     ));

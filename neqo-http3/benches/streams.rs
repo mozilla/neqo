@@ -6,7 +6,7 @@
 
 #![expect(clippy::unwrap_used, reason = "OK in a bench.")]
 
-use std::iter::repeat_with;
+use std::{hint::black_box, iter::repeat_with};
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use neqo_crypto::AuthenticationStatus;
@@ -88,7 +88,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             let data = vec![0; data_size];
             b.iter_batched_ref(
                 connect,
-                |(client, server)| use_streams(client, server, streams, &data),
+                |_| black_box(|(client, server)| use_streams(client, server, streams, &data)),
                 BatchSize::SmallInput,
             );
         });

@@ -308,13 +308,13 @@ mod tests {
 
         let temp_dir = TempDir::new();
 
-        let mut client_args = client::Args::new(&[1], false);
+        let mut client_args = client::Args::new(None, &[1], false);
         client_args.set_qlog_dir(temp_dir.path());
         let mut server_args = server::Args::default();
         server_args.set_qlog_dir(temp_dir.path());
 
         let client = client::client(client_args);
-        let server = Box::pin(server::server(server_args));
+        let server = Box::pin(server::server(server_args).unwrap().run());
         tokio::select! {
             _ = client => {}
             res = server  => panic!("expect server not to terminate: {res:?}"),

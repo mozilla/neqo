@@ -259,6 +259,8 @@ pub struct Stats {
     /// Acknowledgments for packets that contained data that was marked
     /// for retransmission when the PTO timer popped.
     pub pto_ack: usize,
+    /// Number of times we had to drop an unacknowledged ACK range.
+    pub unacked_range_dropped: usize,
     /// Number of PMTUD probes sent.
     pub pmtud_tx: usize,
     /// Number of PMTUD probes ACK'ed.
@@ -330,7 +332,7 @@ impl Stats {
         self.info = info;
     }
 
-    pub fn pkt_dropped(&mut self, reason: impl AsRef<str>) {
+    pub fn pkt_dropped<A: AsRef<str>>(&mut self, reason: A) {
         self.dropped_rx += 1;
         qwarn!(
             "[{}] Dropped received packet: {}; Total: {}",
@@ -367,8 +369,8 @@ impl Debug for Stats {
         )?;
         writeln!(
             f,
-            "  tx: {} lost {} lateack {} ptoack {}",
-            self.packets_tx, self.lost, self.late_ack, self.pto_ack
+            "  tx: {} lost {} lateack {} ptoack {} unackdrop {}",
+            self.packets_tx, self.lost, self.late_ack, self.pto_ack, self.unacked_range_dropped
         )?;
         writeln!(
             f,

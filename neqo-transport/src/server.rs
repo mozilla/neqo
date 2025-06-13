@@ -9,7 +9,6 @@
 use std::{
     cell::RefCell,
     cmp::min,
-    collections::HashSet,
     fmt::{self, Display, Formatter},
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -25,6 +24,7 @@ use neqo_crypto::{
     encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
     ZeroRttChecker,
 };
+use rustc_hash::FxHashSet as HashSet;
 
 pub use crate::addr_valid::ValidateAddress;
 use crate::{
@@ -135,10 +135,10 @@ impl Server {
     ///   IDs produced by the manager cannot be zero-length.
     /// # Errors
     /// When address validation state cannot be created.
-    pub fn new(
+    pub fn new<A1: AsRef<str>, A2: AsRef<str>>(
         now: Instant,
-        certs: &[impl AsRef<str>],
-        protocols: &[impl AsRef<str>],
+        certs: &[A1],
+        protocols: &[A2],
         anti_replay: AntiReplay,
         zero_rtt_checker: Box<dyn ZeroRttChecker>,
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
@@ -172,7 +172,7 @@ impl Server {
 
     /// Set the cipher suites that should be used.  Set an empty value to use
     /// default values.
-    pub fn set_ciphers(&mut self, ciphers: impl AsRef<[Cipher]>) {
+    pub fn set_ciphers<A: AsRef<[Cipher]>>(&mut self, ciphers: A) {
         self.ciphers = Vec::from(ciphers.as_ref());
     }
 
@@ -420,12 +420,7 @@ impl Server {
                 now,
             );
 
-            return Output::Datagram(Datagram::new(
-                dgram.destination(),
-                dgram.source(),
-                IpTos::default(),
-                vn,
-            ));
+            return Output::Datagram(Datagram::new(destination, source, IpTos::default(), vn));
         }
 
         match packet.packet_type() {
@@ -440,8 +435,10 @@ impl Server {
                 self.handle_initial(initial, dgram, now)
             }
             PacketType::ZeroRtt => {
-                let dcid = ConnectionId::from(packet.dcid());
-                qdebug!("[{self}] Dropping 0-RTT for unknown connection {dcid}");
+                qdebug!(
+                    "[{self}] Dropping 0-RTT for unknown connection {}",
+                    ConnectionId::from(packet.dcid())
+                );
                 Output::None
             }
             PacketType::OtherVersion => unreachable!(),
@@ -478,9 +475,9 @@ impl Server {
     }
 
     #[must_use]
-    pub fn process(
+    pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
-        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
         let out = dgram

@@ -357,7 +357,7 @@ impl ReceiverFlowControl<()> {
                 self.consumed,
                 self.max_allowed
             );
-            return Err(Error::FlowControlError);
+            return Err(Error::FlowControl);
         }
         self.consumed += count;
         Ok(())
@@ -468,7 +468,7 @@ impl ReceiverFlowControl<StreamId> {
 
         if consumed > self.max_allowed {
             qtrace!("Stream RX window exceeded: {consumed}");
-            return Err(Error::FlowControlError);
+            return Err(Error::FlowControl);
         }
         let new_consumed = consumed - self.consumed;
         self.consumed = consumed;
@@ -537,7 +537,7 @@ impl RemoteStreamLimit {
 
     pub fn is_new_stream(&self, stream_id: StreamId) -> Res<bool> {
         if !self.is_allowed(stream_id) {
-            return Err(Error::StreamLimitError);
+            return Err(Error::StreamLimit);
         }
         Ok(stream_id >= self.next_stream)
     }
@@ -666,7 +666,7 @@ mod test {
     use super::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
     use crate::{
         fc::WINDOW_UPDATE_FRACTION,
-        packet::PacketBuilder,
+        packet::{PacketBuilder, PACKET_LIMIT},
         recv_stream::MAX_RECV_WINDOW_SIZE,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
@@ -889,11 +889,11 @@ mod test {
         // Exceed limits
         assert_eq!(
             fc[StreamType::BiDi].is_new_stream(StreamId::from(bidi + 8)),
-            Err(Error::StreamLimitError)
+            Err(Error::StreamLimit)
         );
         assert_eq!(
             fc[StreamType::UniDi].is_new_stream(StreamId::from(unidi + 4)),
-            Err(Error::StreamLimitError)
+            Err(Error::StreamLimit)
         );
 
         assert_eq!(fc[StreamType::BiDi].take_stream_id(), StreamId::from(bidi));
@@ -909,7 +909,7 @@ mod test {
         fc[StreamType::BiDi].add_retired(1);
         fc[StreamType::BiDi].send_flowc_update();
         // consume the frame
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
         let mut tokens = Vec::new();
         fc[StreamType::BiDi].write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
         assert_eq!(tokens.len(), 1);
@@ -925,7 +925,7 @@ mod test {
         // 13 still exceeds limits
         assert_eq!(
             fc[StreamType::BiDi].is_new_stream(StreamId::from(bidi + 12)),
-            Err(Error::StreamLimitError)
+            Err(Error::StreamLimit)
         );
 
         fc[StreamType::UniDi].add_retired(1);
@@ -945,7 +945,7 @@ mod test {
         // 11 exceeds limits
         assert_eq!(
             fc[StreamType::UniDi].is_new_stream(StreamId::from(unidi + 8)),
-            Err(Error::StreamLimitError)
+            Err(Error::StreamLimit)
         );
     }
 
@@ -1016,7 +1016,7 @@ mod test {
     }
 
     fn write_frames(fc: &mut ReceiverFlowControl<StreamId>, rtt: Duration, now: Instant) -> usize {
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
         let mut tokens = Vec::new();
         fc.write_frames(
             &mut builder,
@@ -1243,7 +1243,7 @@ mod test {
 
         // Neqo should never attempt writing a connection flow control update
         // larger than the largest possible QUIC varint value.
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
         let mut tokens = Vec::new();
         fc.write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
     }

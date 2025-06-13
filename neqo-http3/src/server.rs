@@ -6,7 +6,6 @@
 
 use std::{
     cell::{RefCell, RefMut},
-    collections::HashMap,
     fmt::{self, Display, Formatter},
     path::PathBuf,
     rc::Rc,
@@ -19,6 +18,7 @@ use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
     ConnectionIdGenerator, Output,
 };
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     connection::Http3State,
@@ -53,10 +53,10 @@ impl Http3Server {
     ///
     /// Making a `neqo_transport::Server` may produce an error. This can only be a crypto error if
     /// the socket can't be created or configured.
-    pub fn new(
+    pub fn new<A: AsRef<str>, A1: AsRef<str>>(
         now: Instant,
-        certs: &[impl AsRef<str>],
-        protocols: &[impl AsRef<str>],
+        certs: &[A],
+        protocols: &[A1],
         anti_replay: AntiReplay,
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
         http3_parameters: Http3Parameters,
@@ -74,7 +74,7 @@ impl Http3Server {
                 http3_parameters.get_connection_parameters().clone(),
             )?,
             http3_parameters,
-            http3_handlers: HashMap::new(),
+            http3_handlers: HashMap::default(),
             events: Http3ServerEvents::default(),
         })
     }
@@ -87,7 +87,7 @@ impl Http3Server {
         self.server.set_validation(v);
     }
 
-    pub fn set_ciphers(&mut self, ciphers: impl AsRef<[Cipher]>) {
+    pub fn set_ciphers<A: AsRef<[Cipher]>>(&mut self, ciphers: A) {
         self.server.set_ciphers(ciphers);
     }
 
@@ -117,9 +117,9 @@ impl Http3Server {
         self.process(None::<Datagram>, now)
     }
 
-    pub fn process(
+    pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
-        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
         qtrace!("[{self}] Process");
@@ -977,9 +977,7 @@ mod tests {
                     check_request_header(&headers);
                     assert!(!fin);
                     headers_frames += 1;
-                    stream
-                        .stream_stop_sending(Error::HttpNoError.code())
-                        .unwrap();
+                    stream.stream_stop_sending(Error::HttpNone.code()).unwrap();
                     stream
                         .send_headers(&[
                             Header::new(":status", "200"),
@@ -1102,7 +1100,7 @@ mod tests {
     fn server_reset_control_stream() {
         let (mut hconn, mut peer_conn) = connect();
         peer_conn
-            .stream_reset_send(CLIENT_SIDE_CONTROL_STREAM_ID, Error::HttpNoError.code())
+            .stream_reset_send(CLIENT_SIDE_CONTROL_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
@@ -1115,7 +1113,7 @@ mod tests {
     fn server_reset_client_side_encoder_stream() {
         let (mut hconn, mut peer_conn) = connect();
         peer_conn
-            .stream_reset_send(CLIENT_SIDE_ENCODER_STREAM_ID, Error::HttpNoError.code())
+            .stream_reset_send(CLIENT_SIDE_ENCODER_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
@@ -1128,7 +1126,7 @@ mod tests {
     fn server_reset_client_side_decoder_stream() {
         let (mut hconn, mut peer_conn) = connect();
         peer_conn
-            .stream_reset_send(CLIENT_SIDE_DECODER_STREAM_ID, Error::HttpNoError.code())
+            .stream_reset_send(CLIENT_SIDE_DECODER_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
@@ -1142,7 +1140,7 @@ mod tests {
         let (mut hconn, mut peer_conn) = connect();
 
         peer_conn
-            .stream_stop_sending(SERVER_SIDE_CONTROL_STREAM_ID, Error::HttpNoError.code())
+            .stream_stop_sending(SERVER_SIDE_CONTROL_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
@@ -1155,7 +1153,7 @@ mod tests {
     fn server_stop_sending_encoder_stream() {
         let (mut hconn, mut peer_conn) = connect();
         peer_conn
-            .stream_stop_sending(SERVER_SIDE_ENCODER_STREAM_ID, Error::HttpNoError.code())
+            .stream_stop_sending(SERVER_SIDE_ENCODER_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
@@ -1168,7 +1166,7 @@ mod tests {
     fn server_stop_sending_decoder_stream() {
         let (mut hconn, mut peer_conn) = connect();
         peer_conn
-            .stream_stop_sending(SERVER_SIDE_DECODER_STREAM_ID, Error::HttpNoError.code())
+            .stream_stop_sending(SERVER_SIDE_DECODER_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());

@@ -41,7 +41,7 @@ use crate::{
     },
     ech,
     err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res},
-    ext::{ExtensionHandler, ExtensionTracker},
+    ext::{ExtensionHandler, ExtensionTracker, SSL_CallExtensionWriterOnEchInner},
     null_safe_slice,
     p11::{self, PrivateKey, PublicKey},
     prio,
@@ -61,7 +61,7 @@ pub enum HandshakeState {
     AuthenticationPending,
     /// When encrypted client hello is enabled, the server might engage a fallback.
     /// This is the status that is returned.  The included value is the public
-    /// name of the server, which should be used to validated the certificate.
+    /// name of the server, which should be used to validate the certificate.
     EchFallbackAuthenticationPending(String),
     Authenticated(PRErrorCode),
     Complete(SecretAgentInfo),
@@ -95,9 +95,9 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
     secstatus_to_res(unsafe {
         ssl::SSL_GetNextProto(
             fd,
-            &raw mut alpn_state,
+            &mut alpn_state,
             chosen.as_mut_ptr(),
-            &raw mut chosen_len,
+            &mut chosen_len,
             c_uint::try_from(chosen.len())?,
         )
     })?;
@@ -112,7 +112,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
             chosen.truncate(usize::try_from(chosen_len)?);
             Some(match String::from_utf8(chosen) {
                 Ok(a) => a,
-                Err(_) => return Err(Error::InternalError),
+                Err(_) => return Err(Error::Internal),
             })
         }
         _ => None,
@@ -432,7 +432,7 @@ impl SecretAgent {
     /// If the range of versions isn't supported.
     pub fn set_version_range(&mut self, min: Version, max: Version) -> Res<()> {
         let range = ssl::SSLVersionRange { min, max };
-        secstatus_to_res(unsafe { ssl::SSL_VersionRangeSet(self.fd, &raw const range) })
+        secstatus_to_res(unsafe { ssl::SSL_VersionRangeSet(self.fd, &range) })
     }
 
     /// Enable a set of ciphers.  Note that the order of these is not respected.
@@ -443,7 +443,7 @@ impl SecretAgent {
     pub fn set_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
         if self.state != HandshakeState::New {
             qwarn!("[{self}] Cannot enable ciphers in state {:?}", self.state);
-            return Err(Error::InternalError);
+            return Err(Error::Internal);
         }
 
         let all_ciphers = unsafe { ssl::SSL_GetImplementedCiphers() };
@@ -535,7 +535,7 @@ impl SecretAgent {
     /// If any of the provided `protocols` are more than 255 bytes long.
     ///
     /// [RFC7301]: https://datatracker.ietf.org/doc/html/rfc7301
-    pub fn set_alpn(&mut self, protocols: &[impl AsRef<str>]) -> Res<()> {
+    pub fn set_alpn<A: AsRef<str>>(&mut self, protocols: &[A]) -> Res<()> {
         // Validate and set length.
         let mut encoded_len = protocols.len();
         for v in protocols {
@@ -555,7 +555,7 @@ impl SecretAgent {
 
         // NSS inherited an idiosyncratic API as a result of having implemented NPN
         // before ALPN.  For that reason, we need to put the "best" option last.
-        let (first, rest) = protocols.split_first().ok_or(Error::InternalError)?;
+        let (first, rest) = protocols.split_first().ok_or(Error::Internal)?;
         for v in rest {
             add(v.as_ref());
         }
@@ -586,7 +586,7 @@ impl SecretAgent {
         ext: Extension,
         handler: Rc<RefCell<dyn ExtensionHandler>>,
     ) -> Res<()> {
-        let tracker = unsafe { ExtensionTracker::new(self.fd, ext, handler) }?;
+        let tracker = unsafe { ExtensionTracker::new(self.fd, ext, handler)? };
         self.extension_handlers.push(tracker);
         Ok(())
     }
@@ -638,14 +638,9 @@ impl SecretAgent {
     }
 
     /// Return any fatal alert that the TLS stack might have sent.
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     #[must_use]
-    pub fn alert(&self) -> Option<&Alert> {
-        (*self.alert).as_ref()
+    pub fn alert(&self) -> Option<Alert> {
+        *self.alert
     }
 
     /// Call this function to mark the peer as authenticated.
@@ -774,7 +769,7 @@ impl SecretAgent {
         }
         #[expect(
             clippy::branches_sharing_code,
-            reason = "Moving the PR_Close call after the conditional crashes things?!"
+            reason = "The PR_Close calls cannot be run after dropping the returned values."
         )]
         if self.raw == Some(true) {
             // Need to hold the record list in scope until the close is done.
@@ -812,11 +807,6 @@ impl SecretAgent {
     }
 
     /// Get the active ECH configuration, which is empty if ECH is disabled.
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     #[must_use]
     pub fn ech_config(&self) -> &[u8] {
         &self.ech_config
@@ -880,7 +870,7 @@ impl Client {
     /// # Errors
     ///
     /// Errors returned if the socket can't be created or configured.
-    pub fn new(server_name: impl Into<String>, grease: bool) -> Res<Self> {
+    pub fn new<I: Into<String>>(server_name: I, grease: bool) -> Res<Self> {
         let server_name = server_name.into();
         let mut agent = SecretAgent::new()?;
         let url = CString::new(server_name.as_bytes())?;
@@ -934,11 +924,6 @@ impl Client {
         ssl::SECSuccess
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     #[must_use]
     pub fn server_name(&self) -> &str {
         &self.server_name
@@ -973,7 +958,7 @@ impl Client {
     ///
     /// Error returned when the resumption token is invalid or
     /// the socket is not able to use the value.
-    pub fn enable_resumption(&mut self, token: impl AsRef<[u8]>) -> Res<()> {
+    pub fn enable_resumption<A: AsRef<[u8]>>(&mut self, token: A) -> Res<()> {
         unsafe {
             ssl::SSL_SetResumptionToken(
                 self.agent.fd,
@@ -996,7 +981,7 @@ impl Client {
     /// # Errors
     ///
     /// Error returned when the configuration is invalid.
-    pub fn enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
+    pub fn enable_ech<A: AsRef<[u8]>>(&mut self, ech_config_list: A) -> Res<()> {
         let config = ech_config_list.as_ref();
         qdebug!("[{self}] Enable ECH for a server: {}", hex_with_len(config));
         self.ech_config = Vec::from(config);
@@ -1004,6 +989,13 @@ impl Client {
             unsafe { ech::SSL_EnableTls13GreaseEch(self.agent.fd, PRBool::from(true)) }
         } else {
             unsafe {
+                // Allow writing of different transport parameters to the inner and outer
+                // ClientHello. Avoid setting this otherwise, as the transport
+                // parameter extension handler filters out essential values from the
+                // outer ClientHello. Under normal operation, NSS reports to
+                // extension writers that an ordinary, non-ECH ClientHello is an
+                // outer ClientHello, resulting in unwanted filtering.
+                SSL_CallExtensionWriterOnEchInner(self.fd, PRBool::from(true))?;
                 ech::SSL_SetClientEchConfigs(
                     self.agent.fd,
                     config.as_ptr(),
@@ -1090,7 +1082,7 @@ impl Server {
     /// # Errors
     ///
     /// Errors returned when NSS fails.
-    pub fn new(certificates: &[impl AsRef<str>]) -> Res<Self> {
+    pub fn new<A: AsRef<str>>(certificates: &[A]) -> Res<Self> {
         let mut agent = SecretAgent::new()?;
 
         for n in certificates {

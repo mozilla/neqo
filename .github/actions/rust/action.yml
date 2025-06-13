@@ -58,15 +58,17 @@ runs:
       shell: bash
       env:
         TARGETS: ${{ inputs.targets }}
+        RUNNER_OS: ${{ runner.os }}
       run: |
         {
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
-          if [[ "${{ runner.os }}" == "Linux" && "$TARGETS" == "" && "$(command -v mold)" ]]; then
+          if [[ "$RUNNER_OS" == "Linux" && "$TARGETS" == "" && "$(command -v mold)" ]]; then
             echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold $RUSTFLAGS"
-          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
             echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld $RUSTFLAGS"
           fi
+          echo "RUNNER_OS=$(uname -srm)"
         } >> "$GITHUB_ENV"
 
     - name: Enable sscache
@@ -86,7 +88,7 @@ runs:
       with:
         cache-bin: ${{ runner.environment != 'github-hosted' }}
         cache-all-crates: true
-        key: ${{ inputs.targets }}
+        key: ${{ inputs.targets }}-${{ env.RUNNER_OS }}
         workspaces: ${{ inputs.workspaces }}
         save-if: ${{ github.ref == 'refs/heads/main' }} # Only cache runs from `main`.
 
@@ -102,13 +104,6 @@ runs:
       if: ${{ runner.os == 'Windows' }}
       run: rm /usr/bin/link.exe || true
 
-    - name: Install cargo-quickinstall
-      shell: bash
-      if: ${{ inputs.tools != '' }}
-      env:
-        GITHUB_TOKEN: ${{ inputs.token }}
-      run: cargo install --locked cargo-quickinstall
-
     - name: Install Rust tools
       shell: bash
       if: ${{ inputs.tools != '' }}
@@ -118,10 +113,10 @@ runs:
       run: |
         for tool in $(echo $TOOLS | tr -d ","); do
           if [ "$tool" == "samply" ]; then
-            # TODO: Install via quickinstall once `--unstable-presymbolicate` is released.
+            # TODO: Install released version once `--unstable-presymbolicate` is released.
             cargo install --git https://github.com/mstange/samply samply
           else
             # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
-            cargo quickinstall --force "$tool"
+            cargo install --locked --force "$tool"
           fi
         done

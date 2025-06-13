@@ -65,19 +65,19 @@ experimental_api!(SSL_EncodeEchConfigId(
 
 /// Convert any result that contains an ECH error into a result with an `EchRetry`.
 pub fn convert_ech_error(fd: *mut PRFileDesc, err: Error) -> Error {
-    if let Error::NssError {
+    if let Error::Nss {
         code: SSL_ERROR_ECH_RETRY_WITH_ECH,
         ..
     } = &err
     {
         let mut item = Item::make_empty();
-        if unsafe { SSL_GetEchRetryConfigs(fd, &raw mut item).is_err() } {
-            return Error::InternalError;
+        if unsafe { SSL_GetEchRetryConfigs(fd, &mut item).is_err() } {
+            return Error::Internal;
         }
         let buf = unsafe {
             let slc = null_safe_slice(item.data, item.len);
             let buf = Vec::from(slc);
-            SECITEM_FreeItem(&raw mut item, PRBool::from(false));
+            SECITEM_FreeItem(&mut item, PRBool::from(false));
             buf
         };
         Error::EchRetry(buf)
@@ -99,7 +99,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
     let slot = Slot::internal()?;
 
     let oid_data = unsafe { p11::SECOID_FindOIDByTag(p11::SECOidTag::SEC_OID_CURVE25519) };
-    let oid = unsafe { oid_data.as_ref() }.ok_or(Error::InternalError)?;
+    let oid = unsafe { oid_data.as_ref() }.ok_or(Error::Internal)?;
     let oid_slc = unsafe { null_safe_slice(oid.oid.data, oid.oid.len) };
     let mut params: Vec<u8> = Vec::with_capacity(oid_slc.len() + 2);
     params.push(u8::try_from(p11::SEC_ASN1_OBJECT_ID)?);
@@ -116,7 +116,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
                 *slot,
                 p11::CK_MECHANISM_TYPE::from(p11::CKM_EC_KEY_PAIR_GEN),
                 addr_of_mut!(param_item).cast(),
-                &raw mut public_ptr,
+                &mut public_ptr,
                 p11::PK11_ATTR_SESSION | p11::PK11_ATTR_INSENSITIVE | p11::PK11_ATTR_PUBLIC,
                 p11::CK_FLAGS::from(p11::CKF_DERIVE),
                 p11::CK_FLAGS::from(p11::CKF_DERIVE),
@@ -133,7 +133,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
                 *slot,
                 p11::CK_MECHANISM_TYPE::from(p11::CKM_EC_KEY_PAIR_GEN),
                 addr_of_mut!(param_item).cast(),
-                &raw mut public_ptr,
+                &mut public_ptr,
                 p11::PK11_ATTR_SESSION | p11::PK11_ATTR_SENSITIVE | p11::PK11_ATTR_PRIVATE,
                 p11::CK_FLAGS::from(p11::CKF_DERIVE),
                 p11::CK_FLAGS::from(p11::CKF_DERIVE),
@@ -192,7 +192,7 @@ pub fn encode_config(config: u8, public_name: &str, pk: &PublicKey) -> Res<Vec<u
             SUITES.as_ptr(),
             c_uint::try_from(SUITES.len())?,
             encoded.as_mut_ptr(),
-            &raw mut encoded_len,
+            &mut encoded_len,
             c_uint::try_from(encoded.len())?,
         )?;
     }

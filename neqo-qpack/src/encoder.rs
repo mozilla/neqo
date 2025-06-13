@@ -11,12 +11,13 @@
 
 use std::{
     cmp::min,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::VecDeque,
     fmt::{self, Display, Formatter},
 };
 
 use neqo_common::{qdebug, qerror, qlog::NeqoQlog, qtrace, Header};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use crate::{
     decoder_instructions::{DecoderInstruction, DecoderInstructionReader},
@@ -77,7 +78,7 @@ impl QPackEncoder {
             instruction_reader: DecoderInstructionReader::new(),
             local_stream: LocalStreamState::NoStream,
             max_blocked_streams: 0,
-            unacked_header_blocks: HashMap::new(),
+            unacked_header_blocks: HashMap::default(),
             blocked_stream_cnt: 0,
             use_huffman,
             next_capacity: None,
@@ -323,7 +324,7 @@ impl QPackEncoder {
                     false,
                     "can_evict_to should have checked and make sure this operation is possible"
                 );
-                return Err(Error::InternalError);
+                return Err(Error::Internal);
             }
             self.max_entries = cap / 32;
             self.next_capacity = None;
@@ -406,7 +407,7 @@ impl QPackEncoder {
         let stream_is_blocker = self.is_stream_blocker(stream_id);
         let can_block = self.blocked_stream_cnt < self.max_blocked_streams || stream_is_blocker;
 
-        let mut ref_entries = HashSet::new();
+        let mut ref_entries = HashSet::default();
 
         for iter in h {
             let name = iter.name().as_bytes().to_vec();
@@ -532,12 +533,10 @@ fn map_error(err: &Error) -> Error {
 
 fn map_stream_send_atomic_error(err: &TransportError) -> Error {
     match err {
-        TransportError::InvalidStreamId | TransportError::FinalSizeError => {
-            Error::ClosedCriticalStream
-        }
+        TransportError::InvalidStreamId | TransportError::FinalSize => Error::ClosedCriticalStream,
         _ => {
             debug_assert!(false, "Unexpected error");
-            Error::InternalError
+            Error::Internal
         }
     }
 }
