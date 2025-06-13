@@ -181,7 +181,7 @@ impl RecvMessage {
                 .extended_connect_new_session(self.stream_id, headers);
         } else {
             self.conn_events
-                .header_ready(self.get_stream_info(), headers, interim, fin);
+                .header_ready(&self.stream_info, headers, interim, fin);
         }
 
         if fin {
@@ -219,7 +219,7 @@ impl RecvMessage {
             RecvMessageState::WaitingForData { .. }
             | RecvMessageState::WaitingForFinAfterTrailers { .. } => {
                 if post_readable_event {
-                    self.conn_events.data_readable(self.get_stream_info());
+                    self.conn_events.data_readable(&self.stream_info);
                 }
             }
             _ => unreachable!("Closing an already closed transaction"),
@@ -333,7 +333,7 @@ impl RecvMessage {
                 }
                 RecvMessageState::ReadingData { .. } => {
                     if post_readable_event {
-                        self.conn_events.data_readable(self.get_stream_info());
+                        self.conn_events.data_readable(&self.stream_info);
                     }
                     break Ok(());
                 }
@@ -357,7 +357,7 @@ impl RecvMessage {
         }
         self.state = RecvMessageState::Closed;
         self.conn_events
-            .recv_closed(self.get_stream_info(), CloseType::Done);
+            .recv_closed(&self.stream_info, CloseType::Done);
     }
 
     const fn closing(&self) -> bool {
@@ -365,10 +365,6 @@ impl RecvMessage {
             self.state,
             RecvMessageState::ClosePending | RecvMessageState::Closed
         )
-    }
-
-    const fn get_stream_info(&self) -> &Http3StreamInfo {
-        &self.stream_info
     }
 }
 
@@ -393,8 +389,7 @@ impl RecvStream for RecvMessage {
                 .borrow_mut()
                 .cancel_stream(self.stream_id);
         }
-        self.conn_events
-            .recv_closed(self.get_stream_info(), close_type);
+        self.conn_events.recv_closed(&self.stream_info, close_type);
         self.state = RecvMessageState::Closed;
         Ok(())
     }
