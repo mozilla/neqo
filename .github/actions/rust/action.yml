@@ -52,6 +52,7 @@ runs:
         {
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
+          echo "RUNNER_OS=$(uname -srm)"
         } >> "$GITHUB_ENV"
 
     - name: Enable sscache
