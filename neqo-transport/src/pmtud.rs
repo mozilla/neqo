@@ -386,13 +386,20 @@ mod tests {
         mtu: usize,
         now: Instant,
     ) {
+        const AEAD_EXPANSION: usize = 16;
+
         let stats_before = stats.clone();
 
         // Fake a packet number, so the builder logic works.
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let profile = SendProfile::new_limited(pmtud.plpmtu());
+        let limit = if pmtud.needs_probe() {
+            pmtud.probe_size() - AEAD_EXPANSION
+        } else {
+            profile.limit() - AEAD_EXPANSION
+        };
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, limit);
         let pn = prot.next_pn();
         builder.pn(pn, 4);
-        builder.set_initial_limit(&SendProfile::new_limited(pmtud.plpmtu()), 16, pmtud);
         builder.enable_padding(true);
         pmtud.send_probe(&mut builder, stats);
         builder.pad();

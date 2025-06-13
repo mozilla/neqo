@@ -9,7 +9,6 @@
 use std::{
     cell::RefCell,
     cmp::min,
-    collections::HashSet,
     fmt::{self, Display, Formatter},
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -25,6 +24,7 @@ use neqo_crypto::{
     encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
     ZeroRttChecker,
 };
+use rustc_hash::FxHashSet as HashSet;
 
 pub use crate::addr_valid::ValidateAddress;
 use crate::{

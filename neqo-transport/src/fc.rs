@@ -666,7 +666,7 @@ mod test {
     use super::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
     use crate::{
         fc::WINDOW_UPDATE_FRACTION,
-        packet::PacketBuilder,
+        packet::{PacketBuilder, PACKET_LIMIT},
         recv_stream::MAX_RECV_WINDOW_SIZE,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
@@ -909,7 +909,7 @@ mod test {
         fc[StreamType::BiDi].add_retired(1);
         fc[StreamType::BiDi].send_flowc_update();
         // consume the frame
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
         let mut tokens = Vec::new();
         fc[StreamType::BiDi].write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
         assert_eq!(tokens.len(), 1);
@@ -1016,7 +1016,7 @@ mod test {
     }
 
     fn write_frames(fc: &mut ReceiverFlowControl<StreamId>, rtt: Duration, now: Instant) -> usize {
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
         let mut tokens = Vec::new();
         fc.write_frames(
             &mut builder,
@@ -1243,7 +1243,7 @@ mod test {
 
         // Neqo should never attempt writing a connection flow control update
         // larger than the largest possible QUIC varint value.
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
         let mut tokens = Vec::new();
         fc.write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
     }

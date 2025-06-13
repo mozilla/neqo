@@ -1787,7 +1787,12 @@ impl Connection {
             .acks
             .get_mut(PacketNumberSpace::from(packet.packet_type()))
         {
-            space.set_received(now, packet.pn(), ack_eliciting)?
+            space.set_received(
+                now,
+                packet.pn(),
+                ack_eliciting,
+                &mut self.stats.borrow_mut(),
+            )?
         } else {
             qdebug!(
                 "[{self}] processed a {:?} packet without tracking it",
@@ -2092,6 +2097,7 @@ impl Connection {
         res.unwrap_or_default()
     }
 
+    #[expect(clippy::too_many_arguments, reason = "no easy way to simplify")]
     fn build_packet_header(
         path: &Path,
         epoch: Epoch,
@@ -2100,18 +2106,26 @@ impl Connection {
         address_validation: &AddressValidationInfo,
         version: Version,
         grease_quic_bit: bool,
+        limit: usize,
     ) -> (PacketType, PacketBuilder) {
         let pt = PacketType::from(epoch);
         let mut builder = if pt == PacketType::Short {
             qdebug!("Building Short dcid {:?}", path.remote_cid());
-            PacketBuilder::short(encoder, tx.key_phase(), path.remote_cid())
+            PacketBuilder::short(encoder, tx.key_phase(), path.remote_cid(), limit)
         } else {
             qdebug!(
                 "Building {pt:?} dcid {:?} scid {:?}",
                 path.remote_cid(),
                 path.local_cid(),
             );
-            PacketBuilder::long(encoder, pt, version, path.remote_cid(), path.local_cid())
+            PacketBuilder::long(
+                encoder,
+                pt,
+                version,
+                path.remote_cid(),
+                path.local_cid(),
+                limit,
+            )
         };
         if builder.remaining() > 0 {
             builder.scramble(grease_quic_bit);
@@ -2459,8 +2473,19 @@ impl Connection {
             else {
                 continue;
             };
+            let aead_expansion = CryptoDxState::expansion();
 
             let header_start = encoder.len();
+
+            // Configure the limits and padding for this packet.
+            let limit = if path.borrow().pmtud().needs_probe() {
+                needs_padding = true;
+                debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
+                path.borrow().pmtud().probe_size() - aead_expansion
+            } else {
+                profile.limit() - aead_expansion
+            };
+
             let (pt, mut builder) = Self::build_packet_header(
                 &path.borrow(),
                 epoch,
@@ -2469,6 +2494,7 @@ impl Connection {
                 &self.address_validation,
                 version,
                 grease_quic_bit,
+                limit,
             );
             let pn = Self::add_packet_number(
                 &mut builder,
@@ -2481,17 +2507,6 @@ impl Connection {
                 break;
             }
 
-            // Configure the limits and padding for this packet.
-            let aead_expansion = CryptoDxState::expansion();
-            needs_padding |= builder.set_initial_limit(
-                &profile,
-                aead_expansion,
-                self.paths
-                    .primary()
-                    .ok_or(Error::Internal)?
-                    .borrow()
-                    .pmtud(),
-            );
             builder.enable_padding(needs_padding);
             if builder.is_full() {
                 encoder = builder.abort();
@@ -3600,6 +3615,7 @@ impl Connection {
             &self.address_validation,
             version,
             false,
+            usize::MAX,
         );
         _ = Self::add_packet_number(
             &mut builder,

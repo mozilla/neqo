@@ -20,6 +20,7 @@ log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 neqo-transport = { path = "./../neqo-transport" }
 qlog = { workspace = true }
+rustc-hash = { workspace = true }
 static_assertions = { workspace = true }
 
 [dev-dependencies]
