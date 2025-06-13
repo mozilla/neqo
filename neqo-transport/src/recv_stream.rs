@@ -157,6 +157,8 @@ impl RxStreamOrderer {
     /// Only when `u64` values cannot be converted to `usize`, which only
     /// happens on 32-bit machines that hold far too much data at the same time.
     pub fn inbound_frame(&mut self, mut new_start: u64, mut new_data: &[u8]) {
+        const MAX_RANGE: usize = 64 * 1024; // 64 KiB is the maximum range we allow in a single frame.
+
         qtrace!("Inbound data offset={new_start} len={}", new_data.len());
 
         // Get entry before where new entry would go, so we can see if we already
@@ -197,7 +199,7 @@ impl RxStreamOrderer {
                 // If it is small enough, extend the previous buffer.
                 // This can't always extend, because otherwise the buffer could end up
                 // growing indefinitely without being released.
-                prev_vec.len() < 4096 && prev_end == new_start
+                prev_vec.len() < MAX_RANGE && prev_end == new_start
             } else {
                 // PPPPPP    ->  PPPPPP
                 //   NNNN
