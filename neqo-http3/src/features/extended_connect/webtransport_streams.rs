@@ -21,6 +21,7 @@ pub const WEBTRANSPORT_STREAM: u64 = 0x41;
 #[derive(Debug)]
 pub struct WebTransportRecvStream {
     stream_id: StreamId,
+    stream_info: Http3StreamInfo,
     events: Box<dyn RecvStreamEvents>,
     session: Rc<RefCell<WebTransportSession>>,
     session_id: StreamId,
@@ -36,6 +37,7 @@ impl WebTransportRecvStream {
     ) -> Self {
         Self {
             stream_id,
+            stream_info: Http3StreamInfo::new(stream_id, Http3StreamType::WebTransport(session_id)),
             events,
             session_id,
             session,
@@ -43,8 +45,8 @@ impl WebTransportRecvStream {
         }
     }
 
-    fn get_info(&self) -> Http3StreamInfo {
-        Http3StreamInfo::new(self.stream_id, self.stream_type())
+    const fn get_info(&self) -> &Http3StreamInfo {
+        &self.stream_info
     }
 }
 
@@ -117,6 +119,7 @@ enum WebTransportSenderStreamState {
 #[derive(Debug)]
 pub struct WebTransportSendStream {
     stream_id: StreamId,
+    stream_info: Http3StreamInfo,
     state: WebTransportSenderStreamState,
     events: Box<dyn SendStreamEvents>,
     session: Rc<RefCell<WebTransportSession>>,
@@ -133,6 +136,7 @@ impl WebTransportSendStream {
     ) -> Self {
         Self {
             stream_id,
+            stream_info: Http3StreamInfo::new(stream_id, Http3StreamType::WebTransport(session_id)),
             state: if local {
                 let mut d = Encoder::default();
                 if stream_id.is_uni() {
@@ -160,8 +164,8 @@ impl WebTransportSendStream {
         self.session.borrow_mut().remove_send_stream(self.stream_id);
     }
 
-    fn get_info(&self) -> Http3StreamInfo {
-        Http3StreamInfo::new(self.stream_id, self.stream_type())
+    const fn get_info(&self) -> &Http3StreamInfo {
+        &self.stream_info
     }
 }
 
