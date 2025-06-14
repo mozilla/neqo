@@ -21,6 +21,7 @@ pub const WEBTRANSPORT_STREAM: u64 = 0x41;
 #[derive(Debug)]
 pub struct WebTransportRecvStream {
     stream_id: StreamId,
+    stream_info: Http3StreamInfo,
     events: Box<dyn RecvStreamEvents>,
     session: Rc<RefCell<WebTransportSession>>,
     session_id: StreamId,
@@ -36,15 +37,12 @@ impl WebTransportRecvStream {
     ) -> Self {
         Self {
             stream_id,
+            stream_info: Http3StreamInfo::new(stream_id, Http3StreamType::WebTransport(session_id)),
             events,
             session_id,
             session,
             fin: false,
         }
-    }
-
-    fn get_info(&self) -> Http3StreamInfo {
-        Http3StreamInfo::new(self.stream_id, self.stream_type())
     }
 }
 
@@ -56,13 +54,13 @@ impl Stream for WebTransportRecvStream {
 
 impl RecvStream for WebTransportRecvStream {
     fn receive(&mut self, _conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
-        self.events.data_readable(self.get_info());
+        self.events.data_readable(&self.stream_info);
         Ok((ReceiveOutput::NoOutput, false))
     }
 
     fn reset(&mut self, close_type: CloseType) -> Res<()> {
         if !matches!(close_type, CloseType::ResetApp(_)) {
-            self.events.recv_closed(self.get_info(), close_type);
+            self.events.recv_closed(&self.stream_info, close_type);
         }
         self.session.borrow_mut().remove_recv_stream(self.stream_id);
         Ok(())
@@ -117,6 +115,7 @@ enum WebTransportSenderStreamState {
 #[derive(Debug)]
 pub struct WebTransportSendStream {
     stream_id: StreamId,
+    stream_info: Http3StreamInfo,
     state: WebTransportSenderStreamState,
     events: Box<dyn SendStreamEvents>,
     session: Rc<RefCell<WebTransportSession>>,
@@ -133,6 +132,7 @@ impl WebTransportSendStream {
     ) -> Self {
         Self {
             stream_id,
+            stream_info: Http3StreamInfo::new(stream_id, Http3StreamType::WebTransport(session_id)),
             state: if local {
                 let mut d = Encoder::default();
                 if stream_id.is_uni() {
@@ -156,12 +156,8 @@ impl WebTransportSendStream {
 
     fn set_done(&mut self, close_type: CloseType) {
         self.state = WebTransportSenderStreamState::Done;
-        self.events.send_closed(self.get_info(), close_type);
+        self.events.send_closed(&self.stream_info, close_type);
         self.session.borrow_mut().remove_send_stream(self.stream_id);
-    }
-
-    fn get_info(&self) -> Http3StreamInfo {
-        Http3StreamInfo::new(self.stream_id, self.stream_type())
     }
 }
 
@@ -198,7 +194,7 @@ impl SendStream for WebTransportSendStream {
     }
 
     fn stream_writable(&self) {
-        self.events.data_writable(self.get_info());
+        self.events.data_writable(&self.stream_info);
     }
 
     fn done(&self) -> bool {

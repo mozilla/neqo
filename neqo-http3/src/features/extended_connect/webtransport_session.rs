@@ -527,7 +527,7 @@ impl RecvStreamEvents for Rc<RefCell<WebTransportSessionListener>> {}
 impl HttpRecvStreamEvents for Rc<RefCell<WebTransportSessionListener>> {
     fn header_ready(
         &self,
-        _stream_info: Http3StreamInfo,
+        _stream_info: &Http3StreamInfo,
         headers: Vec<Header>,
         interim: bool,
         fin: bool,
