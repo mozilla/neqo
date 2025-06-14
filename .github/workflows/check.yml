@@ -97,8 +97,8 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
-          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} junit-test
+          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools, ' || '' }} ${{ matrix.rust-toolchain == 'nightly' && 'rust-src, ' || '' }}
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} ${{ matrix.rust-toolchain == 'nightly' && 'cargo-careful, ' || '' }} junit-test
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -121,6 +121,7 @@ jobs:
           RUST_TEST_TIME_INTEGRATION: 10,30
           RUST_TEST_TIME_DOCTEST: 10,30
           TOOLCHAIN: ${{ matrix.rust-toolchain }}
+          CAREFUL: ${{ matrix.rust-toolchain == 'nightly' && 'careful' || '' }}
         run: |
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
@@ -128,7 +129,7 @@ jobs:
           if [ "$TOOLCHAIN" == "stable" ]; then
             cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
-            cargo test $BUILD_TYPE --locked --features ci
+            cargo $CAREFUL test $BUILD_TYPE --locked --features ci
           fi
           # shellcheck disable=SC2086
           junit-test $BUILD_TYPE
