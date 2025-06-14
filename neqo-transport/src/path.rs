@@ -979,7 +979,7 @@ impl Path {
     pub fn on_packets_acked(
         &mut self,
         acked_pkts: &[SentPacket],
-        ack_ecn: Option<ecn::Count>,
+        ack_ecn: Option<&ecn::Count>,
         now: Instant,
         stats: &mut Stats,
     ) {
