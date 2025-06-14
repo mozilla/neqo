@@ -25,7 +25,7 @@ use neqo_common::{
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
     HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
-    Server, ZeroRttChecker,
+    Server, ZeroRttChecker, random, randomize,
 };
 use smallvec::SmallVec;
 use strum::IntoEnumIterator as _;
@@ -87,6 +87,11 @@ pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, Transmissi
 /// to receiving an undecryptable packet during the early part of the
 /// handshake.  This is a hack, but a useful one.
 const EXTRA_INITIALS: usize = 4;
+
+/// Maximum number of noise datagrams to send before Client Initial packets.
+const MAX_PRE_INIT_NOISE_PKTS: usize = 1;
+/// Payload size range (in bytes) for pre-Initial noise datagrams: to mimic real Initial packets.
+const PRE_INIT_NOISE_LEN_RANGE: RangeInclusive<usize> = RangeInclusive::new(1200, 1400);
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ZeroRttState {
@@ -285,6 +290,7 @@ pub struct Connection {
     release_resumption_token_timer: Option<Instant>,
     conn_params: ConnectionParameters,
     hrtime: hrtime::Handle,
+    pre_initial_noise_pkts: usize,
 
     /// For testing purposes it is sometimes necessary to inject frames that wouldn't
     /// otherwise be sent, just to see how a connection handles them.  Inserting them
@@ -345,6 +351,12 @@ impl Connection {
             &mut c.stats.borrow_mut(),
         );
         c.setup_handshake_path(&Rc::new(RefCell::new(path)), now);
+
+        if c.conn_params.pre_init_noise_enabled() {
+            // Generate a random number between 1 and the maximum number of pre-initial packets
+            c.pre_initial_noise_pkts = (usize::from(random::<1>()[0]) % MAX_PRE_INIT_NOISE_PKTS) + 1;
+        }
+        
         Ok(c)
     }
 
@@ -431,6 +443,7 @@ impl Connection {
             conn_params,
             hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
             quic_datagrams,
+            pre_initial_noise_pkts: 0,
             #[cfg(test)]
             test_frame_writer: None,
         };
@@ -1139,6 +1152,28 @@ impl Connection {
 
         match (&self.state, self.role) {
             (State::Init, Role::Client) => {
+                // Before starting the client, send some noise
+                if self.pre_initial_noise_pkts > 0 {
+                    if let Some(path) = self.paths.primary() {
+                        // Choose a random payload size between the noise payload length range.
+                        let span = PRE_INIT_NOISE_LEN_RANGE.end() - PRE_INIT_NOISE_LEN_RANGE.start() + 1;
+                        let v = usize::from(random::<1>()[0]);
+                        let len  = PRE_INIT_NOISE_LEN_RANGE.start() + (v % span);
+
+                        let mut dummy_buf= vec![0u8; len];
+                        randomize(&mut dummy_buf);
+                        
+                        let dg = Datagram::new(
+                            path.borrow().local_address(),
+                            path.borrow().remote_address(),
+                            IpTos::default(),
+                            dummy_buf,
+                        );
+                        self.pre_initial_noise_pkts -= 1;
+                        return Output::Datagram(dg);
+                    }
+                }
+
                 let res = self.client_start(now);
                 self.absorb_error(now, res);
             }
