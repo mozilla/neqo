@@ -65,6 +65,7 @@ pub enum Error {
     Internal,
     IntegerOverflow,
     InvalidEpoch,
+    InvalidCertificateCompressionID,
     MixedHandshakeMethod,
     NoDataAvailable,
     Nss {

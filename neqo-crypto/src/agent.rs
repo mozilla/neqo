@@ -21,7 +21,7 @@ use std::{
     ops::{Deref, DerefMut},
     os::raw::{c_uint, c_void},
     pin::Pin,
-    ptr::{null, null_mut},
+    ptr::{null, null_mut, NonNull},
     rc::Rc,
     time::Instant,
 };
@@ -50,6 +50,136 @@ use crate::{
     ssl::{self, PRBool},
     time::{Time, TimeHolder},
 };
+
+/// Private trait for Certificate Compression implementation
+/// # Safety
+///
+/// Use `SafeCertCompression` to implement an encoder/decoder instead.
+unsafe trait UnsafeCertCompression {
+    unsafe extern "C" fn decode_callback(
+        input: *const ssl::SECItem,
+        output: *mut ::std::os::raw::c_uchar,
+        output_len: usize,
+        used_len: *mut usize,
+    ) -> ssl::SECStatus;
+
+    unsafe extern "C" fn encode_callback(
+        input: *const ssl::SECItem,
+        output: *mut ssl::SECItem,
+    ) -> ssl::SECStatus;
+}
+
+/// The trait is used to represent a certificate compression data structure
+/// Used in order to enable Certificate Compression extension during TLS connection
+pub trait CertificateCompressor {
+    /// Certificate Compression identifier as in RFC8879
+    const ID: u16;
+    /// Certification Compression name (used only for logging/debugging)
+    const NAME: &CStr;
+    /// Certificate Compression could be used to encode and decode a certificate
+    /// though the encoding is not frequently used
+    /// Enable decoding field is used to signal to the implementation
+    /// to use the encoding as well
+    const ENABLE_ENCODING: bool = false;
+
+    /// Certificate Compression encoding function
+    /// If the implementation is not provided, we only copy the data
+    /// NB: If `ENABLE_ENCODING` is not set, the function pointer provided to NSS will be null
+    #[must_use]
+    fn encode(input: &[u8], output: &mut [u8]) -> usize {
+        let len = std::cmp::min(input.len(), output.len());
+        output[..len].copy_from_slice(&input[..len]);
+        len
+    }
+
+    /// Certificate Compression decoding function. Returns the length of the decoded buffer,
+    /// or 0 if an error has occured.
+    #[must_use]
+    fn decode(input: &[u8], output: &mut [u8]) -> usize;
+}
+
+/// The trait is responsible for calling `CertificateCompression` encoding and decoding
+/// functions using the NSS types
+unsafe impl<T: CertificateCompressor> UnsafeCertCompression for T {
+    unsafe extern "C" fn decode_callback(
+        input: *const ssl::SECItem,
+        output: *mut ::std::os::raw::c_uchar,
+        output_len: usize,
+        used_len: *mut usize,
+    ) -> ssl::SECStatus {
+        unsafe {
+            match NonNull::new(input.cast_mut()) {
+                None => ssl::SECFailure,
+                Some(input) => {
+                    if input.as_ref().data.is_null() || input.as_ref().len == 0 {
+                        return ssl::SECFailure;
+                    }
+
+                    let input_slice = null_safe_slice(input.as_ref().data, input.as_ref().len);
+                    let output_slice: &mut [u8] =
+                        core::slice::from_raw_parts_mut(output, output_len);
+                    let decoded_len = T::decode(input_slice, output_slice);
+                    if decoded_len != output_len {
+                        return ssl::SECFailure;
+                    }
+
+                    *used_len = decoded_len;
+                    ssl::SECSuccess
+                }
+            }
+        }
+    }
+
+    unsafe extern "C" fn encode_callback(
+        input: *const ssl::SECItem,
+        output: *mut ssl::SECItem,
+    ) -> ssl::SECStatus {
+        unsafe {
+            match NonNull::new(input.cast_mut()) {
+                None => ssl::SECFailure,
+                Some(input) => {
+                    if input.as_ref().data.is_null() || input.as_ref().len == 0 {
+                        return ssl::SECFailure;
+                    }
+
+                    let input_len = input.as_ref().len;
+
+                    p11::SECITEM_AllocItem(
+                        null_mut(),
+                        // p11::SECItem is the same as ssl::SECItem
+                        output.cast::<p11::SECItemStr>(),
+                        input_len + 1,
+                    );
+
+                    let input_slice = null_safe_slice(input.as_ref().data, input_len);
+                    let output_slice: &mut [u8] = core::slice::from_raw_parts_mut(
+                        (*output).data,
+                        (*output).len.try_into().unwrap(),
+                    );
+
+                    let encoded_len: usize = T::encode(input_slice, output_slice);
+
+                    if encoded_len == 0 {
+                        return ssl::SECFailure;
+                    }
+
+                    let rv = p11::SECITEM_ReallocItem(
+                        null_mut(),
+                        output.cast::<p11::SECItemStr>(),
+                        (*output).len,
+                        encoded_len.try_into().unwrap(),
+                    );
+
+                    if rv != ssl::SECSuccess {
+                        return ssl::SECFailure;
+                    }
+
+                    ssl::SECSuccess
+                }
+            }
+        }
+    }
+}
 
 /// The maximum number of tickets to remember for a given connection.
 const MAX_TICKETS: usize = 4;
@@ -570,6 +700,30 @@ impl SecretAgent {
                 c_uint::try_from(encoded.len())?,
             )
         })
+    }
+
+    /// Install a certificate compression mechanism.
+    ///
+    /// # Errors
+    /// If the compression mechanism with the same id is already registered
+    /// If too many compression mechanisms are already registered
+    ///
+    /// This returns an error if the certificate compression could not be established
+    ///
+    /// [RFC8879]: https://datatracker.ietf.org/doc/rfc8879/
+    pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
+        if T::ID == 0 {
+            return Err(Error::InvalidCertificateCompressionID);
+        }
+
+        let compressor: ssl::SSLCertificateCompressionAlgorithm =
+            ssl::SSLCertificateCompressionAlgorithm {
+                id: T::ID,
+                name: T::NAME.as_ptr().cast_mut(),
+                encode: T::ENABLE_ENCODING.then_some(<T as UnsafeCertCompression>::encode_callback),
+                decode: Some(<T as UnsafeCertCompression>::decode_callback),
+            };
+        unsafe { ssl::SSL_SetCertificateCompressionAlgorithm(self.fd, compressor) }
     }
 
     /// Install an extension handler.
