@@ -144,7 +144,8 @@ impl Default for QuicParameters {
             idle_timeout: 30,
             congestion_control: CongestionControlAlgorithm::Cubic,
             no_pacing: false,
-            no_pmtud: false,
+            // TODO: revert
+            no_pmtud: true,
             preferred_address_v4: None,
             preferred_address_v6: None,
             no_sni_slicing: false,

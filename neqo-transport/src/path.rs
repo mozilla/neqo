@@ -12,7 +12,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Encoder, IpTos};
+use neqo_common::{
+    hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn, Buffer, DatagramBatch, Encoder, IpTos
+};
 use neqo_crypto::random;
 
 use crate::{
@@ -365,9 +367,9 @@ impl Paths {
     }
 
     /// Write out any `RETIRE_CONNECTION_ID` frames that are outstanding.
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
@@ -575,8 +577,8 @@ impl Path {
     }
 
     /// Return the DSCP/ECN marking to use for outgoing packets on this path.
-    pub fn tos(&self, tokens: &mut Vec<RecoveryToken>) -> IpTos {
-        self.ecn_info.ecn_mark(tokens).into()
+    pub fn tos(&self) -> IpTos {
+        self.ecn_info.ecn_mark().into()
     }
 
     /// Whether this path is the primary or current path for the connection.
@@ -686,17 +688,20 @@ impl Path {
     }
 
     /// Make a datagram.
-    pub fn datagram<V: Into<Vec<u8>>>(
+    pub fn datagram_batch(
         &mut self,
-        payload: V,
+        payload: Vec<u8>,
         tos: IpTos,
+        // TODO: rename?
+        num_segments: usize,
+        segment_size: usize,
         stats: &mut Stats,
-    ) -> Datagram {
+    ) -> DatagramBatch {
         // Make sure to use the TOS value from before calling ecn::Info::on_packet_sent, which may
         // update the ECN state and can hence change it - this packet should still be sent
         // with the current value.
-        self.ecn_info.on_packet_sent(stats);
-        Datagram::new(self.local, self.remote, tos, payload.into())
+        self.ecn_info.on_packet_sent(num_segments, stats);
+        DatagramBatch::new(self.local, self.remote, tos, segment_size, payload)
     }
 
     /// Get local address as `SocketAddr`
@@ -769,9 +774,9 @@ impl Path {
         self.challenge.is_some() || self.state.probe_needed()
     }
 
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         stats: &mut FrameStats,
         mtu: bool, // Whether the packet we're writing into will be a full MTU.
         now: Instant,
@@ -819,9 +824,9 @@ impl Path {
     }
 
     /// Write `ACK_FREQUENCY` frames.
-    pub fn write_cc_frames(
+    pub fn write_cc_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {

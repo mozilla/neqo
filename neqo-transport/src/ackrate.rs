@@ -8,7 +8,7 @@
 
 use std::{cmp::max, time::Duration};
 
-use neqo_common::qtrace;
+use neqo_common::{qtrace, Buffer};
 
 use crate::{
     connection::params::ACK_RATIO_SCALE, frame::FrameType, packet::PacketBuilder,
@@ -41,7 +41,7 @@ impl AckRate {
         Self { packets, delay }
     }
 
-    pub fn write_frame(&self, builder: &mut PacketBuilder, seqno: u64) -> bool {
+    pub fn write_frame<B: Buffer>(&self, builder: &mut PacketBuilder<B>, seqno: u64) -> bool {
         builder.write_varint_frame(&[
             u64::from(FrameType::AckFrequency),
             seqno,
@@ -97,9 +97,9 @@ impl FlexibleAckRate {
         }
     }
 
-    fn write_frames(
+    fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
@@ -163,9 +163,9 @@ impl PeerAckDelay {
         ))
     }
 
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {

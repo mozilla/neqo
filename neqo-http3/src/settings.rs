@@ -6,7 +6,7 @@
 
 use std::ops::Deref;
 
-use neqo_common::{Decoder, Encoder};
+use neqo_common::{Buffer, Decoder, Encoder};
 use neqo_crypto::{ZeroRttCheckResult, ZeroRttChecker};
 
 use crate::{Error, Http3Parameters, Res};
@@ -86,7 +86,7 @@ impl HSettings {
             .map_or_else(|| hsetting_default(setting), |v| v.value)
     }
 
-    pub fn encode_frame_contents(&self, enc: &mut Encoder) {
+    pub fn encode_frame_contents<B: Buffer>(&self, enc: &mut Encoder<B>) {
         enc.encode_vvec_with(|enc_inner| {
             for iter in &self.settings {
                 match iter.setting_type {
