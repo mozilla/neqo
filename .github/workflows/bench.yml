@@ -322,8 +322,7 @@ jobs:
                   # We're not doing this during hyperfine or perf runs, because the writing-to-disk incurrs overheads we're not interested in.
                   # shellcheck disable=SC2086
                   $WORKSPACE/$SERVER_CMD &
-                  # shellcheck disable=SC2086
-                  $WORKSPACE/$CMD
+                  eval "$WORKSPACE/$CMD"
                   pkill "$SERVER_TAG"
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
