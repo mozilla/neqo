@@ -214,11 +214,11 @@ jobs:
           truncate -s "$BIGSIZE" "$TMP/$BIGSIZE"
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
-            ["neqo"]="binaries/neqo/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
+            ["neqo"]="binaries/neqo/neqo-client _cc _pacing _disk _flags -Q 1 https://$HOST:$PORT/$SIZE"
             ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
-            ["google"]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
-            ["quiche"]="quiche/target/release/quiche-client --dump-responses . --no-verify https://$HOST:$PORT/$SIZE"
-            ["s2n"]="s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE"
+            ["google"]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE _disk"
+            ["quiche"]="quiche/target/release/quiche-client _disk --no-verify https://$HOST:$PORT/$SIZE"
+            ["s2n"]="s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification _disk --local-ip $HOST https://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
             ["neqo"]="binaries/neqo/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
@@ -226,6 +226,14 @@ jobs:
             ["google"]="google-quiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
             ["quiche"]="quiche/target/release/quiche-server --root $TMP --listen $HOST:$PORT --cert $TMP/cert --key $TMP/key"
             ["s2n"]="s2n-quic/target/release/s2n-quic-qns interop server --www-dir $TMP --certificate $TMP/cert --private-key $TMP/key --ip $HOST --port $PORT"
+          )
+          # Flags to append to client_cmd to make the client dump the retrieved file to disk.
+          declare -A disk_flags=(
+            ["neqo"]="--output-dir ."
+            ["msquic"]="" # msquic always dumps to disk :-(
+            ["google"]="> $SIZE"
+            ["quiche"]="--dump-responses ."
+            ["s2n"]="--download-dir ."
           )
           # Flags to pass to neqo when it runs against another implementation.
           declare -A neqo_flags=(
@@ -243,6 +251,7 @@ jobs:
             local cc=$2
             local pacing=$3
             local flags=$4
+            local disk=$5
             if [[ "$cc" != "" ]]; then
               CMD=${CMD//_cc/--cc $cc}
               EXT="-$cc"
@@ -256,6 +265,7 @@ jobs:
               EXT="$EXT-nopacing"
             fi
             CMD=${CMD//_flags/$flags}
+            CMD=${CMD//_disk/$disk}
           }
 
           # A Welch's t-test to determine if a performance change is statistically significant.
@@ -297,15 +307,29 @@ jobs:
               fi
               for cc in "${cc_opt[@]}"; do
                 for pacing in "${pacing_opt[@]}"; do
-                  transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
+                  transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}" ""
                   FILENAME="$client-$server$EXT"
                   SERVER_CMD="$CMD"
                   echo "Server command: $SERVER_CMD"
                   # pkill only matches on the first 15 characters of the command?!
                   SERVER_TAG="$(basename "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" | cut -c1-15)"
-                  transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
-                  echo "Client command: $CMD"
+                  transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}" "${disk_flags[$client]}"
+                  echo "Write-to-disk client command: $CMD"
                   cd "$TMP/out"
+
+                  # Do a single test run where we check the size of the file that is downloaded.
+                  # This is to ensure that the server actually served the file, and that the client downloaded it.
+                  # We're not doing this during hyperfine or perf runs, because the writing-to-disk incurrs overheads we're not interested in.
+                  "$WORKSPACE/$SERVER_CMD" &
+                  "$WORKSPACE/$CMD"
+                  pkill "$SERVER_TAG"
+                  # Sanity check the size of the last retrieved file.
+                  # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
+                  [ "$(wc -c <"$TMP/out/$SIZE")" -ge "$SIZE" ] || exit 1
+                  # Don't write to disk following this.
+                  transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}" ""
+                  echo "Non-disk client command: $CMD"
+
                   # Make a tag string for this test.
                   COMMAND="$client vs. $server${cc:+ (}$cc${pacing:+, paced}${cc:+)}"
                   if [[ "$client" == "neqo" || "$server" == "neqo" ]]; then
@@ -321,6 +345,7 @@ jobs:
                       "echo \$\$ >> /cpusets/cpu3/tasks; $WORKSPACE/${CMD/neqo/neqo-main}"
                   fi
 
+                  # Now do the actual hyperfine runs.
                   nice -n -20 setarch --addr-no-randomize hyperfine \
                     --command-name "$COMMAND" --time-unit millisecond  \
                     --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
@@ -329,10 +354,6 @@ jobs:
                     --prepare "$WORKSPACE/$SERVER_CMD & echo \$! >> /cpusets/cpu2/tasks; sleep 0.1" \
                     --conclude "pkill $SERVER_TAG" \
                     "echo \$\$ >> /cpusets/cpu3/tasks; $WORKSPACE/$CMD"
-
-                  # Sanity check the size of the last retrieved file.
-                  # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
-                  [ "$(wc -c <"$TMP/out/$SIZE")" -ge "$SIZE" ] || exit 1
 
                   # Do a longer run with perf separately. We used to just wrap the hyperfine command above in perf,
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
