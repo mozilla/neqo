@@ -110,6 +110,7 @@ impl MessageState {
 #[derive(Debug)]
 pub struct SendMessage {
     state: MessageState,
+    stream_info: Http3StreamInfo,
     message_type: MessageType,
     stream_type: Http3StreamType,
     stream: BufferedStream,
@@ -128,6 +129,7 @@ impl SendMessage {
         qdebug!("Create a request stream_id={stream_id}");
         Self {
             state: MessageState::WaitingForHeaders,
+            stream_info: Http3StreamInfo::new(stream_id, Http3StreamType::Http),
             message_type,
             stream_type,
             stream: BufferedStream::new(stream_id),
@@ -158,10 +160,6 @@ impl SendMessage {
 
     fn stream_id(&self) -> StreamId {
         Option::<StreamId>::from(&self.stream).expect("stream has ID")
-    }
-
-    fn get_stream_info(&self) -> Http3StreamInfo {
-        Http3StreamInfo::new(self.stream_id(), Http3StreamType::Http)
     }
 }
 
@@ -236,7 +234,7 @@ impl SendStream for SendMessage {
             // DataWritable is just a signal for an application to try to write more data,
             // if writing fails it is fine. Therefore we do not need to properly check
             // whether more credits are available on the transport layer.
-            self.conn_events.data_writable(self.get_stream_info());
+            self.conn_events.data_writable(&self.stream_info);
         }
     }
 
@@ -263,7 +261,7 @@ impl SendStream for SendMessage {
                 // DataWritable is just a signal for an application to try to write more data,
                 // if writing fails it is fine. Therefore we do not need to properly check
                 // whether more credits are available on the transport layer.
-                self.conn_events.data_writable(self.get_stream_info());
+                self.conn_events.data_writable(&self.stream_info);
             }
         }
         Ok(())
@@ -283,14 +281,13 @@ impl SendStream for SendMessage {
         }
 
         self.conn_events
-            .send_closed(self.get_stream_info(), CloseType::Done);
+            .send_closed(&self.stream_info, CloseType::Done);
         Ok(())
     }
 
     fn handle_stop_sending(&mut self, close_type: CloseType) {
         if !self.state.done() {
-            self.conn_events
-                .send_closed(self.get_stream_info(), close_type);
+            self.conn_events.send_closed(&self.stream_info, close_type);
         }
     }
 
