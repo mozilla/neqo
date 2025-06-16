@@ -431,7 +431,8 @@ impl<'a, H: Handler> Runner<'a, H> {
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
         loop {
             let handler_done = self.handler.handle(&mut self.client)?;
-            self.process_output().await?;
+            let now = Instant::now();
+            self.process_output(now).await?;
             if self.client.has_events() {
                 continue;
             }
@@ -441,7 +442,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                 (true, CloseState::Closing) | (false, _) => {}
                 // no more work, closing connection
                 (true, CloseState::NotClosing) => {
-                    self.client.close(Instant::now(), 0, "kthxbye!");
+                    self.client.close(now, 0, "kthxbye!");
                     continue;
                 }
                 // no more work, connection closed, terminating
@@ -463,9 +464,9 @@ impl<'a, H: Handler> Runner<'a, H> {
         Ok(self.handler.take_token())
     }
 
-    async fn process_output(&mut self) -> Result<(), io::Error> {
+    async fn process_output(&mut self, now: Instant) -> Result<(), io::Error> {
         loop {
-            match self.client.process_output(Instant::now()) {
+            match self.client.process_output(now) {
                 Output::Datagram(dgram) => loop {
                     // Optimistically attempt sending datagram. In case the OS
                     // buffer is full, wait till socket is writable then try
@@ -499,8 +500,9 @@ impl<'a, H: Handler> Runner<'a, H> {
             let Some(dgrams) = self.socket.recv(self.local_addr, &mut self.recv_buf)? else {
                 break;
             };
-            self.client.process_multiple_input(dgrams, Instant::now());
-            self.process_output().await?;
+            let now = Instant::now();
+            self.client.process_multiple_input(dgrams, now);
+            self.process_output(now).await?;
         }
 
         Ok(())
