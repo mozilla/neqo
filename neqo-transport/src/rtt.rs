@@ -100,7 +100,7 @@ impl RttEstimate {
 
     pub fn update(
         &mut self,
-        qlog: &NeqoQlog,
+        qlog: &mut NeqoQlog,
         mut rtt_sample: Duration,
         ack_delay: Duration,
         source: RttSource,

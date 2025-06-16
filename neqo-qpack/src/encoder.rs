@@ -221,7 +221,7 @@ impl QPackEncoder {
         }
     }
 
-    fn call_instruction(&mut self, instruction: DecoderInstruction, qlog: &NeqoQlog) -> Res<()> {
+    fn call_instruction(&mut self, instruction: DecoderInstruction, qlog: &mut NeqoQlog) -> Res<()> {
         qdebug!("[{self}] call instruction {instruction:?}");
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
