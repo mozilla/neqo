@@ -4,14 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::ffi::CStr;
+
 use neqo_crypto::{
     agent::CertificateCompressor, generate_ech_keys, AuthenticationStatus, Client, Error,
     HandshakeState, SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,
     TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
     TLS_VERSION_1_3,
 };
-
-use std::ffi::CStr;
 
 mod handshake;
 use test_fixture::{fixture_init, now};
