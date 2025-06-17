@@ -85,16 +85,16 @@ pub trait CertificateCompressor {
     /// If the implementation is not provided, we only copy the data
     /// NB: If `ENABLE_ENCODING` is not set, the function pointer provided to NSS will be null
     #[must_use]
-    fn encode(input: &[u8], output: &mut [u8]) -> usize {
+    fn encode(input: &[u8], output: &mut [u8]) -> Result<usize, ()> {
         let len = std::cmp::min(input.len(), output.len());
         output[..len].copy_from_slice(&input[..len]);
-        len
+        Ok(len)
     }
 
     /// Certificate Compression decoding function. Returns the length of the decoded buffer,
     /// or 0 if an error has occured.
     #[must_use]
-    fn decode(input: &[u8], output: &mut [u8]) -> usize;
+    fn decode(input: &[u8], output: &mut [u8]) -> Result<usize, ()>;
 }
 
 /// The trait is responsible for calling `CertificateCompression` encoding and decoding
@@ -117,13 +117,20 @@ unsafe impl<T: CertificateCompressor> UnsafeCertCompression for T {
                     let input_slice = null_safe_slice(input.as_ref().data, input.as_ref().len);
                     let output_slice: &mut [u8] =
                         core::slice::from_raw_parts_mut(output, output_len);
-                    let decoded_len = T::decode(input_slice, output_slice);
-                    if decoded_len != output_len {
-                        return ssl::SECFailure;
-                    }
+                    let decode_result = T::decode(input_slice, output_slice);
+                    match decode_result {
+                        Err(()) => {
+                            return ssl::SECFailure;
+                        }
+                        Ok(decoded_len) => {
+                            if decoded_len != output_len {
+                                return ssl::SECFailure;
+                            }
 
-                    *used_len = decoded_len;
-                    ssl::SECSuccess
+                            *used_len = decoded_len;
+                            ssl::SECSuccess
+                        }
+                    }
                 }
             }
         }
@@ -156,24 +163,30 @@ unsafe impl<T: CertificateCompressor> UnsafeCertCompression for T {
                         (*output).len.try_into().unwrap(),
                     );
 
-                    let encoded_len: usize = T::encode(input_slice, output_slice);
+                    let encode_result = T::encode(input_slice, output_slice);
+                    match encode_result {
+                        Err(()) => {
+                            return ssl::SECFailure;
+                        }
+                        Ok(encoded_len) => {
+                            if encoded_len == 0 {
+                                return ssl::SECFailure;
+                            }
 
-                    if encoded_len == 0 {
-                        return ssl::SECFailure;
+                            let rv = p11::SECITEM_ReallocItem(
+                                null_mut(),
+                                output.cast::<p11::SECItemStr>(),
+                                (*output).len,
+                                encoded_len.try_into().unwrap(),
+                            );
+
+                            if rv != ssl::SECSuccess {
+                                return ssl::SECFailure;
+                            }
+
+                            ssl::SECSuccess
+                        }
                     }
-
-                    let rv = p11::SECITEM_ReallocItem(
-                        null_mut(),
-                        output.cast::<p11::SECItemStr>(),
-                        (*output).len,
-                        encoded_len.try_into().unwrap(),
-                    );
-
-                    if rv != ssl::SECSuccess {
-                        return ssl::SECFailure;
-                    }
-
-                    ssl::SECSuccess
                 }
             }
         }

@@ -549,16 +549,16 @@ fn connection_succeeds_when_server_and_client_support_cert_compr_copy() {
         const NAME: &CStr = c"copy";
         const ENABLE_ENCODING: bool = true;
 
-        fn decode(input: &[u8], output: &mut [u8]) -> usize {
+        fn decode(input: &[u8], output: &mut [u8]) -> Result<usize, ()> {
             let len = std::cmp::min(input.len(), output.len());
             output[..len].copy_from_slice(&input[..len]);
-            len
+            Ok(len)
         }
 
-        fn encode(input: &[u8], output: &mut [u8]) -> usize {
+        fn encode(input: &[u8], output: &mut [u8]) -> Result<usize, ()> {
             let len = std::cmp::min(input.len(), output.len());
             output[..len].copy_from_slice(&input[..len]);
-            len
+            Ok(len)
         }
     }
 
@@ -585,10 +585,10 @@ impl CertificateCompressor for CopyCompressionNoEncoder {
     const ID: u16 = 0x4;
     const NAME: &CStr = c"copy";
 
-    fn decode(input: &[u8], output: &mut [u8]) -> usize {
+    fn decode(input: &[u8], output: &mut [u8]) -> Result<usize, ()> {
         let len = std::cmp::min(input.len(), output.len());
         output[..len].copy_from_slice(&input[..len]);
-        len
+        Ok(len)
     }
 }
 
@@ -641,4 +641,42 @@ fn connection_succeeds_when_only_client_support_cert_compr() {
 
     assert!(client.state().is_connected());
     assert!(server.state().is_connected());
+}
+
+struct CopyCompressionNoEncoderReturnsErr {}
+
+impl CertificateCompressor for CopyCompressionNoEncoderReturnsErr {
+    const ID: u16 = 0x4;
+    const NAME: &CStr = c"copy";
+
+    const ENABLE_ENCODING: bool = true;
+
+    fn encode(input: &[u8], output: &mut [u8]) -> Result<usize, ()> {
+        let len = std::cmp::min(input.len(), output.len());
+        output[..len].copy_from_slice(&input[..len]);
+        Ok(len)
+    }
+
+    fn decode(input: &[u8], output: &mut [u8]) -> Result<usize, ()> {
+        let len = std::cmp::min(input.len(), output.len());
+        output[..len].copy_from_slice(&input[..len]);
+        Err(())
+    }
+}
+
+#[test]
+fn connection_fails_when_decoding_fails() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    server
+        .set_certificate_compression::<CopyCompressionNoEncoderReturnsErr>()
+        .unwrap();
+
+    client
+        .set_certificate_compression::<CopyCompressionNoEncoderReturnsErr>()
+        .unwrap();
+
+    connect_fail(&mut client, &mut server);
 }
