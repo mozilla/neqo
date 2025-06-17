@@ -36,7 +36,11 @@ enum ValidationState {
         initial_probes_lost: usize,
     },
     /// The validation test has concluded but the path's ECN capability is not yet known.
-    Unknown,
+    Unknown {
+        probes_sent: usize,
+        initial_probes_acked: usize,
+        initial_probes_lost: usize,
+    },
     /// The path is known to **not** be ECN capable.
     Failed(ValidationError),
     /// The path is known to be ECN capable.
@@ -58,12 +62,12 @@ impl ValidationState {
         let old = std::mem::replace(self, new);
 
         match old {
-            Self::Testing { .. } | Self::Unknown => {}
+            Self::Testing { .. } | Self::Unknown { .. } => {}
             Self::Failed(_) => debug_assert!(false, "Failed is a terminal state"),
             Self::Capable => stats.ecn_path_validation[ValidationOutcome::Capable] -= 1,
         }
         match new {
-            Self::Testing { .. } | Self::Unknown => {}
+            Self::Testing { .. } | Self::Unknown { .. } => {}
             Self::Failed(error) => {
                 stats.ecn_path_validation[ValidationOutcome::NotCapable(error)] += 1;
             }
@@ -195,12 +199,27 @@ impl Info {
     /// We do not implement the part of the RFC that says to exit ECN validation if the time since
     /// the start of ECN validation exceeds 3 * PTO, since this seems to happen much too quickly.
     pub(crate) fn on_packet_sent(&mut self, stats: &mut Stats) {
-        if let ValidationState::Testing { probes_sent, .. } = &mut self.state {
+        if let ValidationState::Testing {
+            probes_sent,
+            initial_probes_acked,
+            initial_probes_lost,
+        } = &mut self.state
+        {
             *probes_sent += 1;
             qdebug!("ECN probing: sent {probes_sent} probes");
             if *probes_sent == TEST_COUNT {
                 qdebug!("ECN probing concluded with {probes_sent} probes sent");
-                self.state.set(ValidationState::Unknown, stats);
+                let probes_sent = *probes_sent;
+                let initial_probes_acked = *initial_probes_acked;
+                let initial_probes_lost = *initial_probes_lost;
+                self.state.set(
+                    ValidationState::Unknown {
+                        probes_sent,
+                        initial_probes_acked,
+                        initial_probes_lost,
+                    },
+                    stats,
+                );
             }
         }
     }
@@ -232,9 +251,14 @@ impl Info {
         if let ValidationState::Testing {
             initial_probes_acked: probes_acked,
             ..
+        }
+        | ValidationState::Unknown {
+            initial_probes_acked: probes_acked,
+            ..
         } = &mut self.state
         {
             *probes_acked += 1;
+            qdebug!("ECN probing: acked {probes_acked} probes");
         }
     }
 
@@ -245,6 +269,11 @@ impl Info {
         }
 
         if let ValidationState::Testing {
+            initial_probes_acked: probes_acked,
+            initial_probes_lost: probes_lost,
+            ..
+        }
+        | ValidationState::Unknown {
             initial_probes_acked: probes_acked,
             initial_probes_lost: probes_lost,
             ..
@@ -286,7 +315,7 @@ impl Info {
         // > no marked packet has been acknowledged.
         match self.state {
             ValidationState::Testing { .. } | ValidationState::Failed(_) => return,
-            ValidationState::Unknown | ValidationState::Capable => {}
+            ValidationState::Unknown { .. } | ValidationState::Capable => {}
         }
 
         // RFC 9000, Section 13.4.2.1:
@@ -316,7 +345,23 @@ impl Info {
             .count()
             .try_into()
             .expect("usize fits into u64");
-        if newly_acked_sent_with_ect0 == 0 {
+        if let ValidationState::Testing {
+            probes_sent,
+            initial_probes_acked,
+            ..
+        }
+        | ValidationState::Unknown {
+            probes_sent,
+            initial_probes_acked,
+            ..
+        } = self.state
+        {
+            qdebug!("ECN acked {initial_probes_acked} sent {probes_sent}");
+            if initial_probes_acked == probes_sent {
+                qinfo!("ECN validation succeeded, path is capable");
+                self.state.set(ValidationState::Capable, stats);
+            }
+        } else if newly_acked_sent_with_ect0 == 0 {
             qwarn!("ECN validation failed, no ECT(0) packets were newly acked");
             self.disable_ecn(stats, ValidationError::Bleaching);
             return;
@@ -331,9 +376,6 @@ impl Info {
         } else if ecn_diff[IpTosEcn::Ect1] > 0 {
             qwarn!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
             self.disable_ecn(stats, ValidationError::ReceivedUnsentECT1);
-        } else if self.state != ValidationState::Capable {
-            qinfo!("ECN validation succeeded, path is capable");
-            self.state.set(ValidationState::Capable, stats);
         }
         self.baseline = ack_ecn;
         self.largest_acked = largest_acked.pn();
@@ -342,7 +384,7 @@ impl Info {
     pub(crate) const fn is_marking(&self) -> bool {
         match self.state {
             ValidationState::Testing { .. } | ValidationState::Capable => true,
-            ValidationState::Failed(_) | ValidationState::Unknown => false,
+            ValidationState::Failed { .. } | ValidationState::Unknown { .. } => false,
         }
     }
 
