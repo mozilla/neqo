@@ -9,10 +9,15 @@
     reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
 )]
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    cmp::min,
+    collections::VecDeque,
+    fmt::{self, Display, Formatter},
+};
 
 use neqo_common::{qdebug, qerror, qlog::NeqoQlog, qtrace, Header};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use crate::{
     decoder_instructions::{DecoderInstruction, DecoderInstructionReader},
@@ -73,7 +78,7 @@ impl QPackEncoder {
             instruction_reader: DecoderInstructionReader::new(),
             local_stream: LocalStreamState::NoStream,
             max_blocked_streams: 0,
-            unacked_header_blocks: HashMap::new(),
+            unacked_header_blocks: HashMap::default(),
             blocked_stream_cnt: 0,
             use_huffman,
             next_capacity: None,
@@ -103,7 +108,7 @@ impl QPackEncoder {
             self.max_table_size,
         );
 
-        let new_cap = std::cmp::min(self.max_table_size, cap);
+        let new_cap = min(self.max_table_size, cap);
         // we also set our table to the max allowed.
         self.change_capacity(new_cap);
         Ok(())
@@ -146,6 +151,10 @@ impl QPackEncoder {
     fn recalculate_blocked_streams(&mut self) {
         let acked_inserts_cnt = self.table.get_acked_inserts_cnt();
         self.blocked_stream_cnt = 0;
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over unACKed blocks in an undefined order."
+        )]
         for hb_list in self.unacked_header_blocks.values_mut() {
             debug_assert!(!hb_list.is_empty());
             if hb_list.iter().flatten().any(|e| *e >= acked_inserts_cnt) {
@@ -167,6 +176,10 @@ impl QPackEncoder {
         let mut new_acked = self.table.get_acked_inserts_cnt();
         if let Some(hb_list) = self.unacked_header_blocks.get_mut(&stream_id) {
             if let Some(ref_list) = hb_list.pop_back() {
+                #[expect(
+                    clippy::iter_over_hash_type,
+                    reason = "OK to loop over unACKed blocks in an undefined order."
+                )]
                 for iter in ref_list {
                     self.table.remove_ref(iter);
                     if iter >= new_acked {
@@ -192,6 +205,10 @@ impl QPackEncoder {
         if let Some(mut hb_list) = self.unacked_header_blocks.remove(&stream_id) {
             debug_assert!(!hb_list.is_empty());
             while let Some(ref_list) = hb_list.pop_front() {
+                #[expect(
+                    clippy::iter_over_hash_type,
+                    reason = "OK to loop over unACKed blocks in an undefined order."
+                )]
                 for iter in ref_list {
                     self.table.remove_ref(iter);
                     was_blocker = was_blocker || (iter >= self.table.get_acked_inserts_cnt());
@@ -307,7 +324,7 @@ impl QPackEncoder {
                     false,
                     "can_evict_to should have checked and make sure this operation is possible"
                 );
-                return Err(Error::InternalError);
+                return Err(Error::Internal);
             }
             self.max_entries = cap / 32;
             self.next_capacity = None;
@@ -390,7 +407,7 @@ impl QPackEncoder {
         let stream_is_blocker = self.is_stream_blocker(stream_id);
         let can_block = self.blocked_stream_cnt < self.max_blocked_streams || stream_is_blocker;
 
-        let mut ref_entries = HashSet::new();
+        let mut ref_entries = HashSet::default();
 
         for iter in h {
             let name = iter.name().as_bytes().to_vec();
@@ -500,8 +517,8 @@ impl QPackEncoder {
     }
 }
 
-impl ::std::fmt::Display for QPackEncoder {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for QPackEncoder {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "QPackEncoder")
     }
 }
@@ -516,12 +533,10 @@ fn map_error(err: &Error) -> Error {
 
 fn map_stream_send_atomic_error(err: &TransportError) -> Error {
     match err {
-        TransportError::InvalidStreamId | TransportError::FinalSizeError => {
-            Error::ClosedCriticalStream
-        }
+        TransportError::InvalidStreamId | TransportError::FinalSize => Error::ClosedCriticalStream,
         _ => {
             debug_assert!(false, "Unexpected error");
-            Error::InternalError
+            Error::Internal
         }
     }
 }

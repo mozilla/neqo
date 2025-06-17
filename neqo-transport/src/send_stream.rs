@@ -15,6 +15,7 @@ use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
     collections::{btree_map::Entry, BTreeMap, VecDeque},
+    fmt::{self, Display, Formatter},
     mem,
     num::NonZeroUsize,
     ops::Add,
@@ -643,43 +644,43 @@ impl SendStreamState {
 pub struct SendStreamStats {
     // The total number of bytes the consumer has successfully written to
     // this stream. This number can only increase.
-    pub bytes_written: u64,
+    pub written: u64,
     // An indicator of progress on how many of the consumer bytes written to
     // this stream has been sent at least once. This number can only increase,
     // and is always less than or equal to bytes_written.
-    pub bytes_sent: u64,
+    pub sent: u64,
     // An indicator of progress on how many of the consumer bytes written to
     // this stream have been sent and acknowledged as received by the server
     // using QUIC’s ACK mechanism. Only sequential bytes up to,
     // but not including, the first non-acknowledged byte, are counted.
     // This number can only increase and is always less than or equal to
     // bytes_sent.
-    pub bytes_acked: u64,
+    pub acked: u64,
 }
 
 impl SendStreamStats {
     #[must_use]
-    pub const fn new(bytes_written: u64, bytes_sent: u64, bytes_acked: u64) -> Self {
+    pub const fn new(written: u64, sent: u64, acked: u64) -> Self {
         Self {
-            bytes_written,
-            bytes_sent,
-            bytes_acked,
+            written,
+            sent,
+            acked,
         }
     }
 
     #[must_use]
     pub const fn bytes_written(&self) -> u64 {
-        self.bytes_written
+        self.written
     }
 
     #[must_use]
     pub const fn bytes_sent(&self) -> u64 {
-        self.bytes_sent
+        self.sent
     }
 
     #[must_use]
     pub const fn bytes_acked(&self) -> u64 {
-        self.bytes_acked
+        self.acked
     }
 }
 
@@ -851,7 +852,8 @@ impl SendStream {
         match self.state {
             SendStreamState::Send {
                 ref mut send_buf, ..
-            } => send_buf.next_bytes().and_then(|(offset, slice)| {
+            } => {
+                let (offset, slice) = send_buf.next_bytes()?;
                 if retransmission_only {
                     qtrace!(
                         "next_bytes apply retransmission limit at {}",
@@ -867,7 +869,7 @@ impl SendStream {
                 } else {
                     Some((offset, slice))
                 }
-            }),
+            }
             SendStreamState::DataSent {
                 ref mut send_buf,
                 fin_sent,
@@ -1260,7 +1262,7 @@ impl SendStream {
         }
 
         if !matches!(self.state, SendStreamState::Send { .. }) {
-            return Err(Error::FinalSizeError);
+            return Err(Error::FinalSize);
         }
 
         let buf = if self.avail() == 0 {
@@ -1288,7 +1290,7 @@ impl SendStream {
                 conn_fc.borrow_mut().consume(sent);
                 Ok(sent)
             }
-            _ => Err(Error::FinalSizeError),
+            _ => Err(Error::FinalSize),
         }
     }
 
@@ -1386,8 +1388,8 @@ impl SendStream {
     }
 }
 
-impl ::std::fmt::Display for SendStream {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for SendStream {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "SendStream {}", self.stream_id)
     }
 }
@@ -1421,7 +1423,7 @@ pub struct OrderGroupIter<'a> {
 }
 
 impl OrderGroup {
-    pub fn iter(&mut self) -> OrderGroupIter {
+    pub fn iter(&mut self) -> OrderGroupIter<'_> {
         // Ids may have been deleted since we last iterated
         if self.next >= self.vec.len() {
             self.next = 0;
@@ -1626,7 +1628,7 @@ impl SendStreams {
             let group = if let Some(sendorder) = stream.sendorder {
                 self.sendordered
                     .get_mut(&sendorder)
-                    .ok_or(Error::InternalError)?
+                    .ok_or(Error::Internal)?
             } else {
                 &mut self.regular
             };
@@ -1796,7 +1798,7 @@ impl<'a> IntoIterator for &'a mut SendStreams {
 
 #[derive(Debug, Clone)]
 pub struct SendStreamRecoveryToken {
-    pub(crate) id: StreamId,
+    id: StreamId,
     offset: u64,
     length: usize,
     fin: bool,
@@ -1806,14 +1808,14 @@ pub struct SendStreamRecoveryToken {
 mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
-    use neqo_common::{event::Provider as _, hex_with_len, qtrace, Encoder};
+    use neqo_common::{event::Provider as _, hex_with_len, qtrace, Encoder, MAX_VARINT};
 
     use super::SendStreamRecoveryToken;
     use crate::{
         connection::{RetransmissionPriority, TransmissionPriority},
         events::ConnectionEvent,
         fc::SenderFlowControl,
-        packet::PacketBuilder,
+        packet::{PacketBuilder, PACKET_LIMIT},
         recovery::{RecoveryToken, StreamRecoveryToken},
         send_stream::{
             RangeState, RangeTracker, SendStream, SendStreamState, SendStreams, TxBuffer,
@@ -2597,7 +2599,7 @@ mod tests {
         ss.insert(StreamId::from(0), s);
 
         let mut tokens = Vec::new();
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
 
         // Write a small frame: no fin.
         let written = builder.len();
@@ -2685,7 +2687,7 @@ mod tests {
         ss.insert(StreamId::from(0), s);
 
         let mut tokens = Vec::new();
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
         ss.write_frames(
             TransmissionPriority::default(),
             &mut builder,
@@ -2763,7 +2765,7 @@ mod tests {
         assert_eq!(s.next_bytes(false), Some((0, &b"ab"[..])));
 
         // This doesn't report blocking yet.
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
         let mut tokens = Vec::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
@@ -2829,7 +2831,7 @@ mod tests {
         assert_eq!(s.send_atomic(b"abc").unwrap(), 0);
 
         // Assert that STREAM_DATA_BLOCKED is sent.
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
         let mut tokens = Vec::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
@@ -2916,7 +2918,7 @@ mod tests {
         s.mark_as_lost(len_u64, 0, true);
 
         // No frame should be sent here.
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
         let mut tokens = Vec::new();
         let mut stats = FrameStats::default();
         s.write_stream_frame(
@@ -2931,8 +2933,6 @@ mod tests {
     /// Create a `SendStream` and force it into a state where it believes that
     /// `offset` bytes have already been sent and acknowledged.
     fn stream_with_sent(stream: u64, offset: usize) -> SendStream {
-        const MAX_VARINT: u64 = (1 << 62) - 1;
-
         let conn_fc = connection_fc(MAX_VARINT);
         let mut s = SendStream::new(
             StreamId::from(stream),
@@ -2969,7 +2969,7 @@ mod tests {
             s.close();
         }
 
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
         let header_len = builder.len();
         builder.set_limit(header_len + space);
 
@@ -3070,7 +3070,8 @@ mod tests {
             s.send(data).unwrap();
             s.close();
 
-            let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+            let mut builder =
+                PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
             let header_len = builder.len();
             // Add 2 for the frame type and stream ID, then add the extra.
             builder.set_limit(header_len + data.len() + 2 + extra);

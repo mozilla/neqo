@@ -106,11 +106,6 @@ impl SentPacket {
     }
 
     /// Access the recovery tokens that this holds.
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     #[must_use]
     pub fn tokens(&self) -> &[RecoveryToken] {
         &self.tokens
@@ -248,7 +243,7 @@ impl SentPackets {
             // > values in **descending packet number order**.
             //
             // <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.1>
-            debug_assert!(previous_range_start.is_none_or(|s| s > *range.end()));
+            debug_assert!(previous_range_start.map_or(true, |s| s > *range.end()));
             previous_range_start = Some(*range.start());
 
             // Thus none of the following ACK ranges will acknowledge packets in

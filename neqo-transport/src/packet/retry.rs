@@ -44,12 +44,12 @@ where
     .try_with(|aead| f(&aead.borrow()))
     .map_err(|e| {
         qerror!("Unable to access Retry AEAD: {e:?}");
-        Error::InternalError
+        Error::Internal
     })?
 }
 
 /// Determine how large the expansion is for a given key.
 pub fn expansion(version: Version) -> usize {
-    use_aead(version, |aead| Ok(aead.expansion()))
+    use_aead(version, |_| Ok(Aead::expansion()))
         .unwrap_or_else(|_| panic!("Unable to access Retry AEAD"))
 }

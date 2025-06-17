@@ -216,7 +216,7 @@ impl WtTest {
 
     pub fn cancel_session_client(&mut self, wt_stream_id: StreamId) {
         self.client
-            .cancel_fetch(wt_stream_id, Error::HttpNoError.code())
+            .cancel_fetch(wt_stream_id, Error::HttpNone.code())
             .unwrap();
         self.exchange_packets();
     }
@@ -262,7 +262,7 @@ impl WtTest {
     }
 
     pub fn cancel_session_server(&mut self, wt_session: &WebTransportRequest) {
-        wt_session.cancel_fetch(Error::HttpNoError.code()).unwrap();
+        wt_session.cancel_fetch(Error::HttpNone.code()).unwrap();
         self.exchange_packets();
     }
 
@@ -362,7 +362,7 @@ impl WtTest {
 
     fn reset_stream_client(&mut self, wt_stream_id: StreamId) {
         self.client
-            .stream_reset_send(wt_stream_id, Error::HttpNoError.code())
+            .stream_reset_send(wt_stream_id, Error::HttpNone.code())
             .unwrap();
         self.exchange_packets();
     }
@@ -375,7 +375,7 @@ impl WtTest {
                     stream_id,
                     error,
                     local
-                } if stream_id == expected_stream_id && error == Error::HttpNoError.code() && !local
+                } if stream_id == expected_stream_id && error == Error::HttpNone.code() && !local
             )
         };
         assert!(self.client.events().any(wt_reset_event));
@@ -383,7 +383,7 @@ impl WtTest {
 
     fn stream_stop_sending_client(&mut self, stream_id: StreamId) {
         self.client
-            .stream_stop_sending(stream_id, Error::HttpNoError.code())
+            .stream_stop_sending(stream_id, Error::HttpNone.code())
             .unwrap();
         self.exchange_packets();
     }
@@ -395,7 +395,7 @@ impl WtTest {
                 Http3ClientEvent::StopSending {
                     stream_id,
                     error
-                } if stream_id == expected_stream_id && error == Error::HttpNoError.code()
+                } if stream_id == expected_stream_id && error == Error::HttpNone.code()
             )
         };
         assert!(self.client.events().any(wt_stop_sending_event));
@@ -505,15 +505,13 @@ impl WtTest {
     }
 
     fn reset_stream_server(&mut self, wt_stream: &Http3OrWebTransportStream) {
-        wt_stream
-            .stream_reset_send(Error::HttpNoError.code())
-            .unwrap();
+        wt_stream.stream_reset_send(Error::HttpNone.code()).unwrap();
         self.exchange_packets();
     }
 
     fn stream_stop_sending_server(&mut self, wt_stream: &Http3OrWebTransportStream) {
         wt_stream
-            .stream_stop_sending(Error::HttpNoError.code())
+            .stream_stop_sending(Error::HttpNone.code())
             .unwrap();
         self.exchange_packets();
     }

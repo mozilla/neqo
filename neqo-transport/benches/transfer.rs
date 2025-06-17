@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::time::Duration;
+use std::{hint::black_box, time::Duration};
 
 use criterion::{criterion_group, criterion_main, BatchSize::SmallInput, Criterion};
 use neqo_transport::{ConnectionParameters, State};
@@ -62,7 +62,7 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
                     }
                     sim.setup()
                 },
-                ReadySimulator::run,
+                black_box(ReadySimulator::run),
                 SmallInput,
             );
         });

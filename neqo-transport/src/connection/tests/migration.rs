@@ -611,7 +611,7 @@ fn migrate_same_fail() {
 
 /// This gets the connection ID from a datagram using the default
 /// connection ID generator/decoder.
-pub fn get_cid(d: &Datagram) -> ConnectionIdRef {
+pub fn get_cid(d: &Datagram) -> ConnectionIdRef<'_> {
     let gen = CountingConnectionIdGenerator::default();
     assert_eq!(d[0] & 0x80, 0); // Only support short packets for now.
     gen.decode_cid(&mut Decoder::from(&d[1..])).unwrap()
@@ -912,8 +912,8 @@ fn preferred_address_server_empty_cid() {
     connect_fail(
         &mut client,
         &mut server,
-        Error::TransportParameterError,
-        Error::PeerError(Error::TransportParameterError.code()),
+        Error::TransportParameter,
+        Error::Peer(Error::TransportParameter.code()),
     );
 }
 
@@ -933,8 +933,8 @@ fn preferred_address_client() {
     connect_fail(
         &mut client,
         &mut server,
-        Error::PeerError(Error::TransportParameterError.code()),
-        Error::TransportParameterError,
+        Error::Peer(Error::TransportParameter.code()),
+        Error::TransportParameter,
     );
 }
 

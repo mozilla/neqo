@@ -36,32 +36,32 @@ pub struct SharedArgs {
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP/3 no matter what the ALPN says.
-    pub alpn: String,
+    alpn: String,
 
     #[arg(name = "qlog-dir", long, value_parser=clap::value_parser!(PathBuf))]
     /// Enable QLOG logging and QLOG traces to this directory
-    pub qlog_dir: Option<PathBuf>,
+    qlog_dir: Option<PathBuf>,
 
     #[arg(name = "encoder-table-size", long, default_value = "16384")]
-    pub max_table_size_encoder: u64,
+    max_table_size_encoder: u64,
 
     #[arg(name = "decoder-table-size", long, default_value = "16384")]
-    pub max_table_size_decoder: u64,
+    max_table_size_decoder: u64,
 
     #[arg(name = "max-blocked-streams", short = 'b', long, default_value = "10")]
-    pub max_blocked_streams: u16,
+    max_blocked_streams: u16,
 
     #[arg(short = 'c', long, number_of_values = 1)]
     /// The set of TLS cipher suites to enable.
     /// From: `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`, `TLS_CHACHA20_POLY1305_SHA256`.
-    pub ciphers: Vec<String>,
+    ciphers: Vec<String>,
 
     #[arg(name = "qns-test", long)]
     /// Enable special behavior for use with QUIC Network Simulator
-    pub qns_test: Option<String>,
+    qns_test: Option<String>,
 
     #[command(flatten)]
-    pub quic_parameters: QuicParameters,
+    quic_parameters: QuicParameters,
 }
 
 #[cfg(any(test, feature = "bench"))]
@@ -308,13 +308,13 @@ mod tests {
 
         let temp_dir = TempDir::new();
 
-        let mut client_args = client::Args::new(&[1], false);
+        let mut client_args = client::Args::new(None, &[1], false);
         client_args.set_qlog_dir(temp_dir.path());
         let mut server_args = server::Args::default();
         server_args.set_qlog_dir(temp_dir.path());
 
         let client = client::client(client_args);
-        let server = Box::pin(server::server(server_args));
+        let server = Box::pin(server::server(server_args).unwrap().run());
         tokio::select! {
             _ = client => {}
             res = server  => panic!("expect server not to terminate: {res:?}"),

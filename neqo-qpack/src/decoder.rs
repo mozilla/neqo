@@ -9,6 +9,8 @@
     reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
 )]
 
+use std::fmt::{self, Display, Formatter};
+
 use neqo_common::{qdebug, Header};
 use neqo_transport::{Connection, StreamId};
 
@@ -198,7 +200,7 @@ impl QPackDecoder {
 
     /// # Errors
     ///
-    /// May return `DecompressionFailed` if header block is incorrect or incomplete.
+    /// May return `Error::Decompression` if header block is incorrect or incomplete.
     pub fn refers_dynamic_table(&self, buf: &[u8]) -> Res<bool> {
         HeaderDecoder::new(buf).refers_dynamic_table(self.max_entries, self.table.base())
     }
@@ -208,7 +210,7 @@ impl QPackDecoder {
     ///
     /// # Errors
     ///
-    /// May return `DecompressionFailed` if header block is incorrect or incomplete.
+    /// May return `Error::Decompression` if header block is incorrect or incomplete.
     ///
     /// # Panics
     ///
@@ -224,7 +226,7 @@ impl QPackDecoder {
         match decoder.decode_header_block(&self.table, self.max_entries, self.table.base()) {
             Ok(HeaderDecoderResult::Blocked(req_insert_cnt)) => {
                 if self.blocked_streams.len() > self.max_blocked_streams {
-                    Err(Error::DecompressionFailed)
+                    Err(Error::Decompression)
                 } else {
                     let r = self
                         .blocked_streams
@@ -247,7 +249,7 @@ impl QPackDecoder {
                 }
                 Ok(Some(h))
             }
-            Err(_) => Err(Error::DecompressionFailed),
+            Err(_) => Err(Error::Decompression),
         }
     }
 
@@ -273,8 +275,8 @@ impl QPackDecoder {
     }
 }
 
-impl ::std::fmt::Display for QPackDecoder {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for QPackDecoder {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "QPackDecoder {}", self.capacity())
     }
 }

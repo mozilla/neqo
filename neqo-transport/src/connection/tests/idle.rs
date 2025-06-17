@@ -16,7 +16,7 @@ use super::{
     AT_LEAST_PTO, DEFAULT_STREAM_DATA,
 };
 use crate::{
-    packet::PacketBuilder,
+    packet::{PacketBuilder, PACKET_LIMIT},
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     tparams::{TransportParameter, TransportParameterId},
@@ -96,7 +96,7 @@ fn asymmetric_idle_timeout() {
     server
         .tps
         .borrow_mut()
-        .local
+        .local_mut()
         .set_integer(TransportParameterId::IdleTimeout, LOWER_TIMEOUT_MS);
     server.idle_timeout = IdleTimeout::new(LOWER_TIMEOUT);
 
@@ -285,7 +285,7 @@ fn idle_caching() {
     let mut client = default_client();
     let mut server = default_server();
     let start = now();
-    let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+    let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
 
     // Perform the first round trip, but drop the Initial from the server.
     // The client then caches the Handshake packet.
@@ -309,7 +309,7 @@ fn idle_caching() {
     // to send CRYPTO frames again, so manually extract and discard those.
     server.process_input(dgram.unwrap(), middle);
     let mut tokens = Vec::new();
-    server.crypto.streams.write_frame(
+    server.crypto.streams_mut().write_frame(
         PacketNumberSpace::Initial,
         server.conn_params.sni_slicing_enabled(),
         &mut builder,
@@ -318,7 +318,7 @@ fn idle_caching() {
     );
     assert_eq!(tokens.len(), 1);
     tokens.clear();
-    server.crypto.streams.write_frame(
+    server.crypto.streams_mut().write_frame(
         PacketNumberSpace::Initial,
         server.conn_params.sni_slicing_enabled(),
         &mut builder,

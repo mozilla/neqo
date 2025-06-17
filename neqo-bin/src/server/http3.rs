@@ -8,9 +8,9 @@
 
 use std::{
     cell::RefCell,
-    collections::HashMap,
     fmt::{self, Display},
     rc::Rc,
+    slice,
     time::Instant,
 };
 
@@ -20,6 +20,7 @@ use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
 };
 use neqo_transport::{server::ValidateAddress, ConnectionIdGenerator};
+use rustc_hash::FxHashMap as HashMap;
 
 use super::{qns_read_response, Args};
 use crate::send_data::SendData;
@@ -40,8 +41,8 @@ impl HttpServer {
     ) -> Self {
         let mut server = Http3Server::new(
             args.now(),
-            &[args.key.clone()],
-            &[args.shared.alpn.clone()],
+            slice::from_ref(&args.key),
+            slice::from_ref(&args.shared.alpn),
             anti_replay,
             cid_mgr,
             Http3Parameters::default()
@@ -63,13 +64,12 @@ impl HttpServer {
             server
                 .enable_ech(random::<1>()[0], "public.example", &sk, &pk)
                 .unwrap();
-            let cfg = server.ech_config();
-            qinfo!("ECHConfigList: {}", hex(cfg));
+            qinfo!("ECHConfigList: {}", hex(server.ech_config()));
         }
         Self {
             server,
-            remaining_data: HashMap::new(),
-            posts: HashMap::new(),
+            remaining_data: HashMap::default(),
+            posts: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
         }
     }

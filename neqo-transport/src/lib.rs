@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::fmt::{self, Display, Formatter};
+
 use neqo_common::qwarn;
 use neqo_crypto::Error as CryptoError;
 
@@ -82,23 +84,23 @@ const ERROR_AEAD_LIMIT_REACHED: TransportError = 15;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub enum Error {
-    NoError,
+    None,
     // Each time this error is returned a different parameter is supplied.
     // This will be used to distinguish each occurrence of this error.
-    InternalError,
+    Internal,
     ConnectionRefused,
-    FlowControlError,
-    StreamLimitError,
-    StreamStateError,
-    FinalSizeError,
-    FrameEncodingError,
-    TransportParameterError,
+    FlowControl,
+    StreamLimit,
+    StreamState,
+    FinalSize,
+    FrameEncoding,
+    TransportParameter,
     ProtocolViolation,
     InvalidToken,
-    ApplicationError,
+    Application,
     CryptoBufferExceeded,
-    CryptoError(CryptoError),
-    QlogError,
+    Crypto(CryptoError),
+    Qlog,
     CryptoAlert(u8),
     EchRetry(Vec<u8>),
 
@@ -107,7 +109,7 @@ pub enum Error {
     ConnectionIdLimitExceeded,
     ConnectionIdsExhausted,
     ConnectionState,
-    DecryptError,
+    Decrypt,
     DisabledVersion,
     IdleTimeout,
     IntegerOverflow,
@@ -131,8 +133,8 @@ pub enum Error {
     NotAvailable,
     NotConnected,
     PacketNumberOverlap,
-    PeerApplicationError(AppError),
-    PeerError(TransportError),
+    PeerApplication(AppError),
+    Peer(TransportError),
     StatelessReset,
     TooMuchData,
     UnexpectedMessage,
@@ -147,21 +149,18 @@ impl Error {
     #[must_use]
     pub fn code(&self) -> TransportError {
         match self {
-            Self::NoError
-            | Self::IdleTimeout
-            | Self::PeerError(_)
-            | Self::PeerApplicationError(_) => 0,
+            Self::None | Self::IdleTimeout | Self::Peer(_) | Self::PeerApplication(_) => 0,
             Self::ConnectionRefused => 2,
-            Self::FlowControlError => 3,
-            Self::StreamLimitError => 4,
-            Self::StreamStateError => 5,
-            Self::FinalSizeError => 6,
-            Self::FrameEncodingError => 7,
-            Self::TransportParameterError => 8,
+            Self::FlowControl => 3,
+            Self::StreamLimit => 4,
+            Self::StreamState => 5,
+            Self::FinalSize => 6,
+            Self::FrameEncoding => 7,
+            Self::TransportParameter => 8,
             Self::ProtocolViolation => 10,
             Self::InvalidToken => 11,
             Self::KeysExhausted => ERROR_AEAD_LIMIT_REACHED,
-            Self::ApplicationError => ERROR_APPLICATION_CLOSE,
+            Self::Application => ERROR_APPLICATION_CLOSE,
             Self::NoAvailablePath => 16,
             Self::CryptoBufferExceeded => ERROR_CRYPTO_BUFFER_EXCEEDED,
             Self::CryptoAlert(a) => 0x100 + u64::from(*a),
@@ -180,14 +179,14 @@ impl From<CryptoError> for Error {
         qwarn!("Crypto operation failed {err:?}");
         match err {
             CryptoError::EchRetry(config) => Self::EchRetry(config),
-            _ => Self::CryptoError(err),
+            _ => Self::Crypto(err),
         }
     }
 }
 
 impl From<::qlog::Error> for Error {
     fn from(_err: ::qlog::Error) -> Self {
-        Self::QlogError
+        Self::Qlog
     }
 }
 
@@ -200,14 +199,14 @@ impl From<std::num::TryFromIntError> for Error {
 impl ::std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::CryptoError(e) => Some(e),
+            Self::Crypto(e) => Some(e),
             _ => None,
         }
     }
 }
 
-impl ::std::fmt::Display for Error {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Transport error: {self:?}")
     }
 }
@@ -233,18 +232,18 @@ impl CloseReason {
         }
     }
 
-    /// Checks enclosed error for [`Error::NoError`] and
+    /// Checks enclosed error for [`Error::None`] and
     /// [`CloseReason::Application(0)`].
     #[must_use]
     pub const fn is_error(&self) -> bool {
-        !matches!(self, Self::Transport(Error::NoError) | Self::Application(0),)
+        !matches!(self, Self::Transport(Error::None) | Self::Application(0),)
     }
 }
 
 impl From<CloseError> for CloseReason {
     fn from(err: CloseError) -> Self {
         match err {
-            CloseError::Transport(c) => Self::Transport(Error::PeerError(c)),
+            CloseError::Transport(c) => Self::Transport(Error::Peer(c)),
             CloseError::Application(c) => Self::Application(c),
         }
     }
