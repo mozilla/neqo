@@ -549,6 +549,10 @@ impl Buffer for Vec<u8> {
         self.len()
     }
 
+    fn as_slice(&self) -> &[u8] {
+        self.as_ref()
+    }
+
     fn write_zeroes(&mut self, n: usize) {
         self.resize(self.len() + n, 0);
     }
@@ -559,10 +563,6 @@ impl Buffer for Vec<u8> {
 
     fn rotate_right(&mut self, start: usize, count: usize) {
         self[start..].rotate_right(count);
-    }
-
-    fn as_slice(&self) -> &[u8] {
-        self.as_ref()
     }
 }
 
@@ -571,6 +571,10 @@ impl Buffer for &mut Vec<u8> {
         Vec::len(self)
     }
 
+    fn as_slice(&self) -> &[u8] {
+        self.as_ref()
+    }
+
     fn write_zeroes(&mut self, n: usize) {
         self.resize(self.len() + n, 0);
     }
@@ -582,15 +586,15 @@ impl Buffer for &mut Vec<u8> {
     fn rotate_right(&mut self, start: usize, count: usize) {
         self[start..].rotate_right(count);
     }
-
-    fn as_slice(&self) -> &[u8] {
-        self.as_ref()
-    }
 }
 
 impl Buffer for Cursor<&mut [u8]> {
     fn len(&self) -> usize {
         usize::try_from(self.position()).expect("memory allocation not to exceed usize")
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        self.get_ref()
     }
 
     fn write_zeroes(&mut self, n: usize) {
@@ -607,10 +611,6 @@ impl Buffer for Cursor<&mut [u8]> {
 
     fn rotate_right(&mut self, start: usize, count: usize) {
         self.get_mut()[start..].rotate_right(count);
-    }
-
-    fn as_slice(&self) -> &[u8] {
-        self.get_ref()
     }
 }
 
