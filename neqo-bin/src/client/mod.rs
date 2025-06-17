@@ -431,8 +431,7 @@ impl<'a, H: Handler> Runner<'a, H> {
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
         loop {
             let handler_done = self.handler.handle(&mut self.client)?;
-            let now = Instant::now();
-            self.process_output(now).await?;
+            self.process_output(Instant::now()).await?;
             if self.client.has_events() {
                 continue;
             }
@@ -442,7 +441,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                 (true, CloseState::Closing) | (false, _) => {}
                 // no more work, closing connection
                 (true, CloseState::NotClosing) => {
-                    self.client.close(now, 0, "kthxbye!");
+                    self.client.close(Instant::now(), 0, "kthxbye!");
                     continue;
                 }
                 // no more work, connection closed, terminating
