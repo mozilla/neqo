@@ -228,7 +228,7 @@ impl<B: Buffer> Encoder<B> {
     /// Note: for a view of a slice, use `Decoder::new(&enc[s..e])`
     #[must_use]
     pub fn as_decoder(&self) -> Decoder<'_> {
-        Decoder::new(&self.buf.as_slice())
+        Decoder::new(self.buf.as_slice())
     }
 
     /// Generic encode routine for arbitrary data.
