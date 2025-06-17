@@ -216,7 +216,7 @@ jobs:
           declare -A client_cmd=(
             ["neqo"]="binaries/neqo/neqo-client _cc _pacing _disk _flags -Q 1 https://$HOST:$PORT/$SIZE"
             ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
-            ["google"]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE _disk"
+            ["google"]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE"
             ["quiche"]="quiche/target/release/quiche-client _disk --no-verify https://$HOST:$PORT/$SIZE"
             ["s2n"]="s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification _disk --local-ip $HOST https://$HOST:$PORT/$SIZE"
           )
@@ -231,7 +231,7 @@ jobs:
           declare -A disk_flags=(
             ["neqo"]="--output-dir ."
             ["msquic"]="" # msquic always dumps to disk :-(
-            ["google"]="> $SIZE"
+            ["google"]=""
             ["quiche"]="--dump-responses ."
             ["s2n"]="--download-dir ."
           )
@@ -325,7 +325,13 @@ jobs:
                   # We're not doing this during hyperfine or perf runs, because the writing-to-disk incurrs overheads we're not interested in.
                   # shellcheck disable=SC2086
                   $WORKSPACE/$SERVER_CMD &
-                  eval "$WORKSPACE/$CMD"
+                  if [ "$client" == "google" ]; then
+                    # shellcheck disable=SC2086
+                    $WORKSPACE/$CMD > "$SIZE"
+                  else
+                    # shellcheck disable=SC2086
+                    $WORKSPACE/$CMD
+                  fi
                   pkill "$SERVER_TAG"
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
@@ -333,7 +339,6 @@ jobs:
                   # Don't write to disk following this.
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}" ""
                   echo "Non-disk client command: $CMD"
-                  ps -efww
 
                   # Make a tag string for this test.
                   COMMAND="$client vs. $server${cc:+ (}$cc${pacing:+, paced}${cc:+)}"
@@ -368,17 +373,13 @@ jobs:
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec \
                     perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.server.perf" $WORKSPACE/$SERVER_CMD &
-                  echo "Server started"
                   sleep 1
-                  ps -efww
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
-                  nice -n -20 setarch --addr-no-randomize cset proc -vv --set=cpu3 --exec \
-                    perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD
-                  echo "Client finished"
+                  nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
+                    perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD > /dev/null 2>&1
                   pkill "$SERVER_TAG"
                   cd "$WORKSPACE"
-                  ps -efww
 
                   echo "*** Preparing results report for $client vs. $server"
                   if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
