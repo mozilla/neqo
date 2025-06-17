@@ -203,27 +203,32 @@ impl<'b> PartialEq<Decoder<'b>> for Decoder<'_> {
 #[derive(Clone, PartialEq, Eq)]
 pub struct Encoder<B = Vec<u8>> {
     buf: B,
+    /// Tracks the starting position of the buffer when the [`Encoder`] is created.
+    /// This allows distinguishing between bytes that existed in the buffer before
+    /// encoding began and those written by the [`Encoder`] itself.
+    start: usize,
 }
 
 impl<B: Buffer> Encoder<B> {
-    /// Get the length of the underlying buffer: the number of bytes that have
-    /// been written to the buffer.
+    /// Get the length of the [`Encoder`].
+    ///
+    /// Note that the length of the underlying buffer might be larger.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.buf.len()
+        self.buf.len() - self.start
     }
 
     /// Returns true if the encoder buffer contains no elements.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.buf.is_empty()
+        self.len() == 0
     }
 
     /// Create a view of the current contents of the buffer.
     /// Note: for a view of a slice, use `Decoder::new(&enc[s..e])`
     #[must_use]
     pub fn as_decoder(&self) -> Decoder<'_> {
-        Decoder::new(self.buf.as_slice())
+        Decoder::new(&self.buf.as_slice())
     }
 
     /// Generic encode routine for arbitrary data.
@@ -409,6 +414,7 @@ impl Encoder<Vec<u8>> {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             buf: Vec::with_capacity(capacity),
+            start: 0,
         }
     }
 
@@ -439,17 +445,21 @@ impl Encoder<Vec<u8>> {
         self.buf.truncate(len);
     }
 
-    /// Pad the buffer to `len` with bytes set to `v`.
+    /// Pad the [`Encoder`] to `len` with bytes set to `v`.
     pub fn pad_to(&mut self, len: usize, v: u8) {
-        if len > self.buf.len() {
-            self.buf.resize(len, v);
+        let buffer_len = len + self.start;
+        if buffer_len > self.buf.len() {
+            self.buf.resize(buffer_len, v);
         }
     }
 }
 
 impl Default for Encoder {
     fn default() -> Self {
-        Self { buf: Vec::new() }
+        Self {
+            buf: Vec::new(),
+            start: 0,
+        }
     }
 }
 
@@ -481,6 +491,7 @@ impl From<&[u8]> for Encoder {
     fn from(buf: &[u8]) -> Self {
         Self {
             buf: Vec::from(buf),
+            start: 0,
         }
     }
 }
@@ -515,6 +526,7 @@ impl<'a> Encoder<Cursor<&'a mut [u8]>> {
     pub fn new_borrowed_slice(buf: &'a mut [u8]) -> Self {
         Encoder {
             buf: Cursor::new(buf),
+            start: 0,
         }
     }
 }
@@ -522,7 +534,10 @@ impl<'a> Encoder<Cursor<&'a mut [u8]>> {
 impl<'a> Encoder<&'a mut Vec<u8>> {
     #[must_use]
     pub fn new_borrowed_vec(buf: &'a mut Vec<u8>) -> Self {
-        Encoder { buf }
+        Encoder {
+            start: buf.len(),
+            buf,
+        }
     }
 }
 
