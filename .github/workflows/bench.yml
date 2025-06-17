@@ -333,6 +333,7 @@ jobs:
                   # Don't write to disk following this.
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}" ""
                   echo "Non-disk client command: $CMD"
+                  ps -efww
 
                   # Make a tag string for this test.
                   COMMAND="$client vs. $server${cc:+ (}$cc${pacing:+, paced}${cc:+)}"
@@ -344,7 +345,7 @@ jobs:
                       --command-name "$COMMAND" --time-unit millisecond  \
                       --export-json "$WORKSPACE/hyperfine-main/$FILENAME.json" \
                       --output null --warmup 5 --min-runs "$RUNS" \
-                      --prepare "$WORKSPACE/${SERVER_CMD/neqo/neqo-main} & echo \$! >> /cpusets/cpu2/tasks; sleep 0.1" \
+                      --prepare "$WORKSPACE/${SERVER_CMD/neqo/neqo-main} & echo \$! >> /cpusets/cpu2/tasks; sleep 0.2" \
                       --conclude "pkill $SERVER_TAG" \
                       "echo \$\$ >> /cpusets/cpu3/tasks; $WORKSPACE/${CMD/neqo/neqo-main}"
                   fi
@@ -356,7 +357,7 @@ jobs:
                     --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
                     --export-markdown "$WORKSPACE/hyperfine/$FILENAME.md" \
                     --output null --warmup 5 --min-runs "$RUNS" \
-                    --prepare "$WORKSPACE/$SERVER_CMD & echo \$! >> /cpusets/cpu2/tasks; sleep 0.1" \
+                    --prepare "$WORKSPACE/$SERVER_CMD & echo \$! >> /cpusets/cpu2/tasks; sleep 0.2" \
                     --conclude "pkill $SERVER_TAG" \
                     "echo \$\$ >> /cpusets/cpu3/tasks; $WORKSPACE/$CMD"
 
@@ -367,16 +368,17 @@ jobs:
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec \
                     perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.server.perf" $WORKSPACE/$SERVER_CMD &
-
                   echo "Server started"
                   sleep 1
+                  ps -efww
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
-                  nice -n -20 setarch --addr-no-randomize cset proc -v --set=cpu3 --exec \
+                  nice -n -20 setarch --addr-no-randomize cset proc -vv --set=cpu3 --exec \
                     perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD
                   echo "Client finished"
                   pkill "$SERVER_TAG"
                   cd "$WORKSPACE"
+                  ps -efww
 
                   echo "*** Preparing results report for $client vs. $server"
                   if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
