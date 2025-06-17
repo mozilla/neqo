@@ -290,7 +290,7 @@ impl<B: Buffer> Encoder<B> {
     ///
     /// # Panics
     ///
-    /// When `v` is longer than 2^64.
+    /// When `v` is longer than 2^n.
     pub fn encode_vec(&mut self, n: usize, v: &[u8]) -> &mut Self {
         self.encode_uint(
             n,
@@ -325,7 +325,7 @@ impl<B: Buffer> Encoder<B> {
     ///
     /// # Panics
     ///
-    /// When `v` is longer than 2^64.
+    /// When `v` is longer than 2^62.
     pub fn encode_vvec(&mut self, v: &[u8]) -> &mut Self {
         self.encode_varint(u64::try_from(v.as_ref().len()).expect("v is longer than 2^64"))
             .encode(v)
