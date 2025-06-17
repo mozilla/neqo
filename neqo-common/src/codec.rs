@@ -469,15 +469,15 @@ impl Debug for Encoder {
     }
 }
 
-impl AsRef<[u8]> for Encoder {
+impl<B: Buffer> AsRef<[u8]> for Encoder<B> {
     fn as_ref(&self) -> &[u8] {
-        self.buf.as_ref()
+        &self.buf.as_slice()[self.start..]
     }
 }
 
-impl AsMut<[u8]> for Encoder {
+impl<B: Buffer> AsMut<[u8]> for Encoder<B> {
     fn as_mut(&mut self) -> &mut [u8] {
-        self.buf.as_mut()
+        &mut self.buf.as_mut()[self.start..]
     }
 }
 
@@ -550,6 +550,8 @@ pub trait Buffer: io::Write {
 
     fn as_slice(&self) -> &[u8];
 
+    fn as_mut(&mut self) -> &mut [u8];
+
     // Functions needed for `Encoder::encode_vvec_with` and `Encoder::encode_vec_with`.
 
     fn write_zeroes(&mut self, n: usize);
@@ -566,6 +568,10 @@ impl Buffer for Vec<u8> {
 
     fn as_slice(&self) -> &[u8] {
         self.as_ref()
+    }
+
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.as_mut_slice()
     }
 
     fn write_zeroes(&mut self, n: usize) {
@@ -590,6 +596,10 @@ impl Buffer for &mut Vec<u8> {
         self.as_ref()
     }
 
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.as_mut_slice()
+    }
+
     fn write_zeroes(&mut self, n: usize) {
         self.resize(self.len() + n, 0);
     }
@@ -610,6 +620,10 @@ impl Buffer for Cursor<&mut [u8]> {
 
     fn as_slice(&self) -> &[u8] {
         self.get_ref()
+    }
+
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.get_mut()
     }
 
     fn write_zeroes(&mut self, n: usize) {
