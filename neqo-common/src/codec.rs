@@ -215,7 +215,7 @@ impl<B: Buffer> Encoder<B> {
     /// Note that the length of the underlying buffer might be larger.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.buf.len() - self.start
+        self.buf.position() - self.start
     }
 
     /// Returns true if the encoder buffer contains no elements.
@@ -309,10 +309,10 @@ impl<B: Buffer> Encoder<B> {
         reason = "AND'ing with 0xff makes this OK."
     )]
     pub fn encode_vec_with<F: FnOnce(&mut Self)>(&mut self, n: usize, f: F) -> &mut Self {
-        let start = self.buf.len();
+        let start = self.buf.position();
         self.buf.write_zeroes(n);
         f(self);
-        let len = self.buf.len() - start - n;
+        let len = self.buf.position() - start - n;
         assert!(len < (1 << (n * 8)));
         for i in 0..n {
             self.buf
@@ -337,13 +337,13 @@ impl<B: Buffer> Encoder<B> {
     ///
     /// When `f()` writes more than 2^62 bytes.
     pub fn encode_vvec_with<F: FnOnce(&mut Self)>(&mut self, f: F) -> &mut Self {
-        let start = self.buf.len();
+        let start = self.buf.position();
         // Optimize for short buffers, reserve a single byte for the length.
         self.buf
             .write_all(&[0])
             .expect("Buffer has enough capacity.");
         f(self);
-        let len = self.buf.len() - start - 1;
+        let len = self.buf.position() - start - 1;
 
         // Now to insert a varint for `len` before the encoded block.
         //
@@ -535,17 +535,23 @@ impl<'a> Encoder<&'a mut Vec<u8>> {
     #[must_use]
     pub fn new_borrowed_vec(buf: &'a mut Vec<u8>) -> Self {
         Encoder {
-            start: buf.len(),
+            start: buf.position(),
             buf,
         }
     }
 }
 
+/// Extends a memory buffer with methods beyond [`std::io::Write`]. Needed for
+/// [`Encoder`].
+///
+/// Note that each method operates on the bytes written, not the entire buffer.
+/// E.g. [`Buffer::as_slice`] returns the bytes written, not all bytes of the
+/// underlying buffer.
 pub trait Buffer: io::Write {
-    fn len(&self) -> usize;
+    fn position(&self) -> usize;
 
     fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.position() == 0
     }
 
     fn as_slice(&self) -> &[u8];
@@ -562,7 +568,7 @@ pub trait Buffer: io::Write {
 }
 
 impl Buffer for Vec<u8> {
-    fn len(&self) -> usize {
+    fn position(&self) -> usize {
         self.len()
     }
 
@@ -575,7 +581,7 @@ impl Buffer for Vec<u8> {
     }
 
     fn write_zeroes(&mut self, n: usize) {
-        self.resize(self.len() + n, 0);
+        self.resize(self.position() + n, 0);
     }
 
     fn write_at(&mut self, pos: usize, data: u8) {
@@ -588,7 +594,7 @@ impl Buffer for Vec<u8> {
 }
 
 impl Buffer for &mut Vec<u8> {
-    fn len(&self) -> usize {
+    fn position(&self) -> usize {
         Vec::len(self)
     }
 
@@ -601,7 +607,7 @@ impl Buffer for &mut Vec<u8> {
     }
 
     fn write_zeroes(&mut self, n: usize) {
-        self.resize(self.len() + n, 0);
+        self.resize(self.position() + n, 0);
     }
 
     fn write_at(&mut self, pos: usize, data: u8) {
@@ -614,16 +620,17 @@ impl Buffer for &mut Vec<u8> {
 }
 
 impl Buffer for Cursor<&mut [u8]> {
-    fn len(&self) -> usize {
+    fn position(&self) -> usize {
         usize::try_from(self.position()).expect("memory allocation not to exceed usize")
     }
 
     fn as_slice(&self) -> &[u8] {
-        self.get_ref()
+        &self.get_ref()[..Buffer::position(self)]
     }
 
     fn as_mut(&mut self) -> &mut [u8] {
-        self.get_mut()
+        let len = Buffer::position(self);
+        &mut self.get_mut()[..len]
     }
 
     fn write_zeroes(&mut self, n: usize) {
@@ -639,13 +646,16 @@ impl Buffer for Cursor<&mut [u8]> {
     }
 
     fn rotate_right(&mut self, start: usize, count: usize) {
-        self.get_mut()[start..].rotate_right(count);
+        let len = Buffer::position(self);
+        self.get_mut()[start..len].rotate_right(count);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Decoder, Encoder};
+    use std::io::Cursor;
+
+    use super::{Buffer, Decoder, Encoder};
 
     #[test]
     fn decode() {
@@ -1032,5 +1042,97 @@ mod tests {
         assert_eq!(enc, Encoder::from_hex("0102340000"));
         enc.pad_to(7, 0xc2);
         assert_eq!(enc, Encoder::from_hex("0102340000c2c2"));
+    }
+
+    #[test]
+    fn buffer_write_zeroes() {
+        fn check_write_zeroes<B: Buffer>(mut buf: B) {
+            const NUM_BYTES: usize = 5;
+
+            assert!(buf.is_empty());
+
+            buf.write_zeroes(NUM_BYTES);
+
+            assert_eq!(buf.position(), NUM_BYTES);
+            let written = &buf.as_slice()[..NUM_BYTES];
+            assert!(written.iter().all(|&b| b == 0));
+        }
+
+        check_write_zeroes(Vec::<u8>::new());
+
+        let mut buf = Vec::<u8>::new();
+        check_write_zeroes(&mut buf);
+
+        let mut buf = [0; 16];
+        check_write_zeroes(Cursor::new(&mut buf[..]));
+    }
+
+    #[test]
+    fn buffer_rotate_right() {
+        fn check_rotate_right<B: Buffer>(mut buf: B) {
+            const DATA: [u8; 5] = [1, 2, 3, 4, 5];
+            const EXPECTED: [u8; 5] = [1, 4, 5, 2, 3];
+            const START: usize = 1;
+            const COUNT: usize = 2;
+
+            buf.write_all(&DATA).expect("Buffer has enough capacity.");
+
+            buf.rotate_right(START, COUNT);
+
+            assert_eq!(&buf.as_slice()[..EXPECTED.len()], EXPECTED);
+        }
+
+        check_rotate_right(Vec::<u8>::new());
+
+        let mut buf = Vec::<u8>::new();
+        check_rotate_right(&mut buf);
+
+        let mut buf = [0; 16];
+        check_rotate_right(Cursor::new(&mut buf[..]));
+    }
+
+    #[test]
+    fn encoder_as_mut() {
+        fn check_as_mut<B: Buffer>(mut enc: Encoder<B>) {
+            enc.encode_byte(41);
+            enc.as_mut()[0] = 42;
+            assert_eq!(enc.as_ref(), &[42]);
+        }
+
+        check_as_mut(Encoder::default());
+
+        let mut buf = Vec::<u8>::new();
+        check_as_mut(Encoder::new_borrowed_vec(&mut buf));
+
+        let mut buf = [0; 16];
+        check_as_mut(Encoder::new_borrowed_slice(&mut buf[..]));
+    }
+
+    /// When reusing one [`Buffer`] across [`Encoder`]s, [`Buffer::position`]
+    /// can be larger than [`Encoder::len`].
+    #[test]
+    fn buffer_vs_encoder_len() {
+        let mut non_empty_vec = vec![1, 2, 3, 4];
+        assert_eq!(non_empty_vec.len(), Buffer::position(&non_empty_vec));
+
+        let mut enc = Encoder::new_borrowed_vec(&mut non_empty_vec);
+        assert!(enc.is_empty());
+        enc.encode_byte(5);
+        assert_eq!(enc.len(), 1);
+
+        assert_eq!(non_empty_vec.len(), 5);
+        assert_eq!(non_empty_vec.len(), Buffer::position(&non_empty_vec));
+    }
+
+    /// [`Buffer::position`] returns the number of bytes written to and not the
+    /// length of the underyling buffer.
+    ///
+    /// When using [`Vec<u8>`] length and position are equal. When using
+    /// [`Cursor<&mut [u8]>`] they are not.
+    #[test]
+    fn buffer_position() {
+        let mut a = [0; 16];
+        let buf = Cursor::new(&mut a[..]);
+        assert_eq!(Buffer::position(&buf), 0);
     }
 }
