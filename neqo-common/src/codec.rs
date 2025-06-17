@@ -598,7 +598,7 @@ impl Buffer for Cursor<&mut [u8]> {
         let end = start + n;
 
         self.get_mut()[start..end].fill(0);
-        self.set_position(end as u64);
+        self.set_position(u64::try_from(end).expect("Position cannot exceed u64"));
     }
 
     fn write_at(&mut self, pos: usize, data: u8) {
