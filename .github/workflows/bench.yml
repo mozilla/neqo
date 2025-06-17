@@ -285,11 +285,13 @@ jobs:
           for server in "${!server_cmd[@]}"; do
             cp "$(echo "${server_cmd[$server]}" | cut -f1 -d' ')" binaries/
             for client in "${!client_cmd[@]}"; do
+              echo
               # Do not run msquic and s2n-quic against google-quiche and quiche; the latter only support H3.
               if [[ "$client" != "$server" && "$client" != "neqo" && "$server" != "neqo" ]]; then
-                echo "Skipping $client vs. $server"
+                echo "*** Skipping $client vs. $server"
                 continue
               fi
+              echo "*** Running $client vs. $server"
               cp "$(echo "${client_cmd[$client]}" | cut -f1 -d' ')" binaries/
               # google-quiche binaries don't have write permissions by default?!
               chmod u+w binaries/*
@@ -307,6 +309,7 @@ jobs:
               fi
               for cc in "${cc_opt[@]}"; do
                 for pacing in "${pacing_opt[@]}"; do
+                  echo "*** Running retrieval verification test for $client vs. $server"
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}" ""
                   FILENAME="$client-$server$EXT"
                   SERVER_CMD="$CMD"
@@ -334,7 +337,7 @@ jobs:
                   # Make a tag string for this test.
                   COMMAND="$client vs. $server${cc:+ (}$cc${pacing:+, paced}${cc:+)}"
                   if [[ "$client" == "neqo" || "$server" == "neqo" ]]; then
-                    echo "Generate main-branch results for comparison."
+                    echo "*** Running main-branch hyperfine tests for $client vs. $server"
                     echo "Server command: ${SERVER_CMD/neqo/neqo-main}"
                     echo "Client command: ${CMD/neqo/neqo-main}"
                     nice -n -20 setarch --addr-no-randomize hyperfine \
@@ -347,6 +350,7 @@ jobs:
                   fi
 
                   # Now do the actual hyperfine runs.
+                  echo "*** Running PR-branch hyperfine tests for $client vs. $server"
                   nice -n -20 setarch --addr-no-randomize hyperfine \
                     --command-name "$COMMAND" --time-unit millisecond  \
                     --export-json "$WORKSPACE/hyperfine/$FILENAME.json" \
@@ -359,6 +363,7 @@ jobs:
                   # Do a longer run with perf separately. We used to just wrap the hyperfine command above in perf,
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
                   # the perf profiles of those different runs.
+                  echo "*** Running PR-branch perf tests for $client vs. $server"
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec \
                     perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.server.perf" $WORKSPACE/$SERVER_CMD &
@@ -370,6 +375,7 @@ jobs:
                   pkill "$SERVER_TAG"
                   cd "$WORKSPACE"
 
+                  echo "*** Preparing results report for $client vs. $server"
                   if [[ "$client" == "neqo" && "$server" == "neqo" && "$cc" == "cubic" && "$pacing" == "on" ||
                         "$client" == "$server" && "$client" != "neqo" && "$server" != "neqo" ]]; then
                     BOLD="**"
