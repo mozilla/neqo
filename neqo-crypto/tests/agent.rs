@@ -8,7 +8,7 @@ use std::ffi::CStr;
 
 use neqo_crypto::{
     agent::CertificateCompressor, generate_ech_keys, AuthenticationStatus, Client, Error,
-    HandshakeState, SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,
+    HandshakeState, Res, SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,
     TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
     TLS_VERSION_1_3,
 };
@@ -544,13 +544,13 @@ fn connection_succeeds_when_server_and_client_support_cert_compr_copy() {
         const NAME: &CStr = c"copy";
         const ENABLE_ENCODING: bool = true;
 
-        fn decode(input: &[u8], output: &mut [u8]) -> Result<usize, ()> {
+        fn decode(input: &[u8], output: &mut [u8]) -> Res<usize> {
             let len = std::cmp::min(input.len(), output.len());
             output[..len].copy_from_slice(&input[..len]);
             Ok(len)
         }
 
-        fn encode(input: &[u8], output: &mut [u8]) -> Result<usize, ()> {
+        fn encode(input: &[u8], output: &mut [u8]) -> Res<usize> {
             let len = std::cmp::min(input.len(), output.len());
             output[..len].copy_from_slice(&input[..len]);
             Ok(len)
@@ -580,7 +580,7 @@ impl CertificateCompressor for CopyCompressionNoEncoder {
     const ID: u16 = 0x4;
     const NAME: &CStr = c"copy";
 
-    fn decode(input: &[u8], output: &mut [u8]) -> Result<usize, ()> {
+    fn decode(input: &[u8], output: &mut [u8]) -> Res<usize> {
         let len = std::cmp::min(input.len(), output.len());
         output[..len].copy_from_slice(&input[..len]);
         Ok(len)
@@ -646,16 +646,16 @@ impl CertificateCompressor for CopyCompressionNoEncoderReturnsErr {
 
     const ENABLE_ENCODING: bool = true;
 
-    fn encode(input: &[u8], output: &mut [u8]) -> Result<usize, ()> {
+    fn encode(input: &[u8], output: &mut [u8]) -> Res<usize> {
         let len = std::cmp::min(input.len(), output.len());
         output[..len].copy_from_slice(&input[..len]);
         Ok(len)
     }
 
-    fn decode(input: &[u8], output: &mut [u8]) -> Result<usize, ()> {
+    fn decode(input: &[u8], output: &mut [u8]) -> Res<usize> {
         let len = std::cmp::min(input.len(), output.len());
         output[..len].copy_from_slice(&input[..len]);
-        Err(())
+        Err(Error::CertificateDecoding)
     }
 }
 
