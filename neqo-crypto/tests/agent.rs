@@ -578,7 +578,6 @@ fn connection_succeeds_when_server_and_client_support_cert_compr_copy() {
     assert!(server.state().is_connected());
 }
 
-
 #[test]
 fn connection_succeeds_when_server_and_client_default_encoding() {
     struct DefaultEncoding {}
@@ -612,7 +611,6 @@ fn connection_succeeds_when_server_and_client_default_encoding() {
     assert!(client.state().is_connected());
     assert!(server.state().is_connected());
 }
-
 
 struct CopyCompressionNoEncoder {}
 
