@@ -324,11 +324,15 @@ jobs:
                   # shellcheck disable=SC2086
                   $WORKSPACE/$SERVER_CMD > /dev/null 2>&1 &
                   sleep 0.2
-                  eval "$WORKSPACE/$CMD 2> /dev/null"
+                  eval "$WORKSPACE/$CMD"
                   pkill "$SERVER_TAG"
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
-                  [ "$(wc -c <"$TMP/out/$SIZE")" -ge "$SIZE" ] || exit 1
+                  FILE_SIZE=$(wc -c <"$TMP/out/$SIZE")
+                  if [ "$FILE_SIZE" -lt "$SIZE" ]; then
+                    echo "Error: File size mismatch for $client vs. $server, $SIZE expected, got $FILE_SIZE"
+                    exit 1
+                  fi
                   # Don't write to disk following this.
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}" ""
 
