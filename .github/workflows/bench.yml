@@ -331,7 +331,9 @@ jobs:
                     # shellcheck disable=SC2086
                     $WORKSPACE/$CMD > /dev/null 2>&1
                   fi
+                  pgrep "$SERVER_TAG" || true
                   pkill "$SERVER_TAG"
+                  pgrep "$SERVER_TAG" || true
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
                   FILE_SIZE=$(wc -c <"$TMP/out/$SIZE")
@@ -370,15 +372,19 @@ jobs:
                   # but that uses different processes for the individual runs, and there is apparently no way to merge
                   # the perf profiles of those different runs.
                   echo "*** Running PR-branch perf tests for $client vs. $server"
+                  pgrep "$SERVER_TAG" || true
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec \
-                    perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.server.perf" $WORKSPACE/$SERVER_CMD & # > /dev/null 2>&1 &
+                    perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.server.perf" $WORKSPACE/$SERVER_CMD &
+                  # > /dev/null 2>&1 &
                   sleep 0.2
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
-                    perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD # > /dev/null 2>&1
+                    perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD > /dev/null 2>&1
+                  pgrep "$SERVER_TAG" || true
                   pkill "$SERVER_TAG"
+                  pgrep "$SERVER_TAG" || true
                   cd "$WORKSPACE"
 
                   echo "*** Preparing results report for $client vs. $server"
