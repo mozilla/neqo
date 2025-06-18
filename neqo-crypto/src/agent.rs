@@ -174,10 +174,9 @@ unsafe impl<T: CertificateCompressor> UnsafeCertCompression for T {
                                 return ssl::SECFailure;
                             }
 
-                            let rv = p11::SECITEM_ReallocItem(
+                            let rv = p11::SECITEM_ReallocItemV2(
                                 null_mut(),
                                 output.cast::<p11::SECItemStr>(),
-                                (*output).len,
                                 encoded_len.try_into().unwrap(),
                             );
 

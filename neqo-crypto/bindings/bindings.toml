@@ -172,7 +172,7 @@ functions = [
     "PK11_ReadRawAttribute",
     "PK11_ReferenceSymKey",
     "SECITEM_AllocItem",
-    "SECITEM_ReallocItem",
+    "SECITEM_ReallocItemV2",
     "SECITEM_FreeArray",
     "SECITEM_FreeItem",
     "SECKEY_CopyPrivateKey",
