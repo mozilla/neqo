@@ -452,7 +452,7 @@ impl Connection {
     /// # Errors
     /// When the operation fails.
     pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
-        self.crypto.tls.set_certificate_compression::<T>()?;
+        self.crypto.tls_mut().set_certificate_compression::<T>()?;
         Ok(())
     }
 

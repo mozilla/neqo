@@ -85,6 +85,8 @@ pub trait CertificateCompressor {
     /// Certificate Compression encoding function
     /// If the implementation is not provided, we only copy the data
     /// NB: If `ENABLE_ENCODING` is not set, the function pointer provided to NSS will be null
+    /// # Errors
+    /// Encoding was unsuccessful, for example, not enough memory
     #[must_use]
     fn encode(input: &[u8], output: &mut [u8]) -> Result<usize, ()> {
         let len = std::cmp::min(input.len(), output.len());
@@ -94,6 +96,8 @@ pub trait CertificateCompressor {
 
     /// Certificate Compression decoding function. Returns the length of the decoded buffer,
     /// or 0 if an error has occured.
+    /// # Errors
+    /// Decoding was unsuccessful, for example, not enough memory
     #[must_use]
     fn decode(input: &[u8], output: &mut [u8]) -> Result<usize, ()>;
 }
@@ -120,9 +124,7 @@ unsafe impl<T: CertificateCompressor> UnsafeCertCompression for T {
                         core::slice::from_raw_parts_mut(output, output_len);
                     let decode_result = T::decode(input_slice, output_slice);
                     match decode_result {
-                        Err(()) => {
-                            return ssl::SECFailure;
-                        }
+                        Err(()) => return ssl::SECFailure,
                         Ok(decoded_len) => {
                             if decoded_len != output_len {
                                 return ssl::SECFailure;
@@ -166,9 +168,7 @@ unsafe impl<T: CertificateCompressor> UnsafeCertCompression for T {
 
                     let encode_result = T::encode(input_slice, output_slice);
                     match encode_result {
-                        Err(()) => {
-                            return ssl::SECFailure;
-                        }
+                        Err(()) => return ssl::SECFailure,
                         Ok(encoded_len) => {
                             if encoded_len == 0 {
                                 return ssl::SECFailure;
