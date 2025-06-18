@@ -322,7 +322,7 @@ jobs:
                   # downloaded it. We're not doing this during hyperfine or perf runs, because the
                   # writing-to-disk incurrs overheads we're not interested in.
                   # shellcheck disable=SC2086
-                  $WORKSPACE/$SERVER_CMD > /dev/null 2>&1 &
+                  $WORKSPACE/$SERVER_CMD &
                   sleep 0.2
                   eval "$WORKSPACE/$CMD"
                   pkill "$SERVER_TAG"
