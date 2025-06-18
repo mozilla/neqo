@@ -578,6 +578,42 @@ fn connection_succeeds_when_server_and_client_support_cert_compr_copy() {
     assert!(server.state().is_connected());
 }
 
+
+#[test]
+fn connection_succeeds_when_server_and_client_default_encoding() {
+    struct DefaultEncoding {}
+
+    // Implementation supports both encoder and decoder
+    impl CertificateCompressor for DefaultEncoding {
+        const ID: u16 = 0x4;
+        const NAME: &CStr = c"copy";
+        const ENABLE_ENCODING: bool = true;
+
+        fn decode(input: &[u8], output: &mut [u8]) -> Res<usize> {
+            let len = std::cmp::min(input.len(), output.len());
+            output[..len].copy_from_slice(&input[..len]);
+            Ok(len)
+        }
+    }
+
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    client
+        .set_certificate_compression::<DefaultEncoding>()
+        .unwrap();
+    server
+        .set_certificate_compression::<DefaultEncoding>()
+        .unwrap();
+
+    connect(&mut client, &mut server);
+
+    assert!(client.state().is_connected());
+    assert!(server.state().is_connected());
+}
+
+
 struct CopyCompressionNoEncoder {}
 
 impl CertificateCompressor for CopyCompressionNoEncoder {
