@@ -6,7 +6,7 @@
 
 use std::{
     cell::RefCell,
-    fmt::{Debug, Display},
+    fmt::{self, Debug, Display, Formatter},
     iter,
     net::SocketAddr,
     rc::Rc,
@@ -286,7 +286,7 @@ pub struct Http3Client {
 }
 
 impl Display for Http3Client {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Http3 client")
     }
 }
@@ -296,8 +296,8 @@ impl Http3Client {
     ///
     /// Making a `neqo-transport::connection` may produce an error. This can only be a crypto error
     /// if the crypto context can't be created or configured.
-    pub fn new(
-        server_name: impl Into<String>,
+    pub fn new<I: Into<String>>(
+        server_name: I,
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
@@ -352,7 +352,7 @@ impl Http3Client {
     /// The function returns the current state of the connection.
     #[must_use]
     pub fn state(&self) -> Http3State {
-        self.base_handler.state()
+        self.base_handler.state().clone()
     }
 
     #[must_use]
@@ -384,7 +384,7 @@ impl Http3Client {
     /// # Errors
     ///
     /// Fails when the configuration provided is bad.
-    pub fn enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
+    pub fn enable_ech<A: AsRef<[u8]>>(&mut self, ech_config_list: A) -> Res<()> {
         self.conn.client_enable_ech(ech_config_list)?;
         Ok(())
     }
@@ -422,9 +422,8 @@ impl Http3Client {
     /// connection the HTTP/3 setting will be decoded and used until the setting are received from
     /// the server.
     pub fn take_resumption_token(&mut self, now: Instant) -> Option<ResumptionToken> {
-        self.conn
-            .take_resumption_token(now)
-            .and_then(|t| self.encode_resumption_token(&t))
+        let t = self.conn.take_resumption_token(now)?;
+        self.encode_resumption_token(&t)
     }
 
     /// This may be call if an application has a resumption token. This must be called before
@@ -440,8 +439,8 @@ impl Http3Client {
     /// # Panics
     ///
     /// On closing if the base handler can't handle it (debug only).
-    pub fn enable_resumption(&mut self, now: Instant, token: impl AsRef<[u8]>) -> Res<()> {
-        if self.base_handler.state != Http3State::Initializing {
+    pub fn enable_resumption<A: AsRef<[u8]>>(&mut self, now: Instant, token: A) -> Res<()> {
+        if self.base_handler.state() != &Http3State::Initializing {
             return Err(Error::InvalidState);
         }
         let mut dec = Decoder::from(token.as_ref());
@@ -464,13 +463,13 @@ impl Http3Client {
                 .base_handler
                 .handle_state_change(&mut self.conn, &state);
             debug_assert_eq!(Ok(true), res);
-            return Err(Error::FatalError);
+            return Err(Error::Fatal);
         }
         if self.conn.zero_rtt_state() == ZeroRttState::Sending {
             self.base_handler
                 .set_0rtt_settings(&mut self.conn, settings)?;
             self.events
-                .connection_state_change(self.base_handler.state());
+                .connection_state_change(self.base_handler.state().clone());
             self.push_handler
                 .borrow_mut()
                 .maybe_send_max_push_id_frame(&mut self.base_handler);
@@ -485,14 +484,14 @@ impl Http3Client {
     {
         qinfo!("[{self}] Close the connection error={error} msg={msg}");
         if !matches!(
-            self.base_handler.state,
+            self.base_handler.state(),
             Http3State::Closing(_) | Http3State::Closed(_)
         ) {
             self.push_handler.borrow_mut().clear();
             self.conn.close(now, error, msg);
             self.base_handler.close(error);
             self.events
-                .connection_state_change(self.base_handler.state());
+                .connection_state_change(self.base_handler.state().clone());
         }
     }
 
@@ -623,7 +622,7 @@ impl Http3Client {
             buf.len()
         );
         self.base_handler
-            .send_streams
+            .send_streams_mut()
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .send_data(&mut self.conn, buf)
@@ -761,11 +760,11 @@ impl Http3Client {
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
-    pub fn webtransport_send_datagram(
+    pub fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         session_id: StreamId,
         buf: &[u8],
-        id: impl Into<DatagramTracking>,
+        id: I,
     ) -> Res<()> {
         qtrace!("webtransport_send_datagram session:{session_id:?}");
         self.base_handler
@@ -822,7 +821,7 @@ impl Http3Client {
     /// `InvalidStreamId` if the stream does not exist.
     pub fn webtransport_send_stream_stats(&mut self, stream_id: StreamId) -> Res<SendStreamStats> {
         self.base_handler
-            .send_streams
+            .send_streams_mut()
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .stats(&mut self.conn)
@@ -835,16 +834,16 @@ impl Http3Client {
     /// `InvalidStreamId` if the stream does not exist.
     pub fn webtransport_recv_stream_stats(&mut self, stream_id: StreamId) -> Res<RecvStreamStats> {
         self.base_handler
-            .recv_streams
+            .recv_streams_mut()
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .stats(&mut self.conn)
     }
 
     /// This function combines  `process_input` and `process_output` function.
-    pub fn process(
+    pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
-        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
         qtrace!("[{self}] Process");
@@ -864,13 +863,20 @@ impl Http3Client {
     /// packets need to be sent or if a timer needs to be updated.
     ///
     /// [1]: ../neqo_transport/enum.ConnectionEvent.html
-    pub fn process_input(&mut self, dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>, now: Instant) {
+    pub fn process_input<A: AsRef<[u8]> + AsMut<[u8]>>(
+        &mut self,
+        dgram: Datagram<A>,
+        now: Instant,
+    ) {
         self.process_multiple_input(iter::once(dgram), now);
     }
 
-    pub fn process_multiple_input(
+    pub fn process_multiple_input<
+        A: AsRef<[u8]> + AsMut<[u8]>,
+        I: IntoIterator<Item = Datagram<A>>,
+    >(
         &mut self,
-        dgrams: impl IntoIterator<Item = Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        dgrams: I,
         now: Instant,
     ) {
         let mut dgrams = dgrams.into_iter().peekable();
@@ -1000,7 +1006,7 @@ impl Http3Client {
                     self.base_handler.add_new_stream(stream_id);
                 }
                 ConnectionEvent::SendStreamWritable { stream_id } => {
-                    if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id) {
+                    if let Some(s) = self.base_handler.send_streams_mut().get_mut(&stream_id) {
                         s.stream_writable();
                     }
                 }
@@ -1035,7 +1041,7 @@ impl Http3Client {
                         .handle_state_change(&mut self.conn, &state)?
                     {
                         self.events
-                            .connection_state_change(self.base_handler.state());
+                            .connection_state_change(self.base_handler.state().clone());
                     }
                 }
                 ConnectionEvent::ZeroRttRejected => {
@@ -1156,7 +1162,7 @@ impl Http3Client {
                     stream_id,
                     first_frame_type: None,
                 },
-                Rc::clone(&self.base_handler.qpack_decoder),
+                Rc::clone(self.base_handler.qpack_decoder()),
                 Box::new(RecvPushEvents::new(push_id, Rc::clone(&self.push_handler))),
                 None,
                 // TODO: think about the right priority for the push streams.
@@ -1177,9 +1183,10 @@ impl Http3Client {
             return Err(Error::HttpId);
         }
 
-        match self.base_handler.state {
+        match self.base_handler.state_mut() {
             Http3State::Connected => {
-                self.base_handler.state = Http3State::GoingAway(goaway_stream_id);
+                self.base_handler
+                    .set_state(Http3State::GoingAway(goaway_stream_id));
             }
             Http3State::GoingAway(ref mut stream_id) => {
                 if goaway_stream_id > *stream_id {
@@ -1194,7 +1201,7 @@ impl Http3Client {
         // Issue reset events for streams >= goaway stream id
         let send_ids: Vec<StreamId> = self
             .base_handler
-            .send_streams
+            .send_streams()
             .iter()
             .filter_map(id_gte(goaway_stream_id))
             .collect();
@@ -1209,7 +1216,7 @@ impl Http3Client {
 
         let recv_ids: Vec<StreamId> = self
             .base_handler
-            .recv_streams
+            .recv_streams()
             .iter()
             .filter_map(id_gte(goaway_stream_id))
             .collect();
@@ -1240,12 +1247,12 @@ impl Http3Client {
 
     #[must_use]
     pub fn qpack_decoder_stats(&self) -> QpackStats {
-        self.base_handler.qpack_decoder.borrow().stats()
+        self.base_handler.qpack_decoder().borrow().stats()
     }
 
     #[must_use]
     pub fn qpack_encoder_stats(&self) -> QpackStats {
-        self.base_handler.qpack_encoder.borrow().stats()
+        self.base_handler.qpack_encoder().borrow().stats()
     }
 
     #[must_use]
@@ -2144,7 +2151,7 @@ mod tests {
         let (mut client, mut server) = connect();
         server
             .conn
-            .stream_reset_send(server.control_stream_id.unwrap(), Error::HttpNoError.code())
+            .stream_reset_send(server.control_stream_id.unwrap(), Error::HttpNone.code())
             .unwrap();
         let out = server.conn.process_output(now());
         client.process(out.dgram(), now());
@@ -2158,7 +2165,7 @@ mod tests {
         let (mut client, mut server) = connect();
         server
             .conn
-            .stream_reset_send(server.encoder_stream_id.unwrap(), Error::HttpNoError.code())
+            .stream_reset_send(server.encoder_stream_id.unwrap(), Error::HttpNone.code())
             .unwrap();
         let out = server.conn.process_output(now());
         client.process(out.dgram(), now());
@@ -2172,7 +2179,7 @@ mod tests {
         let (mut client, mut server) = connect();
         server
             .conn
-            .stream_reset_send(server.decoder_stream_id.unwrap(), Error::HttpNoError.code())
+            .stream_reset_send(server.decoder_stream_id.unwrap(), Error::HttpNone.code())
             .unwrap();
         let out = server.conn.process_output(now());
         client.process(out.dgram(), now());
@@ -2186,7 +2193,7 @@ mod tests {
         let (mut client, mut server) = connect();
         server
             .conn
-            .stream_stop_sending(CLIENT_SIDE_CONTROL_STREAM_ID, Error::HttpNoError.code())
+            .stream_stop_sending(CLIENT_SIDE_CONTROL_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = server.conn.process_output(now());
         client.process(out.dgram(), now());
@@ -2200,7 +2207,7 @@ mod tests {
         let (mut client, mut server) = connect();
         server
             .conn
-            .stream_stop_sending(CLIENT_SIDE_ENCODER_STREAM_ID, Error::HttpNoError.code())
+            .stream_stop_sending(CLIENT_SIDE_ENCODER_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = server.conn.process_output(now());
         client.process(out.dgram(), now());
@@ -2214,7 +2221,7 @@ mod tests {
         let (mut client, mut server) = connect();
         server
             .conn
-            .stream_stop_sending(CLIENT_SIDE_DECODER_STREAM_ID, Error::HttpNoError.code())
+            .stream_stop_sending(CLIENT_SIDE_DECODER_STREAM_ID, Error::HttpNone.code())
             .unwrap();
         let out = server.conn.process_output(now());
         client.process(out.dgram(), now());
@@ -2953,7 +2960,7 @@ mod tests {
             Ok(()),
             server
                 .conn
-                .stream_stop_sending(request_stream_id, Error::HttpNoError.code())
+                .stream_stop_sending(request_stream_id, Error::HttpNone.code())
         );
 
         // send response - 200  Content-Length: 3
@@ -2973,7 +2980,7 @@ mod tests {
             match e {
                 Http3ClientEvent::StopSending { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
-                    assert_eq!(error, Error::HttpNoError.code());
+                    assert_eq!(error, Error::HttpNone.code());
                     // assert that we cannot send any more request data.
                     assert_eq!(
                         Err(Error::InvalidStreamId),
@@ -7025,7 +7032,7 @@ mod tests {
             DEFAULT_ALPN_H3,
             ConnectionParameters::default().max_streams(StreamType::UniDi, 0),
         ));
-        handshake_client_error(&mut client, &mut server, &Error::StreamLimitError);
+        handshake_client_error(&mut client, &mut server, &Error::StreamLimit);
     }
 
     /// 2 streams isn't enough for control and QPACK streams.
@@ -7036,7 +7043,7 @@ mod tests {
             DEFAULT_ALPN_H3,
             ConnectionParameters::default().max_streams(StreamType::UniDi, 2),
         ));
-        handshake_client_error(&mut client, &mut server, &Error::StreamLimitError);
+        handshake_client_error(&mut client, &mut server, &Error::StreamLimit);
     }
 
     fn do_malformed_response_test(headers: &[Header]) {
@@ -7252,7 +7259,7 @@ mod tests {
     fn manipulate_conrol_stream(client: &mut Http3Client, stream_id: StreamId) {
         assert_eq!(
             client
-                .cancel_fetch(stream_id, Error::HttpNoError.code())
+                .cancel_fetch(stream_id, Error::HttpNone.code())
                 .unwrap_err(),
             Error::InvalidStreamId
         );
@@ -7281,7 +7288,7 @@ mod tests {
         manipulate_conrol_stream(&mut client, server.encoder_stream_id.unwrap());
         manipulate_conrol_stream(&mut client, server.decoder_stream_id.unwrap());
         client
-            .cancel_fetch(request_stream_id, Error::HttpNoError.code())
+            .cancel_fetch(request_stream_id, Error::HttpNone.code())
             .unwrap();
     }
 

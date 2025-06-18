@@ -51,41 +51,41 @@ mod http3;
 
 #[derive(Debug)]
 pub enum Error {
-    ArgumentError(&'static str),
-    Http3Error(neqo_http3::Error),
-    IoError(io::Error),
-    QlogError,
-    TransportError(neqo_transport::Error),
-    CryptoError(neqo_crypto::Error),
+    Argument(&'static str),
+    Http3(neqo_http3::Error),
+    Io(io::Error),
+    Qlog,
+    Transport(neqo_transport::Error),
+    Crypto(neqo_crypto::Error),
 }
 
 impl From<neqo_crypto::Error> for Error {
     fn from(err: neqo_crypto::Error) -> Self {
-        Self::CryptoError(err)
+        Self::Crypto(err)
     }
 }
 
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
-        Self::IoError(err)
+        Self::Io(err)
     }
 }
 
 impl From<neqo_http3::Error> for Error {
     fn from(err: neqo_http3::Error) -> Self {
-        Self::Http3Error(err)
+        Self::Http3(err)
     }
 }
 
 impl From<qlog::Error> for Error {
     fn from(_err: qlog::Error) -> Self {
-        Self::QlogError
+        Self::Qlog
     }
 }
 
 impl From<neqo_transport::Error> for Error {
     fn from(err: neqo_transport::Error) -> Self {
-        Self::TransportError(err)
+        Self::Transport(err)
     }
 }
 
@@ -191,6 +191,10 @@ impl Args {
     pub fn set_qlog_dir(&mut self, dir: PathBuf) {
         self.shared.qlog_dir = Some(dir);
     }
+
+    pub fn set_hosts(&mut self, hosts: Vec<String>) {
+        self.hosts = hosts;
+    }
 }
 
 fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
@@ -228,6 +232,14 @@ impl ServerRunner {
             sockets,
             recv_buf: RecvBuf::new(),
         }
+    }
+
+    #[must_use]
+    pub fn local_addresses(&self) -> Vec<SocketAddr> {
+        self.sockets
+            .iter()
+            .map(|(_, s)| s.local_addr().unwrap())
+            .collect()
     }
 
     /// Tries to find a socket, but then just falls back to sending from the first.
@@ -360,7 +372,7 @@ enum Ready {
     Timeout,
 }
 
-pub async fn server(mut args: Args) -> Res<()> {
+pub fn server(mut args: Args) -> Res<ServerRunner> {
     neqo_common::log::init(
         args.shared
             .verbose
@@ -414,12 +426,14 @@ pub async fn server(mut args: Args) -> Res<()> {
         qerror!("No valid hosts defined");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts").into());
     }
-    let sockets = hosts
+    let sockets: Vec<(SocketAddr, crate::udp::Socket)> = hosts
         .into_iter()
         .map(|host| {
             let socket = crate::udp::Socket::bind(host)?;
-            let local_addr = socket.local_addr()?;
-            qinfo!("Server waiting for connection on: {local_addr:?}");
+            qinfo!(
+                "Server waiting for connection on: {:?}",
+                socket.local_addr()
+            );
 
             Ok((host, socket))
         })
@@ -438,7 +452,9 @@ pub async fn server(mut args: Args) -> Res<()> {
         )
     };
 
-    ServerRunner::new(Box::new(move || args.now()), server, sockets)
-        .run()
-        .await
+    Ok(ServerRunner::new(
+        Box::new(move || args.now()),
+        server,
+        sockets,
+    ))
 }

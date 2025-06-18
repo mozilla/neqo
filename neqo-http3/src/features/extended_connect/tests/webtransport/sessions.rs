@@ -49,7 +49,7 @@ fn wt_session_close_client() {
     wt.cancel_session_client(wt_session.stream_id());
     wt.check_session_closed_event_server(
         &wt_session,
-        &SessionCloseReason::Error(Error::HttpNoError.code()),
+        &SessionCloseReason::Error(Error::HttpNone.code()),
     );
 }
 
@@ -61,7 +61,7 @@ fn wt_session_close_server() {
     wt.cancel_session_server(&wt_session);
     wt.check_session_closed_event_client(
         wt_session.stream_id(),
-        &SessionCloseReason::Error(Error::HttpNoError.code()),
+        &SessionCloseReason::Error(Error::HttpNone.code()),
         None,
     );
 }
@@ -89,12 +89,12 @@ fn wt_session_close_server_stop_sending() {
     let wt_session = wt.create_wt_session();
 
     wt_session
-        .stream_stop_sending(Error::HttpNoError.code())
+        .stream_stop_sending(Error::HttpNone.code())
         .unwrap();
     wt.exchange_packets();
     wt.check_session_closed_event_client(
         wt_session.stream_id(),
-        &SessionCloseReason::Error(Error::HttpNoError.code()),
+        &SessionCloseReason::Error(Error::HttpNone.code()),
         None,
     );
 }
@@ -105,12 +105,12 @@ fn wt_session_close_server_reset() {
     let wt_session = wt.create_wt_session();
 
     wt_session
-        .stream_reset_send(Error::HttpNoError.code())
+        .stream_reset_send(Error::HttpNone.code())
         .unwrap();
     wt.exchange_packets();
     wt.check_session_closed_event_client(
         wt_session.stream_id(),
-        &SessionCloseReason::Error(Error::HttpNoError.code()),
+        &SessionCloseReason::Error(Error::HttpNone.code()),
         None,
     );
 }
@@ -366,9 +366,7 @@ fn receive_request(server: &Http3Server) -> Option<Http3OrWebTransportStream> {
 }
 
 #[test]
-// Ignoring this test as it is panicking at wt.create_wt_stream_client
-// Issue # 1386 is created to track this
-#[ignore]
+#[ignore = "Is panicking at wt.create_wt_stream_client; see issue #1386"]
 fn wt_close_session_cannot_be_sent_at_once() {
     const BUF: &[u8] = &[0; 443];
     const ERROR_NUM: u32 = 23;

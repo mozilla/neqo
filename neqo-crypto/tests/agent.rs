@@ -14,7 +14,7 @@ use neqo_crypto::{
 };
 
 mod handshake;
-use test_fixture::{fixture_init, now};
+use test_fixture::{damage_ech_config, fixture_init, now};
 
 use crate::handshake::{
     connect, connect_fail, forward_records, resumption_setup, PermissiveZeroRttChecker, Resumption,
@@ -486,14 +486,9 @@ fn ech_retry() {
     server.enable_ech(CONFIG_ID, PUBLIC_NAME, &sk, &pk).unwrap();
 
     let mut client = Client::new(PRIVATE_NAME, true).unwrap();
-    let mut cfg = Vec::from(server.ech_config());
-    // Ensure that the version and config_id is correct.
-    assert_eq!(cfg[2], 0xfe);
-    assert_eq!(cfg[3], 0x0d);
-    assert_eq!(cfg[6], CONFIG_ID);
-    // Change the config_id so that the server doesn't recognize this.
-    cfg[6] ^= 0x94;
-    client.enable_ech(&cfg).unwrap();
+    client
+        .enable_ech(damage_ech_config(server.ech_config()))
+        .unwrap();
 
     // Long version of connect() so that we can check the state.
     let records = client.handshake_raw(now(), None).unwrap(); // ClientHello
@@ -524,7 +519,7 @@ fn ech_retry() {
     );
     // We don't forward alerts, so we can't tell the server about them.
     // An ech_required alert should be set though.
-    assert_eq!(client.alert(), Some(&121));
+    assert_eq!(client.alert(), Some(121));
 
     let mut server = Server::new(&["key"]).unwrap();
     server.enable_ech(CONFIG_ID, PUBLIC_NAME, &sk, &pk).unwrap();

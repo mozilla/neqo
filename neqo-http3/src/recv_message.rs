@@ -4,7 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, cmp::min, collections::VecDeque, fmt::Debug, rc::Rc};
+use std::{
+    cell::RefCell,
+    cmp::min,
+    collections::VecDeque,
+    fmt::{self, Debug, Display, Formatter},
+    rc::Rc,
+};
 
 use neqo_common::{header::HeadersExt as _, qdebug, qinfo, qtrace, Header};
 use neqo_qpack::decoder::QPackDecoder;
@@ -67,6 +73,7 @@ struct PushInfo {
 #[derive(Debug)]
 pub struct RecvMessage {
     state: RecvMessageState,
+    stream_info: Http3StreamInfo,
     message_type: MessageType,
     stream_type: Http3StreamType,
     qpack_decoder: Rc<RefCell<QPackDecoder>>,
@@ -77,8 +84,8 @@ pub struct RecvMessage {
     blocked_push_promise: VecDeque<PushInfo>,
 }
 
-impl ::std::fmt::Display for RecvMessage {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for RecvMessage {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "RecvMessage stream_id:{}", self.stream_id)
     }
 }
@@ -99,6 +106,7 @@ impl RecvMessage {
                         FrameReader::new_with_type(HFrameType(frame_type))
                     }),
             },
+            stream_info: Http3StreamInfo::new(message_info.stream_id, Http3StreamType::Http),
             message_type: message_info.message_type,
             stream_type: message_info.stream_type,
             qpack_decoder,
@@ -173,7 +181,7 @@ impl RecvMessage {
                 .extended_connect_new_session(self.stream_id, headers);
         } else {
             self.conn_events
-                .header_ready(self.get_stream_info(), headers, interim, fin);
+                .header_ready(&self.stream_info, headers, interim, fin);
         }
 
         if fin {
@@ -211,7 +219,7 @@ impl RecvMessage {
             RecvMessageState::WaitingForData { .. }
             | RecvMessageState::WaitingForFinAfterTrailers { .. } => {
                 if post_readable_event {
-                    self.conn_events.data_readable(self.get_stream_info());
+                    self.conn_events.data_readable(&self.stream_info);
                 }
             }
             _ => unreachable!("Closing an already closed transaction"),
@@ -325,7 +333,7 @@ impl RecvMessage {
                 }
                 RecvMessageState::ReadingData { .. } => {
                     if post_readable_event {
-                        self.conn_events.data_readable(self.get_stream_info());
+                        self.conn_events.data_readable(&self.stream_info);
                     }
                     break Ok(());
                 }
@@ -349,7 +357,7 @@ impl RecvMessage {
         }
         self.state = RecvMessageState::Closed;
         self.conn_events
-            .recv_closed(self.get_stream_info(), CloseType::Done);
+            .recv_closed(&self.stream_info, CloseType::Done);
     }
 
     const fn closing(&self) -> bool {
@@ -357,10 +365,6 @@ impl RecvMessage {
             self.state,
             RecvMessageState::ClosePending | RecvMessageState::Closed
         )
-    }
-
-    const fn get_stream_info(&self) -> Http3StreamInfo {
-        Http3StreamInfo::new(self.stream_id, Http3StreamType::Http)
     }
 }
 
@@ -385,8 +389,7 @@ impl RecvStream for RecvMessage {
                 .borrow_mut()
                 .cancel_stream(self.stream_id);
         }
-        self.conn_events
-            .recv_closed(self.get_stream_info(), close_type);
+        self.conn_events.recv_closed(&self.stream_info, close_type);
         self.state = RecvMessageState::Closed;
         Ok(())
     }

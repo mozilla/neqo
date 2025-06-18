@@ -535,7 +535,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         // state and update the variable `self.recovery_start`. Before the
         // first recovery, all packets were sent after the recovery event,
         // allowing to reduce the cwnd on congestion events.
-        !self.state.transient() && self.recovery_start.is_none_or(|pn| packet.pn() >= pn)
+        !self.state.transient() && self.recovery_start.map_or(true, |pn| packet.pn() >= pn)
     }
 
     /// Handle a congestion event.

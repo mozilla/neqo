@@ -15,7 +15,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
       with:
         run-id: ${{ github.event.workflow_run.id }}
         name: ${{ inputs.name }}
@@ -27,10 +27,10 @@ runs:
 
     - shell: bash
       run: |
-        if [ -s log-url ]; then
-          echo "" >> contents
-          echo "[:arrow_down: Download logs]($(cat log-url))" >> contents
-        fi
+        {
+          echo
+          cat log-md
+        } >> contents || true
 
     - uses: thollander/actions-comment-pull-request@fabd468d3a1a0b97feee5f6b9e499eab0dd903f6 # v2.5.0
       with:
