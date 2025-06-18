@@ -536,23 +536,27 @@ fn ech_retry() {
 
 #[test]
 fn connection_succeeds_when_server_and_client_support_cert_compr_copy() {
-    struct CopyCompression {}
+    struct IncDecCompression {}
 
     // Implementation supports both encoder and decoder
-    impl CertificateCompressor for CopyCompression {
+    impl CertificateCompressor for IncDecCompression {
         const ID: u16 = 0x4;
         const NAME: &CStr = c"copy";
         const ENABLE_ENCODING: bool = true;
 
         fn decode(input: &[u8], output: &mut [u8]) -> Res<usize> {
             let len = std::cmp::min(input.len(), output.len());
-            output[..len].copy_from_slice(&input[..len]);
+            for i in 0..len {
+                output[i] = input[i].wrapping_sub(1);
+            }
             Ok(len)
         }
 
         fn encode(input: &[u8], output: &mut [u8]) -> Res<usize> {
             let len = std::cmp::min(input.len(), output.len());
-            output[..len].copy_from_slice(&input[..len]);
+            for i in 0..len {
+                output[i] = input[i].wrapping_add(1);
+            }
             Ok(len)
         }
     }
@@ -562,10 +566,10 @@ fn connection_succeeds_when_server_and_client_support_cert_compr_copy() {
     let mut server = Server::new(&["key"]).expect("should create server");
 
     client
-        .set_certificate_compression::<CopyCompression>()
+        .set_certificate_compression::<IncDecCompression>()
         .unwrap();
     server
-        .set_certificate_compression::<CopyCompression>()
+        .set_certificate_compression::<IncDecCompression>()
         .unwrap();
 
     connect(&mut client, &mut server);
