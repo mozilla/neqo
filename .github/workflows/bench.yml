@@ -374,10 +374,12 @@ jobs:
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec \
                     perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.server.perf" $WORKSPACE/$SERVER_CMD &
                   sleep 1
+                  echo $CMD
                   CMD=${CMD//$SIZE/$BIGSIZE}
+                  echo $CMD
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
-                    perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD > /dev/null 2>&1
+                    perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD # > /dev/null 2>&1
                   pkill "$SERVER_TAG"
                   cd "$WORKSPACE"
 
