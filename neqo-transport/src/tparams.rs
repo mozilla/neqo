@@ -14,7 +14,7 @@ use std::{
 };
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{hex, qdebug, qinfo, qtrace, Decoder, Encoder, Role};
+use neqo_common::{hex, qdebug, qinfo, qtrace, Buffer, Decoder, Encoder, Role};
 use neqo_crypto::{
     constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
@@ -155,7 +155,7 @@ pub enum TransportParameter {
 }
 
 impl TransportParameter {
-    fn encode(&self, enc: &mut Encoder, tp: TransportParameterId) {
+    fn encode<B: Buffer>(&self, enc: &mut Encoder<B>, tp: TransportParameterId) {
         qtrace!("TP encoded; type {tp}) val {self:?}");
         enc.encode_varint(tp);
         match self {
@@ -373,11 +373,11 @@ impl TransportParameters {
         true
     }
 
-    pub(crate) fn encode(&self, enc: &mut Encoder) {
+    pub(crate) fn encode<B: Buffer>(&self, enc: &mut Encoder<B>) {
         self.encode_filtered(Self::retain_all, enc);
     }
 
-    fn encode_filtered<F>(&self, f: F, enc: &mut Encoder)
+    fn encode_filtered<F, B: Buffer>(&self, f: F, enc: &mut Encoder<B>)
     where
         F: Fn(TransportParameterId, Option<&TransportParameter>) -> bool,
     {
@@ -782,8 +782,7 @@ impl ExtensionHandler for TransportParametersHandler {
 
         qdebug!("Writing transport parameters, msg={msg:?}");
 
-        // TODO(ekr@rtfm.com): Modify to avoid a copy.
-        let mut enc = Encoder::default();
+        let mut enc = Encoder::new_borrowed_slice(d);
         let f = if ch_outer {
             debug_assert_eq!(msg, TLS_HS_CLIENT_HELLO);
             Self::filter_ch_outer
@@ -791,8 +790,6 @@ impl ExtensionHandler for TransportParametersHandler {
             TransportParameters::retain_all
         };
         self.local.encode_filtered(f, &mut enc);
-        assert!(enc.len() <= d.len());
-        d[..enc.len()].copy_from_slice(enc.as_ref());
         ExtensionWriterResult::Write(enc.len())
     }
 
