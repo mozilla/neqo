@@ -544,14 +544,14 @@ impl Http3StreamInfo {
 }
 
 trait RecvStreamEvents: Debug {
-    fn data_readable(&self, _stream_info: Http3StreamInfo) {}
-    fn recv_closed(&self, _stream_info: Http3StreamInfo, _close_type: CloseType) {}
+    fn data_readable(&self, _stream_info: &Http3StreamInfo) {}
+    fn recv_closed(&self, _stream_info: &Http3StreamInfo, _close_type: CloseType) {}
 }
 
 trait HttpRecvStreamEvents: RecvStreamEvents {
     fn header_ready(
         &self,
-        stream_info: Http3StreamInfo,
+        stream_info: &Http3StreamInfo,
         headers: Vec<Header>,
         interim: bool,
         fin: bool,
@@ -623,8 +623,8 @@ trait HttpSendStream: SendStream {
 }
 
 trait SendStreamEvents: Debug {
-    fn send_closed(&self, _stream_info: Http3StreamInfo, _close_type: CloseType) {}
-    fn data_writable(&self, _stream_info: Http3StreamInfo) {}
+    fn send_closed(&self, _stream_info: &Http3StreamInfo, _close_type: CloseType) {}
+    fn data_writable(&self, _stream_info: &Http3StreamInfo) {}
 }
 
 /// This enum is used to mark a different type of closing a stream:

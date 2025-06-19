@@ -112,16 +112,10 @@ jobs:
           mkdir -p binaries/neqo
           cd neqo
           git checkout origin/main
-          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches-main.txt
-          BENCHES_MAIN=$(grep Executable benches-main.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
-          echo "BENCHES_MAIN=$BENCHES_MAIN" >> "$GITHUB_ENV"
           cargo build --locked --release --bin neqo-client --bin neqo-server
           cp target/release/neqo-client ../binaries/neqo-main/
           cp target/release/neqo-server ../binaries/neqo-main/
           git checkout -
-          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
-          BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
-          echo "BENCHES=$BENCHES" >> "$GITHUB_ENV"
           cargo build --locked --release --bin neqo-client --bin neqo-server
           cp target/release/neqo-client ../binaries/neqo/
           cp target/release/neqo-server ../binaries/neqo/
@@ -165,6 +159,8 @@ jobs:
           cd neqo
           rm -rf target/criterion
           git checkout origin/main
+          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches-main.txt
+          BENCHES_MAIN=$(grep Executable benches-main.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
           # Run the builds from the main branch first, to establish a baseline.
           for BENCH in $BENCHES_MAIN; do
             cp "$BENCH" ../binaries/neqo-main/
@@ -175,6 +171,8 @@ jobs:
           # Copy the main branch results to a separate directory for bencher.dev.
           cp -r target/criterion ../criterion-main
           git checkout -
+          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
+          BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
           # Run pull request builds twice, once without perf for baseline comparison, and once with perf for profiling.
           # (Perf seems to introduce some variability in the results.)
           for BENCH in $BENCHES; do
@@ -187,7 +185,7 @@ jobs:
             NAME=$(basename "$BENCH" | cut -d- -f1)
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "$NAME.perf" $BENCH --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
+              perf -- $PERF_OPT -o "../$NAME.perf" $BENCH --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
           done
           cp -r target/criterion ../criterion
 
