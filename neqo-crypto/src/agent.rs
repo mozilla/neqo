@@ -53,8 +53,6 @@ use crate::{
 };
 
 /// Private trait for Certificate Compression implementation
-/// # Safety
-///
 /// Use `SafeCertCompression` to implement an encoder/decoder instead.
 trait UnsafeCertCompression {
     extern "C" fn decode_callback(
@@ -113,30 +111,26 @@ impl<T: CertificateCompressor> UnsafeCertCompression for T {
         output_len: usize,
         used_len: *mut usize,
     ) -> ssl::SECStatus {
-        match NonNull::new(input.cast_mut()) {
-            None => ssl::SECFailure,
-            Some(input) => {
-                if unsafe { input.as_ref().data.is_null() || input.as_ref().len == 0 } {
-                    return ssl::SECFailure;
-                }
-
-                let input_slice =
-                    unsafe { null_safe_slice(input.as_ref().data, input.as_ref().len) };
-                let output_slice = unsafe { slice::from_raw_parts_mut(output, output_len) };
-                let decode_result = T::decode(input_slice, output_slice);
-                match decode_result {
-                    Err(_) => ssl::SECFailure,
-                    Ok(decoded_len) => {
-                        if decoded_len != output_len {
-                            return ssl::SECFailure;
-                        }
-
-                        unsafe { *used_len = decoded_len };
-                        ssl::SECSuccess
-                    }
-                }
-            }
+        let Some(input) = NonNull::new(input.cast_mut()) else {
+            return ssl::SECFailure;
+        };
+        if unsafe { input.as_ref().data.is_null() || input.as_ref().len == 0 } {
+            return ssl::SECFailure;
         }
+
+        let input_slice = unsafe { null_safe_slice(input.as_ref().data, input.as_ref().len) };
+        let output_slice = unsafe { slice::from_raw_parts_mut(output, output_len) };
+
+        let Ok(decoded_len) = T::decode(input_slice, output_slice) else {
+            return ssl::SECFailure;
+        };
+
+        if decoded_len != output_len {
+            return ssl::SECFailure;
+        }
+
+        unsafe { *used_len = decoded_len; }
+        ssl::SECSuccess
     }
 
     extern "C" fn encode_callback(
@@ -144,50 +138,47 @@ impl<T: CertificateCompressor> UnsafeCertCompression for T {
         output: *mut ssl::SECItem,
     ) -> ssl::SECStatus {
         unsafe {
-            match NonNull::new(input.cast_mut()) {
-                None => ssl::SECFailure,
-                Some(input) => {
-                    let input_len = input.as_ref().len;
-                    if input.as_ref().data.is_null() || input_len == 0 {
-                        return ssl::SECFailure;
-                    }
+            let Some(input) = NonNull::new(input.cast_mut()) else {
+                return ssl::SECFailure;
+            };
 
-                    p11::SECITEM_AllocItem(
-                        null_mut(),
-                        // p11::SECItem is the same as ssl::SECItem
-                        output.cast::<p11::SECItemStr>(),
-                        input_len + 1,
-                    );
-
-                    let input_slice = null_safe_slice(input.as_ref().data, input_len);
-                    let output_slice = slice::from_raw_parts_mut(
-                        (*output).data,
-                        (*output).len.try_into().unwrap(),
-                    );
-
-                    let encode_result = T::encode(input_slice, output_slice);
-                    match encode_result {
-                        Err(_) => ssl::SECFailure,
-                        Ok(encoded_len) => {
-                            if encoded_len == 0 {
-                                return ssl::SECFailure;
-                            }
-
-                            let rv = p11::SECITEM_ReallocItemV2(
-                                null_mut(),
-                                output.cast::<p11::SECItemStr>(),
-                                encoded_len.try_into().unwrap(),
-                            );
-
-                            if rv != ssl::SECSuccess {
-                                return ssl::SECFailure;
-                            }
-
-                            ssl::SECSuccess
-                        }
-                    }
-                }
+            let input_len = input.as_ref().len;
+            if input.as_ref().data.is_null() || input_len == 0 {
+                return ssl::SECFailure;
             }
+
+            p11::SECITEM_AllocItem(
+                null_mut(),
+                // p11::SECItem is the same as ssl::SECItem
+                output.cast::<p11::SECItemStr>(),
+                // Compression shouldn't make the thing *longer*,
+                // but allocate one extra byte anyway to enable simple testing modes.
+                input_len + 1,
+            );
+
+            let input_slice = null_safe_slice(input.as_ref().data, input_len);
+            let output_len = (*output).len.try_into().unwrap();
+            let output_slice = slice::from_raw_parts_mut((*output).data, output_len);
+
+            let Ok(encoded_len) = T::encode(input_slice, output_slice) else {
+                return ssl::SECFailure;
+            };
+
+            if encoded_len == 0 || encoded_len > output_len {
+                return ssl::SECFailure;
+            }
+
+            let rv = p11::SECITEM_ReallocItemV2(
+                null_mut(),
+                output.cast::<p11::SECItemStr>(),
+                encoded_len.try_into().unwrap(),
+            );
+
+            if rv != ssl::SECSuccess {
+                return ssl::SECFailure;
+            }
+
+            ssl::SECSuccess
         }
     }
 }
@@ -730,7 +721,7 @@ impl SecretAgent {
         let compressor: ssl::SSLCertificateCompressionAlgorithm =
             ssl::SSLCertificateCompressionAlgorithm {
                 id: T::ID,
-                name: T::NAME.as_ptr().cast_mut(),
+                name: T::NAME.as_ptr(),
                 encode: T::ENABLE_ENCODING.then_some(<T as UnsafeCertCompression>::encode_callback),
                 decode: Some(<T as UnsafeCertCompression>::decode_callback),
             };
