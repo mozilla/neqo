@@ -129,7 +129,9 @@ impl<T: CertificateCompressor> UnsafeCertCompression for T {
             return ssl::SECFailure;
         }
 
-        unsafe { *used_len = decoded_len; }
+        unsafe {
+            *used_len = decoded_len;
+        }
         ssl::SECSuccess
     }
 
