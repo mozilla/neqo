@@ -83,8 +83,11 @@ pub trait CertificateCompressor {
     const ENABLE_ENCODING: bool = false;
 
     /// Certificate Compression encoding function
-    /// If the implementation is not provided, we only copy the data
-    /// NB: If `ENABLE_ENCODING` is not set, the function pointer provided to NSS will be null
+    ///
+    /// This default implementation effectively does nothing.
+    /// However, this is only run if `ENABLE_ENCODING` is `true`.
+    /// Implementations that set `ENABLE_ENCODING` to `true` need to implement this function.
+    ///
     /// # Errors
     /// Encoding was unsuccessful, for example, not enough memory
     fn encode(input: &[u8], output: &mut [u8]) -> Res<usize> {
