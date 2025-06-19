@@ -227,6 +227,11 @@ impl DatagramBatch {
     pub fn num_datagrams(&self) -> usize {
         self.d.len().div_ceil(self.segment_size)
     }
+
+    #[cfg(feature = "build-fuzzing-corpus")]
+    pub fn iter(&self) -> impl Iterator<Item = &[u8]> {
+        self.d.chunks(self.segment_size)
+    }
 }
 
 #[cfg(test)]

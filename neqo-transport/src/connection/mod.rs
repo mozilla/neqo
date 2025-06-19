@@ -1284,8 +1284,10 @@ impl Connection {
         let output = self.process_multiple_output(now, max_datagrams);
         #[cfg(all(feature = "build-fuzzing-corpus", test))]
         if self.test_frame_writer.is_none() {
-            if let Some(d) = output.clone().dgram() {
-                neqo_common::write_item_to_fuzzing_corpus("packet", &d);
+            if let OutputBatch::DatagramBatch(batch) = &output {
+                for dgram in batch.iter() {
+                    neqo_common::write_item_to_fuzzing_corpus("packet", &dgram);
+                }
             }
         }
         output
