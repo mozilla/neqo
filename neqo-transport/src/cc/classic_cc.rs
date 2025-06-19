@@ -101,12 +101,13 @@ pub trait WindowAdjustment: Display + Debug {
     /// Cubic needs this signal to reset its epoch.
     fn on_app_limited(&mut self);
 
-    // Those are only needed as helpers for CUBIC tests and are properly implemented in `cubic.rs`
+    /// Helper for CUBIC tests and overridden in [`cubic::Cubic`]
     #[cfg(test)]
     fn w_max(&self) -> f64 {
         0.0
     }
 
+    /// Helper for CUBIC tests and overridden in [`cubic::Cubic`]
     #[cfg(test)]
     fn set_w_max(&mut self, _w_max: f64) {}
 }
@@ -560,18 +561,14 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             return false;
         }
 
-        let (cwnd, acked_bytes) = self.cc_algorithm.reduce_cwnd(
+        let (ssthresh, acked_bytes) = self.cc_algorithm.reduce_cwnd(
             self.congestion_window,
             self.acked_bytes,
             self.max_datagram_size(),
         );
-        // UPDATE: Add condition for `self.cc_algorithm == cubic` here to set `ssthresh` and
-        // `congestion_window` according to RFC 9438.
-        //
-        // <https://datatracker.ietf.org/doc/html/rfc9438#figure-5>
-        self.congestion_window = max(cwnd, self.cwnd_min());
+        self.ssthresh = max(ssthresh, self.cwnd_min());
         self.acked_bytes = acked_bytes;
-        self.ssthresh = self.congestion_window;
+        self.congestion_window = self.ssthresh;
         qdebug!(
             "[{self}] Cong event -> recovery; cwnd {}, ssthresh {}",
             self.congestion_window,

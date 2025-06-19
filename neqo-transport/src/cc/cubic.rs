@@ -149,19 +149,14 @@ pub struct Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-variables-of-interest>
     t_epoch: Option<Instant>,
-    /// Number of bytes acked since the last Standard TCP congestion window increase.
+    /// Number of bytes acked since the last congestion window increase.
     ///
-    /// UPDATE: We are using bytes but the spec recommends using segments.
+    /// > Implementations can use bytes to express window sizes, which would require factoring in
+    /// > the SMSS wherever necessary and replacing `segments_acked` (Figure 4) with the number of
+    /// > acknowledged bytes.
     ///
-    /// > Implementations can use bytes to express window sizes, which would require
-    /// > factoring in the SMSS wherever necessary and replacing segments_acked (Figure 4)
-    /// > with the number of acknowledged bytes.
-    ///
-    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-definitions>
-    ///
-    /// ACTIONS: Discuss if we want to switch to segments, confirm we are doing all conversions.
-    /// Research why this is prefaced with `tcp_` and clean up docs.
-    tcp_acked_bytes: f64,
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.1-1>
+    bytes_acked: f64,
 }
 
 // TODO: Maybe add `cwnd_prior` variable so we can record it here (we recorded last_max_cwnd before,
@@ -225,7 +220,7 @@ impl Cubic {
     ) {
         self.t_epoch = Some(now);
         self.w_est = cwnd_epoch;
-        self.tcp_acked_bytes = new_acked_f64;
+        self.bytes_acked = new_acked_f64;
         // If `w_max > cwnd_epoch` we take the cubic root from a negative value in `calc_k()`. That
         // could only happen if somehow `cwnd` get's increased between calling `reduce_cwnd()` and
         // `start_epoch()`, which is only possible if we go through slow start in between. It could
@@ -262,7 +257,7 @@ impl WindowAdjustment for Cubic {
             // This is a start of a new congestion avoidance phase.
             self.start_epoch(curr_cwnd_f64, new_acked_f64, max_datagram_size, now);
         } else {
-            self.tcp_acked_bytes += new_acked_f64;
+            self.bytes_acked += new_acked_f64;
         }
 
         // Calculate `target` for the concave or convex region
@@ -320,9 +315,9 @@ impl WindowAdjustment for Cubic {
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-11>
         let max_datagram_size = convert_to_f64(max_datagram_size);
         let tcp_cnt = self.w_est / CUBIC_ALPHA;
-        let incr = (self.tcp_acked_bytes / tcp_cnt).floor();
+        let incr = (self.bytes_acked / tcp_cnt).floor();
         if incr > 0.0 {
-            self.tcp_acked_bytes -= incr * tcp_cnt;
+            self.bytes_acked -= incr * tcp_cnt;
             self.w_est += incr * max_datagram_size;
         }
 
@@ -362,8 +357,7 @@ impl WindowAdjustment for Cubic {
         acked_to_increase as usize
     }
 
-    // UPDATE: CUBIC RFC 9438 changes the logic for multiplicative decrease and uses
-    // `bytes_in_flight` instead of `cwnd` for it's calculation:
+    // CUBIC RFC 9438 changes the logic for multiplicative decrease:
     //
     // > ssthresh = bytes_in_flight * CUBIC_BETA
     // > cwnd_prior = cwnd
@@ -374,29 +368,36 @@ impl WindowAdjustment for Cubic {
     // > }
     // > ssthresh = max(ssthresh, 2*MSS)
     //
-    // <https://datatracker.ietf.org/doc/html/rfc9438#figure-5>
+    // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.6>
+    //
+    // Most notably setting the minimum congestion window to 1*MSS under some circumstances.
+    //
+    // QUIC has a minimum congestion window of 2*MSS as per RFC 9002 though.
+    //
+    // <https://datatracker.ietf.org/doc/html/rfc9002#section-4.8>
+    //
+    // For that reason we diverge from CUBIC RFC 9438 here and can still assert that `ssthresh`
+    // always equals `cwnd` making this calculation look like:
+    //
+    // > ssthresh = cwnd * CUBIC_BETA
+    // > ssthresh = max(ssthresh, 2*MSS)
+    // > cwnd = ssthresh
     //
     // With the note:
     //
-    // > A QUIC sender that uses a cwnd value to calculate new values for cwnd and ssthresh after
-    // > detecting a congestion event is REQUIRED to apply similar mechanisms [RFC9002].
+    // > A QUIC sender that uses a `cwnd` value to calculate new values for `cwnd` and `ssthresh`
+    // > after detecting a congestion event is REQUIRED to apply similar mechanisms [RFC9002].
+    //
+    // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.6-4>
     //
     // "similar mechanisms" refering to taking "measures to prevent cwnd from growing when the
     // volume of bytes in flight is smaller than cwnd".
     //
     // QUESTION: Do we already do this somewhere?
     //
-    // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.6>
-    //
-    // We are setting ssthresh in `on_congestion_event()` in `classic_cc.rs` after having returned
-    // `cwnd` from `reduce_cwnd()` below. That is code that isn't CUBIC specific though, so we
-    // can add a condition there to check which cc algorithm we're using and do the
-    // `ssthresh|cwnd = max(...)` outlined above for CUBIC only.
-    //
-    // (or maybe don't do it at all because QUIC has a minimum congestion window of 2*MSS, as
-    // mentioned further below)
-    // QUESTION: Which takes precedence? The minimum congestion window of 2*MSS for QUIC or CUBIC
-    // wanting to set cwnd to 1*MSS on reduction by ECE?
+    // This function only returns the value for `cwnd * CUBIC_BETA` and sets some variables for the
+    // start of a new congestion avoidance phase. Actually setting the congestion window happens in
+    // `ClassicCongestionControl::on_congestion_event` where this function is called.
     fn reduce_cwnd(
         &mut self,
         curr_cwnd: usize,
@@ -438,7 +439,7 @@ impl WindowAdjustment for Cubic {
     }
 
     fn on_app_limited(&mut self) {
-        // Reset ca_epoch_start. Let it start again when the congestion controller
+        // Reset `t_epoch`. Let it start again when the congestion controller
         // exits the app-limited period.
         self.t_epoch = None;
     }
@@ -453,35 +454,3 @@ impl WindowAdjustment for Cubic {
         self.w_max = w_max;
     }
 }
-
-// UPDATE: Things to remember that didn't make it anywhere else:
-//
-// 1. Minimum congestion window:
-//
-// > Note that CUBIC MUST continue to reduce cwnd in response to congestion events
-// > detected by ECN-Echo ACKs until it reaches a value of 1 SMSS. If congestion events
-// > indicated by ECN-Echo ACKs persist, a sender with a cwnd of 1 SMSS MUST reduce its
-// > sending rate even further. This can be achieved by using a retransmission timer
-// > with exponential backoff, as described in [RFC3168].
-//
-// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.6-7> VERSUS
-//
-// > QUIC therefore recommends that the minimum congestion window be two packets.
-//
-// <https://datatracker.ietf.org/doc/html/rfc9002#section-4.8>
-//
-// QUESTION: So this probably does not apply to CUBIC on QUIC and we never go below 2*MSS
-// (as is currently implemented)?
-//
-// 2. Timeout: <https://datatracker.ietf.org/doc/html/rfc9438#section-4.8>
-//
-// > QUIC does not collapse the congestion window when the PTO expires, since a single
-// > packet loss at the tail does not indicate persistent congestion.
-//
-// <https://datatracker.ietf.org/doc/html/rfc9002#section-4.7>
-//
-// QUESTION: Timeout (RTO/PTO) does not apply to us then?
-//
-// 3. Spurious fast retransmits: <https://datatracker.ietf.org/doc/html/rfc9438#section-4.9.2>
-//
-// QUESTION: Do we want to implement this? If yes then we may be able to do it in a follow up PR.

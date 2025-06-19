@@ -361,6 +361,4 @@ fn congestion_event_congestion_avoidance_no_overflow() {
 
     // Now ack packet that was send earlier.
     ack_packet(&mut cubic, 0, now().checked_sub(PTO).unwrap());
-
-    // TODO: This test never asserts anything after the initial setup??
 }
