@@ -23,6 +23,7 @@ use std::{
     pin::Pin,
     ptr::{null, null_mut, NonNull},
     rc::Rc,
+    slice,
     time::Instant,
 };
 
@@ -55,15 +56,15 @@ use crate::{
 /// # Safety
 ///
 /// Use `SafeCertCompression` to implement an encoder/decoder instead.
-unsafe trait UnsafeCertCompression {
-    unsafe extern "C" fn decode_callback(
+trait UnsafeCertCompression {
+    extern "C" fn decode_callback(
         input: *const ssl::SECItem,
         output: *mut ::std::os::raw::c_uchar,
         output_len: usize,
         used_len: *mut usize,
     ) -> ssl::SECStatus;
 
-    unsafe extern "C" fn encode_callback(
+    extern "C" fn encode_callback(
         input: *const ssl::SECItem,
         output: *mut ssl::SECItem,
     ) -> ssl::SECStatus;
@@ -105,42 +106,40 @@ pub trait CertificateCompressor {
 
 /// The trait is responsible for calling `CertificateCompression` encoding and decoding
 /// functions using the NSS types
-unsafe impl<T: CertificateCompressor> UnsafeCertCompression for T {
-    unsafe extern "C" fn decode_callback(
+impl<T: CertificateCompressor> UnsafeCertCompression for T {
+    extern "C" fn decode_callback(
         input: *const ssl::SECItem,
         output: *mut ::std::os::raw::c_uchar,
         output_len: usize,
         used_len: *mut usize,
     ) -> ssl::SECStatus {
-        unsafe {
-            match NonNull::new(input.cast_mut()) {
-                None => ssl::SECFailure,
-                Some(input) => {
-                    if input.as_ref().data.is_null() || input.as_ref().len == 0 {
-                        return ssl::SECFailure;
-                    }
+        match NonNull::new(input.cast_mut()) {
+            None => ssl::SECFailure,
+            Some(input) => {
+                if unsafe { input.as_ref().data.is_null() || input.as_ref().len == 0 } {
+                    return ssl::SECFailure;
+                }
 
-                    let input_slice = null_safe_slice(input.as_ref().data, input.as_ref().len);
-                    let output_slice: &mut [u8] =
-                        core::slice::from_raw_parts_mut(output, output_len);
-                    let decode_result = T::decode(input_slice, output_slice);
-                    match decode_result {
-                        Err(_) => ssl::SECFailure,
-                        Ok(decoded_len) => {
-                            if decoded_len != output_len {
-                                return ssl::SECFailure;
-                            }
-
-                            *used_len = decoded_len;
-                            ssl::SECSuccess
+                let input_slice =
+                    unsafe { null_safe_slice(input.as_ref().data, input.as_ref().len) };
+                let output_slice = unsafe { slice::from_raw_parts_mut(output, output_len) };
+                let decode_result = T::decode(input_slice, output_slice);
+                match decode_result {
+                    Err(_) => ssl::SECFailure,
+                    Ok(decoded_len) => {
+                        if decoded_len != output_len {
+                            return ssl::SECFailure;
                         }
+
+                        unsafe { *used_len = decoded_len };
+                        ssl::SECSuccess
                     }
                 }
             }
         }
     }
 
-    unsafe extern "C" fn encode_callback(
+    extern "C" fn encode_callback(
         input: *const ssl::SECItem,
         output: *mut ssl::SECItem,
     ) -> ssl::SECStatus {
@@ -148,11 +147,10 @@ unsafe impl<T: CertificateCompressor> UnsafeCertCompression for T {
             match NonNull::new(input.cast_mut()) {
                 None => ssl::SECFailure,
                 Some(input) => {
-                    if input.as_ref().data.is_null() || input.as_ref().len == 0 {
+                    let input_len = input.as_ref().len;
+                    if input.as_ref().data.is_null() || input_len == 0 {
                         return ssl::SECFailure;
                     }
-
-                    let input_len = input.as_ref().len;
 
                     p11::SECITEM_AllocItem(
                         null_mut(),
@@ -162,7 +160,7 @@ unsafe impl<T: CertificateCompressor> UnsafeCertCompression for T {
                     );
 
                     let input_slice = null_safe_slice(input.as_ref().data, input_len);
-                    let output_slice: &mut [u8] = core::slice::from_raw_parts_mut(
+                    let output_slice = slice::from_raw_parts_mut(
                         (*output).data,
                         (*output).len.try_into().unwrap(),
                     );
@@ -1300,7 +1298,7 @@ impl Server {
                 // Don't bother propagating errors from this, because it should be caught in
                 // testing.
                 assert!(tok.len() <= usize::try_from(retry_token_max).unwrap());
-                let slc = std::slice::from_raw_parts_mut(retry_token, tok.len());
+                let slc = slice::from_raw_parts_mut(retry_token, tok.len());
                 slc.copy_from_slice(&tok);
                 *retry_token_len = c_uint::try_from(tok.len()).unwrap();
                 ssl::SSLHelloRetryRequestAction::ssl_hello_retry_request
