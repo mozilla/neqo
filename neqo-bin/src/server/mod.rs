@@ -38,16 +38,16 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init_db, AntiReplay, Cipher,
 };
-use neqo_transport::{Output, RandomConnectionIdGenerator, Version};
-use neqo_udp::RecvBuf;
+use neqo_transport::{ConnectionIdGenerator, Output, RandomConnectionIdGenerator, Version};
+use neqo_udp::{DatagramIter, RecvBuf};
 use tokio::time::Sleep;
 
 use crate::SharedArgs;
 
 const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 
-mod http09;
-mod http3;
+pub mod http09;
+pub mod http3;
 
 #[derive(Debug)]
 pub enum Error {
@@ -145,6 +145,11 @@ impl Default for Args {
 }
 
 impl Args {
+    #[must_use]
+    pub const fn get_shared(&self) -> &SharedArgs {
+        &self.shared
+    }
+
     fn get_ciphers(&self) -> Vec<Cipher> {
         self.shared
             .ciphers
@@ -205,24 +210,33 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
 }
 
 pub trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<Datagram<&mut [u8]>>, now: Instant) -> Output;
+    fn new(
+        args: &Args,
+        anti_replay: AntiReplay,
+        cid_mgr: Rc<RefCell<dyn ConnectionIdGenerator>>,
+    ) -> Self;
+    fn process<'a>(
+        &mut self,
+        dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
+        now: Instant,
+    ) -> Output;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }
 
-pub struct ServerRunner {
+pub struct ServerRunner<S> {
     now: Box<dyn Fn() -> Instant>,
-    server: Box<dyn HttpServer>,
+    server: S,
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<(SocketAddr, crate::udp::Socket)>,
     recv_buf: RecvBuf,
 }
 
-impl ServerRunner {
+impl<S: HttpServer> ServerRunner<S> {
     #[must_use]
     pub fn new(
+        server: S,
         now: Box<dyn Fn() -> Instant>,
-        server: Box<dyn HttpServer>,
         sockets: Vec<(SocketAddr, crate::udp::Socket)>,
     ) -> Self {
         Self {
@@ -258,14 +272,20 @@ impl ServerRunner {
     // `ServerRunner::read_and_process` while holding a reference to
     // `ServerRunner::recv_buf`.
     async fn process_inner(
-        server: &mut Box<dyn HttpServer>,
+        server: &mut S,
         timeout: &mut Option<Pin<Box<Sleep>>>,
         sockets: &mut [(SocketAddr, crate::udp::Socket)],
         now: &dyn Fn() -> Instant,
-        mut input_dgram: Option<Datagram<&mut [u8]>>,
+        mut input_dgrams: Option<DatagramIter<'_>>,
     ) -> Result<(), io::Error> {
         loop {
-            match server.process(input_dgram.take(), now()) {
+            let out = if let Some(dgrams) = input_dgrams.take() {
+                server.process(dgrams, now())
+            } else {
+                server.process(None, now())
+            };
+
+            match out {
                 Output::Datagram(dgram) => {
                     let socket = Self::find_socket(sockets, dgram.source());
                     loop {
@@ -300,16 +320,14 @@ impl ServerRunner {
                 break;
             };
 
-            for input_dgram in input_dgrams {
-                Self::process_inner(
-                    &mut self.server,
-                    &mut self.timeout,
-                    &mut self.sockets,
-                    &self.now,
-                    Some(input_dgram),
-                )
-                .await?;
-            }
+            Self::process_inner(
+                &mut self.server,
+                &mut self.timeout,
+                &mut self.sockets,
+                &self.now,
+                Some(input_dgrams),
+            )
+            .await?;
         }
 
         Ok(())
@@ -372,7 +390,7 @@ enum Ready {
     Timeout,
 }
 
-pub fn server(mut args: Args) -> Res<ServerRunner> {
+pub fn server<S: HttpServer>(mut args: Args) -> Res<ServerRunner<S>> {
     neqo_common::log::init(
         args.shared
             .verbose
@@ -444,17 +462,17 @@ pub fn server(mut args: Args) -> Res<ServerRunner> {
         .expect("unable to setup anti-replay");
     let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
 
-    let server: Box<dyn HttpServer> = if args.shared.alpn == "h3" {
-        Box::new(http3::HttpServer::new(&args, anti_replay, cid_mgr))
-    } else {
-        Box::new(
-            http09::HttpServer::new(&args, anti_replay, cid_mgr).expect("We cannot make a server!"),
-        )
-    };
+    // let server: Box<dyn HttpServer> = if args.shared.alpn == "h3" {
+    //     Box::new(http3::HttpServer::new())
+    // } else {
+    //     Box::new(
+    //         http09::HttpServer::new(&args, anti_replay, cid_mgr).expect("We cannot make a
+    // server!"),     )
+    // };
 
     Ok(ServerRunner::new(
+        S::new(&args, anti_replay, cid_mgr),
         Box::new(move || args.now()),
-        server,
         sockets,
     ))
 }
