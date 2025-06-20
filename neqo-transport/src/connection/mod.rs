@@ -1099,7 +1099,7 @@ impl Connection {
         self.cid_manager.is_valid(cid)
     }
 
-    /// Process new input datagram on the connection.
+    /// Process a new input datagram on the connection.
     pub fn process_input<A: AsRef<[u8]> + AsMut<[u8]>>(&mut self, d: Datagram<A>, now: Instant) {
         self.process_multiple_input(iter::once(d), now);
     }
