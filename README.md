@@ -133,10 +133,8 @@ something has changed.
 
 1. Run `neqo-server` via `cargo run --bin neqo-server -- 'localhost:12345' --db ./test-fixture/db`.
 2. On Firefox, set `about:config` preferences:
-
-- `network.http.http3.alt-svc-mapping-for-testing` to `localhost;h3=":12345"`
-- `network.http.http3.disable_when_third_party_roots_found` to `false`
-
+   - `network.http.http3.alt-svc-mapping-for-testing` to `localhost;h3=":12345"`
+   - `network.http.http3.disable_when_third_party_roots_found` to `false`
 3. Optionally enable logging via `about:logging` or profiling via <https://profiler.firefox.com/>.
 4. Navigate to <https://localhost:12345> and accept self-signed certificate.
 
