@@ -271,7 +271,15 @@ impl ServerRunner {
         now: &dyn Fn() -> Instant,
         mut input_dgram: Option<Datagram<&mut [u8]>>,
     ) -> Result<(), io::Error> {
-        let min_max_gos_segments = sockets
+        // Each socket has a maximum number of GSO segments it can handle. When
+        // calling `server.process_multiple` we don't know which socket will be
+        // used. Take the smallest maximum GSO segments from all sockets to
+        // ensure that we don't send more segments than any socket can handle.
+        //
+        // Ideally we would have a way to know which socket will be used. Likely
+        // not worth it for a test-only server implementation which is mostly
+        // used with a single socket only.
+        let smallest_max_gso_segments = sockets
             .iter()
             .map(|(_, socket)| socket.max_gso_segments())
             .min()
@@ -281,7 +289,7 @@ impl ServerRunner {
             .map_err(|_| io::Error::from(io::ErrorKind::Unsupported))?;
 
         loop {
-            match server.process_multiple(input_dgram.take(), now(), min_max_gos_segments) {
+            match server.process_multiple(input_dgram.take(), now(), smallest_max_gso_segments) {
                 OutputBatch::DatagramBatch(dgram) => {
                     let socket = Self::find_socket(sockets, dgram.source());
                     loop {
