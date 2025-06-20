@@ -185,16 +185,25 @@ impl Args {
     #[must_use]
     #[cfg(any(test, feature = "bench"))]
     #[expect(clippy::missing_panics_doc, reason = "This is example code.")]
-    pub fn new(server_addr: Option<SocketAddr>, requests: &[usize], upload: bool) -> Self {
-        use std::str::FromStr as _;
+    pub fn new(
+        server_addr: Option<SocketAddr>,
+        num_requests: usize,
+        upload_size: usize,
+        download_size: usize,
+    ) -> Self {
+        use std::{iter::repeat_with, str::FromStr as _};
+
         let addr = server_addr.map_or("[::1]:12345".into(), |a| format!("[::1]:{}", a.port()));
         Self {
             shared: SharedArgs::default(),
-            urls: requests
-                .iter()
-                .map(|r| Url::from_str(&format!("http://{addr}/{r}")).unwrap())
+            urls: repeat_with(|| Url::from_str(&format!("http://{addr}/{download_size}")).unwrap())
+                .take(num_requests)
                 .collect(),
-            method: if upload { "POST".into() } else { "GET".into() },
+            method: if upload_size == 0 {
+                "GET".into()
+            } else {
+                "POST".into()
+            },
             header: vec![],
             max_concurrent_push_streams: 10,
             download_in_series: false,
@@ -207,7 +216,7 @@ impl Args {
             ipv4_only: false,
             ipv6_only: false,
             test: None,
-            upload_size: if upload { requests[0] } else { 100 },
+            upload_size,
             stats: false,
             cid_len: 0,
         }
