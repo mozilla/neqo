@@ -139,16 +139,21 @@ impl<T: CertificateCompressor> UnsafeCertCompression for T {
         input: *const ssl::SECItem,
         output: *mut ssl::SECItem,
     ) -> ssl::SECStatus {
+        let Some(input) = NonNull::new(input.cast_mut()) else {
+            return ssl::SECFailure;
+        };
+
+        let (input_data, input_len) = unsafe {
+            let input_ref = input.as_ref();
+            (input_ref.data, input_ref.len)
+        };
+
+        if input_data.is_null() || input_len == 0 {
+            return ssl::SECFailure;
+        }
+        let input_slice = unsafe { null_safe_slice(input_data, input_len) };
+
         unsafe {
-            let Some(input) = NonNull::new(input.cast_mut()) else {
-                return ssl::SECFailure;
-            };
-
-            let input_len = input.as_ref().len;
-            if input.as_ref().data.is_null() || input_len == 0 {
-                return ssl::SECFailure;
-            }
-
             p11::SECITEM_AllocItem(
                 null_mut(),
                 // p11::SECItem is the same as ssl::SECItem
@@ -157,31 +162,30 @@ impl<T: CertificateCompressor> UnsafeCertCompression for T {
                 // but allocate one extra byte anyway to enable simple testing modes.
                 input_len + 1,
             );
-
-            let input_slice = null_safe_slice(input.as_ref().data, input_len);
-            let output_len = (*output).len.try_into().unwrap();
-            let output_slice = slice::from_raw_parts_mut((*output).data, output_len);
-
-            let Ok(encoded_len) = T::encode(input_slice, output_slice) else {
-                return ssl::SECFailure;
-            };
-
-            if encoded_len == 0 || encoded_len > output_len {
-                return ssl::SECFailure;
-            }
-
-            let rv = p11::SECITEM_ReallocItemV2(
-                null_mut(),
-                output.cast::<p11::SECItemStr>(),
-                encoded_len.try_into().unwrap(),
-            );
-
-            if rv != ssl::SECSuccess {
-                return ssl::SECFailure;
-            }
-
-            ssl::SECSuccess
         }
+
+        let Ok(output_len) = (unsafe { (*output).len.try_into() }) else {
+            return ssl::SECFailure;
+        };
+
+        let output_slice = unsafe { slice::from_raw_parts_mut((*output).data, output_len) };
+
+        let Ok(encoded_len) = T::encode(input_slice, output_slice) else {
+            return ssl::SECFailure;
+        };
+
+        if encoded_len == 0 || encoded_len > output_len || encoded_len > u32::MAX as usize {
+            return ssl::SECFailure;
+        }
+
+        let Ok(encoded_len) = encoded_len.try_into() else {
+            return ssl::SECFailure;
+        };
+
+        unsafe {
+            (*output).len = encoded_len;
+        }
+        ssl::SECSuccess
     }
 }
 
