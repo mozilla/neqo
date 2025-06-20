@@ -133,7 +133,7 @@ impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
     }
 }
 
-/// A batch of [`Datagram`]s with same metadata, e.g. destination.
+/// A batch of [`Datagram`]s with the same metadata, e.g., destination.
 ///
 /// Upholds Linux GSO requirement. That is, all but the last datagram in the
 /// batch have the same size. The last datagram may be equal or smaller.
