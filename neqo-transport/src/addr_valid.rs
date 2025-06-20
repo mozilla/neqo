@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qinfo, qtrace, Decoder, Encoder, Role};
+use neqo_common::{qinfo, qtrace, Buffer, Decoder, Encoder, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     selfencrypt::SelfEncrypt,
@@ -338,9 +338,9 @@ impl NewTokenState {
 
     /// If this is a server, maybe send a frame.
     /// If this is a client, do nothing.
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
@@ -412,9 +412,9 @@ impl NewTokenSender {
         self.next_seqno += 1;
     }
 
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
