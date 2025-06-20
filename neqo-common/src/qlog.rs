@@ -27,7 +27,7 @@ use crate::Role;
 
 #[derive(Debug, Clone, Default)]
 pub struct NeqoQlog {
-    inner: Rc<RefCell<Option<NeqoQlogShared>>>,
+    inner: Option<Rc<RefCell<NeqoQlogShared>>>,
 }
 
 pub struct NeqoQlogShared {
@@ -80,7 +80,7 @@ impl NeqoQlog {
         streamer.start_log()?;
 
         Ok(Self {
-            inner: Rc::new(RefCell::new(Some(NeqoQlogShared {
+            inner: Some(Rc::new(RefCell::new(NeqoQlogShared {
                 qlog_path,
                 streamer,
             }))),
@@ -88,8 +88,8 @@ impl NeqoQlog {
     }
 
     #[must_use]
-    pub fn inner(&self) -> Rc<RefCell<Option<NeqoQlogShared>>> {
-        Rc::clone(&self.inner)
+    pub fn inner(&self) -> Option<Rc<RefCell<NeqoQlogShared>>> {
+        self.inner.as_ref().map(Rc::clone)
     }
 
     /// Create a disabled `NeqoQlog` configuration.
@@ -99,7 +99,7 @@ impl NeqoQlog {
     }
 
     /// If logging enabled, closure may generate an event to be logged.
-    pub fn add_event_with_instant<F>(&self, f: F, now: Instant)
+    pub fn add_event_with_instant<F>(&mut self, f: F, now: Instant)
     where
         F: FnOnce() -> Option<qlog::events::Event>,
     {
@@ -112,7 +112,7 @@ impl NeqoQlog {
     }
 
     /// If logging enabled, closure may generate an event to be logged.
-    pub fn add_event_data_with_instant<F>(&self, f: F, now: Instant)
+    pub fn add_event_data_with_instant<F>(&mut self, f: F, now: Instant)
     where
         F: FnOnce() -> Option<qlog::events::EventData>,
     {
@@ -133,7 +133,7 @@ impl NeqoQlog {
     /// ensures consistency with the current time, which might differ from
     /// [`std::time::Instant::now`] (e.g., when using simulated time instead of
     /// real time).
-    pub fn add_event_data_now<F>(&self, f: F)
+    pub fn add_event_data_now<F>(&mut self, f: F)
     where
         F: FnOnce() -> Option<qlog::events::EventData>,
     {
@@ -147,14 +147,19 @@ impl NeqoQlog {
 
     /// If logging enabled, closure is given the Qlog stream to write events and
     /// frames to.
-    pub fn add_event_with_stream<F>(&self, f: F)
+    pub fn add_event_with_stream<F>(&mut self, f: F)
     where
         F: FnOnce(&mut QlogStreamer) -> Result<(), qlog::Error>,
     {
-        if let Some(inner) = self.inner.borrow_mut().as_mut() {
-            if let Err(e) = f(&mut inner.streamer) {
+        if let Some(inner) = &self.inner {
+            let close_log = if let Err(e) = f(&mut inner.borrow_mut().streamer) {
                 log::error!("Qlog event generation failed with error {e}; closing qlog.");
-                *self.inner.borrow_mut() = None;
+                true
+            } else {
+                false
+            };
+            if close_log {
+                self.inner = None;
             }
         }
     }
@@ -230,7 +235,7 @@ mod test {
 
     #[test]
     fn add_event_with_instant() {
-        let (log, contents) = test_fixture::new_neqo_qlog();
+        let (mut log, contents) = test_fixture::new_neqo_qlog();
         log.add_event_with_instant(|| Some(Event::with_time(0.0, EV_DATA)), Instant::now());
         assert_eq!(
             Regex::new("\"time\":[0-9]+.[0-9]+,")
