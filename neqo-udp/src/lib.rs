@@ -74,7 +74,20 @@ pub fn send_inner(
         src_ip: None,
     };
 
-    state.try_send(socket, &transmit)?;
+    match state.try_send(socket, &transmit) {
+        Ok(()) => {}
+        Err(e) if is_emsgsize(&e) => {
+            qdebug!(
+                "Failed to send datagram of size {} from {} to {}. PMTUD probe? Ignoring error: {}",
+                d.len(),
+                d.source(),
+                d.destination(),
+                e
+            );
+            return Ok(());
+        }
+        e @ Err(_) => return e,
+    }
 
     qtrace!(
         "sent {} bytes from {} to {}",
@@ -84,6 +97,27 @@ pub fn send_inner(
     );
 
     Ok(())
+}
+
+#[expect(
+    clippy::unnecessary_map_or,
+    reason = "Clippy ignores the #[cfg] attribute."
+)]
+fn is_emsgsize(e: &io::Error) -> bool {
+    e.raw_os_error().map_or(false, |e| {
+        #[cfg(unix)]
+        {
+            e == libc::EMSGSIZE
+        }
+        #[cfg(windows)]
+        {
+            e == windows::Win32::Networking::WinSock::WSAEMSGSIZE.0
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            false
+        }
+    })
 }
 
 #[cfg(unix)]
@@ -338,6 +372,47 @@ mod tests {
                     num_received += 1;
                 });
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn send_ignore_emsgsize() -> Result<(), io::Error> {
+        let sender = socket()?;
+        // Use non-blocking socket to test for `WouldBlock` error.
+        let receiver = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
+        let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+
+        let oversized_datagram = Datagram::new(
+            sender.inner.local_addr()?,
+            receiver.inner.local_addr()?,
+            IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
+            vec![0; u16::MAX as usize + 1],
+        );
+        sender.send(&oversized_datagram)?;
+
+        let mut recv_buf = RecvBuf::new();
+        match receiver.recv(receiver_addr, &mut recv_buf) {
+            Ok(_) => panic!("Expected an error, but received datagrams"),
+            Err(e) => assert_eq!(e.kind(), io::ErrorKind::WouldBlock),
+        }
+
+        // Now send a normal datagram to ensure that the socket is still usable.
+
+        let normal_datagram = Datagram::new(
+            sender.inner.local_addr()?,
+            receiver.inner.local_addr()?,
+            IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
+            b"Hello World!".to_vec(),
+        );
+        sender.send(&normal_datagram)?;
+
+        let mut recv_buf = RecvBuf::new();
+        let mut received_datagram = receiver.recv(receiver_addr, &mut recv_buf)?;
+        assert_eq!(
+            received_datagram.next().unwrap().as_ref(),
+            normal_datagram.as_ref()
+        );
 
         Ok(())
     }

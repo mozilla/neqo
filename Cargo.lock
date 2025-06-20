@@ -914,9 +914,11 @@ name = "neqo-udp"
 version = "0.13.4"
 dependencies = [
  "cfg_aliases",
+ "libc",
  "log",
  "neqo-common",
  "quinn-udp",
+ "windows",
 ]
 
 [[package]]
@@ -1000,9 +1002,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.5.11"
+version = "0.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "541d0f57c6ec747a90738a52741d3221f7960e8ac2f0ff4b1a63680e033b4ab5"
+checksum = "fcebb1209ee276352ef14ff8732e24cc2b02bbac986cd74a4c81bcb2f9881970"
 dependencies = [
  "cfg_aliases",
  "libc",
