@@ -18,7 +18,7 @@ use std::{
 };
 
 use log::{log_enabled, Level};
-use neqo_common::{qdebug, qtrace, Datagram, IpTos};
+use neqo_common::{qdebug, qtrace, Buffer, Datagram, DatagramBatch, IpTos};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 
 /// Receive buffer size
@@ -26,6 +26,9 @@ use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 /// Fits a maximum size UDP datagram, or, on platforms with segmentation
 /// offloading, multiple smaller datagrams.
 const RECV_BUF_SIZE: usize = u16::MAX as usize;
+
+/// Send buffer size
+pub const SEND_BUF_SIZE: usize = u16::MAX as usize;
 
 /// The number of buffers to pass to the OS on [`Socket::recv`].
 ///
@@ -46,6 +49,8 @@ const NUM_BUFS: usize = 1;
 const NUM_BUFS: usize = 16;
 
 /// A UDP receive buffer.
+//
+// TODO: Is a Box<[u8]> better?
 pub struct RecvBuf(Vec<Vec<u8>>);
 
 impl RecvBuf {
@@ -61,26 +66,28 @@ impl Default for RecvBuf {
     }
 }
 
-pub fn send_inner(
+pub fn send_inner<B: Buffer>(
     state: &UdpSocketState,
     socket: quinn_udp::UdpSockRef<'_>,
-    d: &Datagram,
+    d: &DatagramBatch<B>,
 ) -> io::Result<()> {
     let transmit = Transmit {
         destination: d.destination(),
         ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
-        contents: d,
-        segment_size: None,
+        contents: d.data(),
+        segment_size: Some(d.datagram_size()),
         src_ip: None,
     };
 
     state.try_send(socket, &transmit)?;
 
     qtrace!(
-        "sent {} bytes from {} to {}",
-        d.len(),
+        "sent {} bytes, in {} segments, each {} bytes, from {} to {} ",
+        d.data().len(),
+        d.num_datagrams(),
+        d.datagram_size(),
         d.source(),
-        d.destination()
+        d.destination(),
     );
 
     Ok(())
@@ -109,14 +116,15 @@ pub fn recv_inner<'a, S: SocketRef>(
     if log_enabled!(Level::Trace) {
         for meta in metas.iter().take(n) {
             qtrace!(
-                "received {} bytes from {} to {local_address} in {} segments",
+                "received {} bytes, in {} segments, each {} bytes, from {} to {local_address}",
                 meta.len,
-                meta.addr,
                 if meta.stride == 0 {
                     0
                 } else {
                     meta.len.div_ceil(meta.stride)
-                }
+                },
+                meta.stride,
+                meta.addr,
             );
         }
     }
@@ -201,8 +209,12 @@ impl<S: SocketRef> Socket<S> {
     }
 
     /// Send a [`Datagram`] on the given [`Socket`].
-    pub fn send(&self, d: &Datagram) -> io::Result<()> {
+    pub fn send<B: Buffer>(&self, d: &DatagramBatch<B>) -> io::Result<()> {
         send_inner(&self.state, (&self.inner).into(), d)
+    }
+
+    pub fn max_gso_segments(&self) -> usize {
+        self.state.max_gso_segments()
     }
 
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each
@@ -255,12 +267,13 @@ mod tests {
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        let datagram = Datagram::new(
+        let datagram: DatagramBatch<Vec<u8>> = Datagram::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
             b"Hello, world!".to_vec(),
-        );
+        )
+        .into();
 
         sender.send(&datagram)?;
 

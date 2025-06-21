@@ -10,7 +10,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{hex_with_len, IpTos};
+use crate::{hex_with_len, Buffer, IpTos};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Datagram<D = Vec<u8>> {
@@ -18,6 +18,22 @@ pub struct Datagram<D = Vec<u8>> {
     dst: SocketAddr,
     tos: IpTos,
     d: D,
+}
+
+impl TryFrom<DatagramBatch<Vec<u8>>> for Datagram {
+    type Error = ();
+
+    fn try_from(d: DatagramBatch<Vec<u8>>) -> Result<Self, Self::Error> {
+        if d.num_datagrams() != 1 {
+            return Err(());
+        }
+        Ok(Self {
+            src: d.src,
+            dst: d.dst,
+            tos: d.tos,
+            d: d.d,
+        })
+    }
 }
 
 impl<D> Datagram<D> {
@@ -117,9 +133,119 @@ impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
     }
 }
 
+/// A batch of [`Datagram`]s with the same metadata, e.g., destination.
+///
+/// Upholds Linux GSO requirement. That is, all but the last datagram in the
+/// batch have the same size. The last datagram may be equal or smaller.
+///
+/// TODO: pub fields good idea?
+#[derive(Clone, PartialEq, Eq)]
+pub struct DatagramBatch<B> {
+    pub src: SocketAddr,
+    pub dst: SocketAddr,
+    pub tos: IpTos,
+    pub segment_size: usize,
+    pub d: B,
+}
+
+impl<B: Buffer> Debug for DatagramBatch<B> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(
+            f,
+            "DatagramBatch {:?} {:?}->{:?} {:?}: {}",
+            self.tos,
+            self.src,
+            self.dst,
+            self.segment_size,
+            hex_with_len(&self.d.as_slice())
+        )
+    }
+}
+
+impl From<Datagram<Vec<u8>>> for DatagramBatch<Vec<u8>> {
+    fn from(d: Datagram<Vec<u8>>) -> Self {
+        Self {
+            src: d.src,
+            dst: d.dst,
+            tos: d.tos,
+            segment_size: d.d.len(),
+            d: d.d,
+        }
+    }
+}
+
+impl<B: Buffer> DatagramBatch<B> {
+    /// Maximum [`DatagramBatch`] size in bytes.
+    ///
+    /// This value is set conservatively to ensure compatibility with batch IO
+    /// system calls across all supported platforms.
+    ///
+    /// See for example Linux limit in
+    /// <https://github.com/torvalds/linux/blob/fb4d33ab452ea254e2c319bac5703d1b56d895bf/include/linux/netdevice.h#L2402>.
+    pub const MAX: usize = 65535 // maximum UDP datagram size
+        - 40 // IPv6 header
+        - 8; // UDP header
+
+    #[must_use]
+    pub const fn new(
+        src: SocketAddr,
+        dst: SocketAddr,
+        tos: IpTos,
+        segment_size: usize,
+        d:  B,
+    ) -> Self {
+        Self {
+            src,
+            dst,
+            tos,
+            segment_size,
+            d,
+        }
+    }
+
+    #[must_use]
+    pub const fn source(&self) -> SocketAddr {
+        self.src
+    }
+
+    #[must_use]
+    pub const fn destination(&self) -> SocketAddr {
+        self.dst
+    }
+
+    #[must_use]
+    pub const fn tos(&self) -> IpTos {
+        self.tos
+    }
+
+    #[must_use]
+    pub const fn datagram_size(&self) -> usize {
+        self.segment_size
+    }
+
+    #[must_use]
+    pub fn data(&self) -> &[u8] {
+        &self.d.as_slice()
+    }
+
+    #[must_use]
+    pub fn num_datagrams(&self) -> usize {
+        self.d.position().div_ceil(self.segment_size)
+    }
+
+    #[cfg(feature = "build-fuzzing-corpus")]
+    pub fn iter(&self) -> impl Iterator<Item = &[u8]> {
+        self.d.chunks(self.segment_size)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+
     use test_fixture::datagram;
+
+    use crate::{DatagramBatch, IpTos};
 
     #[test]
     fn fmt_datagram() {
@@ -135,5 +261,34 @@ mod tests {
         let d = datagram(vec![]);
         assert_eq!(d.len(), 0);
         assert!(d.is_empty());
+    }
+
+    #[test]
+    fn batch_num_datagrams() {
+        let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
+        let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
+        let tos = IpTos::default();
+
+        // TODO: cleanup the &mut
+
+        // 10 bytes, segment size 4 -> 3 datagrams (4+4+2)
+        let mut data =vec![0u8; 10];
+        let batch = DatagramBatch::new(src, dst, tos, 4, &mut data);
+        assert_eq!(batch.num_datagrams(), 3);
+
+        // 8 bytes, segment size 4 -> 2 datagrams (4+4)
+        let mut data =vec![0u8; 8];
+        let batch = DatagramBatch::new(src, dst, tos, 4, &mut data);
+        assert_eq!(batch.num_datagrams(), 2);
+
+        // 5 bytes, segment size 5 -> 1 datagram
+        let mut data = vec![0u8; 5];
+        let batch = DatagramBatch::new(src, dst, tos, 5, &mut data);
+        assert_eq!(batch.num_datagrams(), 1);
+
+        // 6 bytes, segment size 5 -> 2 datagrams (5+1)
+        let mut data = vec![0u8; 6];
+        let batch = DatagramBatch::new(src, dst, tos, 5, &mut data);
+        assert_eq!(batch.num_datagrams(), 2);
     }
 }

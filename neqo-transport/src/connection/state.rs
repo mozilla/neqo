@@ -6,7 +6,7 @@
 
 use std::{cmp::min, rc::Rc, time::Instant};
 
-use neqo_common::Encoder;
+use neqo_common::{Buffer, Encoder};
 
 use crate::{
     frame::FrameType, packet::PacketBuilder, path::PathRef, recovery::RecoveryToken, CloseReason,
@@ -120,7 +120,7 @@ impl ClosingFrame {
     /// the value.
     pub const MIN_LENGTH: usize = 1 + 8 + 8 + 2 + 8;
 
-    pub fn write_frame(&self, builder: &mut PacketBuilder) {
+    pub fn write_frame<B: Buffer>(&self, builder: &mut PacketBuilder<B>) {
         if builder.remaining() < Self::MIN_LENGTH {
             return;
         }
@@ -176,7 +176,10 @@ impl StateSignaling {
         *self = Self::HandshakeDone;
     }
 
-    pub fn write_done(&mut self, builder: &mut PacketBuilder) -> Option<RecoveryToken> {
+    pub fn write_done<B: Buffer>(
+        &mut self,
+        builder: &mut PacketBuilder<B>,
+    ) -> Option<RecoveryToken> {
         (matches!(self, Self::HandshakeDone) && builder.remaining() >= 1).then(|| {
             *self = Self::Idle;
             builder.encode_varint(FrameType::HandshakeDone);

@@ -8,7 +8,7 @@
 
 use std::{io, net::SocketAddr};
 
-use neqo_common::{qdebug, Datagram};
+use neqo_common::{qdebug, Buffer, DatagramBatch};
 use neqo_udp::{DatagramIter, RecvBuf};
 
 /// Ideally this would live in [`neqo-udp`]. [`neqo-udp`] is used in Firefox.
@@ -79,8 +79,9 @@ impl Socket {
         self.inner.readable().await
     }
 
-    /// Send a [`Datagram`] on the given [`Socket`].
-    pub fn send(&self, d: &Datagram) -> io::Result<()> {
+    /// Send a [`DatagramBatch`] on the given [`Socket`].
+    /// TODO: Do we need to be generic over B? Why not concrete Vec<u8>?
+    pub fn send<B: Buffer>(&self, d: &DatagramBatch<B>) -> io::Result<()> {
         self.inner.try_io(tokio::io::Interest::WRITABLE, || {
             neqo_udp::send_inner(&self.state, (&self.inner).into(), d)
         })
@@ -105,5 +106,9 @@ impl Socket {
                     Err(e)
                 }
             })
+    }
+
+    pub fn max_gso_segments(&self) -> usize {
+        self.state.max_gso_segments()
     }
 }

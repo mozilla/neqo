@@ -9,20 +9,20 @@ use std::{
     fmt::{self, Debug, Display, Formatter},
     iter,
     net::SocketAddr,
+    num::NonZeroUsize,
     rc::Rc,
     time::Instant,
 };
 
 use neqo_common::{
-    event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
-    Datagram, Decoder, Encoder, Header, MessageType, Role,
+    event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace, Buffer, Datagram, Decoder, Encoder, Header, MessageType, Role
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
     streams::SendOrder, AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator,
-    DatagramTracking, Output, RecvStreamStats, SendStreamStats, Stats as TransportStats, StreamId,
-    StreamType, Version, ZeroRttState,
+    DatagramTracking, Output, OutputBatch, RecvStreamStats, SendStreamStats,
+    Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
 };
 
 use crate::{
@@ -915,16 +915,26 @@ impl Http3Client {
         }
     }
 
-    /// The function should be called to check if there is a new UDP packet to be sent. It should
+    /// Wrapper around [`Http3Server::process_multiple_output`] that processes a single
+    /// output datagram only.
+    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
+    pub fn process_output(&mut self, now: Instant) -> Output {
+        let mut send_buffer = vec![];
+        self.process_multiple_output(now, 1.try_into().expect(">0"), send_buffer)
+            .try_into()
+            .expect("max_datagrams is 1")
+    }
+
+    /// The function should be called to check if there are new UDP packets to be sent. It should
     /// be called after a new packet is received and processed and after a timer expires (QUIC
     /// needs timers to handle events like PTO detection and timers are not implemented by the neqo
     /// library, but instead must be driven by the application).
     ///
-    /// `process_output` can return:
-    /// - a [`Output::Datagram(Datagram)`][1]: data that should be sent as a UDP payload,
-    /// - a [`Output::Callback(Duration)`][1]: the duration of a  timer. `process_output` should be
-    ///   called at least after the time expires,
-    /// - [`Output::None`][1]: this is returned when `Http3Client` is done and can be destroyed.
+    /// [`Http3Client::process_multiple_output`] can return:
+    /// - a [`OutputBatch::Datagram(Datagram)`]: data that should be sent as a UDP payload,
+    /// - a [`OutputBatch::Callback(Duration)`]: the duration of a  timer. `process_output` should
+    ///   be called at least after the time expires,
+    /// - [`OutputBatch::None`]: this is returned when `Http3Client` is done and can be destroyed.
     ///
     /// The application should call this function repeatedly until a timer value or None is
     /// returned. After that, the application should call the function again if a new UDP packet is
@@ -942,13 +952,18 @@ impl Http3Client {
     /// [1]: ../neqo_transport/enum.Output.html
     /// [2]: ../neqo_transport/struct.ConnectionEvents.html
     /// [3]: ../neqo_transport/struct.Connection.html#method.process_output
-    pub fn process_output(&mut self, now: Instant) -> Output {
+    pub fn process_multiple_output<B: Buffer>(
+        &mut self,
+        now: Instant,
+        max_datagrams: NonZeroUsize,
+        send_buffer: B,
+    ) -> OutputBatch<B> {
         qtrace!("[{self}] Process output");
 
         // Maybe send() stuff on http3-managed streams
         self.process_http3(now);
 
-        let out = self.conn.process_output(now);
+        let out = self.conn.process_multiple_output(now, send_buffer, max_datagrams);
 
         // Update H3 for any transport state changes and events
         self.process_http3(now);

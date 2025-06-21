@@ -1,4 +1,3 @@
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
@@ -10,6 +9,7 @@ use std::{
     cell::RefCell,
     cmp::{max, min},
     fmt::{self, Debug, Display, Formatter, Write as _},
+    io::Cursor,
     iter, mem,
     net::{IpAddr, SocketAddr},
     num::NonZeroUsize,
@@ -20,7 +20,8 @@ use std::{
 
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, IpTosEcn, Role,
+    qlog::NeqoQlog, qtrace, qwarn, Buffer, Datagram, DatagramBatch, Decoder, Encoder, IpTos,
+    IpTosEcn, Role,
 };
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
@@ -110,8 +111,64 @@ pub enum Output {
     Callback(Duration),
 }
 
+impl TryFrom<OutputBatch<Vec<u8>>> for Output {
+    type Error = ();
+
+    fn try_from(value: OutputBatch<Vec<u8>>) -> Result<Self, Self::Error> {
+        match value {
+            OutputBatch::None => Ok(Self::None),
+            OutputBatch::DatagramBatch(dg) => Ok(Self::Datagram(dg.try_into()?)),
+            OutputBatch::Callback(t) => Ok(Self::Callback(t)),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OutputBatch<B: Buffer> {
+    /// Connection requires no action.
+    None,
+    /// Connection requires the datagram batch be sent.
+    DatagramBatch(DatagramBatch<B>),
+    /// Connection requires `process_input()` be called when the `Duration`
+    /// elapses.
+    Callback(Duration),
+}
+
+// TODO
+// impl<'a> From<Output> for OutputBatch<'a> {
+//     fn from(value: Output) -> Self {
+//         match value {
+//             Output::None => Self::None,
+//             Output::Datagram(dg) => Self::DatagramBatch(DatagramBatch::from(dg)),
+//             Output::Callback(t) => Self::Callback(t),
+//         }
+//     }
+// }
+
+impl<B: Buffer> OutputBatch<B> {
+    /// Convert into an [`Option<DatagramBatch>`].
+    #[must_use]
+    pub fn dgram(self) -> Option<DatagramBatch<B>> {
+        match self {
+            Self::DatagramBatch(dg) => Some(dg),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn or_else<F>(self, f: F) -> Self
+    where
+        F: FnOnce() -> Self,
+    {
+        match self {
+            x @ (Self::DatagramBatch(_) | Self::Callback(_)) => x,
+            Self::None => f(),
+        }
+    }
+}
+
 impl Output {
-    /// Convert into an `Option<Datagram>`.
+    /// Convert into an [`Option<Datagram>`].
     #[must_use]
     pub fn dgram(self) -> Option<Datagram> {
         match self {
@@ -157,17 +214,28 @@ impl From<Option<Datagram>> for Output {
 }
 
 /// Used by inner functions like `Connection::output`.
-enum SendOption {
+enum SendOptionBatch<B> {
     /// Yes, please send this datagram.
-    Yes(Datagram),
+    Yes(DatagramBatch<B>),
     /// Don't send.  If this was blocked on the pacer (the arg is true).
     No(bool),
 }
 
-impl Default for SendOption {
+impl<B> Default for SendOptionBatch<B> {
     fn default() -> Self {
         Self::No(false)
     }
+}
+
+/// Used by inner functions like `Connection::output`.
+enum SendOption {
+    /// Yes, please send this datagram.
+    Yes,
+    /// Don't send.
+    No(
+        /// Whether this was blocked on the pacer.
+        bool,
+    ),
 }
 
 /// Used by `Connection::preprocess` to determine what to do
@@ -1033,7 +1101,7 @@ impl Connection {
         self.cid_manager.is_valid(cid)
     }
 
-    /// Process new input datagrams on the connection.
+    /// Process a new input datagram on the connection.
     pub fn process_input<A: AsRef<[u8]> + AsMut<[u8]>>(&mut self, d: Datagram<A>, now: Instant) {
         self.process_multiple_input(iter::once(d), now);
     }
@@ -1129,12 +1197,29 @@ impl Connection {
         delay
     }
 
+    /// Wrapper around [`Connection::process_multiple_output`] that processes a
+    /// single output datagram only.
+    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
+    #[must_use = "Output of the process_output function must be handled"]
+    pub fn process_output(&mut self, now: Instant) -> Output {
+        todo!()
+        // let mut send_buffer = vec![0; u16::MAX as usize];
+        // self.process_multiple_output(now, &mut send_buffer, 1.try_into().expect(">0"))
+        //     .try_into()
+        //     .expect("max_datagrams is 1")
+    }
+
     /// Get output packets, as a result of receiving packets, or actions taken
     /// by the application.
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
-    #[must_use = "Output of the process_output function must be handled"]
-    pub fn process_output(&mut self, now: Instant) -> Output {
+    #[must_use = "OutputBatch of the process_multiple_output function must be handled"]
+    pub fn process_multiple_output<B: Buffer>(
+        &mut self,
+        now: Instant,
+        send_buffer: B,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch<B> {
         qtrace!("[{self}] process_output {:?} {now:?}", self.state);
 
         match (&self.state, self.role) {
@@ -1143,21 +1228,21 @@ impl Connection {
                 self.absorb_error(now, res);
             }
             (State::Init | State::WaitInitial, Role::Server) => {
-                return Output::None;
+                return OutputBatch::None;
             }
             _ => {
                 self.process_timer(now);
             }
         }
 
-        match self.output(now) {
-            SendOption::Yes(dgram) => Output::Datagram(dgram),
-            SendOption::No(paced) => match self.state {
-                State::Init | State::Closed(_) => Output::None,
+        match self.output(now, send_buffer, max_datagrams) {
+            SendOptionBatch::Yes(dgram) => OutputBatch::DatagramBatch(dgram),
+            SendOptionBatch::No(paced) => match self.state {
+                State::Init | State::Closed(_) => OutputBatch::None,
                 State::Closing { timeout, .. } | State::Draining { timeout, .. } => {
-                    Output::Callback(timeout.duration_since(now))
+                    OutputBatch::Callback(timeout.duration_since(now))
                 }
-                _ => Output::Callback(self.next_delay(now, paced)),
+                _ => OutputBatch::Callback(self.next_delay(now, paced)),
             },
         }
     }
@@ -1175,22 +1260,41 @@ impl Connection {
         res
     }
 
-    /// Process input and generate output.
+    /// Wrapper around [`Connection::process_multiple`], processing a single
+    /// input and single output datagram only.
+    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     #[must_use = "Output of the process function must be handled"]
     pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
         dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
+        todo!()
+        // self.process_multiple(dgram, now, 1.try_into().expect(">0"))
+        //     .try_into()
+        //     .expect("max_datagrams is 1")
+    }
+
+    /// Process input and generate output.
+    #[must_use = "OutputBatch of the process_multiple function must be handled"]
+    pub fn process_multiple<B: Buffer>(
+        &mut self,
+        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        now: Instant,
+        send_buffer: B,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch<B> {
         if let Some(d) = dgram {
             self.input(d, now, now);
             self.process_saved(now);
         }
-        let output = self.process_output(now);
+        let output = self.process_multiple_output(now, send_buffer, max_datagrams);
         #[cfg(all(feature = "build-fuzzing-corpus", test))]
         if self.test_frame_writer.is_none() {
-            if let Some(d) = output.clone().dgram() {
-                neqo_common::write_item_to_fuzzing_corpus("packet", &d);
+            if let OutputBatch::DatagramBatch(batch) = &output {
+                for dgram in batch.iter() {
+                    neqo_common::write_item_to_fuzzing_corpus("packet", &dgram);
+                }
             }
         }
         output
@@ -2059,7 +2163,12 @@ impl Connection {
         }
     }
 
-    fn output(&mut self, now: Instant) -> SendOption {
+    fn output<'a, B: Buffer>(
+        &mut self,
+        now: Instant,
+        send_buffer: B,
+        max_datagrams: NonZeroUsize,
+    ) -> SendOptionBatch<B> {
         qtrace!("[{self}] output {now:?}");
         let res = match &self.state {
             State::Init
@@ -2068,15 +2177,21 @@ impl Connection {
             | State::Handshaking
             | State::Connected
             | State::Confirmed => self.paths.select_path().map_or_else(
-                || Ok(SendOption::default()),
+                || Ok(SendOptionBatch::default()),
                 |path| {
-                    let res = self.output_path(&path, now, None);
+                    let res = self.output_dgram_batch_on_path(
+                        &path,
+                        now,
+                        None,
+                        send_buffer,
+                        max_datagrams,
+                    );
                     self.capture_error(Some(path), now, FrameType::Padding, res)
                 },
             ),
             State::Closing { .. } | State::Draining { .. } | State::Closed(_) => {
                 self.state_signaling.close_frame().map_or_else(
-                    || Ok(SendOption::default()),
+                    || Ok(SendOptionBatch::default()),
                     |details| {
                         let path = Rc::clone(details.path());
                         // In some error cases, we will not be able to make a new, permanent path.
@@ -2087,7 +2202,13 @@ impl Connection {
                             qerror!("[{self}] Attempting to close with a temporary path");
                             Err(Error::Internal)
                         } else {
-                            self.output_path(&path, now, Some(&details))
+                            self.output_dgram_batch_on_path(
+                                &path,
+                                now,
+                                Some(&details),
+                                send_buffer,
+                                max_datagrams,
+                            )
                         };
                         self.capture_error(Some(path), now, FrameType::Padding, res)
                     },
@@ -2098,16 +2219,16 @@ impl Connection {
     }
 
     #[expect(clippy::too_many_arguments, reason = "no easy way to simplify")]
-    fn build_packet_header(
+    fn build_packet_header<B: Buffer>(
         path: &Path,
         epoch: Epoch,
-        encoder: Encoder,
+        encoder: Encoder<B>,
         tx: &CryptoDxState,
         address_validation: &AddressValidationInfo,
         version: Version,
         grease_quic_bit: bool,
         limit: usize,
-    ) -> (PacketType, PacketBuilder) {
+    ) -> (PacketType, PacketBuilder<B>) {
         let pt = PacketType::from(epoch);
         let mut builder = if pt == PacketType::Short {
             qdebug!("Building Short dcid {:?}", path.remote_cid());
@@ -2138,8 +2259,8 @@ impl Connection {
     }
 
     #[must_use]
-    fn add_packet_number(
-        builder: &mut PacketBuilder,
+    fn add_packet_number<B: Buffer>(
+        builder: &mut PacketBuilder<B>,
         tx: &CryptoDxState,
         largest_acknowledged: Option<PacketNumber>,
     ) -> PacketNumber {
@@ -2171,9 +2292,9 @@ impl Connection {
 
     /// Write the frames that are exchanged in the application data space.
     /// The order of calls here determines the relative priority of frames.
-    fn write_appdata_frames(
+    fn write_appdata_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         tokens: &mut Vec<RecoveryToken>,
         now: Instant,
     ) {
@@ -2267,11 +2388,11 @@ impl Connection {
     }
 
     // Maybe send a probe.  Return true if the packet was ack-eliciting.
-    fn maybe_probe(
+    fn maybe_probe<B: Buffer>(
         &mut self,
         path: &PathRef,
         force_probe: bool,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         ack_end: usize,
         tokens: &mut Vec<RecoveryToken>,
         now: Instant,
@@ -2318,12 +2439,12 @@ impl Connection {
     /// Write frames to the provided builder.  Returns a list of tokens used for
     /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
     /// whether the packet was padded.
-    fn write_frames(
+    fn write_frames<B: Buffer>(
         &mut self,
         path: &PathRef,
         space: PacketNumberSpace,
         profile: &SendProfile,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         coalesced: bool, // Whether this packet is coalesced behind another one.
         now: Instant,
     ) -> (Vec<RecoveryToken>, bool, bool) {
@@ -2411,10 +2532,10 @@ impl Connection {
         (tokens, ack_eliciting, padded)
     }
 
-    fn write_closing_frames(
+    fn write_closing_frames<B: Buffer>(
         &mut self,
         close: &ClosingFrame,
-        builder: &mut PacketBuilder,
+        builder: &mut PacketBuilder<B>,
         space: PacketNumberSpace,
         now: Instant,
         path: &PathRef,
@@ -2445,28 +2566,103 @@ impl Connection {
         self.stats.borrow_mut().frame_tx.connection_close += 1;
     }
 
+    /// Build batch of datagrams to be sent on the provided path.
+    #[expect(
+        clippy::unwrap_in_result,
+        reason = "expect() used on internal invariants"
+    )]
+    fn output_dgram_batch_on_path<B: Buffer>(
+        &mut self,
+        path: &PathRef,
+        now: Instant,
+        mut closing_frame: Option<&ClosingFrame>,
+        mut send_buffer: B,
+        max_datagrams: NonZeroUsize,
+    ) -> Res<SendOptionBatch<B>> {
+        let packet_tos = path.borrow().tos();
+
+        let mut datagram_size = None;
+        let mut num_datagrams = 0;
+
+        let mut bytes_written = 0;
+
+        loop {
+            if max_datagrams.get() <= num_datagrams {
+                break;
+            }
+
+            // Check if we can fit another PMTUD sized datagram into the batch.
+            if datagram_size.is_some_and(|datagram_size| {
+                min(datagram_size, DatagramBatch::<B>::MAX - send_buffer.position())
+                    < path.borrow().plpmtu()
+            }) {
+                break;
+            }
+
+            // Determine how we are sending packets (PTO, etc..).
+            let profile = self.loss_recovery.send_profile(&path.borrow(), now);
+            qdebug!("[{self}] output_path send_profile {profile:?}");
+
+            match self.output_dgram_on_path(
+                path,
+                now,
+                closing_frame.take(),
+                &profile,
+                Encoder::new_with_buffer(&mut send_buffer),
+                packet_tos,
+            )? {
+                SendOption::Yes => {
+                    num_datagrams += 1;
+                    let datagram_size = *datagram_size.get_or_insert(send_buffer.position());
+                    if ((send_buffer.position()) % datagram_size) > 0 {
+                        // GSO requires that all packets in a batch are of equal
+                        // size. Only the last packet can be smaller. This
+                        // packet was smaller. Make sure it was the last by
+                        // breaking the loop.
+                        break;
+                    }
+                }
+                SendOption::No(paced) => {
+                    if num_datagrams == 0 {
+                        debug_assert!(send_buffer.is_empty());
+                        return Ok(SendOptionBatch::No(paced));
+                    }
+                    break;
+                }
+            }
+        }
+
+        debug_assert!(!send_buffer.is_empty());
+        let batch = path.borrow_mut().datagram_batch(
+            send_buffer,
+            packet_tos,
+            num_datagrams,
+            datagram_size.expect("one or more datagrams"),
+            &mut self.stats.borrow_mut(),
+        );
+
+        Ok(SendOptionBatch::Yes(batch))
+    }
+
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
     #[expect(clippy::too_many_lines, reason = "Yeah, that's just the way it is.")]
-    fn output_path(
+    fn output_dgram_on_path<B: Buffer>(
         &mut self,
         path: &PathRef,
         now: Instant,
         closing_frame: Option<&ClosingFrame>,
+        profile: &SendProfile,
+        mut encoder: Encoder<B>,
+        packet_tos: IpTos,
     ) -> Res<SendOption> {
         let mut initial_sent = None;
-        let mut packet_tos = None;
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
 
-        // Determine how we are sending packets (PTO, etc..).
-        let profile = self.loss_recovery.send_profile(&path.borrow(), now);
-        qdebug!("[{self}] output_path send_profile {profile:?}");
-
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
-        let mut encoder = Encoder::with_capacity(profile.limit());
         for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
             let Some((epoch, tx)) = self.crypto.states_mut().select_tx_mut(self.version, space)
@@ -2520,17 +2716,19 @@ impl Connection {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, space, &profile, &mut builder, header_start != 0, now);
+                    self.write_frames(path, space, profile, &mut builder, header_start != 0, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();
+
                 continue;
             }
 
-            // If we don't have a TOS for this UDP datagram yet (i.e. `tos` is `None`), get it,
-            // adding a `RecoveryToken::EcnEct0` to `tokens` in case of loss.
-            let tos = packet_tos.get_or_insert_with(|| path.borrow().tos(&mut tokens));
+            if packet_tos.is_ecn_marked() {
+                tokens.push(RecoveryToken::EcnEct0);
+            }
+
             self.log_packet(
                 packet::MetaData::new_out(
                     path,
@@ -2538,12 +2736,17 @@ impl Connection {
                     pn,
                     builder.len() + aead_expansion,
                     &builder.as_ref()[payload_start..],
-                    *tos,
+                    packet_tos,
                 ),
                 now,
             );
 
             self.stats.borrow_mut().packets_tx += 1;
+            // Track which packet types are sent with which ECN codepoints. For
+            // coalesced packets, this increases the counts for each packet type
+            // contained in the coalesced packet. This is per Section 13.4.1 of
+            // RFC 9000.
+            self.stats.borrow_mut().ecn_tx[pt] += IpTosEcn::from(packet_tos);
             let tx = self
                 .crypto
                 .states_mut()
@@ -2578,11 +2781,6 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, sent, now);
             }
 
-            // Track which packet types are sent with which ECN codepoints. For
-            // coalesced packets, this increases the counts for each packet type
-            // contained in the coalesced packet. This is per Section 13.4.1 of
-            // RFC 9000.
-            self.stats.borrow_mut().ecn_tx[pt] += IpTosEcn::from(*tos);
             if space == PacketNumberSpace::Handshake {
                 if self.role == Role::Client {
                     // We're sending a Handshake packet, so we can discard Initial keys.
@@ -2612,27 +2810,22 @@ impl Connection {
             Ok(SendOption::No(profile.paced()))
         } else {
             // Perform additional padding for Initial packets as necessary.
-            let mut packets: Vec<u8> = encoder.into();
             if let Some(mut initial) = initial_sent.take() {
-                if needs_padding && packets.len() < profile.limit() {
+                if needs_padding && encoder.len() < profile.limit() {
                     qdebug!(
                         "[{self}] pad Initial from {} to PLPMTU {}",
-                        packets.len(),
+                        encoder.len(),
                         profile.limit()
                     );
-                    initial.track_padding(profile.limit() - packets.len());
+                    initial.track_padding(profile.limit() - encoder.len());
                     // These zeros aren't padding frames, they are an invalid all-zero coalesced
                     // packet, which is why we don't increase `frame_tx.padding` count here.
-                    packets.resize(profile.limit(), 0);
+                    encoder.pad_to(profile.limit(), 0);
                 }
                 self.loss_recovery.on_packet_sent(path, initial, now);
             }
-            path.borrow_mut().add_sent(packets.len());
-            Ok(SendOption::Yes(path.borrow_mut().datagram(
-                packets,
-                packet_tos.unwrap_or_default(),
-                &mut self.stats.borrow_mut(),
-            )))
+            path.borrow_mut().add_sent(encoder.len());
+            Ok(SendOption::Yes)
         }
     }
 
@@ -3605,7 +3798,8 @@ impl Connection {
         };
         let path = self.paths.primary().ok_or(Error::NotAvailable)?;
         let mtu = path.borrow().plpmtu();
-        let encoder = Encoder::default();
+        let mut buffer = Vec::new();
+        let encoder = Encoder::new_borrowed_vec(&mut buffer);
 
         let (_, mut builder) = Self::build_packet_header(
             &path.borrow(),

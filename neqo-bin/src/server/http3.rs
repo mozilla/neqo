@@ -7,11 +7,7 @@
 #![expect(clippy::unwrap_used, reason = "This is example code.")]
 
 use std::{
-    cell::RefCell,
-    fmt::{self, Display},
-    rc::Rc,
-    slice,
-    time::Instant,
+    cell::RefCell, fmt::{self, Display}, io::Cursor, num::NonZeroUsize, rc::Rc, slice, time::Instant
 };
 
 use neqo_common::{header::HeadersExt as _, hex, qdebug, qerror, qinfo, Datagram, Header};
@@ -19,7 +15,7 @@ use neqo_crypto::{generate_ech_keys, random, AntiReplay};
 use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
 };
-use neqo_transport::{server::ValidateAddress, ConnectionIdGenerator};
+use neqo_transport::{server::ValidateAddress, ConnectionIdGenerator, OutputBatch};
 use rustc_hash::FxHashMap as HashMap;
 
 use super::{qns_read_response, Args};
@@ -82,8 +78,14 @@ impl Display for HttpServer {
 }
 
 impl super::HttpServer for HttpServer {
-    fn process(&mut self, dgram: Option<Datagram<&mut [u8]>>, now: Instant) -> neqo_http3::Output {
-        self.server.process(dgram, now)
+    fn process_multiple<'a>(
+        &mut self,
+        dgram: Option<Datagram<&mut [u8]>>,
+        now: Instant,
+        max_datagrams: NonZeroUsize,
+        send_buffer: Cursor<&'a mut [u8]>,
+    ) -> OutputBatch<Cursor<&'a mut [u8]>> {
+        self.server.process_multiple(dgram, now, max_datagrams, send_buffer)
     }
 
     fn process_events(&mut self, _now: Instant) {
