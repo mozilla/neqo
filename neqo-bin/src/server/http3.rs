@@ -5,12 +5,7 @@
 // except according to those terms.
 
 use std::{
-    cell::RefCell,
-    fmt::{self, Display},
-    num::NonZeroUsize,
-    rc::Rc,
-    slice,
-    time::Instant,
+    cell::RefCell, fmt::{self, Display}, num::NonZeroUsize, rc::Rc, slice, time::Instant
 };
 
 use neqo_common::{Datagram, Header, header::HeadersExt as _, qdebug, qerror};
@@ -124,7 +119,7 @@ impl super::HttpServer for HttpServer {
         dgrams: D,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
+    ) -> OutputBatch<Vec<u8>> {
         self.server.process_multiple(dgrams, now, max_datagrams)
     }
 

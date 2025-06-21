@@ -48,7 +48,7 @@ struct InsertDatagram<'a> {
 }
 
 impl crate::connection::test_internal::FrameWriter for InsertDatagram<'_> {
-    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<Vec<u8>>) {
         builder.encode_varint(FrameType::Datagram);
         builder.encode(self.data);
     }
@@ -596,13 +596,15 @@ fn datagram_overfill(client: &mut Connection, server: &mut Connection, gap: usiz
     /// This `FrameWriter` should not be invoked.
     struct PanickingFrameWriter {}
     impl crate::connection::test_internal::FrameWriter for PanickingFrameWriter {
-        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        fn write_frames(&mut self, builder: &mut packet::Builder<Vec<u8>>) {
             panic!(
                 "builder invoked with {} bytes remaining",
                 builder.remaining()
             );
         }
     }
+
+
 
     // Work out how much space we have for a datagram.
     let space = {

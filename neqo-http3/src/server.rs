@@ -136,7 +136,7 @@ impl Http3Server {
         dgrams: I,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
+    ) -> OutputBatch<Vec<u8>> {
         qtrace!("[{self}] Process");
         let out = self.server.process_multiple_input(dgrams, now);
         self.process_http3(now);
@@ -146,9 +146,7 @@ impl Http3Server {
                 qtrace!("[{self}] Send packet: {d:?}");
                 OutputBatch::DatagramBatch(d)
             }
-            _ => self
-                .server
-                .process_multiple(Option::<Datagram>::None, now, max_datagrams),
+            _ => self.server.process_multiple(std::iter::empty::<Datagram<Vec<u8>>>(), now, max_datagrams),
         }
     }
 
