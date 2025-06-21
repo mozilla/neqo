@@ -20,7 +20,7 @@ use std::{
     cell::RefCell,
     fmt::{self, Display},
     fs,
-    io::{self},
+    io::{self, Cursor},
     net::{SocketAddr, ToSocketAddrs as _},
     num::NonZeroUsize,
     path::PathBuf,
@@ -207,12 +207,13 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
 }
 
 pub trait HttpServer: Display {
-    fn process_multiple(
+    fn process_multiple<'a>(
         &mut self,
         dgram: Option<Datagram<&mut [u8]>>,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch;
+        send_buffer: Cursor<&'a mut [u8]>,
+    ) -> OutputBatch<Cursor<&'a mut [u8]>>;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }
@@ -223,6 +224,8 @@ pub struct ServerRunner {
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<(SocketAddr, crate::udp::Socket)>,
     recv_buf: RecvBuf,
+    // TODO: How about Box<[u8]>? Would prevent growth.
+    send_buf: Vec<u8>,
 }
 
 impl ServerRunner {
@@ -238,6 +241,7 @@ impl ServerRunner {
             timeout: None,
             sockets,
             recv_buf: RecvBuf::new(),
+            send_buf: vec![0; neqo_udp::SEND_BUF_SIZE],
         }
     }
 
@@ -270,6 +274,8 @@ impl ServerRunner {
         sockets: &mut [(SocketAddr, crate::udp::Socket)],
         now: &dyn Fn() -> Instant,
         mut input_dgram: Option<Datagram<&mut [u8]>>,
+        // TODO &mut [u8] instead?
+        mut send_buffer: &mut Vec<u8>,
     ) -> Result<(), io::Error> {
         // Each socket has a maximum number of GSO segments it can handle. When
         // calling `server.process_multiple` we don't know which socket will be
@@ -289,7 +295,8 @@ impl ServerRunner {
             .map_err(|_| io::Error::from(io::ErrorKind::Unsupported))?;
 
         loop {
-            match server.process_multiple(input_dgram.take(), now(), smallest_max_gso_segments) {
+            let send_buffer = Cursor::new(&mut send_buffer[..]);
+            match server.process_multiple(input_dgram.take(), now(), smallest_max_gso_segments, send_buffer) {
                 OutputBatch::DatagramBatch(dgram) => {
                     let socket = Self::find_socket(sockets, dgram.source());
                     loop {
@@ -331,6 +338,7 @@ impl ServerRunner {
                     &mut self.sockets,
                     &self.now,
                     Some(input_dgram),
+                    &mut self.send_buf,
                 )
                 .await?;
             }
@@ -346,6 +354,8 @@ impl ServerRunner {
             &mut self.sockets,
             &self.now,
             None,
+
+                    &mut self.send_buf,
         )
         .await
     }

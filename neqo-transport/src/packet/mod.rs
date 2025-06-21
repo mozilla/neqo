@@ -190,13 +190,14 @@ impl PacketBuilder {
 
     /// Make a Version Negotiation packet.
     #[must_use]
-    pub fn version_negotiation(
+    pub fn version_negotiation<B: Buffer>(
         dcid: &[u8],
         scid: &[u8],
         client_version: u32,
         versions: &[Version],
-    ) -> Vec<u8> {
-        let mut encoder = Encoder::default();
+        send_buffer: B,
+    ) {
+        let mut encoder = Encoder::new_with_buffer(send_buffer);
         let mut grease = random::<4>();
         // This will not include the "QUIC bit" sometimes.  Intentionally.
         encoder.encode_byte(PACKET_BIT_LONG | (grease[3] & 0x7f));
@@ -216,8 +217,6 @@ impl PacketBuilder {
         // by making the last byte differ from the client initial.
         grease[3] = (client_version.wrapping_add(0x10) & 0xf0) as u8 | 0x0a;
         encoder.encode(&grease[..4]);
-
-        Vec::from(encoder)
     }
 }
 
@@ -1458,11 +1457,13 @@ mod tests {
     #[test]
     fn build_vn() {
         fixture_init();
-        let mut vn = PacketBuilder::version_negotiation(
+        let  mut vn= vec![];
+        PacketBuilder::version_negotiation(
             SERVER_CID,
             CLIENT_CID,
             0x0a0a_0a0a,
             &Version::all(),
+            &mut vn,
         );
         // Erase randomness from greasing...
         assert_eq!(vn.len(), SAMPLE_VN.len());
@@ -1476,11 +1477,13 @@ mod tests {
     #[test]
     fn vn_do_not_repeat_client_grease() {
         fixture_init();
-        let vn = PacketBuilder::version_negotiation(
+        let mut vn = vec![];
+        PacketBuilder::version_negotiation(
             SERVER_CID,
             CLIENT_CID,
             0x0a0a_0a0a,
             &Version::all(),
+            &mut vn
         );
         assert_ne!(&vn[SAMPLE_VN.len() - 4..], &[0x0a, 0x0a, 0x0a, 0x0a]);
     }
