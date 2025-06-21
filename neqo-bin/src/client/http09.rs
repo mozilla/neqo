@@ -13,7 +13,7 @@ use std::{
     collections::VecDeque,
     fmt::Display,
     fs::File,
-    io::{BufWriter, Write as _},
+    io::{BufWriter, Cursor, Write as _},
     net::SocketAddr,
     num::NonZeroUsize,
     path::PathBuf,
@@ -192,12 +192,13 @@ impl TryFrom<&State> for CloseState {
 }
 
 impl super::Client for Connection {
-    fn process_multiple_output(
+    fn process_multiple_output<'a>(
         &mut self,
         now: Instant,
+        send_buffer: Cursor<&'a mut [u8]>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
-        self.process_multiple_output(now, max_datagrams)
+    ) -> OutputBatch<Cursor<&'a mut [u8]>> {
+        self.process_multiple_output(now, send_buffer, max_datagrams)
     }
 
     fn process_multiple_input<'a>(

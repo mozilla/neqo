@@ -7,13 +7,7 @@
 #![expect(clippy::unwrap_used, reason = "This is example code.")]
 
 use std::{
-    borrow::Cow,
-    cell::RefCell,
-    fmt::{self, Display, Formatter},
-    num::NonZeroUsize,
-    rc::Rc,
-    slice, str,
-    time::Instant,
+    borrow::Cow, cell::RefCell, fmt::{self, Display, Formatter}, io::Cursor, num::NonZeroUsize, rc::Rc, slice, str, time::Instant
 };
 
 use neqo_common::{event::Provider as _, hex, qdebug, qerror, qinfo, qwarn, Datagram};
@@ -201,13 +195,14 @@ impl HttpServer {
 }
 
 impl super::HttpServer for HttpServer {
-    fn process_multiple(
+    fn process_multiple<'a>(
         &mut self,
         dgram: Option<Datagram<&mut [u8]>>,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
-        self.server.process_multiple(dgram, now, max_datagrams)
+        send_buffer: Cursor<&'a mut [u8]>
+    ) -> OutputBatch<Cursor<&'a mut [u8]>> {
+        self.server.process_multiple(dgram, now, max_datagrams, send_buffer)
     }
 
     fn process_events(&mut self, now: Instant) {

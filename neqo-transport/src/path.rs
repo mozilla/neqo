@@ -688,14 +688,14 @@ impl Path {
     }
 
     /// Make a datagram.
-    pub fn datagram_batch(
+    pub fn datagram_batch<B: Buffer>(
         &mut self,
-        payload: Vec<u8>,
+        payload: B,
         tos: Tos,
         num_datagrams: usize,
         datagram_size: usize,
         stats: &mut Stats,
-    ) -> DatagramBatch {
+    ) -> DatagramBatch<B> {
         // Make sure to use the TOS value from before calling ecn::Info::on_packet_sent, which may
         // update the ECN state and can hence change it - this packet should still be sent
         // with the current value.
