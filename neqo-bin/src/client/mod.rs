@@ -10,7 +10,7 @@ use std::{
     collections::VecDeque,
     fmt::{self, Display},
     fs::{create_dir_all, File, OpenOptions},
-    io::{self, BufWriter, ErrorKind},
+    io::{self, BufWriter, Cursor, ErrorKind},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _},
     num::NonZeroUsize,
     path::PathBuf,
@@ -396,8 +396,8 @@ enum CloseState {
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
-    fn process_multiple_output(&mut self, now: Instant, max_datagrams: NonZeroUsize)
-        -> OutputBatch;
+    fn process_multiple_output<'a>(&mut self, now: Instant, send_buf: Cursor<&'a mut [u8]>, max_datagrams: NonZeroUsize)
+        -> OutputBatch<Cursor<&'a mut [u8]>>;
     fn process_multiple_input<'a>(
         &mut self,
         dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
@@ -419,6 +419,7 @@ struct Runner<'a, H: Handler> {
     timeout: Option<Pin<Box<Sleep>>>,
     args: &'a Args,
     recv_buf: RecvBuf,
+    send_buf: Vec<u8>,
 }
 
 impl<'a, H: Handler> Runner<'a, H> {
@@ -437,6 +438,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             args,
             timeout: None,
             recv_buf: RecvBuf::new(),
+            send_buf: vec![0; neqo_udp::SEND_BUF_SIZE],
         }
     }
 
@@ -484,9 +486,12 @@ impl<'a, H: Handler> Runner<'a, H> {
                 .inspect_err(|_| qerror!("Socket return GSO size of 0"))
                 .map_err(|_| io::Error::from(ErrorKind::Unsupported))?;
 
+            // TODO: No need to zero the buffer, right?
+            let send_buffer = Cursor::new(&mut self.send_buf[..]);
+
             match self
                 .client
-                .process_multiple_output(Instant::now(), max_datagrams)
+                .process_multiple_output(Instant::now(), send_buffer, max_datagrams)
             {
                 OutputBatch::DatagramBatch(dgram) => loop {
                     // Optimistically attempt sending datagram. In case the OS

@@ -364,7 +364,7 @@ impl Server {
         &mut self,
         dgrams: I,
         now: Instant,
-    ) -> OutputBatch {
+    ) -> OutputBatch<Vec<u8>> {
         let mut dgrams = dgrams.into_iter();
         while let Some(mut dgram) = dgrams.next() {
             qtrace!("Process datagram: {}", hex(&dgram[..]));
@@ -409,12 +409,15 @@ impl Server {
                     continue;
                 }
 
+                let mut buffer = vec![];
+
                 qdebug!("[{self}] Unsupported version: {:x}", packet.wire_version());
-                let vn = packet::Builder::version_negotiation(
+                packet::Builder::version_negotiation(
                     &packet.scid()[..],
                     &packet.dcid()[..],
                     packet.wire_version(),
                     self.conn_params.get_versions().all(),
+                    &mut buffer,
                 );
                 qdebug!(
                     "[{self}] type={:?} path:{} {}->{} {:?} len {}",
@@ -423,7 +426,7 @@ impl Server {
                     destination,
                     source,
                     Tos::default(),
-                    vn.len(),
+                    buffer.len(),
                 );
 
                 crate::qlog::server_version_information_failed(
@@ -439,7 +442,7 @@ impl Server {
                 }));
 
                 return OutputBatch::DatagramBatch(
-                    Datagram::new(destination, source, Tos::default(), vn).into(),
+                    Datagram::new(destination, source, Tos::default(), buffer).into(),
                 );
             }
 
@@ -483,17 +486,18 @@ impl Server {
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
-    fn process_next_output(&mut self, now: Instant, max_datagrams: NonZeroUsize) -> OutputBatch {
+    fn process_next_output(&mut self, now: Instant, max_datagrams: NonZeroUsize) -> OutputBatch<Vec<u8>> {
         assert!(
             self.saved_datagrams.is_empty(),
             "Always process all inbound datagrams first."
         );
         let mut callback = None;
 
+
         for connection in &mut self.connections {
             match connection
                 .borrow_mut()
-                .process_multiple_output(now, max_datagrams)
+                .process_multiple_output(now, vec![], max_datagrams)
             {
                 OutputBatch::None => {}
                 d @ OutputBatch::DatagramBatch(_) => return d,
@@ -532,7 +536,7 @@ impl Server {
         dgrams: I,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
+    ) -> OutputBatch<Vec<u8>> {
         while let Some(SavedDatagram { d, t }) = self.saved_datagrams.pop_front() {
             if let OutputBatch::DatagramBatch(b) = self.process_input(std::iter::once(d), t) {
                 self.saved_datagrams

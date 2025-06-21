@@ -136,7 +136,7 @@ impl Http3Server {
         dgrams: I,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
+    ) -> OutputBatch<Vec<u8>> {
         qtrace!("[{self}] Process");
         let out = self.server.process_multiple(dgrams, now, max_datagrams);
         self.process_http3(now);

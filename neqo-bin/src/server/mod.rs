@@ -259,7 +259,7 @@ pub trait HttpServer: Display {
         dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch;
+    ) -> OutputBatch<Vec<u8>>;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }

@@ -32,8 +32,9 @@ fn gso() {
     client.stream_send(stream_id2, &[42; 2048]).unwrap();
     client.stream_close_send(stream_id2).unwrap();
 
+    let send_buffer = vec![];
     let out = client
-        .process_multiple_output(now(), 64.try_into().expect(">0"))
+        .process_multiple_output(now(),send_buffer, 64.try_into().expect(">0"))
         .dgram()
         .unwrap();
 

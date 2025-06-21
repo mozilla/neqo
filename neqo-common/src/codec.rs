@@ -222,6 +222,23 @@ pub struct Encoder<B = Vec<u8>> {
 }
 
 impl<B: Buffer> Encoder<B> {
+    // TODO cfg
+    // TODO hack
+    pub fn to_owned(&self) -> Encoder<Vec<u8>> {
+        dbg!(self.as_ref().len());
+        Encoder {
+            buf: self.as_ref().to_vec(),
+            start: 0,
+        }
+    }
+
+    // TODO: better name?
+    pub fn new_with_buffer(b: B) -> Self {
+        Self {
+            start: b.position(),
+            buf: b,
+        }
+    }
     /// Get the length of the [`Encoder`].
     ///
     /// Note that the length of the underlying buffer might be larger.
@@ -581,6 +598,36 @@ pub trait Buffer: io::Write {
     fn rotate_right(&mut self, start: usize, count: usize);
 }
 
+impl<B: Buffer> Buffer for &mut B {
+    fn position(&self) -> usize {
+        B::position(self)
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        B::as_slice(self)
+    }
+
+    fn as_mut(&mut self) -> &mut [u8] {
+        B::as_mut(self)
+    }
+
+    fn truncate(&mut self, len: usize) {
+        B::truncate(self, len)
+    }
+
+    fn pad_to(&mut self, n: usize, v: u8) {
+        B::pad_to(self, n, v)
+    }
+
+    fn write_at(&mut self, pos: usize, data: u8) {
+        B::write_at(self, pos, data)
+    }
+
+    fn rotate_right(&mut self, start: usize, count: usize) {
+        B::rotate_right(self, start, count)
+    }
+}
+
 impl Buffer for Vec<u8> {
     fn position(&self) -> usize {
         self.len()
@@ -596,36 +643,6 @@ impl Buffer for Vec<u8> {
 
     fn truncate(&mut self, len: usize) {
         Self::truncate(self, len);
-    }
-
-    fn pad_to(&mut self, n: usize, v: u8) {
-        self.resize(n, v);
-    }
-
-    fn write_at(&mut self, pos: usize, data: u8) {
-        self[pos] = data;
-    }
-
-    fn rotate_right(&mut self, start: usize, count: usize) {
-        self[start..].rotate_right(count);
-    }
-}
-
-impl Buffer for &mut Vec<u8> {
-    fn position(&self) -> usize {
-        Vec::len(self)
-    }
-
-    fn as_slice(&self) -> &[u8] {
-        self.as_ref()
-    }
-
-    fn as_mut(&mut self) -> &mut [u8] {
-        self.as_mut_slice()
-    }
-
-    fn truncate(&mut self, len: usize) {
-        Vec::truncate(self, len);
     }
 
     fn pad_to(&mut self, n: usize, v: u8) {

@@ -214,7 +214,7 @@ impl super::HttpServer for HttpServer {
         dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
+    ) -> OutputBatch<Vec<u8>> {
         self.server.process_multiple(dgrams, now, max_datagrams)
     }
 
