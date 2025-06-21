@@ -158,7 +158,7 @@ fn reliable_reset_emits_no_send_complete() {
 struct ResetStreamAtWriter(u64);
 
 impl FrameWriter for ResetStreamAtWriter {
-    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<Vec<u8>>) {
         // type, stream_id, application_error_code, final_size, reliable_size
         builder.write_varint_frame(&[FrameType::ResetStreamAt.into(), self.0, 0, 0, 0]);
     }

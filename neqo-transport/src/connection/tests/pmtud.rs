@@ -49,7 +49,7 @@ fn gso_with_max_mtu() {
     loop {
         fill_stream(&mut client, stream_id);
         let mut pkts = client
-            .process_multiple_output(now(), 2.try_into().unwrap())
+            .process_multiple_output(now(), Vec::new(), 2.try_into().unwrap())
             .dgram()
             .unwrap();
         if pkts.datagram_size().get() == 65507 {

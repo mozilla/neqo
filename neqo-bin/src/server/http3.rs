@@ -124,7 +124,7 @@ impl super::HttpServer for HttpServer {
         dgrams: D,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
+    ) -> OutputBatch<Vec<u8>> {
         self.server.process_multiple(dgrams, now, max_datagrams)
     }
 

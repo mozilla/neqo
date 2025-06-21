@@ -306,7 +306,7 @@ pub trait HttpServer: Display {
         dgrams: D,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch;
+    ) -> OutputBatch<Vec<u8>>;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
     /// Enables an [`HttpServer`] to drive asynchronous operations.
@@ -616,7 +616,7 @@ mod tests {
 
     #[derive(Default)]
     struct MockServer {
-        batches: Vec<datagram::Batch>,
+        batches: Vec<datagram::Batch<Vec<u8>>>,
         received: usize,
     }
 
@@ -632,7 +632,7 @@ mod tests {
             dgrams: D,
             _now: Instant,
             _max_datagrams: NonZeroUsize,
-        ) -> OutputBatch {
+        ) -> OutputBatch<Vec<u8>> {
             self.received += dgrams.into_iter().count();
             self.batches
                 .pop()
