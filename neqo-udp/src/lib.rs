@@ -18,7 +18,7 @@ use std::{
 };
 
 use log::{log_enabled, Level};
-use neqo_common::{qdebug, qtrace, Datagram, DatagramBatch, Tos};
+use neqo_common::{qdebug, qtrace, Datagram, DatagramBatch, Tos, Buffer};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 
 /// Receive buffer size
@@ -26,6 +26,9 @@ use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 /// Fits a maximum size UDP datagram, or, on platforms with segmentation
 /// offloading, multiple smaller datagrams.
 const RECV_BUF_SIZE: usize = u16::MAX as usize;
+
+/// Send buffer size
+pub const SEND_BUF_SIZE: usize = u16::MAX as usize;
 
 /// The number of buffers to pass to the OS on [`Socket::recv`].
 ///
@@ -46,6 +49,8 @@ const NUM_BUFS: usize = 1;
 const NUM_BUFS: usize = 16;
 
 /// A UDP receive buffer.
+//
+// TODO: Is a Box<[u8]> better?
 pub struct RecvBuf(Vec<Vec<u8>>);
 
 impl RecvBuf {
@@ -61,10 +66,10 @@ impl Default for RecvBuf {
     }
 }
 
-pub fn send_inner(
+pub fn send_inner<B: Buffer>(
     state: &UdpSocketState,
     socket: quinn_udp::UdpSockRef<'_>,
-    d: &DatagramBatch,
+    d: &DatagramBatch<B>,
 ) -> io::Result<()> {
     let transmit = Transmit {
         destination: d.destination(),
@@ -243,7 +248,7 @@ impl<S: SocketRef> Socket<S> {
     }
 
     /// Send a [`Datagram`] on the given [`Socket`].
-    pub fn send(&self, d: &DatagramBatch) -> io::Result<()> {
+    pub fn send<B: Buffer>(&self, d: &DatagramBatch<B>) -> io::Result<()> {
         send_inner(&self.state, (&self.inner).into(), d)
     }
 
@@ -301,7 +306,7 @@ mod tests {
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        let datagram: DatagramBatch = Datagram::new(
+        let datagram: DatagramBatch<Vec<u8>> = Datagram::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             Tos::from((Dscp::Le, Ecn::Ect1)),
