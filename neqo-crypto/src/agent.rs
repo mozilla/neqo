@@ -96,7 +96,6 @@ pub trait CertificateCompressor {
     }
 
     /// Certificate Compression decoding function.
-    /// Returns the length of the decoded buffer.
     /// # Errors
     /// Decoding was unsuccessful, for example, not enough memory
     fn decode(input: &[u8], output: &mut [u8]) -> Res<usize>;
