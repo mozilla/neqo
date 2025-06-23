@@ -151,43 +151,43 @@ jobs:
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
 
-      - name: Run cargo bench
-        env:
-          NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
-        run: |
-          sudo ip link set dev lo mtu "$MTU"
-          cd neqo
-          rm -rf target/criterion
-          git checkout origin/main
-          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches-main.txt
-          BENCHES_MAIN=$(grep Executable benches-main.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
-          # Run the builds from the main branch first, to establish a baseline.
-          for BENCH in $BENCHES_MAIN; do
-            cp "$BENCH" ../binaries/neqo-main/
-            # shellcheck disable=SC2086
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --save-baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results-main.txt
-          done
-          # Copy the main branch results to a separate directory for bencher.dev.
-          cp -r target/criterion ../criterion-main
-          git checkout -
-          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
-          BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
-          # Run pull request builds twice, once without perf for baseline comparison, and once with perf for profiling.
-          # (Perf seems to introduce some variability in the results.)
-          for BENCH in $BENCHES; do
-            cp "$BENCH" ../binaries/neqo/
-            # shellcheck disable=SC2086
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
-          done
-          for BENCH in $BENCHES; do
-            NAME=$(basename "$BENCH" | cut -d- -f1)
-            # shellcheck disable=SC2086
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "../$NAME.perf" $BENCH --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
-          done
-          cp -r target/criterion ../criterion
+      # - name: Run cargo bench
+      #   env:
+      #     NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
+      #   run: |
+      #     sudo ip link set dev lo mtu "$MTU"
+      #     cd neqo
+      #     rm -rf target/criterion
+      #     git checkout origin/main
+      #     cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches-main.txt
+      #     BENCHES_MAIN=$(grep Executable benches-main.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
+      #     # Run the builds from the main branch first, to establish a baseline.
+      #     for BENCH in $BENCHES_MAIN; do
+      #       cp "$BENCH" ../binaries/neqo-main/
+      #       # shellcheck disable=SC2086
+      #       nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+      #         $BENCH -- --bench --save-baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results-main.txt
+      #     done
+      #     # Copy the main branch results to a separate directory for bencher.dev.
+      #     cp -r target/criterion ../criterion-main
+      #     git checkout -
+      #     cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
+      #     BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
+      #     # Run pull request builds twice, once without perf for baseline comparison, and once with perf for profiling.
+      #     # (Perf seems to introduce some variability in the results.)
+      #     for BENCH in $BENCHES; do
+      #       cp "$BENCH" ../binaries/neqo/
+      #       # shellcheck disable=SC2086
+      #       nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+      #         $BENCH -- --bench --baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
+      #     done
+      #     for BENCH in $BENCHES; do
+      #       NAME=$(basename "$BENCH" | cut -d- -f1)
+      #       # shellcheck disable=SC2086
+      #       nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
+      #         perf -- $PERF_OPT -o "../$NAME.perf" $BENCH --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
+      #     done
+      #     cp -r target/criterion ../criterion
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -329,8 +329,10 @@ jobs:
                     # shellcheck disable=SC2086
                     $WORKSPACE/$CMD > /dev/null 2>&1
                   fi
+                  echo -n "Before pkill: "
                   pgrep "$SERVER_TAG" || true
-                  pkill "$SERVER_TAG"
+                  pkill -e "$SERVER_TAG"
+                  echo -n "After pkill: "
                   pgrep "$SERVER_TAG" || true
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
@@ -380,8 +382,10 @@ jobs:
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
                     perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD > /dev/null 2>&1
+                  echo -n "Before pkill: "
                   pgrep "$SERVER_TAG" || true
-                  pkill "$SERVER_TAG"
+                  pkill -e "$SERVER_TAG"
+                  echo -n "After pkill: "
                   pgrep "$SERVER_TAG" || true
                   cd "$WORKSPACE"
 
