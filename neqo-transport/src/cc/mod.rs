@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::qlog::NeqoQlog;
+use neqo_common::qlog::Qlog;
 
 use crate::{recovery::SentPacket, rtt::RttEstimate, Error, Pmtud};
 
@@ -27,7 +27,7 @@ pub use cubic::Cubic;
 pub use new_reno::NewReno;
 
 pub trait CongestionControl: Display + Debug {
-    fn set_qlog(&mut self, qlog: NeqoQlog);
+    fn set_qlog(&mut self, qlog: Qlog);
 
     #[must_use]
     fn cwnd(&self) -> usize;

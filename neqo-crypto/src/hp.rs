@@ -4,11 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
-
 use std::{
     cell::RefCell,
     fmt::{self, Debug},
@@ -44,6 +39,7 @@ experimental_api!(SSL_HkdfExpandLabelWithMech(
 ));
 
 #[derive(Clone)]
+#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub enum HpKey {
     /// An AES encryption context.
     /// Note: as we need to clone this object, we clone the pointer and

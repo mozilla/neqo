@@ -336,7 +336,7 @@ mod tests {
 
     use neqo_common::{event::Provider as _, Encoder};
     use neqo_crypto::{AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker};
-    use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
+    use neqo_qpack::{encoder, QpackSettings};
     use neqo_transport::{
         CloseReason, Connection, ConnectionEvent, State, StreamId, StreamType, ZeroRttState,
     };
@@ -566,7 +566,7 @@ mod tests {
             &[0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64],
         );
         assert_eq!(sent, Ok(9));
-        let mut encoder = QPackEncoder::new(
+        let mut encoder = encoder::QPack::new(
             &QpackSettings {
                 max_table_size_encoder: 100,
                 max_table_size_decoder: 0,

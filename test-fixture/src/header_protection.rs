@@ -4,10 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
 #![expect(clippy::missing_panics_doc, reason = "This is test code.")]
 
 use std::ops::Range;
@@ -100,7 +96,7 @@ pub fn initial_aead_and_hp(dcid: &[u8], role: Role) -> (Aead, HpKey) {
 
 // Remove header protection, returning the unmasked header and the packet number.
 #[must_use]
-pub fn remove_header_protection(hp: &HpKey, header: &[u8], payload: &[u8]) -> (Vec<u8>, u64) {
+pub fn remove(hp: &HpKey, header: &[u8], payload: &[u8]) -> (Vec<u8>, u64) {
     // Make a copy of the header that can be modified.
     let mut fixed_header = header.to_vec();
     let pn_offset = header.len();
@@ -123,7 +119,7 @@ pub fn remove_header_protection(hp: &HpKey, header: &[u8], payload: &[u8]) -> (V
     (fixed_header, u64::from_be_bytes(pn))
 }
 
-pub fn apply_header_protection(hp: &HpKey, packet: &mut [u8], pn_bytes: Range<usize>) {
+pub fn apply(hp: &HpKey, packet: &mut [u8], pn_bytes: Range<usize>) {
     let sample_start = pn_bytes.start + 4;
     let sample_end = sample_start + 16;
     let mask = hp.mask(&packet[sample_start..sample_end]).unwrap();

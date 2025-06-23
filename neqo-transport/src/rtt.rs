@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qlog::NeqoQlog, qtrace};
+use neqo_common::{qlog::Qlog, qtrace};
 
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
@@ -100,7 +100,7 @@ impl RttEstimate {
 
     pub fn update(
         &mut self,
-        qlog: &NeqoQlog,
+        qlog: &Qlog,
         mut rtt_sample: Duration,
         ack_delay: Duration,
         source: RttSource,

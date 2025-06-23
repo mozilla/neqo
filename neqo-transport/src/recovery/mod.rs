@@ -6,11 +6,6 @@
 
 // Tracking of sent packets and detecting their loss.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
-
 #[cfg(feature = "bench")]
 pub mod sent;
 #[cfg(not(feature = "bench"))]
@@ -26,7 +21,7 @@ use std::{
 
 use enum_map::EnumMap;
 use enumset::enum_set;
-use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
+use neqo_common::{qdebug, qinfo, qlog::Qlog, qtrace, qwarn};
 pub use sent::SentPacket;
 use sent::SentPackets;
 use strum::IntoEnumIterator as _;
@@ -486,7 +481,7 @@ pub struct LossRecovery {
     confirmed_time: Option<Instant>,
     pto_state: Option<PtoState>,
     spaces: LossRecoverySpaces,
-    qlog: NeqoQlog,
+    qlog: Qlog,
     stats: StatsCell,
     /// The factor by which the PTO period is reduced.
     /// This enables faster probing at a cost in additional lost packets.
@@ -500,7 +495,7 @@ impl LossRecovery {
             confirmed_time: None,
             pto_state: None,
             spaces: LossRecoverySpaces::default(),
-            qlog: NeqoQlog::default(),
+            qlog: Qlog::default(),
             stats,
             fast_pto,
         }
@@ -511,7 +506,7 @@ impl LossRecovery {
         self.spaces.get(pn_space)?.largest_acked
     }
 
-    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+    pub fn set_qlog(&mut self, qlog: Qlog) {
         self.qlog = qlog;
     }
 
@@ -955,7 +950,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use neqo_common::qlog::NeqoQlog;
+    use neqo_common::qlog::Qlog;
     use test_fixture::{now, DEFAULT_ADDR};
 
     use super::{
@@ -1032,7 +1027,7 @@ mod tests {
                 DEFAULT_ADDR,
                 DEFAULT_ADDR,
                 &ConnectionParameters::default(),
-                NeqoQlog::default(),
+                Qlog::default(),
                 now(),
                 &mut stats.borrow_mut(),
             );

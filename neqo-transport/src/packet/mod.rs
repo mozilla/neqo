@@ -6,11 +6,6 @@
 
 // Encoding and decoding packets off the wire.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
-
 use std::{
     cmp::min,
     fmt,
@@ -28,7 +23,7 @@ use crate::{
     crypto::{CryptoDxState, CryptoStates, Epoch},
     frame::FrameType,
     tracking::PacketNumberSpace,
-    version::{Version, WireVersion},
+    version::{self, Version},
     Error, Res,
 };
 
@@ -556,7 +551,7 @@ pub struct PublicPacket<'a> {
     /// The size of the header, not including the packet number.
     header_len: usize,
     /// Protocol version, if present in header.
-    version: Option<WireVersion>,
+    version: Option<version::Wire>,
     /// A reference to the entire packet, including the header.
     data: &'a mut [u8],
 }
@@ -762,7 +757,7 @@ impl<'a> PublicPacket<'a> {
     }
 
     #[must_use]
-    pub fn wire_version(&self) -> WireVersion {
+    pub fn wire_version(&self) -> version::Wire {
         debug_assert!(self.version.is_some());
         self.version.unwrap_or(0)
     }
@@ -898,14 +893,14 @@ impl<'a> PublicPacket<'a> {
     ///
     /// This will return an error if the packet is not a version negotiation packet
     /// or if the versions cannot be decoded.
-    pub fn supported_versions(&self) -> Res<Vec<WireVersion>> {
+    pub fn supported_versions(&self) -> Res<Vec<version::Wire>> {
         if self.packet_type != PacketType::VersionNegotiation {
             return Err(Error::InvalidPacket);
         }
         let mut decoder = Decoder::new(&self.data[self.header_len..]);
         let mut res = Vec::new();
         while decoder.remaining() > 0 {
-            let version = Self::opt(decoder.decode_uint::<WireVersion>())?;
+            let version = Self::opt(decoder.decode_uint::<version::Wire>())?;
             res.push(version);
         }
         Ok(res)

@@ -7,7 +7,7 @@
 use std::ops::{AddAssign, Deref, DerefMut, Sub};
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{qdebug, qinfo, qwarn, IpTosEcn};
+use neqo_common::{qdebug, qinfo, qwarn, Ecn};
 
 use crate::{
     packet::{PacketNumber, PacketType},
@@ -82,10 +82,10 @@ impl ValidationState {
 ///
 /// See also <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.2>.
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
-pub struct Count(EnumMap<IpTosEcn, u64>);
+pub struct Count(EnumMap<Ecn, u64>);
 
 impl Deref for Count {
-    type Target = EnumMap<IpTosEcn, u64>;
+    type Target = EnumMap<Ecn, u64>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -108,7 +108,7 @@ impl Count {
     /// Whether any of the ECT(0), ECT(1) or CE counts are non-zero.
     #[must_use]
     pub fn is_some(&self) -> bool {
-        self[IpTosEcn::Ect0] > 0 || self[IpTosEcn::Ect1] > 0 || self[IpTosEcn::Ce] > 0
+        self[Ecn::Ect0] > 0 || self[Ecn::Ect1] > 0 || self[Ecn::Ce] > 0
     }
 
     /// Whether all of the ECN counts are zero (including Not-ECT.)
@@ -131,8 +131,8 @@ impl Sub<Self> for Count {
     }
 }
 
-impl AddAssign<IpTosEcn> for Count {
-    fn add_assign(&mut self, rhs: IpTosEcn) {
+impl AddAssign<Ecn> for Count {
+    fn add_assign(&mut self, rhs: Ecn) {
         self[rhs] += 1;
     }
 }
@@ -224,7 +224,7 @@ impl Info {
         self.validate_ack_ecn_and_update(acked_packets, ack_ecn, stats);
 
         matches!(self.state, ValidationState::Capable)
-            && (self.baseline - prev_baseline)[IpTosEcn::Ce] > 0
+            && (self.baseline - prev_baseline)[Ecn::Ce] > 0
     }
 
     /// An [`IpTosEcn::Ect0`] marked packet has been acked.
@@ -322,13 +322,13 @@ impl Info {
             return;
         }
         let ecn_diff = ack_ecn - self.baseline;
-        let sum_inc = ecn_diff[IpTosEcn::Ect0] + ecn_diff[IpTosEcn::Ce];
+        let sum_inc = ecn_diff[Ecn::Ect0] + ecn_diff[Ecn::Ce];
         if sum_inc < newly_acked_sent_with_ect0 {
             qwarn!(
                 "ECN validation failed, ACK counted {sum_inc} new marks, but {newly_acked_sent_with_ect0} of newly acked packets were sent with ECT(0)"
             );
             self.disable_ecn(stats, ValidationError::Bleaching);
-        } else if ecn_diff[IpTosEcn::Ect1] > 0 {
+        } else if ecn_diff[Ecn::Ect1] > 0 {
             qwarn!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
             self.disable_ecn(stats, ValidationError::ReceivedUnsentECT1);
         } else if self.state != ValidationState::Capable {
@@ -350,12 +350,12 @@ impl Info {
     ///
     /// On [`IpTosEcn::Ect0`] adds a [`RecoveryToken::EcnEct0`] to `tokens` in
     /// order to detect potential loss, then handled in [`Info::lost_ecn`].
-    pub(crate) fn ecn_mark(&self, tokens: &mut Vec<RecoveryToken>) -> IpTosEcn {
+    pub(crate) fn ecn_mark(&self, tokens: &mut Vec<RecoveryToken>) -> Ecn {
         if self.is_marking() {
             tokens.push(RecoveryToken::EcnEct0);
-            IpTosEcn::Ect0
+            Ecn::Ect0
         } else {
-            IpTosEcn::NotEct
+            Ecn::NotEct
         }
     }
 }

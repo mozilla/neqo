@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Encoder, IpTos};
+use neqo_common::{hex, qdebug, qinfo, qlog::Qlog, qtrace, qwarn, Datagram, Encoder, Tos};
 use neqo_crypto::random;
 
 use crate::{
@@ -62,7 +62,7 @@ pub struct Paths {
     to_retire: Vec<u64>,
 
     /// `QLog` handler.
-    qlog: NeqoQlog,
+    qlog: Qlog,
 }
 
 impl Paths {
@@ -433,7 +433,7 @@ impl Paths {
         )
     }
 
-    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+    pub fn set_qlog(&mut self, qlog: Qlog) {
         for p in &mut self.paths {
             p.borrow_mut().set_qlog(qlog.clone());
         }
@@ -515,7 +515,7 @@ pub struct Path {
     /// The ECN-related state for this path (see RFC9000, Section 13.4 and Appendix A.4)
     ecn_info: ecn::Info,
     /// For logging of events.
-    qlog: NeqoQlog,
+    qlog: Qlog,
 }
 
 impl Path {
@@ -525,7 +525,7 @@ impl Path {
         local: SocketAddr,
         remote: SocketAddr,
         conn_params: &ConnectionParameters,
-        qlog: NeqoQlog,
+        qlog: Qlog,
         now: Instant,
         stats: &mut Stats,
     ) -> Self {
@@ -575,7 +575,7 @@ impl Path {
     }
 
     /// Return the DSCP/ECN marking to use for outgoing packets on this path.
-    pub fn tos(&self, tokens: &mut Vec<RecoveryToken>) -> IpTos {
+    pub fn tos(&self, tokens: &mut Vec<RecoveryToken>) -> Tos {
         self.ecn_info.ecn_mark(tokens).into()
     }
 
@@ -689,7 +689,7 @@ impl Path {
     pub fn datagram<V: Into<Vec<u8>>>(
         &mut self,
         payload: V,
-        tos: IpTos,
+        tos: Tos,
         stats: &mut Stats,
     ) -> Datagram {
         // Make sure to use the TOS value from before calling ecn::Info::on_packet_sent, which may
@@ -1053,8 +1053,8 @@ impl Path {
         }
     }
 
-    /// Update the `NeqoQLog` instance.
-    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+    /// Update the `QLog` instance.
+    pub fn set_qlog(&mut self, qlog: Qlog) {
         self.sender.set_qlog(qlog);
     }
 }

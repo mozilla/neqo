@@ -4,11 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
-
 use std::fmt::{self, Display, Formatter};
 
 use neqo_common::{qdebug, Header};
@@ -28,7 +23,7 @@ use crate::{
 pub const QPACK_UNI_STREAM_TYPE_DECODER: u64 = 0x3;
 
 #[derive(Debug)]
-pub struct QPackDecoder {
+pub struct QPack {
     instruction_reader: EncoderInstructionReader,
     table: HeaderTable,
     acked_inserts: u64,
@@ -41,7 +36,7 @@ pub struct QPackDecoder {
     stats: Stats,
 }
 
-impl QPackDecoder {
+impl QPack {
     /// # Panics
     ///
     /// If settings include invalid values.
@@ -275,9 +270,9 @@ impl QPackDecoder {
     }
 }
 
-impl Display for QPackDecoder {
+impl Display for QPack {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "QPackDecoder {}", self.capacity())
+        write!(f, "QPack {}", self.capacity())
     }
 }
 
@@ -295,13 +290,13 @@ mod tests {
     use neqo_transport::{StreamId, StreamType};
     use test_fixture::now;
 
-    use super::{Connection, Error, QPackDecoder, Res};
+    use super::{Connection, Error, QPack, Res};
     use crate::QpackSettings;
 
     const STREAM_0: StreamId = StreamId::new(0);
 
     struct TestDecoder {
-        decoder: QPackDecoder,
+        decoder: QPack,
         send_stream_id: StreamId,
         recv_stream_id: StreamId,
         conn: Connection,
@@ -316,7 +311,7 @@ mod tests {
         let send_stream_id = conn.stream_create(StreamType::UniDi).unwrap();
 
         // create a decoder
-        let mut decoder = QPackDecoder::new(&QpackSettings {
+        let mut decoder = QPack::new(&QpackSettings {
             max_table_size_encoder: 0,
             max_table_size_decoder: 300,
             max_blocked_streams: 100,

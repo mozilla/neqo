@@ -8,7 +8,7 @@ use std::ops::Deref;
 
 use neqo_common::Encoder;
 
-use crate::{huffman::encode_huffman, prefix::Prefix};
+use crate::{huffman, prefix::Prefix};
 
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct QpackData {
@@ -72,7 +72,7 @@ impl QpackData {
         );
 
         if use_huffman {
-            let encoded = encode_huffman(value);
+            let encoded = huffman::encode(value);
             self.encode_prefixed_encoded_int(
                 real_prefix,
                 u64::try_from(encoded.len()).expect("usize fits in u64"),

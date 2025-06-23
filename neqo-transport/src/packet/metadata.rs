@@ -9,7 +9,7 @@
 
 use std::fmt::{self, Display, Formatter};
 
-use neqo_common::IpTos;
+use neqo_common::Tos;
 use qlog::events::quic::PacketHeader;
 use strum::Display;
 
@@ -32,7 +32,7 @@ pub struct MetaData<'a> {
     direction: Direction,
     packet_type: PacketType,
     packet_number: PacketNumber,
-    tos: IpTos,
+    tos: Tos,
     len: usize,
     payload: &'a [u8],
 }
@@ -40,7 +40,7 @@ pub struct MetaData<'a> {
 impl MetaData<'_> {
     pub fn new_in<'a>(
         path: &'a PathRef,
-        tos: IpTos,
+        tos: Tos,
         len: usize,
         decrypted: &'a DecryptedPacket,
     ) -> MetaData<'a> {
@@ -61,7 +61,7 @@ impl MetaData<'_> {
         packet_number: PacketNumber,
         length: usize,
         payload: &'a [u8],
-        tos: IpTos,
+        tos: Tos,
     ) -> MetaData<'a> {
         MetaData {
             path,

@@ -7,11 +7,6 @@
 // Building a stream of ordered bytes to give the application from a series of
 // incoming STREAM frames.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
-
 use std::{
     cell::RefCell,
     cmp::max,

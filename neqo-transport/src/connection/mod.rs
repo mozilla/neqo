@@ -20,7 +20,7 @@ use std::{
 
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, IpTosEcn, Role,
+    qlog::Qlog, qtrace, qwarn, Datagram, Decoder, Ecn, Encoder, Role, Tos,
 };
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
@@ -61,7 +61,7 @@ use crate::{
         TransportParameters, TransportParametersHandler,
     },
     tracking::{AckTracker, PacketNumberSpace, RecvdPackets},
-    version::{Version, WireVersion},
+    version::{self, Version},
     AppError, CloseReason, Error, Res, StreamId,
 };
 
@@ -279,7 +279,7 @@ pub struct Connection {
     events: ConnectionEvents,
     new_token: NewTokenState,
     stats: StatsCell,
-    qlog: NeqoQlog,
+    qlog: Qlog,
     /// A session ticket was received without `NEW_TOKEN`,
     /// this is when that turns into an event without `NEW_TOKEN`.
     release_resumption_token_timer: Option<Instant>,
@@ -340,7 +340,7 @@ impl Connection {
             local_addr,
             remote_addr,
             &c.conn_params,
-            NeqoQlog::default(),
+            Qlog::default(),
             now,
             &mut c.stats.borrow_mut(),
         );
@@ -426,7 +426,7 @@ impl Connection {
             events,
             new_token: NewTokenState::new(role),
             stats,
-            qlog: NeqoQlog::disabled(),
+            qlog: Qlog::disabled(),
             release_resumption_token_timer: None,
             conn_params,
             hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
@@ -474,14 +474,14 @@ impl Connection {
     }
 
     /// Set or clear the qlog for this connection.
-    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+    pub fn set_qlog(&mut self, qlog: Qlog) {
         self.loss_recovery.set_qlog(qlog.clone());
         self.paths.set_qlog(qlog.clone());
         self.qlog = qlog;
     }
 
     /// Get the qlog (if any) for this connection.
-    pub fn qlog_mut(&mut self) -> &mut NeqoQlog {
+    pub fn qlog_mut(&mut self) -> &mut Qlog {
         &mut self.qlog
     }
 
@@ -737,7 +737,7 @@ impl Connection {
         let mut dec = Decoder::from(token.as_ref());
 
         let version = Version::try_from(
-            dec.decode_uint::<WireVersion>()
+            dec.decode_uint::<version::Wire>()
                 .ok_or(Error::InvalidResumptionToken)?,
         )?;
         qtrace!("[{self}]   version {version:?}");
@@ -1336,7 +1336,7 @@ impl Connection {
     }
 
     /// Perform version negotiation.
-    fn version_negotiation(&mut self, supported: &[WireVersion], now: Instant) -> Res<()> {
+    fn version_negotiation(&mut self, supported: &[version::Wire], now: Instant) -> Res<()> {
         debug_assert_eq!(self.role, Role::Client);
 
         if let Some(version) = self.conn_params.get_versions().preferred(supported) {
@@ -1533,14 +1533,14 @@ impl Connection {
     fn postprocess_packet(
         &mut self,
         path: &PathRef,
-        tos: IpTos,
+        tos: Tos,
         remote: SocketAddr,
         packet: &PublicPacket,
         packet_number: PacketNumber,
         migrate: bool,
         now: Instant,
     ) {
-        let ecn_mark = IpTosEcn::from(tos);
+        let ecn_mark = Ecn::from(tos);
         let mut stats = self.stats.borrow_mut();
         stats.ecn_rx[packet.packet_type()] += ecn_mark;
         if let Some(last_ecn_mark) = stats.ecn_last_mark.filter(|&last_ecn_mark| {
@@ -2582,7 +2582,7 @@ impl Connection {
             // coalesced packets, this increases the counts for each packet type
             // contained in the coalesced packet. This is per Section 13.4.1 of
             // RFC 9000.
-            self.stats.borrow_mut().ecn_tx[pt] += IpTosEcn::from(*tos);
+            self.stats.borrow_mut().ecn_tx[pt] += Ecn::from(*tos);
             if space == PacketNumberSpace::Handshake {
                 if self.role == Role::Client {
                     // We're sending a Handshake packet, so we can discard Initial keys.

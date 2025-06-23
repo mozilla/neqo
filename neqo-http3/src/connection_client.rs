@@ -14,7 +14,7 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
+    event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::Qlog, qtrace,
     Datagram, Decoder, Encoder, Header, MessageType, Role,
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
@@ -375,7 +375,7 @@ impl Http3Client {
         self.conn.authenticated(status, now);
     }
 
-    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+    pub fn set_qlog(&mut self, qlog: Qlog) {
         self.conn.set_qlog(qlog);
     }
 
@@ -1288,7 +1288,7 @@ mod tests {
 
     use neqo_common::{event::Provider as _, qtrace, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
-    use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
+    use neqo_qpack::{encoder, QpackSettings};
     use neqo_transport::{
         CloseReason, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
         Version, INITIAL_RECV_WINDOW_SIZE, MIN_INITIAL_PACKET_SIZE,
@@ -1375,7 +1375,7 @@ mod tests {
         settings: HFrame,
         conn: Connection,
         control_stream_id: Option<StreamId>,
-        encoder: Rc<RefCell<QPackEncoder>>,
+        encoder: Rc<RefCell<encoder::QPack>>,
         encoder_receiver: EncoderRecvStream,
         encoder_stream_id: Option<StreamId>,
         decoder_stream_id: Option<StreamId>,
@@ -1403,7 +1403,7 @@ mod tests {
                     .map_or(100, |s| s.value),
             )
             .unwrap();
-            let qpack = Rc::new(RefCell::new(QPackEncoder::new(
+            let qpack = Rc::new(RefCell::new(encoder::QPack::new(
                 &QpackSettings {
                     max_table_size_encoder: max_table_size,
                     max_table_size_decoder: max_table_size,
@@ -1425,7 +1425,7 @@ mod tests {
         }
 
         pub fn new_with_conn(conn: Connection) -> Self {
-            let qpack = Rc::new(RefCell::new(QPackEncoder::new(
+            let qpack = Rc::new(RefCell::new(encoder::QPack::new(
                 &QpackSettings {
                     max_table_size_encoder: 128,
                     max_table_size_decoder: 128,

@@ -17,8 +17,8 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as _, hex, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram,
-    IpTos, Role,
+    event::Provider as _, hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn, Datagram, Role,
+    Tos,
 };
 use neqo_crypto::{
     encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
@@ -243,13 +243,13 @@ impl Server {
                                 initial.dst_cid,
                                 dgram.destination(),
                                 dgram.source(),
-                                IpTos::default(),
+                                Tos::default(),
                                 p.len(),
                             );
                             Output::Datagram(Datagram::new(
                                 dgram.destination(),
                                 dgram.source(),
-                                IpTos::default(),
+                                Tos::default(),
                                 p,
                             ))
                         },
@@ -262,11 +262,11 @@ impl Server {
         }
     }
 
-    fn create_qlog_trace(&self, odcid: ConnectionIdRef<'_>) -> NeqoQlog {
+    fn create_qlog_trace(&self, odcid: ConnectionIdRef<'_>) -> Qlog {
         self.qlog_dir
             .as_ref()
-            .map_or_else(NeqoQlog::disabled, |qlog_dir| {
-                NeqoQlog::enabled_with_file(
+            .map_or_else(Qlog::disabled, |qlog_dir| {
+                Qlog::enabled_with_file(
                     qlog_dir.clone(),
                     Role::Server,
                     Some("Neqo server qlog".to_string()),
@@ -274,8 +274,8 @@ impl Server {
                     format!("server-{odcid}"),
                 )
                 .unwrap_or_else(|e| {
-                    qerror!("failed to create NeqoQlog: {e}");
-                    NeqoQlog::disabled()
+                    qerror!("failed to create Qlog: {e}");
+                    Qlog::disabled()
                 })
             })
     }
@@ -409,7 +409,7 @@ impl Server {
                 packet.dcid(),
                 destination,
                 source,
-                IpTos::default(),
+                Tos::default(),
                 vn.len(),
             );
 
@@ -420,7 +420,7 @@ impl Server {
                 now,
             );
 
-            return Output::Datagram(Datagram::new(destination, source, IpTos::default(), vn));
+            return Output::Datagram(Datagram::new(destination, source, Tos::default(), vn));
         }
 
         match packet.packet_type() {

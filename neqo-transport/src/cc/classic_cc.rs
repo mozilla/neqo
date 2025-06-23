@@ -13,7 +13,7 @@ use std::{
 };
 
 use ::qlog::events::{quic::CongestionStateUpdated, EventData};
-use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::NeqoQlog, qtrace};
+use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::Qlog, qtrace};
 
 use super::CongestionControl;
 use crate::{
@@ -124,7 +124,7 @@ pub struct ClassicCongestionControl<T> {
     /// [1]: https://datatracker.ietf.org/doc/html/rfc9002#section-7.8
     first_app_limited: PacketNumber,
     pmtud: Pmtud,
-    qlog: NeqoQlog,
+    qlog: Qlog,
 }
 
 impl<T> ClassicCongestionControl<T> {
@@ -145,7 +145,7 @@ impl<T: WindowAdjustment> Display for ClassicCongestionControl<T> {
 }
 
 impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
-    fn set_qlog(&mut self, qlog: NeqoQlog) {
+    fn set_qlog(&mut self, qlog: Qlog) {
         self.qlog = qlog;
     }
 
@@ -412,7 +412,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             acked_bytes: 0,
             ssthresh: usize::MAX,
             recovery_start: None,
-            qlog: NeqoQlog::disabled(),
+            qlog: Qlog::disabled(),
             first_app_limited: 0,
             pmtud,
         }

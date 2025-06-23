@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use neqo_common::{qdebug, qinfo, Datagram, IpTosEcn};
+use neqo_common::{qdebug, qinfo, Datagram, Ecn};
 
 use super::{
     super::Output, ack_bytes, assert_full_cwnd, connect_rtt_idle, cwnd, cwnd_avail, cwnd_packets,
@@ -105,7 +105,7 @@ fn cc_slow_start_to_cong_avoidance_recovery_period(congestion_signal: Congestion
             c_tx_dgrams.remove(0);
         }
         CongestionSignal::EcnCe => {
-            c_tx_dgrams.last_mut().unwrap().set_tos(IpTosEcn::Ce.into());
+            c_tx_dgrams.last_mut().unwrap().set_tos(Ecn::Ce.into());
         }
     }
     let s_ack = ack_bytes(&mut server, stream_id, c_tx_dgrams, now);

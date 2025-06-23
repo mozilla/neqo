@@ -6,11 +6,6 @@
 
 // Buffering data to send until it is acked.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
-
 use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},

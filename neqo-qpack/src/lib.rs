@@ -22,8 +22,6 @@ mod table;
 
 use std::fmt::{self, Display, Formatter};
 
-pub use decoder::QPackDecoder;
-pub use encoder::QPackEncoder;
 pub use stats::Stats;
 
 type Res<T> = Result<T, Error>;

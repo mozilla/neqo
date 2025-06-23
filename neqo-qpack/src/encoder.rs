@@ -4,18 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
-
 use std::{
     cmp::min,
     collections::VecDeque,
     fmt::{self, Display, Formatter},
 };
 
-use neqo_common::{qdebug, qerror, qlog::NeqoQlog, qtrace, Header};
+use neqo_common::{qdebug, qerror, qlog::Qlog, qtrace, Header};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
@@ -50,7 +45,7 @@ impl LocalStreamState {
 }
 
 #[derive(Debug)]
-pub struct QPackEncoder {
+pub struct QPack {
     table: HeaderTable,
     max_table_size: u64,
     max_entries: u64,
@@ -68,7 +63,7 @@ pub struct QPackEncoder {
     stats: Stats,
 }
 
-impl QPackEncoder {
+impl QPack {
     #[must_use]
     pub fn new(qpack_settings: &QpackSettings, use_huffman: bool) -> Self {
         Self {
@@ -221,7 +216,7 @@ impl QPackEncoder {
         }
     }
 
-    fn call_instruction(&mut self, instruction: DecoderInstruction, qlog: &NeqoQlog) -> Res<()> {
+    fn call_instruction(&mut self, instruction: DecoderInstruction, qlog: &Qlog) -> Res<()> {
         qdebug!("[{self}] call instruction {instruction:?}");
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
@@ -517,9 +512,9 @@ impl QPackEncoder {
     }
 }
 
-impl Display for QPackEncoder {
+impl Display for QPack {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "QPackEncoder")
+        write!(f, "QPack")
     }
 }
 
@@ -546,11 +541,11 @@ mod tests {
     use neqo_transport::{ConnectionParameters, StreamId, StreamType};
     use test_fixture::{default_client, default_server, handshake, new_server, now, DEFAULT_ALPN};
 
-    use super::{Connection, Error, Header, QPackEncoder, Res};
+    use super::{Connection, Error, Header, QPack, Res};
     use crate::QpackSettings;
 
     struct TestEncoder {
-        encoder: QPackEncoder,
+        encoder: QPack,
         send_stream_id: StreamId,
         recv_stream_id: StreamId,
         conn: Connection,
@@ -618,7 +613,7 @@ mod tests {
         let send_stream_id = conn.stream_create(StreamType::UniDi).unwrap();
 
         // create an encoder
-        let mut encoder = QPackEncoder::new(
+        let mut encoder = QPack::new(
             &QpackSettings {
                 max_table_size_encoder: 1500,
                 max_table_size_decoder: 0,

@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qlog::NeqoQlog};
+use neqo_common::{qdebug, qlog::Qlog};
 
 use crate::{
     cc::{ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno},
@@ -59,7 +59,7 @@ impl PacketSender {
         }
     }
 
-    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+    pub fn set_qlog(&mut self, qlog: Qlog) {
         self.cc.set_qlog(qlog);
     }
 

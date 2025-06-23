@@ -28,7 +28,7 @@ pub use self::{
     datagram::Datagram,
     header::Header,
     incrdecoder::{IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint},
-    tos::{IpTos, IpTosDscp, IpTosEcn},
+    tos::{Dscp, Ecn, Tos},
 };
 
 #[must_use]

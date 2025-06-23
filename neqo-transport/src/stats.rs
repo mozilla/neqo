@@ -15,7 +15,7 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{qwarn, IpTosDscp, IpTosEcn};
+use neqo_common::{qwarn, Dscp, Ecn};
 use strum::IntoEnumIterator as _;
 
 use crate::{
@@ -171,10 +171,10 @@ impl DerefMut for EcnCount {
 
 /// Packet types and numbers of the first ECN mark transition between two marks.
 #[derive(Default, Clone, PartialEq, Eq)]
-pub struct EcnTransitions(EnumMap<IpTosEcn, EnumMap<IpTosEcn, Option<(PacketType, PacketNumber)>>>);
+pub struct EcnTransitions(EnumMap<Ecn, EnumMap<Ecn, Option<(PacketType, PacketNumber)>>>);
 
 impl Deref for EcnTransitions {
-    type Target = EnumMap<IpTosEcn, EnumMap<IpTosEcn, Option<(PacketType, PacketNumber)>>>;
+    type Target = EnumMap<Ecn, EnumMap<Ecn, Option<(PacketType, PacketNumber)>>>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -188,13 +188,13 @@ impl DerefMut for EcnTransitions {
 
 impl Debug for EcnTransitions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for from in IpTosEcn::iter() {
+        for from in Ecn::iter() {
             // Don't show all-None rows.
             if self.0[from].iter().all(|(_, v)| v.is_none()) {
                 continue;
             }
             write!(f, "      First {from:?} ")?;
-            for to in IpTosEcn::iter() {
+            for to in Ecn::iter() {
                 // Don't show transitions that were not recorded.
                 if let Some(pkt) = self.0[from][to] {
                     write!(f, "to {to:?} {pkt:?} ")?;
@@ -208,7 +208,7 @@ impl Debug for EcnTransitions {
 
 /// Received packet counts by DSCP value.
 #[derive(Default, Clone, PartialEq, Eq)]
-pub struct DscpCount(EnumMap<IpTosDscp, usize>);
+pub struct DscpCount(EnumMap<Dscp, usize>);
 
 impl Debug for DscpCount {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -224,7 +224,7 @@ impl Debug for DscpCount {
 }
 
 impl Deref for DscpCount {
-    type Target = EnumMap<IpTosDscp, usize>;
+    type Target = EnumMap<Dscp, usize>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -320,7 +320,7 @@ pub struct Stats {
     /// counts increase for all packet types in the coalesced datagram.
     pub ecn_rx: EcnCount,
     /// Packet numbers of the first observed (received) ECN mark transition between two marks.
-    pub ecn_last_mark: Option<IpTosEcn>,
+    pub ecn_last_mark: Option<Ecn>,
     pub ecn_rx_transition: EcnTransitions,
 
     /// Counters for DSCP values received.

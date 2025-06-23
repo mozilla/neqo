@@ -16,7 +16,7 @@ use std::{
 use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use log::{log_enabled, Level};
-use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn, MAX_VARINT};
+use neqo_common::{qdebug, qinfo, qtrace, qwarn, Ecn, MAX_VARINT};
 use neqo_crypto::Epoch;
 use smallvec::SmallVec;
 use strum::{Display, EnumIter};
@@ -492,9 +492,9 @@ impl RecvdPackets {
         }
 
         if self.ecn_count.is_some() {
-            builder.encode_varint(self.ecn_count[IpTosEcn::Ect0]);
-            builder.encode_varint(self.ecn_count[IpTosEcn::Ect1]);
-            builder.encode_varint(self.ecn_count[IpTosEcn::Ce]);
+            builder.encode_varint(self.ecn_count[Ecn::Ect0]);
+            builder.encode_varint(self.ecn_count[Ecn::Ect1]);
+            builder.encode_varint(self.ecn_count[Ecn::Ce]);
         }
 
         // We've sent an ACK, reset the timer.
