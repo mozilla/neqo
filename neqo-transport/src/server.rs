@@ -10,6 +10,7 @@ use std::{
     cell::RefCell,
     cmp::min,
     fmt::{self, Display, Formatter},
+    num::NonZeroUsize,
     ops::{Deref, DerefMut},
     path::PathBuf,
     rc::Rc,
@@ -17,8 +18,8 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as _, hex, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram,
-    IpTos, Role,
+    event::Provider as _, hex, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Buffer,
+    Datagram, DatagramBatch, IpTos, Role,
 };
 use neqo_crypto::{
     encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
@@ -32,7 +33,7 @@ use crate::{
     cid::{ConnectionId, ConnectionIdGenerator, ConnectionIdRef},
     connection::{Connection, Output, State},
     packet::{PacketBuilder, PacketType, PublicPacket, MIN_INITIAL_PACKET_SIZE},
-    ConnectionParameters, Res, Version,
+    ConnectionParameters, OutputBatch, Res, Version,
 };
 
 /// A `ServerZeroRttChecker` is a simple wrapper around a single checker.
@@ -194,22 +195,25 @@ impl Server {
         self.ech_config.as_ref().map_or(&[], |cfg| &cfg.encoded)
     }
 
-    fn handle_initial(
+    fn handle_initial<B: Buffer>(
         &mut self,
         initial: InitialDetails,
         dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
-    ) -> Output {
+        send_buffer: B,
+    ) -> OutputBatch<B> {
         qdebug!("[{self}] Handle initial");
         let res = self
             .address_validation
             .borrow()
             .validate(&initial.token, dgram.source(), now);
         match res {
-            AddressValidationResult::Invalid => Output::None,
-            AddressValidationResult::Pass => self.accept_connection(initial, dgram, None, now),
+            AddressValidationResult::Invalid => OutputBatch::None,
+            AddressValidationResult::Pass => {
+                self.accept_connection(initial, dgram, None, now, send_buffer)
+            }
             AddressValidationResult::ValidRetry(orig_dcid) => {
-                self.accept_connection(initial, dgram, Some(orig_dcid), now)
+                self.accept_connection(initial, dgram, Some(orig_dcid), now, send_buffer)
             }
             AddressValidationResult::Validate => {
                 qinfo!("[{self}] Send retry for {:?}", initial.dst_cid);
@@ -221,7 +225,7 @@ impl Server {
                 );
                 let Ok(token) = res else {
                     qerror!("[{self}] unable to generate token, dropping packet");
-                    return Output::None;
+                    return OutputBatch::None;
                 };
                 if let Some(new_dcid) = self.cid_generator.borrow_mut().generate_cid() {
                     let packet = PacketBuilder::retry(
@@ -234,7 +238,7 @@ impl Server {
                     packet.map_or_else(
                         |_| {
                             qerror!("[{self}] unable to encode retry, dropping packet");
-                            Output::None
+                            OutputBatch::None
                         },
                         |p| {
                             qdebug!(
@@ -246,17 +250,19 @@ impl Server {
                                 IpTos::default(),
                                 p.len(),
                             );
-                            Output::Datagram(Datagram::new(
+                            todo!("p");
+                            OutputBatch::DatagramBatch(DatagramBatch::new(
                                 dgram.destination(),
                                 dgram.source(),
                                 IpTos::default(),
-                                p,
+                                send_buffer.position(),
+                                send_buffer,
                             ))
                         },
                     )
                 } else {
                     qerror!("[{self}] no connection ID for retry, dropping packet");
-                    Output::None
+                    OutputBatch::None
                 }
             }
         }
@@ -305,13 +311,14 @@ impl Server {
         }
     }
 
-    fn accept_connection(
+    fn accept_connection<B: Buffer>(
         &mut self,
         initial: InitialDetails,
         dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
-    ) -> Output {
+        send_buffer: B,
+    ) -> OutputBatch<B> {
         qinfo!(
             "[{self}] Accept connection {:?}",
             orig_dcid.as_ref().unwrap_or(&initial.dst_cid)
@@ -331,7 +338,8 @@ impl Server {
         match sconn {
             Ok(mut c) => {
                 self.setup_connection(&mut c, initial, orig_dcid);
-                let out = c.process(Some(dgram), now);
+                let out =
+                    c.process_multiple(Some(dgram), now, send_buffer, 1.try_into().expect(">0"));
                 self.connections.push(Rc::new(RefCell::new(c)));
                 out
             }
@@ -345,16 +353,18 @@ impl Server {
                         now,
                     );
                 }
-                Output::None
+                OutputBatch::None
             }
         }
     }
 
-    fn process_input(
+    fn process_input<B: Buffer>(
         &mut self,
         mut dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
-    ) -> Output {
+        mut send_buffer: B,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch<B> {
         qtrace!("Process datagram: {}", hex(&dgram[..]));
 
         // This is only looking at the first packet header in the datagram.
@@ -365,7 +375,7 @@ impl Server {
         let res = PublicPacket::decode(&mut dgram[..], self.cid_generator.borrow().as_decoder());
         let Ok((packet, _remainder)) = res else {
             qtrace!("[{self}] Discarding {dgram:?}");
-            return Output::None;
+            return OutputBatch::None;
         };
 
         // Finding an existing connection. Should be the most common case.
@@ -374,13 +384,15 @@ impl Server {
             .iter_mut()
             .find(|c| c.borrow().is_valid_local_cid(packet.dcid()))
         {
-            return c.borrow_mut().process(Some(dgram), now);
+            return c
+                .borrow_mut()
+                .process_multiple(Some(dgram), now, send_buffer, max_datagrams);
         }
 
         if packet.packet_type() == PacketType::Short {
             // TODO send a stateless reset here.
             qtrace!("[{self}] Short header packet for an unknown connection");
-            return Output::None;
+            return OutputBatch::None;
         }
 
         if packet.packet_type() == PacketType::OtherVersion
@@ -393,15 +405,16 @@ impl Server {
         {
             if len < MIN_INITIAL_PACKET_SIZE {
                 qdebug!("[{self}] Unsupported version: too short");
-                return Output::None;
+                return OutputBatch::None;
             }
 
             qdebug!("[{self}] Unsupported version: {:x}", packet.wire_version());
-            let vn = PacketBuilder::version_negotiation(
+            PacketBuilder::version_negotiation(
                 &packet.scid()[..],
                 &packet.dcid()[..],
                 packet.wire_version(),
                 self.conn_params.get_versions().all(),
+                &mut send_buffer,
             );
             qdebug!(
                 "[{self}] type={:?} path:{} {}->{} {:?} len {}",
@@ -410,7 +423,7 @@ impl Server {
                 destination,
                 source,
                 IpTos::default(),
-                vn.len(),
+                send_buffer.position(),
             );
 
             crate::qlog::server_version_information_failed(
@@ -420,52 +433,81 @@ impl Server {
                 now,
             );
 
-            return Output::Datagram(Datagram::new(destination, source, IpTos::default(), vn));
+            return OutputBatch::DatagramBatch(DatagramBatch::new(
+                destination,
+                source,
+                IpTos::default(),
+                send_buffer.position(),
+                send_buffer,
+            ));
         }
 
         match packet.packet_type() {
             PacketType::Initial => {
                 if len < MIN_INITIAL_PACKET_SIZE {
                     qdebug!("[{self}] Drop initial: too short");
-                    return Output::None;
+                    return OutputBatch::None;
                 }
                 // Copy values from `packet` because they are currently still borrowing from
                 // `dgram`.
                 let initial = InitialDetails::new(&packet);
-                self.handle_initial(initial, dgram, now)
+                self.handle_initial(initial, dgram, now, send_buffer).into()
             }
             PacketType::ZeroRtt => {
                 qdebug!(
                     "[{self}] Dropping 0-RTT for unknown connection {}",
                     ConnectionId::from(packet.dcid())
                 );
-                Output::None
+                OutputBatch::None
             }
             PacketType::OtherVersion => unreachable!(),
             _ => {
                 qtrace!("[{self}] Not an initial packet");
-                Output::None
+                OutputBatch::None
             }
         }
     }
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
-    fn process_next_output(&mut self, now: Instant) -> Output {
+    fn process_next_output<B: Buffer>(
+        &mut self,
+        now: Instant,
+        max_datagrams: NonZeroUsize,
+        mut send_buffer: B,
+    ) -> OutputBatch<B> {
         let mut callback = None;
 
         for connection in &mut self.connections {
-            match connection.borrow_mut().process_output(now) {
-                Output::None => {}
-                d @ Output::Datagram(_) => return d,
-                Output::Callback(next) => match callback {
+            match connection.borrow_mut().process_multiple_output(
+                now,
+                &mut send_buffer,
+                max_datagrams,
+            ) {
+                OutputBatch::None => {}
+                d @ OutputBatch::DatagramBatch(DatagramBatch {
+                    src,
+                    dst,
+                    tos,
+                    segment_size,
+                    d: _,
+                }) => {
+                    return OutputBatch::DatagramBatch(DatagramBatch::new(
+                        dst,
+                        src,
+                        tos,
+                        segment_size,
+                        send_buffer,
+                    ));
+                }
+                OutputBatch::Callback(next) => match callback {
                     Some(previous) => callback = Some(min(previous, next)),
                     None => callback = Some(next),
                 },
             }
         }
 
-        callback.map_or(Output::None, Output::Callback)
+        callback.map_or(OutputBatch::None, OutputBatch::Callback)
     }
 
     /// Short-hand for [`Server::process`] without an input datagram.
@@ -474,21 +516,80 @@ impl Server {
         self.process(None::<Datagram>, now)
     }
 
+    /// Wrapper around [`Server::process_multiple`] that processes a single output
+    /// datagram only.
+    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     #[must_use]
     pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
         dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
-        let out = dgram
-            .map_or(Output::None, |d| self.process_input(d, now))
-            .or_else(|| self.process_next_output(now));
+        todo!();
+        // let send_buffer = vec![];
+        // self.process_multiple(dgram, now, 1.try_into().expect(">0"), send_buffer)
+        //     .try_into()
+        //     .expect("max_datagrams is 1")
+    }
+
+    pub fn process_multiple<B: Buffer>(
+        &mut self,
+        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        now: Instant,
+        max_datagrams: NonZeroUsize,
+        mut send_buffer: B,
+    ) -> OutputBatch<B> {
+        match dgram.map_or(OutputBatch::None, |d| {
+            self.process_input(d, now, &mut send_buffer, max_datagrams)
+        }) {
+            OutputBatch::None => {}
+            OutputBatch::DatagramBatch(DatagramBatch {
+                src,
+                dst,
+                tos,
+                segment_size,
+                d: _,
+            }) => {
+                // Clean-up closed connections.
+                self.connections
+                    .retain(|c| !matches!(c.borrow().state(), State::Closed(_)));
+
+                return OutputBatch::DatagramBatch(DatagramBatch {
+                    src,
+                    dst,
+                    tos,
+                    segment_size,
+                    d: send_buffer,
+                })
+            }
+            // TODO: should we try outbound?
+            OutputBatch::Callback(duration) => return OutputBatch::Callback(duration),
+        }
+
+        let out = self.process_next_output(now, max_datagrams, &mut send_buffer);
 
         // Clean-up closed connections.
         self.connections
             .retain(|c| !matches!(c.borrow().state(), State::Closed(_)));
 
-        out
+        // TODO: Maybe introduce a map_batch function?
+        match out {
+            OutputBatch::None => OutputBatch::None,
+            OutputBatch::DatagramBatch(DatagramBatch {
+                src,
+                dst,
+                tos,
+                segment_size,
+                d: _,
+            }) => OutputBatch::DatagramBatch(DatagramBatch::new(
+                dst,
+                src,
+                tos,
+                segment_size,
+                send_buffer,
+            )),
+            OutputBatch::Callback(c) => OutputBatch::Callback(c),
+        }
     }
 
     /// This lists the connections that have received new events

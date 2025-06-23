@@ -19,8 +19,10 @@
 use std::{
     cell::RefCell,
     fmt::{self, Display},
-    fs, io,
+    fs,
+    io::{self, Cursor},
     net::{SocketAddr, ToSocketAddrs as _},
+    num::NonZeroUsize,
     path::PathBuf,
     pin::Pin,
     process::exit,
@@ -38,7 +40,7 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init_db, AntiReplay, Cipher,
 };
-use neqo_transport::{Output, RandomConnectionIdGenerator, Version};
+use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version};
 use neqo_udp::RecvBuf;
 use tokio::time::Sleep;
 
@@ -205,7 +207,13 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
 }
 
 pub trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<Datagram<&mut [u8]>>, now: Instant) -> Output;
+    fn process_multiple<'a>(
+        &mut self,
+        dgram: Option<Datagram<&mut [u8]>>,
+        now: Instant,
+        max_datagrams: NonZeroUsize,
+        send_buffer: Cursor<&'a mut [u8]>,
+    ) -> OutputBatch<Cursor<&'a mut [u8]>>;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }
@@ -216,6 +224,8 @@ pub struct ServerRunner {
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<(SocketAddr, crate::udp::Socket)>,
     recv_buf: RecvBuf,
+    // TODO: How about Box<[u8]>? Would prevent growth.
+    send_buf: Vec<u8>,
 }
 
 impl ServerRunner {
@@ -231,6 +241,7 @@ impl ServerRunner {
             timeout: None,
             sockets,
             recv_buf: RecvBuf::new(),
+            send_buf: vec![0; neqo_udp::SEND_BUF_SIZE],
         }
     }
 
@@ -263,10 +274,30 @@ impl ServerRunner {
         sockets: &mut [(SocketAddr, crate::udp::Socket)],
         now: &dyn Fn() -> Instant,
         mut input_dgram: Option<Datagram<&mut [u8]>>,
+        // TODO &mut [u8] instead?
+        mut send_buffer: &mut Vec<u8>,
     ) -> Result<(), io::Error> {
+        // Each socket has a maximum number of GSO segments it can handle. When
+        // calling `server.process_multiple` we don't know which socket will be
+        // used. Take the smallest maximum GSO segments from all sockets to
+        // ensure that we don't send more segments than any socket can handle.
+        //
+        // Ideally we would have a way to know which socket will be used. Likely
+        // not worth it for a test-only server implementation which is mostly
+        // used with a single socket only.
+        let smallest_max_gso_segments = sockets
+            .iter()
+            .map(|(_, socket)| socket.max_gso_segments())
+            .min()
+            .expect("At least one socket must be present")
+            .try_into()
+            .inspect_err(|_| qerror!("Socket return GSO size of 0"))
+            .map_err(|_| io::Error::from(io::ErrorKind::Unsupported))?;
+
         loop {
-            match server.process(input_dgram.take(), now()) {
-                Output::Datagram(dgram) => {
+            let send_buffer = Cursor::new(&mut send_buffer[..]);
+            match server.process_multiple(input_dgram.take(), now(), smallest_max_gso_segments, send_buffer) {
+                OutputBatch::DatagramBatch(dgram) => {
                     let socket = Self::find_socket(sockets, dgram.source());
                     loop {
                         // Optimistically attempt sending datagram. In case the
@@ -282,12 +313,12 @@ impl ServerRunner {
                         }
                     }
                 }
-                Output::Callback(new_timeout) => {
+                OutputBatch::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
                     *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
-                Output::None => break,
+                OutputBatch::None => break,
             }
         }
         Ok(())
@@ -307,6 +338,7 @@ impl ServerRunner {
                     &mut self.sockets,
                     &self.now,
                     Some(input_dgram),
+                    &mut self.send_buf,
                 )
                 .await?;
             }
@@ -322,6 +354,8 @@ impl ServerRunner {
             &mut self.sockets,
             &self.now,
             None,
+
+                    &mut self.send_buf,
         )
         .await
     }

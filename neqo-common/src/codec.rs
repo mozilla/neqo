@@ -210,6 +210,13 @@ pub struct Encoder<B = Vec<u8>> {
 }
 
 impl<B: Buffer> Encoder<B> {
+    // TODO: better name?
+    pub fn new_with_buffer(b: B) -> Self {
+        Self {
+            start: b.position(),
+            buf: b,
+        }
+    }
     /// Get the length of the [`Encoder`].
     ///
     /// Note that the length of the underlying buffer might be larger.
@@ -310,7 +317,7 @@ impl<B: Buffer> Encoder<B> {
     )]
     pub fn encode_vec_with<F: FnOnce(&mut Self)>(&mut self, n: usize, f: F) -> &mut Self {
         let start = self.buf.position();
-        self.buf.write_zeroes(n);
+        self.pad_to(n, 0);
         f(self);
         let len = self.buf.position() - start - n;
         assert!(len < (1 << (n * 8)));
@@ -373,6 +380,19 @@ impl<B: Buffer> Encoder<B> {
         // ..., then rotate the entire thing right by the same amount.
         self.buf.rotate_right(start, count);
         self
+    }
+
+    /// Truncate the encoder to the given size.
+    pub fn truncate(&mut self, len: usize) {
+        self.buf.truncate(len + self.start);
+    }
+
+    /// Pad the [`Encoder`] to `len` with bytes set to `v`.
+    pub fn pad_to(&mut self, len: usize, v: u8) {
+        let buffer_len = self.start + len;
+        if buffer_len > self.buf.position() {
+            self.buf.pad_to(buffer_len, v);
+        }
     }
 }
 
@@ -438,19 +458,6 @@ impl Encoder<Vec<u8>> {
             enc.encode_byte(v);
         }
         enc
-    }
-
-    /// Truncate the encoder to the given size.
-    pub fn truncate(&mut self, len: usize) {
-        self.buf.truncate(len);
-    }
-
-    /// Pad the [`Encoder`] to `len` with bytes set to `v`.
-    pub fn pad_to(&mut self, len: usize, v: u8) {
-        let buffer_len = len + self.start;
-        if buffer_len > self.buf.len() {
-            self.buf.resize(buffer_len, v);
-        }
     }
 }
 
@@ -558,13 +565,45 @@ pub trait Buffer: io::Write {
 
     fn as_mut(&mut self) -> &mut [u8];
 
-    // Functions needed for `Encoder::encode_vvec_with` and `Encoder::encode_vec_with`.
+    fn truncate(&mut self, len: usize);
 
-    fn write_zeroes(&mut self, n: usize);
+    fn pad_to(&mut self, n: usize, v: u8);
+
+    // Functions needed for `Encoder::encode_vvec_with` and `Encoder::encode_vec_with`.
 
     fn write_at(&mut self, pos: usize, data: u8);
 
     fn rotate_right(&mut self, start: usize, count: usize);
+}
+
+impl<B: Buffer> Buffer for &mut B {
+    fn position(&self) -> usize {
+        B::position(self)
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        B::as_slice(self)
+    }
+
+    fn as_mut(&mut self) -> &mut [u8] {
+        B::as_mut(self)
+    }
+
+    fn truncate(&mut self, len: usize) {
+        B::truncate(self, len)
+    }
+
+    fn pad_to(&mut self, n: usize, v: u8) {
+        B::pad_to(self, n, v)
+    }
+
+    fn write_at(&mut self, pos: usize, data: u8) {
+        B::write_at(self, pos, data)
+    }
+
+    fn rotate_right(&mut self, start: usize, count: usize) {
+        B::rotate_right(self, start, count)
+    }
 }
 
 impl Buffer for Vec<u8> {
@@ -580,34 +619,12 @@ impl Buffer for Vec<u8> {
         self.as_mut_slice()
     }
 
-    fn write_zeroes(&mut self, n: usize) {
-        self.resize(self.position() + n, 0);
+    fn truncate(&mut self, len: usize) {
+        Self::truncate(self, len);
     }
 
-    fn write_at(&mut self, pos: usize, data: u8) {
-        self[pos] = data;
-    }
-
-    fn rotate_right(&mut self, start: usize, count: usize) {
-        self[start..].rotate_right(count);
-    }
-}
-
-impl Buffer for &mut Vec<u8> {
-    fn position(&self) -> usize {
-        Vec::len(self)
-    }
-
-    fn as_slice(&self) -> &[u8] {
-        self.as_ref()
-    }
-
-    fn as_mut(&mut self) -> &mut [u8] {
-        self.as_mut_slice()
-    }
-
-    fn write_zeroes(&mut self, n: usize) {
-        self.resize(self.position() + n, 0);
+    fn pad_to(&mut self, n: usize, v: u8) {
+        self.resize(n, v);
     }
 
     fn write_at(&mut self, pos: usize, data: u8) {
@@ -633,12 +650,19 @@ impl Buffer for Cursor<&mut [u8]> {
         &mut self.get_mut()[..len]
     }
 
-    fn write_zeroes(&mut self, n: usize) {
-        let start = usize::try_from(self.position()).expect("Buffer length does not exceed usize");
-        let end = start + n;
+    fn truncate(&mut self, len: usize) {
+        let old_position = Buffer::position(self);
+        if len < old_position {
+            self.set_position(u64::try_from(len).expect("Position cannot exceed u64"));
+            self.get_mut()[len..old_position].fill(0);
+        }
+    }
 
-        self.get_mut()[start..end].fill(0);
-        self.set_position(u64::try_from(end).expect("Position cannot exceed u64"));
+    fn pad_to(&mut self, n: usize, v: u8) {
+        let start = usize::try_from(self.position()).expect("Buffer length does not exceed usize");
+
+        self.get_mut()[start..n].fill(v);
+        self.set_position(u64::try_from(n).expect("Position cannot exceed u64"));
     }
 
     fn write_at(&mut self, pos: usize, data: u8) {
@@ -1051,7 +1075,7 @@ mod tests {
 
             assert!(buf.is_empty());
 
-            buf.write_zeroes(NUM_BYTES);
+            buf.pad_to(NUM_BYTES, 0);
 
             assert_eq!(buf.position(), NUM_BYTES);
             let written = &buf.as_slice()[..NUM_BYTES];
