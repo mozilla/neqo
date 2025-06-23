@@ -20,9 +20,9 @@ use neqo_common::{
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
-    streams::SendOrder, AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator,
-    DatagramTracking, Output, RecvStreamStats, SendStreamStats, Stats as TransportStats, StreamId,
-    StreamType, Version, ZeroRttState,
+    recv_stream, send_stream, streams::SendOrder, AppError, Connection, ConnectionEvent,
+    ConnectionId, ConnectionIdGenerator, DatagramTracking, Output, Stats as TransportStats,
+    StreamId, StreamType, Version, ZeroRttState,
 };
 
 use crate::{
@@ -814,12 +814,15 @@ impl Http3Client {
         Http3Connection::stream_set_fairness(&mut self.conn, stream_id, fairness)
     }
 
-    /// Returns the current `SendStreamStats` of a `WebTransportSendStream`.
+    /// Returns the current `send_stream::Stats` of a `WebTransportSendStream`.
     ///
     /// # Errors
     ///
     /// `InvalidStreamId` if the stream does not exist.
-    pub fn webtransport_send_stream_stats(&mut self, stream_id: StreamId) -> Res<SendStreamStats> {
+    pub fn webtransport_send_stream_stats(
+        &mut self,
+        stream_id: StreamId,
+    ) -> Res<send_stream::Stats> {
         self.base_handler
             .send_streams_mut()
             .get_mut(&stream_id)
@@ -827,12 +830,15 @@ impl Http3Client {
             .stats(&mut self.conn)
     }
 
-    /// Returns the current `RecvStreamStats` of a `WebTransportRecvStream`.
+    /// Returns the current `recv_stream::Stats` of a `WebTransportRecvStream`.
     ///
     /// # Errors
     ///
     /// `InvalidStreamId` if the stream does not exist.
-    pub fn webtransport_recv_stream_stats(&mut self, stream_id: StreamId) -> Res<RecvStreamStats> {
+    pub fn webtransport_recv_stream_stats(
+        &mut self,
+        stream_id: StreamId,
+    ) -> Res<recv_stream::Stats> {
         self.base_handler
             .recv_streams_mut()
             .get_mut(&stream_id)

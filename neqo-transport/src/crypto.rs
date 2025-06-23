@@ -28,8 +28,8 @@ use neqo_crypto::{
 use crate::{
     cid::ConnectionIdRef,
     frame::FrameType,
-    packet::{PacketBuilder, PacketNumber},
-    recovery::RecoveryToken,
+    packet::{self},
+    recovery,
     recv_stream::RxStreamOrderer,
     send_stream::TxBuffer,
     sni::find_sni,
@@ -44,7 +44,7 @@ use crate::{
 /// to update keys.  This has to be much smaller than the number returned
 /// by `CryptoDxState::limit` or updates will happen too often.  As we don't
 /// need to ask permission to update, this can be quite small.
-pub const UPDATE_WRITE_KEYS_AT: PacketNumber = 100;
+pub const UPDATE_WRITE_KEYS_AT: packet::Number = 100;
 
 // This is a testing kludge that allows for overwriting the number of
 // invocations of the next cipher to operate.  With this, it is possible
@@ -52,7 +52,7 @@ pub const UPDATE_WRITE_KEYS_AT: PacketNumber = 100;
 // when it hits `UPDATE_WRITE_KEYS_AT` and an automatic update should occur.
 // This is a little crude, but it saves a lot of plumbing.
 #[cfg(test)]
-thread_local!(pub static OVERWRITE_INVOCATIONS: RefCell<Option<PacketNumber>> = RefCell::default());
+thread_local!(pub static OVERWRITE_INVOCATIONS: RefCell<Option<packet::Number>> = RefCell::default());
 
 #[derive(Debug)]
 pub struct Crypto {
@@ -318,8 +318,8 @@ impl Crypto {
         &mut self,
         space: PacketNumberSpace,
         sni_slicing: bool,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder,
+        tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) {
         self.streams
@@ -452,12 +452,12 @@ pub struct CryptoDxState {
     /// This tracks the range of packet numbers that have been seen.  This allows
     /// for verifying that packet numbers before a key update are strictly lower
     /// than packet numbers after a key update.
-    used_pn: Range<PacketNumber>,
+    used_pn: Range<packet::Number>,
     /// This is the minimum packet number that is allowed.
-    min_pn: PacketNumber,
+    min_pn: packet::Number,
     /// The total number of operations that are remaining before the keys
     /// become exhausted and can't be used any more.
-    invocations: PacketNumber,
+    invocations: packet::Number,
     /// The basis of the invocation limits in `invocations`.
     largest_packet_len: usize,
 }
@@ -509,20 +509,20 @@ impl CryptoDxState {
     }
 
     /// Determine the confidentiality and integrity limits for the cipher.
-    fn limit(direction: CryptoDxDirection, cipher: Cipher) -> PacketNumber {
+    fn limit(direction: CryptoDxDirection, cipher: Cipher) -> packet::Number {
         match direction {
             // This uses the smaller limits for 2^16 byte packets
             // as we don't control incoming packet size.
             CryptoDxDirection::Read => match cipher {
                 TLS_AES_128_GCM_SHA256 => 1 << 52,
-                TLS_AES_256_GCM_SHA384 => PacketNumber::MAX,
+                TLS_AES_256_GCM_SHA384 => packet::Number::MAX,
                 TLS_CHACHA20_POLY1305_SHA256 => 1 << 36,
                 _ => unreachable!(),
             },
             // This uses the larger limits for 2^11 byte packets.
             CryptoDxDirection::Write => match cipher {
                 TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => 1 << 28,
-                TLS_CHACHA20_POLY1305_SHA256 => PacketNumber::MAX,
+                TLS_CHACHA20_POLY1305_SHA256 => packet::Number::MAX,
                 _ => unreachable!(),
             },
         }
@@ -614,7 +614,7 @@ impl CryptoDxState {
     /// Mark a packet number as used.  If this is too low, reject it.
     /// Note that this won't catch a value that is too high if packets protected with
     /// old keys are received after a key update.  That needs to be caught elsewhere.
-    pub fn used(&mut self, pn: PacketNumber) -> Res<()> {
+    pub fn used(&mut self, pn: packet::Number) -> Res<()> {
         if pn < self.min_pn {
             qdebug!(
                 "[{self}] Found packet with too old packet number: {pn} < {}",
@@ -638,7 +638,7 @@ impl CryptoDxState {
     }
 
     #[must_use]
-    pub fn can_update(&self, largest_acknowledged: Option<PacketNumber>) -> bool {
+    pub fn can_update(&self, largest_acknowledged: Option<packet::Number>) -> bool {
         largest_acknowledged.map_or_else(
             || self.epoch == usize::from(Epoch::ApplicationData),
             |la| self.used_pn.contains(&la),
@@ -652,13 +652,13 @@ impl CryptoDxState {
     }
 
     #[must_use]
-    pub const fn next_pn(&self) -> PacketNumber {
+    pub const fn next_pn(&self) -> packet::Number {
         self.used_pn.end
     }
 
     pub fn encrypt<'a>(
         &mut self,
-        pn: PacketNumber,
+        pn: packet::Number,
         hdr: Range<usize>,
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
@@ -699,7 +699,7 @@ impl CryptoDxState {
 
     pub fn decrypt<'a>(
         &mut self,
-        pn: PacketNumber,
+        pn: packet::Number,
         hdr: Range<usize>,
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
@@ -1133,7 +1133,7 @@ impl CryptoStates {
     }
 
     /// Update the write keys.
-    pub fn initiate_key_update(&mut self, largest_acknowledged: Option<PacketNumber>) -> Res<()> {
+    pub fn initiate_key_update(&mut self, largest_acknowledged: Option<packet::Number>) -> Res<()> {
         // Only update if we are able to. We can only do this if we have
         // received an acknowledgement for a packet in the current phase.
         // Also, skip this if we are waiting for read keys on the existing
@@ -1510,14 +1510,14 @@ impl CryptoStreams {
         &mut self,
         space: PacketNumberSpace,
         sni_slicing: bool,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder,
+        tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) {
         fn write_chunk(
             offset: u64,
             data: &[u8],
-            builder: &mut PacketBuilder,
+            builder: &mut packet::Builder,
         ) -> Option<(u64, usize)> {
             let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 
@@ -1543,14 +1543,14 @@ impl CryptoStreams {
         fn mark_as_sent(
             cs: &mut CryptoStream,
             space: PacketNumberSpace,
-            tokens: &mut Vec<RecoveryToken>,
+            tokens: &mut Vec<recovery::Token>,
             offset: u64,
             len: usize,
             stats: &mut FrameStats,
         ) {
             cs.tx.mark_as_sent(offset, len);
             qdebug!("CRYPTO for {space} offset={offset}, len={len}");
-            tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
+            tokens.push(recovery::Token::Crypto(CryptoRecoveryToken {
                 space,
                 offset,
                 length: len,

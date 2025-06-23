@@ -15,7 +15,7 @@ use super::{
 };
 use crate::{
     connection::tests::{connect_with_rtt, new_client, new_server, now},
-    packet::PacketNumber,
+    packet,
     recovery::{ACK_ONLY_SIZE_LIMIT, PACKET_THRESHOLD},
     sender::PACING_BURST_SIZE,
     stream_id::StreamType,
@@ -73,7 +73,7 @@ fn cc_slow_start_to_cong_avoidance_recovery_period(congestion_signal: Congestion
     // We have already sent packets in `connect_rtt_idle`,
     // so include a fudge factor.
     let flight1_largest =
-        PacketNumber::try_from(c_tx_dgrams.len() + CLIENT_HANDSHAKE_1RTT_PACKETS).unwrap();
+        packet::Number::try_from(c_tx_dgrams.len() + CLIENT_HANDSHAKE_1RTT_PACKETS).unwrap();
 
     // Server: Receive and generate ack
     now += DEFAULT_RTT / 2;

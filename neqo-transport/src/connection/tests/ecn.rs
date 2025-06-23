@@ -20,8 +20,7 @@ use crate::{
         new_server, send_and_receive, send_something, send_something_with_modifier,
         send_with_modifier_and_receive, DEFAULT_RTT,
     },
-    ecn,
-    packet::PacketType,
+    ecn, packet,
     path::MAX_PATH_PROBES,
     ConnectionId, ConnectionParameters, StreamType,
 };
@@ -206,7 +205,7 @@ fn stats() {
             }
         }
 
-        for packet_type in PacketType::iter() {
+        for packet_type in packet::Type::iter() {
             for codepoint in [Ecn::Ect1, Ecn::Ce] {
                 assert_eq!(stats.ecn_tx[packet_type][codepoint], 0);
                 assert_eq!(stats.ecn_tx_acked[packet_type][codepoint], 0);
@@ -215,7 +214,7 @@ fn stats() {
         }
     }
 
-    for packet_type in PacketType::iter() {
+    for packet_type in packet::Type::iter() {
         assert!(
             client.stats().ecn_tx_acked[packet_type][Ecn::Ect0]
                 <= server.stats().ecn_rx[packet_type][Ecn::Ect0]

@@ -17,9 +17,9 @@ use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::Qlog, qtrace};
 
 use super::CongestionControl;
 use crate::{
-    packet::PacketNumber,
+    packet,
     qlog::{self, QlogMetric},
-    recovery::SentPacket,
+    recovery::sent,
     rtt::RttEstimate,
     sender::PACING_BURST_SIZE,
     Pmtud,
@@ -114,7 +114,7 @@ pub struct ClassicCongestionControl<T> {
     bytes_in_flight: usize,
     acked_bytes: usize,
     ssthresh: usize,
-    recovery_start: Option<PacketNumber>,
+    recovery_start: Option<packet::Number>,
     /// `first_app_limited` indicates the packet number after which the application might be
     /// underutilizing the congestion window. When underutilizing the congestion window due to not
     /// sending out enough data, we SHOULD NOT increase the congestion window.[1] Packets sent
@@ -122,7 +122,7 @@ pub struct ClassicCongestionControl<T> {
     /// increasing the congestion window.
     ///
     /// [1]: https://datatracker.ietf.org/doc/html/rfc9002#section-7.8
-    first_app_limited: PacketNumber,
+    first_app_limited: packet::Number,
     pmtud: Pmtud,
     qlog: Qlog,
 }
@@ -180,7 +180,12 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         &mut self.pmtud
     }
 
-    fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], rtt_est: &RttEstimate, now: Instant) {
+    fn on_packets_acked(
+        &mut self,
+        acked_pkts: &[sent::Packet],
+        rtt_est: &RttEstimate,
+        now: Instant,
+    ) {
         let mut is_app_limited = true;
         let mut new_acked = 0;
         for pkt in acked_pkts {
@@ -279,7 +284,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         first_rtt_sample_time: Option<Instant>,
         prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
-        lost_packets: &[SentPacket],
+        lost_packets: &[sent::Packet],
         now: Instant,
     ) -> bool {
         if lost_packets.is_empty() {
@@ -335,11 +340,11 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     /// congestion event.
     ///
     /// See <https://datatracker.ietf.org/doc/html/rfc9002#section-b.7>.
-    fn on_ecn_ce_received(&mut self, largest_acked_pkt: &SentPacket, now: Instant) -> bool {
+    fn on_ecn_ce_received(&mut self, largest_acked_pkt: &sent::Packet, now: Instant) -> bool {
         self.on_congestion_event(largest_acked_pkt, now)
     }
 
-    fn discard(&mut self, pkt: &SentPacket, now: Instant) {
+    fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
         if pkt.cc_outstanding() {
             assert!(self.bytes_in_flight >= pkt.len());
             self.bytes_in_flight -= pkt.len();
@@ -361,7 +366,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         );
     }
 
-    fn on_packet_sent(&mut self, pkt: &SentPacket, now: Instant) {
+    fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant) {
         // Record the recovery time and exit any transient state.
         if self.state.transient() {
             self.recovery_start = Some(pkt.pn());
@@ -473,7 +478,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         first_rtt_sample_time: Option<Instant>,
         prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
-        lost_packets: impl IntoIterator<Item = &'a SentPacket>,
+        lost_packets: impl IntoIterator<Item = &'a sent::Packet>,
         now: Instant,
     ) -> bool {
         if first_rtt_sample_time.is_none() {
@@ -528,7 +533,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     }
 
     #[must_use]
-    fn after_recovery_start(&self, packet: &SentPacket) -> bool {
+    fn after_recovery_start(&self, packet: &sent::Packet) -> bool {
         // At the start of the recovery period, the state is transient and
         // all packets will have been sent before recovery. When sending out
         // the first packet we transition to the non-transient `Recovery`
@@ -540,7 +545,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
     /// Handle a congestion event.
     /// Returns true if this was a true congestion event.
-    fn on_congestion_event(&mut self, last_packet: &SentPacket, now: Instant) -> bool {
+    fn on_congestion_event(&mut self, last_packet: &sent::Packet, now: Instant) -> bool {
         // Start a new congestion event if lost or ECN CE marked packet was sent
         // after the start of the previous congestion recovery period.
         if !self.after_recovery_start(last_packet) {
@@ -606,8 +611,8 @@ mod tests {
             tests::{IP_ADDR, MTU, RTT},
             CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS,
         },
-        packet::{PacketNumber, PacketType},
-        recovery::SentPacket,
+        packet,
+        recovery::sent::{self},
         rtt::RttEstimate,
         Pmtud,
     };
@@ -632,9 +637,9 @@ mod tests {
         assert_eq!(cc.ssthresh(), cc.cwnd_initial() / 2);
     }
 
-    fn lost(pn: PacketNumber, ack_eliciting: bool, t: Duration) -> SentPacket {
-        SentPacket::new(
-            PacketType::Short,
+    fn lost(pn: packet::Number, ack_eliciting: bool, t: Duration) -> sent::Packet {
+        sent::Packet::new(
+            packet::Type::Short,
             pn,
             now() + t,
             ack_eliciting,
@@ -659,7 +664,7 @@ mod tests {
     fn persistent_congestion_by_algorithm(
         mut cc: Box<dyn CongestionControl>,
         reduced_cwnd: usize,
-        lost_packets: &[SentPacket],
+        lost_packets: &[sent::Packet],
         persistent_expected: bool,
     ) {
         for p in lost_packets {
@@ -678,7 +683,7 @@ mod tests {
         assert_eq!(persistent, persistent_expected);
     }
 
-    fn persistent_congestion(lost_packets: &[SentPacket], persistent_expected: bool) {
+    fn persistent_congestion(lost_packets: &[sent::Packet], persistent_expected: bool) {
         let cc = congestion_control(CongestionControlAlgorithm::NewReno);
         let cwnd_initial = cc.cwnd_initial();
         persistent_congestion_by_algorithm(cc, cwnd_initial / 2, lost_packets, persistent_expected);
@@ -842,13 +847,13 @@ mod tests {
 
     /// Make packets that will be made lost.
     /// `times` is the time of sending, in multiples of `PTO`, relative to `now()`.
-    fn make_lost(times: &[u32]) -> Vec<SentPacket> {
+    fn make_lost(times: &[u32]) -> Vec<sent::Packet> {
         times
             .iter()
             .enumerate()
             .map(|(i, &t)| {
-                SentPacket::new(
-                    PacketType::Short,
+                sent::Packet::new(
+                    packet::Type::Short,
                     u64::try_from(i).unwrap(),
                     by_pto(t),
                     true,
@@ -866,7 +871,7 @@ mod tests {
         mut cc: ClassicCongestionControl<T>,
         last_ack: u32,
         rtt_time: u32,
-        lost: &[SentPacket],
+        lost: &[sent::Packet],
     ) -> bool {
         let now = Instant::now();
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
@@ -968,7 +973,7 @@ mod tests {
     #[test]
     fn persistent_congestion_ack_eliciting() {
         let mut lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
-        lost[0] = SentPacket::new(
+        lost[0] = sent::Packet::new(
             lost[0].packet_type(),
             lost[0].pn(),
             lost[0].time_sent(),
@@ -1069,8 +1074,8 @@ mod tests {
             // always stay below app_limit during sent.
             let mut pkts = Vec::new();
             for _ in 0..packet_burst_size {
-                let p = SentPacket::new(
-                    PacketType::Short,
+                let p = sent::Packet::new(
+                    packet::Type::Short,
                     next_pn,
                     now,
                     true,
@@ -1096,8 +1101,8 @@ mod tests {
         // have `bytes_in_flight` above the `app_limited` threshold.
         let mut pkts = Vec::new();
         for _ in 0..ABOVE_APP_LIMIT_PKTS {
-            let p = SentPacket::new(
-                PacketType::Short,
+            let p = sent::Packet::new(
+                packet::Type::Short,
                 next_pn,
                 now,
                 true,
@@ -1146,8 +1151,8 @@ mod tests {
 
         // Change state to congestion avoidance by introducing loss.
 
-        let p_lost = SentPacket::new(
-            PacketType::Short,
+        let p_lost = sent::Packet::new(
+            packet::Type::Short,
             1,
             now,
             true,
@@ -1159,8 +1164,8 @@ mod tests {
         now += PTO;
         cc.on_packets_lost(Some(now), None, PTO, &[p_lost], now);
         cwnd_is_halved(&cc);
-        let p_not_lost = SentPacket::new(
-            PacketType::Short,
+        let p_not_lost = sent::Packet::new(
+            packet::Type::Short,
             2,
             now,
             true,
@@ -1182,8 +1187,8 @@ mod tests {
             // always stay below app_limit during sent.
             let mut pkts = Vec::new();
             for _ in 0..packet_burst_size {
-                let p = SentPacket::new(
-                    PacketType::Short,
+                let p = sent::Packet::new(
+                    packet::Type::Short,
                     next_pn,
                     now,
                     true,
@@ -1215,8 +1220,8 @@ mod tests {
         // have `bytes_in_flight` above the `app_limited` threshold.
         let mut pkts = Vec::new();
         for _ in 0..ABOVE_APP_LIMIT_PKTS {
-            let p = SentPacket::new(
-                PacketType::Short,
+            let p = sent::Packet::new(
+                packet::Type::Short,
                 next_pn,
                 now,
                 true,
@@ -1254,8 +1259,8 @@ mod tests {
     fn ecn_ce() {
         let now = now();
         let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
-        let p_ce = SentPacket::new(
-            PacketType::Short,
+        let p_ce = sent::Packet::new(
+            packet::Type::Short,
             1,
             now,
             true,

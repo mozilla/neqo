@@ -25,9 +25,9 @@ use smallvec::SmallVec;
 use crate::{
     connection::State,
     frame::{CloseError, Frame},
-    packet::{self, metadata::Direction, PacketType, PublicPacket},
+    packet::{self, metadata::Direction},
     path::PathRef,
-    recovery::SentPacket,
+    recovery::sent,
     stream_id::StreamType as NeqoStreamType,
     tparams::{
         TransportParameterId::{
@@ -254,7 +254,7 @@ pub fn packet_io(qlog: &Qlog, meta: packet::MetaData, now: Instant) {
     );
 }
 
-pub fn packet_dropped(qlog: &Qlog, public_packet: &PublicPacket, now: Instant) {
+pub fn packet_dropped(qlog: &Qlog, public_packet: &packet::Public, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
             let header =
@@ -276,7 +276,7 @@ pub fn packet_dropped(qlog: &Qlog, public_packet: &PublicPacket, now: Instant) {
     );
 }
 
-pub fn packets_lost(qlog: &Qlog, pkts: &[SentPacket], now: Instant) {
+pub fn packets_lost(qlog: &Qlog, pkts: &[sent::Packet], now: Instant) {
     qlog.add_event_with_stream(|stream| {
         for pkt in pkts {
             let header =
@@ -551,16 +551,16 @@ impl From<Frame<'_>> for QuicFrame {
     }
 }
 
-impl From<PacketType> for qlog::events::quic::PacketType {
-    fn from(value: PacketType) -> Self {
+impl From<packet::Type> for qlog::events::quic::PacketType {
+    fn from(value: packet::Type) -> Self {
         match value {
-            PacketType::Initial => Self::Initial,
-            PacketType::Handshake => Self::Handshake,
-            PacketType::ZeroRtt => Self::ZeroRtt,
-            PacketType::Short => Self::OneRtt,
-            PacketType::Retry => Self::Retry,
-            PacketType::VersionNegotiation => Self::VersionNegotiation,
-            PacketType::OtherVersion => Self::Unknown,
+            packet::Type::Initial => Self::Initial,
+            packet::Type::Handshake => Self::Handshake,
+            packet::Type::ZeroRtt => Self::ZeroRtt,
+            packet::Type::Short => Self::OneRtt,
+            packet::Type::Retry => Self::Retry,
+            packet::Type::VersionNegotiation => Self::VersionNegotiation,
+            packet::Type::OtherVersion => Self::Unknown,
         }
     }
 }

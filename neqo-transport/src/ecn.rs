@@ -10,8 +10,8 @@ use enum_map::{Enum, EnumMap};
 use neqo_common::{qdebug, qinfo, qwarn, Ecn};
 
 use crate::{
-    packet::{PacketNumber, PacketType},
-    recovery::{RecoveryToken, SentPacket},
+    packet,
+    recovery::{self, sent},
     Stats,
 };
 
@@ -173,7 +173,7 @@ pub(crate) struct Info {
     state: ValidationState,
 
     /// The largest ACK seen so far.
-    largest_acked: PacketNumber,
+    largest_acked: packet::Number,
 
     /// The ECN counts from the last ACK frame that increased `largest_acked`.
     baseline: Count,
@@ -215,7 +215,7 @@ impl Info {
     /// Returns whether ECN counts contain new valid ECN CE marks.
     pub(crate) fn on_packets_acked(
         &mut self,
-        acked_packets: &[SentPacket],
+        acked_packets: &[sent::Packet],
         ack_ecn: Option<Count>,
         stats: &mut Stats,
     ) -> bool {
@@ -239,8 +239,8 @@ impl Info {
     }
 
     /// An [`IpTosEcn::Ect0`] marked packet has been declared lost.
-    pub(crate) fn lost_ecn(&mut self, pt: PacketType, stats: &mut Stats) {
-        if pt != PacketType::Initial {
+    pub(crate) fn lost_ecn(&mut self, pt: packet::Type, stats: &mut Stats) {
+        if pt != packet::Type::Initial {
             return;
         }
 
@@ -265,7 +265,7 @@ impl Info {
     /// After the ECN validation test has ended, check if the path is ECN capable.
     fn validate_ack_ecn_and_update(
         &mut self,
-        acked_packets: &[SentPacket],
+        acked_packets: &[sent::Packet],
         ack_ecn: Option<Count>,
         stats: &mut Stats,
     ) {
@@ -348,11 +348,11 @@ impl Info {
 
     /// The ECN mark to use for an outgoing UDP datagram.
     ///
-    /// On [`IpTosEcn::Ect0`] adds a [`RecoveryToken::EcnEct0`] to `tokens` in
+    /// On [`IpTosEcn::Ect0`] adds a [`recovery::Token::EcnEct0`] to `tokens` in
     /// order to detect potential loss, then handled in [`Info::lost_ecn`].
-    pub(crate) fn ecn_mark(&self, tokens: &mut Vec<RecoveryToken>) -> Ecn {
+    pub(crate) fn ecn_mark(&self, tokens: &mut Vec<recovery::Token>) -> Ecn {
         if self.is_marking() {
-            tokens.push(RecoveryToken::EcnEct0);
+            tokens.push(recovery::Token::EcnEct0);
             Ecn::Ect0
         } else {
             Ecn::NotEct

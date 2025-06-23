@@ -13,11 +13,7 @@ use neqo_common::Tos;
 use qlog::events::quic::PacketHeader;
 use strum::Display;
 
-use super::DecryptedPacket;
-use crate::{
-    packet::{PacketNumber, PacketType},
-    path::PathRef,
-};
+use crate::{packet, path::PathRef};
 
 #[derive(Clone, Copy, Display)]
 pub enum Direction {
@@ -30,8 +26,8 @@ pub enum Direction {
 pub struct MetaData<'a> {
     path: &'a PathRef,
     direction: Direction,
-    packet_type: PacketType,
-    packet_number: PacketNumber,
+    packet_type: packet::Type,
+    packet_number: packet::Number,
     tos: Tos,
     len: usize,
     payload: &'a [u8],
@@ -42,7 +38,7 @@ impl MetaData<'_> {
         path: &'a PathRef,
         tos: Tos,
         len: usize,
-        decrypted: &'a DecryptedPacket,
+        decrypted: &'a packet::Decrypted,
     ) -> MetaData<'a> {
         MetaData {
             path,
@@ -57,8 +53,8 @@ impl MetaData<'_> {
 
     pub const fn new_out<'a>(
         path: &'a PathRef,
-        packet_type: PacketType,
-        packet_number: PacketNumber,
+        packet_type: packet::Type,
+        packet_number: packet::Number,
         length: usize,
         payload: &'a [u8],
         tos: Tos,

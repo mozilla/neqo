@@ -15,9 +15,9 @@ use neqo_common::{qlog::Qlog, qtrace};
 
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
-    packet::PacketBuilder,
+    packet,
     qlog::{self, QlogMetric},
-    recovery::RecoveryToken,
+    recovery,
     stats::FrameStats,
 };
 
@@ -195,8 +195,8 @@ impl RttEstimate {
 
     pub fn write_frames(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder,
+        tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) {
         self.ack_delay.write_frames(builder, tokens, stats);

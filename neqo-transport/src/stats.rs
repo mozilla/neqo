@@ -18,17 +18,14 @@ use enum_map::EnumMap;
 use neqo_common::{qwarn, Dscp, Ecn};
 use strum::IntoEnumIterator as _;
 
-use crate::{
-    ecn,
-    packet::{PacketNumber, PacketType},
-};
+use crate::{ecn, packet};
 
 pub const MAX_PTO_COUNTS: usize = 16;
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct FrameStats {
     pub ack: usize,
-    pub largest_acknowledged: PacketNumber,
+    pub largest_acknowledged: packet::Number,
 
     pub crypto: usize,
     pub stream: usize,
@@ -139,9 +136,9 @@ pub struct DatagramStats {
     pub dropped_queue_full: usize,
 }
 
-/// ECN counts by QUIC [`PacketType`].
+/// ECN counts by QUIC [`packet::Type`].
 #[derive(Default, Clone, PartialEq, Eq)]
-pub struct EcnCount(EnumMap<PacketType, ecn::Count>);
+pub struct EcnCount(EnumMap<packet::Type, ecn::Count>);
 
 impl Debug for EcnCount {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -157,7 +154,7 @@ impl Debug for EcnCount {
 }
 
 impl Deref for EcnCount {
-    type Target = EnumMap<PacketType, ecn::Count>;
+    type Target = EnumMap<packet::Type, ecn::Count>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -171,10 +168,10 @@ impl DerefMut for EcnCount {
 
 /// Packet types and numbers of the first ECN mark transition between two marks.
 #[derive(Default, Clone, PartialEq, Eq)]
-pub struct EcnTransitions(EnumMap<Ecn, EnumMap<Ecn, Option<(PacketType, PacketNumber)>>>);
+pub struct EcnTransitions(EnumMap<Ecn, EnumMap<Ecn, Option<(packet::Type, packet::Number)>>>);
 
 impl Deref for EcnTransitions {
-    type Target = EnumMap<Ecn, EnumMap<Ecn, Option<(PacketType, PacketNumber)>>>;
+    type Target = EnumMap<Ecn, EnumMap<Ecn, Option<(packet::Type, packet::Number)>>>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
