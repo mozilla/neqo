@@ -914,9 +914,11 @@ name = "neqo-udp"
 version = "0.13.4"
 dependencies = [
  "cfg_aliases",
+ "libc",
  "log",
  "neqo-common",
  "quinn-udp",
+ "windows",
 ]
 
 [[package]]
