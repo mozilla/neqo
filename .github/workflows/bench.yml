@@ -329,10 +329,7 @@ jobs:
                     # shellcheck disable=SC2086
                     $WORKSPACE/$CMD > /dev/null 2>&1
                   fi
-                  echo -n "Before pkill: "
-                  pgrep "$SERVER_TAG" || true
-                  pkill -e "$SERVER_TAG"
-                  echo -n "After pkill: "
+                  pkill "$SERVER_TAG"
                   pgrep "$SERVER_TAG" || true
                   # Sanity check the size of the last retrieved file.
                   # google/quiche outputs the HTTP header, too, so we can't just check for -eq.
@@ -376,17 +373,12 @@ jobs:
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu2 --exec \
                     perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.server.perf" $WORKSPACE/$SERVER_CMD &
-                  # > /dev/null 2>&1 &
                   sleep 0.2
                   CMD=${CMD//$SIZE/$BIGSIZE}
                   # shellcheck disable=SC2086
                   nice -n -20 setarch --addr-no-randomize cset proc --set=cpu3 --exec \
                     perf -- $PERF_OPT -o "$WORKSPACE/$FILENAME.client.perf" $WORKSPACE/$CMD > /dev/null 2>&1
-                  echo -n "Before pkill: "
-                  pgrep "$SERVER_TAG" || true
-                  pkill -e "$SERVER_TAG"
-                  echo -n "After pkill: "
-                  pgrep "$SERVER_TAG" || true
+                  pkill "$SERVER_TAG"
                   cd "$WORKSPACE"
 
                   echo "*** Preparing results report for $client vs. $server"
