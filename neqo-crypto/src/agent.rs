@@ -122,7 +122,7 @@ impl<T: CertificateCompressor> UnsafeCertCompression for T {
 
         let Ok(decoded_len) = T::decode(input_slice, output_slice) else {
             return ssl::SECFailure;
-        };
+        }
 
         if decoded_len != output_len {
             return ssl::SECFailure;
