@@ -13,8 +13,7 @@ use strum::FromRepr;
 
 use crate::{
     cid::MAX_CONNECTION_ID_LEN,
-    ecn,
-    packet::PacketType,
+    ecn, packet,
     stream_id::{StreamId, StreamType},
     AppError, CloseReason, Error, Res, TransportError,
 };
@@ -424,7 +423,7 @@ impl<'a> Frame<'a> {
     }
 
     #[must_use]
-    pub fn is_allowed(&self, pt: PacketType) -> bool {
+    pub fn is_allowed(&self, pt: packet::Type) -> bool {
         match self {
             Self::Padding { .. } | Self::Ping => true,
             Self::Crypto { .. }
@@ -432,9 +431,9 @@ impl<'a> Frame<'a> {
             | Self::ConnectionClose {
                 error_code: CloseError::Transport(_),
                 ..
-            } => pt != PacketType::ZeroRtt,
-            Self::NewToken { .. } | Self::ConnectionClose { .. } => pt == PacketType::Short,
-            _ => pt == PacketType::ZeroRtt || pt == PacketType::Short,
+            } => pt != packet::Type::ZeroRtt,
+            Self::NewToken { .. } | Self::ConnectionClose { .. } => pt == packet::Type::Short,
+            _ => pt == packet::Type::ZeroRtt || pt == packet::Type::Short,
         }
     }
 

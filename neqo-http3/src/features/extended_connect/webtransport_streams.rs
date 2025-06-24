@@ -7,7 +7,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use neqo_common::Encoder;
-use neqo_transport::{Connection, RecvStreamStats, SendStreamStats, StreamId};
+use neqo_transport::{recv_stream, send_stream, Connection, StreamId};
 
 use super::WebTransportSession;
 use crate::{
@@ -75,7 +75,7 @@ impl RecvStream for WebTransportRecvStream {
         Ok((amount, fin))
     }
 
-    fn stats(&mut self, conn: &mut Connection) -> Res<RecvStreamStats> {
+    fn stats(&mut self, conn: &mut Connection) -> Res<recv_stream::Stats> {
         const TYPE_LEN_UNI: usize = Encoder::varint_len(WEBTRANSPORT_UNI_STREAM);
         const TYPE_LEN_BIDI: usize = Encoder::varint_len(WEBTRANSPORT_STREAM);
 
@@ -101,7 +101,7 @@ impl RecvStream for WebTransportRecvStream {
         let bytes_received = subtract_non_app_bytes(stats.bytes_received());
         let bytes_read = subtract_non_app_bytes(stats.bytes_read());
 
-        Ok(RecvStreamStats::new(bytes_received, bytes_read))
+        Ok(recv_stream::Stats::new(bytes_received, bytes_read))
     }
 }
 
@@ -226,7 +226,7 @@ impl SendStream for WebTransportSendStream {
         Ok(())
     }
 
-    fn stats(&mut self, conn: &mut Connection) -> Res<SendStreamStats> {
+    fn stats(&mut self, conn: &mut Connection) -> Res<send_stream::Stats> {
         const TYPE_LEN_UNI: usize = Encoder::varint_len(WEBTRANSPORT_UNI_STREAM);
         const TYPE_LEN_BIDI: usize = Encoder::varint_len(WEBTRANSPORT_STREAM);
 
@@ -252,6 +252,10 @@ impl SendStream for WebTransportSendStream {
         let bytes_written = subtract_non_app_bytes(stats.bytes_written());
         let bytes_sent = subtract_non_app_bytes(stats.bytes_sent());
         let bytes_acked = subtract_non_app_bytes(stats.bytes_acked());
-        Ok(SendStreamStats::new(bytes_written, bytes_sent, bytes_acked))
+        Ok(send_stream::Stats::new(
+            bytes_written,
+            bytes_sent,
+            bytes_acked,
+        ))
     }
 }
