@@ -25,7 +25,7 @@ use crate::{
         TransportParametersHandler,
     },
     tracking::DEFAULT_LOCAL_ACK_DELAY,
-    version::{Version, VersionConfig},
+    version::{self, Version},
     CongestionControlAlgorithm, Res,
 };
 
@@ -58,7 +58,7 @@ pub enum PreferredAddressConfig {
 #[expect(clippy::struct_excessive_bools, reason = "We need that many, sorry.")]
 #[derive(Debug, Clone)]
 pub struct ConnectionParameters {
-    versions: VersionConfig,
+    versions: version::Config,
     cc_algorithm: CongestionControlAlgorithm,
     /// Initial connection-level flow control limit.
     max_data: u64,
@@ -105,7 +105,7 @@ pub struct ConnectionParameters {
 impl Default for ConnectionParameters {
     fn default() -> Self {
         Self {
-            versions: VersionConfig::default(),
+            versions: version::Config::default(),
             cc_algorithm: CongestionControlAlgorithm::Cubic,
             max_data: LOCAL_MAX_DATA,
             max_stream_data_bidi_remote: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
@@ -136,11 +136,11 @@ impl Default for ConnectionParameters {
 
 impl ConnectionParameters {
     #[must_use]
-    pub const fn get_versions(&self) -> &VersionConfig {
+    pub const fn get_versions(&self) -> &version::Config {
         &self.versions
     }
 
-    pub(crate) fn get_versions_mut(&mut self) -> &mut VersionConfig {
+    pub(crate) fn get_versions_mut(&mut self) -> &mut version::Config {
         &mut self.versions
     }
 
@@ -150,7 +150,7 @@ impl ConnectionParameters {
     /// before less preferred.
     #[must_use]
     pub fn versions(mut self, initial: Version, all: Vec<Version>) -> Self {
-        self.versions = VersionConfig::new(initial, all);
+        self.versions = version::Config::new(initial, all);
         self
     }
 
