@@ -18,11 +18,11 @@ use enum_map::EnumMap;
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
 pub use neqo_crypto::Epoch;
 use neqo_crypto::{
-    hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState,
-    PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker,
-    TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE,
-    TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519,
-    TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
+    hkdf, hp, Aead, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState, PrivateKey,
+    PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker, TLS_AES_128_GCM_SHA256,
+    TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1,
+    TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519,
+    TLS_VERSION_1_3,
 };
 
 use crate::{
@@ -448,7 +448,7 @@ pub struct CryptoDxState {
     /// many times keys can be updated, so we don't use `u16` for this.
     epoch: usize,
     aead: Aead,
-    hpkey: HpKey,
+    hpkey: hp::Key,
     /// This tracks the range of packet numbers that have been seen.  This allows
     /// for verifying that packet numbers before a key update are strictly lower
     /// than packet numbers after a key update.
@@ -479,7 +479,7 @@ impl CryptoDxState {
             direction,
             epoch: usize::from(epoch),
             aead: Aead::new(TLS_VERSION_1_3, cipher, secret, version.label_prefix())?,
-            hpkey: HpKey::extract(TLS_VERSION_1_3, cipher, secret, &hplabel)?,
+            hpkey: hp::Key::extract(TLS_VERSION_1_3, cipher, secret, &hplabel)?,
             used_pn: 0..0,
             min_pn: 0,
             invocations: Self::limit(direction, cipher),
@@ -645,7 +645,7 @@ impl CryptoDxState {
         )
     }
 
-    pub fn compute_mask(&self, sample: &[u8]) -> Res<[u8; HpKey::SAMPLE_SIZE]> {
+    pub fn compute_mask(&self, sample: &[u8]) -> Res<[u8; hp::Key::SAMPLE_SIZE]> {
         let mask = self.hpkey.mask(sample)?;
         qtrace!("[{self}] HP sample={} mask={}", hex(sample), hex(mask));
         Ok(mask)
@@ -734,7 +734,7 @@ impl CryptoDxState {
     /// This is the difference between the size of the header protection sample
     /// and the AEAD expansion.
     pub const fn extra_padding() -> usize {
-        HpKey::SAMPLE_SIZE.saturating_sub(Aead::expansion())
+        hp::Key::SAMPLE_SIZE.saturating_sub(Aead::expansion())
     }
 }
 
@@ -1319,7 +1319,7 @@ impl CryptoStates {
                     "quic ", // This is a v1 test so hard-code the label.
                 )
                 .unwrap(),
-                hpkey: HpKey::extract(
+                hpkey: hp::Key::extract(
                     TLS_VERSION_1_3,
                     TLS_CHACHA20_POLY1305_SHA256,
                     &secret,
