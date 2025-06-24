@@ -388,6 +388,7 @@ mod tests {
         let receiver = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
+        // Send oversized datagram and expect `EMSGSIZE` error to be ignored.
         let oversized_datagram = Datagram::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
@@ -404,7 +405,6 @@ mod tests {
         }
 
         // Now send a normal datagram to ensure that the socket is still usable.
-
         let normal_datagram = Datagram::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
@@ -415,6 +415,8 @@ mod tests {
         sender.send(&normal_datagram)?;
 
         let mut recv_buf = RecvBuf::new();
+        // Block until "Hello World!" is received.
+        receiver.inner.set_nonblocking(false)?;
         let mut received_datagram = receiver.recv(receiver_addr, &mut recv_buf)?;
         assert_eq!(
             received_datagram.next().unwrap().as_ref(),
