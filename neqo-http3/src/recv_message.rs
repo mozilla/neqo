@@ -13,7 +13,7 @@ use std::{
 };
 
 use neqo_common::{header::HeadersExt as _, qdebug, qinfo, qtrace, Header};
-use neqo_qpack::qpack;
+use neqo_qpack as qpack;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{

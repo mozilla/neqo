@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use neqo_qpack::qpack;
+use neqo_qpack as qpack;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{CloseType, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream};

@@ -6,7 +6,7 @@
 
 use std::cmp::min;
 
-use neqo_qpack::qpack;
+use neqo_qpack as qpack;
 use neqo_transport::ConnectionParameters;
 
 const QPACK_MAX_TABLE_SIZE_DEFAULT: u64 = 65536;

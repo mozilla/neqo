@@ -24,9 +24,7 @@ use std::fmt::{self, Display, Formatter};
 
 pub use stats::Stats;
 
-pub mod qpack {
-    pub use crate::{decoder::Decoder, encoder::Encoder, Settings};
-}
+pub use crate::{decoder::Decoder, encoder::Encoder};
 
 type Res<T> = Result<T, Error>;
 

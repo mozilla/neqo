@@ -12,7 +12,7 @@ use std::{
 };
 
 use neqo_common::{qtrace, Encoder, Header, MessageType, Role};
-use neqo_qpack::qpack;
+use neqo_qpack as qpack;
 use neqo_transport::{Connection, DatagramTracking, StreamId};
 use rustc_hash::FxHashSet as HashSet;
 
