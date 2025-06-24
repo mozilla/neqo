@@ -1294,7 +1294,7 @@ mod tests {
 
     use neqo_common::{event::Provider as _, qtrace, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
-    use neqo_qpack::{encoder, QpackSettings};
+    use neqo_qpack::qpack;
     use neqo_transport::{
         CloseReason, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
         Version, INITIAL_RECV_WINDOW_SIZE, MIN_INITIAL_PACKET_SIZE,
@@ -1381,7 +1381,7 @@ mod tests {
         settings: HFrame,
         conn: Connection,
         control_stream_id: Option<StreamId>,
-        encoder: Rc<RefCell<encoder::QPack>>,
+        encoder: Rc<RefCell<qpack::Encoder>>,
         encoder_receiver: EncoderRecvStream,
         encoder_stream_id: Option<StreamId>,
         decoder_stream_id: Option<StreamId>,
@@ -1409,8 +1409,8 @@ mod tests {
                     .map_or(100, |s| s.value),
             )
             .unwrap();
-            let qpack = Rc::new(RefCell::new(encoder::QPack::new(
-                &QpackSettings {
+            let qpack = Rc::new(RefCell::new(qpack::Encoder::new(
+                &qpack::Settings {
                     max_table_size_encoder: max_table_size,
                     max_table_size_decoder: max_table_size,
                     max_blocked_streams,
@@ -1431,8 +1431,8 @@ mod tests {
         }
 
         pub fn new_with_conn(conn: Connection) -> Self {
-            let qpack = Rc::new(RefCell::new(encoder::QPack::new(
-                &QpackSettings {
+            let qpack = Rc::new(RefCell::new(qpack::Encoder::new(
+                &qpack::Settings {
                     max_table_size_encoder: 128,
                     max_table_size_decoder: 128,
                     max_blocked_streams: 0,

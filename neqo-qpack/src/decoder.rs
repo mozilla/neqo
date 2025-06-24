@@ -13,22 +13,22 @@ use crate::{
     decoder_instructions::DecoderInstruction,
     encoder_instructions::{DecodedEncoderInstruction, EncoderInstructionReader},
     header_block::{HeaderDecoder, HeaderDecoderResult},
-    qpack_send_buf::QpackData,
+    qpack_send_buf::Data,
     reader::ReceiverConnWrapper,
     stats::Stats,
     table::HeaderTable,
-    Error, QpackSettings, Res,
+    Error, Res, Settings,
 };
 
 pub const QPACK_UNI_STREAM_TYPE_DECODER: u64 = 0x3;
 
 #[derive(Debug)]
-pub struct QPack {
+pub struct Decoder {
     instruction_reader: EncoderInstructionReader,
     table: HeaderTable,
     acked_inserts: u64,
     max_entries: u64,
-    send_buf: QpackData,
+    send_buf: Data,
     local_stream_id: Option<StreamId>,
     max_table_size: u64,
     max_blocked_streams: usize,
@@ -36,14 +36,14 @@ pub struct QPack {
     stats: Stats,
 }
 
-impl QPack {
+impl Decoder {
     /// # Panics
     ///
     /// If settings include invalid values.
     #[must_use]
-    pub fn new(qpack_settings: &QpackSettings) -> Self {
+    pub fn new(qpack_settings: &Settings) -> Self {
         qdebug!("Decoder: creating a new qpack decoder");
-        let mut send_buf = QpackData::default();
+        let mut send_buf = Data::default();
         send_buf.encode_varint(QPACK_UNI_STREAM_TYPE_DECODER);
         Self {
             instruction_reader: EncoderInstructionReader::new(),
@@ -270,7 +270,7 @@ impl QPack {
     }
 }
 
-impl Display for QPack {
+impl Display for Decoder {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "QPack {}", self.capacity())
     }
@@ -290,13 +290,13 @@ mod tests {
     use neqo_transport::{StreamId, StreamType};
     use test_fixture::now;
 
-    use super::{Connection, Error, QPack, Res};
-    use crate::QpackSettings;
+    use super::{Connection, Decoder, Error, Res};
+    use crate::Settings;
 
     const STREAM_0: StreamId = StreamId::new(0);
 
     struct TestDecoder {
-        decoder: QPack,
+        decoder: Decoder,
         send_stream_id: StreamId,
         recv_stream_id: StreamId,
         conn: Connection,
@@ -311,7 +311,7 @@ mod tests {
         let send_stream_id = conn.stream_create(StreamType::UniDi).unwrap();
 
         // create a decoder
-        let mut decoder = QPack::new(&QpackSettings {
+        let mut decoder = Decoder::new(&Settings {
             max_table_size_encoder: 0,
             max_table_size_decoder: 300,
             max_blocked_streams: 100,
