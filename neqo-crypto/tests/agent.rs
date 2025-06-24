@@ -544,12 +544,12 @@ fn connection_succeeds_when_server_and_client_support_cert_compr_copy() {
         const NAME: &CStr = c"inc-dec";
         const ENABLE_ENCODING: bool = true;
 
-        fn decode(input: &[u8], output: &mut [u8]) -> Res<usize> {
+        fn decode(input: &[u8], output: &mut [u8]) -> Res<()> {
             let len = std::cmp::min(input.len(), output.len());
             for i in 0..len {
                 output[i] = input[i].wrapping_sub(1);
             }
-            Ok(len)
+            Ok(())
         }
 
         fn encode(input: &[u8], output: &mut [u8]) -> Res<usize> {
@@ -588,10 +588,10 @@ fn connection_succeeds_when_server_and_client_default_encoding() {
         const NAME: &CStr = c"copy";
         const ENABLE_ENCODING: bool = true;
 
-        fn decode(input: &[u8], output: &mut [u8]) -> Res<usize> {
+        fn decode(input: &[u8], output: &mut [u8]) -> Res<()> {
             let len = std::cmp::min(input.len(), output.len());
             output[..len].copy_from_slice(&input[..len]);
-            Ok(len)
+            Ok(())
         }
     }
 
@@ -618,10 +618,10 @@ impl CertificateCompressor for CopyCompressionNoEncoder {
     const ID: u16 = 0x4;
     const NAME: &CStr = c"copy";
 
-    fn decode(input: &[u8], output: &mut [u8]) -> Res<usize> {
+    fn decode(input: &[u8], output: &mut [u8]) -> Res<()> {
         let len = std::cmp::min(input.len(), output.len());
         output[..len].copy_from_slice(&input[..len]);
-        Ok(len)
+        Ok(())
     }
 }
 
@@ -686,7 +686,7 @@ fn connection_fails_when_decoding_fails() {
 
         const ENABLE_ENCODING: bool = true;
 
-        fn decode(input: &[u8], output: &mut [u8]) -> Res<usize> {
+        fn decode(input: &[u8], output: &mut [u8]) -> Res<()> {
             let len = std::cmp::min(input.len(), output.len());
             output[..len].copy_from_slice(&input[..len]);
             Err(Error::CertificateDecoding)
@@ -726,10 +726,10 @@ fn connection_fails_when_encoding_fails() {
             Err(Error::CertificateEncoding)
         }
 
-        fn decode(input: &[u8], output: &mut [u8]) -> Res<usize> {
+        fn decode(input: &[u8], output: &mut [u8]) -> Res<()> {
             let len = std::cmp::min(input.len(), output.len());
             output[..len].copy_from_slice(&input[..len]);
-            Ok(len)
+            Ok(())
         }
     }
 
@@ -765,10 +765,10 @@ fn connection_fails_encoder_returned_too_long() {
             Ok(len + 10)
         }
 
-        fn decode(input: &[u8], output: &mut [u8]) -> Res<usize> {
+        fn decode(input: &[u8], output: &mut [u8]) -> Res<()> {
             let len = std::cmp::min(input.len(), output.len());
             output[..len].copy_from_slice(&input[..len]);
-            Ok(len)
+            Ok(())
         }
     }
 
@@ -782,38 +782,6 @@ fn connection_fails_encoder_returned_too_long() {
 
     client
         .set_certificate_compression::<CompressionEncoderReturnsTooLong>()
-        .unwrap();
-
-    connect_fail(&mut client, &mut server);
-}
-
-#[test]
-fn connection_fails_decoder_returned_too_long() {
-    struct CompressionDecoderReturnsTooLong {}
-
-    impl CertificateCompressor for CompressionDecoderReturnsTooLong {
-        const ID: u16 = 0x4;
-        const NAME: &CStr = c"copy";
-
-        const ENABLE_ENCODING: bool = true;
-
-        fn decode(input: &[u8], output: &mut [u8]) -> Res<usize> {
-            let len = std::cmp::min(input.len(), output.len());
-            output[..len].copy_from_slice(&input[..len]);
-            Ok(len + 10)
-        }
-    }
-
-    fixture_init();
-    let mut client = Client::new("server.example", true).expect("should create client");
-    let mut server = Server::new(&["key"]).expect("should create server");
-
-    server
-        .set_certificate_compression::<CompressionDecoderReturnsTooLong>()
-        .unwrap();
-
-    client
-        .set_certificate_compression::<CompressionDecoderReturnsTooLong>()
         .unwrap();
 
     connect_fail(&mut client, &mut server);

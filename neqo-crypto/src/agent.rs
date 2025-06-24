@@ -97,8 +97,11 @@ pub trait CertificateCompressor {
 
     /// Certificate Compression decoding function.
     /// # Errors
-    /// Decoding was unsuccessful, for example, not enough memory
-    fn decode(input: &[u8], output: &mut [u8]) -> Res<usize>;
+    /// Decoding was unsuccessful.
+    /// We require a decoder internally to check the length of the decoded buffer.
+    /// If the decoded length is not equal to the length of the provided slice
+    /// the decoder should return an error.
+    fn decode(input: &[u8], output: &mut [u8]) -> Res<()>;
 }
 
 /// The trait is responsible for calling `CertificateCompression` encoding and decoding
@@ -120,16 +123,12 @@ impl<T: CertificateCompressor> UnsafeCertCompression for T {
         let input_slice = unsafe { null_safe_slice(input.as_ref().data, input.as_ref().len) };
         let output_slice = unsafe { slice::from_raw_parts_mut(output, output_len) };
 
-        let Ok(decoded_len) = T::decode(input_slice, output_slice) else {
-            return ssl::SECFailure;
-        }
-
-        if decoded_len != output_len {
+        if T::decode(input_slice, output_slice).is_err() {
             return ssl::SECFailure;
         }
 
         unsafe {
-            *used_len = decoded_len;
+            *used_len = output_len;
         }
         ssl::SECSuccess
     }
