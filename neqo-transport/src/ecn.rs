@@ -77,8 +77,8 @@ impl ValidationState {
 /// Note: [`Count`] is used both for outgoing UDP datagrams, returned by
 /// remote through QUIC ACKs and for incoming UDP datagrams, read from IP TOS
 /// header. In the former case, given that QUIC ACKs only carry
-/// [`IpTosEcn::Ect0`], [`IpTosEcn::Ect1`] and [`IpTosEcn::Ce`], but never
-/// [`IpTosEcn::NotEct`], the [`IpTosEcn::NotEct`] value will always be 0.
+/// [`Ecn::Ect0`], [`Ecn::Ect1`] and [`Ecn::Ce`], but never
+/// [`Ecn::NotEct`], the [`Ecn::NotEct`] value will always be 0.
 ///
 /// See also <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.2>.
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
@@ -227,7 +227,7 @@ impl Info {
             && (self.baseline - prev_baseline)[Ecn::Ce] > 0
     }
 
-    /// An [`IpTosEcn::Ect0`] marked packet has been acked.
+    /// An [`Ecn::Ect0`] marked packet has been acked.
     pub(crate) fn acked_ecn(&mut self) {
         if let ValidationState::Testing {
             initial_probes_acked: probes_acked,
@@ -238,7 +238,7 @@ impl Info {
         }
     }
 
-    /// An [`IpTosEcn::Ect0`] marked packet has been declared lost.
+    /// An [`Ecn::Ect0`] marked packet has been declared lost.
     pub(crate) fn lost_ecn(&mut self, pt: packet::Type, stats: &mut Stats) {
         if pt != packet::Type::Initial {
             return;
@@ -348,7 +348,7 @@ impl Info {
 
     /// The ECN mark to use for an outgoing UDP datagram.
     ///
-    /// On [`IpTosEcn::Ect0`] adds a [`recovery::Token::EcnEct0`] to `tokens` in
+    /// On [`Ecn::Ect0`] adds a [`recovery::Token::EcnEct0`] to `tokens` in
     /// order to detect potential loss, then handled in [`Info::lost_ecn`].
     pub(crate) fn ecn_mark(&self, tokens: &mut Vec<recovery::Token>) -> Ecn {
         if self.is_marking() {

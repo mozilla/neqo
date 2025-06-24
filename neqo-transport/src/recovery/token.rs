@@ -62,6 +62,6 @@ pub enum Token {
     RetireConnectionId(u64),
     AckFrequency(AckRate),
     Datagram(DatagramTracking),
-    /// A packet marked with [`neqo_common::IpTosEcn::Ect0`].
+    /// A packet marked with [`neqo_common::Ecn::Ect0`].
     EcnEct0,
 }

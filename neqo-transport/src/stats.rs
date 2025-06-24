@@ -308,10 +308,10 @@ pub struct Stats {
     ///
     /// See also <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.2>.
     ///
-    /// [`Ect0`]: neqo_common::tos::IpTosEcn::Ect0
-    /// [`Ect1`]: neqo_common::tos::IpTosEcn::Ect1
-    /// [`Ce`]: neqo_common::tos::IpTosEcn::Ce
-    /// [`NotEct`]: neqo_common::tos::IpTosEcn::NotEct
+    /// [`Ect0`]: neqo_common::tos::Ecn::Ect0
+    /// [`Ect1`]: neqo_common::tos::Ecn::Ect1
+    /// [`Ce`]: neqo_common::tos::Ecn::Ce
+    /// [`NotEct`]: neqo_common::tos::Ecn::NotEct
     pub ecn_tx_acked: EcnCount,
     /// ECN counts for incoming UDP datagrams, read from IP TOS header. For coalesced packets,
     /// counts increase for all packet types in the coalesced datagram.
