@@ -10,13 +10,13 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{hex_with_len, IpTos};
+use crate::{hex_with_len, Tos};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Datagram<D = Vec<u8>> {
     src: SocketAddr,
     dst: SocketAddr,
-    tos: IpTos,
+    tos: Tos,
     d: D,
 }
 
@@ -48,11 +48,11 @@ impl<D> Datagram<D> {
     }
 
     #[must_use]
-    pub const fn tos(&self) -> IpTos {
+    pub const fn tos(&self) -> Tos {
         self.tos
     }
 
-    pub fn set_tos(&mut self, tos: IpTos) {
+    pub fn set_tos(&mut self, tos: Tos) {
         self.tos = tos;
     }
 }
@@ -74,7 +74,7 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> AsMut<[u8]> for Datagram<D> {
 }
 
 impl Datagram<Vec<u8>> {
-    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: V) -> Self {
+    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: Tos, d: V) -> Self {
         Self {
             src,
             dst,
@@ -112,7 +112,7 @@ impl<D: AsRef<[u8]>> Debug for Datagram<D> {
 
 impl<'a> Datagram<&'a mut [u8]> {
     #[must_use]
-    pub fn from_slice(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: &'a mut [u8]) -> Self {
+    pub fn from_slice(src: SocketAddr, dst: SocketAddr, tos: Tos, d: &'a mut [u8]) -> Self {
         Self { src, dst, tos, d }
     }
 
@@ -141,7 +141,7 @@ impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
 pub struct DatagramBatch {
     src: SocketAddr,
     dst: SocketAddr,
-    tos: IpTos,
+    tos: Tos,
     segment_size: usize,
     d: Vec<u8>,
 }
@@ -188,7 +188,7 @@ impl DatagramBatch {
     pub const fn new(
         src: SocketAddr,
         dst: SocketAddr,
-        tos: IpTos,
+        tos: Tos,
         segment_size: usize,
         d: Vec<u8>,
     ) -> Self {
@@ -212,7 +212,7 @@ impl DatagramBatch {
     }
 
     #[must_use]
-    pub const fn tos(&self) -> IpTos {
+    pub const fn tos(&self) -> Tos {
         self.tos
     }
 
@@ -243,7 +243,7 @@ mod tests {
 
     use test_fixture::datagram;
 
-    use crate::{DatagramBatch, IpTos};
+    use crate::{DatagramBatch, Tos};
 
     #[test]
     fn fmt_datagram() {
@@ -265,7 +265,7 @@ mod tests {
     fn batch_num_datagrams() {
         let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
         let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
-        let tos = IpTos::default();
+        let tos = Tos::default();
 
         // 10 bytes, segment size 4 -> 3 datagrams (4+4+2)
         let batch = DatagramBatch::new(src, dst, tos, 4, vec![0u8; 10]);

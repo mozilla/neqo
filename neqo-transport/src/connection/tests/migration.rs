@@ -29,7 +29,7 @@ use crate::{
         assert_path_challenge_min_len, connect, send_something_paced, send_with_extra,
     },
     frame::FrameType,
-    packet::PacketBuilder,
+    packet,
     path::MAX_PATH_PROBES,
     pmtud::Pmtud,
     stats::FrameStats,
@@ -1041,7 +1041,7 @@ struct RetireAll {
 }
 
 impl crate::connection::test_internal::FrameWriter for RetireAll {
-    fn write_frames(&mut self, builder: &mut PacketBuilder<&mut Vec<u8>>) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         // Use a sequence number that is large enough that all existing values
         // will be lower (so they get retired).  As the code doesn't care about
         // gaps in sequence numbers, this is safe, even though the gap might
@@ -1203,7 +1203,7 @@ fn retire_prior_to_migration_success() {
 struct GarbageWriter {}
 
 impl crate::connection::test_internal::FrameWriter for GarbageWriter {
-    fn write_frames(&mut self, builder: &mut PacketBuilder<&mut Vec<u8>>) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         // Not a valid frame type.
         builder.encode_varint(u32::MAX);
     }

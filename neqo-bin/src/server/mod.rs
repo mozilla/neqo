@@ -4,10 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
 #![expect(
     clippy::unwrap_used,
     clippy::future_not_send,
@@ -206,6 +202,7 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
     fs::read(path)
 }
 
+#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub trait HttpServer: Display {
     fn process_multiple(
         &mut self,
@@ -217,7 +214,7 @@ pub trait HttpServer: Display {
     fn has_events(&self) -> bool;
 }
 
-pub struct ServerRunner {
+pub struct Runner {
     now: Box<dyn Fn() -> Instant>,
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
@@ -225,7 +222,7 @@ pub struct ServerRunner {
     recv_buf: RecvBuf,
 }
 
-impl ServerRunner {
+impl Runner {
     #[must_use]
     pub fn new(
         now: Box<dyn Fn() -> Instant>,
@@ -396,7 +393,7 @@ enum Ready {
     Timeout,
 }
 
-pub fn server(mut args: Args) -> Res<ServerRunner> {
+pub fn server(mut args: Args) -> Res<Runner> {
     neqo_common::log::init(
         args.shared
             .verbose
@@ -476,9 +473,5 @@ pub fn server(mut args: Args) -> Res<ServerRunner> {
         )
     };
 
-    Ok(ServerRunner::new(
-        Box::new(move || args.now()),
-        server,
-        sockets,
-    ))
+    Ok(Runner::new(Box::new(move || args.now()), server, sockets))
 }

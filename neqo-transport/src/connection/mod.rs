@@ -19,8 +19,7 @@ use std::{
 
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Buffer, Datagram, DatagramBatch, Decoder, Encoder, IpTos,
-    IpTosEcn, Role,
+    qlog::Qlog, qtrace, qwarn, Buffer, Datagram, DatagramBatch, Decoder, Ecn, Encoder, Role, Tos,
 };
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
@@ -40,14 +39,14 @@ use crate::{
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{CloseError, Frame, FrameType},
-    packet::{self, DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket},
+    packet::{self},
     path::{Path, PathRef, Paths},
     qlog,
     quic_datagrams::{DatagramTracking, QuicDatagrams},
-    recovery::{LossRecovery, RecoveryToken, SendProfile, SentPacket},
-    recv_stream::RecvStreamStats,
+    recovery::{self, sent, SendProfile},
+    recv_stream,
     rtt::{RttEstimate, GRANULARITY, INITIAL_RTT},
-    send_stream::SendStream,
+    send_stream::{self, SendStream},
     stats::{Stats, StatsCell},
     stream_id::StreamType,
     streams::{SendOrder, Streams},
@@ -61,7 +60,7 @@ use crate::{
         TransportParameters, TransportParametersHandler,
     },
     tracking::{AckTracker, PacketNumberSpace, RecvdPackets},
-    version::{Version, WireVersion},
+    version::{self, Version},
     AppError, CloseReason, Error, Res, StreamId,
 };
 
@@ -81,7 +80,7 @@ use saved::SavedDatagrams;
 use state::StateSignaling;
 pub use state::{ClosingFrame, State};
 
-pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
+pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
 
 /// The number of Initial packets that the client will send in response
 /// to receiving an undecryptable packet during the early part of the
@@ -341,11 +340,11 @@ pub struct Connection {
     idle_timeout: IdleTimeout,
     streams: Streams,
     state_signaling: StateSignaling,
-    loss_recovery: LossRecovery,
+    loss_recovery: recovery::Loss,
     events: ConnectionEvents,
     new_token: NewTokenState,
     stats: StatsCell,
-    qlog: NeqoQlog,
+    qlog: Qlog,
     /// A session ticket was received without `NEW_TOKEN`,
     /// this is when that turns into an event without `NEW_TOKEN`.
     release_resumption_token_timer: Option<Instant>,
@@ -406,7 +405,7 @@ impl Connection {
             local_addr,
             remote_addr,
             &c.conn_params,
-            NeqoQlog::default(),
+            Qlog::default(),
             now,
             &mut c.stats.borrow_mut(),
         );
@@ -488,11 +487,11 @@ impl Connection {
             streams: Streams::new(tphandler, role, events.clone()),
             cids: ConnectionIdStore::default(),
             state_signaling: StateSignaling::Idle,
-            loss_recovery: LossRecovery::new(stats.clone(), conn_params.get_fast_pto()),
+            loss_recovery: recovery::Loss::new(stats.clone(), conn_params.get_fast_pto()),
             events,
             new_token: NewTokenState::new(role),
             stats,
-            qlog: NeqoQlog::disabled(),
+            qlog: Qlog::disabled(),
             release_resumption_token_timer: None,
             conn_params,
             hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
@@ -540,14 +539,14 @@ impl Connection {
     }
 
     /// Set or clear the qlog for this connection.
-    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+    pub fn set_qlog(&mut self, qlog: Qlog) {
         self.loss_recovery.set_qlog(qlog.clone());
         self.paths.set_qlog(qlog.clone());
         self.qlog = qlog;
     }
 
     /// Get the qlog (if any) for this connection.
-    pub fn qlog_mut(&mut self) -> &mut NeqoQlog {
+    pub fn qlog_mut(&mut self) -> &mut Qlog {
         &mut self.qlog
     }
 
@@ -803,7 +802,7 @@ impl Connection {
         let mut dec = Decoder::from(token.as_ref());
 
         let version = Version::try_from(
-            dec.decode_uint::<WireVersion>()
+            dec.decode_uint::<version::Wire>()
                 .ok_or(Error::InvalidResumptionToken)?,
         )?;
         qtrace!("[{self}]   version {version:?}");
@@ -1293,7 +1292,7 @@ impl Connection {
         output
     }
 
-    fn handle_retry(&mut self, packet: &PublicPacket, now: Instant) -> Res<()> {
+    fn handle_retry(&mut self, packet: &packet::Public, now: Instant) -> Res<()> {
         qinfo!("[{self}] received Retry");
         if matches!(self.address_validation, AddressValidationInfo::Retry { .. }) {
             self.stats.borrow_mut().pkt_dropped("Extra Retry");
@@ -1433,7 +1432,7 @@ impl Connection {
     }
 
     /// Perform version negotiation.
-    fn version_negotiation(&mut self, supported: &[WireVersion], now: Instant) -> Res<()> {
+    fn version_negotiation(&mut self, supported: &[version::Wire], now: Instant) -> Res<()> {
         debug_assert_eq!(self.role, Role::Client);
 
         if let Some(version) = self.conn_params.get_versions().preferred(supported) {
@@ -1484,7 +1483,7 @@ impl Connection {
     #[expect(clippy::too_many_lines, reason = "Yeah, it's a work in progress.")]
     fn preprocess_packet(
         &mut self,
-        packet: &PublicPacket,
+        packet: &packet::Public,
         path: &PathRef,
         dcid: Option<&ConnectionId>,
         now: Instant,
@@ -1496,8 +1495,8 @@ impl Connection {
             return Ok(PreprocessResult::Next);
         }
 
-        if (packet.packet_type() == PacketType::Initial
-            || packet.packet_type() == PacketType::Handshake)
+        if (packet.packet_type() == packet::Type::Initial
+            || packet.packet_type() == packet::Type::Handshake)
             && self.role == Role::Client
             && !path.borrow().is_primary()
         {
@@ -1508,7 +1507,7 @@ impl Connection {
         }
 
         match (packet.packet_type(), &self.state, &self.role) {
-            (PacketType::Initial, State::Init, Role::Server) => {
+            (packet::Type::Initial, State::Init, Role::Server) => {
                 let version = packet.version().ok_or(Error::ProtocolViolation)?;
                 if !packet.is_valid_initial()
                     || !self.conn_params.get_versions().all().contains(&version)
@@ -1538,7 +1537,7 @@ impl Connection {
                         .set_bytes(OriginalDestinationConnectionId, packet.dcid().to_vec());
                 }
             }
-            (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
+            (packet::Type::VersionNegotiation, State::WaitInitial, Role::Client) => {
                 if let Ok(versions) = packet.supported_versions() {
                     if versions.is_empty()
                         || versions.contains(&self.version().wire_version())
@@ -1558,11 +1557,11 @@ impl Connection {
                 }
                 return Ok(PreprocessResult::End);
             }
-            (PacketType::Retry, State::WaitInitial, Role::Client) => {
+            (packet::Type::Retry, State::WaitInitial, Role::Client) => {
                 self.handle_retry(packet, now)?;
                 return Ok(PreprocessResult::Next);
             }
-            (PacketType::Handshake | PacketType::Short, State::WaitInitial, Role::Client) => {
+            (packet::Type::Handshake | packet::Type::Short, State::WaitInitial, Role::Client) => {
                 // This packet can't be processed now, but it could be a sign
                 // that Initial packets were lost.
                 // Resend Initial CRYPTO frames immediately a few times just
@@ -1577,7 +1576,10 @@ impl Connection {
                     self.resend_0rtt(now);
                 }
             }
-            (PacketType::VersionNegotiation | PacketType::Retry | PacketType::OtherVersion, ..) => {
+            (
+                packet::Type::VersionNegotiation | packet::Type::Retry | packet::Type::OtherVersion,
+                ..,
+            ) => {
                 self.stats
                     .borrow_mut()
                     .pkt_dropped(format!("{:?}", packet.packet_type()));
@@ -1596,7 +1598,8 @@ impl Connection {
             State::WaitInitial => PreprocessResult::Continue,
             State::WaitVersion | State::Handshaking | State::Connected | State::Confirmed => {
                 if self.cid_manager.is_valid(packet.dcid()) {
-                    if self.role == Role::Server && packet.packet_type() == PacketType::Handshake {
+                    if self.role == Role::Server && packet.packet_type() == packet::Type::Handshake
+                    {
                         // Server has received a Handshake packet -> discard Initial keys and states
                         self.discard_keys(PacketNumberSpace::Initial, now);
                     }
@@ -1630,14 +1633,14 @@ impl Connection {
     fn postprocess_packet(
         &mut self,
         path: &PathRef,
-        tos: IpTos,
+        tos: Tos,
         remote: SocketAddr,
-        packet: &PublicPacket,
-        packet_number: PacketNumber,
+        packet: &packet::Public,
+        packet_number: packet::Number,
         migrate: bool,
         now: Instant,
     ) {
-        let ecn_mark = IpTosEcn::from(tos);
+        let ecn_mark = Ecn::from(tos);
         let mut stats = self.stats.borrow_mut();
         stats.ecn_rx[packet.packet_type()] += ecn_mark;
         if let Some(last_ecn_mark) = stats.ecn_last_mark.filter(|&last_ecn_mark| {
@@ -1681,7 +1684,7 @@ impl Connection {
         if self.state.connected() {
             self.handle_migration(path, remote, migrate, now);
         } else if self.role != Role::Client
-            && (packet.packet_type() == PacketType::Handshake
+            && (packet.packet_type() == packet::Type::Handshake
                 || (packet.dcid().len() >= 8 && packet.dcid() == self.local_initial_source_cid))
         {
             // We only allow one path during setup, so apply handshake
@@ -1729,7 +1732,7 @@ impl Connection {
             self.stats.borrow_mut().packets_rx += 1;
             let slc_len = slc.len();
             let (mut packet, remainder) =
-                match PublicPacket::decode(slc, self.cid_manager.decoder().as_ref()) {
+                match packet::Public::decode(slc, self.cid_manager.decoder().as_ref()) {
                     Ok((packet, remainder)) => (packet, remainder),
                     Err(e) => {
                         qinfo!("[{self}] Garbage packet: {e}");
@@ -1758,7 +1761,7 @@ impl Connection {
                     );
 
                     #[cfg(feature = "build-fuzzing-corpus")]
-                    if payload.packet_type() == PacketType::Initial {
+                    if payload.packet_type() == packet::Type::Initial {
                         let target = if self.role == Role::Client {
                             "server_initial"
                         } else {
@@ -1833,7 +1836,7 @@ impl Connection {
     fn process_packet(
         &mut self,
         path: &PathRef,
-        packet: &DecryptedPacket,
+        packet: &packet::Decrypted,
         now: Instant,
     ) -> Res<bool> {
         (!packet.is_empty())
@@ -1964,11 +1967,11 @@ impl Connection {
     /// After an error, a permanent path is needed to send the `CONNECTION_CLOSE`.
     /// This attempts to ensure that this exists.  As the connection is now
     /// temporary, there is no reason to do anything special here.
-    fn ensure_error_path(&mut self, path: &PathRef, packet: &PublicPacket, now: Instant) {
+    fn ensure_error_path(&mut self, path: &PathRef, packet: &packet::Public, now: Instant) {
         path.borrow_mut().set_valid(now);
         if self.paths.is_temporary(path) {
             // First try to fill in handshake details.
-            if packet.packet_type() == PacketType::Initial {
+            if packet.packet_type() == packet::Type::Initial {
                 self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
                 self.setup_handshake_path(path, now);
             } else {
@@ -1978,9 +1981,9 @@ impl Connection {
         }
     }
 
-    fn start_handshake(&mut self, path: &PathRef, packet: &PublicPacket, now: Instant) {
+    fn start_handshake(&mut self, path: &PathRef, packet: &packet::Public, now: Instant) {
         qtrace!("[{self}] starting handshake");
-        debug_assert_eq!(packet.packet_type(), PacketType::Initial);
+        debug_assert_eq!(packet.packet_type(), packet::Type::Initial);
         self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
 
         if self.role == Role::Server {
@@ -2209,18 +2212,18 @@ impl Connection {
         version: Version,
         grease_quic_bit: bool,
         limit: usize,
-    ) -> (PacketType, PacketBuilder<&'a mut Vec<u8>>) {
-        let pt = PacketType::from(epoch);
-        let mut builder = if pt == PacketType::Short {
+    ) -> (packet::Type, packet::Builder<&'a mut Vec<u8>>) {
+        let pt = packet::Type::from(epoch);
+        let mut builder = if pt == packet::Type::Short {
             qdebug!("Building Short dcid {:?}", path.remote_cid());
-            PacketBuilder::short(encoder, tx.key_phase(), path.remote_cid(), limit)
+            packet::Builder::short(encoder, tx.key_phase(), path.remote_cid(), limit)
         } else {
             qdebug!(
                 "Building {pt:?} dcid {:?} scid {:?}",
                 path.remote_cid(),
                 path.local_cid(),
             );
-            PacketBuilder::long(
+            packet::Builder::long(
                 encoder,
                 pt,
                 version,
@@ -2231,7 +2234,7 @@ impl Connection {
         };
         if builder.remaining() > 0 {
             builder.scramble(grease_quic_bit);
-            if pt == PacketType::Initial {
+            if pt == packet::Type::Initial {
                 builder.initial_token(address_validation.token());
             }
         }
@@ -2241,15 +2244,15 @@ impl Connection {
 
     #[must_use]
     fn add_packet_number(
-        builder: &mut PacketBuilder<&mut Vec<u8>>,
+        builder: &mut packet::Builder<&mut Vec<u8>>,
         tx: &CryptoDxState,
-        largest_acknowledged: Option<PacketNumber>,
-    ) -> PacketNumber {
+        largest_acknowledged: Option<packet::Number>,
+    ) -> packet::Number {
         // Get the packet number and work out how long it is.
         let pn = tx.next_pn();
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
-        let pn_len = size_of::<PacketNumber>()
+        let pn_len = size_of::<packet::Number>()
             - usize::try_from(unacked_range.leading_zeros() / 8).expect("u32 fits in usize");
         assert!(
             pn_len > 0,
@@ -2275,8 +2278,8 @@ impl Connection {
     /// The order of calls here determines the relative priority of frames.
     fn write_appdata_frames(
         &mut self,
-        builder: &mut PacketBuilder<&mut Vec<u8>>,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<&mut Vec<u8>>,
+        tokens: &mut Vec<recovery::Token>,
         now: Instant,
     ) {
         let rtt = self.paths.primary().map_or_else(
@@ -2373,9 +2376,9 @@ impl Connection {
         &mut self,
         path: &PathRef,
         force_probe: bool,
-        builder: &mut PacketBuilder<B>,
+        builder: &mut packet::Builder<B>,
         ack_end: usize,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut Vec<recovery::Token>,
         now: Instant,
     ) -> bool {
         let untracked = self.received_untracked && !self.state.connected();
@@ -2425,10 +2428,10 @@ impl Connection {
         path: &PathRef,
         space: PacketNumberSpace,
         profile: &SendProfile,
-        builder: &mut PacketBuilder<&mut Vec<u8>>,
+        builder: &mut packet::Builder<&mut Vec<u8>>,
         coalesced: bool, // Whether this packet is coalesced behind another one.
         now: Instant,
-    ) -> (Vec<RecoveryToken>, bool, bool) {
+    ) -> (Vec<recovery::Token>, bool, bool) {
         let mut tokens = Vec::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
@@ -2513,14 +2516,14 @@ impl Connection {
         (tokens, ack_eliciting, padded)
     }
 
-    fn write_closing_frames(
+    fn write_closing_frames<B: Buffer>(
         &mut self,
         close: &ClosingFrame,
-        builder: &mut PacketBuilder<&mut Vec<u8>>,
+        builder: &mut packet::Builder<B>,
         space: PacketNumberSpace,
         now: Instant,
         path: &PathRef,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut Vec<recovery::Token>,
     ) {
         if builder.remaining() > ClosingFrame::MIN_LENGTH + RecvdPackets::USEFUL_ACK_LEN {
             // Include an ACK frame with the CONNECTION_CLOSE.
@@ -2632,7 +2635,7 @@ impl Connection {
         closing_frame: Option<&ClosingFrame>,
         profile: &SendProfile,
         mut encoder: Encoder<&mut Vec<u8>>,
-        packet_tos: IpTos,
+        packet_tos: Tos,
     ) -> Res<SendOption> {
         let mut initial_sent = None;
         let mut needs_padding = false;
@@ -2704,7 +2707,7 @@ impl Connection {
             }
 
             if packet_tos.is_ecn_marked() {
-                tokens.push(RecoveryToken::EcnEct0);
+                tokens.push(recovery::Token::EcnEct0);
             }
 
             self.log_packet(
@@ -2724,7 +2727,7 @@ impl Connection {
             // coalesced packets, this increases the counts for each packet type
             // contained in the coalesced packet. This is per Section 13.4.1 of
             // RFC 9000.
-            self.stats.borrow_mut().ecn_tx[pt] += IpTosEcn::from(packet_tos);
+            self.stats.borrow_mut().ecn_tx[pt] += Ecn::from(packet_tos);
             let tx = self
                 .crypto
                 .states_mut()
@@ -2736,7 +2739,7 @@ impl Connection {
             if ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
             }
-            let sent = SentPacket::new(
+            let sent = sent::Packet::new(
                 pt,
                 pn,
                 now,
@@ -2747,13 +2750,13 @@ impl Connection {
             if padded {
                 needs_padding = false;
                 self.loss_recovery.on_packet_sent(path, sent, now);
-            } else if pt == PacketType::Initial && (self.role == Role::Client || ack_eliciting) {
+            } else if pt == packet::Type::Initial && (self.role == Role::Client || ack_eliciting) {
                 // Packets containing Initial packets might need padding, and we want to
                 // track that padding along with the Initial packet.  So defer tracking.
                 initial_sent = Some(sent);
                 needs_padding = true;
             } else {
-                if pt == PacketType::Handshake && self.role == Role::Client {
+                if pt == packet::Type::Handshake && self.role == Role::Client {
                     needs_padding = false;
                 }
                 self.loss_recovery.on_packet_sent(path, sent, now);
@@ -3144,9 +3147,9 @@ impl Connection {
         &mut self,
         path: &PathRef,
         packet_version: Version,
-        packet_type: PacketType,
+        packet_type: packet::Type,
         frame: Frame,
-        next_pn: PacketNumber,
+        next_pn: packet::Number,
         now: Instant,
     ) -> Res<()> {
         if !frame.is_allowed(packet_type) {
@@ -3326,34 +3329,36 @@ impl Connection {
         Ok(())
     }
 
-    /// Given a set of `SentPacket` instances, ensure that the source of the packet
+    /// Given a set of `sent::Packet` instances, ensure that the source of the packet
     /// is told that they are lost.  This gives the frame generation code a chance
     /// to retransmit the frame as needed.
-    fn handle_lost_packets(&mut self, lost_packets: &[SentPacket]) {
+    fn handle_lost_packets(&mut self, lost_packets: &[sent::Packet]) {
         for lost in lost_packets {
             for token in lost.tokens() {
                 qdebug!("[{self}] Lost: {token:?}");
                 match token {
-                    RecoveryToken::Ack(ack_token) => {
+                    recovery::Token::Ack(ack_token) => {
                         // If we lost an ACK frame during the handshake, send another one.
                         if ack_token.space() != PacketNumberSpace::ApplicationData {
                             self.acks.immediate_ack(ack_token.space(), lost.time_sent());
                         }
                     }
-                    RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
-                    RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
-                    RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
-                    RecoveryToken::NewConnectionId(ncid) => self.cid_manager.lost(ncid),
-                    RecoveryToken::RetireConnectionId(seqno) => self.paths.lost_retire_cid(*seqno),
-                    RecoveryToken::AckFrequency(rate) => self.paths.lost_ack_frequency(rate),
-                    RecoveryToken::KeepAlive => self.idle_timeout.lost_keep_alive(),
-                    RecoveryToken::Stream(stream_token) => self.streams.lost(stream_token),
-                    RecoveryToken::Datagram(dgram_tracker) => {
+                    recovery::Token::Crypto(ct) => self.crypto.lost(ct),
+                    recovery::Token::HandshakeDone => self.state_signaling.handshake_done(),
+                    recovery::Token::NewToken(seqno) => self.new_token.lost(*seqno),
+                    recovery::Token::NewConnectionId(ncid) => self.cid_manager.lost(ncid),
+                    recovery::Token::RetireConnectionId(seqno) => {
+                        self.paths.lost_retire_cid(*seqno);
+                    }
+                    recovery::Token::AckFrequency(rate) => self.paths.lost_ack_frequency(rate),
+                    recovery::Token::KeepAlive => self.idle_timeout.lost_keep_alive(),
+                    recovery::Token::Stream(stream_token) => self.streams.lost(stream_token),
+                    recovery::Token::Datagram(dgram_tracker) => {
                         self.events
                             .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Lost);
                         self.stats.borrow_mut().datagram_tx.lost += 1;
                     }
-                    RecoveryToken::EcnEct0 => self
+                    recovery::Token::EcnEct0 => self
                         .paths
                         .lost_ecn(lost.packet_type(), &mut self.stats.borrow_mut()),
                 }
@@ -3389,7 +3394,7 @@ impl Connection {
         now: Instant,
     ) -> Res<()>
     where
-        R: IntoIterator<Item = RangeInclusive<PacketNumber>> + Debug,
+        R: IntoIterator<Item = RangeInclusive<packet::Number>> + Debug,
         R::IntoIter: ExactSizeIterator,
     {
         qdebug!("[{self}] Rx ACK space={space}, ranges={ack_ranges:?}");
@@ -3405,24 +3410,26 @@ impl Connection {
             self.decode_ack_delay(ack_delay)?,
             now,
         );
-        let largest_acknowledged = acked_packets.first().map(SentPacket::pn);
+        let largest_acknowledged = acked_packets.first().map(sent::Packet::pn);
         for acked in acked_packets {
             for token in acked.tokens() {
                 match token {
-                    RecoveryToken::Stream(stream_token) => self.streams.acked(stream_token),
-                    RecoveryToken::Ack(at) => self.acks.acked(at),
-                    RecoveryToken::Crypto(ct) => self.crypto.acked(ct),
-                    RecoveryToken::NewToken(seqno) => self.new_token.acked(*seqno),
-                    RecoveryToken::NewConnectionId(entry) => self.cid_manager.acked(entry),
-                    RecoveryToken::RetireConnectionId(seqno) => self.paths.acked_retire_cid(*seqno),
-                    RecoveryToken::AckFrequency(rate) => self.paths.acked_ack_frequency(rate),
-                    RecoveryToken::KeepAlive => self.idle_timeout.ack_keep_alive(),
-                    RecoveryToken::Datagram(dgram_tracker) => self
+                    recovery::Token::Stream(stream_token) => self.streams.acked(stream_token),
+                    recovery::Token::Ack(at) => self.acks.acked(at),
+                    recovery::Token::Crypto(ct) => self.crypto.acked(ct),
+                    recovery::Token::NewToken(seqno) => self.new_token.acked(*seqno),
+                    recovery::Token::NewConnectionId(entry) => self.cid_manager.acked(entry),
+                    recovery::Token::RetireConnectionId(seqno) => {
+                        self.paths.acked_retire_cid(*seqno);
+                    }
+                    recovery::Token::AckFrequency(rate) => self.paths.acked_ack_frequency(rate),
+                    recovery::Token::KeepAlive => self.idle_timeout.ack_keep_alive(),
+                    recovery::Token::Datagram(dgram_tracker) => self
                         .events
                         .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Acked),
-                    RecoveryToken::EcnEct0 => self.paths.acked_ecn(),
+                    recovery::Token::EcnEct0 => self.paths.acked_ecn(),
                     // We only worry when these are lost
-                    RecoveryToken::HandshakeDone => (),
+                    recovery::Token::HandshakeDone => (),
                 }
             }
         }
@@ -3594,7 +3601,7 @@ impl Connection {
 
     /// # Errors
     /// When the stream does not exist.
-    pub fn send_stream_stats(&self, stream_id: StreamId) -> Res<SendStreamStats> {
+    pub fn send_stream_stats(&self, stream_id: StreamId) -> Res<send_stream::Stats> {
         self.streams
             .get_send_stream(stream_id)
             .map(SendStream::stats)
@@ -3602,7 +3609,7 @@ impl Connection {
 
     /// # Errors
     /// When the stream does not exist.
-    pub fn recv_stream_stats(&mut self, stream_id: StreamId) -> Res<RecvStreamStats> {
+    pub fn recv_stream_stats(&mut self, stream_id: StreamId) -> Res<recv_stream::Stats> {
         let stream = self.streams.get_recv_stream_mut(stream_id)?;
 
         Ok(stream.stats())
