@@ -17,8 +17,8 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as _, hex, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram,
-    IpTos, Role,
+    event::Provider as _, hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn, Datagram, Role,
+    Tos,
 };
 use neqo_crypto::{
     encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
@@ -31,7 +31,7 @@ use crate::{
     addr_valid::{AddressValidation, AddressValidationResult},
     cid::{ConnectionId, ConnectionIdGenerator, ConnectionIdRef},
     connection::{Connection, Output, State},
-    packet::{PacketBuilder, PacketType, PublicPacket, MIN_INITIAL_PACKET_SIZE},
+    packet::{self, MIN_INITIAL_PACKET_SIZE},
     ConnectionParameters, Res, Version,
 };
 
@@ -66,7 +66,7 @@ struct InitialDetails {
 }
 
 impl InitialDetails {
-    fn new(packet: &PublicPacket) -> Self {
+    fn new(packet: &packet::Public) -> Self {
         Self {
             src_cid: ConnectionId::from(packet.scid()),
             dst_cid: ConnectionId::from(packet.dcid()),
@@ -224,7 +224,7 @@ impl Server {
                     return Output::None;
                 };
                 if let Some(new_dcid) = self.cid_generator.borrow_mut().generate_cid() {
-                    let packet = PacketBuilder::retry(
+                    let packet = packet::Builder::retry(
                         initial.version,
                         &initial.src_cid,
                         &new_dcid,
@@ -239,17 +239,17 @@ impl Server {
                         |p| {
                             qdebug!(
                                 "[{self}] type={:?} path:{} {}->{} {:?} len {}",
-                                PacketType::Retry,
+                                packet::Type::Retry,
                                 initial.dst_cid,
                                 dgram.destination(),
                                 dgram.source(),
-                                IpTos::default(),
+                                Tos::default(),
                                 p.len(),
                             );
                             Output::Datagram(Datagram::new(
                                 dgram.destination(),
                                 dgram.source(),
-                                IpTos::default(),
+                                Tos::default(),
                                 p,
                             ))
                         },
@@ -262,11 +262,11 @@ impl Server {
         }
     }
 
-    fn create_qlog_trace(&self, odcid: ConnectionIdRef<'_>) -> NeqoQlog {
+    fn create_qlog_trace(&self, odcid: ConnectionIdRef<'_>) -> Qlog {
         self.qlog_dir
             .as_ref()
-            .map_or_else(NeqoQlog::disabled, |qlog_dir| {
-                NeqoQlog::enabled_with_file(
+            .map_or_else(Qlog::disabled, |qlog_dir| {
+                Qlog::enabled_with_file(
                     qlog_dir.clone(),
                     Role::Server,
                     Some("Neqo server qlog".to_string()),
@@ -274,8 +274,8 @@ impl Server {
                     format!("server-{odcid}"),
                 )
                 .unwrap_or_else(|e| {
-                    qerror!("failed to create NeqoQlog: {e}");
-                    NeqoQlog::disabled()
+                    qerror!("failed to create Qlog: {e}");
+                    Qlog::disabled()
                 })
             })
     }
@@ -362,7 +362,7 @@ impl Server {
         let len = dgram.len();
         let destination = dgram.destination();
         let source = dgram.source();
-        let res = PublicPacket::decode(&mut dgram[..], self.cid_generator.borrow().as_decoder());
+        let res = packet::Public::decode(&mut dgram[..], self.cid_generator.borrow().as_decoder());
         let Ok((packet, _remainder)) = res else {
             qtrace!("[{self}] Discarding {dgram:?}");
             return Output::None;
@@ -377,14 +377,14 @@ impl Server {
             return c.borrow_mut().process(Some(dgram), now);
         }
 
-        if packet.packet_type() == PacketType::Short {
+        if packet.packet_type() == packet::Type::Short {
             // TODO send a stateless reset here.
             qtrace!("[{self}] Short header packet for an unknown connection");
             return Output::None;
         }
 
-        if packet.packet_type() == PacketType::OtherVersion
-            || (packet.packet_type() == PacketType::Initial
+        if packet.packet_type() == packet::Type::OtherVersion
+            || (packet.packet_type() == packet::Type::Initial
                 && !self
                     .conn_params
                     .get_versions()
@@ -397,7 +397,7 @@ impl Server {
             }
 
             qdebug!("[{self}] Unsupported version: {:x}", packet.wire_version());
-            let vn = PacketBuilder::version_negotiation(
+            let vn = packet::Builder::version_negotiation(
                 &packet.scid()[..],
                 &packet.dcid()[..],
                 packet.wire_version(),
@@ -405,11 +405,11 @@ impl Server {
             );
             qdebug!(
                 "[{self}] type={:?} path:{} {}->{} {:?} len {}",
-                PacketType::VersionNegotiation,
+                packet::Type::VersionNegotiation,
                 packet.dcid(),
                 destination,
                 source,
-                IpTos::default(),
+                Tos::default(),
                 vn.len(),
             );
 
@@ -420,11 +420,11 @@ impl Server {
                 now,
             );
 
-            return Output::Datagram(Datagram::new(destination, source, IpTos::default(), vn));
+            return Output::Datagram(Datagram::new(destination, source, Tos::default(), vn));
         }
 
         match packet.packet_type() {
-            PacketType::Initial => {
+            packet::Type::Initial => {
                 if len < MIN_INITIAL_PACKET_SIZE {
                     qdebug!("[{self}] Drop initial: too short");
                     return Output::None;
@@ -434,14 +434,14 @@ impl Server {
                 let initial = InitialDetails::new(&packet);
                 self.handle_initial(initial, dgram, now)
             }
-            PacketType::ZeroRtt => {
+            packet::Type::ZeroRtt => {
                 qdebug!(
                     "[{self}] Dropping 0-RTT for unknown connection {}",
                     ConnectionId::from(packet.dcid())
                 );
                 Output::None
             }
-            PacketType::OtherVersion => unreachable!(),
+            packet::Type::OtherVersion => unreachable!(),
             _ => {
                 qtrace!("[{self}] Not an initial packet");
                 Output::None

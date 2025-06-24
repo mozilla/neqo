@@ -112,14 +112,14 @@ pub struct Http3ClientEvents {
 
 impl RecvStreamEvents for Http3ClientEvents {
     /// Add a new `DataReadable` event
-    fn data_readable(&self, stream_info: Http3StreamInfo) {
+    fn data_readable(&self, stream_info: &Http3StreamInfo) {
         self.insert(Http3ClientEvent::DataReadable {
             stream_id: stream_info.stream_id(),
         });
     }
 
     /// Add a new `Reset` event.
-    fn recv_closed(&self, stream_info: Http3StreamInfo, close_type: CloseType) {
+    fn recv_closed(&self, stream_info: &Http3StreamInfo, close_type: CloseType) {
         let stream_id = stream_info.stream_id();
         let (local, error) = match close_type {
             CloseType::ResetApp(_) => {
@@ -149,7 +149,7 @@ impl HttpRecvStreamEvents for Http3ClientEvents {
     /// Add a new `HeaderReady` event.
     fn header_ready(
         &self,
-        stream_info: Http3StreamInfo,
+        stream_info: &Http3StreamInfo,
         headers: Vec<Header>,
         interim: bool,
         fin: bool,
@@ -165,13 +165,13 @@ impl HttpRecvStreamEvents for Http3ClientEvents {
 
 impl SendStreamEvents for Http3ClientEvents {
     /// Add a new `DataWritable` event.
-    fn data_writable(&self, stream_info: Http3StreamInfo) {
+    fn data_writable(&self, stream_info: &Http3StreamInfo) {
         self.insert(Http3ClientEvent::DataWritable {
             stream_id: stream_info.stream_id(),
         });
     }
 
-    fn send_closed(&self, stream_info: Http3StreamInfo, close_type: CloseType) {
+    fn send_closed(&self, stream_info: &Http3StreamInfo, close_type: CloseType) {
         let stream_id = stream_info.stream_id();
         self.remove_send_stream_events(stream_id);
         if let CloseType::ResetRemote(error) = close_type {
