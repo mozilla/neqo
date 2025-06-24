@@ -4,10 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
 use std::{cmp::min, fmt::Debug};
 
 use neqo_common::{
@@ -37,6 +33,7 @@ pub trait FrameDecoder<T> {
     fn decode(frame_type: HFrameType, frame_len: u64, data: Option<&[u8]>) -> Res<Option<T>>;
 }
 
+#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub trait StreamReader {
     /// # Errors
     ///
@@ -96,6 +93,7 @@ enum FrameReaderState {
 }
 
 #[derive(Debug)]
+#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub struct FrameReader {
     state: FrameReaderState,
     frame_type: HFrameType,

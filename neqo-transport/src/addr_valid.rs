@@ -18,10 +18,7 @@ use neqo_crypto::{
 };
 use smallvec::SmallVec;
 
-use crate::{
-    cid::ConnectionId, frame::FrameType, packet::PacketBuilder, recovery::RecoveryToken,
-    stats::FrameStats, Res,
-};
+use crate::{cid::ConnectionId, frame::FrameType, packet, recovery, stats::FrameStats, Res};
 
 /// A prefix we add to Retry tokens to distinguish them from `NEW_TOKEN` tokens.
 const TOKEN_IDENTIFIER_RETRY: &[u8] = &[0x52, 0x65, 0x74, 0x72, 0x79];
@@ -340,8 +337,8 @@ impl NewTokenState {
     /// If this is a client, do nothing.
     pub fn write_frames(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder,
+        tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) {
         if let Self::Server(ref mut sender) = self {
@@ -414,8 +411,8 @@ impl NewTokenSender {
 
     pub fn write_frames(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder,
+        tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) {
         for t in &mut self.tokens {
@@ -425,7 +422,7 @@ impl NewTokenSender {
                 builder.encode_varint(FrameType::NewToken);
                 builder.encode_vvec(&t.token);
 
-                tokens.push(RecoveryToken::NewToken(t.seqno));
+                tokens.push(recovery::Token::NewToken(t.seqno));
                 stats.new_token += 1;
             }
         }

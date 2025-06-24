@@ -13,7 +13,7 @@ use std::{
 };
 
 use neqo_common::{header::HeadersExt as _, qdebug, qinfo, qtrace, Header};
-use neqo_qpack::decoder::QPackDecoder;
+use neqo_qpack as qpack;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -76,7 +76,7 @@ pub struct RecvMessage {
     stream_info: Http3StreamInfo,
     message_type: MessageType,
     stream_type: Http3StreamType,
-    qpack_decoder: Rc<RefCell<QPackDecoder>>,
+    qpack_decoder: Rc<RefCell<qpack::Decoder>>,
     conn_events: Box<dyn HttpRecvStreamEvents>,
     push_handler: Option<Rc<RefCell<PushController>>>,
     stream_id: StreamId,
@@ -93,7 +93,7 @@ impl Display for RecvMessage {
 impl RecvMessage {
     pub fn new(
         message_info: &RecvMessageInfo,
-        qpack_decoder: Rc<RefCell<QPackDecoder>>,
+        qpack_decoder: Rc<RefCell<qpack::Decoder>>,
         conn_events: Box<dyn HttpRecvStreamEvents>,
         push_handler: Option<Rc<RefCell<PushController>>>,
         priority_handler: PriorityHandler,

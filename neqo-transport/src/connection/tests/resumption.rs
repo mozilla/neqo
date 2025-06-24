@@ -10,10 +10,7 @@ use neqo_common::{Datagram, Decoder, Role};
 use neqo_crypto::AuthenticationStatus;
 use test_fixture::{
     assertions,
-    header_protection::{
-        apply_header_protection, decode_initial_header, initial_aead_and_hp,
-        remove_header_protection,
-    },
+    header_protection::{self, decode_initial_header, initial_aead_and_hp},
     now, split_datagram,
 };
 
@@ -112,7 +109,7 @@ fn ticket_rtt(rtt: Duration) -> Duration {
 
     // Now decrypt the packet.
     let (aead, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
-    let (header, pn) = remove_header_protection(&hp, protected_header, payload);
+    let (header, pn) = header_protection::remove(&hp, protected_header, payload);
     assert_eq!(pn, 0);
     let pn_len = header.len() - protected_header.len();
     let mut buf = vec![0; payload.len()];
@@ -136,7 +133,7 @@ fn ticket_rtt(rtt: Duration) -> Duration {
     packet.resize(MIN_INITIAL_PACKET_SIZE, 0);
     aead.encrypt(pn, &header, &plaintext, &mut packet[header.len()..])
         .unwrap();
-    apply_header_protection(&hp, &mut packet, protected_header.len()..header.len());
+    header_protection::apply(&hp, &mut packet, protected_header.len()..header.len());
     let si = Datagram::new(
         server_initial.source(),
         server_initial.destination(),
