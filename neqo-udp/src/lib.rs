@@ -342,28 +342,26 @@ mod tests {
         not(any(target_os = "linux", target_os = "windows")),
         ignore = "GRO not available"
     )]
-    fn many_datagrams_through_gro() -> Result<(), io::Error> {
+    fn many_datagrams_through_gso_gro() -> Result<(), io::Error> {
         const SEGMENT_SIZE: usize = 128;
 
         let sender = socket()?;
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        // `neqo_udp::Socket::send` does not yet
-        // (https://github.com/mozilla/neqo/issues/1693) support GSO. Use
-        // `quinn_udp` directly.
         let max_gso_segments = sender.state.max_gso_segments();
         let msg = vec![0xAB; SEGMENT_SIZE * max_gso_segments];
-        let transmit = Transmit {
-            destination: receiver.inner.local_addr()?,
-            ecn: EcnCodepoint::from_bits(Into::<u8>::into(Tos::from((Dscp::Le, Ecn::Ect1)))),
-            contents: &msg,
-            segment_size: Some(SEGMENT_SIZE),
-            src_ip: None,
-        };
-        sender.state.try_send((&sender.inner).into(), &transmit)?;
+        let batch = DatagramBatch::new(
+            sender.inner.local_addr()?,
+            receiver.inner.local_addr()?,
+            Tos::from((Dscp::Le, Ecn::Ect0)),
+            SEGMENT_SIZE,
+            msg,
+        );
 
-        // Allow for one GSO sendmmsg to result in multiple GRO recvmmsg.
+        sender.send(&batch)?;
+
+        // Allow for one GSO sendmsg to result in multiple GRO recvmmsg.
         let mut num_received = 0;
         let mut recv_buf = RecvBuf::new();
         while num_received < max_gso_segments {
