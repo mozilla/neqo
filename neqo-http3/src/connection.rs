@@ -12,7 +12,7 @@ use std::{
 };
 
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, MessageType, Role};
-use neqo_qpack::{decoder::QPackDecoder, encoder::QPackEncoder};
+use neqo_qpack as qpack;
 use neqo_transport::{
     streams::SendOrder, AppError, CloseReason, Connection, DatagramTracking, State, StreamId,
     StreamType, ZeroRttState,
@@ -239,8 +239,8 @@ frames read (the list may be empty). The control frames are handled by `Http3Con
 
 ### `DecoderRecvStream` and `EncoderRecvStream`
 
-The `receive` functions of these handlers call corresponding `receive` functions of `QPackDecoder`
-and `QPackDecoder`.
+The `receive` functions of these handlers call corresponding `receive` functions of `decoder::QPack`
+and `decoder::QPack`.
 
 `DecoderRecvStream` returns `ReceiveOutput::UnblockedStreams(_)` that may contain a list of stream
 ids that are unblocked by receiving qpack decoder commands. `Http3Connection` will handle this
@@ -292,8 +292,8 @@ pub struct Http3Connection {
     state: Http3State,
     local_params: Http3Parameters,
     control_stream_local: ControlStreamLocal,
-    qpack_encoder: Rc<RefCell<QPackEncoder>>,
-    qpack_decoder: Rc<RefCell<QPackDecoder>>,
+    qpack_encoder: Rc<RefCell<qpack::Encoder>>,
+    qpack_decoder: Rc<RefCell<qpack::Decoder>>,
     settings_state: Http3RemoteSettingsState,
     streams_with_pending_data: HashSet<StreamId>,
     send_streams: HashMap<StreamId, Box<dyn SendStream>>,
@@ -313,11 +313,11 @@ impl Http3Connection {
         Self {
             state: Http3State::Initializing,
             control_stream_local: ControlStreamLocal::new(),
-            qpack_encoder: Rc::new(RefCell::new(QPackEncoder::new(
+            qpack_encoder: Rc::new(RefCell::new(qpack::Encoder::new(
                 conn_params.get_qpack_settings(),
                 true,
             ))),
-            qpack_decoder: Rc::new(RefCell::new(QPackDecoder::new(
+            qpack_decoder: Rc::new(RefCell::new(qpack::Decoder::new(
                 conn_params.get_qpack_settings(),
             ))),
             webtransport: ExtendedConnectFeature::new(
@@ -619,11 +619,11 @@ impl Http3Connection {
         if self.state == Http3State::ZeroRtt {
             self.state = Http3State::Initializing;
             self.control_stream_local = ControlStreamLocal::new();
-            self.qpack_encoder = Rc::new(RefCell::new(QPackEncoder::new(
+            self.qpack_encoder = Rc::new(RefCell::new(qpack::Encoder::new(
                 self.local_params.get_qpack_settings(),
                 true,
             )));
-            self.qpack_decoder = Rc::new(RefCell::new(QPackDecoder::new(
+            self.qpack_decoder = Rc::new(RefCell::new(qpack::Decoder::new(
                 self.local_params.get_qpack_settings(),
             )));
             self.settings_state = Http3RemoteSettingsState::NotReceived;
@@ -1605,12 +1605,12 @@ impl Http3Connection {
     }
 
     #[must_use]
-    pub const fn qpack_encoder(&self) -> &Rc<RefCell<QPackEncoder>> {
+    pub const fn qpack_encoder(&self) -> &Rc<RefCell<qpack::Encoder>> {
         &self.qpack_encoder
     }
 
     #[must_use]
-    pub const fn qpack_decoder(&self) -> &Rc<RefCell<QPackDecoder>> {
+    pub const fn qpack_decoder(&self) -> &Rc<RefCell<qpack::Decoder>> {
         &self.qpack_decoder
     }
 

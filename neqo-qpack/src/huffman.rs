@@ -4,11 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
-
 use crate::{
     huffman_decode_helper::{huffman_decoder_root, HuffmanDecoderNode},
     huffman_table::HUFFMAN_TABLE,
@@ -80,7 +75,7 @@ impl<'a> BitReader<'a> {
 /// # Panics
 ///
 /// Never, but rust can't know that.
-pub fn decode_huffman(input: &[u8]) -> Res<Vec<u8>> {
+pub fn decode(input: &[u8]) -> Res<Vec<u8>> {
     let mut reader = BitReader::new(input);
     let mut output = Vec::new();
     while reader.has_more_data() {
@@ -120,7 +115,7 @@ fn decode_character(reader: &mut BitReader) -> Res<Option<u16>> {
 ///
 /// Never, but rust doesn't know that.
 #[must_use]
-pub fn encode_huffman(input: &[u8]) -> Vec<u8> {
+pub fn encode(input: &[u8]) -> Vec<u8> {
     let mut output: Vec<u8> = Vec::new();
     let mut left: u8 = 8;
     let mut saved: u8 = 0;
@@ -167,7 +162,7 @@ pub fn encode_huffman(input: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_huffman, encode_huffman, Error};
+    use super::{decode, encode, Error};
 
     struct TestElement {
         pub val: &'static [u8],
@@ -241,7 +236,7 @@ mod tests {
     #[test]
     fn encoder() {
         for e in TEST_CASES {
-            let out = encode_huffman(e.val);
+            let out = encode(e.val);
             assert_eq!(out[..], *e.res);
         }
     }
@@ -249,7 +244,7 @@ mod tests {
     #[test]
     fn decoder() {
         for e in TEST_CASES {
-            let res = decode_huffman(e.res);
+            let res = decode(e.res);
             assert!(res.is_ok());
             assert_eq!(res.unwrap()[..], *e.val);
         }
@@ -257,6 +252,6 @@ mod tests {
 
     #[test]
     fn decoder_error_wrong_ending() {
-        assert_eq!(decode_huffman(WRONG_END), Err(Error::HuffmanDecompression));
+        assert_eq!(decode(WRONG_END), Err(Error::HuffmanDecompression));
     }
 }

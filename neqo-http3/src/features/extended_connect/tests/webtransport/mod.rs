@@ -12,7 +12,7 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_crypto::AuthenticationStatus;
-use neqo_transport::{ConnectionParameters, Pmtud, StreamId, StreamType};
+use neqo_transport::{recv_stream, send_stream, ConnectionParameters, Pmtud, StreamId, StreamType};
 use test_fixture::{
     anti_replay, fixture_init, now, CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3,
     DEFAULT_KEYS, DEFAULT_SERVER_NAME,
@@ -21,8 +21,8 @@ use test_fixture::{
 use crate::{
     features::extended_connect::SessionCloseReason, Error, Header, Http3Client, Http3ClientEvent,
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
-    RecvStreamStats, SendStreamStats, WebTransportEvent, WebTransportRequest,
-    WebTransportServerEvent, WebTransportSessionAcceptAction,
+    WebTransportEvent, WebTransportRequest, WebTransportServerEvent,
+    WebTransportSessionAcceptAction,
 };
 
 // Leave space for large QUIC header.
@@ -314,11 +314,11 @@ impl WtTest {
         self.exchange_packets();
     }
 
-    fn send_stream_stats(&mut self, wt_stream_id: StreamId) -> Result<SendStreamStats, Error> {
+    fn send_stream_stats(&mut self, wt_stream_id: StreamId) -> Result<send_stream::Stats, Error> {
         self.client.webtransport_send_stream_stats(wt_stream_id)
     }
 
-    fn recv_stream_stats(&mut self, wt_stream_id: StreamId) -> Result<RecvStreamStats, Error> {
+    fn recv_stream_stats(&mut self, wt_stream_id: StreamId) -> Result<recv_stream::Stats, Error> {
         self.client.webtransport_recv_stream_stats(wt_stream_id)
     }
 

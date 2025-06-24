@@ -18,7 +18,7 @@ use neqo_transport::{ConnectionParameters, State};
 use test_fixture::{
     boxed,
     sim::{
-        connection::{ConnectionNode, ReachState, ReceiveData, SendData},
+        connection::{Node, ReachState, ReceiveData, SendData},
         network::{Delay, Mtu, TailDrop},
         Simulator,
     },
@@ -47,7 +47,7 @@ pub fn main() {
     let simulated_time = Simulator::new(
         "gbit-bandwidth",
         boxed![
-            ConnectionNode::new_client(
+            Node::new_client(
                 ConnectionParameters::default(),
                 boxed![ReachState::new(State::Confirmed)],
                 boxed![ReceiveData::new(TRANSFER_AMOUNT)]
@@ -55,7 +55,7 @@ pub fn main() {
             Mtu::new(1500),
             gbit_link(),
             Delay::new(Duration::from_millis(LINK_RTT_MS as u64 / 2)),
-            ConnectionNode::new_server(
+            Node::new_server(
                 ConnectionParameters::default(),
                 boxed![ReachState::new(State::Confirmed)],
                 boxed![SendData::new(TRANSFER_AMOUNT)]

@@ -22,10 +22,7 @@ use neqo_transport::{
 };
 use test_fixture::{
     assertions, damage_ech_config, datagram, default_client,
-    header_protection::{
-        apply_header_protection, decode_initial_header, initial_aead_and_hp,
-        remove_header_protection,
-    },
+    header_protection::{self, decode_initial_header, initial_aead_and_hp},
     now, split_datagram,
 };
 
@@ -466,7 +463,7 @@ fn mitm_retry() {
 
     // Now we have enough information to make keys.
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
-    let (header, pn) = remove_header_protection(&hp, protected_header, payload);
+    let (header, pn) = header_protection::remove(&hp, protected_header, payload);
     let pn_len = header.len() - protected_header.len();
 
     // Decrypt.
@@ -503,7 +500,7 @@ fn mitm_retry() {
     // Unlike with decryption, don't truncate.
     // All MIN_INITIAL_PACKET_SIZE bytes are needed to reach the minimum datagram size.
 
-    apply_header_protection(&hp, &mut notoken_packet, pn_offset..(pn_offset + pn_len));
+    header_protection::apply(&hp, &mut notoken_packet, pn_offset..(pn_offset + pn_len));
     qtrace!("packet={}", hex_with_len(&notoken_packet));
 
     let new_datagram = Datagram::new(

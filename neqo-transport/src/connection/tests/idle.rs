@@ -16,7 +16,7 @@ use super::{
     AT_LEAST_PTO, DEFAULT_STREAM_DATA,
 };
 use crate::{
-    packet::{PacketBuilder, PACKET_LIMIT},
+    packet::{self, PACKET_LIMIT},
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     tparams::{TransportParameter, TransportParameterId},
@@ -285,7 +285,7 @@ fn idle_caching() {
     let mut client = default_client();
     let mut server = default_server();
     let start = now();
-    let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+    let mut builder = packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
 
     // Perform the first round trip, but drop the Initial from the server.
     // The client then caches the Handshake packet.

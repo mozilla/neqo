@@ -4,10 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
 #![expect(clippy::missing_panics_doc, reason = "This is test code.")]
 
 use std::ops::Range;
@@ -15,9 +11,7 @@ use std::ops::Range;
 use neqo_common::{hex_with_len, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-    hkdf,
-    hp::HpKey,
-    Aead,
+    hkdf, hp, Aead,
 };
 
 pub use crate::{default_client, now, CountingConnectionIdGenerator};
@@ -64,7 +58,7 @@ pub fn decode_initial_header(dgram: &Datagram, role: Role) -> Option<(&[u8], &[u
 /// Generate an AEAD and header protection object for a client Initial.
 /// Note that this works for QUIC version 1 only.
 #[must_use]
-pub fn initial_aead_and_hp(dcid: &[u8], role: Role) -> (Aead, HpKey) {
+pub fn initial_aead_and_hp(dcid: &[u8], role: Role) -> (Aead, hp::Key) {
     const INITIAL_SALT: &[u8] = &[
         0x38, 0x76, 0x2c, 0xf7, 0xf5, 0x59, 0x34, 0xb3, 0x4d, 0x17, 0x9a, 0xe6, 0xa4, 0xc8, 0x0c,
         0xad, 0xcc, 0xbb, 0x7f, 0x0a,
@@ -94,13 +88,13 @@ pub fn initial_aead_and_hp(dcid: &[u8], role: Role) -> (Aead, HpKey) {
     .unwrap();
     (
         Aead::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &secret, "quic ").unwrap(),
-        HpKey::extract(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &secret, "quic hp").unwrap(),
+        hp::Key::extract(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &secret, "quic hp").unwrap(),
     )
 }
 
 // Remove header protection, returning the unmasked header and the packet number.
 #[must_use]
-pub fn remove_header_protection(hp: &HpKey, header: &[u8], payload: &[u8]) -> (Vec<u8>, u64) {
+pub fn remove(hp: &hp::Key, header: &[u8], payload: &[u8]) -> (Vec<u8>, u64) {
     // Make a copy of the header that can be modified.
     let mut fixed_header = header.to_vec();
     let pn_offset = header.len();
@@ -123,7 +117,7 @@ pub fn remove_header_protection(hp: &HpKey, header: &[u8], payload: &[u8]) -> (V
     (fixed_header, u64::from_be_bytes(pn))
 }
 
-pub fn apply_header_protection(hp: &HpKey, packet: &mut [u8], pn_bytes: Range<usize>) {
+pub fn apply(hp: &hp::Key, packet: &mut [u8], pn_bytes: Range<usize>) {
     let sample_start = pn_bytes.start + 4;
     let sample_end = sample_start + 16;
     let mask = hp.mask(&packet[sample_start..sample_end]).unwrap();

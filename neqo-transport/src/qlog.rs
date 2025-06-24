@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder, IpTosEcn};
+use neqo_common::{hex, qinfo, qlog::Qlog, Decoder, Ecn};
 use qlog::events::{
     connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated},
     quic::{
@@ -25,9 +25,9 @@ use smallvec::SmallVec;
 use crate::{
     connection::State,
     frame::{CloseError, Frame},
-    packet::{self, metadata::Direction, PacketType, PublicPacket},
+    packet::{self, metadata::Direction},
     path::PathRef,
-    recovery::SentPacket,
+    recovery::sent,
     stream_id::StreamType as NeqoStreamType,
     tparams::{
         TransportParameterId::{
@@ -38,10 +38,10 @@ use crate::{
         },
         TransportParametersHandler,
     },
-    version::{Version, VersionConfig, WireVersion},
+    version::{self, Version},
 };
 
-pub fn connection_tparams_set(qlog: &NeqoQlog, tph: &TransportParametersHandler, now: Instant) {
+pub fn connection_tparams_set(qlog: &Qlog, tph: &TransportParametersHandler, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
             let remote = tph.remote();
@@ -89,15 +89,15 @@ pub fn connection_tparams_set(qlog: &NeqoQlog, tph: &TransportParametersHandler,
     );
 }
 
-pub fn server_connection_started(qlog: &NeqoQlog, path: &PathRef, now: Instant) {
+pub fn server_connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
     connection_started(qlog, path, now);
 }
 
-pub fn client_connection_started(qlog: &NeqoQlog, path: &PathRef, now: Instant) {
+pub fn client_connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
     connection_started(qlog, path, now);
 }
 
-fn connection_started(qlog: &NeqoQlog, path: &PathRef, now: Instant) {
+fn connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
             let p = path.deref().borrow();
@@ -123,7 +123,7 @@ fn connection_started(qlog: &NeqoQlog, path: &PathRef, now: Instant) {
 }
 
 #[expect(clippy::similar_names, reason = "new and now are similar.")]
-pub fn connection_state_updated(qlog: &NeqoQlog, new: &State, now: Instant) {
+pub fn connection_state_updated(qlog: &Qlog, new: &State, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
             let ev_data = EventData::ConnectionStateUpdated(ConnectionStateUpdated {
@@ -146,8 +146,8 @@ pub fn connection_state_updated(qlog: &NeqoQlog, new: &State, now: Instant) {
 }
 
 pub fn client_version_information_initiated(
-    qlog: &NeqoQlog,
-    version_config: &VersionConfig,
+    qlog: &Qlog,
+    version_config: &version::Config,
     now: Instant,
 ) {
     qlog.add_event_data_with_instant(
@@ -169,9 +169,9 @@ pub fn client_version_information_initiated(
 }
 
 pub fn client_version_information_negotiated(
-    qlog: &NeqoQlog,
+    qlog: &Qlog,
     client: &[Version],
-    server: &[WireVersion],
+    server: &[version::Wire],
     chosen: Version,
     now: Instant,
 ) {
@@ -193,9 +193,9 @@ pub fn client_version_information_negotiated(
 }
 
 pub fn server_version_information_failed(
-    qlog: &NeqoQlog,
+    qlog: &Qlog,
     server: &[Version],
-    client: WireVersion,
+    client: version::Wire,
     now: Instant,
 ) {
     qlog.add_event_data_with_instant(
@@ -215,7 +215,7 @@ pub fn server_version_information_failed(
     );
 }
 
-pub fn packet_io(qlog: &NeqoQlog, meta: packet::MetaData, now: Instant) {
+pub fn packet_io(qlog: &Qlog, meta: packet::MetaData, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
             let mut d = Decoder::from(meta.payload());
@@ -254,7 +254,7 @@ pub fn packet_io(qlog: &NeqoQlog, meta: packet::MetaData, now: Instant) {
     );
 }
 
-pub fn packet_dropped(qlog: &NeqoQlog, public_packet: &PublicPacket, now: Instant) {
+pub fn packet_dropped(qlog: &Qlog, public_packet: &packet::Public, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
             let header =
@@ -276,7 +276,7 @@ pub fn packet_dropped(qlog: &NeqoQlog, public_packet: &PublicPacket, now: Instan
     );
 }
 
-pub fn packets_lost(qlog: &NeqoQlog, pkts: &[SentPacket], now: Instant) {
+pub fn packets_lost(qlog: &Qlog, pkts: &[sent::Packet], now: Instant) {
     qlog.add_event_with_stream(|stream| {
         for pkt in pkts {
             let header =
@@ -309,7 +309,7 @@ pub enum QlogMetric {
     PacingRate(u64),
 }
 
-pub fn metrics_updated(qlog: &NeqoQlog, updated_metrics: &[QlogMetric], now: Instant) {
+pub fn metrics_updated(qlog: &Qlog, updated_metrics: &[QlogMetric], now: Instant) {
     debug_assert!(!updated_metrics.is_empty());
 
     qlog.add_event_data_with_instant(
@@ -409,9 +409,9 @@ impl From<Frame<'_>> for QuicFrame {
                 Self::Ack {
                     ack_delay: Some(ack_delay as f32 / 1000.0),
                     acked_ranges,
-                    ect1: ecn_count.map(|c| c[IpTosEcn::Ect1]),
-                    ect0: ecn_count.map(|c| c[IpTosEcn::Ect0]),
-                    ce: ecn_count.map(|c| c[IpTosEcn::Ce]),
+                    ect1: ecn_count.map(|c| c[Ecn::Ect1]),
+                    ect0: ecn_count.map(|c| c[Ecn::Ect0]),
+                    ce: ecn_count.map(|c| c[Ecn::Ce]),
                     length: None,
                     payload_length: None,
                 }
@@ -551,16 +551,16 @@ impl From<Frame<'_>> for QuicFrame {
     }
 }
 
-impl From<PacketType> for qlog::events::quic::PacketType {
-    fn from(value: PacketType) -> Self {
+impl From<packet::Type> for qlog::events::quic::PacketType {
+    fn from(value: packet::Type) -> Self {
         match value {
-            PacketType::Initial => Self::Initial,
-            PacketType::Handshake => Self::Handshake,
-            PacketType::ZeroRtt => Self::ZeroRtt,
-            PacketType::Short => Self::OneRtt,
-            PacketType::Retry => Self::Retry,
-            PacketType::VersionNegotiation => Self::VersionNegotiation,
-            PacketType::OtherVersion => Self::Unknown,
+            packet::Type::Initial => Self::Initial,
+            packet::Type::Handshake => Self::Handshake,
+            packet::Type::ZeroRtt => Self::ZeroRtt,
+            packet::Type::Short => Self::OneRtt,
+            packet::Type::Retry => Self::Retry,
+            packet::Type::VersionNegotiation => Self::VersionNegotiation,
+            packet::Type::OtherVersion => Self::Unknown,
         }
     }
 }

@@ -22,15 +22,15 @@ mod table;
 
 use std::fmt::{self, Display, Formatter};
 
-pub use decoder::QPackDecoder;
-pub use encoder::QPackEncoder;
 pub use stats::Stats;
+
+pub use crate::{decoder::Decoder, encoder::Encoder};
 
 type Res<T> = Result<T, Error>;
 
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
 #[expect(clippy::struct_field_names, reason = "That's how they are called.")]
-pub struct QpackSettings {
+pub struct Settings {
     pub max_table_size_decoder: u64,
     pub max_table_size_encoder: u64,
     pub max_blocked_streams: u16,

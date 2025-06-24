@@ -6,7 +6,7 @@
 
 use std::fmt::{Debug, Write as _};
 
-use neqo_common::{Decoder, Encoder};
+use neqo_common::{Buffer, Decoder, Encoder};
 use neqo_crypto::random;
 use neqo_transport::StreamId;
 
@@ -94,7 +94,7 @@ impl HFrame {
         }
     }
 
-    pub fn encode(&self, enc: &mut Encoder) {
+    pub fn encode<B: Buffer>(&self, enc: &mut Encoder<B>) {
         enc.encode_varint(self.get_type());
 
         match self {

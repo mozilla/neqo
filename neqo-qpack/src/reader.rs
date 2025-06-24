@@ -4,17 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
-
 use std::{mem, str};
 
 use neqo_common::{qdebug, qerror};
 use neqo_transport::{Connection, StreamId};
 
-use crate::{huffman::decode_huffman, prefix::Prefix, Error, Res};
+use crate::{huffman, prefix::Prefix, Error, Res};
 
 pub trait ReadByte {
     /// # Errors
@@ -135,7 +130,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
             .try_into()
             .or(Err(Error::Decompression))?;
         if use_huffman {
-            Ok(parse_utf8(&decode_huffman(self.slice(length)?)?)?.to_string())
+            Ok(parse_utf8(&huffman::decode(self.slice(length)?)?)?.to_string())
         } else {
             Ok(parse_utf8(self.slice(length)?)?.to_string())
         }
@@ -154,6 +149,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
 
 /// This is varint reader that can take into account a prefix.
 #[derive(Debug)]
+#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub struct IntReader {
     value: u64,
     cnt: u8,
@@ -248,6 +244,7 @@ enum LiteralReaderState {
 ///   4) reads the literal
 ///   5) performs huffman decoding if needed.
 #[derive(Debug, Default)]
+#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub struct LiteralReader {
     state: LiteralReaderState,
     literal: Vec<u8>,
@@ -313,7 +310,7 @@ impl LiteralReader {
                     if *offset == self.literal.len() {
                         self.state = LiteralReaderState::Done;
                         if self.use_huffman {
-                            break Ok(decode_huffman(&self.literal)?);
+                            break Ok(huffman::decode(&self.literal)?);
                         }
                         break Ok(mem::take(&mut self.literal));
                     }

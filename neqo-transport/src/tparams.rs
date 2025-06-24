@@ -14,7 +14,7 @@ use std::{
 };
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{hex, qdebug, qinfo, qtrace, Decoder, Encoder, Role};
+use neqo_common::{hex, qdebug, qinfo, qtrace, Buffer, Decoder, Encoder, Role};
 use neqo_crypto::{
     constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
@@ -26,7 +26,7 @@ use crate::{
     cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
     packet::MIN_INITIAL_PACKET_SIZE,
     tracking::DEFAULT_REMOTE_ACK_DELAY,
-    version::{Version, VersionConfig, WireVersion},
+    version::{self, Version},
     Error, Res,
 };
 
@@ -149,13 +149,13 @@ pub enum TransportParameter {
         srt: [u8; 16],
     },
     Versions {
-        current: WireVersion,
-        other: Vec<WireVersion>,
+        current: version::Wire,
+        other: Vec<version::Wire>,
     },
 }
 
 impl TransportParameter {
-    fn encode(&self, enc: &mut Encoder, tp: TransportParameterId) {
+    fn encode<B: Buffer>(&self, enc: &mut Encoder<B>, tp: TransportParameterId) {
         qtrace!("TP encoded; type {tp}) val {self:?}");
         enc.encode_varint(tp);
         match self {
@@ -245,8 +245,10 @@ impl TransportParameter {
     }
 
     fn decode_versions(dec: &mut Decoder) -> Res<Self> {
-        fn dv(dec: &mut Decoder) -> Res<WireVersion> {
-            let v = dec.decode_uint::<WireVersion>().ok_or(Error::NoMoreData)?;
+        fn dv(dec: &mut Decoder) -> Res<version::Wire> {
+            let v = dec
+                .decode_uint::<version::Wire>()
+                .ok_or(Error::NoMoreData)?;
             if v == 0 {
                 Err(Error::TransportParameter)
             } else {
@@ -373,11 +375,11 @@ impl TransportParameters {
         true
     }
 
-    pub(crate) fn encode(&self, enc: &mut Encoder) {
+    pub(crate) fn encode<B: Buffer>(&self, enc: &mut Encoder<B>) {
         self.encode_filtered(Self::retain_all, enc);
     }
 
-    fn encode_filtered<F>(&self, f: F, enc: &mut Encoder)
+    fn encode_filtered<F, B: Buffer>(&self, f: F, enc: &mut Encoder<B>)
     where
         F: Fn(TransportParameterId, Option<&TransportParameter>) -> bool,
     {
@@ -488,7 +490,7 @@ impl TransportParameters {
     }
 
     /// Set version information.
-    pub fn set_versions(&mut self, role: Role, versions: &VersionConfig) {
+    pub fn set_versions(&mut self, role: Role, versions: &version::Config) {
         let mut other: Vec<u32> = Vec::with_capacity(versions.all().len() + 1);
         let grease = u32::from_ne_bytes(random::<4>()) & 0xf0f0_f0f0 | 0x0a0a_0a0a;
         other.push(grease);
@@ -599,7 +601,7 @@ impl TransportParameters {
 
     /// Get the version negotiation values for validation.
     #[must_use]
-    pub fn get_versions(&self) -> Option<(WireVersion, &[WireVersion])> {
+    pub fn get_versions(&self) -> Option<(version::Wire, &[version::Wire])> {
         if let Some(TransportParameter::Versions { current, other }) =
             &self.params[TransportParameterId::VersionInformation]
         {
@@ -618,7 +620,7 @@ impl TransportParameters {
 #[derive(Debug)]
 pub struct TransportParametersHandler {
     role: Role,
-    versions: VersionConfig,
+    versions: version::Config,
     local: TransportParameters,
     remote_handshake: Option<TransportParameters>,
     remote_0rtt: Option<TransportParameters>,
@@ -626,7 +628,7 @@ pub struct TransportParametersHandler {
 
 impl TransportParametersHandler {
     #[must_use]
-    pub fn new(role: Role, versions: VersionConfig) -> Self {
+    pub fn new(role: Role, versions: version::Config) -> Self {
         let mut local = TransportParameters::default();
         local.set_versions(role, &versions);
         Self {
@@ -782,8 +784,7 @@ impl ExtensionHandler for TransportParametersHandler {
 
         qdebug!("Writing transport parameters, msg={msg:?}");
 
-        // TODO(ekr@rtfm.com): Modify to avoid a copy.
-        let mut enc = Encoder::default();
+        let mut enc = Encoder::new_borrowed_slice(d);
         let f = if ch_outer {
             debug_assert_eq!(msg, TLS_HS_CLIENT_HELLO);
             Self::filter_ch_outer
@@ -791,8 +792,6 @@ impl ExtensionHandler for TransportParametersHandler {
             TransportParameters::retain_all
         };
         self.local.encode_filtered(f, &mut enc);
-        assert!(enc.len() <= d.len());
-        d[..enc.len()].copy_from_slice(enc.as_ref());
         ExtensionWriterResult::Write(enc.len())
     }
 

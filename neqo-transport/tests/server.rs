@@ -15,16 +15,12 @@ use neqo_crypto::{
 };
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
-    version::WireVersion,
-    CloseReason, Connection, ConnectionParameters, Error, Output, State, StreamType, Version,
-    MIN_INITIAL_PACKET_SIZE,
+    version, CloseReason, Connection, ConnectionParameters, Error, Output, State, StreamType,
+    Version, MIN_INITIAL_PACKET_SIZE,
 };
 use test_fixture::{
     assertions, datagram, default_client,
-    header_protection::{
-        apply_header_protection, decode_initial_header, initial_aead_and_hp,
-        remove_header_protection,
-    },
+    header_protection::{self, decode_initial_header, initial_aead_and_hp},
     new_client, now, split_datagram, CountingConnectionIdGenerator,
 };
 
@@ -438,7 +434,7 @@ fn bad_client_initial() {
     let dgram = client.process_output(now()).dgram().expect("a datagram");
     let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram, Role::Client).unwrap();
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
-    let (fixed_header, pn) = remove_header_protection(&hp, header, payload);
+    let (fixed_header, pn) = header_protection::remove(&hp, header, payload);
     let payload = &payload[(fixed_header.len() - header.len())..];
 
     let mut plaintext_buf = vec![0; dgram.len()];
@@ -474,7 +470,7 @@ fn bad_client_initial() {
     // Pad with zero to get up to MIN_INITIAL_PACKET_SIZE.
     ciphertext.resize(MIN_INITIAL_PACKET_SIZE, 0);
 
-    apply_header_protection(
+    header_protection::apply(
         &hp,
         &mut ciphertext,
         (header_enc.len() - 1)..header_enc.len(),
@@ -530,7 +526,7 @@ fn bad_client_initial_connection_close() {
     let dgram = client.process_output(now()).dgram().expect("a datagram");
     let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram, Role::Client).unwrap();
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
-    let (_, pn) = remove_header_protection(&hp, header, payload);
+    let (_, pn) = header_protection::remove(&hp, header, payload);
 
     let mut payload_enc = Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE);
     payload_enc.encode(&[0x1c, 0x01, 0x00, 0x00]); // Add a CONNECTION_CLOSE frame.
@@ -560,7 +556,7 @@ fn bad_client_initial_connection_close() {
     // Pad with zero to get up to MIN_INITIAL_PACKET_SIZE.
     ciphertext.resize(MIN_INITIAL_PACKET_SIZE, 0);
 
-    apply_header_protection(
+    header_protection::apply(
         &hp,
         &mut ciphertext,
         (header_enc.len() - 1)..header_enc.len(),
@@ -606,7 +602,9 @@ fn version_negotiation_ignored() {
     assert_eq!(dec.decode_vec(1).expect("VN SCID"), &d_cid[..]);
     let mut found = false;
     while dec.remaining() > 0 {
-        let v = dec.decode_uint::<WireVersion>().expect("supported version");
+        let v = dec
+            .decode_uint::<version::Wire>()
+            .expect("supported version");
         found |= v == Version::default().wire_version();
     }
     assert!(found, "valid version not found");

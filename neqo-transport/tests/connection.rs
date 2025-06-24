@@ -13,10 +13,7 @@ use neqo_transport::{
 };
 use test_fixture::{
     default_client, default_server,
-    header_protection::{
-        apply_header_protection, decode_initial_header, initial_aead_and_hp,
-        remove_header_protection,
-    },
+    header_protection::{self, decode_initial_header, initial_aead_and_hp},
     new_client, now, split_datagram,
 };
 
@@ -93,7 +90,7 @@ fn reorder_server_initial() {
 
     // Now decrypt the packet.
     let (aead, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
-    let (header, pn) = remove_header_protection(&hp, protected_header, payload);
+    let (header, pn) = header_protection::remove(&hp, protected_header, payload);
     assert_eq!(pn, 0);
     let pn_len = header.len() - protected_header.len();
     let mut buf = vec![0; payload.len()];
@@ -118,7 +115,7 @@ fn reorder_server_initial() {
     packet.resize(MIN_INITIAL_PACKET_SIZE, 0);
     aead.encrypt(pn, &header, &plaintext, &mut packet[header.len()..])
         .unwrap();
-    apply_header_protection(&hp, &mut packet, protected_header.len()..header.len());
+    header_protection::apply(&hp, &mut packet, protected_header.len()..header.len());
     let reordered = Datagram::new(
         server_initial.source(),
         server_initial.destination(),
@@ -150,7 +147,7 @@ fn set_payload(server_packet: Option<&Datagram>, client_dcid: &[u8], payload: &[
 
     // Now decrypt the packet.
     let (aead, hp) = initial_aead_and_hp(client_dcid, Role::Server);
-    let (mut header, pn) = remove_header_protection(&hp, protected_header, orig_payload);
+    let (mut header, pn) = header_protection::remove(&hp, protected_header, orig_payload);
     assert_eq!(pn, 0);
     // Re-encode the packet number as four bytes, so we have enough material for the header
     // protection sample if payload is empty.
@@ -164,7 +161,7 @@ fn set_payload(server_packet: Option<&Datagram>, client_dcid: &[u8], payload: &[
     packet.resize(header.len() + payload.len() + Aead::expansion(), 0);
     aead.encrypt(pn, &header, payload, &mut packet[header.len()..])
         .unwrap();
-    apply_header_protection(&hp, &mut packet, protected_header.len()..header.len());
+    header_protection::apply(&hp, &mut packet, protected_header.len()..header.len());
     Datagram::new(
         server_initial.source(),
         server_initial.destination(),
@@ -265,7 +262,7 @@ fn overflow_crypto() {
         packet.resize(header.len() + payload.len() + Aead::expansion(), 0);
         aead.encrypt(pn, &header, payload.as_ref(), &mut packet[header.len()..])
             .unwrap();
-        apply_header_protection(&hp, &mut packet, pn_offset..(pn_offset + 2));
+        header_protection::apply(&hp, &mut packet, pn_offset..(pn_offset + 2));
         packet.resize(MIN_INITIAL_PACKET_SIZE, 0); // Initial has to be MIN_INITIAL_PACKET_SIZE bytes!
 
         let dgram = Datagram::new(

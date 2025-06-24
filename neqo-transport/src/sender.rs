@@ -11,13 +11,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qlog::NeqoQlog};
+use neqo_common::{qdebug, qlog::Qlog};
 
 use crate::{
     cc::{ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno},
     pace::Pacer,
     pmtud::Pmtud,
-    recovery::SentPacket,
+    recovery::sent,
     rtt::RttEstimate,
     ConnectionParameters, Stats,
 };
@@ -59,7 +59,7 @@ impl PacketSender {
         }
     }
 
-    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+    pub fn set_qlog(&mut self, qlog: Qlog) {
         self.cc.set_qlog(qlog);
     }
 
@@ -100,7 +100,7 @@ impl PacketSender {
 
     pub fn on_packets_acked(
         &mut self,
-        acked_pkts: &[SentPacket],
+        acked_pkts: &[sent::Packet],
         rtt_est: &RttEstimate,
         now: Instant,
         stats: &mut Stats,
@@ -116,7 +116,7 @@ impl PacketSender {
         first_rtt_sample_time: Option<Instant>,
         prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
-        lost_packets: &[SentPacket],
+        lost_packets: &[sent::Packet],
         stats: &mut Stats,
         now: Instant,
     ) -> bool {
@@ -135,11 +135,11 @@ impl PacketSender {
     }
 
     /// Called when ECN CE mark received.  Returns true if the congestion window was reduced.
-    pub fn on_ecn_ce_received(&mut self, largest_acked_pkt: &SentPacket, now: Instant) -> bool {
+    pub fn on_ecn_ce_received(&mut self, largest_acked_pkt: &sent::Packet, now: Instant) -> bool {
         self.cc.on_ecn_ce_received(largest_acked_pkt, now)
     }
 
-    pub fn discard(&mut self, pkt: &SentPacket, now: Instant) {
+    pub fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
         self.cc.discard(pkt, now);
     }
 
@@ -149,7 +149,7 @@ impl PacketSender {
         self.cc.discard_in_flight(now);
     }
 
-    pub fn on_packet_sent(&mut self, pkt: &SentPacket, rtt: Duration, now: Instant) {
+    pub fn on_packet_sent(&mut self, pkt: &sent::Packet, rtt: Duration, now: Instant) {
         self.pacer
             .spend(pkt.time_sent(), rtt, self.cc.cwnd(), pkt.len());
         self.cc.on_packet_sent(pkt, now);

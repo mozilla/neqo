@@ -12,8 +12,8 @@ use std::{
     rc::Rc,
 };
 
-use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType};
-use neqo_qpack::encoder::QPackEncoder;
+use neqo_common::{qdebug, qtrace, Buffer, Encoder, Header, MessageType};
+use neqo_qpack as qpack;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -114,7 +114,7 @@ pub struct SendMessage {
     message_type: MessageType,
     stream_type: Http3StreamType,
     stream: BufferedStream,
-    encoder: Rc<RefCell<QPackEncoder>>,
+    encoder: Rc<RefCell<qpack::Encoder>>,
     conn_events: Box<dyn SendStreamEvents>,
 }
 
@@ -123,7 +123,7 @@ impl SendMessage {
         message_type: MessageType,
         stream_type: Http3StreamType,
         stream_id: StreamId,
-        encoder: Rc<RefCell<QPackEncoder>>,
+        encoder: Rc<RefCell<qpack::Encoder>>,
         conn_events: Box<dyn SendStreamEvents>,
     ) -> Self {
         qdebug!("Create a request stream_id={stream_id}");
@@ -142,20 +142,19 @@ impl SendMessage {
     ///
     /// `ClosedCriticalStream` if the encoder stream is closed.
     /// `InternalError` if an unexpected error occurred.
-    fn encode(
-        encoder: &mut QPackEncoder,
+    fn encode<B: Buffer>(
+        encoder: &mut Encoder<B>,
+        qpack_encoder: &mut qpack::Encoder,
         headers: &[Header],
         conn: &mut Connection,
         stream_id: StreamId,
-    ) -> Vec<u8> {
+    ) {
         qdebug!("Encoding headers");
-        let header_block = encoder.encode_header_block(conn, headers, stream_id);
+        let header_block = qpack_encoder.encode_header_block(conn, headers, stream_id);
         let hframe = HFrame::Headers {
             header_block: header_block.to_vec(),
         };
-        let mut d = Encoder::default();
-        hframe.encode(&mut d);
-        d.into()
+        hframe.encode(encoder);
     }
 
     fn stream_id(&self) -> StreamId {
@@ -299,9 +298,7 @@ impl SendStream for SendMessage {
         let data_frame = HFrame::Data {
             len: buf.len() as u64,
         };
-        let mut enc = Encoder::default();
-        data_frame.encode(&mut enc);
-        self.stream.buffer(enc.as_ref());
+        self.stream.encode_with(|e| data_frame.encode(e));
         self.stream.buffer(buf);
         _ = self.stream.send_buffer(conn)?;
         Ok(())
@@ -311,13 +308,10 @@ impl SendStream for SendMessage {
 impl HttpSendStream for SendMessage {
     fn send_headers(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()> {
         self.state.new_headers(headers, self.message_type)?;
-        let buf = Self::encode(
-            &mut self.encoder.borrow_mut(),
-            headers,
-            conn,
-            self.stream_id(),
-        );
-        self.stream.buffer(&buf);
+        let stream_id = self.stream_id();
+        self.stream.encode_with(|e| {
+            Self::encode(e, &mut self.encoder.borrow_mut(), headers, conn, stream_id);
+        });
         Ok(())
     }
 

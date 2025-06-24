@@ -6,7 +6,7 @@
 
 use std::cmp::min;
 
-use neqo_qpack::QpackSettings;
+use neqo_qpack as qpack;
 use neqo_transport::ConnectionParameters;
 
 const QPACK_MAX_TABLE_SIZE_DEFAULT: u64 = 65536;
@@ -19,7 +19,7 @@ const HTTP3_DATAGRAM_DEFAULT: bool = false;
 #[derive(Debug, Clone)]
 pub struct Http3Parameters {
     conn_params: ConnectionParameters,
-    qpack_settings: QpackSettings,
+    qpack_settings: qpack::Settings,
     max_concurrent_push_streams: u64,
     webtransport: bool,
     http3_datagram: bool,
@@ -29,7 +29,7 @@ impl Default for Http3Parameters {
     fn default() -> Self {
         Self {
             conn_params: ConnectionParameters::default(),
-            qpack_settings: QpackSettings {
+            qpack_settings: qpack::Settings {
                 max_table_size_encoder: QPACK_MAX_TABLE_SIZE_DEFAULT,
                 max_table_size_decoder: QPACK_MAX_TABLE_SIZE_DEFAULT,
                 max_blocked_streams: QPACK_MAX_BLOCKED_STREAMS_DEFAULT,
@@ -97,7 +97,7 @@ impl Http3Parameters {
     }
 
     #[must_use]
-    pub const fn get_qpack_settings(&self) -> &QpackSettings {
+    pub const fn get_qpack_settings(&self) -> &qpack::Settings {
         &self.qpack_settings
     }
 

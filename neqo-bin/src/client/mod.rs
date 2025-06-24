@@ -23,7 +23,7 @@ use futures::{
     future::{select, Either},
     FutureExt as _, TryFutureExt as _,
 };
-use neqo_common::{qdebug, qerror, qinfo, qlog::NeqoQlog, qwarn, Datagram, Role};
+use neqo_common::{qdebug, qerror, qinfo, qlog::Qlog, qwarn, Datagram, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, Cipher, ResumptionToken,
@@ -507,9 +507,9 @@ impl<'a, H: Handler> Runner<'a, H> {
     }
 }
 
-fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
+fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<Qlog> {
     let Some(qlog_dir) = args.shared.qlog_dir.clone() else {
-        return Ok(NeqoQlog::disabled());
+        return Ok(Qlog::disabled());
     };
 
     // hostname might be an IPv6 address, e.g. `[::1]`. `:` is an invalid
@@ -520,7 +520,7 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
         .map(|c| if c == ':' { '_' } else { c })
         .collect();
 
-    NeqoQlog::enabled_with_file(
+    Qlog::enabled_with_file(
         qlog_dir,
         Role::Client,
         Some("Neqo client qlog".to_string()),

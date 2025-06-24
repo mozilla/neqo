@@ -20,7 +20,7 @@ use crate::{
         HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST, HEADER_FIELD_LITERAL_NAME_REF_STATIC,
         NO_PREFIX,
     },
-    qpack_send_buf::QpackData,
+    qpack_send_buf::Data,
     reader::{parse_utf8, ReceiverBufferWrapper},
     table::HeaderTable,
     Error, Res,
@@ -28,7 +28,7 @@ use crate::{
 
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct HeaderEncoder {
-    buf: QpackData,
+    buf: Data,
     base: u64,
     use_huffman: bool,
     max_entries: u64,
@@ -44,7 +44,7 @@ impl Display for HeaderEncoder {
 impl HeaderEncoder {
     pub fn new(base: u64, use_huffman: bool, max_entries: u64) -> Self {
         Self {
-            buf: QpackData::default(),
+            buf: Data::default(),
             base,
             use_huffman,
             max_entries,
