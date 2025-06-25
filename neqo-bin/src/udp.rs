@@ -86,7 +86,7 @@ impl Socket {
         })
     }
 
-    /// Receive a batch of [`Datagram`]s on the given [`Socket`], each set with
+    /// Receive a batch of [`neqo_common::Datagram`]s on the given [`Socket`], each set with
     /// the provided local address.
     pub fn recv<'a>(
         &self,

@@ -922,7 +922,7 @@ impl Http3Client {
         }
     }
 
-    /// Wrapper around [`Http3Server::process_multiple_output`] that processes a single
+    /// Wrapper around [`Http3Client::process_multiple_output`] that processes a single
     /// output datagram only.
     #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     pub fn process_output(&mut self, now: Instant) -> Output {

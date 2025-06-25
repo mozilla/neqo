@@ -342,7 +342,7 @@ impl Info {
         }
     }
 
-    /// The ECN mark ([`IpTosEcn`]) to use for an outgoing UDP datagram.
+    /// The ECN mark ([`Ecn`]) to use for an outgoing UDP datagram.
     pub(crate) const fn ecn_mark(&self) -> Ecn {
         if self.is_marking() {
             Ecn::Ect0
