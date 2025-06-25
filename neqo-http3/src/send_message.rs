@@ -13,7 +13,7 @@ use std::{
 };
 
 use neqo_common::{qdebug, qtrace, Buffer, Encoder, Header, MessageType};
-use neqo_qpack::encoder::QPackEncoder;
+use neqo_qpack as qpack;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -114,7 +114,7 @@ pub struct SendMessage {
     message_type: MessageType,
     stream_type: Http3StreamType,
     stream: BufferedStream,
-    encoder: Rc<RefCell<QPackEncoder>>,
+    encoder: Rc<RefCell<qpack::Encoder>>,
     conn_events: Box<dyn SendStreamEvents>,
 }
 
@@ -123,7 +123,7 @@ impl SendMessage {
         message_type: MessageType,
         stream_type: Http3StreamType,
         stream_id: StreamId,
-        encoder: Rc<RefCell<QPackEncoder>>,
+        encoder: Rc<RefCell<qpack::Encoder>>,
         conn_events: Box<dyn SendStreamEvents>,
     ) -> Self {
         qdebug!("Create a request stream_id={stream_id}");
@@ -144,7 +144,7 @@ impl SendMessage {
     /// `InternalError` if an unexpected error occurred.
     fn encode<B: Buffer>(
         encoder: &mut Encoder<B>,
-        qpack_encoder: &mut QPackEncoder,
+        qpack_encoder: &mut qpack::Encoder,
         headers: &[Header],
         conn: &mut Connection,
         stream_id: StreamId,
