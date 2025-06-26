@@ -126,7 +126,7 @@ mod tests {
         let d = datagram([0; 1].to_vec());
         assert_eq!(
             &format!("{d:?}"),
-            "Datagram IpTos(Cs0, Ect0) [fe80::1]:443->[fe80::1]:443: [1]: 00"
+            "Datagram Tos(Cs0, Ect0) [fe80::1]:443->[fe80::1]:443: [1]: 00"
         );
     }
 
