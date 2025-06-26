@@ -158,6 +158,10 @@ impl<T: CertificateCompressor> UnsafeCertCompression for T {
             );
         }
 
+        if unsafe { (*output).data.is_null() } {
+            return ssl::SECFailure;
+        }
+
         let Ok(output_len) = (unsafe { (*output).len.try_into() }) else {
             return ssl::SECFailure;
         };
@@ -168,7 +172,7 @@ impl<T: CertificateCompressor> UnsafeCertCompression for T {
             return ssl::SECFailure;
         };
 
-        if encoded_len == 0 || encoded_len > output_len || encoded_len > u32::MAX as usize {
+        if encoded_len == 0 || encoded_len > output_len {
             return ssl::SECFailure;
         }
 
