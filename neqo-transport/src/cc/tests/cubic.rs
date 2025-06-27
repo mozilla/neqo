@@ -11,6 +11,7 @@
 )]
 
 use std::{
+    fmt::Display,
     ops::Sub,
     time::{Duration, Instant},
 };
@@ -249,11 +250,21 @@ fn cubic_phase() {
     assert_eq!(cubic.cwnd(), cubic.cwnd_initial() * 10);
 }
 
-fn assert_within<T: Sub<Output = T> + PartialOrd + Copy>(value: T, expected: T, margin: T) {
+fn assert_within<T: Sub<Output = T> + PartialOrd + Copy + Display>(
+    value: T,
+    expected: T,
+    margin: T,
+) {
     if value >= expected {
-        assert!(value - expected < margin);
+        assert!(
+            value - expected < margin,
+            "Expected: {expected}, Actual: {value}"
+        );
     } else {
-        assert!(expected - value < margin);
+        assert!(
+            expected - value < margin,
+            "Expected: {expected}, Actual: {value}"
+        );
     }
 }
 

@@ -192,7 +192,7 @@ impl Cubic {
     ///
     /// `k = cubic_root((w_max - cwnd_epoch)/SMSS/C)`
     fn calc_k(&self, cwnd_epoch: f64, max_datagram_size_f64: f64) -> f64 {
-        ((self.w_max - cwnd_epoch) / max_datagram_size_f64) / CUBIC_C.cbrt()
+        ((self.w_max - cwnd_epoch) / max_datagram_size_f64 / CUBIC_C).cbrt()
     }
 
     /// `w_cubic(t) = C*(t-K)^3 + w_max`
