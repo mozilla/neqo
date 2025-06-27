@@ -1,3 +1,4 @@
+.ansible/
 .DS_Store
 .envrc
 *.qlog
