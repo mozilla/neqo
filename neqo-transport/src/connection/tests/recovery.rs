@@ -910,7 +910,7 @@ fn ack_for_unsent() {
     struct AckforUnsentWriter {}
 
     impl FrameWriter for AckforUnsentWriter {
-        fn write_frames(&mut self, builder: &mut packet::Builder) {
+        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
             builder.encode_varint(FrameType::Ack);
             builder.encode_varint(666u16); // Largest ACKed
             builder.encode_varint(0u8); // ACK delay

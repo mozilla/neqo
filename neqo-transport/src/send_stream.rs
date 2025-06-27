@@ -18,7 +18,7 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use neqo_common::{qdebug, qerror, qtrace, Encoder, Role};
+use neqo_common::{qdebug, qerror, qtrace, Buffer, Encoder, Role};
 use smallvec::SmallVec;
 
 use crate::{
@@ -722,10 +722,10 @@ impl SendStream {
         ss
     }
 
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
-        builder: &mut packet::Builder,
+        builder: &mut packet::Builder<B>,
         tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) {
@@ -737,10 +737,10 @@ impl SendStream {
     }
 
     // return false if the builder is full and the caller should stop iterating
-    pub fn write_frames_with_early_return(
+    pub fn write_frames_with_early_return<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
-        builder: &mut packet::Builder,
+        builder: &mut packet::Builder<B>,
         tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) -> bool {
@@ -915,10 +915,10 @@ impl SendStream {
         clippy::missing_panics_doc,
         reason = "OK here."
     )]
-    pub fn write_stream_frame(
+    pub fn write_stream_frame<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
-        builder: &mut packet::Builder,
+        builder: &mut packet::Builder<B>,
         tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) {
@@ -1013,10 +1013,10 @@ impl SendStream {
     }
 
     /// Maybe write a `RESET_STREAM` frame.
-    pub fn write_reset_frame(
+    pub fn write_reset_frame<B: Buffer>(
         &mut self,
         p: TransmissionPriority,
-        builder: &mut packet::Builder,
+        builder: &mut packet::Builder<B>,
         tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) -> bool {
@@ -1059,10 +1059,10 @@ impl SendStream {
     }
 
     /// Maybe write a `STREAM_DATA_BLOCKED` frame.
-    pub fn write_blocked_frame(
+    pub fn write_blocked_frame<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
-        builder: &mut packet::Builder,
+        builder: &mut packet::Builder<B>,
         tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) {
@@ -1677,10 +1677,10 @@ impl SendStreams {
         });
     }
 
-    pub(crate) fn write_frames(
+    pub(crate) fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
-        builder: &mut packet::Builder,
+        builder: &mut packet::Builder<B>,
         tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) {

@@ -9,5 +9,5 @@
 use crate::packet;
 
 pub trait FrameWriter {
-    fn write_frames(&mut self, builder: &mut packet::Builder);
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>);
 }

@@ -532,7 +532,7 @@ fn do_not_accept_data_after_stop_sending() {
 struct Writer(Vec<u64>);
 
 impl crate::connection::test_internal::FrameWriter for Writer {
-    fn write_frames(&mut self, builder: &mut packet::Builder) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder.write_varint_frame(&self.0);
     }
 }

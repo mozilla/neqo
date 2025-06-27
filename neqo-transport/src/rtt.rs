@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qlog::Qlog, qtrace};
+use neqo_common::{qlog::Qlog, qtrace, Buffer};
 
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
@@ -193,9 +193,9 @@ impl RttEstimate {
         self.min_rtt
     }
 
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut packet::Builder,
+        builder: &mut packet::Builder<B>,
         tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) {
