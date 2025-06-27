@@ -10,13 +10,13 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{hex_with_len, IpTos};
+use crate::{hex_with_len, Tos};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Datagram<D = Vec<u8>> {
     src: SocketAddr,
     dst: SocketAddr,
-    tos: IpTos,
+    tos: Tos,
     d: D,
 }
 
@@ -32,11 +32,11 @@ impl<D> Datagram<D> {
     }
 
     #[must_use]
-    pub const fn tos(&self) -> IpTos {
+    pub const fn tos(&self) -> Tos {
         self.tos
     }
 
-    pub fn set_tos(&mut self, tos: IpTos) {
+    pub fn set_tos(&mut self, tos: Tos) {
         self.tos = tos;
     }
 }
@@ -58,7 +58,7 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> AsMut<[u8]> for Datagram<D> {
 }
 
 impl Datagram<Vec<u8>> {
-    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: V) -> Self {
+    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: Tos, d: V) -> Self {
         Self {
             src,
             dst,
@@ -96,7 +96,7 @@ impl<D: AsRef<[u8]>> Debug for Datagram<D> {
 
 impl<'a> Datagram<&'a mut [u8]> {
     #[must_use]
-    pub fn from_slice(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: &'a mut [u8]) -> Self {
+    pub fn from_slice(src: SocketAddr, dst: SocketAddr, tos: Tos, d: &'a mut [u8]) -> Self {
         Self { src, dst, tos, d }
     }
 
@@ -126,7 +126,7 @@ mod tests {
         let d = datagram([0; 1].to_vec());
         assert_eq!(
             &format!("{d:?}"),
-            "Datagram IpTos(Cs0, Ect0) [fe80::1]:443->[fe80::1]:443: [1]: 00"
+            "Datagram Tos(Cs0, Ect0) [fe80::1]:443->[fe80::1]:443: [1]: 00"
         );
     }
 

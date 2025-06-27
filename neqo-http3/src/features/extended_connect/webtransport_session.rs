@@ -12,7 +12,7 @@ use std::{
 };
 
 use neqo_common::{qtrace, Encoder, Header, MessageType, Role};
-use neqo_qpack::{QPackDecoder, QPackEncoder};
+use neqo_qpack as qpack;
 use neqo_transport::{Connection, DatagramTracking, StreamId};
 use rustc_hash::FxHashSet as HashSet;
 
@@ -66,8 +66,8 @@ impl WebTransportSession {
         session_id: StreamId,
         events: Box<dyn ExtendedConnectEvents>,
         role: Role,
-        qpack_encoder: Rc<RefCell<QPackEncoder>>,
-        qpack_decoder: Rc<RefCell<QPackDecoder>>,
+        qpack_encoder: Rc<RefCell<qpack::Encoder>>,
+        qpack_decoder: Rc<RefCell<qpack::Decoder>>,
     ) -> Self {
         let stream_event_listener = Rc::new(RefCell::new(WebTransportSessionListener::default()));
         Self {
