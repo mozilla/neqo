@@ -190,6 +190,7 @@ impl Paths {
             |p| p.borrow().ecn_info.baseline(),
         );
         path.borrow_mut().set_ecn_baseline(baseline);
+        path.borrow_mut().start_ecn();
         if force || path.borrow().is_valid() {
             path.borrow_mut().set_valid(now);
             drop(self.select_primary(path, now));
@@ -414,9 +415,15 @@ impl Paths {
         }
     }
 
-    pub fn lost_ecn(&self, pt: packet::Type, stats: &mut Stats) {
+    pub fn lost_ecn(&self, stats: &mut Stats) {
         if let Some(path) = self.primary() {
-            path.borrow_mut().lost_ecn(pt, stats);
+            path.borrow_mut().lost_ecn(stats);
+        }
+    }
+
+    pub fn start_ecn(&mut self) {
+        if let Some(path) = self.primary() {
+            path.borrow_mut().start_ecn();
         }
     }
 
@@ -575,8 +582,8 @@ impl Path {
     }
 
     /// Return the DSCP/ECN marking to use for outgoing packets on this path.
-    pub fn tos(&self, tokens: &mut Vec<recovery::Token>) -> Tos {
-        self.ecn_info.ecn_mark(tokens).into()
+    pub fn tos(&self, pt: packet::Type, tokens: &mut Vec<recovery::Token>) -> Tos {
+        self.ecn_info.ecn_mark(pt, tokens).into()
     }
 
     /// Whether this path is the primary or current path for the connection.
@@ -836,8 +843,12 @@ impl Path {
         self.ecn_info.acked_ecn();
     }
 
-    pub fn lost_ecn(&mut self, pt: packet::Type, stats: &mut Stats) {
-        self.ecn_info.lost_ecn(pt, stats);
+    pub fn lost_ecn(&mut self, stats: &mut Stats) {
+        self.ecn_info.lost_ecn(stats);
+    }
+
+    pub fn start_ecn(&mut self) {
+        self.ecn_info.start();
     }
 
     pub fn acked_ack_frequency(&mut self, acked: &AckRate) {
