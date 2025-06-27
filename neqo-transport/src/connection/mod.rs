@@ -23,9 +23,9 @@ use neqo_common::{
     qlog::Qlog, qtrace, qwarn, Datagram, Decoder, Ecn, Encoder, Role, Tos,
 };
 use neqo_crypto::{
-    agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
-    HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
-    Server, ZeroRttChecker,
+    agent::{CertificateCompressor, CertificateInfo},
+    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
+    PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttChecker,
 };
 use smallvec::SmallVec;
 use strum::IntoEnumIterator as _;
@@ -447,6 +447,13 @@ impl Connection {
     ) -> Res<()> {
         self.crypto
             .server_enable_0rtt(Rc::clone(&self.tps), anti_replay, zero_rtt_checker)
+    }
+
+    /// # Errors
+    /// When the operation fails.
+    pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
+        self.crypto.tls_mut().set_certificate_compression::<T>()?;
+        Ok(())
     }
 
     /// # Errors

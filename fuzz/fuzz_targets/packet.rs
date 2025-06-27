@@ -7,14 +7,14 @@ use libfuzzer_sys::fuzz_target;
 fuzz_target!(|data: &[u8]| {
     use std::sync::OnceLock;
 
-    use neqo_transport::{packet::PublicPacket, RandomConnectionIdGenerator};
+    use neqo_transport::{packet, RandomConnectionIdGenerator};
 
     static DECODER: OnceLock<RandomConnectionIdGenerator> = OnceLock::new();
     let decoder = DECODER.get_or_init(|| RandomConnectionIdGenerator::new(20));
     neqo_crypto::init().unwrap();
 
     // Run the fuzzer
-    _ = PublicPacket::decode(&mut data.to_vec(), decoder);
+    _ = packet::Public::decode(&mut data.to_vec(), decoder);
 });
 
 #[cfg(any(not(fuzzing), windows))]
