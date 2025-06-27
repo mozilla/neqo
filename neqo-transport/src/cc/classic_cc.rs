@@ -254,8 +254,8 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             // TODO: We increase possibly `2 * max_datagram_size` per acked packet here. RFC 9002
             // states "A sender in congestion avoidance [...] MUST limit the increase to the
             // congestion window to at most one maximum datagram size for each congestion window
-            // that is acknowledged."
-            // We should change to increasing once.
+            // that is acknowledged.". Not sure if that also applies to Cubic, but as this is code
+            // that also runs for NewReno we should look at it anyways.
             debug_assert!(bytes_for_increase > 0);
             // If enough credit has been accumulated already, apply them gradually.
             // If we have sudden increase in allowed rate we actually increase cwnd gently.

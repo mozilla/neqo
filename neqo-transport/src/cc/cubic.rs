@@ -83,17 +83,6 @@ pub const CUBIC_BETA_USIZE_DIVISOR: usize = 10;
 /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
 pub const CUBIC_FAST_CONVERGENCE_FACTOR: f64 = (1.0 + 0.7) / 2.0;
 
-/// The minimum number of multiples of the datagram size that need
-/// to be received to cause an increase in the congestion window.
-/// When there is no loss, Cubic can return to exponential increase, but
-/// this value reduces the magnitude of the resulting growth by a constant factor.
-/// A value of 1.0 would mean a return to the rate used in slow start.
-///
-/// UPDATE/TODO: This makes sure we have to ack at least 2 datagrams to increase by 1 MSS, which
-/// means we can at most increase cwnd * 1.5 per RTT. That's equivalent for the `target = 1.5 *
-/// target` cap in the new RFC.
-const EXPONENTIAL_GROWTH_REDUCTION: f64 = 2.0;
-
 /// Convert an integer congestion window value into a floating point value.
 /// This has the effect of reducing larger values to `1<<53`.
 /// If you have a congestion window that large, something is probably wrong.
@@ -198,11 +187,12 @@ impl Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#figure-2>
     ///
-    /// Taking into account that we're using bytes not MSS units, the formula becomes:
+    /// Taking into account that neqo is using bytes but the formula assumes segments for both
+    /// `w_max` and `cwnd_epoch` it becomes:
     ///
-    /// `k = cubic_root((w_max - cwnd_epoch)/C/MSS)`
-    fn calc_k(&self, cwnd_epoch: f64, max_datagram_size: usize) -> f64 {
-        ((self.w_max - cwnd_epoch) / CUBIC_C / convert_to_f64(max_datagram_size)).cbrt()
+    /// `k = cubic_root((w_max - cwnd_epoch)/SMSS/C)`
+    fn calc_k(&self, cwnd_epoch: f64, max_datagram_size_f64: f64) -> f64 {
+        ((self.w_max - cwnd_epoch) / max_datagram_size_f64) / CUBIC_C.cbrt()
     }
 
     /// `w_cubic(t) = C*(t-K)^3 + w_max`
@@ -211,11 +201,12 @@ impl Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#figure-1>
     ///
-    /// Taking into account that we're using bytes not MSS units, the formula becomes:
+    /// Taking into account that neqo is using bytes and the formula returns segments and that
+    /// `w_max` already is in bytes the formula becomes:
     ///
-    /// `w_cubic(t) = (C*(t-K)^3) * MSS + w_max`
-    fn w_cubic(&self, t: f64, max_datagram_size: usize) -> f64 {
-        (CUBIC_C * (t - self.k).powi(3)).mul_add(convert_to_f64(max_datagram_size), self.w_max)
+    /// `w_cubic(t) = (C*(t-K)^3) * SMSS + w_max`
+    fn w_cubic(&self, t: f64, max_datagram_size_f64: f64) -> f64 {
+        (CUBIC_C * (t - self.k).powi(3)).mul_add(max_datagram_size_f64, self.w_max)
     }
 
     /// This function resets all relevant parameters at the start of a new epoch (new congestion
@@ -226,7 +217,7 @@ impl Cubic {
     /// > `w_est` is set equal to `cwnd_epoch` at the start of the congestion avoidance stage.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-9>
-    fn start_epoch(&mut self, cwnd_epoch: f64, max_datagram_size: usize, now: Instant) {
+    fn start_epoch(&mut self, cwnd_epoch: f64, max_datagram_size_f64: f64, now: Instant) {
         self.alpha = CUBIC_ALPHA;
         self.t_epoch = Some(now);
         self.w_est = cwnd_epoch;
@@ -241,7 +232,7 @@ impl Cubic {
             self.w_max = cwnd_epoch;
             0.0
         } else {
-            self.calc_k(cwnd_epoch, max_datagram_size)
+            self.calc_k(cwnd_epoch, max_datagram_size_f64)
         };
         qtrace!("[{self}] New epoch");
     }
@@ -262,6 +253,7 @@ impl WindowAdjustment for Cubic {
         now: Instant,
     ) -> usize {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
+        let max_datagram_size_f64 = convert_to_f64(max_datagram_size);
         self.bytes_acked = convert_to_f64(new_acked_bytes);
         let t_epoch;
         if let Some(t) = self.t_epoch {
@@ -271,45 +263,27 @@ impl WindowAdjustment for Cubic {
         // start.
         } else {
             t_epoch = now;
-            self.start_epoch(curr_cwnd_f64, max_datagram_size, now);
+            self.start_epoch(curr_cwnd_f64, max_datagram_size_f64, now);
         }
 
         // Calculate `target` for the concave or convex region
         //
-        // <https://datatracker.ietf.org/doc/html/rfc9438#name-concave-region>
-        // <https://datatracker.ietf.org/doc/html/rfc9438#name-convex-region>
+        // > Upon receiving a new ACK during congestion avoidance, CUBIC computes the target
+        // > congestion window size after the next RTT [...], where RTT is the
+        // > smoothed round-trip time. The lower and upper bounds below ensure that CUBIC's
+        // > congestion window increase rate is non-decreasing and is less than the increase rate of
+        // > slow start.
         //
-        // UPDATE: New logic for how `target` is calculated.
+        // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.2-10>
         //
-        // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.2-11.1>
-        //
-        // And the `cwnd` increase of `target - cwnd / cwnd` only applies here,
-        // not in the Reno-friendly region. So that needs to be adjusted. Right now
-        // we are doing the `target - cwnd / cwnd` part for all regions I think.
-        // See wording:
-        //
-        // > cwnd SHOULD be set to w_est ("set to")
-        //
-        // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-8>
-        //
-        // vs.
-        //
-        // > cwnd MUST be incremented by `target - cwnd / cwnd` ("incremented by")
-        //
-        // <https://datatracker.ietf.org/doc/html/rfc9438#name-convex-region>
-        let time_ca = self
-            .t_epoch
-            .map_or(min_rtt, |t| {
-                if now + min_rtt < t {
-                    // This only happens when processing old packets
-                    // that were saved and replayed with old timestamps.
-                    min_rtt
-                } else {
-                    now + min_rtt - t
-                }
-            })
-            .as_secs_f64();
-        let target_cubic = self.w_cubic(time_ca, max_datagram_size);
+        // In neqo target is in bytes.
+        let t = now.saturating_duration_since(t_epoch);
+        // cwnd <= target <= cwnd * 1.5
+        let target = f64::clamp(
+            self.w_cubic((t + min_rtt).as_secs_f64(), max_datagram_size_f64),
+            curr_cwnd_f64,
+            curr_cwnd_f64 * 1.5,
+        );
 
         // Calculate w_est for the Reno-friendly region with a slightly adjusted formula per the
         // below:
@@ -321,8 +295,7 @@ impl WindowAdjustment for Cubic {
         // Formula: w_est = w_est + alpha * (bytes_acked / cwnd) * SMSS
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-9>
-        self.w_est +=
-            self.alpha * (self.bytes_acked / curr_cwnd_f64) * convert_to_f64(max_datagram_size);
+        self.w_est += self.alpha * (self.bytes_acked / curr_cwnd_f64) * max_datagram_size_f64;
 
         // > Once w_est has grown to reach the cwnd at the time of most recently setting
         // > ssthresh -- that is, w_est >= cwnd_prior -- the sender SHOULD set CUBIC_ALPHA to
@@ -346,57 +319,68 @@ impl WindowAdjustment for Cubic {
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-8>
         //
-        // UPDATE: We should compare `w_cubic` (not `target`) and `w_est` here.
-        // Maybe it might make sense to change the order of things a bit:
-        // 1. Calculate `w_cubic` and `w_est`
-        // 2. Compare `w_cubic` and `w_est`
-        // 2.b. Maybe get `target` from `w_cubic`
-        // 3.a. Either get `acked_to_increase` from `target` (with `target - cwnd / cwnd`) OR
-        // 3.b. Get `acked_to_increase` from `w_est` by calculating the difference between
-        // `curr_cwnd` and `w_est`.
-        let target_cwnd = target_cubic.max(self.w_est);
+        // > When receiving a new ACK in congestion avoidance, if CUBIC is not in the Reno-friendly
+        // > region, then CUBIC is in the concave or convex region. In those regions,
+        // > cwnd MUST be incremented by ((target - cwnd) / cwnd) segments.
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.4-1>
+        //
+        // In neqo target_cwnd is in bytes.
+        let target_cwnd = if self.w_cubic(t.as_secs_f64(), max_datagram_size_f64) < self.w_est {
+            // Reno-friendly region sets cwnd = w_est
+            self.w_est
+        } else {
+            // Concave or convex region increments cwnd by ((target - cwnd) / cwnd) segments
+            ((target - curr_cwnd_f64) / curr_cwnd_f64).mul_add(max_datagram_size_f64, curr_cwnd_f64)
+        };
 
         // Calculate the number of bytes that would need to be acknowledged for an increase
-        // of `max_datagram_size` to match the increase of `target - cwnd / cwnd` as defined
-        // in the specification (Sections 4.4 and 4.5).
-        // The amount of data required therefore reduces asymptotically as the target increases.
-        // If the target is not significantly higher than the congestion window, require a very
-        // large amount of acknowledged data (effectively block increases).
+        // of `max_datagram_size` to match the increase from the current congestion window to
+        // `target_cwnd`. Let's call this targeted increase `cwnd_increase`.
+        let cwnd_increase = target_cwnd - curr_cwnd_f64;
+        // The amount of acked data required therefore reduces asymptotically as the target
+        // increases. If the target is not significantly higher than the congestion window,
+        // require a very large amount of acknowledged data (effectively block increases).
+        if cwnd_increase < 1.0 {
+            return max_datagram_size * curr_cwnd;
+        }
+        // We get a formula for acked_to_increase the following way:
         //
-        // UPDATE: See above.
-        let mut acked_to_increase =
-            max_datagram_size * curr_cwnd_f64 / (target_cwnd - curr_cwnd_f64).max(1.0);
+        // (We want to know how many bytes to ack for cwnd_increase to match max_datagram_size)
+        // max_datagram_size = cwnd_increase * acked_to_increase
+        // ==> acked_to_increase = max_datagram_size / cwnd_increase
+        // ((max_datagram_size / cwnd_increase) returns segments needed to increase, thus we
+        // multiply by max_datagram_size again)
+        // ==> acked_to_increase = max_datagram_size / cwnd_increase * max_datagram_size
+        //
+        // Let's take an example with real numbers, e.g. cwnd_increase = 0.5*smss
+        // ==> 1*smss / 0.5*smss = 2 segments acked needed to increase cwnd by 1*smss
+        // ==> 2 * smss bytes needed to increase cwnd by 1*smss
+        (max_datagram_size_f64 / cwnd_increase * max_datagram_size_f64) as usize
 
-        // Limit increase to max 1 MSS per EXPONENTIAL_GROWTH_REDUCTION ack packets.
-        // This effectively limits target_cwnd to (1 + 1 / EXPONENTIAL_GROWTH_REDUCTION) cwnd.
-        acked_to_increase = acked_to_increase.max(EXPONENTIAL_GROWTH_REDUCTION * max_datagram_size);
-        acked_to_increase as usize
+        // other options:
+        // 1. get rid of the acked_to_increase logic and just do something akin to
+        //    `self.congestion_window = target_cwnd` OR
+        // 2. if we are actually bound to only increase in SMSS blocks then do `if cwnd_increase >=
+        //    max_datagram_size` and only increase if it is. track cwnd_increase across calls of
+        //    this function.
     }
 
-    // CUBIC RFC 9438 changes the logic for multiplicative decrease:
-    //
-    // > ssthresh = bytes_in_flight * CUBIC_BETA
-    // > cwnd_prior = cwnd
-    // > if (reduction_on_loss) {
-    // > cwnd = max(ssthresh, 2*MSS)
-    // > } else if (reduction_on_ece) {
-    // > cwnd = max(ssthresh, 1*MSS)
-    // > }
-    // > ssthresh = max(ssthresh, 2*MSS)
+    // CUBIC RFC 9438 changes the logic for multiplicative decrease, most notably setting the
+    // minimum congestion window to 1*SMSS under some circumstances while keeping ssthresh at
+    // 2*SMSS.
     //
     // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.6>
     //
-    // Most notably setting the minimum congestion window to 1*MSS under some circumstances.
-    //
-    // QUIC has a minimum congestion window of 2*MSS as per RFC 9002 though.
+    // QUIC has a minimum congestion window of 2*SMSS as per RFC 9002.
     //
     // <https://datatracker.ietf.org/doc/html/rfc9002#section-4.8>
     //
     // For that reason we diverge from CUBIC RFC 9438 here and can still assert that `ssthresh`
-    // always equals `cwnd` making this calculation look like:
+    // always equals `cwnd` making the multiplicative decrease look like:
     //
     // > ssthresh = cwnd * CUBIC_BETA
-    // > ssthresh = max(ssthresh, 2*MSS)
+    // > ssthresh = max(ssthresh, 2*SMSS)
     // > cwnd = ssthresh
     //
     // With the note:
@@ -404,12 +388,12 @@ impl WindowAdjustment for Cubic {
     // > A QUIC sender that uses a `cwnd` value to calculate new values for `cwnd` and `ssthresh`
     // > after detecting a congestion event is REQUIRED to apply similar mechanisms [RFC9002].
     //
-    // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.6-4>
-    //
     // "similar mechanisms" refering to taking "measures to prevent cwnd from growing when the
     // volume of bytes in flight is smaller than cwnd".
     //
-    // QUESTION: Do we already do this somewhere?
+    // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.6-4>
+    //
+    // TODO: Do we already have those mechanisms somewhere?
     //
     // This function only returns the value for `cwnd * CUBIC_BETA` and sets some variables for the
     // start of a new congestion avoidance phase. Actually setting the congestion window happens in
