@@ -8,3 +8,4 @@ allow-mixed-uninlined-format-args = false
 allow-unwrap-in-tests = true
 allow-dbg-in-tests = true
 avoid-breaking-exported-api = false # We have one consumer and can afford to break the API.
+pass-by-value-size-limit = 32
