@@ -20,8 +20,8 @@ To run test HTTP/3 programs (`neqo-client` and `neqo-server`):
 ## Build with separate NSS/NSPR
 
 You can clone [NSS][NSS] and [NSPR][NSPR] into the same directory and export an
-environment variable called `NSS_DIR` pointing to NSS.  This causes the build to
-use the existing NSS checkout.  However, in order to run anything that depends
+environment variable called `NSS_DIR` pointing to NSS. This causes the build to
+use the existing NSS checkout. However, in order to run anything that depends
 on NSS, you need to set an environment as follows:
 
 ### Linux
@@ -58,7 +58,7 @@ To export QLOG files for [Neqo Simulator](./test-fixture/src/sim) runs, set the
 environment variable `QLOGDIR`. For example:
 
 ```shell
-QLOGDIR=/tmp/qlog cargo bench --profile=dev --bench min_bandwidth --features bench
+QLOGDIR=/tmp/qlog cargo bench --bench min_bandwidth --features bench
 ```
 
 ### Using `SSLKEYLOGFILE` to decrypt Wireshark logs
@@ -133,8 +133,8 @@ something has changed.
 
 1. Run `neqo-server` via `cargo run --bin neqo-server -- 'localhost:12345' --db ./test-fixture/db`.
 2. On Firefox, set `about:config` preferences:
-  - `network.http.http3.alt-svc-mapping-for-testing` to `localhost;h3=":12345"`
-  - `network.http.http3.disable_when_third_party_roots_found` to `false`
+   - `network.http.http3.alt-svc-mapping-for-testing` to `localhost;h3=":12345"`
+   - `network.http.http3.disable_when_third_party_roots_found` to `false`
 3. Optionally enable logging via `about:logging` or profiling via <https://profiler.firefox.com/>.
 4. Navigate to <https://localhost:12345> and accept self-signed certificate.
 

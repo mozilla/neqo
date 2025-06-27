@@ -174,10 +174,8 @@ use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;
 use neqo_qpack::Error as QpackError;
+use neqo_transport::{recv_stream, send_stream, AppError, Connection, Error as TransportError};
 pub use neqo_transport::{streams::SendOrder, Output, StreamId};
-use neqo_transport::{
-    AppError, Connection, Error as TransportError, RecvStreamStats, SendStreamStats,
-};
 pub use priority::Priority;
 pub use push_id::PushId;
 pub use server::Http3Server;
@@ -483,7 +481,7 @@ trait RecvStream: Stream {
     }
 
     /// This function is only implemented by `WebTransportRecvStream`.
-    fn stats(&mut self, _conn: &mut Connection) -> Res<RecvStreamStats> {
+    fn stats(&mut self, _conn: &mut Connection) -> Res<recv_stream::Stats> {
         Err(Error::Unavailable)
     }
 }
@@ -544,14 +542,14 @@ impl Http3StreamInfo {
 }
 
 trait RecvStreamEvents: Debug {
-    fn data_readable(&self, _stream_info: Http3StreamInfo) {}
-    fn recv_closed(&self, _stream_info: Http3StreamInfo, _close_type: CloseType) {}
+    fn data_readable(&self, _stream_info: &Http3StreamInfo) {}
+    fn recv_closed(&self, _stream_info: &Http3StreamInfo, _close_type: CloseType) {}
 }
 
 trait HttpRecvStreamEvents: RecvStreamEvents {
     fn header_ready(
         &self,
-        stream_info: Http3StreamInfo,
+        stream_info: &Http3StreamInfo,
         headers: Vec<Header>,
         interim: bool,
         fin: bool,
@@ -605,7 +603,7 @@ trait SendStream: Stream {
     }
 
     /// This function is only implemented by `WebTransportSendStream`.
-    fn stats(&mut self, _conn: &mut Connection) -> Res<SendStreamStats> {
+    fn stats(&mut self, _conn: &mut Connection) -> Res<send_stream::Stats> {
         Err(Error::Unavailable)
     }
 }
@@ -623,8 +621,8 @@ trait HttpSendStream: SendStream {
 }
 
 trait SendStreamEvents: Debug {
-    fn send_closed(&self, _stream_info: Http3StreamInfo, _close_type: CloseType) {}
-    fn data_writable(&self, _stream_info: Http3StreamInfo) {}
+    fn send_closed(&self, _stream_info: &Http3StreamInfo, _close_type: CloseType) {}
+    fn data_writable(&self, _stream_info: &Http3StreamInfo) {}
 }
 
 /// This enum is used to mark a different type of closing a stream:

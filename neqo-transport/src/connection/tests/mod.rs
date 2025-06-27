@@ -25,7 +25,7 @@ use crate::{
     cid::ConnectionIdRef,
     events::ConnectionEvent,
     frame::FrameType,
-    packet::PacketBuilder,
+    packet,
     pmtud::Pmtud,
     recovery::ACK_ONLY_SIZE_LIMIT,
     stats::{FrameStats, Stats, MAX_PTO_COUNTS},
@@ -181,7 +181,7 @@ pub fn rttvar_after_n_updates(n: usize, rtt: Duration) -> Duration {
 struct PingWriter {}
 
 impl test_internal::FrameWriter for PingWriter {
-    fn write_frames(&mut self, builder: &mut PacketBuilder) {
+    fn write_frames(&mut self, builder: &mut packet::Builder) {
         builder.encode_varint(FrameType::Ping);
     }
 }
