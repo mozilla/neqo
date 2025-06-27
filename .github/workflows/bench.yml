@@ -19,7 +19,7 @@ permissions:
 jobs:
   bench:
     name: Benchmark
-    runs-on: self-hosted # zizmor: ignore[self-hosted-runner]
+    runs-on: [self-hosted, moonshot] # zizmor: ignore[self-hosted-runner]
     defaults:
       run:
         shell: bash
@@ -41,6 +41,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: microsoft/msquic
+          ref: v2.4.12
           path: msquic
           submodules: 'recursive'
           persist-credentials: false
@@ -50,6 +51,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: google/quiche
+          ref: 520b4e9e361f3a1b52f1490e9a0f1a2f46e1df9f # Google doesn't tag release, just update the hash occasionally
           path: google-quiche
           submodules: 'recursive'
           persist-credentials: false
@@ -59,6 +61,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: cloudflare/quiche
+          ref: 0.24.4
           path: quiche
           submodules: 'recursive'
           persist-credentials: false
@@ -68,6 +71,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: aws/s2n-quic
+          ref: v1.60.0
           path: s2n-quic
           submodules: 'recursive'
           persist-credentials: false
