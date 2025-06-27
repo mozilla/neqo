@@ -9,10 +9,7 @@ fuzz_target!(|data: &[u8]| {
     use neqo_crypto::Aead;
     use neqo_transport::{packet::MIN_INITIAL_PACKET_SIZE, ConnectionParameters, Version};
     use test_fixture::{
-        header_protection::{
-            apply_header_protection, decode_initial_header, initial_aead_and_hp,
-            remove_header_protection,
-        },
+        header_protection::{self, decode_initial_header, initial_aead_and_hp},
         new_client, new_server, now, DEFAULT_ALPN,
     };
 
@@ -25,7 +22,7 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Server);
-    let (_, pn) = remove_header_protection(&hp, header, payload);
+    let (_, pn) = header_protection::remove(&hp, header, payload);
 
     let mut payload_enc = Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE);
     payload_enc.encode(data); // Add fuzzed data.
@@ -55,7 +52,7 @@ fuzz_target!(|data: &[u8]| {
     // Pad with zero to get up to MIN_INITIAL_PACKET_SIZE.
     ciphertext.resize(MIN_INITIAL_PACKET_SIZE, 0);
 
-    apply_header_protection(
+    header_protection::apply(
         &hp,
         &mut ciphertext,
         (header_enc.len() - 1)..header_enc.len(),

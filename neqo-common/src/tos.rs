@@ -168,7 +168,7 @@ impl From<u8> for Tos {
 
 impl Debug for Tos {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("IpTos")
+        f.debug_tuple("Tos")
             .field(&Dscp::from(*self))
             .field(&Ecn::from(*self))
             .finish()
@@ -195,7 +195,7 @@ mod tests {
     use crate::{Dscp, Ecn, Tos};
 
     #[test]
-    fn iptosecn_into_u8() {
+    fn ecn_into_u8() {
         assert_eq!(u8::from(Ecn::NotEct), 0b00);
         assert_eq!(u8::from(Ecn::Ect1), 0b01);
         assert_eq!(u8::from(Ecn::Ect0), 0b10);
@@ -203,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn u8_into_iptosecn() {
+    fn u8_into_ecn() {
         assert_eq!(Ecn::from(0b00), Ecn::NotEct);
         assert_eq!(Ecn::from(0b01), Ecn::Ect1);
         assert_eq!(Ecn::from(0b10), Ecn::Ect0);
@@ -211,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn iptosdscp_into_u8() {
+    fn dscp_into_u8() {
         assert_eq!(u8::from(Dscp::Cs0), 0b0000_0000);
         assert_eq!(u8::from(Dscp::Cs1), 0b0010_0000);
         assert_eq!(u8::from(Dscp::Cs2), 0b0100_0000);
@@ -238,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn u8_into_iptosdscp() {
+    fn u8_into_dscp() {
         assert_eq!(Dscp::from(0b0000_0000), Dscp::Cs0);
         assert_eq!(Dscp::from(0b0010_0000), Dscp::Cs1);
         assert_eq!(Dscp::from(0b0100_0000), Dscp::Cs2);
@@ -265,29 +265,29 @@ mod tests {
     }
 
     #[test]
-    fn iptosecn_into_iptos() {
+    fn ecn_into_tos() {
         let ecn = Ecn::default();
-        let iptos_ecn: Tos = ecn.into();
-        assert_eq!(u8::from(iptos_ecn), ecn as u8);
+        let tos: Tos = ecn.into();
+        assert_eq!(u8::from(tos), ecn as u8);
     }
 
     #[test]
-    fn iptosdscp_into_iptos() {
+    fn dscp_into_tos() {
         let dscp = Dscp::default();
-        let iptos_dscp: Tos = dscp.into();
-        assert_eq!(u8::from(iptos_dscp), dscp as u8);
+        let tos_dscp: Tos = dscp.into();
+        assert_eq!(u8::from(tos_dscp), dscp as u8);
     }
 
     #[test]
-    fn u8_to_iptos() {
-        let tos = 0x8b;
-        let iptos: Tos = (Ecn::Ce, Dscp::Af41).into();
-        assert_eq!(tos, u8::from(iptos));
-        assert_eq!(Tos::from(tos), iptos);
+    fn u8_to_tos() {
+        let tos_u8 = 0x8b;
+        let tos = Tos::from((Ecn::Ce, Dscp::Af41));
+        assert_eq!(tos_u8, u8::from(tos));
+        assert_eq!(Tos::from(tos_u8), tos);
     }
 
     #[test]
-    fn iptos_to_iptosdscp() {
+    fn tos_to_dscp() {
         let tos = Tos::from((Dscp::Af41, Ecn::NotEct));
         let dscp = Dscp::from(tos);
         assert_eq!(dscp, Dscp::Af41);
@@ -295,26 +295,26 @@ mod tests {
 
     #[test]
     fn tos_modify_ecn() {
-        let mut iptos: Tos = (Dscp::Af41, Ecn::NotEct).into();
-        iptos.set_ecn(Ecn::Ce);
-        assert_eq!(u8::from(iptos), 0b1000_1011);
+        let mut tos: Tos = (Dscp::Af41, Ecn::NotEct).into();
+        tos.set_ecn(Ecn::Ce);
+        assert_eq!(u8::from(tos), 0b1000_1011);
     }
 
     #[test]
     fn tos_modify_dscp() {
-        let mut iptos: Tos = (Dscp::Af41, Ecn::Ect1).into();
-        iptos.set_dscp(Dscp::Le);
-        assert_eq!(u8::from(iptos), 0b0000_0101);
+        let mut tos: Tos = (Dscp::Af41, Ecn::Ect1).into();
+        tos.set_dscp(Dscp::Le);
+        assert_eq!(u8::from(tos), 0b0000_0101);
     }
 
     #[test]
-    fn iptos_is_ecn_marked() {
-        let iptos: Tos = (Dscp::Af41, Ecn::Ce).into();
-        assert!(iptos.is_ecn_marked());
+    fn tos_is_ecn_marked() {
+        let tos: Tos = (Dscp::Af41, Ecn::Ce).into();
+        assert!(tos.is_ecn_marked());
     }
 
     #[test]
-    fn iptosecn_is_ecn_marked() {
+    fn ecn_is_ecn_marked() {
         assert!(Ecn::Ce.is_ecn_marked());
         assert!(!Ecn::NotEct.is_ecn_marked());
     }
