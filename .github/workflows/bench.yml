@@ -45,7 +45,7 @@ jobs:
         uses: ./neqo/.github/actions/rust
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
-          tools: hyperfine, flamegraph, samply
+          tools: flamegraph, samply
           token: ${{ secrets.GITHUB_TOKEN }}
           workspaces: |
             neqo
@@ -173,7 +173,6 @@ jobs:
             echo "### Client/server transfer results"
             echo
             cat sha.md
-            cat comparison.md
           } >> results.md
           rm sha.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
@@ -184,7 +183,7 @@ jobs:
         id: export_samply
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}-samply
+          name: ${{ github.event.repository.name }}-${{ github.sha }}-bench-samply
           path: |
             *.samply.json.gz
             *.syms.json
@@ -195,7 +194,7 @@ jobs:
         id: export_perf
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}-perf
+          name: ${{ github.event.repository.name }}-${{ github.sha }}-bench-perf
           path: |
             *.svg
             *.txt
@@ -205,8 +204,6 @@ jobs:
             results-main.*
             criterion
             criterion-main
-            hyperfine
-            hyperfine-main
           compression-level: 9
 
       - name: Export PR comment data
@@ -231,4 +228,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- binaries comment-data hyperfine hyperfine-main criterion criterion-main "$COMPARE_TMP" || true
+          rm -r -- binaries comment-data criterion criterion-main "$COMPARE_TMP" || true

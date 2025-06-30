@@ -472,7 +472,7 @@ jobs:
         id: export_samply
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}-samply
+          name: ${{ github.event.repository.name }}-${{ github.sha }}-perfcompare-samply
           path: |
             *.samply.json.gz
             *.syms.json
@@ -483,7 +483,7 @@ jobs:
         id: export_perf
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}-perf
+          name: ${{ github.event.repository.name }}-${{ github.sha }}-perfcompare-perf
           path: |
             *.svg
             *.txt
@@ -491,8 +491,6 @@ jobs:
             event.json
             results.*
             results-main.*
-            criterion
-            criterion-main
             hyperfine
             hyperfine-main
           compression-level: 9
@@ -519,4 +517,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- binaries comment-data hyperfine hyperfine-main criterion criterion-main "$COMPARE_TMP" || true
+          rm -r -- binaries comment-data hyperfine hyperfine-main "$COMPARE_TMP" || true
