@@ -9,7 +9,7 @@
 use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
-    collections::{btree_map::Entry, BTreeMap, VecDeque},
+    collections::{btree_map::Entry, hash_map, BTreeMap, VecDeque},
     fmt::{self, Display, Formatter},
     mem,
     num::NonZeroUsize,
@@ -17,8 +17,8 @@ use std::{
     rc::Rc,
 };
 
-use indexmap::IndexMap;
 use neqo_common::{qdebug, qerror, qtrace, Encoder, Role};
+use rustc_hash::FxHashMap as HashMap;
 use smallvec::SmallVec;
 
 use crate::{
@@ -1479,7 +1479,7 @@ impl Iterator for OrderGroupIter<'_> {
 
 #[derive(Debug, Default)]
 pub struct SendStreams {
-    map: IndexMap<StreamId, SendStream>,
+    map: HashMap<StreamId, SendStream>,
 
     // What we really want is a Priority Queue that we can do arbitrary
     // removes from (so we can reprioritize). BinaryHeap doesn't work,
@@ -1508,7 +1508,7 @@ pub struct SendStreams {
 
     // These both store stream_ids, which need to be looked up in 'map'.
     // This avoids the complexity of trying to hold references to the
-    // Streams which are owned by the IndexMap.
+    // Streams which are owned by the HashMap.
     sendordered: BTreeMap<SendOrder, OrderGroup>,
     regular: OrderGroup, // streams with no SendOrder set, sorted in stream_id order
 }
@@ -1719,6 +1719,10 @@ impl SendStreams {
         // Iterate the map, but only those without fairness, then iterate
         // OrderGroups, then iterate each group
         qtrace!("processing streams...  unfair:");
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over streams in an undefined order."
+        )]
         for stream in self.map.values_mut() {
             if !stream.is_fair() {
                 qtrace!("   {stream}");
@@ -1754,6 +1758,10 @@ impl SendStreams {
         reason = "OK here."
     )]
     pub fn update_initial_limit(&mut self, remote: &TransportParameters) {
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over streams in an undefined order."
+        )]
         for (id, ss) in &mut self.map {
             let limit = if id.is_bidi() {
                 assert!(!id.is_remote_initiated(Role::Client));
@@ -1773,9 +1781,9 @@ impl SendStreams {
 )]
 impl<'a> IntoIterator for &'a mut SendStreams {
     type Item = (&'a StreamId, &'a mut SendStream);
-    type IntoIter = indexmap::map::IterMut<'a, StreamId, SendStream>;
+    type IntoIter = hash_map::IterMut<'a, StreamId, SendStream>;
 
-    fn into_iter(self) -> indexmap::map::IterMut<'a, StreamId, SendStream> {
+    fn into_iter(self) -> hash_map::IterMut<'a, StreamId, SendStream> {
         self.map.iter_mut()
     }
 }

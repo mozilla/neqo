@@ -895,7 +895,6 @@ dependencies = [
  "criterion",
  "enum-map",
  "enumset",
- "indexmap",
  "log",
  "mtu",
  "neqo-common",
