@@ -26,8 +26,12 @@ const TEST_COUNT_INITIAL_PHASE: usize = 3;
 
 /// The state information related to testing a path for ECN capability.
 /// See RFC9000, Appendix A.4.
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Default)]
 enum ValidationState {
+    /// ECN validation not started yet. Reason might e.g. be still handshaking
+    /// or not being the primary path.
+    #[default]
+    NotStarted,
     /// The path is currently being tested for ECN capability, with the number of probes sent so
     /// far on the path during the ECN validation.
     Testing {
@@ -43,26 +47,18 @@ enum ValidationState {
     Capable,
 }
 
-impl Default for ValidationState {
-    fn default() -> Self {
-        Self::Testing {
-            probes_sent: 0,
-            initial_probes_acked: 0,
-            initial_probes_lost: 0,
-        }
-    }
-}
-
 impl ValidationState {
     fn set(&mut self, new: Self, stats: &mut Stats) {
         let old = std::mem::replace(self, new);
 
         match old {
+            Self::NotStarted => unreachable!("TODO"),
             Self::Testing { .. } | Self::Unknown => {}
             Self::Failed(_) => debug_assert!(false, "Failed is a terminal state"),
             Self::Capable => stats.ecn_path_validation[ValidationOutcome::Capable] -= 1,
         }
         match new {
+            Self::NotStarted => unreachable!("TODO"),
             Self::Testing { .. } | Self::Unknown => {}
             Self::Failed(error) => {
                 stats.ecn_path_validation[ValidationOutcome::NotCapable(error)] += 1;
@@ -180,6 +176,18 @@ pub(crate) struct Info {
 }
 
 impl Info {
+    pub(crate) fn start(&mut self) {
+        if !matches!(self.state, ValidationState::NotStarted) {
+            return;
+        }
+
+        self.state = ValidationState::Testing {
+            probes_sent: 0,
+            initial_probes_acked: 0,
+            initial_probes_lost: 0,
+        }
+    }
+
     /// Set the baseline (= the ECN counts from the last ACK Frame).
     pub(crate) fn set_baseline(&mut self, baseline: Count) {
         self.baseline = baseline;
@@ -239,11 +247,7 @@ impl Info {
     }
 
     /// An [`Ecn::Ect0`] marked packet has been declared lost.
-    pub(crate) fn lost_ecn(&mut self, pt: packet::Type, stats: &mut Stats) {
-        if pt != packet::Type::Initial {
-            return;
-        }
-
+    pub(crate) fn lost_ecn(&mut self, stats: &mut Stats) {
         if let ValidationState::Testing {
             initial_probes_acked: probes_acked,
             initial_probes_lost: probes_lost,
@@ -285,7 +289,9 @@ impl Info {
         // > (see Section 13.4.2.1) causes the ECN state for the path to become "capable", unless
         // > no marked packet has been acknowledged.
         match self.state {
-            ValidationState::Testing { .. } | ValidationState::Failed(_) => return,
+            ValidationState::NotStarted
+            | ValidationState::Testing { .. }
+            | ValidationState::Failed(_) => return,
             ValidationState::Unknown | ValidationState::Capable => {}
         }
 
@@ -342,7 +348,9 @@ impl Info {
     pub(crate) const fn is_marking(&self) -> bool {
         match self.state {
             ValidationState::Testing { .. } | ValidationState::Capable => true,
-            ValidationState::Failed(_) | ValidationState::Unknown => false,
+            ValidationState::NotStarted | ValidationState::Failed(_) | ValidationState::Unknown => {
+                false
+            }
         }
     }
 
@@ -350,8 +358,8 @@ impl Info {
     ///
     /// On [`Ecn::Ect0`] adds a [`recovery::Token::EcnEct0`] to `tokens` in
     /// order to detect potential loss, then handled in [`Info::lost_ecn`].
-    pub(crate) fn ecn_mark(&self, tokens: &mut Vec<recovery::Token>) -> Ecn {
-        if self.is_marking() {
+    pub(crate) fn ecn_mark(&self, pt: packet::Type, tokens: &mut Vec<recovery::Token>) -> Ecn {
+        if pt == packet::Type::Short && self.is_marking() {
             tokens.push(recovery::Token::EcnEct0);
             Ecn::Ect0
         } else {
