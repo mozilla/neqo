@@ -10,7 +10,7 @@
 use std::{
     cell::RefCell,
     cmp::max,
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fmt::Debug,
     mem,
     rc::{Rc, Weak},
@@ -50,7 +50,7 @@ pub const MAX_RECV_WINDOW_SIZE: u64 = 10 * 1024 * 1024;
 
 #[derive(Debug, Default)]
 pub struct RecvStreams {
-    streams: BTreeMap<StreamId, RecvStream>,
+    streams: HashMap<StreamId, RecvStream>,
     keep_alive: Weak<()>,
 }
 
@@ -63,6 +63,10 @@ impl RecvStreams {
         now: Instant,
         rtt: Duration,
     ) {
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over streams in an undefined order."
+        )]
         for stream in self.streams.values_mut() {
             stream.write_frame(builder, tokens, stats, now, rtt);
             if builder.is_full() {
