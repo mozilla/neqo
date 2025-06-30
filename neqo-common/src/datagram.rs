@@ -142,7 +142,7 @@ pub struct DatagramBatch {
     src: SocketAddr,
     dst: SocketAddr,
     tos: Tos,
-    segment_size: usize,
+    datagram_size: usize,
     d: Vec<u8>,
 }
 
@@ -154,7 +154,7 @@ impl Debug for DatagramBatch {
             self.tos,
             self.src,
             self.dst,
-            self.segment_size,
+            self.datagram_size,
             hex_with_len(&self.d)
         )
     }
@@ -166,7 +166,7 @@ impl From<Datagram<Vec<u8>>> for DatagramBatch {
             src: d.src,
             dst: d.dst,
             tos: d.tos,
-            segment_size: d.d.len(),
+            datagram_size: d.d.len(),
             d: d.d,
         }
     }
@@ -189,14 +189,14 @@ impl DatagramBatch {
         src: SocketAddr,
         dst: SocketAddr,
         tos: Tos,
-        segment_size: usize,
+        datagram_size: usize,
         d: Vec<u8>,
     ) -> Self {
         Self {
             src,
             dst,
             tos,
-            segment_size,
+            datagram_size,
             d,
         }
     }
@@ -218,7 +218,7 @@ impl DatagramBatch {
 
     #[must_use]
     pub const fn datagram_size(&self) -> usize {
-        self.segment_size
+        self.datagram_size
     }
 
     #[must_use]
@@ -228,12 +228,12 @@ impl DatagramBatch {
 
     #[must_use]
     pub fn num_datagrams(&self) -> usize {
-        self.d.len().div_ceil(self.segment_size)
+        self.d.len().div_ceil(self.datagram_size)
     }
 
     #[cfg(feature = "build-fuzzing-corpus")]
     pub fn iter(&self) -> impl Iterator<Item = &[u8]> {
-        self.d.chunks(self.segment_size)
+        self.d.chunks(self.datagram_size)
     }
 }
 
