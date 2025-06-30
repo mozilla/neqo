@@ -116,6 +116,9 @@ fn is_emsgsize(e: &io::Error) -> bool {
         #[cfg(windows)]
         {
             e == windows::Win32::Networking::WinSock::WSAEMSGSIZE.0
+                // WSAEINVAL is returned when the Windows USO (UDP Segmentation Offload)
+                // segment size exceeds the supported limit.
+                || windows::Win32::Networking::WinSock::WSAEINVAL.0
         }
         #[cfg(not(any(unix, windows)))]
         {
