@@ -482,7 +482,7 @@ jobs:
       - name: Export PR comment data
         uses: ./neqo/.github/actions/pr-comment-data-export
         with:
-          name: ${{ github.workflow }}
+          name: ${{ github.workflow }}-perfcompare
           contents: results.md
           log-md: ${{ format('[Download data for `profiler.firefox.com`]({0}) or [download performance comparison data]({1}).', steps.export_samply.outputs.artifact-url, steps.export_perf.outputs.artifact-url) }}
 
