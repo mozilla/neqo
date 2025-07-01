@@ -98,7 +98,7 @@ jobs:
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} junit-test
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -130,8 +130,6 @@ jobs:
           else
             cargo test $BUILD_TYPE --locked --features ci
           fi
-          # shellcheck disable=SC2086
-          junit-test $BUILD_TYPE
 
       - name: Run client/server transfer
         run: |
@@ -166,14 +164,6 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
-
-      - uses: codecov/test-results-action@47f89e9acb64b76debcd5ea40642d25a4adced9f # v1.1.1
-        if: ${{ always() }}
-        with:
-          files: junit.xml
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
-          verbose: true
 
       - name: Save simulation seeds artifact
         if: ${{ always() }}
