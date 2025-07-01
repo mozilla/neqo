@@ -14,7 +14,7 @@ use std::{
 };
 
 use enum_map::Enum;
-use neqo_common::{hex, hex_with_len, qtrace, qwarn, Decoder, Encoder};
+use neqo_common::{hex, hex_with_len, qtrace, qwarn, Buffer, Decoder, Encoder};
 use neqo_crypto::{random, Aead};
 use strum::{EnumIter, FromRepr};
 
@@ -131,8 +131,8 @@ struct BuilderOffsets {
 
 /// A packet builder that can be used to produce short packets and long packets.
 /// This does not produce Retry or Version Negotiation.
-pub struct Builder {
-    encoder: Encoder,
+pub struct Builder<B> {
+    encoder: Encoder<B>,
     pn: Number,
     header: Range<usize>,
     offsets: BuilderOffsets,
@@ -141,10 +141,82 @@ pub struct Builder {
     padding: bool,
 }
 
-impl Builder {
+impl Builder<Vec<u8>> {
     /// The minimum useful frame size.  If space is less than this, we will claim to be full.
     pub const MINIMUM_FRAME_SIZE: usize = 2;
 
+    /// Make a retry packet.
+    /// As this is a simple packet, this is just an associated function.
+    /// As Retry is odd (it has to be constructed with leading bytes),
+    /// this returns a [`Vec<u8>`] rather than building on an encoder.
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if AEAD encrypt fails.
+    pub fn retry(
+        version: Version,
+        dcid: &[u8],
+        scid: &[u8],
+        token: &[u8],
+        odcid: &[u8],
+    ) -> Res<Vec<u8>> {
+        let mut encoder = Encoder::default();
+        encoder.encode_vec(1, odcid);
+        let start = encoder.len();
+        encoder.encode_byte(
+            PACKET_BIT_LONG
+                | PACKET_BIT_FIXED_QUIC
+                | (Type::Retry.to_byte(version) << 4)
+                | (random::<1>()[0] & 0xf),
+        );
+        encoder.encode_uint(4, version.wire_version());
+        encoder.encode_vec(1, dcid);
+        encoder.encode_vec(1, scid);
+        debug_assert_ne!(token.len(), 0);
+        encoder.encode(token);
+        let tag = retry::use_aead(version, |aead| {
+            let mut buf = vec![0; Aead::expansion()];
+            Ok(aead.encrypt(0, encoder.as_ref(), &[], &mut buf)?.to_vec())
+        })?;
+        encoder.encode(&tag);
+        let mut complete: Vec<u8> = encoder.into();
+        Ok(complete.split_off(start))
+    }
+
+    /// Make a Version Negotiation packet.
+    #[must_use]
+    pub fn version_negotiation(
+        dcid: &[u8],
+        scid: &[u8],
+        client_version: u32,
+        versions: &[Version],
+    ) -> Vec<u8> {
+        let mut encoder = Encoder::default();
+        let mut grease = random::<4>();
+        // This will not include the "QUIC bit" sometimes.  Intentionally.
+        encoder.encode_byte(PACKET_BIT_LONG | (grease[3] & 0x7f));
+        encoder.encode(&[0; 4]); // Zero version == VN.
+        encoder.encode_vec(1, dcid);
+        encoder.encode_vec(1, scid);
+
+        for v in versions {
+            encoder.encode_uint(4, v.wire_version());
+        }
+        // Add a greased version, using the randomness already generated.
+        for g in &mut grease[..3] {
+            *g = *g & 0xf0 | 0x0a;
+        }
+
+        // Ensure our greased version does not collide with the client version
+        // by making the last byte differ from the client initial.
+        grease[3] = (client_version.wrapping_add(0x10) & 0xf0) as u8 | 0x0a;
+        encoder.encode(&grease[..4]);
+
+        Vec::from(encoder)
+    }
+}
+
+impl<B: Buffer> Builder<B> {
     /// Start building a short header packet.
     ///
     /// This doesn't fail if there isn't enough space; instead it returns a builder that
@@ -155,7 +227,7 @@ impl Builder {
     /// If, after calling this method, `remaining()` returns 0, then call `abort()` to get
     /// the encoder back.
     pub fn short<A: AsRef<[u8]>>(
-        mut encoder: Encoder,
+        mut encoder: Encoder<B>,
         key_phase: bool,
         dcid: Option<A>,
         limit: usize,
@@ -196,7 +268,7 @@ impl Builder {
     ///
     /// See `short()` for more on how to handle this in cases where there is no space.
     pub fn long<A: AsRef<[u8]>, A1: AsRef<[u8]>>(
-        mut encoder: Encoder,
+        mut encoder: Encoder<B>,
         pt: Type,
         version: Version,
         mut dcid: Option<A>,
@@ -257,19 +329,19 @@ impl Builder {
     /// How many bytes remain against the size limit for the builder.
     #[must_use]
     pub fn remaining(&self) -> usize {
-        self.limit.saturating_sub(self.encoder.len())
+        self.limit.saturating_sub(self.len())
     }
 
     /// Returns true if the packet has no more space for frames.
     #[must_use]
     pub fn is_full(&self) -> bool {
         // No useful frame is smaller than 2 bytes long.
-        self.limit < self.encoder.len() + Self::MINIMUM_FRAME_SIZE
+        self.limit < self.len() + Builder::MINIMUM_FRAME_SIZE
     }
 
     /// Adjust the limit to ensure that no more data is added.
     pub fn mark_full(&mut self) {
-        self.limit = self.encoder.len();
+        self.limit = self.len();
     }
 
     /// Mark the packet as needing padding (or not).
@@ -390,7 +462,7 @@ impl Builder {
     /// # Errors
     ///
     /// This will return an error if the packet is too large.
-    pub fn build(mut self, crypto: &mut CryptoDxState) -> Res<Encoder> {
+    pub fn build(mut self, crypto: &mut CryptoDxState) -> Res<Encoder<B>> {
         if self.len() > self.limit {
             qwarn!("Packet contents are more than the limit");
             debug_assert!(false);
@@ -434,7 +506,7 @@ impl Builder {
 
     /// Abort writing of this packet and return the encoder.
     #[must_use]
-    pub fn abort(mut self) -> Encoder {
+    pub fn abort(mut self) -> Encoder<B> {
         self.encoder.truncate(self.header.start);
         self.encoder
     }
@@ -445,93 +517,31 @@ impl Builder {
         self.encoder.len() == self.header.end
     }
 
-    /// Make a retry packet.
-    /// As this is a simple packet, this is just an associated function.
-    /// As Retry is odd (it has to be constructed with leading bytes),
-    /// this returns a [`Vec<u8>`] rather than building on an encoder.
-    ///
-    /// # Errors
-    ///
-    /// This will return an error if AEAD encrypt fails.
-    pub fn retry(
-        version: Version,
-        dcid: &[u8],
-        scid: &[u8],
-        token: &[u8],
-        odcid: &[u8],
-    ) -> Res<Vec<u8>> {
-        let mut encoder = Encoder::default();
-        encoder.encode_vec(1, odcid);
-        let start = encoder.len();
-        encoder.encode_byte(
-            PACKET_BIT_LONG
-                | PACKET_BIT_FIXED_QUIC
-                | (Type::Retry.to_byte(version) << 4)
-                | (random::<1>()[0] & 0xf),
-        );
-        encoder.encode_uint(4, version.wire_version());
-        encoder.encode_vec(1, dcid);
-        encoder.encode_vec(1, scid);
-        debug_assert_ne!(token.len(), 0);
-        encoder.encode(token);
-        let tag = retry::use_aead(version, |aead| {
-            let mut buf = vec![0; Aead::expansion()];
-            Ok(aead.encrypt(0, encoder.as_ref(), &[], &mut buf)?.to_vec())
-        })?;
-        encoder.encode(&tag);
-        let mut complete: Vec<u8> = encoder.into();
-        Ok(complete.split_off(start))
+    pub fn len(&self) -> usize {
+        self.encoder.len()
     }
 
-    /// Make a Version Negotiation packet.
-    #[must_use]
-    pub fn version_negotiation(
-        dcid: &[u8],
-        scid: &[u8],
-        client_version: u32,
-        versions: &[Version],
-    ) -> Vec<u8> {
-        let mut encoder = Encoder::default();
-        let mut grease = random::<4>();
-        // This will not include the "QUIC bit" sometimes.  Intentionally.
-        encoder.encode_byte(PACKET_BIT_LONG | (grease[3] & 0x7f));
-        encoder.encode(&[0; 4]); // Zero version == VN.
-        encoder.encode_vec(1, dcid);
-        encoder.encode_vec(1, scid);
-
-        for v in versions {
-            encoder.encode_uint(4, v.wire_version());
-        }
-        // Add a greased version, using the randomness already generated.
-        for g in &mut grease[..3] {
-            *g = *g & 0xf0 | 0x0a;
-        }
-
-        // Ensure our greased version does not collide with the client version
-        // by making the last byte differ from the client initial.
-        grease[3] = (client_version.wrapping_add(0x10) & 0xf0) as u8 | 0x0a;
-        encoder.encode(&grease[..4]);
-
-        Vec::from(encoder)
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
-impl Deref for Builder {
-    type Target = Encoder;
+impl<B> Deref for Builder<B> {
+    type Target = Encoder<B>;
 
     fn deref(&self) -> &Self::Target {
         &self.encoder
     }
 }
 
-impl DerefMut for Builder {
+impl<B> DerefMut for Builder<B> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.encoder
     }
 }
 
-impl From<Builder> for Encoder {
-    fn from(v: Builder) -> Self {
+impl<B> From<Builder<B>> for Encoder<B> {
+    fn from(v: Builder<B>) -> Self {
         v.encoder
     }
 }

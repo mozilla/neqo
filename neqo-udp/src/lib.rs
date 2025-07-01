@@ -18,7 +18,7 @@ use std::{
 };
 
 use log::{log_enabled, Level};
-use neqo_common::{qdebug, qtrace, Datagram, Tos};
+use neqo_common::{qdebug, qtrace, Datagram, DatagramBatch, Tos};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 
 /// Receive buffer size
@@ -64,13 +64,13 @@ impl Default for RecvBuf {
 pub fn send_inner(
     state: &UdpSocketState,
     socket: quinn_udp::UdpSockRef<'_>,
-    d: &Datagram,
+    d: &DatagramBatch,
 ) -> io::Result<()> {
     let transmit = Transmit {
         destination: d.destination(),
         ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
-        contents: d,
-        segment_size: None,
+        contents: d.data(),
+        segment_size: Some(d.datagram_size()),
         src_ip: None,
     };
 
@@ -78,8 +78,10 @@ pub fn send_inner(
         Ok(()) => {}
         Err(e) if is_emsgsize(&e) => {
             qdebug!(
-                "Failed to send datagram of size {} from {} to {}. PMTUD probe? Ignoring error: {}",
-                d.len(),
+                "Failed to send datagram of size {} bytes, in {} segments, each {} bytes, from {} to {}. PMTUD probe? Ignoring error: {}",
+                d.data().len(),
+                d.num_datagrams(),
+                d.datagram_size(),
                 d.source(),
                 d.destination(),
                 e
@@ -90,10 +92,12 @@ pub fn send_inner(
     }
 
     qtrace!(
-        "sent {} bytes from {} to {}",
-        d.len(),
+        "sent {} bytes, in {} segments, each {} bytes, from {} to {} ",
+        d.data().len(),
+        d.num_datagrams(),
+        d.datagram_size(),
         d.source(),
-        d.destination()
+        d.destination(),
     );
 
     Ok(())
@@ -112,6 +116,9 @@ fn is_emsgsize(e: &io::Error) -> bool {
         #[cfg(windows)]
         {
             e == windows::Win32::Networking::WinSock::WSAEMSGSIZE.0
+                // WSAEINVAL is returned when the Windows USO (UDP Segmentation Offload)
+                // segment size exceeds the supported limit.
+                || e == windows::Win32::Networking::WinSock::WSAEINVAL.0
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -143,14 +150,15 @@ pub fn recv_inner<'a, S: SocketRef>(
     if log_enabled!(Level::Trace) {
         for meta in metas.iter().take(n) {
             qtrace!(
-                "received {} bytes from {} to {local_address} in {} segments",
+                "received {} bytes, in {} segments, each {} bytes, from {} to {local_address}",
                 meta.len,
-                meta.addr,
                 if meta.stride == 0 {
                     0
                 } else {
                     meta.len.div_ceil(meta.stride)
-                }
+                },
+                meta.stride,
+                meta.addr,
             );
         }
     }
@@ -235,8 +243,12 @@ impl<S: SocketRef> Socket<S> {
     }
 
     /// Send a [`Datagram`] on the given [`Socket`].
-    pub fn send(&self, d: &Datagram) -> io::Result<()> {
+    pub fn send(&self, d: &DatagramBatch) -> io::Result<()> {
         send_inner(&self.state, (&self.inner).into(), d)
+    }
+
+    pub fn max_gso_segments(&self) -> usize {
+        self.state.max_gso_segments()
     }
 
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each
@@ -289,12 +301,13 @@ mod tests {
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        let datagram = Datagram::new(
+        let datagram: DatagramBatch = Datagram::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             Tos::from((Dscp::Le, Ecn::Ect1)),
             b"Hello, world!".to_vec(),
-        );
+        )
+        .into();
 
         sender.send(&datagram)?;
 
@@ -332,28 +345,26 @@ mod tests {
         not(any(target_os = "linux", target_os = "windows")),
         ignore = "GRO not available"
     )]
-    fn many_datagrams_through_gro() -> Result<(), io::Error> {
+    fn many_datagrams_through_gso_gro() -> Result<(), io::Error> {
         const SEGMENT_SIZE: usize = 128;
 
         let sender = socket()?;
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        // `neqo_udp::Socket::send` does not yet
-        // (https://github.com/mozilla/neqo/issues/1693) support GSO. Use
-        // `quinn_udp` directly.
         let max_gso_segments = sender.state.max_gso_segments();
         let msg = vec![0xAB; SEGMENT_SIZE * max_gso_segments];
-        let transmit = Transmit {
-            destination: receiver.inner.local_addr()?,
-            ecn: EcnCodepoint::from_bits(Into::<u8>::into(Tos::from((Dscp::Le, Ecn::Ect1)))),
-            contents: &msg,
-            segment_size: Some(SEGMENT_SIZE),
-            src_ip: None,
-        };
-        sender.state.try_send((&sender.inner).into(), &transmit)?;
+        let batch = DatagramBatch::new(
+            sender.inner.local_addr()?,
+            receiver.inner.local_addr()?,
+            Tos::from((Dscp::Le, Ecn::Ect0)),
+            SEGMENT_SIZE,
+            msg,
+        );
 
-        // Allow for one GSO sendmmsg to result in multiple GRO recvmmsg.
+        sender.send(&batch)?;
+
+        // Allow for one GSO sendmsg to result in multiple GRO recvmmsg.
         let mut num_received = 0;
         let mut recv_buf = RecvBuf::new();
         while num_received < max_gso_segments {
@@ -386,7 +397,8 @@ mod tests {
             receiver.inner.local_addr()?,
             Tos::from((Dscp::Le, Ecn::Ect1)),
             vec![0; u16::MAX as usize + 1],
-        );
+        )
+        .into();
         sender.send(&oversized_datagram)?;
 
         let mut recv_buf = RecvBuf::new();
@@ -401,7 +413,8 @@ mod tests {
             receiver.inner.local_addr()?,
             Tos::from((Dscp::Le, Ecn::Ect1)),
             b"Hello World!".to_vec(),
-        );
+        )
+        .into();
         sender.send(&normal_datagram)?;
 
         let mut recv_buf = RecvBuf::new();
@@ -410,7 +423,7 @@ mod tests {
         let mut received_datagram = receiver.recv(receiver_addr, &mut recv_buf)?;
         assert_eq!(
             received_datagram.next().unwrap().as_ref(),
-            normal_datagram.as_ref()
+            normal_datagram.data()
         );
 
         Ok(())
