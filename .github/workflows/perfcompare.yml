@@ -19,7 +19,7 @@ permissions:
 jobs:
   perfcompare:
     name: Performance comparison
-    runs-on: [self-hosted, moonshot] # zizmor: ignore[self-hosted-runner]
+    runs-on: "gcp-cirun-bencher--${{ github.run_id }}"
     defaults:
       run:
         shell: bash
