@@ -10,6 +10,7 @@ use std::{
     borrow::Cow,
     cell::RefCell,
     fmt::{self, Display, Formatter},
+    num::NonZeroUsize,
     rc::Rc,
     slice, str,
     time::Instant,
@@ -20,7 +21,7 @@ use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay};
 use neqo_http3::Error;
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
-    ConnectionEvent, ConnectionIdGenerator, Output, State, StreamId,
+    ConnectionEvent, ConnectionIdGenerator, OutputBatch, State, StreamId,
 };
 use regex::Regex;
 use rustc_hash::FxHashMap as HashMap;
@@ -200,8 +201,13 @@ impl HttpServer {
 }
 
 impl super::HttpServer for HttpServer {
-    fn process(&mut self, dgram: Option<Datagram<&mut [u8]>>, now: Instant) -> Output {
-        self.server.process(dgram, now)
+    fn process_multiple(
+        &mut self,
+        dgram: Option<Datagram<&mut [u8]>>,
+        now: Instant,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch {
+        self.server.process_multiple(dgram, now, max_datagrams)
     }
 
     fn process_events(&mut self, now: Instant) {

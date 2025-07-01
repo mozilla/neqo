@@ -8,7 +8,7 @@
 
 use std::{cmp::min, collections::VecDeque};
 
-use neqo_common::Encoder;
+use neqo_common::{Buffer, Encoder};
 
 use crate::{
     events::OutgoingDatagramOutcome, frame::FrameType, packet, recovery, ConnectionEvents, Error,
@@ -97,9 +97,9 @@ impl QuicDatagrams {
     /// This function tries to write a datagram frame into a packet.
     /// If the frame does not fit into the packet, the datagram will
     /// be dropped and a `DatagramLost` event will be posted.
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut packet::Builder,
+        builder: &mut packet::Builder<B>,
         tokens: &mut Vec<recovery::Token>,
         stats: &mut Stats,
     ) {
