@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qtrace, Role};
+use neqo_common::{qtrace, Buffer, Role};
 use smallvec::SmallVec;
 use strum::Display;
 
@@ -55,9 +55,9 @@ pub struct RecvStreams {
 }
 
 impl RecvStreams {
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut packet::Builder,
+        builder: &mut packet::Builder<B>,
         tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
         now: Instant,
@@ -888,9 +888,9 @@ impl RecvStream {
     }
 
     /// Maybe write a `MAX_STREAM_DATA` frame.
-    pub fn write_frame(
+    pub fn write_frame<B: Buffer>(
         &mut self,
-        builder: &mut packet::Builder,
+        builder: &mut packet::Builder<B>,
         tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
         now: Instant,

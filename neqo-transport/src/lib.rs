@@ -62,7 +62,7 @@ pub use self::{
     },
     connection::{
         params::{ConnectionParameters, ACK_RATIO_SCALE},
-        Connection, Output, State, ZeroRttState,
+        Connection, Output, OutputBatch, State, ZeroRttState,
     },
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,

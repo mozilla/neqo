@@ -15,7 +15,7 @@ use std::{
 use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use log::{log_enabled, Level};
-use neqo_common::{qdebug, qinfo, qtrace, qwarn, Ecn, MAX_VARINT};
+use neqo_common::{qdebug, qinfo, qtrace, qwarn, Buffer, Ecn, MAX_VARINT};
 use neqo_crypto::Epoch;
 use smallvec::SmallVec;
 use strum::{Display, EnumIter};
@@ -410,11 +410,11 @@ impl RecvdPackets {
     ///
     /// We don't send ranges that have been acknowledged, but they still need
     /// to be tracked so that duplicates can be detected.
-    fn write_frame(
+    fn write_frame<B: Buffer>(
         &mut self,
         now: Instant,
         rtt: Duration,
-        builder: &mut packet::Builder,
+        builder: &mut packet::Builder<B>,
         tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) {
@@ -582,12 +582,12 @@ impl AckTracker {
         }
     }
 
-    pub(crate) fn write_frame(
+    pub(crate) fn write_frame<B: Buffer>(
         &mut self,
         pn_space: PacketNumberSpace,
         now: Instant,
         rtt: Duration,
-        builder: &mut packet::Builder,
+        builder: &mut packet::Builder<B>,
         tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) {
