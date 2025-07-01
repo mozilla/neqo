@@ -14,6 +14,7 @@ permissions:
 
 jobs:
   fuzz-bench:
+    name: Check that the fuzz and bench targets work
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +40,6 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-      # Check that the fuzz and bench targets work
       - if: ${{ matrix.check == 'fuzz' }}
         env:
           UBUNTU: ${{ startsWith(matrix.os, 'ubuntu') }}
