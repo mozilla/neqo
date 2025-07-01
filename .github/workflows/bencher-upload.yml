@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   bencher_upload:
+    name: Upload to bencher.dev
     # The bench workflow fails when a regression is detected, but we want to upload results regardless.
     if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
     permissions:

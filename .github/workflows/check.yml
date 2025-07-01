@@ -33,6 +33,7 @@ defaults:
 
 jobs:
   toolchains:
+    name: Determine toolchains
     runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
@@ -48,6 +49,7 @@ jobs:
           echo "toolchains=[\"$msrv\", \"stable\", \"nightly\"]" >> "$GITHUB_OUTPUT"
 
   check:
+    name: Run checks
     needs: toolchains
     strategy:
       fail-fast: false
@@ -197,7 +199,13 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' && github.event_name != 'merge_group' }}
     uses: ./.github/workflows/bench.yml
 
+  perfcompare:
+    needs: [check]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' && github.event_name != 'merge_group' }}
+    uses: ./.github/workflows/perfcompare.yml
+
   check-android:
+    name: Check Android
     runs-on: ubuntu-24.04
     env:
       # https://searchfox.org/mozilla-central/search?q=NDK_VERSION =&path=python/mozboot/mozboot/android.py
