@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   actionlint:
+    name: actionlint 🛠️
     runs-on: ubuntu-24.04
     defaults:
       run:
