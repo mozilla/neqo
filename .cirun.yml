@@ -1,0 +1,10 @@
+runners:
+  - name: "gcp-cirun-bencher"
+    cloud: "gcp"
+    instance_type: "c4-highhcpu-8"
+    machine_image: "ubuntu-2404-lts-amd64"
+    preemptible: false
+    labels:
+      - "gcp-cirun-bencher"
+    extra_config:
+      project_id: "moz-fx-dev-leggert-cirun"
