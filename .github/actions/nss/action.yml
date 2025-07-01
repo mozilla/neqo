@@ -97,6 +97,7 @@ runs:
       with:
         repository: nss-dev/nss
         path: nss
+        persist-credentials: false
 
     - name: Retrieve NSPR
       id: nspr

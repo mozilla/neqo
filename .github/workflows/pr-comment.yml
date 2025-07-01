@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   comment:
+    name: Comment on PR
     permissions:
       pull-requests: write
     runs-on: ubuntu-24.04
@@ -28,7 +29,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/pr-comment
+      - if: ${{ github.event.workflow_run.name != 'CI' }}
+        uses: ./.github/actions/pr-comment
         with:
           name: ${{ github.event.workflow_run.name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - if: ${{ github.event.workflow_run.name == 'CI' }}
+        uses: ./.github/actions/pr-comment
+        with:
+          name: ${{ github.event.workflow_run.name }}-bench
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - if: ${{ github.event.workflow_run.name == 'CI' }}
+        uses: ./.github/actions/pr-comment
+        with:
+          name: ${{ github.event.workflow_run.name }}-perfcompare
           token: ${{ secrets.GITHUB_TOKEN }}
