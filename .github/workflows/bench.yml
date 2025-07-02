@@ -29,7 +29,7 @@ permissions:
 jobs:
   bench:
     name: cargo bench
-    runs-on: ${{ inputs.bencher == 'on-prem' && fromJson('["self-hosted", "moonshot"]') || format('gcp-cirun-bencher--{0}', github.run_id) }}
+    runs-on: ${{ inputs.bencher == 'on-prem' && fromJson('["self-hosted", "moonshot"]') || format('cirun-gcp-bencher--{0}', github.run_id) }}
     defaults:
       run:
         shell: bash
