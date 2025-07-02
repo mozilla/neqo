@@ -1,8 +1,9 @@
 runners:
   - name: "gcp-cirun-bencher"
     cloud: "gcp"
-    instance_type: "c4-highhcpu-8"
-    machine_image: "ubuntu-2404-lts-amd64"
+    instance_type: "c4-highcpu-8"
+    region: us-central1-f
+    machine_image: "projects/ubuntu-os-cloud/global/images/ubuntu-2404-noble-amd64-v20250628"
     preemptible: false
     labels:
       - "cirun-gcp-bencher"
