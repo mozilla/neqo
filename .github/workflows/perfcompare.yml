@@ -1,6 +1,11 @@
 name: Performance comparison
 on:
+  workflow_dispatch:
   workflow_call:
+  pull_request:
+    branches: ["main"]
+  merge_group:
+
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
@@ -12,6 +17,10 @@ env:
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
   WORKSPACE: ${{ github.workspace}}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -482,7 +491,7 @@ jobs:
       - name: Export PR comment data
         uses: ./neqo/.github/actions/pr-comment-data-export
         with:
-          name: ${{ github.workflow }}-perfcompare
+          name: ${{ github.workflow }}
           contents: results.md
           log-md: ${{ format('[Download data for `profiler.firefox.com`]({0}) or [download performance comparison data]({1}).', steps.export_samply.outputs.artifact-url, steps.export_perf.outputs.artifact-url) }}
 
