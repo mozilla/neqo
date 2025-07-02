@@ -8,4 +8,4 @@ runners:
     labels:
       - "cirun-gcp-bencher"
     extra_config:
-      project_id: "firefox.gcp.mozilla.com/developers/moz-fx-dev-leggert-cirun"
+      project_id: lateral-booster-464513-i7
