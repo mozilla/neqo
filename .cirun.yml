@@ -10,5 +10,8 @@ runners:
     extra_config:
       project_id: lateral-booster-464513-i7
       networkInterfaces:
-        - stackType: IPV4_ONLY
-          subnetwork: projects/lateral-booster-464513-i7/regions/us-central1-f/subnetworks/moz-fx-dev-leggert-cirun
+      - accessConfigs:
+          - name: "External NAT"
+            networkTier: "PREMIUM"
+        stackType: "IPV4_ONLY"
+        subnetwork: "projects/lateral-booster-464513-i7/regions/us-central1/subnetworks/moz-fx-dev-leggert-cirun"
