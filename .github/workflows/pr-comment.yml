@@ -8,7 +8,7 @@ name: PR Comment
 
 on:
   workflow_run:
-    workflows: ["QNS", "CI", "Firefox"]
+    workflows: ["QNS", "cargo bench", "Performance comparison", "Firefox"]
     types:
       - completed # zizmor: ignore[dangerous-triggers]
 
@@ -29,20 +29,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - if: ${{ github.event.workflow_run.name != 'CI' }}
-        uses: ./.github/actions/pr-comment
+      - uses: ./.github/actions/pr-comment
         with:
           name: ${{ github.event.workflow_run.name }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - if: ${{ github.event.workflow_run.name == 'CI' }}
-        uses: ./.github/actions/pr-comment
-        with:
-          name: ${{ github.event.workflow_run.name }}-bench
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - if: ${{ github.event.workflow_run.name == 'CI' }}
-        uses: ./.github/actions/pr-comment
-        with:
-          name: ${{ github.event.workflow_run.name }}-perfcompare
           token: ${{ secrets.GITHUB_TOKEN }}
