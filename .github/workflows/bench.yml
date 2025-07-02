@@ -66,8 +66,6 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           workspaces: |
             neqo
-            quiche
-            s2n-quic
 
       - name: Get minimum NSS version
         id: nss-version
@@ -166,7 +164,7 @@ jobs:
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          RUNNER_NAME: ${{ runner.name }}
+          TESTBED: ${{ inputs.bencher }}
         run: |
           SHA=$(cd neqo && git log origin/main -1 --format=%H)
           echo "$SHA" > main-sha.txt
@@ -185,7 +183,7 @@ jobs:
                     -e 's/^<details>(.*Performance has.*)/<details open>\1/gi'
           } >> results.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
-          echo "$RUNNER_NAME" > testbed.txt
+          echo "$TESTBED" > testbed.txt
           cp "$EVENT_PATH" event.json
 
       - name: Export profiler.firefox.com data
