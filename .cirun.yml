@@ -5,6 +5,6 @@ runners:
     machine_image: "ubuntu-2404-lts-amd64"
     preemptible: false
     labels:
-      - "gcp-cirun-bencher"
+      - "cirun-gcp-bencher"
     extra_config:
       project_id: "moz-fx-dev-leggert-cirun"
