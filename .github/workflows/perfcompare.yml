@@ -1,6 +1,16 @@
 name: Performance comparison
 on:
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      bencher:
+        type: choice
+        description: Which benchmarking testbed to run on.
+        required: true
+        default: on-prem
+        options:
+          - on-prem
+          - gcp
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
@@ -19,7 +29,7 @@ permissions:
 jobs:
   perfcompare:
     name: Performance comparison
-    runs-on: [self-hosted, moonshot] # zizmor: ignore[self-hosted-runner]
+    runs-on: ${{ inputs.bencher == 'on-prem' && fromJson('["self-hosted", "moonshot"]') || format('gcp-cirun-bencher--{0}', github.run_id) }}
     defaults:
       run:
         shell: bash
