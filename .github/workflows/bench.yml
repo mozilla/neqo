@@ -39,12 +39,12 @@ jobs:
     steps:
       - env:
           INPUT: ${{ inputs.bencher }}
-          BENCHER: github.event_name == 'workflow_dispatch' && inputs.bencher == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || fromJson('["self-hosted", "moonshot"]')
+          BENCHER: ${{ github.event_name == 'workflow_dispatch' && inputs.bencher == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || fromJson('["self-hosted", "moonshot"]') }}
         run: echo "Running on $INPUT, $BENCHER"
 
   bench:
     name: cargo bench
-    runs-on: github.event_name == 'workflow_dispatch' && inputs.bencher == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || fromJson('["self-hosted", "moonshot"]')
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.bencher == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || fromJson('["self-hosted", "moonshot"]') }}
     defaults:
       run:
         shell: bash
