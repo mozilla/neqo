@@ -34,14 +34,6 @@ permissions:
   contents: read
 
 jobs:
-  debug:
-    runs-on: ubuntu-latest
-    steps:
-      - env:
-          INPUT: ${{ inputs.bencher }}
-          BENCHER: ${{ inputs.bencher == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || 'self-hosted' }}
-        run: echo "Running on $INPUT, $BENCHER"
-
   bench:
     name: cargo bench
     runs-on: ${{ inputs.bencher == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || 'self-hosted' }}
