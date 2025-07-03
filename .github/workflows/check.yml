@@ -131,7 +131,8 @@ jobs:
           if [ "$TOOLCHAIN" == "stable" ]; then
             cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
-            cargo $CAREFUL test $BUILD_TYPE --locked --features ci
+            TRIPLE=$(rustc --version --verbose | grep host: | cut -d' ' -f2)
+            cargo $CAREFUL test $BUILD_TYPE --locked --features ci --target "$TRIPLE"
           fi
 
       - name: Run client/server transfer
