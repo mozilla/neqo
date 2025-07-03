@@ -1,0 +1,262 @@
+- name: Install CI runner and dependencies
+  hosts: all
+  vars:
+    bench_path: /opt/actions-runner
+    runner_version: 2.325.0
+    runner_sha: sha256:5020da7139d85c776059f351e0de8fdec753affc9c558e892472d43ebeb518f4
+  become: true
+  tasks:
+    # See: https://stackoverflow.com/questions/30911775/how-to-know-if-a-machine-is-an-google-compute-engine-instance
+    - name: "Detect GCP"
+      block:
+        - name: "Probe for GCP"
+          become: true
+          ansible.builtin.shell: dmidecode -s bios-version | grep -iq "google"
+          changed_when: false
+          failed_when: false
+          register: probe_gcp
+        - name: "Set GCP fact"
+          ansible.builtin.set_fact:
+            is_gcp: "{{ probe_gcp is success and probe_gcp.rc == 0 }}"
+        - name: "Set user/group facts"
+          ansible.builtin.set_fact:
+            bench_user: "{{ 'runnerx' if is_gcp else 'bench' }}"
+            bench_group: "{{ 'runnerx' if is_gcp else 'bench' }}"
+            ansible_common_remote_group: "{{ 'google-sudoers' if is_gcp else 'sudo' }}"
+
+    - name: Install required dependencies for bazel apt repo
+      ansible.builtin.apt:
+        install_recommends: false
+        update_cache: true
+        state: present
+        name:
+          - apt-transport-https
+          - gnupg
+
+    - name: Add bazel apt repo
+      block:
+        - name: Get bazel repo key
+          ansible.builtin.get_url:
+            url: https://bazel.build/bazel-release.pub.gpg
+            dest: /etc/apt/keyrings/bazel-archive-keyring.asc
+            mode: "0644"
+            force: true
+        - name: Add bazel repo into sources list
+          ansible.builtin.apt_repository:
+            repo:
+              "deb [arch=amd64
+              signed-by=/etc/apt/keyrings/bazel-archive-keyring.asc]
+              https://storage.googleapis.com/bazel-apt stable jdk1.8"
+            state: present
+
+    - name: Upgrade all installed apt packages
+      ansible.builtin.apt:
+        autoclean: true
+        autoremove: true
+        install_recommends: false
+        update_cache: true
+        upgrade: dist
+      register: apt_upgrade
+
+    - name: Install required dependencies
+      ansible.builtin.apt:
+        install_recommends: true
+        state: present
+        name:
+          - bazel-7.0.0 # Google quiche needs this specific version
+          - build-essential
+          - clang
+          - cmake
+          - cpuset
+          - git
+          - gnuplot
+          - gyp
+          - htop
+          - libclang-dev
+          - libicu-dev
+          - linux-tools-common
+          - "linux-generic-hwe-{{ ansible_facts['lsb']['release'] }}"
+          - lld
+          - mold
+          - ninja-build
+          - python-is-python3
+          - r-base-core
+          - ripgrep
+          - sccache
+          - zlib1g-dev
+      register: apt_install
+
+    - name: Set kernel.perf_event_paranoid
+      ansible.posix.sysctl:
+        name: kernel.perf_event_paranoid
+        value: "-1"
+        state: present
+
+    - name: Set kernel.kptr_restrict
+      ansible.posix.sysctl:
+        name: kernel.kptr_restrict
+        value: "0"
+        state: present
+
+    - name: Reboot the machine
+      when: not is_gcp and (apt_upgrade.changed or apt_install.changed)
+      ansible.builtin.reboot:
+
+    - name: Enable limited sudo for bench user
+      ansible.builtin.copy:
+        src: "etc/sudoers.d.bench"
+        dest: "/etc/sudoers.d/{{ bench_user }}"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Enable sudoers includedir
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers
+        regexp: "#includedir /etc/sudoers.d"
+        line: "@includedir /etc/sudoers.d"
+        validate: /usr/sbin/visudo -cf %s
+
+    - name: Enable high-priority nice
+      ansible.builtin.lineinfile:
+        path: /etc/security/limits.conf
+        line: "{{ bench_user }} - nice -20"
+        create: true
+        mode: "0644"
+
+    - name: Install CPU isolation scripts
+      ansible.builtin.copy:
+        src: bin/
+        dest: /root/bin/
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Ensure bench group exists
+      ansible.builtin.group:
+        name: "{{ bench_group }}"
+        state: present
+
+    - name: Ensure bench user exists
+      ansible.builtin.user:
+        name: "{{ bench_user }}"
+        group: "{{ bench_group }}"
+        home: "/home/{{ bench_user }}"
+        shell: "/bin/bash"
+        state: present
+
+    - name: Add user to sudo group
+      ansible.builtin.user:
+        name: "{{ bench_user }}"
+        groups: "{{ ansible_common_remote_group }}"
+        append: true
+
+    - name: Check if cargo is installed
+      become: true
+      register: cargo
+      ansible.builtin.stat:
+        path: "/home/{{ bench_user }}/.cargo/bin/cargo"
+
+    - name: Download rustup
+      when: not cargo.stat.exists
+      ansible.builtin.get_url:
+        url: "https://sh.rustup.rs"
+        dest: /tmp/sh.rustup.rs
+        mode: "0755"
+
+    - name: Install Rust
+      when: not cargo.stat.exists
+      become: true
+      become_user: "{{ bench_user }}"
+      ansible.builtin.command: /tmp/sh.rustup.rs -y --default-toolchain stable
+      args:
+        creates: "/home/{{ bench_user }}/.cargo/bin/cargo"
+
+    - name: Create bench directory
+      when: not is_gcp
+      ansible.builtin.file:
+        dest: "{{ bench_path }}"
+        owner: "{{ bench_user }}"
+        group: "{{ bench_group }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download GitHub Actions Runner
+      when: not is_gcp
+      become: true
+      become_user: "{{ bench_user }}"
+      ansible.builtin.get_url:
+        url:
+          "https://github.com/actions/runner/releases/download/v{{
+          runner_version }}/actions-runner-linux-x64-{{ runner_version }}.tar.gz"
+        dest:
+          "{{ bench_path }}/actions-runner-linux-x64-{{ runner_version }}.tar.gz"
+        mode: "0600"
+        owner: "{{ bench_user }}"
+        group: "{{ bench_group }}"
+        checksum: "{{ runner_sha }}"
+
+    - name: Extract GitHub Actions Runner
+      when: not is_gcp
+      become: true
+      become_user: "{{ bench_user }}"
+      ansible.builtin.unarchive:
+        src:
+          "{{ bench_path }}/actions-runner-linux-x64-{{ runner_version }}.tar.gz"
+        remote_src: true
+        dest: "{{ bench_path }}"
+        # NOTE(strager): It's a tar bomb, so --strip-components=1 is implied.
+        owner: "{{ bench_user }}"
+        group: "{{ bench_group }}"
+        creates: "{{ bench_path }}/bin/Runner.Listener"
+
+    - name: Check if GitHub Actions Runner is already configured
+      when: not is_gcp
+      become: true
+      become_user: "{{ bench_user }}"
+      register: runner_credentials_file
+      ansible.builtin.stat:
+        path: "{{ bench_path }}/.credentials"
+
+    - name: Configure GitHub Actions Runner
+      when: not is_gcp and not runner_credentials_file.stat.exists
+      become: true
+      become_user: "{{ bench_user }}"
+      vars:
+        pat:
+          "{{ lookup('ansible.builtin.env', 'GITHUB_API_TOKEN', default=undef())
+          }}"
+      no_log: true # Do not leak PAT secret
+      ansible.builtin.shell:
+        chdir: "{{ bench_path }}"
+        cmd: |
+          ./config.sh \
+            --url https://github.com/mozilla/neqo \
+            --pat "{{ pat }}" \
+            --labels moonshot \
+            --unattended \
+            --replace
+      changed_when: not runner_credentials_file.stat.exists
+
+    - name: Check if GitHub Actions Runner is already running
+      when: not is_gcp
+      register: runner_running
+      ignore_errors: true
+      ansible.builtin.command:
+        chdir: "{{ bench_path }}"
+        cmd: ./svc.sh status
+      changed_when: runner_running.rc != 0
+
+    - name: Install GitHub Actions Runner service
+      when: not is_gcp and runner_running.rc != 0
+      ansible.builtin.command:
+        chdir: "{{ bench_path }}"
+        cmd: ./svc.sh install "{{ bench_user }}"
+      changed_when: runner_running.rc != 0
+
+    - name: Starts GitHub Actions Runner service
+      when: not is_gcp
+      ansible.builtin.command:
+        chdir: "{{ bench_path }}"
+        cmd: ./svc.sh start
+      changed_when: true

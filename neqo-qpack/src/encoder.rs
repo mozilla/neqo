@@ -4,18 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
-
 use std::{
     cmp::min,
     collections::VecDeque,
     fmt::{self, Display, Formatter},
 };
 
-use neqo_common::{qdebug, qerror, qlog::NeqoQlog, qtrace, Header};
+use neqo_common::{qdebug, qerror, qlog::Qlog, qtrace, Header};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
@@ -24,11 +19,11 @@ use crate::{
     encoder_instructions::EncoderInstruction,
     header_block::HeaderEncoder,
     qlog,
-    qpack_send_buf::QpackData,
+    qpack_send_buf::Data,
     reader::ReceiverConnWrapper,
     stats::Stats,
     table::{HeaderTable, LookupResult, ADDITIONAL_TABLE_ENTRY_SIZE},
-    Error, QpackSettings, Res,
+    Error, Res, Settings,
 };
 
 pub const QPACK_UNI_STREAM_TYPE_ENCODER: u64 = 0x2;
@@ -50,7 +45,7 @@ impl LocalStreamState {
 }
 
 #[derive(Debug)]
-pub struct QPackEncoder {
+pub struct Encoder {
     table: HeaderTable,
     max_table_size: u64,
     max_entries: u64,
@@ -68,9 +63,9 @@ pub struct QPackEncoder {
     stats: Stats,
 }
 
-impl QPackEncoder {
+impl Encoder {
     #[must_use]
-    pub fn new(qpack_settings: &QpackSettings, use_huffman: bool) -> Self {
+    pub fn new(qpack_settings: &Settings, use_huffman: bool) -> Self {
         Self {
             table: HeaderTable::new(true),
             max_table_size: qpack_settings.max_table_size_encoder,
@@ -221,7 +216,7 @@ impl QPackEncoder {
         }
     }
 
-    fn call_instruction(&mut self, instruction: DecoderInstruction, qlog: &NeqoQlog) -> Res<()> {
+    fn call_instruction(&mut self, instruction: DecoderInstruction, qlog: &Qlog) -> Res<()> {
         qdebug!("[{self}] call instruction {instruction:?}");
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
@@ -274,7 +269,7 @@ impl QPackEncoder {
             return Err(Error::DynamicTableFull);
         }
 
-        let mut buf = QpackData::default();
+        let mut buf = Data::default();
         EncoderInstruction::InsertWithNameLiteral { name, value }
             .marshal(&mut buf, self.use_huffman);
 
@@ -314,7 +309,7 @@ impl QPackEncoder {
             if cap < self.table.capacity() && !self.table.can_evict_to(cap) {
                 return Err(Error::DynamicTableFull);
             }
-            let mut buf = QpackData::default();
+            let mut buf = Data::default();
             EncoderInstruction::Capacity { value: cap }.marshal(&mut buf, self.use_huffman);
             if !conn.stream_send_atomic(stream_id, &buf)? {
                 return Err(Error::EncoderStreamBlocked);
@@ -344,7 +339,7 @@ impl QPackEncoder {
                 Ok(())
             }
             LocalStreamState::Uninitialized(stream_id) => {
-                let mut buf = QpackData::default();
+                let mut buf = Data::default();
                 buf.encode_varint(QPACK_UNI_STREAM_TYPE_ENCODER);
                 if !conn.stream_send_atomic(stream_id, &buf[..])? {
                     return Err(Error::EncoderStreamBlocked);
@@ -517,9 +512,9 @@ impl QPackEncoder {
     }
 }
 
-impl Display for QPackEncoder {
+impl Display for Encoder {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "QPackEncoder")
+        write!(f, "QPack")
     }
 }
 
@@ -546,11 +541,11 @@ mod tests {
     use neqo_transport::{ConnectionParameters, StreamId, StreamType};
     use test_fixture::{default_client, default_server, handshake, new_server, now, DEFAULT_ALPN};
 
-    use super::{Connection, Error, Header, QPackEncoder, Res};
-    use crate::QpackSettings;
+    use super::{Connection, Encoder, Error, Header, Res};
+    use crate::Settings;
 
     struct TestEncoder {
-        encoder: QPackEncoder,
+        encoder: Encoder,
         send_stream_id: StreamId,
         recv_stream_id: StreamId,
         conn: Connection,
@@ -618,8 +613,8 @@ mod tests {
         let send_stream_id = conn.stream_create(StreamType::UniDi).unwrap();
 
         // create an encoder
-        let mut encoder = QPackEncoder::new(
-            &QpackSettings {
+        let mut encoder = Encoder::new(
+            &Settings {
                 max_table_size_encoder: 1500,
                 max_table_size_decoder: 0,
                 max_blocked_streams: 0,

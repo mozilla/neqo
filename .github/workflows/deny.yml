@@ -14,6 +14,7 @@ permissions:
 
 jobs:
   deny:
+    name: cargo deny
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -29,6 +30,6 @@ jobs:
       with:
         persist-credentials: false
 
-    - uses: EmbarkStudios/cargo-deny-action@34899fc7ba81ca6268d5947a7a16b4649013fea1 # v2.0.11
+    - uses: EmbarkStudios/cargo-deny-action@30f817c6f72275c6d54dc744fbca09ebc958599f # v2.0.12
       with:
         command: check ${{ matrix.checks }}

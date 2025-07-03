@@ -33,6 +33,7 @@ defaults:
 
 jobs:
   toolchains:
+    name: Determine toolchains
     runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
@@ -48,6 +49,7 @@ jobs:
           echo "toolchains=[\"$msrv\", \"stable\", \"nightly\"]" >> "$GITHUB_OUTPUT"
 
   check:
+    name: Run checks
     needs: toolchains
     strategy:
       fail-fast: false
@@ -97,8 +99,8 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
-          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools, ' || '' }} ${{ matrix.rust-toolchain == 'nightly' && 'rust-src, ' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} ${{ matrix.rust-toolchain == 'nightly' && 'cargo-careful, ' || '' }} junit-test
+          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && 'rust-src, ' || '' }}
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && 'cargo-careful, ' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -131,8 +133,6 @@ jobs:
           else
             cargo $CAREFUL test $BUILD_TYPE --locked --features ci
           fi
-          # shellcheck disable=SC2086
-          junit-test $BUILD_TYPE
 
       - name: Run client/server transfer
         run: |
@@ -168,14 +168,6 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
 
-      - uses: codecov/test-results-action@47f89e9acb64b76debcd5ea40642d25a4adced9f # v1.1.1
-        if: ${{ always() }}
-        with:
-          files: junit.xml
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
-          verbose: true
-
       - name: Save simulation seeds artifact
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -193,12 +185,8 @@ jobs:
           persist-credentials: false
       - run: cargo update -w --locked
 
-  bench:
-    needs: [check]
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' && github.event_name != 'merge_group' }}
-    uses: ./.github/workflows/bench.yml
-
   check-android:
+    name: Check Android
     runs-on: ubuntu-24.04
     env:
       # https://searchfox.org/mozilla-central/search?q=NDK_VERSION =&path=python/mozboot/mozboot/android.py

@@ -22,6 +22,7 @@ defaults:
 
 jobs:
   sanitize:
+    name: Sanitize
     if: github.actor != 'dependabot[bot]'
     strategy:
       fail-fast: false

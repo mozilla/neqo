@@ -8,7 +8,7 @@ name: PR Comment
 
 on:
   workflow_run:
-    workflows: ["QNS", "CI", "Firefox"]
+    workflows: ["QNS", "cargo bench", "Performance comparison", "Firefox"]
     types:
       - completed # zizmor: ignore[dangerous-triggers]
 
@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   comment:
+    name: Comment on PR
     permissions:
       pull-requests: write
     runs-on: ubuntu-24.04

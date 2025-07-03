@@ -24,11 +24,11 @@ use strum::Display;
 #[cfg(feature = "build-fuzzing-corpus")]
 pub use self::fuzz::write_item_to_fuzzing_corpus;
 pub use self::{
-    codec::{Decoder, Encoder, MAX_VARINT},
-    datagram::Datagram,
+    codec::{Buffer, Decoder, Encoder, MAX_VARINT},
+    datagram::{Datagram, DatagramBatch},
     header::Header,
     incrdecoder::{IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint},
-    tos::{IpTos, IpTosDscp, IpTosEcn},
+    tos::{Dscp, Ecn, Tos},
 };
 
 #[must_use]

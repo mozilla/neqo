@@ -35,15 +35,15 @@ mod quic_datagrams;
 pub mod recovery;
 #[cfg(not(feature = "bench"))]
 mod recovery;
-#[cfg(feature = "bench")]
+// #[cfg(feature = "bench")]
 pub mod recv_stream;
-#[cfg(not(feature = "bench"))]
-mod recv_stream;
+// #[cfg(not(feature = "bench"))]
+// mod recv_stream;
 mod rtt;
-#[cfg(feature = "bench")]
+// #[cfg(feature = "bench")]
 pub mod send_stream;
-#[cfg(not(feature = "bench"))]
-mod send_stream;
+// #[cfg(not(feature = "bench"))]
+// mod send_stream;
 mod sender;
 pub mod server;
 mod sni;
@@ -62,15 +62,14 @@ pub use self::{
     },
     connection::{
         params::{ConnectionParameters, ACK_RATIO_SCALE},
-        Connection, Output, State, ZeroRttState,
+        Connection, Output, OutputBatch, State, ZeroRttState,
     },
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
     packet::MIN_INITIAL_PACKET_SIZE,
     pmtud::Pmtud,
     quic_datagrams::DatagramTracking,
-    recv_stream::{RecvStreamStats, INITIAL_RECV_WINDOW_SIZE},
-    send_stream::SendStreamStats,
+    recv_stream::INITIAL_RECV_WINDOW_SIZE,
     sni::find_sni,
     stats::Stats,
     stream_id::{StreamId, StreamType},

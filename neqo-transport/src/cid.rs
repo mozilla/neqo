@@ -15,13 +15,11 @@ use std::{
     rc::Rc,
 };
 
-use neqo_common::{hex, hex_with_len, qdebug, qinfo, Decoder, Encoder};
+use neqo_common::{hex, hex_with_len, qdebug, qinfo, Buffer, Decoder, Encoder};
 use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
-use crate::{
-    frame::FrameType, packet::PacketBuilder, recovery::RecoveryToken, stats::FrameStats, Error, Res,
-};
+use crate::{frame::FrameType, packet, recovery, stats::FrameStats, Error, Res};
 
 pub const MAX_CONNECTION_ID_LEN: usize = 20;
 pub const LOCAL_ACTIVE_CID_LIMIT: usize = 8;
@@ -300,7 +298,11 @@ impl ConnectionIdEntry<[u8; 16]> {
 
     /// Write the entry out in a `NEW_CONNECTION_ID` frame.
     /// Returns `true` if the frame was written, `false` if there is insufficient space.
-    pub fn write(&self, builder: &mut PacketBuilder, stats: &mut FrameStats) -> bool {
+    pub fn write<B: Buffer>(
+        &self,
+        builder: &mut packet::Builder<B>,
+        stats: &mut FrameStats,
+    ) -> bool {
         let len = 1 + Encoder::varint_len(self.seqno) + 1 + 1 + self.cid.len() + 16;
         if builder.remaining() < len {
             return false;
@@ -550,10 +552,10 @@ impl ConnectionIdManager {
         );
     }
 
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) {
         if self.generator.deref().borrow().generates_empty_cids() {
@@ -570,7 +572,7 @@ impl ConnectionIdManager {
 
         while let Some(entry) = self.lost_new_connection_id.pop() {
             if entry.write(builder, stats) {
-                tokens.push(RecoveryToken::NewConnectionId(entry));
+                tokens.push(recovery::Token::NewConnectionId(entry));
             } else {
                 // This shouldn't happen often.
                 self.lost_new_connection_id.push(entry);
@@ -595,7 +597,7 @@ impl ConnectionIdManager {
 
                 let entry = ConnectionIdEntry::new(seqno, cid, srt);
                 entry.write(builder, stats);
-                tokens.push(RecoveryToken::NewConnectionId(entry));
+                tokens.push(recovery::Token::NewConnectionId(entry));
             }
         }
     }

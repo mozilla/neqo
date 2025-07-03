@@ -9,20 +9,21 @@ use std::{
     fmt::{self, Debug, Display, Formatter},
     iter,
     net::SocketAddr,
+    num::NonZeroUsize,
     rc::Rc,
     time::Instant,
 };
 
 use neqo_common::{
-    event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
+    event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::Qlog, qtrace,
     Datagram, Decoder, Encoder, Header, MessageType, Role,
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
-    streams::SendOrder, AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator,
-    DatagramTracking, Output, RecvStreamStats, SendStreamStats, Stats as TransportStats, StreamId,
-    StreamType, Version, ZeroRttState,
+    recv_stream, send_stream, streams::SendOrder, AppError, Connection, ConnectionEvent,
+    ConnectionId, ConnectionIdGenerator, DatagramTracking, Output, OutputBatch,
+    Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
 };
 
 use crate::{
@@ -375,7 +376,7 @@ impl Http3Client {
         self.conn.authenticated(status, now);
     }
 
-    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+    pub fn set_qlog(&mut self, qlog: Qlog) {
         self.conn.set_qlog(qlog);
     }
 
@@ -814,12 +815,15 @@ impl Http3Client {
         Http3Connection::stream_set_fairness(&mut self.conn, stream_id, fairness)
     }
 
-    /// Returns the current `SendStreamStats` of a `WebTransportSendStream`.
+    /// Returns the current `send_stream::Stats` of a `WebTransportSendStream`.
     ///
     /// # Errors
     ///
     /// `InvalidStreamId` if the stream does not exist.
-    pub fn webtransport_send_stream_stats(&mut self, stream_id: StreamId) -> Res<SendStreamStats> {
+    pub fn webtransport_send_stream_stats(
+        &mut self,
+        stream_id: StreamId,
+    ) -> Res<send_stream::Stats> {
         self.base_handler
             .send_streams_mut()
             .get_mut(&stream_id)
@@ -827,12 +831,15 @@ impl Http3Client {
             .stats(&mut self.conn)
     }
 
-    /// Returns the current `RecvStreamStats` of a `WebTransportRecvStream`.
+    /// Returns the current `recv_stream::Stats` of a `WebTransportRecvStream`.
     ///
     /// # Errors
     ///
     /// `InvalidStreamId` if the stream does not exist.
-    pub fn webtransport_recv_stream_stats(&mut self, stream_id: StreamId) -> Res<RecvStreamStats> {
+    pub fn webtransport_recv_stream_stats(
+        &mut self,
+        stream_id: StreamId,
+    ) -> Res<recv_stream::Stats> {
         self.base_handler
             .recv_streams_mut()
             .get_mut(&stream_id)
@@ -915,16 +922,25 @@ impl Http3Client {
         }
     }
 
-    /// The function should be called to check if there is a new UDP packet to be sent. It should
+    /// Wrapper around [`Http3Client::process_multiple_output`] that processes a single
+    /// output datagram only.
+    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
+    pub fn process_output(&mut self, now: Instant) -> Output {
+        self.process_multiple_output(now, 1.try_into().expect(">0"))
+            .try_into()
+            .expect("max_datagrams is 1")
+    }
+
+    /// The function should be called to check if there are new UDP packets to be sent. It should
     /// be called after a new packet is received and processed and after a timer expires (QUIC
     /// needs timers to handle events like PTO detection and timers are not implemented by the neqo
     /// library, but instead must be driven by the application).
     ///
-    /// `process_output` can return:
-    /// - a [`Output::Datagram(Datagram)`][1]: data that should be sent as a UDP payload,
-    /// - a [`Output::Callback(Duration)`][1]: the duration of a  timer. `process_output` should be
-    ///   called at least after the time expires,
-    /// - [`Output::None`][1]: this is returned when `Http3Client` is done and can be destroyed.
+    /// [`Http3Client::process_multiple_output`] can return:
+    /// - a [`OutputBatch::Datagram(Datagram)`]: data that should be sent as a UDP payload,
+    /// - a [`OutputBatch::Callback(Duration)`]: the duration of a  timer. `process_output` should
+    ///   be called at least after the time expires,
+    /// - [`OutputBatch::None`]: this is returned when `Http3Client` is done and can be destroyed.
     ///
     /// The application should call this function repeatedly until a timer value or None is
     /// returned. After that, the application should call the function again if a new UDP packet is
@@ -942,13 +958,17 @@ impl Http3Client {
     /// [1]: ../neqo_transport/enum.Output.html
     /// [2]: ../neqo_transport/struct.ConnectionEvents.html
     /// [3]: ../neqo_transport/struct.Connection.html#method.process_output
-    pub fn process_output(&mut self, now: Instant) -> Output {
+    pub fn process_multiple_output(
+        &mut self,
+        now: Instant,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch {
         qtrace!("[{self}] Process output");
 
         // Maybe send() stuff on http3-managed streams
         self.process_http3(now);
 
-        let out = self.conn.process_output(now);
+        let out = self.conn.process_multiple_output(now, max_datagrams);
 
         // Update H3 for any transport state changes and events
         self.process_http3(now);
@@ -1288,7 +1308,7 @@ mod tests {
 
     use neqo_common::{event::Provider as _, qtrace, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
-    use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
+    use neqo_qpack as qpack;
     use neqo_transport::{
         CloseReason, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
         Version, INITIAL_RECV_WINDOW_SIZE, MIN_INITIAL_PACKET_SIZE,
@@ -1375,7 +1395,7 @@ mod tests {
         settings: HFrame,
         conn: Connection,
         control_stream_id: Option<StreamId>,
-        encoder: Rc<RefCell<QPackEncoder>>,
+        encoder: Rc<RefCell<qpack::Encoder>>,
         encoder_receiver: EncoderRecvStream,
         encoder_stream_id: Option<StreamId>,
         decoder_stream_id: Option<StreamId>,
@@ -1403,8 +1423,8 @@ mod tests {
                     .map_or(100, |s| s.value),
             )
             .unwrap();
-            let qpack = Rc::new(RefCell::new(QPackEncoder::new(
-                &QpackSettings {
+            let qpack = Rc::new(RefCell::new(qpack::Encoder::new(
+                &qpack::Settings {
                     max_table_size_encoder: max_table_size,
                     max_table_size_decoder: max_table_size,
                     max_blocked_streams,
@@ -1425,8 +1445,8 @@ mod tests {
         }
 
         pub fn new_with_conn(conn: Connection) -> Self {
-            let qpack = Rc::new(RefCell::new(QPackEncoder::new(
-                &QpackSettings {
+            let qpack = Rc::new(RefCell::new(qpack::Encoder::new(
+                &qpack::Settings {
                     max_table_size_encoder: 128,
                     max_table_size_decoder: 128,
                     max_blocked_streams: 0,

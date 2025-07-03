@@ -7,6 +7,7 @@
 use std::{
     cell::{RefCell, RefMut},
     fmt::{self, Display, Formatter},
+    num::NonZeroUsize,
     path::PathBuf,
     rc::Rc,
     time::Instant,
@@ -16,7 +17,7 @@ use neqo_common::{qtrace, Datagram};
 use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
-    ConnectionIdGenerator, Output,
+    ConnectionIdGenerator, Output, OutputBatch,
 };
 use rustc_hash::FxHashMap as HashMap;
 
@@ -117,21 +118,37 @@ impl Http3Server {
         self.process(None::<Datagram>, now)
     }
 
+    /// Wrapper around [`Http3Server::process_multiple`] that processes a single
+    /// output datagram only.
+    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
         dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
+        self.process_multiple(dgram, now, 1.try_into().expect(">0"))
+            .try_into()
+            .expect("max_datagrams is 1")
+    }
+
+    pub fn process_multiple(
+        &mut self,
+        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        now: Instant,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch {
         qtrace!("[{self}] Process");
-        let out = self.server.process(dgram, now);
+        let out = self.server.process_multiple(dgram, now, max_datagrams);
         self.process_http3(now);
         // If we do not that a dgram already try again after process_http3.
         match out {
-            Output::Datagram(d) => {
+            OutputBatch::DatagramBatch(d) => {
                 qtrace!("[{self}] Send packet: {d:?}");
-                Output::Datagram(d)
+                OutputBatch::DatagramBatch(d)
             }
-            _ => self.server.process(Option::<Datagram>::None, now),
+            _ => self
+                .server
+                .process_multiple(Option::<Datagram>::None, now, max_datagrams),
         }
     }
 
@@ -336,7 +353,7 @@ mod tests {
 
     use neqo_common::{event::Provider as _, Encoder};
     use neqo_crypto::{AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker};
-    use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
+    use neqo_qpack as qpack;
     use neqo_transport::{
         CloseReason, Connection, ConnectionEvent, State, StreamId, StreamType, ZeroRttState,
     };
@@ -348,13 +365,13 @@ mod tests {
     use super::{Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
     use crate::{Error, HFrame, Header, Http3Parameters, Priority};
 
-    const DEFAULT_SETTINGS: QpackSettings = QpackSettings {
+    const DEFAULT_SETTINGS: qpack::Settings = qpack::Settings {
         max_table_size_encoder: 100,
         max_table_size_decoder: 100,
         max_blocked_streams: 100,
     };
 
-    fn http3params(qpack_settings: QpackSettings) -> Http3Parameters {
+    fn http3params(qpack_settings: qpack::Settings) -> Http3Parameters {
         Http3Parameters::default()
             .max_table_size_encoder(qpack_settings.max_table_size_encoder)
             .max_table_size_decoder(qpack_settings.max_table_size_decoder)
@@ -566,8 +583,8 @@ mod tests {
             &[0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64],
         );
         assert_eq!(sent, Ok(9));
-        let mut encoder = QPackEncoder::new(
-            &QpackSettings {
+        let mut encoder = qpack::Encoder::new(
+            &qpack::Settings {
                 max_table_size_encoder: 100,
                 max_table_size_decoder: 0,
                 max_blocked_streams: 0,
@@ -1204,7 +1221,7 @@ mod tests {
     #[test]
     fn zero_rtt_larger_decoder_table() {
         zero_rtt_with_settings(
-            http3params(QpackSettings {
+            http3params(qpack::Settings {
                 max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder + 1,
                 ..DEFAULT_SETTINGS
             }),
@@ -1216,7 +1233,7 @@ mod tests {
     #[test]
     fn zero_rtt_smaller_decoder_table() {
         zero_rtt_with_settings(
-            http3params(QpackSettings {
+            http3params(qpack::Settings {
                 max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder - 1,
                 ..DEFAULT_SETTINGS
             }),
@@ -1228,7 +1245,7 @@ mod tests {
     #[test]
     fn zero_rtt_more_blocked_streams() {
         zero_rtt_with_settings(
-            http3params(QpackSettings {
+            http3params(qpack::Settings {
                 max_blocked_streams: DEFAULT_SETTINGS.max_blocked_streams + 1,
                 ..DEFAULT_SETTINGS
             }),
@@ -1240,7 +1257,7 @@ mod tests {
     #[test]
     fn zero_rtt_fewer_blocked_streams() {
         zero_rtt_with_settings(
-            http3params(QpackSettings {
+            http3params(qpack::Settings {
                 max_blocked_streams: DEFAULT_SETTINGS.max_blocked_streams - 1,
                 ..DEFAULT_SETTINGS
             }),
@@ -1252,7 +1269,7 @@ mod tests {
     #[test]
     fn zero_rtt_smaller_encoder_table() {
         zero_rtt_with_settings(
-            http3params(QpackSettings {
+            http3params(qpack::Settings {
                 max_table_size_encoder: DEFAULT_SETTINGS.max_table_size_encoder - 1,
                 ..DEFAULT_SETTINGS
             }),

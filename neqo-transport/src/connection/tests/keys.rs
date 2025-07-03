@@ -17,7 +17,7 @@ use super::{
 };
 use crate::{
     crypto::{OVERWRITE_INVOCATIONS, UPDATE_WRITE_KEYS_AT},
-    packet::PacketNumber,
+    packet,
 };
 
 fn check_discarded(
@@ -45,7 +45,7 @@ fn assert_update_blocked(c: &mut Connection) {
     );
 }
 
-fn overwrite_invocations(n: PacketNumber) {
+fn overwrite_invocations(n: packet::Number) {
     OVERWRITE_INVOCATIONS.with(|v| {
         *v.borrow_mut() = Some(n);
     });

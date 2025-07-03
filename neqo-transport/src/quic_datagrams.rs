@@ -8,11 +8,11 @@
 
 use std::{cmp::min, collections::VecDeque};
 
-use neqo_common::Encoder;
+use neqo_common::{Buffer, Encoder};
 
 use crate::{
-    events::OutgoingDatagramOutcome, frame::FrameType, packet::PacketBuilder,
-    recovery::RecoveryToken, ConnectionEvents, Error, Res, Stats,
+    events::OutgoingDatagramOutcome, frame::FrameType, packet, recovery, ConnectionEvents, Error,
+    Res, Stats,
 };
 
 pub const MAX_QUIC_DATAGRAM: u64 = 65535;
@@ -97,10 +97,10 @@ impl QuicDatagrams {
     /// This function tries to write a datagram frame into a packet.
     /// If the frame does not fit into the packet, the datagram will
     /// be dropped and a `DatagramLost` event will be posted.
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut Vec<recovery::Token>,
         stats: &mut Stats,
     ) {
         while let Some(dgram) = self.datagrams.pop_front() {
@@ -110,7 +110,8 @@ impl QuicDatagrams {
                 let length_len =
                     Encoder::varint_len(u64::try_from(len).expect("usize fits in u64"));
                 // Include a length if there is space for another frame after this one.
-                if builder.remaining() >= 1 + length_len + len + PacketBuilder::MINIMUM_FRAME_SIZE {
+                if builder.remaining() >= 1 + length_len + len + packet::Builder::MINIMUM_FRAME_SIZE
+                {
                     builder.encode_varint(FrameType::DatagramWithLen);
                     builder.encode_vvec(dgram.as_ref());
                 } else {
@@ -120,7 +121,7 @@ impl QuicDatagrams {
                 }
                 debug_assert!(builder.len() <= builder.limit());
                 stats.frame_tx.datagram += 1;
-                tokens.push(RecoveryToken::Datagram(*dgram.tracking()));
+                tokens.push(recovery::Token::Datagram(*dgram.tracking()));
             } else if tokens.is_empty() {
                 // If the packet is empty, except packet headers, and the
                 // datagram cannot fit, drop it.
