@@ -36,7 +36,7 @@ permissions:
 jobs:
   perfcompare:
     name: Performance comparison
-    runs-on: ${{ inputs.bencher == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || fromJson('["self-hosted", "moonshot"]') }}
+    runs-on: github.event_name == 'workflow_dispatch' && inputs.bencher == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || fromJson('["self-hosted", "moonshot"]')
     defaults:
       run:
         shell: bash
