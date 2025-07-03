@@ -3,7 +3,7 @@ runners:
     cloud: "gcp"
     instance_type: "c4-highcpu-8"
     region: us-central1-f
-    machine_image: ubuntu-2404-noble-amd64-cirun-bencher
+    machine_image: "lateral-booster-464513-i7:ubuntu-2404-noble-amd64-cirun-bencher"
     preemptible: false
     labels:
       - "cirun-gcp-bencher"
