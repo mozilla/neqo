@@ -29,7 +29,7 @@ use crate::{
     cid::ConnectionIdRef,
     frame::FrameType,
     packet::{self},
-    recovery,
+    recovery::{self, RecoveryTokenVec},
     recv_stream::RxStreamOrderer,
     send_stream::TxBuffer,
     sni::find_sni,
@@ -319,7 +319,7 @@ impl Crypto {
         space: PacketNumberSpace,
         sni_slicing: bool,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         self.streams
@@ -1511,7 +1511,7 @@ impl CryptoStreams {
         space: PacketNumberSpace,
         sni_slicing: bool,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         fn write_chunk<B: Buffer>(
@@ -1543,7 +1543,7 @@ impl CryptoStreams {
         fn mark_as_sent(
             cs: &mut CryptoStream,
             space: PacketNumberSpace,
-            tokens: &mut Vec<recovery::Token>,
+            tokens: &mut RecoveryTokenVec,
             offset: u64,
             len: usize,
             stats: &mut FrameStats,

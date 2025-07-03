@@ -29,7 +29,7 @@ use crate::{
     },
     packet,
     pmtud::Pmtud,
-    recovery::sent,
+    recovery::{sent, RecoveryTokenVec},
     rtt::RttEstimate,
 };
 
@@ -48,7 +48,7 @@ fn fill_cwnd(cc: &mut ClassicCongestionControl<Cubic>, mut next_pn: u64, now: In
             next_pn,
             now,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&sent, now);
@@ -63,7 +63,7 @@ fn ack_packet(cc: &mut ClassicCongestionControl<Cubic>, pn: u64, now: Instant) {
         pn,
         now,
         true,
-        Vec::new(),
+        RecoveryTokenVec::new(),
         cc.max_datagram_size(),
     );
     cc.on_packets_acked(&[acked], &RttEstimate::from_duration(RTT), now);
@@ -76,7 +76,7 @@ fn packet_lost(cc: &mut ClassicCongestionControl<Cubic>, pn: u64) {
         pn,
         now(),
         true,
-        Vec::new(),
+        RecoveryTokenVec::new(),
         cc.max_datagram_size(),
     );
     cc.on_packets_lost(None, None, PTO, &[p_lost], now());

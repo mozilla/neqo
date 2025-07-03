@@ -348,7 +348,7 @@ mod tests {
         crypto::CryptoDxState,
         packet,
         pmtud::{Probe, PMTU_RAISE_TIMER, SEARCH_TABLE_LEN},
-        recovery::{sent, SendProfile},
+        recovery::{sent, RecoveryTokenVec, SendProfile},
         Pmtud, Stats,
     };
 
@@ -362,8 +362,15 @@ mod tests {
         Some(u16::MAX as usize),
     ];
 
-    const fn make_sent_packet(pn: u64, now: Instant, len: usize) -> sent::Packet {
-        sent::Packet::new(packet::Type::Short, pn, now, true, Vec::new(), len)
+    fn make_sent_packet(pn: u64, now: Instant, len: usize) -> sent::Packet {
+        sent::Packet::new(
+            packet::Type::Short,
+            pn,
+            now,
+            true,
+            RecoveryTokenVec::new(),
+            len,
+        )
     }
 
     /// Asserts that the PMTUD process has stopped at the given MTU.

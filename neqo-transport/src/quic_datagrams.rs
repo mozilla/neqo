@@ -11,8 +11,11 @@ use std::{cmp::min, collections::VecDeque};
 use neqo_common::{Buffer, Encoder};
 
 use crate::{
-    events::OutgoingDatagramOutcome, frame::FrameType, packet, recovery, ConnectionEvents, Error,
-    Res, Stats,
+    events::OutgoingDatagramOutcome,
+    frame::FrameType,
+    packet,
+    recovery::{self, RecoveryTokenVec},
+    ConnectionEvents, Error, Res, Stats,
 };
 
 pub const MAX_QUIC_DATAGRAM: u64 = 65535;
@@ -100,7 +103,7 @@ impl QuicDatagrams {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut Stats,
     ) {
         while let Some(dgram) = self.datagrams.pop_front() {

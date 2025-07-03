@@ -12,7 +12,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{packet, recovery};
+use crate::{
+    packet,
+    recovery::{self, RecoveryTokenVec},
+};
 
 #[derive(Debug, Clone)]
 pub struct Packet {
@@ -21,7 +24,7 @@ pub struct Packet {
     ack_eliciting: bool,
     time_sent: Instant,
     primary_path: bool,
-    tokens: Vec<recovery::Token>,
+    tokens: RecoveryTokenVec,
 
     time_declared_lost: Option<Instant>,
     /// After a PTO, this is true when the packet has been released.
@@ -37,7 +40,7 @@ impl Packet {
         pn: packet::Number,
         time_sent: Instant,
         ack_eliciting: bool,
-        tokens: Vec<recovery::Token>,
+        tokens: RecoveryTokenVec,
         len: usize,
     ) -> Self {
         Self {
@@ -104,7 +107,7 @@ impl Packet {
 
     /// Access the recovery tokens that this holds.
     #[must_use]
-    pub fn tokens(&self) -> &[recovery::Token] {
+    pub const fn tokens(&self) -> &RecoveryTokenVec {
         &self.tokens
     }
 
@@ -311,7 +314,7 @@ mod tests {
     };
 
     use super::{Packet, Packets};
-    use crate::packet;
+    use crate::{packet, recovery::RecoveryTokenVec};
 
     const PACKET_GAP: Duration = Duration::from_secs(1);
     fn start_time() -> Instant {
@@ -325,7 +328,7 @@ mod tests {
             packet::Number::from(n),
             start_time() + (PACKET_GAP * n),
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             100,
         )
     }
