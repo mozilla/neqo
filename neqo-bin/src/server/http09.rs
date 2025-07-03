@@ -9,8 +9,8 @@
 use std::{
     borrow::Cow,
     cell::RefCell,
-    collections::HashMap,
     fmt::{self, Display, Formatter},
+    num::NonZeroUsize,
     rc::Rc,
     slice, str,
     time::Instant,
@@ -21,9 +21,10 @@ use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay};
 use neqo_http3::Error;
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
-    ConnectionEvent, ConnectionIdGenerator, Output, State, StreamId,
+    ConnectionEvent, ConnectionIdGenerator, OutputBatch, State, StreamId,
 };
 use regex::Regex;
+use rustc_hash::FxHashMap as HashMap;
 
 use super::{qns_read_response, Args};
 use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};
@@ -75,8 +76,8 @@ impl HttpServer {
         let is_qns_test = args.shared.qns_test.is_some();
         Ok(Self {
             server,
-            write_state: HashMap::new(),
-            read_state: HashMap::new(),
+            write_state: HashMap::default(),
+            read_state: HashMap::default(),
             is_qns_test,
             regex: if is_qns_test {
                 Regex::new(r"GET +/(\S+)(?:\r)?\n").map_err(|_| Error::Internal)?
@@ -200,8 +201,13 @@ impl HttpServer {
 }
 
 impl super::HttpServer for HttpServer {
-    fn process(&mut self, dgram: Option<Datagram<&mut [u8]>>, now: Instant) -> Output {
-        self.server.process(dgram, now)
+    fn process_multiple(
+        &mut self,
+        dgram: Option<Datagram<&mut [u8]>>,
+        now: Instant,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch {
+        self.server.process_multiple(dgram, now, max_datagrams)
     }
 
     fn process_events(&mut self, now: Instant) {

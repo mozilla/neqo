@@ -17,9 +17,9 @@ use super::{
 use crate::{
     events::ConnectionEvent,
     frame::FrameType,
-    packet::PacketBuilder,
+    packet,
     recv_stream::INITIAL_RECV_WINDOW_SIZE,
-    send_stream::{OrderGroup, SendStreamState},
+    send_stream::{self, OrderGroup},
     streams::{SendOrder, StreamOrder},
     tparams::{TransportParameter, TransportParameterId::*},
     CloseReason, Connection, ConnectionParameters, Error, StreamId, StreamType,
@@ -532,7 +532,7 @@ fn do_not_accept_data_after_stop_sending() {
 struct Writer(Vec<u64>);
 
 impl crate::connection::test_internal::FrameWriter for Writer {
-    fn write_frames(&mut self, builder: &mut PacketBuilder) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder.write_varint_frame(&self.0);
     }
 }
@@ -691,7 +691,7 @@ fn late_stream_related_frames() {
             }
             FrameType::StreamDataBlocked => {
                 let internal_stream = server.streams.get_send_stream_mut(stream_id).unwrap();
-                if let SendStreamState::Ready { fc, .. } = internal_stream.state() {
+                if let send_stream::State::Ready { fc, .. } = internal_stream.state() {
                     fc.blocked();
                 } else {
                     panic!("unexpected stream state");
@@ -856,7 +856,7 @@ fn stream_data_blocked_generates_max_stream_data() {
 
     // Now send `STREAM_DATA_BLOCKED`.
     let internal_stream = server.streams.get_send_stream_mut(stream_id).unwrap();
-    if let SendStreamState::Send { fc, .. } = internal_stream.state() {
+    if let send_stream::State::Send { fc, .. } = internal_stream.state() {
         fc.blocked();
     } else {
         panic!("unexpected stream state");

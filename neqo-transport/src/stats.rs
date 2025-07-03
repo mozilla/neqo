@@ -15,20 +15,17 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{qwarn, IpTosDscp, IpTosEcn};
+use neqo_common::{qwarn, Dscp, Ecn};
 use strum::IntoEnumIterator as _;
 
-use crate::{
-    ecn,
-    packet::{PacketNumber, PacketType},
-};
+use crate::{ecn, packet};
 
 pub const MAX_PTO_COUNTS: usize = 16;
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct FrameStats {
     pub ack: usize,
-    pub largest_acknowledged: PacketNumber,
+    pub largest_acknowledged: packet::Number,
 
     pub crypto: usize,
     pub stream: usize,
@@ -139,9 +136,9 @@ pub struct DatagramStats {
     pub dropped_queue_full: usize,
 }
 
-/// ECN counts by QUIC [`PacketType`].
+/// ECN counts by QUIC [`packet::Type`].
 #[derive(Default, Clone, PartialEq, Eq)]
-pub struct EcnCount(EnumMap<PacketType, ecn::Count>);
+pub struct EcnCount(EnumMap<packet::Type, ecn::Count>);
 
 impl Debug for EcnCount {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -157,7 +154,7 @@ impl Debug for EcnCount {
 }
 
 impl Deref for EcnCount {
-    type Target = EnumMap<PacketType, ecn::Count>;
+    type Target = EnumMap<packet::Type, ecn::Count>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -171,10 +168,10 @@ impl DerefMut for EcnCount {
 
 /// Packet types and numbers of the first ECN mark transition between two marks.
 #[derive(Default, Clone, PartialEq, Eq)]
-pub struct EcnTransitions(EnumMap<IpTosEcn, EnumMap<IpTosEcn, Option<(PacketType, PacketNumber)>>>);
+pub struct EcnTransitions(EnumMap<Ecn, EnumMap<Ecn, Option<(packet::Type, packet::Number)>>>);
 
 impl Deref for EcnTransitions {
-    type Target = EnumMap<IpTosEcn, EnumMap<IpTosEcn, Option<(PacketType, PacketNumber)>>>;
+    type Target = EnumMap<Ecn, EnumMap<Ecn, Option<(packet::Type, packet::Number)>>>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -188,13 +185,13 @@ impl DerefMut for EcnTransitions {
 
 impl Debug for EcnTransitions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for from in IpTosEcn::iter() {
+        for from in Ecn::iter() {
             // Don't show all-None rows.
             if self.0[from].iter().all(|(_, v)| v.is_none()) {
                 continue;
             }
             write!(f, "      First {from:?} ")?;
-            for to in IpTosEcn::iter() {
+            for to in Ecn::iter() {
                 // Don't show transitions that were not recorded.
                 if let Some(pkt) = self.0[from][to] {
                     write!(f, "to {to:?} {pkt:?} ")?;
@@ -208,7 +205,7 @@ impl Debug for EcnTransitions {
 
 /// Received packet counts by DSCP value.
 #[derive(Default, Clone, PartialEq, Eq)]
-pub struct DscpCount(EnumMap<IpTosDscp, usize>);
+pub struct DscpCount(EnumMap<Dscp, usize>);
 
 impl Debug for DscpCount {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -224,7 +221,7 @@ impl Debug for DscpCount {
 }
 
 impl Deref for DscpCount {
-    type Target = EnumMap<IpTosDscp, usize>;
+    type Target = EnumMap<Dscp, usize>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -259,6 +256,8 @@ pub struct Stats {
     /// Acknowledgments for packets that contained data that was marked
     /// for retransmission when the PTO timer popped.
     pub pto_ack: usize,
+    /// Number of times we had to drop an unacknowledged ACK range.
+    pub unacked_range_dropped: usize,
     /// Number of PMTUD probes sent.
     pub pmtud_tx: usize,
     /// Number of PMTUD probes ACK'ed.
@@ -309,16 +308,16 @@ pub struct Stats {
     ///
     /// See also <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.2>.
     ///
-    /// [`Ect0`]: neqo_common::tos::IpTosEcn::Ect0
-    /// [`Ect1`]: neqo_common::tos::IpTosEcn::Ect1
-    /// [`Ce`]: neqo_common::tos::IpTosEcn::Ce
-    /// [`NotEct`]: neqo_common::tos::IpTosEcn::NotEct
+    /// [`Ect0`]: neqo_common::tos::Ecn::Ect0
+    /// [`Ect1`]: neqo_common::tos::Ecn::Ect1
+    /// [`Ce`]: neqo_common::tos::Ecn::Ce
+    /// [`NotEct`]: neqo_common::tos::Ecn::NotEct
     pub ecn_tx_acked: EcnCount,
     /// ECN counts for incoming UDP datagrams, read from IP TOS header. For coalesced packets,
     /// counts increase for all packet types in the coalesced datagram.
     pub ecn_rx: EcnCount,
     /// Packet numbers of the first observed (received) ECN mark transition between two marks.
-    pub ecn_last_mark: Option<IpTosEcn>,
+    pub ecn_last_mark: Option<Ecn>,
     pub ecn_rx_transition: EcnTransitions,
 
     /// Counters for DSCP values received.
@@ -367,8 +366,8 @@ impl Debug for Stats {
         )?;
         writeln!(
             f,
-            "  tx: {} lost {} lateack {} ptoack {}",
-            self.packets_tx, self.lost, self.late_ack, self.pto_ack
+            "  tx: {} lost {} lateack {} ptoack {} unackdrop {}",
+            self.packets_tx, self.lost, self.late_ack, self.pto_ack, self.unacked_range_dropped
         )?;
         writeln!(
             f,

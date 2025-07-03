@@ -5,12 +5,13 @@
 // except according to those terms.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     fmt::{self, Display, Formatter},
 };
 
 use neqo_common::{qtrace, Encoder};
 use neqo_transport::{Connection, StreamId, StreamType};
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{frames::HFrame, BufferedStream, Error, Http3StreamType, RecvStream, Res};
 
@@ -40,9 +41,7 @@ impl ControlStreamLocal {
 
     /// Add a new frame that needs to be send.
     pub fn queue_frame(&mut self, f: &HFrame) {
-        let mut enc = Encoder::default();
-        f.encode(&mut enc);
-        self.stream.buffer(enc.as_ref());
+        self.stream.encode_with(|e| f.encode(e));
     }
 
     pub fn queue_update_priority(&mut self, stream_id: StreamId) {

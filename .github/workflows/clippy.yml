@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   clippy:
+    name: cargo clippy
     strategy:
       fail-fast: false
       matrix:

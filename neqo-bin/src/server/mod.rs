@@ -4,10 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
 #![expect(
     clippy::unwrap_used,
     clippy::future_not_send,
@@ -19,8 +15,10 @@
 use std::{
     cell::RefCell,
     fmt::{self, Display},
-    fs, io,
+    fs,
+    io::{self},
     net::{SocketAddr, ToSocketAddrs as _},
+    num::NonZeroUsize,
     path::PathBuf,
     pin::Pin,
     process::exit,
@@ -38,7 +36,7 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init_db, AntiReplay, Cipher,
 };
-use neqo_transport::{Output, RandomConnectionIdGenerator, Version};
+use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version};
 use neqo_udp::RecvBuf;
 use tokio::time::Sleep;
 
@@ -204,13 +202,19 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
     fs::read(path)
 }
 
+#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<Datagram<&mut [u8]>>, now: Instant) -> Output;
+    fn process_multiple(
+        &mut self,
+        dgram: Option<Datagram<&mut [u8]>>,
+        now: Instant,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }
 
-pub struct ServerRunner {
+pub struct Runner {
     now: Box<dyn Fn() -> Instant>,
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
@@ -218,7 +222,7 @@ pub struct ServerRunner {
     recv_buf: RecvBuf,
 }
 
-impl ServerRunner {
+impl Runner {
     #[must_use]
     pub fn new(
         now: Box<dyn Fn() -> Instant>,
@@ -264,9 +268,26 @@ impl ServerRunner {
         now: &dyn Fn() -> Instant,
         mut input_dgram: Option<Datagram<&mut [u8]>>,
     ) -> Result<(), io::Error> {
+        // Each socket has a maximum number of GSO segments it can handle. When
+        // calling `server.process_multiple` we don't know which socket will be
+        // used. Take the smallest maximum GSO segments from all sockets to
+        // ensure that we don't send more segments than any socket can handle.
+        //
+        // Ideally we would have a way to know which socket will be used. Likely
+        // not worth it for a test-only server implementation which is mostly
+        // used with a single socket only.
+        let smallest_max_gso_segments = sockets
+            .iter()
+            .map(|(_, socket)| socket.max_gso_segments())
+            .min()
+            .expect("At least one socket must be present")
+            .try_into()
+            .inspect_err(|_| qerror!("Socket return GSO size of 0"))
+            .map_err(|_| io::Error::from(io::ErrorKind::Unsupported))?;
+
         loop {
-            match server.process(input_dgram.take(), now()) {
-                Output::Datagram(dgram) => {
+            match server.process_multiple(input_dgram.take(), now(), smallest_max_gso_segments) {
+                OutputBatch::DatagramBatch(dgram) => {
                     let socket = Self::find_socket(sockets, dgram.source());
                     loop {
                         // Optimistically attempt sending datagram. In case the
@@ -282,12 +303,12 @@ impl ServerRunner {
                         }
                     }
                 }
-                Output::Callback(new_timeout) => {
+                OutputBatch::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
                     *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
-                Output::None => break,
+                OutputBatch::None => break,
             }
         }
         Ok(())
@@ -372,7 +393,7 @@ enum Ready {
     Timeout,
 }
 
-pub fn server(mut args: Args) -> Res<ServerRunner> {
+pub fn server(mut args: Args) -> Res<Runner> {
     neqo_common::log::init(
         args.shared
             .verbose
@@ -452,9 +473,5 @@ pub fn server(mut args: Args) -> Res<ServerRunner> {
         )
     };
 
-    Ok(ServerRunner::new(
-        Box::new(move || args.now()),
-        server,
-        sockets,
-    ))
+    Ok(Runner::new(Box::new(move || args.now()), server, sockets))
 }

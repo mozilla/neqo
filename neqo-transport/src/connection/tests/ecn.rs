@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use neqo_common::{Datagram, IpTos, IpTosEcn};
+use neqo_common::{Datagram, Ecn, Tos};
 use strum::IntoEnumIterator as _;
 use test_fixture::{
     assertions::{assert_v4_path, assert_v6_path},
@@ -20,21 +20,20 @@ use crate::{
         new_server, send_and_receive, send_something, send_something_with_modifier,
         send_with_modifier_and_receive, DEFAULT_RTT,
     },
-    ecn,
-    packet::PacketType,
+    ecn, packet,
     path::MAX_PATH_PROBES,
     ConnectionId, ConnectionParameters, StreamType,
 };
 
-fn assert_ecn_enabled(tos: IpTos) {
+fn assert_ecn_enabled(tos: Tos) {
     assert!(tos.is_ecn_marked());
 }
 
-fn assert_ecn_disabled(tos: IpTos) {
+fn assert_ecn_disabled(tos: Tos) {
     assert!(!tos.is_ecn_marked());
 }
 
-fn set_tos(mut d: Datagram, ecn: IpTosEcn) -> Datagram {
+fn set_tos(mut d: Datagram, ecn: Ecn) -> Datagram {
     d.set_tos(ecn.into());
     d
 }
@@ -44,13 +43,13 @@ fn noop() -> fn(Datagram) -> Option<Datagram> {
 }
 
 fn bleach() -> fn(Datagram) -> Option<Datagram> {
-    |d| Some(set_tos(d, IpTosEcn::NotEct))
+    |d| Some(set_tos(d, Ecn::NotEct))
 }
 
 fn remark() -> fn(Datagram) -> Option<Datagram> {
     |d| {
         if d.tos().is_ecn_marked() {
-            Some(set_tos(d, IpTosEcn::Ect1))
+            Some(set_tos(d, Ecn::Ect1))
         } else {
             Some(d)
         }
@@ -60,7 +59,7 @@ fn remark() -> fn(Datagram) -> Option<Datagram> {
 fn ce() -> fn(Datagram) -> Option<Datagram> {
     |d| {
         if d.tos().is_ecn_marked() {
-            Some(set_tos(d, IpTosEcn::Ce))
+            Some(set_tos(d, Ecn::Ce))
         } else {
             Some(d)
         }
@@ -150,7 +149,7 @@ fn debug() {
         format!("{stats:?}"),
         "stats for\u{0020}
   rx: 0 drop 0 dup 0 saved 0
-  tx: 0 lost 0 lateack 0 ptoack 0
+  tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
   pmtud: 0 sent 0 acked 0 lost 0 change 0 iface_mtu 0 pmtu
   resumed: false
   frames rx:
@@ -206,8 +205,8 @@ fn stats() {
             }
         }
 
-        for packet_type in PacketType::iter() {
-            for codepoint in [IpTosEcn::Ect1, IpTosEcn::Ce] {
+        for packet_type in packet::Type::iter() {
+            for codepoint in [Ecn::Ect1, Ecn::Ce] {
                 assert_eq!(stats.ecn_tx[packet_type][codepoint], 0);
                 assert_eq!(stats.ecn_tx_acked[packet_type][codepoint], 0);
                 assert_eq!(stats.ecn_rx[packet_type][codepoint], 0);
@@ -215,22 +214,22 @@ fn stats() {
         }
     }
 
-    for packet_type in PacketType::iter() {
+    for packet_type in packet::Type::iter() {
         assert!(
-            client.stats().ecn_tx_acked[packet_type][IpTosEcn::Ect0]
-                <= server.stats().ecn_rx[packet_type][IpTosEcn::Ect0]
+            client.stats().ecn_tx_acked[packet_type][Ecn::Ect0]
+                <= server.stats().ecn_rx[packet_type][Ecn::Ect0]
         );
         assert!(
-            server.stats().ecn_tx_acked[packet_type][IpTosEcn::Ect0]
-                <= client.stats().ecn_rx[packet_type][IpTosEcn::Ect0]
+            server.stats().ecn_tx_acked[packet_type][Ecn::Ect0]
+                <= client.stats().ecn_rx[packet_type][Ecn::Ect0]
         );
         assert_eq!(
-            client.stats().ecn_tx[packet_type][IpTosEcn::Ect0],
-            server.stats().ecn_rx[packet_type][IpTosEcn::Ect0]
+            client.stats().ecn_tx[packet_type][Ecn::Ect0],
+            server.stats().ecn_rx[packet_type][Ecn::Ect0]
         );
         assert_eq!(
-            server.stats().ecn_tx[packet_type][IpTosEcn::Ect0],
-            client.stats().ecn_rx[packet_type][IpTosEcn::Ect0]
+            server.stats().ecn_tx[packet_type][Ecn::Ect0],
+            client.stats().ecn_rx[packet_type][Ecn::Ect0]
         );
     }
 }
@@ -282,7 +281,7 @@ pub fn migration_with_modifiers(
     orig_path_modifier: fn(Datagram) -> Option<Datagram>,
     new_path_modifier: fn(Datagram) -> Option<Datagram>,
     burst: usize,
-) -> (IpTos, IpTos, bool) {
+) -> (Tos, Tos, bool) {
     fixture_init();
     let mut client = new_client(ConnectionParameters::default().max_streams(StreamType::UniDi, 64));
     let mut server = new_server(ConnectionParameters::default().max_streams(StreamType::UniDi, 64));

@@ -12,13 +12,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qtrace, qwarn, Role};
+use neqo_common::{qtrace, qwarn, Buffer, Role};
 
 use crate::{
     fc::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl},
     frame::Frame,
-    packet::PacketBuilder,
-    recovery::{RecoveryToken, StreamRecoveryToken},
+    packet,
+    recovery::{self, StreamRecoveryToken},
     recv_stream::{RecvStream, RecvStreams},
     send_stream::{SendStream, SendStreams, TransmissionPriority},
     stats::FrameStats,
@@ -209,10 +209,10 @@ impl Streams {
         Ok(())
     }
 
-    pub fn write_maintenance_frames(
+    pub fn write_maintenance_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
         now: Instant,
         rtt: Duration,
@@ -252,11 +252,11 @@ impl Streams {
         self.local_stream_limits[StreamType::UniDi].write_frames(builder, tokens, stats);
     }
 
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut Vec<recovery::Token>,
         stats: &mut FrameStats,
     ) {
         self.send.write_frames(priority, builder, tokens, stats);
