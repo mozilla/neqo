@@ -3198,7 +3198,7 @@ impl Connection {
 
                 let ranges =
                     Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
-                self.handle_ack(space, ranges, ecn_count, ack_delay, now)?;
+                self.handle_ack(space, ranges, ecn_count.as_ref(), ack_delay, now)?;
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
@@ -3396,7 +3396,7 @@ impl Connection {
         &mut self,
         space: PacketNumberSpace,
         ack_ranges: R,
-        ack_ecn: Option<ecn::Count>,
+        ack_ecn: Option<&ecn::Count>,
         ack_delay: u64,
         now: Instant,
     ) -> Res<()>

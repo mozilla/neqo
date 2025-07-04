@@ -577,7 +577,7 @@ impl Loss {
         primary_path: &PathRef,
         pn_space: PacketNumberSpace,
         acked_ranges: R,
-        ack_ecn: Option<ecn::Count>,
+        ack_ecn: Option<&ecn::Count>,
         ack_delay: Duration,
         now: Instant,
     ) -> (Vec<sent::Packet>, Vec<sent::Packet>)
@@ -990,7 +990,7 @@ mod tests {
             &mut self,
             pn_space: PacketNumberSpace,
             acked_ranges: Vec<RangeInclusive<packet::Number>>,
-            ack_ecn: Option<ecn::Count>,
+            ack_ecn: Option<&ecn::Count>,
             ack_delay: Duration,
             now: Instant,
         ) -> (Vec<sent::Packet>, Vec<sent::Packet>) {
