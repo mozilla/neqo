@@ -14,6 +14,8 @@ use crate::{
     tracking::AckToken,
 };
 
+pub type Tokens = Vec<Token>;
+
 #[derive(Debug, Clone)]
 pub enum StreamRecoveryToken {
     Stream(send_stream::RecoveryToken),

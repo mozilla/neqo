@@ -338,7 +338,7 @@ impl NewTokenState {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if let Self::Server(ref mut sender) = self {
@@ -412,7 +412,7 @@ impl NewTokenSender {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         for t in &mut self.tokens {

@@ -612,7 +612,10 @@ mod tests {
             CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS,
         },
         packet,
-        recovery::sent::{self},
+        recovery::{
+            self,
+            sent::{self},
+        },
         rtt::RttEstimate,
         Pmtud,
     };
@@ -643,7 +646,7 @@ mod tests {
             pn,
             now() + t,
             ack_eliciting,
-            Vec::new(),
+            recovery::Tokens::new(),
             100,
         )
     }
@@ -857,7 +860,7 @@ mod tests {
                     u64::try_from(i).unwrap(),
                     by_pto(t),
                     true,
-                    Vec::new(),
+                    recovery::Tokens::new(),
                     1000,
                 )
             })
@@ -978,7 +981,7 @@ mod tests {
             lost[0].pn(),
             lost[0].time_sent(),
             false,
-            lost[0].tokens().to_vec(),
+            lost[0].tokens().clone(),
             lost[0].len(),
         );
         assert!(!persistent_congestion_by_pto(
@@ -1079,7 +1082,7 @@ mod tests {
                     next_pn,
                     now,
                     true,
-                    Vec::new(),
+                    recovery::Tokens::new(),
                     cc.max_datagram_size(),
                 );
                 next_pn += 1;
@@ -1106,7 +1109,7 @@ mod tests {
                 next_pn,
                 now,
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 cc.max_datagram_size(),
             );
             next_pn += 1;
@@ -1156,7 +1159,7 @@ mod tests {
             1,
             now,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&p_lost, now);
@@ -1169,7 +1172,7 @@ mod tests {
             2,
             now,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&p_not_lost, now);
@@ -1192,7 +1195,7 @@ mod tests {
                     next_pn,
                     now,
                     true,
-                    Vec::new(),
+                    recovery::Tokens::new(),
                     cc.max_datagram_size(),
                 );
                 next_pn += 1;
@@ -1225,7 +1228,7 @@ mod tests {
                 next_pn,
                 now,
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 cc.max_datagram_size(),
             );
             next_pn += 1;
@@ -1264,7 +1267,7 @@ mod tests {
             1,
             now,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&p_ce, now);

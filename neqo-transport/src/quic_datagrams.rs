@@ -100,7 +100,7 @@ impl QuicDatagrams {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut Stats,
     ) {
         while let Some(dgram) = self.datagrams.pop_front() {

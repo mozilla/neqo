@@ -145,7 +145,7 @@ impl SenderFlowControl<()> {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if let Some(limit) = self.blocked_needed() {
@@ -164,7 +164,7 @@ impl SenderFlowControl<StreamId> {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if let Some(limit) = self.blocked_needed() {
@@ -190,7 +190,7 @@ impl SenderFlowControl<StreamType> {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if let Some(limit) = self.blocked_needed() {
@@ -328,7 +328,7 @@ impl ReceiverFlowControl<()> {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if !self.frame_needed() {
@@ -370,7 +370,7 @@ impl ReceiverFlowControl<StreamId> {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
         now: Instant,
         rtt: Duration,
@@ -484,7 +484,7 @@ impl ReceiverFlowControl<StreamType> {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if !self.frame_needed() {
@@ -671,6 +671,7 @@ mod test {
     use crate::{
         fc::WINDOW_UPDATE_FRACTION,
         packet::{self, PACKET_LIMIT},
+        recovery,
         recv_stream::MAX_RECV_WINDOW_SIZE,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
@@ -915,7 +916,7 @@ mod test {
         // consume the frame
         let mut builder =
             packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
-        let mut tokens = Vec::new();
+        let mut tokens = recovery::Tokens::new();
         fc[StreamType::BiDi].write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
         assert_eq!(tokens.len(), 1);
 
@@ -1023,7 +1024,7 @@ mod test {
     fn write_frames(fc: &mut ReceiverFlowControl<StreamId>, rtt: Duration, now: Instant) -> usize {
         let mut builder =
             packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
-        let mut tokens = Vec::new();
+        let mut tokens = recovery::Tokens::new();
         fc.write_frames(
             &mut builder,
             &mut tokens,
@@ -1251,7 +1252,7 @@ mod test {
         // larger than the largest possible QUIC varint value.
         let mut builder =
             packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
-        let mut tokens = Vec::new();
+        let mut tokens = recovery::Tokens::new();
         fc.write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
     }
 }

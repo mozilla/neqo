@@ -196,7 +196,7 @@ impl RttEstimate {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         self.ack_delay.write_frames(builder, tokens, stats);
