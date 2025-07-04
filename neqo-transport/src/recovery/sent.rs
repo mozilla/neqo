@@ -7,7 +7,10 @@
 // A collection for sent packets.
 
 use std::{
-    collections::BTreeMap, ops::RangeInclusive, rc::Rc, time::{Duration, Instant}
+    collections::BTreeMap,
+    ops::RangeInclusive,
+    rc::Rc,
+    time::{Duration, Instant},
 };
 
 use crate::{packet, recovery};
