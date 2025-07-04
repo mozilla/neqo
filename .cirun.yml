@@ -9,6 +9,8 @@ runners:
       - "cirun-gcp-bencher"
     extra_config:
       project_id: lateral-booster-464513-i7
+      baseDisk:
+        diskSizeGb: 256
       networkInterfaces:
       - accessConfigs:
           - name: "External NAT"
