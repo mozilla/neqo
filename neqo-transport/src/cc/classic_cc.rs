@@ -613,8 +613,8 @@ mod tests {
         },
         packet,
         recovery::{
+            self,
             sent::{self},
-            RecoveryTokenVec,
         },
         rtt::RttEstimate,
         Pmtud,
@@ -646,7 +646,7 @@ mod tests {
             pn,
             now() + t,
             ack_eliciting,
-            RecoveryTokenVec::new(),
+            recovery::Tokens::new(),
             100,
         )
     }
@@ -860,7 +860,7 @@ mod tests {
                     u64::try_from(i).unwrap(),
                     by_pto(t),
                     true,
-                    RecoveryTokenVec::new(),
+                    recovery::Tokens::new(),
                     1000,
                 )
             })
@@ -1082,7 +1082,7 @@ mod tests {
                     next_pn,
                     now,
                     true,
-                    RecoveryTokenVec::new(),
+                    recovery::Tokens::new(),
                     cc.max_datagram_size(),
                 );
                 next_pn += 1;
@@ -1109,7 +1109,7 @@ mod tests {
                 next_pn,
                 now,
                 true,
-                RecoveryTokenVec::new(),
+                recovery::Tokens::new(),
                 cc.max_datagram_size(),
             );
             next_pn += 1;
@@ -1159,7 +1159,7 @@ mod tests {
             1,
             now,
             true,
-            RecoveryTokenVec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&p_lost, now);
@@ -1172,7 +1172,7 @@ mod tests {
             2,
             now,
             true,
-            RecoveryTokenVec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&p_not_lost, now);
@@ -1195,7 +1195,7 @@ mod tests {
                     next_pn,
                     now,
                     true,
-                    RecoveryTokenVec::new(),
+                    recovery::Tokens::new(),
                     cc.max_datagram_size(),
                 );
                 next_pn += 1;
@@ -1228,7 +1228,7 @@ mod tests {
                 next_pn,
                 now,
                 true,
-                RecoveryTokenVec::new(),
+                recovery::Tokens::new(),
                 cc.max_datagram_size(),
             );
             next_pn += 1;
@@ -1267,7 +1267,7 @@ mod tests {
             1,
             now,
             true,
-            RecoveryTokenVec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&p_ce, now);

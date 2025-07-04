@@ -348,7 +348,7 @@ mod tests {
         crypto::CryptoDxState,
         packet,
         pmtud::{Probe, PMTU_RAISE_TIMER, SEARCH_TABLE_LEN},
-        recovery::{sent, RecoveryTokenVec, SendProfile},
+        recovery::{self, sent, SendProfile},
         Pmtud, Stats,
     };
 
@@ -368,7 +368,7 @@ mod tests {
             pn,
             now,
             true,
-            RecoveryTokenVec::new(),
+            recovery::Tokens::new(),
             len,
         )
     }

@@ -25,7 +25,7 @@ use crate::{
     ecn,
     frame::FrameType,
     packet,
-    recovery::{self, RecoveryTokenVec},
+    recovery::{self},
     stats::FrameStats,
     Error, Res, Stats,
 };
@@ -424,7 +424,7 @@ impl RecvdPackets {
         now: Instant,
         rtt: Duration,
         builder: &mut packet::Builder<B>,
-        tokens: &mut RecoveryTokenVec,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         // Check that we aren't delaying ACKs.
@@ -597,7 +597,7 @@ impl AckTracker {
         now: Instant,
         rtt: Duration,
         builder: &mut packet::Builder<B>,
-        tokens: &mut RecoveryTokenVec,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if let Some(space) = self.get_mut(pn_space) {
@@ -631,7 +631,7 @@ mod tests {
     use crate::{
         frame::Frame,
         packet::{self, PACKET_LIMIT},
-        recovery::{self, RecoveryTokenVec},
+        recovery::{self},
         stats::FrameStats,
         Stats,
     };
@@ -771,7 +771,7 @@ mod tests {
         let mut builder =
             packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
         let mut stats = FrameStats::default();
-        let mut tokens = RecoveryTokenVec::new();
+        let mut tokens = recovery::Tokens::new();
         rp.write_frame(now, RTT, &mut builder, &mut tokens, &mut stats);
         assert!(!tokens.is_empty());
         assert_eq!(stats.ack, 1);
@@ -940,7 +940,7 @@ mod tests {
             .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
             .is_some());
 
-        let mut tokens = RecoveryTokenVec::new();
+        let mut tokens = recovery::Tokens::new();
         let mut frame_stats = FrameStats::default();
         tracker.write_frame(
             PacketNumberSpace::Initial,
@@ -1007,7 +1007,7 @@ mod tests {
             now(),
             RTT,
             &mut builder,
-            &mut RecoveryTokenVec::new(),
+            &mut recovery::Tokens::new(),
             &mut stats,
         );
         assert_eq!(stats.ack, 0);
@@ -1044,7 +1044,7 @@ mod tests {
             now(),
             RTT,
             &mut builder,
-            &mut RecoveryTokenVec::new(),
+            &mut recovery::Tokens::new(),
             &mut stats,
         );
         assert_eq!(stats.ack, 1);

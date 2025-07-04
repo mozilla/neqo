@@ -18,7 +18,7 @@ use crate::{
     fc::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl},
     frame::Frame,
     packet,
-    recovery::{RecoveryTokenVec, StreamRecoveryToken},
+    recovery::{self, StreamRecoveryToken},
     recv_stream::{RecvStream, RecvStreams},
     send_stream::{SendStream, SendStreams, TransmissionPriority},
     stats::FrameStats,
@@ -212,7 +212,7 @@ impl Streams {
     pub fn write_maintenance_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut RecoveryTokenVec,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
         now: Instant,
         rtt: Duration,
@@ -256,7 +256,7 @@ impl Streams {
         &mut self,
         priority: TransmissionPriority,
         builder: &mut packet::Builder<B>,
-        tokens: &mut RecoveryTokenVec,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         self.send.write_frames(priority, builder, tokens, stats);

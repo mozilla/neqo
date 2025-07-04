@@ -24,7 +24,7 @@ use crate::{
     frame::FrameType,
     packet,
     pmtud::Pmtud,
-    recovery::{self, sent, RecoveryTokenVec},
+    recovery::{self, sent},
     rtt::{RttEstimate, RttSource},
     sender::PacketSender,
     stats::FrameStats,
@@ -370,7 +370,7 @@ impl Paths {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut RecoveryTokenVec,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         while let Some(seqno) = self.to_retire.pop() {
@@ -826,7 +826,7 @@ impl Path {
     pub fn write_cc_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut RecoveryTokenVec,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         self.rtt.write_frames(builder, tokens, stats);

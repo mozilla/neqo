@@ -23,7 +23,7 @@ use enum_map::EnumMap;
 use enumset::enum_set;
 use neqo_common::{qdebug, qinfo, qlog::Qlog, qtrace, qwarn};
 use strum::IntoEnumIterator as _;
-pub use token::{RecoveryTokenVec, StreamRecoveryToken, Token};
+pub use token::{StreamRecoveryToken, Token, Tokens};
 
 use crate::{
     ecn, packet,
@@ -963,7 +963,7 @@ mod tests {
         cid::{ConnectionId, ConnectionIdEntry},
         ecn, packet,
         path::{Path, PathRef},
-        recovery::{self, sent, RecoveryTokenVec},
+        recovery::{self, sent},
         stats::{Stats, StatsCell},
         ConnectionParameters,
     };
@@ -1136,7 +1136,7 @@ mod tests {
                     pn,
                     pn_time(pn),
                     true,
-                    RecoveryTokenVec::new(),
+                    recovery::Tokens::new(),
                     ON_SENT_SIZE,
                 ),
                 Instant::now(),
@@ -1163,7 +1163,7 @@ mod tests {
                 pn,
                 pn_time(pn),
                 true,
-                RecoveryTokenVec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ));
         }
@@ -1287,7 +1287,7 @@ mod tests {
                 0,
                 pn_time(0),
                 true,
-                RecoveryTokenVec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1298,7 +1298,7 @@ mod tests {
                 1,
                 pn_time(0) + TEST_RTT / 4,
                 true,
-                RecoveryTokenVec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1396,7 +1396,7 @@ mod tests {
                 0,
                 pn_time(0),
                 true,
-                RecoveryTokenVec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1407,7 +1407,7 @@ mod tests {
                 0,
                 pn_time(1),
                 true,
-                RecoveryTokenVec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1418,7 +1418,7 @@ mod tests {
                 0,
                 pn_time(2),
                 true,
-                RecoveryTokenVec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1435,7 +1435,7 @@ mod tests {
                 1,
                 pn_time(3),
                 true,
-                RecoveryTokenVec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             );
             let pn_space = PacketNumberSpace::from(sent_pkt.packet_type());
@@ -1471,7 +1471,7 @@ mod tests {
                 0,
                 pn_time(3),
                 true,
-                RecoveryTokenVec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1488,7 +1488,7 @@ mod tests {
                 0,
                 now(),
                 true,
-                RecoveryTokenVec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1510,7 +1510,7 @@ mod tests {
                 0,
                 now(),
                 true,
-                RecoveryTokenVec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1521,7 +1521,7 @@ mod tests {
                 0,
                 now(),
                 true,
-                RecoveryTokenVec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1561,7 +1561,7 @@ mod tests {
                 0,
                 now(),
                 true,
-                RecoveryTokenVec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),

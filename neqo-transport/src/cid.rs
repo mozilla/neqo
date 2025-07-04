@@ -19,13 +19,7 @@ use neqo_common::{hex, hex_with_len, qdebug, qinfo, Buffer, Decoder, Encoder};
 use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
-use crate::{
-    frame::FrameType,
-    packet,
-    recovery::{self, RecoveryTokenVec},
-    stats::FrameStats,
-    Error, Res,
-};
+use crate::{frame::FrameType, packet, recovery, stats::FrameStats, Error, Res};
 
 pub const MAX_CONNECTION_ID_LEN: usize = 20;
 pub const LOCAL_ACTIVE_CID_LIMIT: usize = 8;
@@ -561,7 +555,7 @@ impl ConnectionIdManager {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut RecoveryTokenVec,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if self.generator.deref().borrow().generates_empty_cids() {

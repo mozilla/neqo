@@ -43,7 +43,7 @@ use crate::{
     path::{Path, PathRef, Paths},
     qlog,
     quic_datagrams::{DatagramTracking, QuicDatagrams},
-    recovery::{self, sent, RecoveryTokenVec, SendProfile},
+    recovery::{self, sent, SendProfile},
     recv_stream,
     rtt::{RttEstimate, GRANULARITY, INITIAL_RTT},
     send_stream::{self, SendStream},
@@ -2286,7 +2286,7 @@ impl Connection {
     fn write_appdata_frames(
         &mut self,
         builder: &mut packet::Builder<&mut Vec<u8>>,
-        tokens: &mut RecoveryTokenVec,
+        tokens: &mut recovery::Tokens,
         now: Instant,
     ) {
         let rtt = self.paths.primary().map_or_else(
@@ -2385,7 +2385,7 @@ impl Connection {
         force_probe: bool,
         builder: &mut packet::Builder<B>,
         ack_end: usize,
-        tokens: &mut RecoveryTokenVec,
+        tokens: &mut recovery::Tokens,
         now: Instant,
     ) -> bool {
         let untracked = self.received_untracked && !self.state.connected();
@@ -2438,8 +2438,8 @@ impl Connection {
         builder: &mut packet::Builder<&mut Vec<u8>>,
         coalesced: bool, // Whether this packet is coalesced behind another one.
         now: Instant,
-    ) -> (RecoveryTokenVec, bool, bool) {
-        let mut tokens = RecoveryTokenVec::new();
+    ) -> (recovery::Tokens, bool, bool) {
+        let mut tokens = recovery::Tokens::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
 
@@ -2530,7 +2530,7 @@ impl Connection {
         space: PacketNumberSpace,
         now: Instant,
         path: &PathRef,
-        tokens: &mut RecoveryTokenVec,
+        tokens: &mut recovery::Tokens,
     ) {
         if builder.remaining() > ClosingFrame::MIN_LENGTH + RecvdPackets::USEFUL_ACK_LEN {
             // Include an ACK frame with the CONNECTION_CLOSE.
@@ -2700,7 +2700,7 @@ impl Connection {
             // Add frames to the packet.
             let payload_start = builder.len();
             let (mut tokens, mut ack_eliciting, mut padded) =
-                (RecoveryTokenVec::new(), false, false);
+                (recovery::Tokens::new(), false, false);
             if let Some(close) = closing_frame {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
