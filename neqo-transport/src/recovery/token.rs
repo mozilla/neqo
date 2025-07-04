@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use smallvec::SmallVec;
-
 use crate::{
     ackrate::AckRate,
     cid::ConnectionIdEntry,
@@ -16,7 +14,7 @@ use crate::{
     tracking::AckToken,
 };
 
-pub type Tokens = SmallVec<[Token; 8]>;
+pub type Tokens = Vec<Token>;
 
 #[derive(Debug, Clone)]
 pub enum StreamRecoveryToken {
