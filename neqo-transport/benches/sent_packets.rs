@@ -9,7 +9,7 @@ use std::{hint::black_box, time::Instant};
 use criterion::{criterion_group, criterion_main, Criterion};
 use neqo_transport::{
     self, packet,
-    recovery::{recovery::Tokens, sent},
+    recovery::{self, sent},
 };
 
 fn sent_packets() -> sent::Packets {
