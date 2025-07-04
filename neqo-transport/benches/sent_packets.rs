@@ -7,7 +7,10 @@
 use std::{hint::black_box, time::Instant};
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use neqo_transport::{self, packet, recovery::sent};
+use neqo_transport::{
+    self, packet,
+    recovery::{sent, RecoveryTokenVec},
+};
 
 fn sent_packets() -> sent::Packets {
     let mut pkts = sent::Packets::default();
@@ -19,7 +22,7 @@ fn sent_packets() -> sent::Packets {
             packet::Number::from(i),
             now,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             100,
         ));
     }
