@@ -95,7 +95,8 @@ fn spawn_server() -> (tokio::sync::oneshot::Sender<()>, SocketAddr) {
 
         let mut args = server::Args::default();
         args.set_hosts(vec!["[::]:0".to_string()]);
-        let server = runtime.block_on(async { server::server(args).unwrap() });
+        let server =
+            runtime.block_on(async { server::server::<server::http3::HttpServer>(args).unwrap() });
 
         addr_sender
             .send(

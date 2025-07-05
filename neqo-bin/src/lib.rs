@@ -81,6 +81,13 @@ impl Default for SharedArgs {
     }
 }
 
+impl SharedArgs {
+    #[must_use]
+    pub fn get_alpn(&self) -> &str {
+        &self.alpn
+    }
+}
+
 #[derive(Debug, Parser)]
 pub struct QuicParameters {
     #[arg(
@@ -314,7 +321,11 @@ mod tests {
         server_args.set_qlog_dir(temp_dir.path());
 
         let client = client::client(client_args);
-        let server = Box::pin(server::server(server_args).unwrap().run());
+        let server = Box::pin(
+            server::server::<server::http3::HttpServer>(server_args)
+                .unwrap()
+                .run(),
+        );
         tokio::select! {
             _ = client => {}
             res = server  => panic!("expect server not to terminate: {res:?}"),
