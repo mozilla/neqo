@@ -2591,6 +2591,11 @@ impl Connection {
             let profile = self.loss_recovery.send_profile(&path.borrow(), now);
             qdebug!("[{self}] output_path send_profile {profile:?}");
 
+            if datagram_size.is_none() {
+                // first iteration
+                send_buffer.reserve(profile.limit());
+            }
+
             match self.output_dgram_on_path(
                 path,
                 now,
