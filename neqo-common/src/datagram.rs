@@ -216,6 +216,10 @@ impl DatagramBatch {
         self.tos
     }
 
+    pub fn set_tos(&mut self, tos: Tos) {
+        self.tos = tos;
+    }
+
     #[must_use]
     pub const fn datagram_size(&self) -> usize {
         self.datagram_size
