@@ -7,14 +7,7 @@
 // This file implements a server that can handle multiple connections.
 
 use std::{
-    cell::RefCell,
-    cmp::min,
-    fmt::{self, Display, Formatter},
-    num::NonZeroUsize,
-    ops::{Deref, DerefMut},
-    path::PathBuf,
-    rc::Rc,
-    time::Instant,
+    cell::RefCell, cmp::min, collections::VecDeque, fmt::{self, Display, Formatter}, num::NonZeroUsize, ops::{Deref, DerefMut}, path::PathBuf, rc::Rc, time::Instant
 };
 
 use neqo_common::{
@@ -31,7 +24,7 @@ pub use crate::addr_valid::ValidateAddress;
 use crate::{
     addr_valid::{AddressValidation, AddressValidationResult},
     cid::{ConnectionId, ConnectionIdGenerator, ConnectionIdRef},
-    connection::{Connection, Output, State},
+    connection::{Connection, Output, SavedDatagram, State},
     packet::{self, Public, MIN_INITIAL_PACKET_SIZE},
     ConnectionParameters, OutputBatch, Res, Version,
 };
@@ -121,6 +114,12 @@ pub struct Server {
     qlog_dir: Option<PathBuf>,
     /// Encrypted client hello (ECH) configuration.
     ech_config: Option<EchConfig>,
+    /// Remaining datagrams of a batch of datagrams provided via
+    /// [`Server::process_multiple`]. An earlier datagram in the batch required
+    /// an immediate return without further processing of the remaining
+    /// datagrams. To be processed on consecutive calls to
+    /// [`Server::process_multiple`].
+    saved_datagrams: VecDeque<SavedDatagram>,
 }
 
 impl Server {
@@ -158,6 +157,7 @@ impl Server {
             address_validation: Rc::new(RefCell::new(validation)),
             qlog_dir: None,
             ech_config: None,
+            saved_datagrams: VecDeque::new(),
         })
     }
 
@@ -356,7 +356,8 @@ impl Server {
         dgrams: I,
         now: Instant,
     ) -> OutputBatch {
-        for mut dgram in dgrams {
+        let mut dgrams = dgrams.into_iter();
+        while let Some(mut dgram) = dgrams.next(){
             qtrace!("Process datagram: {}", hex(&dgram[..]));
 
             // This is only looking at the first packet header in the datagram.
@@ -364,8 +365,7 @@ impl Server {
             let len = dgram.len();
             let destination = dgram.destination();
             let source = dgram.source();
-            let res =
-                Public::decode(&mut dgram[..], self.cid_generator.borrow().as_decoder());
+            let res = Public::decode(&mut dgram[..], self.cid_generator.borrow().as_decoder());
             let Ok((packet, _remainder)) = res else {
                 qtrace!("[{self}] Discarding {dgram:?}");
                 continue;
@@ -424,9 +424,12 @@ impl Server {
                     now,
                 );
 
-                // Server implementation isn't meant for production. Dropping
-                // remaining `dgrams` isn't ideal, but OK.
-                return OutputBatch::DatagramBatch(Datagram::new(destination, source, Tos::default(), vn).into());
+                self.saved_datagrams
+                    .extend(dgrams.into_iter().map(|d| SavedDatagram { d: d.to_owned(), t: now }));
+
+                return OutputBatch::DatagramBatch(
+                    Datagram::new(destination, source, Tos::default(), vn).into(),
+                );
             }
 
             match packet.packet_type() {
@@ -439,6 +442,8 @@ impl Server {
                     // `dgram`.
                     let initial = InitialDetails::new(&packet);
                     if let o @ Output::Datagram(_) = self.handle_initial(initial, dgram, now) {
+                self.saved_datagrams
+                    .extend(dgrams.into_iter().map(|d| SavedDatagram { d: d.to_owned(), t: now }));
                         return o.into();
                     }
                 }
@@ -506,6 +511,14 @@ impl Server {
         now: Instant,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
+        while let Some(SavedDatagram { d, t })  = self.saved_datagrams.pop_front() {
+            if let OutputBatch::DatagramBatch(b) = self.process_input(std::iter::once(d), t) {
+                self.saved_datagrams
+                    .extend(dgrams.into_iter().map(|d| SavedDatagram { d: d.to_owned(), t: now }));
+                return OutputBatch::DatagramBatch(b);
+            }
+        }
+
         let out = self
             .process_input(dgrams, now)
             .or_else(|| self.process_next_output(now, max_datagrams));
