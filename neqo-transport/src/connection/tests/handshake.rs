@@ -979,6 +979,33 @@ fn ech() {
     assert!(server.tls_preinfo().unwrap().ech_accepted().unwrap());
 }
 
+/// See <https://github.com/mozilla/neqo/pull/2789> for details.
+#[test]
+fn ech_no_partial_ech_behavior_on_invalid_config() {
+    let mut server = default_server();
+    let (sk, pk) = generate_ech_keys().unwrap();
+    server
+        .server_enable_ech(ECH_CONFIG_ID, ECH_PUBLIC_NAME, &sk, &pk)
+        .unwrap();
+
+    let mut client = default_client();
+    let ech_config = server.ech_config().to_vec();
+    let invalid_ech_config = ech_config[..ech_config.len() - 1].to_vec();
+
+    client
+        .client_enable_ech(invalid_ech_config)
+        .expect_err("client ignores invalid ECH config");
+
+    // Establish a non-ECH connection.
+    connect(&mut client, &mut server);
+
+    // Expect the server to be able to create a stream to the client.
+    // This checks that the client did not fall back to a partial ECH handshake,
+    // ensuring all required transport parameters (such as `InitialMaxStreamsBidi`)
+    // were present in the non-ECH ClientHello.
+    server.stream_create(StreamType::BiDi).unwrap();
+}
+
 #[test]
 fn ech_retry() {
     fixture_init();
