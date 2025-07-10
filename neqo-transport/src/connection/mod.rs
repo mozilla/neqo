@@ -3227,6 +3227,14 @@ impl Connection {
                 }
             }
             Frame::NewToken { token } => {
+                if self.role == Role::Server || !self.state.connected() {
+                    // > Clients MUST NOT send NEW_TOKEN frames. A server MUST
+                    // > treat receipt of a NEW_TOKEN frame as a connection error of
+                    // > type PROTOCOL_VIOLATION.
+                    //
+                    // <https://www.rfc-editor.org/rfc/rfc9000.html#name-new_token-frames>
+                    return Err(Error::ProtocolViolation);
+                }
                 self.stats.borrow_mut().frame_rx.new_token += 1;
                 self.new_token.save_token(token.to_vec());
                 self.create_resumption_token(now);
