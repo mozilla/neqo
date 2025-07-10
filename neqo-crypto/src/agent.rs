@@ -1155,7 +1155,8 @@ impl Client {
                     config.as_ptr(),
                     c_uint::try_from(config.len())?,
                 )?;
-                // Allow writing of different transport parameters to the inner and outer
+                // If the ECH configuration is valid, and only then,
+                // allow writing of different transport parameters to the inner and outer
                 // ClientHello. Avoid setting this otherwise, as the transport
                 // parameter extension handler filters out essential values from the
                 // outer ClientHello. Under normal operation, NSS reports to
