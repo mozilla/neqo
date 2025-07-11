@@ -77,6 +77,8 @@ use params::PreferredAddressConfig;
 #[cfg(test)]
 pub use params::ACK_RATIO_SCALE;
 use saved::SavedDatagrams;
+// TODO
+pub use saved::SavedDatagram;
 use state::StateSignaling;
 pub use state::{ClosingFrame, State};
 
