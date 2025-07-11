@@ -28,6 +28,7 @@ const INITIAL_PTO: Duration = Duration::from_millis(300);
 /// When the count of received packets doesn't match the count of received packets with the
 /// (default) DSCP.
 pub fn assert_dscp(stats: &Stats) {
+    dbg!(stats);
     assert_eq!(stats.dscp_rx[Dscp::Cs0], stats.packets_rx);
 }
 

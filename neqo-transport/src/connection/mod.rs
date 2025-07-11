@@ -1737,6 +1737,7 @@ impl Connection {
         // Handle each packet in the datagram.
         while !slc.is_empty() {
             self.stats.borrow_mut().packets_rx += 1;
+            self.stats.borrow_mut().dscp_rx[tos.into()] += 1;
             let slc_len = slc.len();
             let (mut packet, remainder) =
                 match packet::Public::decode(slc, self.cid_manager.decoder().as_ref()) {
@@ -1747,7 +1748,6 @@ impl Connection {
                         break;
                     }
                 };
-            self.stats.borrow_mut().dscp_rx[tos.into()] += 1;
             match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
                 PreprocessResult::Continue => (),
                 PreprocessResult::Next => break,

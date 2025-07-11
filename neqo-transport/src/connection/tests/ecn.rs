@@ -189,10 +189,7 @@ fn request_response_delay_after_handshake_with_ecn_blackhole() {
 
     assert_eq!(
         (now - request_response_start).as_millis() / DEFAULT_RTT.as_millis(),
-        // TODO: Application space hasn't received an ACK yet. Thus retransmits
-        // are still based on PTO and not time threshold. PTO doubles each time
-        // thus resulting in the large delay below.
-        23,
+        8,
         "expect ECN path validation to start after handshake",
     );
 }
