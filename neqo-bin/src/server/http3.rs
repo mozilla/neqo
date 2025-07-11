@@ -7,12 +7,7 @@
 #![expect(clippy::unwrap_used, reason = "This is example code.")]
 
 use std::{
-    cell::RefCell,
-    fmt::{self, Display},
-    num::NonZeroUsize,
-    rc::Rc,
-    slice,
-    time::Instant,
+    cell::RefCell, fmt::{self, Display}, io::Cursor, num::NonZeroUsize, rc::Rc, slice, time::Instant
 };
 
 use neqo_common::{header::HeadersExt as _, hex, qdebug, qerror, qinfo, Datagram, Header};
@@ -83,13 +78,14 @@ impl Display for HttpServer {
 }
 
 impl super::HttpServer for HttpServer {
-    fn process_multiple(
+    fn process_multiple<'a>(
         &mut self,
         dgram: Option<Datagram<&mut [u8]>>,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
-        self.server.process_multiple(dgram, now, max_datagrams)
+        send_buffer: Cursor<&'a mut [u8]>,
+    ) -> OutputBatch<Cursor<&'a mut [u8]>> {
+        self.server.process_multiple(dgram, now, max_datagrams, send_buffer)
     }
 
     fn process_events(&mut self, _now: Instant) {
