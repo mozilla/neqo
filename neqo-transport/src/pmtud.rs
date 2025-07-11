@@ -362,7 +362,7 @@ mod tests {
         Some(u16::MAX as usize),
     ];
 
-    const fn make_sent_packet(pn: u64, now: Instant, len: usize) -> sent::Packet {
+    fn make_sent_packet(pn: u64, now: Instant, len: usize) -> sent::Packet {
         sent::Packet::new(
             packet::Type::Short,
             pn,
