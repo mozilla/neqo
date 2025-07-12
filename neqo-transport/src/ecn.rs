@@ -353,9 +353,6 @@ impl Info {
     }
 
     /// The ECN mark to use for an outgoing UDP datagram.
-    ///
-    /// On [`IpTosEcn::Ect0`] adds a [`RecoveryToken::EcnEct0`] to `tokens` in
-    /// order to detect potential loss, then handled in [`Info::lost_ecn`].
     pub(crate) const fn ecn_mark(&self) -> Ecn {
         if self.is_marking() {
             Ecn::Ect0
