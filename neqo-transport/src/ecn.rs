@@ -309,8 +309,6 @@ impl Info {
         let ack_ecn = *ack_ecn;
         stats.ecn_tx_acked[largest_acked.packet_type()] = ack_ecn;
 
-        // We always mark with ECT(0) - if at all - so we only need to check for that.
-        //
         // > ECN validation also fails if the sum of the increase in ECT(0) and ECN-CE counts is
         // > less than the number of newly acknowledged packets that were originally sent with an
         // > ECT(0) marking.
@@ -320,11 +318,6 @@ impl Info {
             .count()
             .try_into()
             .expect("usize fits into u64");
-        if newly_acked_sent_with_ect0 == 0 {
-            qwarn!("ECN validation failed, no ECT(0) packets were newly acked");
-            self.disable_ecn(stats, ValidationError::Bleaching);
-            return;
-        }
         let ecn_diff = ack_ecn - self.baseline;
         let sum_inc = ecn_diff[Ecn::Ect0] + ecn_diff[Ecn::Ce];
         if sum_inc < newly_acked_sent_with_ect0 {
