@@ -3147,7 +3147,7 @@ impl Connection {
                 .pmtud_mut()
                 .start(now, &mut self.stats.borrow_mut());
         }
-        self.paths.start_ecn();
+        self.paths.start_ecn(&mut self.stats.borrow_mut());
         Ok(())
     }
 

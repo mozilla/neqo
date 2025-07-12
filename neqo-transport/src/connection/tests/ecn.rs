@@ -19,7 +19,10 @@ use crate::{
         default_client, default_server, handshake_with_modifier, migration::get_cid, new_client,
         new_server, send_and_receive, send_something, send_something_with_modifier,
         send_with_modifier_and_receive, DEFAULT_RTT,
-    }, ecn, packet, path::MAX_PATH_PROBES, ConnectionEvent, ConnectionId, ConnectionParameters, Output, StreamType
+    },
+    ecn, packet,
+    path::MAX_PATH_PROBES,
+    ConnectionEvent, ConnectionId, ConnectionParameters, Output, StreamType,
 };
 
 fn assert_ecn_enabled(tos: Tos) {
@@ -121,7 +124,7 @@ fn request_response_delay_after_handshake_with_ecn_blackhole() {
         match client.process_output(now) {
             Output::Datagram(dg) if !dg.tos().is_ecn_marked() => break dg,
             Output::Callback(dur) => now += dur,
-            _ => continue,
+            _ => {},
         }
     };
 
@@ -143,15 +146,15 @@ fn request_response_delay_after_handshake_with_ecn_blackhole() {
         match server.process_output(now) {
             Output::Datagram(dg) if !dg.tos().is_ecn_marked() => break dg,
             Output::Callback(dur) => now += dur,
-            _ => continue,
+            _ => {},
         }
     };
 
     client.process_input(server_dg, now);
-    let _ = client.events().find_map(|e| match e {
+    client.events().find_map(|e| match e {
         ConnectionEvent::RecvStreamReadable { stream_id, .. } => Some(stream_id),
         _ => None,
-    });
+    }).unwrap();
 
     assert_eq!(
         (now - start).as_millis() / DEFAULT_RTT.as_millis(),

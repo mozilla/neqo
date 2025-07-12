@@ -48,14 +48,12 @@ impl ValidationState {
         let old = std::mem::replace(self, new);
 
         match old {
-            Self::NotStarted => unreachable!("TODO"),
-            Self::Testing { .. } | Self::Unknown => {}
+            Self::NotStarted | Self::Testing { .. } | Self::Unknown => {}
             Self::Failed(_) => debug_assert!(false, "Failed is a terminal state"),
             Self::Capable => stats.ecn_path_validation[ValidationOutcome::Capable] -= 1,
         }
         match new {
-            Self::NotStarted => unreachable!("TODO"),
-            Self::Testing { .. } | Self::Unknown => {}
+            Self::NotStarted | Self::Testing { .. } | Self::Unknown => {}
             Self::Failed(error) => {
                 stats.ecn_path_validation[ValidationOutcome::NotCapable(error)] += 1;
             }
@@ -172,16 +170,19 @@ pub(crate) struct Info {
 }
 
 impl Info {
-    pub(crate) fn start(&mut self) {
+    pub(crate) fn start(&mut self, stats: &mut Stats) {
         if !matches!(self.state, ValidationState::NotStarted) {
             return;
         }
 
-        self.state = ValidationState::Testing {
-            probes_sent: 0,
-            initial_probes_acked: 0,
-            initial_probes_lost: 0,
-        }
+        self.state.set(
+            ValidationState::Testing {
+                probes_sent: 0,
+                initial_probes_acked: 0,
+                initial_probes_lost: 0,
+            },
+            stats,
+        );
     }
 
     /// Set the baseline (= the ECN counts from the last ACK Frame).

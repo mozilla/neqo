@@ -192,7 +192,7 @@ impl Paths {
             |p| p.borrow().ecn_info.baseline(),
         );
         path.borrow_mut().set_ecn_baseline(baseline);
-        path.borrow_mut().start_ecn();
+        path.borrow_mut().start_ecn(stats);
         if force || path.borrow().is_valid() {
             path.borrow_mut().set_valid(now);
             drop(self.select_primary(path, now));
@@ -423,9 +423,9 @@ impl Paths {
         }
     }
 
-    pub fn start_ecn(&self) {
+    pub fn start_ecn(&self, stats: &mut Stats) {
         if let Some(path) = self.primary() {
-            path.borrow_mut().start_ecn();
+            path.borrow_mut().start_ecn(stats);
         }
     }
 
@@ -851,8 +851,8 @@ impl Path {
         self.ecn_info.lost_ecn(stats);
     }
 
-    pub fn start_ecn(&mut self) {
-        self.ecn_info.start();
+    pub fn start_ecn(&mut self, stats: &mut Stats) {
+        self.ecn_info.start(stats);
     }
 
     pub fn acked_ack_frequency(&mut self, acked: &AckRate) {
