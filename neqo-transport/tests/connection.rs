@@ -14,7 +14,7 @@ use neqo_transport::{
 use test_fixture::{
     default_client, default_server,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
-    new_client, now, split_datagram,
+    new_client, new_server, now, split_datagram, DEFAULT_ALPN,
 };
 
 #[test]
@@ -43,17 +43,15 @@ fn gso() {
 
 #[test]
 fn truncate_long_packet() {
-    let mut client = default_client();
-    let mut server = default_server();
+    neqo_common::log::init(None);
+    let now = now();
 
-    let out = client.process_output(now());
-    let out2 = client.process_output(now());
-    assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
-    server.process_input(out.dgram().unwrap(), now());
-    let out = server.process(out2.dgram(), now());
-    assert!(out.as_dgram_ref().is_some());
-    let out = client.process(out.dgram(), now());
-    let out = server.process(out.dgram(), now());
+    // This test needs to alter the server handshake, so turn off MLKEM.
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
+    let mut server = new_server(DEFAULT_ALPN, ConnectionParameters::default().mlkem(false));
+
+    let out = client.process_output(now).dgram().unwrap();
+    let out = server.process(Some(out), now);
 
     // This will truncate the Handshake packet from the server.
     let dupe = out.as_dgram_ref().unwrap().clone();
@@ -65,18 +63,18 @@ fn truncate_long_packet() {
         dupe.tos(),
         &dupe[..(dupe.len() - tail)],
     );
-    let hs_probe = client.process(Some(truncated), now()).dgram();
+    let hs_probe = client.process(Some(truncated), now).dgram();
     assert!(hs_probe.is_some());
 
     // Now feed in the untruncated packet.
-    let out = client.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now);
     assert!(out.as_dgram_ref().is_some()); // Throw this ACK away.
     assert!(test_fixture::maybe_authenticate(&mut client));
-    let out = client.process_output(now());
+    let out = client.process_output(now);
     assert!(out.as_dgram_ref().is_some());
 
     assert!(client.state().connected());
-    let out = server.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now);
     assert!(out.as_dgram_ref().is_some());
     assert!(server.state().connected());
 }
@@ -84,8 +82,8 @@ fn truncate_long_packet() {
 /// Test that reordering parts of the server Initial doesn't change things.
 #[test]
 fn reorder_server_initial() {
-    // A simple ACK_ECN frame for a single packet with packet number 0 with a single ECT(0) mark.
-    const ACK_FRAME: &[u8] = &[0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00];
+    // A simple ACK frame for a single packet with packet number 0.
+    const ACK_FRAME: &[u8] = &[0x02, 0x00, 0x00, 0x00, 0x00];
 
     // This test needs to decrypt the CI, so turn off MLKEM.
     let mut client = new_client(

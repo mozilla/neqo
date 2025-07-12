@@ -244,7 +244,7 @@ fn critical() {
     let stats_before = server.stats().frame_tx;
     let dgram = server.process_output(now()).dgram();
     let stats_after = server.stats().frame_tx;
-    assert_eq!(stats_after.crypto, stats_before.crypto + 2);
+    assert_eq!(stats_after.crypto, stats_before.crypto + 1);
     assert_eq!(stats_after.streams_blocked, 0);
     assert_eq!(stats_after.new_connection_id, 0);
     assert_eq!(stats_after.new_token, 0);
@@ -285,7 +285,7 @@ fn important() {
     let stats_before = server.stats().frame_tx;
     let dgram = server.process_output(now()).dgram();
     let stats_after = server.stats().frame_tx;
-    assert_eq!(stats_after.crypto, stats_before.crypto + 2);
+    assert_eq!(stats_after.crypto, stats_before.crypto + 1);
     assert_eq!(stats_after.streams_blocked, 1);
     assert_eq!(stats_after.new_connection_id, 0);
     assert_eq!(stats_after.new_token, 0);
@@ -328,7 +328,7 @@ fn high_normal() {
     let stats_before = server.stats().frame_tx;
     let dgram = server.process_output(now()).dgram();
     let stats_after = server.stats().frame_tx;
-    assert_eq!(stats_after.crypto, stats_before.crypto + 2);
+    assert_eq!(stats_after.crypto, stats_before.crypto + 1);
     assert_eq!(stats_after.streams_blocked, 1);
     assert_eq!(stats_after.new_connection_id, 0);
     assert_eq!(stats_after.new_token, 0);

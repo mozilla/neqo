@@ -572,7 +572,7 @@ fn migrate_same_fail() {
     assert_path_challenge_min_len(&client, &probe, now);
 
     // -1 because first PATH_CHALLENGE already sent above
-    for _ in 0..MAX_PATH_PROBES - 1 {
+    for _ in 0..MAX_PATH_PROBES * 2 - 1 {
         let cb = client.process_output(now).callback();
         assert_ne!(cb, Duration::new(0, 0));
         now += cb;

@@ -7,7 +7,7 @@
 use std::time::{Duration, Instant};
 
 use neqo_common::{qtrace, qwarn, Encoder};
-use test_fixture::{now, split_datagram};
+use test_fixture::now;
 
 use super::{
     super::{Connection, ConnectionParameters, IdleTimeout, Output, State},
@@ -293,11 +293,9 @@ fn idle_caching() {
     let dgram = client.process_output(start).dgram();
     let dgram2 = client.process_output(start).dgram();
     server.process_input(dgram.unwrap(), start);
-    let dgram = server.process(dgram2, start).dgram();
-    let dgram = client.process(dgram, start).dgram();
-    let dgram = server.process(dgram, start).dgram();
-    let (_, handshake) = split_datagram(&dgram.unwrap());
-    client.process_input(handshake.unwrap(), start);
+    let server_initial = server.process(dgram2, start).dgram().unwrap();
+    let server_handshake = server.process_output(start).dgram().unwrap();
+    client.process_input(server_handshake, start);
 
     // Perform an exchange and keep the connection alive.
     let middle = start + AT_LEAST_PTO;
@@ -331,22 +329,19 @@ fn idle_caching() {
 
     // Now only allow the Initial packet from the server through;
     // it shouldn't contain a CRYPTO frame.
-    let (initial, _) = split_datagram(&dgram.unwrap());
     let crypto_before_c = client.stats().frame_rx.crypto;
     let ack_before = client.stats().frame_rx.ack;
-    client.process_input(initial, middle);
+    client.process_input(dgram.unwrap(), middle);
     assert_eq!(client.stats().frame_rx.crypto, crypto_before_c);
     assert_eq!(client.stats().frame_rx.ack, ack_before + 1);
 
     let end = start + default_timeout() + (AT_LEAST_PTO / 2);
     // Now let the server Initial through, with the CRYPTO frame.
-    let dgram = server.process_output(end).dgram();
-    let (initial, _) = split_datagram(&dgram.unwrap());
     qwarn!("client ingests initial, finally");
-    drop(client.process(Some(initial), end));
+    drop(client.process(Some(server_initial), end));
     maybe_authenticate(&mut client);
-    let dgram = client.process_output(end).dgram();
-    let dgram = server.process(dgram, end).dgram();
+    let dgram = client.process_output(end).dgram().unwrap();
+    let dgram = server.process(Some(dgram), end).dgram();
     client.process_input(dgram.unwrap(), end);
     assert_eq!(*client.state(), State::Confirmed);
     assert_eq!(*server.state(), State::Confirmed);
