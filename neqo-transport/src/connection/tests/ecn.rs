@@ -124,7 +124,7 @@ fn request_response_delay_after_handshake_with_ecn_blackhole() {
         match client.process_output(now) {
             Output::Datagram(dg) if !dg.tos().is_ecn_marked() => break dg,
             Output::Callback(dur) => now += dur,
-            _ => {},
+            _ => {}
         }
     };
 
@@ -146,15 +146,18 @@ fn request_response_delay_after_handshake_with_ecn_blackhole() {
         match server.process_output(now) {
             Output::Datagram(dg) if !dg.tos().is_ecn_marked() => break dg,
             Output::Callback(dur) => now += dur,
-            _ => {},
+            _ => {}
         }
     };
 
     client.process_input(server_dg, now);
-    client.events().find_map(|e| match e {
-        ConnectionEvent::RecvStreamReadable { stream_id, .. } => Some(stream_id),
-        _ => None,
-    }).unwrap();
+    client
+        .events()
+        .find_map(|e| match e {
+            ConnectionEvent::RecvStreamReadable { stream_id, .. } => Some(stream_id),
+            _ => None,
+        })
+        .unwrap();
 
     assert_eq!(
         (now - start).as_millis() / DEFAULT_RTT.as_millis(),
