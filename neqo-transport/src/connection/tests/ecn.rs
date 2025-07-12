@@ -144,7 +144,7 @@ fn request_response_delay_after_handshake_with_ecn_blackhole() {
         .events()
         .find_map(|e| {
             if let ConnectionEvent::RecvStreamReadable { stream_id, .. } = e {
-                return Some(stream_id);
+                Some(stream_id)
             } else {
                 None
             }
@@ -171,7 +171,7 @@ fn request_response_delay_after_handshake_with_ecn_blackhole() {
         client.process_input(server_dg, now);
         let client_stream_id = client.events().find_map(|e| {
             if let ConnectionEvent::RecvStreamReadable { stream_id, .. } = e {
-                return Some(stream_id);
+                Some(stream_id)
             } else {
                 None
             }

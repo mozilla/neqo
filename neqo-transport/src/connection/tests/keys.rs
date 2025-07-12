@@ -79,7 +79,7 @@ fn discarded_initial_keys() {
     // The initial packet should be dropped. The packet contains a Handshake packet as well, which
     // will be marked as dup.  And it will contain padding, which will be "dropped".
     // The client will generate a Handshake packet here to avoid stalling.
-    check_discarded(&mut client, &init_pkt_s.unwrap(), true, 2,0);
+    check_discarded(&mut client, &init_pkt_s.unwrap(), true, 2, 0);
 
     assert!(maybe_authenticate(&mut client));
 

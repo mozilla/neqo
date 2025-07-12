@@ -355,7 +355,7 @@ impl Info {
     ///
     /// On [`IpTosEcn::Ect0`] adds a [`RecoveryToken::EcnEct0`] to `tokens` in
     /// order to detect potential loss, then handled in [`Info::lost_ecn`].
-    pub(crate) fn ecn_mark(&self) -> Ecn {
+    pub(crate) const fn ecn_mark(&self) -> Ecn {
         if self.is_marking() {
             Ecn::Ect0
         } else {

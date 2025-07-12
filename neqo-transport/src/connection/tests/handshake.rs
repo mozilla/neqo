@@ -536,7 +536,7 @@ fn reorder_handshake() {
     now += RTT / 2;
     server.process_input(c1.unwrap(), now);
     let _s_initial = server.process(c2, now).dgram().unwrap();
-    let s_handshake = server.process_output( now).dgram().unwrap();
+    let s_handshake = server.process_output(now).dgram().unwrap();
 
     // Pass just the handshake packet in and the client can't handle it yet.
     // It can only send another Initial packet.
@@ -552,16 +552,16 @@ fn reorder_handshake() {
     now += AT_LEAST_PTO;
     let c2 = client.process_output(now).dgram();
     now += RTT / 2;
-    let s2_initial = server.process(c2, now).dgram().unwrap();
-    let s2_handshake= server.process_output( now).dgram().unwrap();
+    let s_initial_2 = server.process(c2, now).dgram().unwrap();
+    let s_handshake_2 = server.process_output(now).dgram().unwrap();
 
     // Processing the Handshake packet first should save it.
     now += RTT / 2;
-    client.process_input(s2_handshake, now);
+    client.process_input(s_handshake_2, now);
     assert_eq!(client.stats().saved_datagrams, 2);
     assert_eq!(client.stats().packets_rx, 0);
 
-    client.process_input(s2_initial, now);
+    client.process_input(s_initial_2, now);
     // Each saved packet should now be "received" again.
     assert_eq!(client.stats().packets_rx, 3);
     maybe_authenticate(&mut client);
@@ -1134,7 +1134,7 @@ fn only_server_initial() {
     let server_initial1 = server.process(client_dgram2, now).dgram().unwrap();
     let server_handshake1 = server.process_output(now).dgram().unwrap();
 
-    let server_initial2 = server.process_output( now + AT_LEAST_PTO).dgram().unwrap();
+    let server_initial2 = server.process_output(now + AT_LEAST_PTO).dgram().unwrap();
     let _server_handshake2 = server.process_output(now + AT_LEAST_PTO).dgram().unwrap();
 
     // The client sends an Initial ACK.

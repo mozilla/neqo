@@ -7,7 +7,7 @@
 use std::time::{Duration, Instant};
 
 use neqo_common::{qtrace, qwarn, Encoder};
-use test_fixture::{now, split_datagram};
+use test_fixture::now;
 
 use super::{
     super::{Connection, ConnectionParameters, IdleTimeout, Output, State},
@@ -294,7 +294,7 @@ fn idle_caching() {
     let dgram2 = client.process_output(start).dgram();
     server.process_input(dgram.unwrap(), start);
     let server_initial = server.process(dgram2, start).dgram().unwrap();
-    let server_handshake = server.process_output( start).dgram().unwrap();
+    let server_handshake = server.process_output(start).dgram().unwrap();
     client.process_input(server_handshake, start);
 
     // Perform an exchange and keep the connection alive.

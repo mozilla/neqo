@@ -417,13 +417,13 @@ impl Paths {
         }
     }
 
-    pub fn lost_ecn(&self,  stats: &mut Stats) {
+    pub fn lost_ecn(&self, stats: &mut Stats) {
         if let Some(path) = self.primary() {
             path.borrow_mut().lost_ecn(stats);
         }
     }
 
-    pub fn start_ecn(&mut self) {
+    pub fn start_ecn(&self) {
         if let Some(path) = self.primary() {
             path.borrow_mut().start_ecn();
         }
@@ -847,8 +847,8 @@ impl Path {
         self.ecn_info.acked_ecn();
     }
 
-    pub fn lost_ecn(&mut self,  stats: &mut Stats) {
-        self.ecn_info.lost_ecn( stats);
+    pub fn lost_ecn(&mut self, stats: &mut Stats) {
+        self.ecn_info.lost_ecn(stats);
     }
 
     pub fn start_ecn(&mut self) {

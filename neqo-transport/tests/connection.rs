@@ -12,9 +12,10 @@ use neqo_transport::{
     CloseReason, ConnectionParameters, Error, State, StreamType, Version, MIN_INITIAL_PACKET_SIZE,
 };
 use test_fixture::{
-    assertions::assert_handshake, default_client, default_server, header_protection::{self, decode_initial_header, initial_aead_and_hp}, new_client, new_server, now, split_datagram, DEFAULT_ALPN
+    default_client, default_server,
+    header_protection::{self, decode_initial_header, initial_aead_and_hp},
+    new_client, new_server, now, split_datagram, DEFAULT_ALPN,
 };
-
 
 #[test]
 fn connect() {
@@ -46,10 +47,8 @@ fn truncate_long_packet() {
     let now = now();
 
     // This test needs to alter the server handshake, so turn off MLKEM.
-    let mut client = new_client(ConnectionParameters::default()
-        .mlkem(false));
-    let mut server = new_server(DEFAULT_ALPN, ConnectionParameters::default()
-        .mlkem(false));
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
+    let mut server = new_server(DEFAULT_ALPN, ConnectionParameters::default().mlkem(false));
 
     let out = client.process_output(now).dgram().unwrap();
     let out = server.process(Some(out), now);
