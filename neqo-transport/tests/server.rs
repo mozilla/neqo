@@ -918,16 +918,22 @@ fn saved_datagrams() {
     // Server sends a version negotation immediately. Saves second input datagram for later.
     server
         .process_multiple(
-            vec![damaged_dgram.clone(), damaged_dgram],
+            vec![damaged_dgram.clone(), damaged_dgram.clone()],
             now(),
             1.try_into().expect("1>0"),
         )
         .dgram()
         .expect("first vn");
 
-    // Server processes the second datagram.
+    // Server processes the second datagram and saves the third.
+    server
+        .process_multiple(vec![damaged_dgram], now(), 1.try_into().expect("1>0"))
+        .dgram()
+        .expect("second vn");
+
+    // Server processes the third datagram.
     server
         .process_multiple(Vec::<Datagram>::new(), now(), 1.try_into().expect("1>0"))
         .dgram()
-        .expect("second vn");
+        .expect("third vn");
 }
