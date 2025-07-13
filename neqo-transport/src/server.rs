@@ -552,7 +552,7 @@ impl Server {
         let maybe_callback = match self.process_next_output(now, max_datagrams) {
             // Return immediately. Do any maintenance on next call.
             o @ OutputBatch::DatagramBatch(_) => return o,
-            o @ OutputBatch::Callback(_) | o @ OutputBatch::None => o,
+            o @ (OutputBatch::Callback(_) | OutputBatch::None) => o,
         };
 
         // Clean-up closed connections.

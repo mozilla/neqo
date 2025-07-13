@@ -20,7 +20,8 @@ use neqo_common::{event::Provider as _, hex, qdebug, qerror, qinfo, qwarn, Datag
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay};
 use neqo_http3::Error;
 use neqo_transport::{
-    server::{ConnectionRef, Server, ValidateAddress}, ConnectionEvent, ConnectionIdGenerator, OutputBatch, State, StreamId
+    server::{ConnectionRef, Server, ValidateAddress},
+    ConnectionEvent, ConnectionIdGenerator, OutputBatch, State, StreamId,
 };
 use regex::Regex;
 use rustc_hash::FxHashMap as HashMap;

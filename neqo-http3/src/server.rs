@@ -447,7 +447,7 @@ mod tests {
         let needs_auth = client
             .events()
             .any(|e| e == ConnectionEvent::AuthenticationNeeded);
-        let c2 = if needs_auth {
+        let c3 = if needs_auth {
             assert!(!resume);
             // c2 should just be an ACK, so absorb that.
             let s_ack = server.process(c2.dgram(), now());
@@ -457,12 +457,13 @@ mod tests {
             client.process_output(now())
         } else {
             assert!(resume);
-            c2
+            let s3 = server.process(c2.dgram(), now()).dgram();
+            client.process(s3, now())
         };
         assert!(client.state().connected());
-        let s2 = server.process(c2.dgram(), now());
+        let s4 = server.process(c3.dgram(), now());
         assert_connected(server);
-        _ = client.process(s2.dgram(), now());
+        _ = client.process(s4.dgram(), now());
     }
 
     // Start a client/server and check setting frame.
