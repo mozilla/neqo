@@ -741,3 +741,36 @@ fn tp_disable_migration() {
         assert_eq!(disable, disable_migration);
     }
 }
+
+#[test]
+fn server_receives_new_token() {
+    struct NewTokenWriter {}
+
+    impl test_internal::FrameWriter for NewTokenWriter {
+        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+            builder.encode_varint(FrameType::NewToken);
+            builder.encode_vvec(&[0; 4]);
+        }
+    }
+
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    assert_eq!(client.state(), &State::Confirmed);
+    assert_eq!(server.state(), &State::Confirmed);
+
+    let spoofed = client
+        .test_write_frames(NewTokenWriter {}, now())
+        .dgram()
+        .unwrap();
+
+    // Now deliver the packet with the spoofed NEW_TOKEN frame.
+    server.process_input(spoofed, now());
+    assert!(matches!(
+        server.state(),
+        State::Closing {
+            error: CloseReason::Transport(Error::ProtocolViolation),
+            ..
+        }
+    ));
+}

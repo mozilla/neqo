@@ -2,6 +2,27 @@
 
 ![neqo logo](https://github.com/mozilla/neqo/raw/main/neqo.png "neqo logo")
 
+Neqo is the QUIC implementation used by Mozilla in Firefox and other products.
+It is written in Rust and provides a library for QUIC transport, HTTP/3, and
+QPACK. The TLS security backend is the Mozilla NSS library, which is also used
+by Firefox.
+
+Neqo is designed to be used in Firefox, but it can also be used
+standalone. We include command line tools for testing and debugging, such as
+`neqo-client` and `neqo-server`, which can be used to test HTTP/3 servers
+and clients.
+
+**Note: The neqo server functionality is experimental**, since
+it is not in production use at Mozilla, and it is not as mature as the
+client functionality. It is intended to be standards-compliant when
+interoperating with a compliant client, but it may not implement all
+optional protocol features, and it may not handle all edge cases.
+It is also not optimized for performance or resource usage, and
+while it implements many of the necessary features for a server,
+it does not include configuration of a number of options that
+is suited to a live deployment.
+**Do not use the neqo server code in production.**
+
 To build Neqo:
 
 ```shell
