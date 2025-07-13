@@ -37,7 +37,7 @@ use neqo_crypto::{
     init_db, AntiReplay, Cipher,
 };
 use neqo_transport::{ConnectionIdGenerator, OutputBatch, RandomConnectionIdGenerator, Version};
-use neqo_udp::{RecvBuf, DatagramIter};
+use neqo_udp::{DatagramIter, RecvBuf};
 use tokio::time::Sleep;
 
 use crate::SharedArgs;
@@ -96,7 +96,7 @@ impl Display for Error {
 
 impl std::error::Error for Error {}
 
-type Res<T> = Result<T, Error>;
+pub type Res<T> = Result<T, Error>;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
@@ -296,13 +296,11 @@ impl<S: HttpServer> Runner<S> {
             .map_err(|_| io::Error::from(io::ErrorKind::Unsupported))?;
 
         loop {
-            let out = if let Some(dgrams) = input_dgrams.take() {
-                server.process_multiple(dgrams, now(), smallest_max_gso_segments)
-            } else {
-                server.process_multiple(None, now(), smallest_max_gso_segments)
-            };
-
-            match out {
+            match server.process_multiple(
+                input_dgrams.take().into_iter().flatten(),
+                now(),
+                smallest_max_gso_segments,
+            ) {
                 OutputBatch::DatagramBatch(dgram) => {
                     let socket = Self::find_socket(sockets, dgram.source());
                     loop {
@@ -478,14 +476,6 @@ pub fn server<S: HttpServer>(mut args: Args) -> Res<Runner<S>> {
     let anti_replay = AntiReplay::new(Instant::now(), ANTI_REPLAY_WINDOW, 7, 14)
         .expect("unable to setup anti-replay");
     let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
-
-    // let server: Box<dyn HttpServer> = if args.shared.alpn == "h3" {
-    //     Box::new(http3::HttpServer::new())
-    // } else {
-    //     Box::new(
-    //         http09::HttpServer::new(&args, anti_replay, cid_mgr).expect("We cannot make a
-    // server!"),     )
-    // };
 
     Ok(Runner::new(
         S::new(&args, anti_replay, cid_mgr),

@@ -66,7 +66,6 @@ impl<D: AsRef<[u8]>> Datagram<D> {
         self.len() == 0
     }
 
-    // TODO: Footgun?
     #[must_use]
     pub fn to_owned(&self) -> Datagram {
         Datagram {

@@ -7,7 +7,15 @@
 // This file implements a server that can handle multiple connections.
 
 use std::{
-    cell::RefCell, cmp::min, collections::VecDeque, fmt::{self, Display, Formatter}, num::NonZeroUsize, ops::{Deref, DerefMut}, path::PathBuf, rc::Rc, time::Instant
+    cell::RefCell,
+    cmp::min,
+    collections::VecDeque,
+    fmt::{self, Display, Formatter},
+    num::NonZeroUsize,
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+    rc::Rc,
+    time::Instant,
 };
 
 use neqo_common::{
@@ -357,7 +365,7 @@ impl Server {
         now: Instant,
     ) -> OutputBatch {
         let mut dgrams = dgrams.into_iter();
-        while let Some(mut dgram) = dgrams.next(){
+        while let Some(mut dgram) = dgrams.next() {
             qtrace!("Process datagram: {}", hex(&dgram[..]));
 
             // This is only looking at the first packet header in the datagram.
@@ -424,8 +432,10 @@ impl Server {
                     now,
                 );
 
-                self.saved_datagrams
-                    .extend(dgrams.into_iter().map(|d| SavedDatagram { d: d.to_owned(), t: now }));
+                self.saved_datagrams.extend(dgrams.map(|d| SavedDatagram {
+                    d: d.to_owned(),
+                    t: now,
+                }));
 
                 return OutputBatch::DatagramBatch(
                     Datagram::new(destination, source, Tos::default(), vn).into(),
@@ -442,8 +452,10 @@ impl Server {
                     // `dgram`.
                     let initial = InitialDetails::new(&packet);
                     if let o @ Output::Datagram(_) = self.handle_initial(initial, dgram, now) {
-                self.saved_datagrams
-                    .extend(dgrams.into_iter().map(|d| SavedDatagram { d: d.to_owned(), t: now }));
+                        self.saved_datagrams.extend(dgrams.map(|d| SavedDatagram {
+                            d: d.to_owned(),
+                            t: now,
+                        }));
                         return o.into();
                     }
                 }
@@ -460,12 +472,21 @@ impl Server {
             }
         }
 
+        assert!(
+            self.saved_datagrams.is_empty(),
+            "Otherwise, there would be more work to do."
+        );
+
         OutputBatch::None
     }
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
     fn process_next_output(&mut self, now: Instant, max_datagrams: NonZeroUsize) -> OutputBatch {
+        assert!(
+            self.saved_datagrams.is_empty(),
+            "Always process all inbound datagrams first."
+        );
         let mut callback = None;
 
         for connection in &mut self.connections {
@@ -511,23 +532,34 @@ impl Server {
         now: Instant,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
-        while let Some(SavedDatagram { d, t })  = self.saved_datagrams.pop_front() {
+        while let Some(SavedDatagram { d, t }) = self.saved_datagrams.pop_front() {
             if let OutputBatch::DatagramBatch(b) = self.process_input(std::iter::once(d), t) {
                 self.saved_datagrams
-                    .extend(dgrams.into_iter().map(|d| SavedDatagram { d: d.to_owned(), t: now }));
+                    .extend(dgrams.into_iter().map(|d| SavedDatagram {
+                        d: d.to_owned(),
+                        t: now,
+                    }));
+                // Return immediately. Do any maintenance on next call.
                 return OutputBatch::DatagramBatch(b);
             }
         }
 
-        let out = self
-            .process_input(dgrams, now)
-            .or_else(|| self.process_next_output(now, max_datagrams));
+        if let o @ OutputBatch::DatagramBatch(_) = self.process_input(dgrams, now) {
+            // Return immediately. Do any maintenance on next call.
+            return o;
+        }
+
+        let maybe_callback = match self.process_next_output(now, max_datagrams) {
+            // Return immediately. Do any maintenance on next call.
+            o @ OutputBatch::DatagramBatch(_) => return o,
+            o @ OutputBatch::Callback(_) | o @ OutputBatch::None => o,
+        };
 
         // Clean-up closed connections.
         self.connections
             .retain(|c| !matches!(c.borrow().state(), State::Closed(_)));
 
-        out
+        maybe_callback
     }
 
     /// This lists the connections that have received new events

@@ -1326,7 +1326,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO
     fn reject_zero_server() {
         fixture_init();
         let mut server = Http3Server::new(
