@@ -46,6 +46,7 @@ use crate::{
     recovery::{self, sent, SendProfile},
     recv_stream,
     rtt::{RttEstimate, GRANULARITY, INITIAL_RTT},
+    saved::SavedDatagrams,
     send_stream::{self, SendStream},
     stats::{Stats, StatsCell},
     stream_id::StreamType,
@@ -66,7 +67,6 @@ use crate::{
 
 mod idle;
 pub mod params;
-mod saved;
 mod state;
 #[cfg(test)]
 pub mod test_internal;
@@ -76,9 +76,6 @@ pub use params::ConnectionParameters;
 use params::PreferredAddressConfig;
 #[cfg(test)]
 pub use params::ACK_RATIO_SCALE;
-// TODO
-pub use saved::SavedDatagram;
-use saved::SavedDatagrams;
 use state::StateSignaling;
 pub use state::{ClosingFrame, State};
 

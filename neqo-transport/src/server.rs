@@ -32,8 +32,9 @@ pub use crate::addr_valid::ValidateAddress;
 use crate::{
     addr_valid::{AddressValidation, AddressValidationResult},
     cid::{ConnectionId, ConnectionIdGenerator, ConnectionIdRef},
-    connection::{Connection, Output, SavedDatagram, State},
+    connection::{Connection, Output, State},
     packet::{self, Public, MIN_INITIAL_PACKET_SIZE},
+    saved::SavedDatagram,
     ConnectionParameters, OutputBatch, Res, Version,
 };
 
