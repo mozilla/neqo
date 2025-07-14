@@ -43,7 +43,7 @@ jobs:
             core.exportVariable("PR_BASE_SHA", prEvent.pull_request.base.sha || '');
             core.exportVariable("PR_NUMBER", prEvent.number || '');
 
-      - uses: bencherdev/bencher@v0.5.1 # zizmor: ignore[unpinned-uses]
+      - uses: bencherdev/bencher@v0.5.3 # zizmor: ignore[unpinned-uses]
 
       - name: Upload main-branch results to bencher.dev
         run: |
