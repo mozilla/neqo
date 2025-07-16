@@ -235,9 +235,22 @@ impl DatagramBatch {
         self.d.len().div_ceil(self.datagram_size)
     }
 
-    #[cfg(feature = "build-fuzzing-corpus")]
-    pub fn iter(&self) -> impl Iterator<Item = &[u8]> {
-        self.d.chunks(self.datagram_size)
+    pub fn iter(&self) -> impl Iterator<Item = Datagram<&[u8]>> {
+        self.d.chunks(self.datagram_size).map(|d| Datagram {
+            src: self.src,
+            dst: self.dst,
+            tos: self.tos,
+            d,
+        })
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = Datagram<&mut [u8]>> {
+        self.d.chunks_mut(self.datagram_size).map(|d| Datagram {
+            src: self.src,
+            dst: self.dst,
+            tos: self.tos,
+            d,
+        })
     }
 }
 

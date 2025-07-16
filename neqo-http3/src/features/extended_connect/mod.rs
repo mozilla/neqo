@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+pub(crate) mod connect_udp;
 pub(crate) mod webtransport_session;
 pub(crate) mod webtransport_streams;
 
@@ -57,22 +58,27 @@ pub(crate) trait ExtendedConnectEvents: Debug {
         headers: Option<Vec<Header>>,
     );
     fn extended_connect_new_stream(&self, stream_info: Http3StreamInfo) -> Res<()>;
-    fn new_datagram(&self, session_id: StreamId, datagram: Vec<u8>);
+    fn new_datagram(
+        &self,
+        session_id: StreamId,
+        datagram: Vec<u8>,
+        connect_type: ExtendedConnectType,
+    );
 }
 
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]
 pub(crate) enum ExtendedConnectType {
     WebTransport,
+    ConnectUdp,
 }
 
 impl ExtendedConnectType {
     #[must_use]
-    #[expect(
-        clippy::unused_self,
-        reason = "This will change when we have more features using ExtendedConnectType."
-    )]
     pub const fn string(self) -> &'static str {
-        "webtransport"
+        match self {
+            Self::WebTransport => "webtransport",
+            Self::ConnectUdp => "connect-udp",
+        }
     }
 
     #[expect(
@@ -86,9 +92,11 @@ impl ExtendedConnectType {
 }
 
 impl From<ExtendedConnectType> for HSettingType {
-    fn from(_type: ExtendedConnectType) -> Self {
-        // This will change when we have more features using ExtendedConnectType.
-        Self::EnableWebTransport
+    fn from(from: ExtendedConnectType) -> Self {
+        match from {
+            ExtendedConnectType::WebTransport => Self::EnableWebTransport,
+            ExtendedConnectType::ConnectUdp => Self::EnableConnect,
+        }
     }
 }
 

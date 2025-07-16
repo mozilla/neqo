@@ -16,7 +16,9 @@ use neqo_transport::{
 };
 
 use crate::{
-    connection::{Http3Connection, Http3State, WebTransportSessionAcceptAction},
+    connection::{
+        ConnectUdpSessionAcceptAction, Http3Connection, Http3State, WebTransportSessionAcceptAction,
+    },
     frames::HFrame,
     recv_message::{RecvMessage, RecvMessageInfo},
     send_message::SendMessage,
@@ -168,6 +170,22 @@ impl Http3ServerHandler {
         )
     }
 
+    /// Accept a `ConnectUdp` Session request
+    pub(crate) fn connect_udp_session_accept(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        accept: &ConnectUdpSessionAcceptAction,
+    ) -> Res<()> {
+        self.needs_processing = true;
+        self.base_handler.connect_udp_session_accept(
+            conn,
+            stream_id,
+            Box::new(self.events.clone()),
+            accept,
+        )
+    }
+
     /// Close `WebTransport` cleanly
     ///
     /// # Errors
@@ -187,6 +205,27 @@ impl Http3ServerHandler {
         self.needs_processing = true;
         self.base_handler
             .webtransport_close_session(conn, session_id, error, message)
+    }
+
+    /// Close `ConnectUdp` cleanly
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream does not exist,
+    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
+    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
+    /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
+    /// supplied.
+    pub fn connect_udp_close_session(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        error: u32,
+        message: &str,
+    ) -> Res<()> {
+        self.needs_processing = true;
+        self.base_handler
+            .connect_udp_close_session(conn, session_id, error, message)
     }
 
     pub fn webtransport_create_stream(
@@ -215,6 +254,18 @@ impl Http3ServerHandler {
         self.needs_processing = true;
         self.base_handler
             .webtransport_send_datagram(session_id, conn, buf, id)
+    }
+
+    pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        buf: &[u8],
+        id: I,
+    ) -> Res<()> {
+        self.needs_processing = true;
+        self.base_handler
+            .connect_udp_send_datagram(session_id, conn, buf, id)
     }
 
     /// Process HTTTP3 layer.

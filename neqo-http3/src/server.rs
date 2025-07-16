@@ -24,9 +24,10 @@ use rustc_hash::FxHashMap as HashMap;
 use crate::{
     connection::Http3State,
     connection_server::Http3ServerHandler,
-    server_connection_events::Http3ServerConnEvent,
+    server_connection_events::{ConnectUdpEvent, Http3ServerConnEvent, WebTransportEvent},
     server_events::{
-        Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents, WebTransportRequest,
+        ConnectUdpRequest, Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents,
+        WebTransportRequest,
     },
     settings::HttpZeroRttChecker,
     Http3Parameters, Http3StreamInfo, Res,
@@ -251,36 +252,71 @@ impl Http3Server {
                     } => {
                         self.events.priority_update(stream_id, priority);
                     }
-                    Http3ServerConnEvent::ExtendedConnect { stream_id, headers } => {
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::Session {
+                        stream_id,
+                        headers,
+                    }) => {
                         self.events.webtransport_new_session(
                             WebTransportRequest::new(conn.clone(), Rc::clone(handler), stream_id),
                             headers,
                         );
                     }
-                    Http3ServerConnEvent::ExtendedConnectClosed {
+                    Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::Session {
+                        stream_id,
+                        headers,
+                    }) => {
+                        self.events.connect_udp_new_session(
+                            ConnectUdpRequest::new(conn.clone(), Rc::clone(handler), stream_id),
+                            headers,
+                        );
+                    }
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::SessionClosed {
                         stream_id,
                         reason,
                         headers,
                         ..
-                    } => self.events.webtransport_session_closed(
+                    }) => self.events.webtransport_session_closed(
                         WebTransportRequest::new(conn.clone(), Rc::clone(handler), stream_id),
                         reason,
                         headers,
                     ),
-                    Http3ServerConnEvent::ExtendedConnectNewStream(stream_info) => self
+                    Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::SessionClosed {
+                        stream_id,
+                        reason,
+                        headers,
+                        ..
+                    }) => self.events.connect_udp_session_closed(
+                        ConnectUdpRequest::new(conn.clone(), Rc::clone(handler), stream_id),
+                        reason,
+                        headers,
+                    ),
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::NewStream(
+                        stream_info,
+                    )) => self
                         .events
                         .webtransport_new_stream(Http3OrWebTransportStream::new(
                             conn.clone(),
                             Rc::clone(handler),
                             stream_info,
                         )),
-                    Http3ServerConnEvent::ExtendedConnectDatagram {
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::Datagram {
                         session_id,
                         datagram,
-                    } => self.events.webtransport_datagram(
-                        WebTransportRequest::new(conn.clone(), Rc::clone(handler), session_id),
+                    }) => {
+                        self.events.webtransport_datagram(
+                            WebTransportRequest::new(conn.clone(), Rc::clone(handler), session_id),
+                            datagram,
+                        );
+                    }
+                    Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::Datagram {
+                        session_id,
                         datagram,
-                    ),
+                    }) => {
+                        self.events.connect_udp_datagram(
+                            ConnectUdpRequest::new(conn.clone(), Rc::clone(handler), session_id),
+                            datagram,
+                        );
+                    }
                 }
             }
         }
@@ -963,7 +999,8 @@ mod tests {
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
-                | Http3ServerEvent::WebTransport(_) => {}
+                | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }
         assert_eq!(headers_frames, 1);
@@ -1012,7 +1049,8 @@ mod tests {
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
-                | Http3ServerEvent::WebTransport(_) => {}
+                | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }
         let out = hconn.process_output(now());
@@ -1039,7 +1077,8 @@ mod tests {
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
-                | Http3ServerEvent::WebTransport(_) => {}
+                | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }
         assert_eq!(headers_frames, 1);
@@ -1083,7 +1122,8 @@ mod tests {
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
-                | Http3ServerEvent::WebTransport(_) => {}
+                | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }
         let out = hconn.process_output(now());
@@ -1312,7 +1352,8 @@ mod tests {
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
-                | Http3ServerEvent::WebTransport(_) => {}
+                | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }
         assert_eq!(requests.len(), 2);

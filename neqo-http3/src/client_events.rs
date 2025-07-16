@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-use neqo_common::{event::Provider as EventProvider, Header};
+use neqo_common::{event::Provider as EventProvider, qtrace, Header};
 use neqo_crypto::ResumptionToken;
 use neqo_transport::{AppError, StreamId, StreamType};
 
@@ -34,6 +34,28 @@ pub enum WebTransportEvent {
     NewStream {
         stream_id: StreamId,
         session_id: StreamId,
+    },
+    Datagram {
+        session_id: StreamId,
+        datagram: Vec<u8>,
+    },
+}
+
+// TODO: Why is the client side called ConnectUdpEvent, but the server side is called
+// ConnectUdpServerEvent? Also in WebTransport. TODO: All needed?
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum ConnectUdpEvent {
+    Negotiated(bool),
+    // TODO: The server side calls this NewSession, right? Also in WebTransport.
+    Session {
+        stream_id: StreamId,
+        status: u16,
+        headers: Vec<Header>,
+    },
+    SessionClosed {
+        stream_id: StreamId,
+        reason: SessionCloseReason,
+        headers: Option<Vec<Header>>,
     },
     Datagram {
         session_id: StreamId,
@@ -103,6 +125,8 @@ pub enum Http3ClientEvent {
     StateChange(Http3State),
     /// `WebTransport` events
     WebTransport(WebTransportEvent),
+    /// `ConnectUdp` events
+    ConnectUdp(ConnectUdpEvent),
 }
 
 #[derive(Debug, Default, Clone)]
@@ -188,14 +212,21 @@ impl ExtendedConnectEvents for Http3ClientEvents {
         status: u16,
         headers: Vec<Header>,
     ) {
-        if connect_type == ExtendedConnectType::WebTransport {
-            self.insert(Http3ClientEvent::WebTransport(WebTransportEvent::Session {
-                stream_id,
-                status,
-                headers,
-            }));
-        } else {
-            unreachable!("There is only ExtendedConnectType::WebTransport");
+        match connect_type {
+            ExtendedConnectType::WebTransport => {
+                self.insert(Http3ClientEvent::WebTransport(WebTransportEvent::Session {
+                    stream_id,
+                    status,
+                    headers,
+                }));
+            }
+            ExtendedConnectType::ConnectUdp => {
+                self.insert(Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Session {
+                    stream_id,
+                    status,
+                    headers,
+                }));
+            }
         }
     }
 
@@ -206,17 +237,23 @@ impl ExtendedConnectEvents for Http3ClientEvents {
         reason: SessionCloseReason,
         headers: Option<Vec<Header>>,
     ) {
-        if connect_type == ExtendedConnectType::WebTransport {
-            self.insert(Http3ClientEvent::WebTransport(
-                WebTransportEvent::SessionClosed {
+        let event = match connect_type {
+            ExtendedConnectType::WebTransport => {
+                Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed {
                     stream_id,
                     reason,
                     headers,
-                },
-            ));
-        } else {
-            unreachable!("There are no other types");
-        }
+                })
+            }
+            ExtendedConnectType::ConnectUdp => {
+                Http3ClientEvent::ConnectUdp(ConnectUdpEvent::SessionClosed {
+                    stream_id,
+                    reason,
+                    headers,
+                })
+            }
+        };
+        self.insert(event);
     }
 
     fn extended_connect_new_stream(&self, stream_info: Http3StreamInfo) -> Res<()> {
@@ -229,13 +266,27 @@ impl ExtendedConnectEvents for Http3ClientEvents {
         Ok(())
     }
 
-    fn new_datagram(&self, session_id: StreamId, datagram: Vec<u8>) {
-        self.insert(Http3ClientEvent::WebTransport(
-            WebTransportEvent::Datagram {
-                session_id,
-                datagram,
-            },
-        ));
+    fn new_datagram(
+        &self,
+        session_id: StreamId,
+        datagram: Vec<u8>,
+        connect_type: ExtendedConnectType,
+    ) {
+        let event = match connect_type {
+            ExtendedConnectType::WebTransport => {
+                Http3ClientEvent::WebTransport(WebTransportEvent::Datagram {
+                    session_id,
+                    datagram,
+                })
+            }
+            ExtendedConnectType::ConnectUdp => {
+                Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Datagram {
+                    session_id,
+                    datagram,
+                })
+            }
+        };
+        self.insert(event);
     }
 }
 
@@ -356,10 +407,19 @@ impl Http3ClientEvents {
     }
 
     pub fn negotiation_done(&self, feature_type: HSettingType, succeeded: bool) {
-        if feature_type == HSettingType::EnableWebTransport {
-            self.insert(Http3ClientEvent::WebTransport(
-                WebTransportEvent::Negotiated(succeeded),
-            ));
+        match feature_type {
+            HSettingType::EnableWebTransport => {
+                self.insert(Http3ClientEvent::WebTransport(
+                    WebTransportEvent::Negotiated(succeeded),
+                ));
+            }
+            // TODO: Technically this is for extended connect and not just connect-udp.
+            HSettingType::EnableConnect => {
+                self.insert(Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Negotiated(
+                    succeeded,
+                )));
+            }
+            _ => qtrace!("HSetting {:?} {succeeded} not handled", feature_type),
         }
     }
 }
