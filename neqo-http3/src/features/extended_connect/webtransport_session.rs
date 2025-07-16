@@ -211,6 +211,7 @@ impl WebTransportSession {
         if self.state.closing_state() {
             return;
         }
+        // TODO: update now that there are multiple extended connect types.
         qtrace!("ExtendedConnect close the session");
         self.state = SessionState::Done;
         if !close_type.locally_initiated() {
@@ -392,6 +393,7 @@ impl WebTransportSession {
             .send_data_atomic(conn, encoder.as_ref())?;
         self.control_stream_send.close(conn)?;
         self.state = if self.control_stream_send.done() {
+            // TODO: In this case, don't we have to call self.events.session_end?
             SessionState::Done
         } else {
             SessionState::FinPending

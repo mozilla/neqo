@@ -165,7 +165,7 @@ use std::{
 };
 
 use buffered_send_stream::BufferedStream;
-pub use client_events::{Http3ClientEvent, WebTransportEvent};
+pub use client_events::{Http3ClientEvent, WebTransportEvent, ConnectUdpEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::{Http3State, WebTransportSessionAcceptAction};
 pub use connection_client::Http3Client;
@@ -184,7 +184,7 @@ pub use server_events::{
 };
 use stream_type_reader::NewStreamType;
 
-use crate::priority::PriorityHandler;
+use crate::{features::extended_connect::connect_udp::ConnectUdpSession, priority::PriorityHandler};
 
 type Res<T> = Result<T, Error>;
 
@@ -429,6 +429,7 @@ pub enum Http3StreamType {
     Push,
     ExtendedConnect,
     WebTransport(StreamId),
+    ConnectUdp(StreamId),
     Unknown,
 }
 
@@ -478,6 +479,10 @@ trait RecvStream: Stream {
 
     fn webtransport(&self) -> Option<Rc<RefCell<WebTransportSession>>> {
         None
+    }
+
+    fn connect_udp(&self) -> Option<Rc<RefCell<ConnectUdpSession>>> {
+        todo!();
     }
 
     /// This function is only implemented by `WebTransportRecvStream`.

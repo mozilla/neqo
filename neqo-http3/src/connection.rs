@@ -25,6 +25,7 @@ use crate::{
     control_stream_local::ControlStreamLocal,
     control_stream_remote::ControlStreamRemote,
     features::extended_connect::{
+        connect_udp::ConnectUdpSession,
         webtransport_session::WebTransportSession,
         webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
@@ -97,6 +98,7 @@ impl Http3State {
     }
 }
 
+// TODO: Update for connect-udp
 /**
 # HTTP/3 core implementation
 
@@ -299,6 +301,7 @@ pub struct Http3Connection {
     send_streams: HashMap<StreamId, Box<dyn SendStream>>,
     recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
     webtransport: ExtendedConnectFeature,
+    connect_udp: ExtendedConnectFeature,
 }
 
 impl Display for Http3Connection {
@@ -310,6 +313,8 @@ impl Display for Http3Connection {
 impl Http3Connection {
     /// Create a new connection.
     pub fn new(conn_params: Http3Parameters, role: Role) -> Self {
+        // TODO: remove
+        assert!(conn_params.get_connect());
         Self {
             state: Http3State::Initializing,
             control_stream_local: ControlStreamLocal::new(),
@@ -324,6 +329,10 @@ impl Http3Connection {
                 ExtendedConnectType::WebTransport,
                 conn_params.get_webtransport(),
             ),
+            connect_udp: ExtendedConnectFeature::new(
+                ExtendedConnectType::ConnectUdp,
+                conn_params.get_connect(),
+            ),
             local_params: conn_params,
             settings_state: Http3RemoteSettingsState::NotReceived,
             streams_with_pending_data: HashSet::default(),
@@ -337,7 +346,8 @@ impl Http3Connection {
     /// only used for the `WebTransport` feature. The negotiation is done via the `SETTINGS` frame
     /// and when the peer's `SETTINGS` frame has been received the listener will be called.
     pub fn set_features_listener(&mut self, feature_listener: Http3ClientEvents) {
-        self.webtransport.set_listener(feature_listener);
+        self.webtransport.set_listener(feature_listener.clone());
+        self.connect_udp.set_listener(feature_listener);
     }
 
     /// This function creates and initializes, i.e. send stream type, the control and qpack
@@ -646,6 +656,15 @@ impl Http3Connection {
             .and_then(|stream| stream.webtransport());
         if let Some(s) = session {
             s.borrow_mut().datagram(decoder.decode_remainder().to_vec());
+        } else {
+            // TODO: Cleanup
+            let session = decoder
+                .decode_varint()
+                .and_then(|id| self.recv_streams.get_mut(&StreamId::from(id * 4)))
+                .and_then(|stream| stream.connect_udp())
+                .expect("TODO");
+
+            session.borrow_mut().datagram(decoder.decode_remainder().to_vec());
         }
     }
 
@@ -1118,6 +1137,49 @@ impl Http3Connection {
         Ok(id)
     }
 
+    pub fn connect_udp_create_session<'x, 't: 'x, T>(
+        &mut self,
+        conn: &mut Connection,
+        events: Box<dyn ExtendedConnectEvents>,
+        target: &'t T,
+        headers: &'t [Header],
+    ) -> Res<StreamId>
+    where
+        T: AsRequestTarget<'x> + ?Sized + Debug,
+    {
+        qinfo!("[{self}] Create connect-udp");
+        if !self.connect_udp_enabled() {
+            return Err(Error::Unavailable);
+        }
+
+        let id = self.create_bidi_transport_stream(conn)?;
+
+        let extended_conn = Rc::new(RefCell::new(ConnectUdpSession::new(
+            id,
+            events,
+            Rc::clone(&self.qpack_encoder),
+            Rc::clone(&self.qpack_decoder),
+        )));
+        self.add_streams(
+            id,
+            Box::new(Rc::clone(&extended_conn)),
+            Box::new(Rc::clone(&extended_conn)),
+        );
+
+        let final_headers = Self::create_fetch_headers(&RequestDescription {
+            method: "CONNECT",
+            target,
+            headers,
+            connect_type: Some(ExtendedConnectType::ConnectUdp),
+            priority: Priority::default(),
+        })?;
+        extended_conn
+            .borrow_mut()
+            .send_request(&final_headers, conn)?;
+        self.streams_with_pending_data.insert(id);
+        Ok(id)
+    }
+
     pub(crate) fn webtransport_session_accept(
         &mut self,
         conn: &mut Connection,
@@ -1210,6 +1272,32 @@ impl Http3Connection {
             .send_streams
             .get_mut(&session_id)
             .ok_or(Error::InvalidStreamId)?;
+        if send_stream.stream_type() != Http3StreamType::ExtendedConnect {
+            return Err(Error::InvalidStreamId);
+        }
+
+        send_stream.close_with_message(conn, error, message)?;
+        if send_stream.done() {
+            self.remove_send_stream(session_id, conn);
+        } else if send_stream.has_data_to_send() {
+            self.streams_with_pending_data.insert(session_id);
+        }
+        Ok(())
+    }
+
+    // TODO: Can be de-duplicated with `webtransport_close_session`?
+    pub(crate) fn connect_udp_close_session(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        error: u32,
+        message: &str,
+    ) -> Res<()> {
+        qtrace!("Close connect-udp session {session_id:?}");
+        let send_stream = self
+            .send_streams
+            .get_mut(&session_id)
+            .ok_or(Error::InvalidStreamId).unwrap();
         if send_stream.stream_type() != Http3StreamType::ExtendedConnect {
             return Err(Error::InvalidStreamId);
         }
@@ -1357,6 +1445,22 @@ impl Http3Connection {
             .send_datagram(conn, buf, id)
     }
 
+    pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
+        &mut self,
+        session_id: StreamId,
+        conn: &mut Connection,
+        buf: &[u8],
+        id: I,
+    ) -> Res<()> {
+        self.recv_streams
+            .get_mut(&session_id)
+            .ok_or(Error::InvalidStreamId)?
+            .connect_udp()
+            .ok_or(Error::InvalidStreamId)?
+            .borrow_mut()
+            .send_datagram(conn, buf, id)
+    }
+
     /// If the control stream has received frames `MaxPushId`, `Goaway`, `PriorityUpdateRequest` or
     /// `PriorityUpdateRequestPush` which handling is specific to the client and server, we must
     /// give them to the specific client/server handler.
@@ -1397,11 +1501,13 @@ impl Http3Connection {
             Http3RemoteSettingsState::NotReceived => {
                 self.set_qpack_settings(&new_settings)?;
                 self.webtransport.handle_settings(&new_settings);
+                self.connect_udp.handle_settings(&new_settings);
                 self.settings_state = Http3RemoteSettingsState::Received(new_settings);
                 Ok(())
             }
             Http3RemoteSettingsState::ZeroRtt(settings) => {
                 self.webtransport.handle_settings(&new_settings);
+                self.connect_udp.handle_settings(&new_settings);
                 let mut qpack_changed = false;
                 for st in &[
                     HSettingType::MaxHeaderListSize,
@@ -1430,7 +1536,8 @@ impl Http3Connection {
                         HSettingType::BlockedStreams => qpack_changed = true,
                         HSettingType::MaxHeaderListSize
                         | HSettingType::EnableWebTransport
-                        | HSettingType::EnableH3Datagram => (),
+                        | HSettingType::EnableH3Datagram
+                        | HSettingType::EnableConnect => (),
                     }
                 }
                 if qpack_changed {
@@ -1588,6 +1695,10 @@ impl Http3Connection {
 
     pub const fn webtransport_enabled(&self) -> bool {
         self.webtransport.enabled()
+    }
+
+    pub const fn connect_udp_enabled(&self) -> bool {
+        self.connect_udp.enabled()
     }
 
     #[must_use]

@@ -112,6 +112,7 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
         }
 
         if bytes.any(|b| matches!(b, 0 | 0x10 | 0x13 | 0x3a | 0x41..=0x5a)) {
+
             return Err(Error::InvalidHeader); // illegal characters.
         }
     }
@@ -125,6 +126,7 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
                 if let Some(protocol) = protocol_value {
                     // For a webtransport CONNECT, the :scheme field must be set to https.
                     if protocol == "webtransport" && scheme_value != Some("https") {
+
                         return Err(Error::InvalidHeader);
                     }
                     // The CONNECT request for with :protocol included must have the scheme,
