@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qtrace, Datagram};
+use neqo_common::{header::HeadersExt, qtrace, Datagram, Header};
 use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
@@ -26,7 +26,7 @@ use crate::{
     connection_server::Http3ServerHandler,
     server_connection_events::Http3ServerConnEvent,
     server_events::{
-        Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents, WebTransportRequest,
+        ConnectUdpRequest, Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents, WebTransportRequest
     },
     settings::HttpZeroRttChecker,
     Http3Parameters, Http3StreamInfo, Res,
@@ -252,10 +252,34 @@ impl Http3Server {
                         self.events.priority_update(stream_id, priority);
                     }
                     Http3ServerConnEvent::ExtendedConnect { stream_id, headers } => {
-                        self.events.webtransport_new_session(
-                            WebTransportRequest::new(conn.clone(), Rc::clone(handler), stream_id),
-                            headers,
-                        );
+                        match headers.find_header(":protocol").map(Header::value) {
+                            Some("webtransport") => {
+                                self.events.webtransport_new_session(
+                                    WebTransportRequest::new(
+                                        conn.clone(),
+                                        Rc::clone(handler),
+                                        stream_id,
+                                    ),
+                                    headers,
+                                );
+                            }
+                            Some("connect-udp") => {
+                                self.events.connect_udp_new_session(
+                                    ConnectUdpRequest::new(
+                                        conn.clone(),
+                                        Rc::clone(handler),
+                                        stream_id,
+                                    ),
+                                    headers,
+                                );
+                            }
+                            Some(_) => {
+                                unimplemented!("Extended connect other than webtransport or connect-udp")
+                            }
+                            None => {
+                                unimplemented!("Extended connect without :protocol header")
+                            }
+                        }
                     }
                     Http3ServerConnEvent::ExtendedConnectClosed {
                         stream_id,

@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-use neqo_common::Header;
+use neqo_common::{header::HeadersExt as _, Header};
 use neqo_transport::{AppError, StreamId};
 
 use crate::{
@@ -124,7 +124,21 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
     }
 
     fn extended_connect_new_session(&self, stream_id: StreamId, headers: Vec<Header>) {
-        self.insert(Http3ServerConnEvent::ExtendedConnect { stream_id, headers });
+        match headers.find_header(":protocol").map(Header::value) {
+            Some("webtransport") | Some("connect-udp")  => {
+                self.insert(Http3ServerConnEvent::ExtendedConnect {
+                    stream_id,
+                    headers,
+                });
+            }
+            Some(_) => {
+                unimplemented!("Extended connect other than webtransport or connect-udp")
+            }
+            None => {
+                unimplemented!("connect without :protocol header");
+
+            }
+        }
     }
 }
 
