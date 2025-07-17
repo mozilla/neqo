@@ -84,8 +84,8 @@ fn remember_smoothed_rtt() {
 }
 
 fn ticket_rtt(rtt: Duration) -> Duration {
-    // A simple ACK_ECN frame for a single packet with packet number 0 with a single ECT(0) mark.
-    const ACK_FRAME_1: &[u8] = &[0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00];
+    // A simple ACK frame for a single packet with packet number 0.
+    const ACK_FRAME_1: &[u8] = &[0x02, 0x00, 0x00, 0x00, 0x00];
 
     // This test needs to decrypt the CI, so turn off MLKEM.
     let mut client = new_client(
