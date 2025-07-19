@@ -4,11 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
-
 use std::{
     cell::RefCell,
     fmt::{self, Display},
@@ -26,27 +21,27 @@ use qlog::{
 use crate::Role;
 
 #[derive(Debug, Clone, Default)]
-pub struct NeqoQlog {
-    inner: Rc<RefCell<Option<NeqoQlogShared>>>,
+pub struct Qlog {
+    inner: Rc<RefCell<Option<SharedStreamer>>>,
 }
 
-pub struct NeqoQlogShared {
+pub struct SharedStreamer {
     qlog_path: PathBuf,
     streamer: QlogStreamer,
 }
 
-impl NeqoQlog {
-    /// Create an enabled `NeqoQlog` configuration backed by a file.
+impl Qlog {
+    /// Create an enabled `Qlog` configuration backed by a file.
     ///
     /// # Errors
     ///
     /// Will return `qlog::Error` if it cannot write to the new file.
-    pub fn enabled_with_file(
+    pub fn enabled_with_file<D: Display>(
         mut qlog_path: PathBuf,
         role: Role,
         title: Option<String>,
         description: Option<String>,
-        file_prefix: impl Display,
+        file_prefix: D,
     ) -> Result<Self, qlog::Error> {
         qlog_path.push(format!("{file_prefix}.sqlog"));
 
@@ -71,7 +66,7 @@ impl NeqoQlog {
         Self::enabled(streamer, qlog_path)
     }
 
-    /// Create an enabled `NeqoQlog` configuration.
+    /// Create an enabled `Qlog` configuration.
     ///
     /// # Errors
     ///
@@ -80,7 +75,7 @@ impl NeqoQlog {
         streamer.start_log()?;
 
         Ok(Self {
-            inner: Rc::new(RefCell::new(Some(NeqoQlogShared {
+            inner: Rc::new(RefCell::new(Some(SharedStreamer {
                 qlog_path,
                 streamer,
             }))),
@@ -88,11 +83,11 @@ impl NeqoQlog {
     }
 
     #[must_use]
-    pub fn inner(&self) -> Rc<RefCell<Option<NeqoQlogShared>>> {
+    pub fn inner(&self) -> Rc<RefCell<Option<SharedStreamer>>> {
         Rc::clone(&self.inner)
     }
 
-    /// Create a disabled `NeqoQlog` configuration.
+    /// Create a disabled `Qlog` configuration.
     #[must_use]
     pub fn disabled() -> Self {
         Self::default()
@@ -126,10 +121,10 @@ impl NeqoQlog {
 
     /// If logging enabled, closure may generate an event to be logged.
     ///
-    /// This function is similar to [`NeqoQlog::add_event_data_with_instant`],
+    /// This function is similar to [`Qlog::add_event_data_with_instant`],
     /// but it does not take `now: Instant` as an input parameter. Instead, it
     /// internally calls [`std::time::Instant::now`]. Prefer calling
-    /// [`NeqoQlog::add_event_data_with_instant`] when `now` is available, as it
+    /// [`Qlog::add_event_data_with_instant`] when `now` is available, as it
     /// ensures consistency with the current time, which might differ from
     /// [`std::time::Instant::now`] (e.g., when using simulated time instead of
     /// real time).
@@ -160,16 +155,16 @@ impl NeqoQlog {
     }
 }
 
-impl fmt::Debug for NeqoQlogShared {
+impl fmt::Debug for SharedStreamer {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "NeqoQlog writing to {}", self.qlog_path.display())
+        write!(f, "Qlog writing to {}", self.qlog_path.display())
     }
 }
 
-impl Drop for NeqoQlogShared {
+impl Drop for SharedStreamer {
     fn drop(&mut self) {
         if let Err(e) = self.streamer.finish_log() {
-            log::error!("Error dropping NeqoQlog: {e}");
+            log::error!("Error dropping Qlog: {e}");
         }
     }
 }

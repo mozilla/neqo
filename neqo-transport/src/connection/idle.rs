@@ -11,7 +11,7 @@ use std::{
 
 use neqo_common::qtrace;
 
-use crate::recovery::RecoveryToken;
+use crate::recovery;
 
 #[derive(Debug, Clone)]
 /// There's a little bit of different behavior for resetting idle timeout. See
@@ -122,11 +122,11 @@ impl IdleTimeout {
         &mut self,
         now: Instant,
         pto: Duration,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut recovery::Tokens,
     ) -> bool {
         if !self.keep_alive_outstanding && now >= self.keep_alive_timeout(now, pto) {
             self.keep_alive_outstanding = true;
-            tokens.push(RecoveryToken::KeepAlive);
+            tokens.push(recovery::Token::KeepAlive);
             true
         } else {
             false

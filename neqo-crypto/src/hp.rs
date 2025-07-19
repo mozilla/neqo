@@ -4,11 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
-
 use std::{
     cell::RefCell,
     fmt::{self, Debug},
@@ -44,7 +39,7 @@ experimental_api!(SSL_HkdfExpandLabelWithMech(
 ));
 
 #[derive(Clone)]
-pub enum HpKey {
+pub enum Key {
     /// An AES encryption context.
     /// Note: as we need to clone this object, we clone the pointer and
     /// track references using `Rc`.  `PK11Context` can't be used with `PK11_CloneContext`
@@ -55,13 +50,13 @@ pub enum HpKey {
     Chacha(SymKey),
 }
 
-impl Debug for HpKey {
+impl Debug for Key {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "HpKey")
+        write!(f, "hp::Key")
     }
 }
 
-impl HpKey {
+impl Key {
     pub const SAMPLE_SIZE: usize = 16;
 
     /// QUIC-specific API for extracting a header-protection key.
@@ -99,10 +94,10 @@ impl HpKey {
                 c_uint::try_from(l.len())?,
                 mech,
                 key_size,
-                &raw mut secret,
+                &mut secret,
             )
         }?;
-        let key = SymKey::from_ptr(secret).or(Err(Error::HkdfError))?;
+        let key = SymKey::from_ptr(secret).or(Err(Error::Hkdf))?;
 
         let res = match cipher {
             TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => {
@@ -114,7 +109,7 @@ impl HpKey {
                         &Item::wrap(&ZERO[..0])?, // Borrow a zero-length slice of ZERO.
                     )
                 };
-                let context = Context::from_ptr(context_ptr).or(Err(Error::CipherInitFailure))?;
+                let context = Context::from_ptr(context_ptr).or(Err(Error::CipherInit))?;
                 Self::Aes(Rc::new(RefCell::new(context)))
             }
             TLS_CHACHA20_POLY1305_SHA256 => Self::Chacha(key),
@@ -156,7 +151,7 @@ impl HpKey {
                     PK11_CipherOp(
                         **context.borrow_mut(),
                         output.as_mut_ptr(),
-                        &raw mut output_len,
+                        &mut output_len,
                         c_int::try_from(output.len())?,
                         sample[..Self::SAMPLE_SIZE].as_ptr().cast(),
                         c_int::try_from(Self::SAMPLE_SIZE)?,
@@ -181,7 +176,7 @@ impl HpKey {
                         CK_MECHANISM_TYPE::from(CKM_CHACHA20),
                         addr_of_mut!(param_item),
                         output[..].as_mut_ptr(),
-                        &raw mut output_len,
+                        &mut output_len,
                         c_uint::try_from(output.len())?,
                         [0; Self::SAMPLE_SIZE].as_ptr(),
                         c_uint::try_from(Self::SAMPLE_SIZE)?,

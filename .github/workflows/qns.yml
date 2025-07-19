@@ -38,7 +38,7 @@ jobs:
           platforms: arm64
           cache-image: false
 
-      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
         with:
           cache-binary: false
 
@@ -61,7 +61,7 @@ jobs:
             # set latest tag for default branch
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1 # v6.16.0
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         if: ${{ github.event_name != 'pull_request' }}
         with:
           push: true
@@ -70,7 +70,7 @@ jobs:
           build-args: RUST_VERSION=stable
           platforms: 'linux/amd64, linux/arm64'
 
-      - uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1 # v6.16.0
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         id: docker_build_and_push
         with:
           tags: ${{ steps.meta.outputs.tags }}
@@ -164,7 +164,7 @@ jobs:
           name: '${{ env.LATEST }} Docker image'
           path: /tmp
 
-      - run: docker load --input /tmp/${{ env.LATEST }}.tar
+      - run: docker load --input "/tmp/$LATEST.tar"
 
       - id: depair
         env:
@@ -317,10 +317,12 @@ jobs:
           } >> comment.md
 
       - if: ${{ github.ref == 'refs/heads/main' }}
+        env:
+          SHA: ${{ github.sha }}
         run: |
           rm -rf results-main || true
           mv results results-main
-          echo "${{ github.sha }}" > results-main/baseline-sha.txt
+          echo "$SHA" > results-main/baseline-sha.txt
 
       - if: ${{ github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3

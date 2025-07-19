@@ -4,11 +4,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, collections::BTreeSet, mem, rc::Rc};
+use std::{
+    cell::RefCell,
+    fmt::{self, Display, Formatter},
+    mem,
+    rc::Rc,
+};
 
 use neqo_common::{qtrace, Encoder, Header, MessageType, Role};
-use neqo_qpack::{QPackDecoder, QPackEncoder};
+use neqo_qpack as qpack;
 use neqo_transport::{Connection, DatagramTracking, StreamId};
+use rustc_hash::FxHashSet as HashSet;
 
 use super::{ExtendedConnectEvents, ExtendedConnectType, SessionCloseReason};
 use crate::{
@@ -43,13 +49,13 @@ pub struct WebTransportSession {
     state: SessionState,
     frame_reader: FrameReader,
     events: Box<dyn ExtendedConnectEvents>,
-    send_streams: BTreeSet<StreamId>,
-    recv_streams: BTreeSet<StreamId>,
+    send_streams: HashSet<StreamId>,
+    recv_streams: HashSet<StreamId>,
     role: Role,
 }
 
-impl ::std::fmt::Display for WebTransportSession {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for WebTransportSession {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "WebTransportSession session={}", self.session_id)
     }
 }
@@ -60,8 +66,8 @@ impl WebTransportSession {
         session_id: StreamId,
         events: Box<dyn ExtendedConnectEvents>,
         role: Role,
-        qpack_encoder: Rc<RefCell<QPackEncoder>>,
-        qpack_decoder: Rc<RefCell<QPackDecoder>>,
+        qpack_encoder: Rc<RefCell<qpack::Encoder>>,
+        qpack_decoder: Rc<RefCell<qpack::Decoder>>,
     ) -> Self {
         let stream_event_listener = Rc::new(RefCell::new(WebTransportSessionListener::default()));
         Self {
@@ -89,8 +95,8 @@ impl WebTransportSession {
             state: SessionState::Negotiating,
             frame_reader: FrameReader::new(),
             events,
-            send_streams: BTreeSet::new(),
-            recv_streams: BTreeSet::new(),
+            send_streams: HashSet::default(),
+            recv_streams: HashSet::default(),
             role,
         }
     }
@@ -123,8 +129,8 @@ impl WebTransportSession {
             state: SessionState::Active,
             frame_reader: FrameReader::new(),
             events,
-            send_streams: BTreeSet::new(),
-            recv_streams: BTreeSet::new(),
+            send_streams: HashSet::default(),
+            recv_streams: HashSet::default(),
             role,
         })
     }
@@ -324,7 +330,7 @@ impl WebTransportSession {
         matches!(self.state, SessionState::Active)
     }
 
-    pub fn take_sub_streams(&mut self) -> (BTreeSet<StreamId>, BTreeSet<StreamId>) {
+    pub fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
         (
             mem::take(&mut self.recv_streams),
             mem::take(&mut self.send_streams),
@@ -400,11 +406,11 @@ impl WebTransportSession {
     /// # Errors
     ///
     /// Returns an error if the datagram exceeds the remote datagram size limit.
-    pub fn send_datagram(
+    pub fn send_datagram<I: Into<DatagramTracking>>(
         &self,
         conn: &mut Connection,
         buf: &[u8],
-        id: impl Into<DatagramTracking>,
+        id: I,
     ) -> Res<()> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state == SessionState::Active {
@@ -521,7 +527,7 @@ impl RecvStreamEvents for Rc<RefCell<WebTransportSessionListener>> {}
 impl HttpRecvStreamEvents for Rc<RefCell<WebTransportSessionListener>> {
     fn header_ready(
         &self,
-        _stream_info: Http3StreamInfo,
+        _stream_info: &Http3StreamInfo,
         headers: Vec<Header>,
         interim: bool,
         fin: bool,

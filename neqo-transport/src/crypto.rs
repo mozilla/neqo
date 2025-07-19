@@ -7,6 +7,7 @@
 use std::{
     cell::RefCell,
     cmp::{max, min},
+    fmt::{self, Display, Formatter},
     mem,
     ops::{Index, IndexMut, Range},
     rc::Rc,
@@ -14,21 +15,21 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
+use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Buffer, Encoder, Role};
 pub use neqo_crypto::Epoch;
 use neqo_crypto::{
-    hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState,
-    PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker,
-    TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE,
-    TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519,
-    TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
+    hkdf, hp, Aead, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState, PrivateKey,
+    PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker, TLS_AES_128_GCM_SHA256,
+    TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1,
+    TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519,
+    TLS_VERSION_1_3,
 };
 
 use crate::{
     cid::ConnectionIdRef,
     frame::FrameType,
-    packet::{PacketBuilder, PacketNumber},
-    recovery::RecoveryToken,
+    packet::{self},
+    recovery,
     recv_stream::RxStreamOrderer,
     send_stream::TxBuffer,
     sni::find_sni,
@@ -43,7 +44,7 @@ use crate::{
 /// to update keys.  This has to be much smaller than the number returned
 /// by `CryptoDxState::limit` or updates will happen too often.  As we don't
 /// need to ask permission to update, this can be quite small.
-pub const UPDATE_WRITE_KEYS_AT: PacketNumber = 100;
+pub const UPDATE_WRITE_KEYS_AT: packet::Number = 100;
 
 // This is a testing kludge that allows for overwriting the number of
 // invocations of the next cipher to operate.  With this, it is possible
@@ -51,15 +52,15 @@ pub const UPDATE_WRITE_KEYS_AT: PacketNumber = 100;
 // when it hits `UPDATE_WRITE_KEYS_AT` and an automatic update should occur.
 // This is a little crude, but it saves a lot of plumbing.
 #[cfg(test)]
-thread_local!(pub static OVERWRITE_INVOCATIONS: RefCell<Option<PacketNumber>> = RefCell::default());
+thread_local!(pub static OVERWRITE_INVOCATIONS: RefCell<Option<packet::Number>> = RefCell::default());
 
 #[derive(Debug)]
 pub struct Crypto {
     version: Version,
     protocols: Vec<String>,
-    pub(crate) tls: Agent,
-    pub(crate) streams: CryptoStreams,
-    pub(crate) states: CryptoStates,
+    tls: Agent,
+    streams: CryptoStreams,
+    states: CryptoStates,
 }
 
 type TpHandler = Rc<RefCell<TransportParametersHandler>>;
@@ -130,20 +131,15 @@ impl Crypto {
     }
 
     /// Get the set of enabled protocols.
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     pub fn protocols(&self) -> &[String] {
         &self.protocols
     }
 
-    pub fn server_enable_0rtt(
+    pub fn server_enable_0rtt<Z: ZeroRttChecker + 'static>(
         &mut self,
         tphandler: TpHandler,
         anti_replay: &AntiReplay,
-        zero_rtt_checker: impl ZeroRttChecker + 'static,
+        zero_rtt_checker: Z,
     ) -> Res<()> {
         if let Agent::Server(s) = &mut self.tls {
             Ok(s.enable_0rtt(
@@ -171,7 +167,7 @@ impl Crypto {
         }
     }
 
-    pub fn client_enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
+    pub fn client_enable_ech<A: AsRef<[u8]>>(&mut self, ech_config_list: A) -> Res<()> {
         if let Agent::Client(c) = &mut self.tls {
             c.enable_ech(ech_config_list)?;
             Ok(())
@@ -211,7 +207,7 @@ impl Crypto {
                 Err(self
                     .tls
                     .alert()
-                    .map_or(Error::CryptoError(e), |a| Error::CryptoAlert(*a)))
+                    .map_or(Error::Crypto(e), Error::CryptoAlert))
             }
         }
     }
@@ -235,9 +231,9 @@ impl Crypto {
                 self.tls.read_secret(Epoch::ZeroRtt),
             ),
         };
-        let secret = secret.ok_or(Error::InternalError)?;
+        let secret = secret.ok_or(Error::Internal)?;
         self.states
-            .set_0rtt_keys(version, dir, &secret, cipher.ok_or(Error::InternalError)?)?;
+            .set_0rtt_keys(version, dir, &secret, cipher.ok_or(Error::Internal)?)?;
         Ok(true)
     }
 
@@ -270,12 +266,12 @@ impl Crypto {
         let read_secret = self
             .tls
             .read_secret(Epoch::Handshake)
-            .ok_or(Error::InternalError)?;
+            .ok_or(Error::Internal)?;
         let cipher = match self.tls.info() {
             None => self.tls.preinfo()?.cipher_suite(),
             Some(info) => Some(info.cipher_suite()),
         }
-        .ok_or(Error::InternalError)?;
+        .ok_or(Error::Internal)?;
         self.states
             .set_handshake_keys(self.version, &write_secret, &read_secret, cipher)?;
         qdebug!("[{self}] Handshake keys installed");
@@ -299,7 +295,7 @@ impl Crypto {
         let read_secret = self
             .tls
             .read_secret(Epoch::ApplicationData)
-            .ok_or(Error::InternalError)?;
+            .ok_or(Error::Internal)?;
         self.states
             .set_application_read_key(version, &read_secret, expire_0rtt)?;
         qdebug!("[{self}] application read keys installed");
@@ -318,12 +314,12 @@ impl Crypto {
         Ok(())
     }
 
-    pub fn write_frame(
+    pub fn write_frame<B: Buffer>(
         &mut self,
         space: PacketNumberSpace,
         sni_slicing: bool,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         self.streams
@@ -396,10 +392,40 @@ impl Crypto {
             unreachable!("It is a server");
         }
     }
+
+    #[must_use]
+    pub fn tls_mut(&mut self) -> &mut Agent {
+        &mut self.tls
+    }
+
+    #[must_use]
+    pub const fn tls(&self) -> &Agent {
+        &self.tls
+    }
+
+    #[must_use]
+    pub const fn streams(&self) -> &CryptoStreams {
+        &self.streams
+    }
+
+    #[must_use]
+    pub fn streams_mut(&mut self) -> &mut CryptoStreams {
+        &mut self.streams
+    }
+
+    #[must_use]
+    pub const fn states(&self) -> &CryptoStates {
+        &self.states
+    }
+
+    #[must_use]
+    pub fn states_mut(&mut self) -> &mut CryptoStates {
+        &mut self.states
+    }
 }
 
-impl ::std::fmt::Display for Crypto {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Crypto {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Crypto")
     }
 }
@@ -422,16 +448,16 @@ pub struct CryptoDxState {
     /// many times keys can be updated, so we don't use `u16` for this.
     epoch: usize,
     aead: Aead,
-    hpkey: HpKey,
+    hpkey: hp::Key,
     /// This tracks the range of packet numbers that have been seen.  This allows
     /// for verifying that packet numbers before a key update are strictly lower
     /// than packet numbers after a key update.
-    used_pn: Range<PacketNumber>,
+    used_pn: Range<packet::Number>,
     /// This is the minimum packet number that is allowed.
-    min_pn: PacketNumber,
+    min_pn: packet::Number,
     /// The total number of operations that are remaining before the keys
     /// become exhausted and can't be used any more.
-    invocations: PacketNumber,
+    invocations: packet::Number,
     /// The basis of the invocation limits in `invocations`.
     largest_packet_len: usize,
 }
@@ -453,7 +479,7 @@ impl CryptoDxState {
             direction,
             epoch: usize::from(epoch),
             aead: Aead::new(TLS_VERSION_1_3, cipher, secret, version.label_prefix())?,
-            hpkey: HpKey::extract(TLS_VERSION_1_3, cipher, secret, &hplabel)?,
+            hpkey: hp::Key::extract(TLS_VERSION_1_3, cipher, secret, &hplabel)?,
             used_pn: 0..0,
             min_pn: 0,
             invocations: Self::limit(direction, cipher),
@@ -483,20 +509,20 @@ impl CryptoDxState {
     }
 
     /// Determine the confidentiality and integrity limits for the cipher.
-    fn limit(direction: CryptoDxDirection, cipher: Cipher) -> PacketNumber {
+    fn limit(direction: CryptoDxDirection, cipher: Cipher) -> packet::Number {
         match direction {
             // This uses the smaller limits for 2^16 byte packets
             // as we don't control incoming packet size.
             CryptoDxDirection::Read => match cipher {
                 TLS_AES_128_GCM_SHA256 => 1 << 52,
-                TLS_AES_256_GCM_SHA384 => PacketNumber::MAX,
+                TLS_AES_256_GCM_SHA384 => packet::Number::MAX,
                 TLS_CHACHA20_POLY1305_SHA256 => 1 << 36,
                 _ => unreachable!(),
             },
             // This uses the larger limits for 2^11 byte packets.
             CryptoDxDirection::Write => match cipher {
                 TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => 1 << 28,
-                TLS_CHACHA20_POLY1305_SHA256 => PacketNumber::MAX,
+                TLS_CHACHA20_POLY1305_SHA256 => packet::Number::MAX,
                 _ => unreachable!(),
             },
         }
@@ -588,7 +614,7 @@ impl CryptoDxState {
     /// Mark a packet number as used.  If this is too low, reject it.
     /// Note that this won't catch a value that is too high if packets protected with
     /// old keys are received after a key update.  That needs to be caught elsewhere.
-    pub fn used(&mut self, pn: PacketNumber) -> Res<()> {
+    pub fn used(&mut self, pn: packet::Number) -> Res<()> {
         if pn < self.min_pn {
             qdebug!(
                 "[{self}] Found packet with too old packet number: {pn} < {}",
@@ -612,27 +638,27 @@ impl CryptoDxState {
     }
 
     #[must_use]
-    pub fn can_update(&self, largest_acknowledged: Option<PacketNumber>) -> bool {
+    pub fn can_update(&self, largest_acknowledged: Option<packet::Number>) -> bool {
         largest_acknowledged.map_or_else(
             || self.epoch == usize::from(Epoch::ApplicationData),
             |la| self.used_pn.contains(&la),
         )
     }
 
-    pub fn compute_mask(&self, sample: &[u8]) -> Res<[u8; HpKey::SAMPLE_SIZE]> {
+    pub fn compute_mask(&self, sample: &[u8]) -> Res<[u8; hp::Key::SAMPLE_SIZE]> {
         let mask = self.hpkey.mask(sample)?;
         qtrace!("[{self}] HP sample={} mask={}", hex(sample), hex(mask));
         Ok(mask)
     }
 
     #[must_use]
-    pub const fn next_pn(&self) -> PacketNumber {
+    pub const fn next_pn(&self) -> packet::Number {
         self.used_pn.end
     }
 
     pub fn encrypt<'a>(
         &mut self,
-        pn: PacketNumber,
+        pn: packet::Number,
         hdr: Range<usize>,
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
@@ -645,7 +671,7 @@ impl CryptoDxState {
 
         // The numbers in `Self::limit` assume a maximum packet size of `LIMIT`.
         // Adjust them as we encounter larger packets.
-        let body_len = data.len() - hdr.len() - self.aead.expansion();
+        let body_len = data.len() - hdr.len() - Aead::expansion();
         debug_assert!(body_len <= u16::MAX.into());
         if body_len > self.largest_packet_len {
             let new_bits = usize::leading_zeros(self.largest_packet_len - 1)
@@ -667,13 +693,13 @@ impl CryptoDxState {
     }
 
     #[must_use]
-    pub const fn expansion(&self) -> usize {
-        self.aead.expansion()
+    pub const fn expansion() -> usize {
+        Aead::expansion()
     }
 
     pub fn decrypt<'a>(
         &mut self,
-        pn: PacketNumber,
+        pn: packet::Number,
         hdr: Range<usize>,
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
@@ -707,13 +733,13 @@ impl CryptoDxState {
     /// Get the amount of extra padding packets protected with this profile need.
     /// This is the difference between the size of the header protection sample
     /// and the AEAD expansion.
-    pub const fn extra_padding(&self) -> usize {
-        HpKey::SAMPLE_SIZE.saturating_sub(self.aead.expansion())
+    pub const fn extra_padding() -> usize {
+        hp::Key::SAMPLE_SIZE.saturating_sub(Aead::expansion())
     }
 }
 
-impl std::fmt::Display for CryptoDxState {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for CryptoDxState {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "epoch {} {:?}", self.epoch, self.direction)
     }
 }
@@ -1107,12 +1133,12 @@ impl CryptoStates {
     }
 
     /// Update the write keys.
-    pub fn initiate_key_update(&mut self, largest_acknowledged: Option<PacketNumber>) -> Res<()> {
+    pub fn initiate_key_update(&mut self, largest_acknowledged: Option<packet::Number>) -> Res<()> {
         // Only update if we are able to. We can only do this if we have
         // received an acknowledgement for a packet in the current phase.
         // Also, skip this if we are waiting for read keys on the existing
         // key update to be rolled over.
-        let write = &self.app_write.as_ref().ok_or(Error::InternalError)?.dx;
+        let write = &self.app_write.as_ref().ok_or(Error::Internal)?.dx;
         if write.can_update(largest_acknowledged) && self.read_update_time.is_none() {
             // This call additionally checks that we don't advance to the next
             // epoch while a key update is in progress.
@@ -1134,8 +1160,8 @@ impl CryptoStates {
         // ahead of the read keys.  If we initiated the key update, the write keys
         // will already be ahead.
         debug_assert!(self.read_update_time.is_none());
-        let write = &self.app_write.as_ref().ok_or(Error::InternalError)?;
-        let read = &self.app_read.as_ref().ok_or(Error::InternalError)?;
+        let write = &self.app_write.as_ref().ok_or(Error::Internal)?;
+        let read = &self.app_read.as_ref().ok_or(Error::Internal)?;
         if write.epoch() == read.epoch() {
             qdebug!("[{self}] Update write keys to epoch={}", write.epoch() + 1);
             self.app_write = Some(write.next()?);
@@ -1207,7 +1233,7 @@ impl CryptoStates {
                     qtrace!("[{self}] Rotating read keys");
                     mem::swap(&mut self.app_read, &mut self.app_read_next);
                     self.app_read_next =
-                        Some(self.app_read.as_ref().ok_or(Error::InternalError)?.next()?);
+                        Some(self.app_read.as_ref().ok_or(Error::Internal)?.next()?);
                 }
                 self.read_update_time = None;
             }
@@ -1230,8 +1256,8 @@ impl CryptoStates {
         // We only need to do the check while we are waiting for read keys to be updated.
         if self.read_update_time.is_some() {
             qtrace!("[{self}] Checking for PN overlap");
-            let next_dx = &mut self.app_read_next.as_mut().ok_or(Error::InternalError)?.dx;
-            next_dx.continuation(&self.app_read.as_ref().ok_or(Error::InternalError)?.dx)?;
+            let next_dx = &mut self.app_read_next.as_mut().ok_or(Error::Internal)?.dx;
+            next_dx.continuation(&self.app_read.as_ref().ok_or(Error::Internal)?.dx)?;
         }
         Ok(())
     }
@@ -1293,7 +1319,7 @@ impl CryptoStates {
                     "quic ", // This is a v1 test so hard-code the label.
                 )
                 .unwrap(),
-                hpkey: HpKey::extract(
+                hpkey: hp::Key::extract(
                     TLS_VERSION_1_3,
                     TLS_CHACHA20_POLY1305_SHA256,
                     &secret,
@@ -1321,8 +1347,8 @@ impl CryptoStates {
     }
 }
 
-impl std::fmt::Display for CryptoStates {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for CryptoStates {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "CryptoStates")
     }
 }
@@ -1392,7 +1418,7 @@ impl CryptoStreams {
     }
 
     pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
-        let rx = &mut self.get_mut(space).ok_or(Error::InternalError)?.rx;
+        let rx = &mut self.get_mut(space).ok_or(Error::Internal)?.rx;
         rx.inbound_frame(offset, data);
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
             Ok(())
@@ -1437,7 +1463,7 @@ impl CryptoStreams {
     }
 
     pub fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
-        self.get_mut(space).is_none_or(|cs| cs.tx.is_empty())
+        self.get_mut(space).map_or(true, |cs| cs.tx.is_empty())
     }
 
     const fn get(&self, space: PacketNumberSpace) -> Option<&CryptoStream> {
@@ -1480,18 +1506,18 @@ impl CryptoStreams {
         }
     }
 
-    pub fn write_frame(
+    pub fn write_frame<B: Buffer>(
         &mut self,
         space: PacketNumberSpace,
         sni_slicing: bool,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
-        fn write_chunk(
+        fn write_chunk<B: Buffer>(
             offset: u64,
             data: &[u8],
-            builder: &mut PacketBuilder,
+            builder: &mut packet::Builder<B>,
         ) -> Option<(u64, usize)> {
             let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 
@@ -1517,14 +1543,14 @@ impl CryptoStreams {
         fn mark_as_sent(
             cs: &mut CryptoStream,
             space: PacketNumberSpace,
-            tokens: &mut Vec<RecoveryToken>,
+            tokens: &mut recovery::Tokens,
             offset: u64,
             len: usize,
             stats: &mut FrameStats,
         ) {
             cs.tx.mark_as_sent(offset, len);
             qdebug!("CRYPTO for {space} offset={offset}, len={len}");
-            tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
+            tokens.push(recovery::Token::Crypto(CryptoRecoveryToken {
                 space,
                 offset,
                 length: len,

@@ -17,7 +17,7 @@ use super::{
 };
 use crate::{
     crypto::{OVERWRITE_INVOCATIONS, UPDATE_WRITE_KEYS_AT},
-    packet::PacketNumber,
+    packet,
 };
 
 fn check_discarded(
@@ -45,7 +45,7 @@ fn assert_update_blocked(c: &mut Connection) {
     );
 }
 
-fn overwrite_invocations(n: PacketNumber) {
+fn overwrite_invocations(n: packet::Number) {
     OVERWRITE_INVOCATIONS.with(|v| {
         *v.borrow_mut() = Some(n);
     });
@@ -79,7 +79,7 @@ fn discarded_initial_keys() {
     // The initial packet should be dropped. The packet contains a Handshake packet as well, which
     // will be marked as dup.  And it will contain padding, which will be "dropped".
     // The client will generate a Handshake packet here to avoid stalling.
-    check_discarded(&mut client, &init_pkt_s.unwrap(), true, 1, 0);
+    check_discarded(&mut client, &init_pkt_s.unwrap(), true, 2, 0);
 
     assert!(maybe_authenticate(&mut client));
 
@@ -305,7 +305,7 @@ fn exhaust_read_keys() {
     assert!(matches!(
         client.state(),
         State::Draining {
-            error: CloseReason::Transport(Error::PeerError(ERROR_AEAD_LIMIT_REACHED)),
+            error: CloseReason::Transport(Error::Peer(ERROR_AEAD_LIMIT_REACHED)),
             ..
         }
     ));

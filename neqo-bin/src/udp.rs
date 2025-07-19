@@ -8,7 +8,7 @@
 
 use std::{io, net::SocketAddr};
 
-use neqo_common::{qdebug, Datagram};
+use neqo_common::{qdebug, DatagramBatch};
 use neqo_udp::{DatagramIter, RecvBuf};
 
 /// Ideally this would live in [`neqo-udp`]. [`neqo-udp`] is used in Firefox.
@@ -30,7 +30,6 @@ impl Socket {
         let socket = std::net::UdpSocket::bind(addr)?;
         let state = quinn_udp::UdpSocketState::new((&socket).into())?;
 
-        let send_buf_before = state.send_buffer_size((&socket).into())?;
         // FIXME: We need to experiment if increasing this actually improves performance.
         // Also, on BSD and Apple targets, this seems to increase the `net.inet.udp.maxdgram`
         // sysctl, which is not the same as the socket buffer.
@@ -41,15 +40,20 @@ impl Socket {
         // {send_buf_after}"); } else {
         //     qdebug!("Default socket send buffer size is {send_buf_before}, not changing");
         // }
-        qdebug!("Default socket send buffer size is {send_buf_before}");
+        qdebug!(
+            "Default socket send buffer size is {:?}",
+            state.send_buffer_size((&socket).into())
+        );
 
         let recv_buf_before = state.recv_buffer_size((&socket).into())?;
         if recv_buf_before < ONE_MB {
             // Same as Firefox.
             // <https://searchfox.org/mozilla-central/rev/fa5b44a4ea5c98b6a15f39638ea4cd04dc271f3d/modules/libpref/init/StaticPrefList.yaml#13474-13477>
             state.set_recv_buffer_size((&socket).into(), ONE_MB)?;
-            let recv_buf_after = state.recv_buffer_size((&socket).into())?;
-            qdebug!("Increasing socket recv buffer size from {recv_buf_before} to {ONE_MB}, now: {recv_buf_after}");
+            qdebug!(
+                "Increasing socket recv buffer size from {recv_buf_before} to {ONE_MB}, now: {:?}",
+                state.recv_buffer_size((&socket).into())
+            );
         } else {
             qdebug!("Default socket receive buffer size is {recv_buf_before}, not changing");
         }
@@ -75,14 +79,14 @@ impl Socket {
         self.inner.readable().await
     }
 
-    /// Send a [`Datagram`] on the given [`Socket`].
-    pub fn send(&self, d: &Datagram) -> io::Result<()> {
+    /// Send a [`DatagramBatch`] on the given [`Socket`].
+    pub fn send(&self, d: &DatagramBatch) -> io::Result<()> {
         self.inner.try_io(tokio::io::Interest::WRITABLE, || {
             neqo_udp::send_inner(&self.state, (&self.inner).into(), d)
         })
     }
 
-    /// Receive a batch of [`Datagram`]s on the given [`Socket`], each set with
+    /// Receive a batch of [`neqo_common::Datagram`]s on the given [`Socket`], each set with
     /// the provided local address.
     pub fn recv<'a>(
         &self,
@@ -101,5 +105,9 @@ impl Socket {
                     Err(e)
                 }
             })
+    }
+
+    pub fn max_gso_segments(&self) -> usize {
+        self.state.max_gso_segments()
     }
 }

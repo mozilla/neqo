@@ -15,12 +15,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qtrace, Role};
+use neqo_common::{qdebug, qtrace, Buffer, Role, MAX_VARINT};
 
 use crate::{
     frame::FrameType,
-    packet::PacketBuilder,
-    recovery::{RecoveryToken, StreamRecoveryToken},
+    packet,
+    recovery::{self, StreamRecoveryToken},
     recv_stream::MAX_RECV_WINDOW_SIZE,
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
@@ -142,16 +142,16 @@ where
 }
 
 impl SenderFlowControl<()> {
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if let Some(limit) = self.blocked_needed() {
             if builder.write_varint_frame(&[FrameType::DataBlocked.into(), limit]) {
                 stats.data_blocked += 1;
-                tokens.push(RecoveryToken::Stream(StreamRecoveryToken::DataBlocked(
+                tokens.push(recovery::Token::Stream(StreamRecoveryToken::DataBlocked(
                     limit,
                 )));
                 self.blocked_sent();
@@ -161,10 +161,10 @@ impl SenderFlowControl<()> {
 }
 
 impl SenderFlowControl<StreamId> {
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if let Some(limit) = self.blocked_needed() {
@@ -174,7 +174,7 @@ impl SenderFlowControl<StreamId> {
                 limit,
             ]) {
                 stats.stream_data_blocked += 1;
-                tokens.push(RecoveryToken::Stream(
+                tokens.push(recovery::Token::Stream(
                     StreamRecoveryToken::StreamDataBlocked {
                         stream_id: self.subject,
                         limit,
@@ -187,10 +187,10 @@ impl SenderFlowControl<StreamId> {
 }
 
 impl SenderFlowControl<StreamType> {
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if let Some(limit) = self.blocked_needed() {
@@ -200,10 +200,12 @@ impl SenderFlowControl<StreamType> {
             };
             if builder.write_varint_frame(&[frame.into(), limit]) {
                 stats.streams_blocked += 1;
-                tokens.push(RecoveryToken::Stream(StreamRecoveryToken::StreamsBlocked {
-                    stream_type: self.subject,
-                    limit,
-                }));
+                tokens.push(recovery::Token::Stream(
+                    StreamRecoveryToken::StreamsBlocked {
+                        stream_type: self.subject,
+                        limit,
+                    },
+                ));
                 self.blocked_sent();
             }
         }
@@ -283,8 +285,13 @@ where
         self.frame_pending
     }
 
-    pub const fn next_limit(&self) -> u64 {
-        self.retired + self.max_active
+    pub fn next_limit(&self) -> u64 {
+        min(
+            self.retired + self.max_active,
+            // Flow control limits are encoded as QUIC varints and are thus
+            // limited to the maximum QUIC varint value.
+            MAX_VARINT,
+        )
     }
 
     pub const fn max_active(&self) -> u64 {
@@ -318,10 +325,10 @@ where
 }
 
 impl ReceiverFlowControl<()> {
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if !self.frame_needed() {
@@ -330,7 +337,7 @@ impl ReceiverFlowControl<()> {
         let max_allowed = self.next_limit();
         if builder.write_varint_frame(&[FrameType::MaxData.into(), max_allowed]) {
             stats.max_data += 1;
-            tokens.push(RecoveryToken::Stream(StreamRecoveryToken::MaxData(
+            tokens.push(recovery::Token::Stream(StreamRecoveryToken::MaxData(
                 max_allowed,
             )));
             self.frame_sent(max_allowed);
@@ -352,7 +359,7 @@ impl ReceiverFlowControl<()> {
                 self.consumed,
                 self.max_allowed
             );
-            return Err(Error::FlowControlError);
+            return Err(Error::FlowControl);
         }
         self.consumed += count;
         Ok(())
@@ -360,10 +367,10 @@ impl ReceiverFlowControl<()> {
 }
 
 impl ReceiverFlowControl<StreamId> {
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
         now: Instant,
         rtt: Duration,
@@ -381,10 +388,12 @@ impl ReceiverFlowControl<StreamId> {
             max_allowed,
         ]) {
             stats.max_stream_data += 1;
-            tokens.push(RecoveryToken::Stream(StreamRecoveryToken::MaxStreamData {
-                stream_id: self.subject,
-                max_data: max_allowed,
-            }));
+            tokens.push(recovery::Token::Stream(
+                StreamRecoveryToken::MaxStreamData {
+                    stream_id: self.subject,
+                    max_data: max_allowed,
+                },
+            ));
             self.frame_sent(max_allowed);
             self.last_update = Some(now);
         }
@@ -463,7 +472,7 @@ impl ReceiverFlowControl<StreamId> {
 
         if consumed > self.max_allowed {
             qtrace!("Stream RX window exceeded: {consumed}");
-            return Err(Error::FlowControlError);
+            return Err(Error::FlowControl);
         }
         let new_consumed = consumed - self.consumed;
         self.consumed = consumed;
@@ -472,10 +481,10 @@ impl ReceiverFlowControl<StreamId> {
 }
 
 impl ReceiverFlowControl<StreamType> {
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if !self.frame_needed() {
@@ -488,7 +497,7 @@ impl ReceiverFlowControl<StreamType> {
         };
         if builder.write_varint_frame(&[frame.into(), max_streams]) {
             stats.max_streams += 1;
-            tokens.push(RecoveryToken::Stream(StreamRecoveryToken::MaxStreams {
+            tokens.push(recovery::Token::Stream(StreamRecoveryToken::MaxStreams {
                 stream_type: self.subject,
                 max_streams,
             }));
@@ -532,7 +541,7 @@ impl RemoteStreamLimit {
 
     pub fn is_new_stream(&self, stream_id: StreamId) -> Res<bool> {
         if !self.is_allowed(stream_id) {
-            return Err(Error::StreamLimitError);
+            return Err(Error::StreamLimit);
         }
         Ok(stream_id >= self.next_stream)
     }
@@ -655,17 +664,18 @@ mod test {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{qdebug, Encoder, Role};
+    use neqo_common::{qdebug, Encoder, Role, MAX_VARINT};
     use neqo_crypto::random;
 
     use super::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
     use crate::{
         fc::WINDOW_UPDATE_FRACTION,
-        packet::PacketBuilder,
+        packet::{self, PACKET_LIMIT},
+        recovery,
         recv_stream::MAX_RECV_WINDOW_SIZE,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
-        Error, Res, INITIAL_RECV_WINDOW_SIZE,
+        ConnectionParameters, Error, Res, INITIAL_RECV_WINDOW_SIZE,
     };
 
     #[test]
@@ -884,11 +894,11 @@ mod test {
         // Exceed limits
         assert_eq!(
             fc[StreamType::BiDi].is_new_stream(StreamId::from(bidi + 8)),
-            Err(Error::StreamLimitError)
+            Err(Error::StreamLimit)
         );
         assert_eq!(
             fc[StreamType::UniDi].is_new_stream(StreamId::from(unidi + 4)),
-            Err(Error::StreamLimitError)
+            Err(Error::StreamLimit)
         );
 
         assert_eq!(fc[StreamType::BiDi].take_stream_id(), StreamId::from(bidi));
@@ -904,8 +914,9 @@ mod test {
         fc[StreamType::BiDi].add_retired(1);
         fc[StreamType::BiDi].send_flowc_update();
         // consume the frame
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
-        let mut tokens = Vec::new();
+        let mut builder =
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+        let mut tokens = recovery::Tokens::new();
         fc[StreamType::BiDi].write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
         assert_eq!(tokens.len(), 1);
 
@@ -920,7 +931,7 @@ mod test {
         // 13 still exceeds limits
         assert_eq!(
             fc[StreamType::BiDi].is_new_stream(StreamId::from(bidi + 12)),
-            Err(Error::StreamLimitError)
+            Err(Error::StreamLimit)
         );
 
         fc[StreamType::UniDi].add_retired(1);
@@ -940,7 +951,7 @@ mod test {
         // 11 exceeds limits
         assert_eq!(
             fc[StreamType::UniDi].is_new_stream(StreamId::from(unidi + 8)),
-            Err(Error::StreamLimitError)
+            Err(Error::StreamLimit)
         );
     }
 
@@ -1011,8 +1022,9 @@ mod test {
     }
 
     fn write_frames(fc: &mut ReceiverFlowControl<StreamId>, rtt: Duration, now: Instant) -> usize {
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
-        let mut tokens = Vec::new();
+        let mut builder =
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+        let mut tokens = recovery::Tokens::new();
         fc.write_frames(
             &mut builder,
             &mut tokens,
@@ -1220,5 +1232,27 @@ mod test {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn max_active_larger_max_varint() {
+        // Instead of doing proper connection flow control, Neqo simply sets
+        // the largest connection flow control limit possible.
+        let max_data = ConnectionParameters::default().get_max_data();
+        assert_eq!(max_data, MAX_VARINT);
+        let mut fc = ReceiverFlowControl::new((), max_data);
+
+        // Say that the remote consumes 1 byte of that connection flow control
+        // limit and then requests a connection flow control update.
+        fc.consume(1).unwrap();
+        fc.add_retired(1);
+        fc.send_flowc_update();
+
+        // Neqo should never attempt writing a connection flow control update
+        // larger than the largest possible QUIC varint value.
+        let mut builder =
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+        let mut tokens = recovery::Tokens::new();
+        fc.write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
     }
 }

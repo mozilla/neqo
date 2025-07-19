@@ -4,10 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
 #![expect(
     clippy::unwrap_used,
     clippy::future_not_send,
@@ -19,8 +15,10 @@
 use std::{
     cell::RefCell,
     fmt::{self, Display},
-    fs, io,
+    fs,
+    io::{self},
     net::{SocketAddr, ToSocketAddrs as _},
+    num::NonZeroUsize,
     path::PathBuf,
     pin::Pin,
     process::exit,
@@ -38,7 +36,7 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init_db, AntiReplay, Cipher,
 };
-use neqo_transport::{Output, RandomConnectionIdGenerator, Version};
+use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version};
 use neqo_udp::RecvBuf;
 use tokio::time::Sleep;
 
@@ -51,41 +49,41 @@ mod http3;
 
 #[derive(Debug)]
 pub enum Error {
-    ArgumentError(&'static str),
-    Http3Error(neqo_http3::Error),
-    IoError(io::Error),
-    QlogError,
-    TransportError(neqo_transport::Error),
-    CryptoError(neqo_crypto::Error),
+    Argument(&'static str),
+    Http3(neqo_http3::Error),
+    Io(io::Error),
+    Qlog,
+    Transport(neqo_transport::Error),
+    Crypto(neqo_crypto::Error),
 }
 
 impl From<neqo_crypto::Error> for Error {
     fn from(err: neqo_crypto::Error) -> Self {
-        Self::CryptoError(err)
+        Self::Crypto(err)
     }
 }
 
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
-        Self::IoError(err)
+        Self::Io(err)
     }
 }
 
 impl From<neqo_http3::Error> for Error {
     fn from(err: neqo_http3::Error) -> Self {
-        Self::Http3Error(err)
+        Self::Http3(err)
     }
 }
 
 impl From<qlog::Error> for Error {
     fn from(_err: qlog::Error) -> Self {
-        Self::QlogError
+        Self::Qlog
     }
 }
 
 impl From<neqo_transport::Error> for Error {
     fn from(err: neqo_transport::Error) -> Self {
-        Self::TransportError(err)
+        Self::Transport(err)
     }
 }
 
@@ -191,6 +189,10 @@ impl Args {
     pub fn set_qlog_dir(&mut self, dir: PathBuf) {
         self.shared.qlog_dir = Some(dir);
     }
+
+    pub fn set_hosts(&mut self, hosts: Vec<String>) {
+        self.hosts = hosts;
+    }
 }
 
 fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
@@ -200,13 +202,19 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
     fs::read(path)
 }
 
+#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<Datagram<&mut [u8]>>, now: Instant) -> Output;
+    fn process_multiple(
+        &mut self,
+        dgram: Option<Datagram<&mut [u8]>>,
+        now: Instant,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }
 
-pub struct ServerRunner {
+pub struct Runner {
     now: Box<dyn Fn() -> Instant>,
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
@@ -214,7 +222,7 @@ pub struct ServerRunner {
     recv_buf: RecvBuf,
 }
 
-impl ServerRunner {
+impl Runner {
     #[must_use]
     pub fn new(
         now: Box<dyn Fn() -> Instant>,
@@ -228,6 +236,14 @@ impl ServerRunner {
             sockets,
             recv_buf: RecvBuf::new(),
         }
+    }
+
+    #[must_use]
+    pub fn local_addresses(&self) -> Vec<SocketAddr> {
+        self.sockets
+            .iter()
+            .map(|(_, s)| s.local_addr().unwrap())
+            .collect()
     }
 
     /// Tries to find a socket, but then just falls back to sending from the first.
@@ -252,9 +268,26 @@ impl ServerRunner {
         now: &dyn Fn() -> Instant,
         mut input_dgram: Option<Datagram<&mut [u8]>>,
     ) -> Result<(), io::Error> {
+        // Each socket has a maximum number of GSO segments it can handle. When
+        // calling `server.process_multiple` we don't know which socket will be
+        // used. Take the smallest maximum GSO segments from all sockets to
+        // ensure that we don't send more segments than any socket can handle.
+        //
+        // Ideally we would have a way to know which socket will be used. Likely
+        // not worth it for a test-only server implementation which is mostly
+        // used with a single socket only.
+        let smallest_max_gso_segments = sockets
+            .iter()
+            .map(|(_, socket)| socket.max_gso_segments())
+            .min()
+            .expect("At least one socket must be present")
+            .try_into()
+            .inspect_err(|_| qerror!("Socket return GSO size of 0"))
+            .map_err(|_| io::Error::from(io::ErrorKind::Unsupported))?;
+
         loop {
-            match server.process(input_dgram.take(), now()) {
-                Output::Datagram(dgram) => {
+            match server.process_multiple(input_dgram.take(), now(), smallest_max_gso_segments) {
+                OutputBatch::DatagramBatch(dgram) => {
                     let socket = Self::find_socket(sockets, dgram.source());
                     loop {
                         // Optimistically attempt sending datagram. In case the
@@ -270,12 +303,12 @@ impl ServerRunner {
                         }
                     }
                 }
-                Output::Callback(new_timeout) => {
+                OutputBatch::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
                     *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
-                Output::None => break,
+                OutputBatch::None => break,
             }
         }
         Ok(())
@@ -360,7 +393,7 @@ enum Ready {
     Timeout,
 }
 
-pub async fn server(mut args: Args) -> Res<()> {
+pub fn server(mut args: Args) -> Res<Runner> {
     neqo_common::log::init(
         args.shared
             .verbose
@@ -414,12 +447,14 @@ pub async fn server(mut args: Args) -> Res<()> {
         qerror!("No valid hosts defined");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts").into());
     }
-    let sockets = hosts
+    let sockets: Vec<(SocketAddr, crate::udp::Socket)> = hosts
         .into_iter()
         .map(|host| {
             let socket = crate::udp::Socket::bind(host)?;
-            let local_addr = socket.local_addr()?;
-            qinfo!("Server waiting for connection on: {local_addr:?}");
+            qinfo!(
+                "Server waiting for connection on: {:?}",
+                socket.local_addr()
+            );
 
             Ok((host, socket))
         })
@@ -438,7 +473,5 @@ pub async fn server(mut args: Args) -> Res<()> {
         )
     };
 
-    ServerRunner::new(Box::new(move || args.now()), server, sockets)
-        .run()
-        .await
+    Ok(Runner::new(Box::new(move || args.now()), server, sockets))
 }

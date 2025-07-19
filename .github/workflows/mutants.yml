@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   mutants:
+    name: Find mutants
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
     steps:
@@ -32,7 +33,7 @@ jobs:
 
       - uses: ./.github/actions/rust
         with:
-          tools: cargo-mutants, cargo-nextest
+          tools: cargo-mutants
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Find incremental mutants
@@ -43,14 +44,14 @@ jobs:
         run: |
           git diff "origin/$BASE_REF".. > pr.diff
           set -o pipefail
-          cargo mutants --test-tool=nextest --no-shuffle -j 2 -vV --in-diff pr.diff | tee results.txt || true
+          cargo mutants --no-shuffle -j 2 -vV --in-diff pr.diff | tee results.txt || true
           echo 'title=Incremental Mutants' >> "$GITHUB_OUTPUT"
 
       - name: Find mutants
         if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
           set -o pipefail
-          cargo mutants --test-tool=nextest -vV --in-place | tee results.txt || true
+          cargo mutants -vV --in-place | tee results.txt || true
           echo 'title=All Mutants' >> "$GITHUB_OUTPUT"
 
       - name: Post step summary

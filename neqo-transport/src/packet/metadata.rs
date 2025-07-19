@@ -7,17 +7,13 @@
 // Enable just this file for logging to just see packets.
 // e.g. "RUST_LOG=neqo_transport::dump neqo-client ..."
 
-use std::fmt::Display;
+use std::fmt::{self, Display, Formatter};
 
-use neqo_common::IpTos;
+use neqo_common::Tos;
 use qlog::events::quic::PacketHeader;
 use strum::Display;
 
-use super::DecryptedPacket;
-use crate::{
-    packet::{PacketNumber, PacketType},
-    path::PathRef,
-};
+use crate::{packet, path::PathRef};
 
 #[derive(Clone, Copy, Display)]
 pub enum Direction {
@@ -30,24 +26,19 @@ pub enum Direction {
 pub struct MetaData<'a> {
     path: &'a PathRef,
     direction: Direction,
-    packet_type: PacketType,
-    packet_number: PacketNumber,
-    tos: IpTos,
+    packet_type: packet::Type,
+    packet_number: packet::Number,
+    tos: Tos,
     len: usize,
     payload: &'a [u8],
 }
 
 impl MetaData<'_> {
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     pub fn new_in<'a>(
         path: &'a PathRef,
-        tos: IpTos,
+        tos: Tos,
         len: usize,
-        decrypted: &'a DecryptedPacket,
+        decrypted: &'a packet::Decrypted,
     ) -> MetaData<'a> {
         MetaData {
             path,
@@ -62,11 +53,11 @@ impl MetaData<'_> {
 
     pub const fn new_out<'a>(
         path: &'a PathRef,
-        packet_type: PacketType,
-        packet_number: PacketNumber,
+        packet_type: packet::Type,
+        packet_number: packet::Number,
         length: usize,
         payload: &'a [u8],
-        tos: IpTos,
+        tos: Tos,
     ) -> MetaData<'a> {
         MetaData {
             path,
@@ -108,7 +99,7 @@ impl From<MetaData<'_>> for PacketHeader {
 }
 
 impl Display for MetaData<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "pn={} type={:?} {} {:?} len {}",

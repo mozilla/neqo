@@ -6,16 +6,16 @@
 
 // Functions that handle capturing QLOG traces.
 
-use neqo_common::{hex, qlog::NeqoQlog};
+use neqo_common::{hex, qlog::Qlog};
 use qlog::events::{
     qpack::{QPackInstruction, QpackInstructionParsed, QpackInstructionTypeName},
     EventData, RawInfo,
 };
 
-/// Uses [`NeqoQlog::add_event_data_now`] instead of
-/// [`NeqoQlog::add_event_data_with_instant`], given that `now` is not available
-/// on call-site. See docs on [`NeqoQlog::add_event_data_now`] for details.
-pub fn qpack_read_insert_count_increment_instruction(qlog: &NeqoQlog, increment: u64, data: &[u8]) {
+/// Uses [`Qlog::add_event_data_now`] instead of
+/// [`Qlog::add_event_data_with_instant`], given that `now` is not available
+/// on call-site. See docs on [`Qlog::add_event_data_now`] for details.
+pub fn qpack_read_insert_count_increment_instruction(qlog: &Qlog, increment: u64, data: &[u8]) {
     qlog.add_event_data_now(|| {
         let raw = RawInfo {
             length: Some(8),

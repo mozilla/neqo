@@ -29,7 +29,7 @@ use crate::{
         assert_path_challenge_min_len, connect, send_something_paced, send_with_extra,
     },
     frame::FrameType,
-    packet::PacketBuilder,
+    packet,
     path::MAX_PATH_PROBES,
     pmtud::Pmtud,
     stats::FrameStats,
@@ -572,7 +572,7 @@ fn migrate_same_fail() {
     assert_path_challenge_min_len(&client, &probe, now);
 
     // -1 because first PATH_CHALLENGE already sent above
-    for _ in 0..MAX_PATH_PROBES - 1 {
+    for _ in 0..MAX_PATH_PROBES * 2 - 1 {
         let cb = client.process_output(now).callback();
         assert_ne!(cb, Duration::new(0, 0));
         now += cb;
@@ -611,7 +611,7 @@ fn migrate_same_fail() {
 
 /// This gets the connection ID from a datagram using the default
 /// connection ID generator/decoder.
-pub fn get_cid(d: &Datagram) -> ConnectionIdRef {
+pub fn get_cid(d: &Datagram) -> ConnectionIdRef<'_> {
     let gen = CountingConnectionIdGenerator::default();
     assert_eq!(d[0] & 0x80, 0); // Only support short packets for now.
     gen.decode_cid(&mut Decoder::from(&d[1..])).unwrap()
@@ -912,8 +912,8 @@ fn preferred_address_server_empty_cid() {
     connect_fail(
         &mut client,
         &mut server,
-        Error::TransportParameterError,
-        Error::PeerError(Error::TransportParameterError.code()),
+        Error::TransportParameter,
+        Error::Peer(Error::TransportParameter.code()),
     );
 }
 
@@ -933,8 +933,8 @@ fn preferred_address_client() {
     connect_fail(
         &mut client,
         &mut server,
-        Error::PeerError(Error::TransportParameterError.code()),
-        Error::TransportParameterError,
+        Error::Peer(Error::TransportParameter.code()),
+        Error::TransportParameter,
     );
 }
 
@@ -1041,7 +1041,7 @@ struct RetireAll {
 }
 
 impl crate::connection::test_internal::FrameWriter for RetireAll {
-    fn write_frames(&mut self, builder: &mut PacketBuilder) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         // Use a sequence number that is large enough that all existing values
         // will be lower (so they get retired).  As the code doesn't care about
         // gaps in sequence numbers, this is safe, even though the gap might
@@ -1203,7 +1203,7 @@ fn retire_prior_to_migration_success() {
 struct GarbageWriter {}
 
 impl crate::connection::test_internal::FrameWriter for GarbageWriter {
-    fn write_frames(&mut self, builder: &mut PacketBuilder) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         // Not a valid frame type.
         builder.encode_varint(u32::MAX);
     }

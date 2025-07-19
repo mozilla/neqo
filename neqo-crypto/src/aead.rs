@@ -69,7 +69,7 @@ impl RealAead {
     }
 
     #[must_use]
-    pub const fn expansion(&self) -> usize {
+    pub const fn expansion() -> usize {
         16
     }
 
@@ -87,7 +87,7 @@ impl RealAead {
             secret,
             p.as_ptr().cast(),
             c_uint::try_from(p.len())?,
-            &raw mut ctx,
+            &mut ctx,
         )?;
         Ok(Self {
             ctx: AeadContext::from_ptr(ctx)?,
@@ -119,7 +119,7 @@ impl RealAead {
                 input.as_ptr(),
                 c_uint::try_from(input.len())?,
                 output.as_mut_ptr(),
-                &raw mut l,
+                &mut l,
                 c_uint::try_from(output.len())?,
             )
         }?;
@@ -152,9 +152,9 @@ impl RealAead {
                 aad.as_ptr(),
                 c_uint::try_from(aad.len())?,
                 data.as_ptr(),
-                c_uint::try_from(data.len() - self.expansion())?,
+                c_uint::try_from(data.len() - Self::expansion())?,
                 data.as_ptr(),
-                &raw mut l,
+                &mut l,
                 c_uint::try_from(data.len())?,
             )
         }?;
@@ -186,7 +186,7 @@ impl RealAead {
                 input.as_ptr(),
                 c_uint::try_from(input.len())?,
                 output.as_mut_ptr(),
-                &raw mut l,
+                &mut l,
                 c_uint::try_from(output.len())?,
             )
         }?;
@@ -219,11 +219,11 @@ impl RealAead {
                 data.as_ptr(),
                 c_uint::try_from(data.len())?,
                 data.as_ptr(),
-                &raw mut l,
+                &mut l,
                 c_uint::try_from(data.len())?,
             )
         }?;
-        debug_assert_eq!(usize::try_from(l)?, data.len() - self.expansion());
+        debug_assert_eq!(usize::try_from(l)?, data.len() - Self::expansion());
         Ok(&mut data[..l.try_into()?])
     }
 }

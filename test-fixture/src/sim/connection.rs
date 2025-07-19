@@ -4,10 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
 #![expect(clippy::unwrap_used, reason = "This is test code.")]
 
 use std::{
@@ -24,7 +20,7 @@ use neqo_transport::{
 
 use crate::{
     boxed,
-    sim::{Node, Rng},
+    sim::{self, Rng},
 };
 
 /// The status of the processing of an event.
@@ -40,7 +36,7 @@ pub enum GoalStatus {
 
 /// A goal for the connection.
 /// Goals can be accomplished in any order.
-pub trait ConnectionGoal: Debug {
+pub trait Goal: Debug {
     fn init(&mut self, _c: &mut Connection, _now: Instant) {}
     /// Perform some processing.
     fn process(&mut self, _c: &mut Connection, _now: Instant) -> GoalStatus {
@@ -52,17 +48,20 @@ pub trait ConnectionGoal: Debug {
         -> GoalStatus;
 }
 
-pub struct ConnectionNode {
+pub struct Node {
     c: Connection,
-    setup_goals: Vec<Box<dyn ConnectionGoal>>,
-    goals: Vec<Box<dyn ConnectionGoal>>,
+    setup_goals: Vec<Box<dyn Goal>>,
+    goals: Vec<Box<dyn Goal>>,
 }
 
-impl ConnectionNode {
-    pub fn new_client(
+impl Node {
+    pub fn new_client<
+        I: IntoIterator<Item = Box<dyn Goal>>,
+        I1: IntoIterator<Item = Box<dyn Goal>>,
+    >(
         params: ConnectionParameters,
-        setup: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
-        goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
+        setup: I,
+        goals: I1,
     ) -> Self {
         Self {
             c: crate::new_client(params),
@@ -71,10 +70,13 @@ impl ConnectionNode {
         }
     }
 
-    pub fn new_server(
+    pub fn new_server<
+        I: IntoIterator<Item = Box<dyn Goal>>,
+        I1: IntoIterator<Item = Box<dyn Goal>>,
+    >(
         params: ConnectionParameters,
-        setup: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
-        goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
+        setup: I,
+        goals: I1,
     ) -> Self {
         Self {
             c: crate::new_server(crate::DEFAULT_ALPN, params),
@@ -83,7 +85,7 @@ impl ConnectionNode {
         }
     }
 
-    pub fn default_client(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
+    pub fn default_client<I: IntoIterator<Item = Box<dyn Goal>>>(goals: I) -> Self {
         Self::new_client(
             // Simulator logic does not work with multi-packet MLKEM crypto flights.
             ConnectionParameters::default().pmtud(true).mlkem(false),
@@ -92,7 +94,7 @@ impl ConnectionNode {
         )
     }
 
-    pub fn default_server(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
+    pub fn default_server<I: IntoIterator<Item = Box<dyn Goal>>>(goals: I) -> Self {
         Self::new_server(
             // Simulator logic does not work with multi-packet MLKEM crypto flights.
             ConnectionParameters::default().pmtud(true).mlkem(false),
@@ -105,7 +107,7 @@ impl ConnectionNode {
         self.goals.clear();
     }
 
-    pub fn add_goal(&mut self, goal: Box<dyn ConnectionGoal>) {
+    pub fn add_goal(&mut self, goal: Box<dyn Goal>) {
         self.goals.push(goal);
     }
 
@@ -121,7 +123,7 @@ impl ConnectionNode {
     /// Process all goals using the given closure and return whether any were active.
     fn process_goals<F>(&mut self, mut f: F) -> bool
     where
-        F: FnMut(&mut Box<dyn ConnectionGoal>, &mut Connection) -> GoalStatus,
+        F: FnMut(&mut Box<dyn Goal>, &mut Connection) -> GoalStatus,
     {
         let mut active = false;
         let mut i = 0;
@@ -139,7 +141,7 @@ impl ConnectionNode {
     }
 }
 
-impl Node for ConnectionNode {
+impl sim::Node for Node {
     fn init(&mut self, _rng: Rng, now: Instant) {
         self.setup_goals(now);
     }
@@ -185,7 +187,7 @@ impl Node for ConnectionNode {
     }
 }
 
-impl Debug for ConnectionNode {
+impl Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(&self.c, f)
     }
@@ -205,7 +207,7 @@ impl ReachState {
     }
 }
 
-impl ConnectionGoal for ReachState {
+impl Goal for ReachState {
     fn handle_event(
         &mut self,
         _c: &mut Connection,
@@ -265,7 +267,7 @@ impl SendData {
     }
 }
 
-impl ConnectionGoal for SendData {
+impl Goal for SendData {
     fn init(&mut self, c: &mut Connection, _now: Instant) {
         self.make_stream(c);
     }
@@ -334,7 +336,7 @@ impl ReceiveData {
     }
 }
 
-impl ConnectionGoal for ReceiveData {
+impl Goal for ReceiveData {
     fn handle_event(
         &mut self,
         c: &mut Connection,

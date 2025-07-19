@@ -10,17 +10,16 @@ use std::{
     borrow::Borrow,
     cell::{Ref, RefCell},
     cmp::{max, min},
+    fmt::{self, Debug, Display, Formatter},
     ops::Deref,
     rc::Rc,
 };
 
-use neqo_common::{hex, hex_with_len, qdebug, qinfo, Decoder, Encoder};
+use neqo_common::{hex, hex_with_len, qdebug, qinfo, Buffer, Decoder, Encoder};
 use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
-use crate::{
-    frame::FrameType, packet::PacketBuilder, recovery::RecoveryToken, stats::FrameStats, Error, Res,
-};
+use crate::{frame::FrameType, packet, recovery, stats::FrameStats, Error, Res};
 
 pub const MAX_CONNECTION_ID_LEN: usize = 20;
 pub const LOCAL_ACTIVE_CID_LIMIT: usize = 8;
@@ -33,7 +32,7 @@ const CONNECTION_ID_SEQNO_EMPTY: u64 = u64::MAX - 1;
 
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
 pub struct ConnectionId {
-    pub(crate) cid: SmallVec<[u8; MAX_CONNECTION_ID_LEN]>,
+    cid: SmallVec<[u8; MAX_CONNECTION_ID_LEN]>,
 }
 
 impl ConnectionId {
@@ -57,7 +56,7 @@ impl ConnectionId {
     }
 
     #[must_use]
-    pub fn as_cid_ref(&self) -> ConnectionIdRef {
+    pub fn as_cid_ref(&self) -> ConnectionIdRef<'_> {
         ConnectionIdRef::from(&self.cid[..])
     }
 }
@@ -100,14 +99,14 @@ impl Deref for ConnectionId {
     }
 }
 
-impl ::std::fmt::Debug for ConnectionId {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Debug for ConnectionId {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "CID {}", hex_with_len(&self.cid))
     }
 }
 
-impl ::std::fmt::Display for ConnectionId {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for ConnectionId {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{}", hex(&self.cid))
     }
 }
@@ -123,14 +122,14 @@ pub struct ConnectionIdRef<'a> {
     cid: &'a [u8],
 }
 
-impl ::std::fmt::Debug for ConnectionIdRef<'_> {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Debug for ConnectionIdRef<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "CID {}", hex_with_len(self.cid))
     }
 }
 
-impl ::std::fmt::Display for ConnectionIdRef<'_> {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for ConnectionIdRef<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{}", hex(self.cid))
     }
 }
@@ -299,7 +298,11 @@ impl ConnectionIdEntry<[u8; 16]> {
 
     /// Write the entry out in a `NEW_CONNECTION_ID` frame.
     /// Returns `true` if the frame was written, `false` if there is insufficient space.
-    pub fn write(&self, builder: &mut PacketBuilder, stats: &mut FrameStats) -> bool {
+    pub fn write<B: Buffer>(
+        &self,
+        builder: &mut packet::Builder<B>,
+        stats: &mut FrameStats,
+    ) -> bool {
         let len = 1 + Encoder::varint_len(self.seqno) + 1 + 1 + self.cid.len() + 16;
         if builder.remaining() < len {
             return false;
@@ -314,11 +317,6 @@ impl ConnectionIdEntry<[u8; 16]> {
         true
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     pub fn is_empty(&self) -> bool {
         self.seqno == CONNECTION_ID_SEQNO_EMPTY || self.cid.is_empty()
     }
@@ -486,7 +484,7 @@ impl ConnectionIdManager {
         Rc::clone(&self.generator)
     }
 
-    pub fn decoder(&self) -> ConnectionIdDecoderRef {
+    pub fn decoder(&self) -> ConnectionIdDecoderRef<'_> {
         ConnectionIdDecoderRef {
             generator: self.generator.deref().borrow(),
         }
@@ -554,10 +552,10 @@ impl ConnectionIdManager {
         );
     }
 
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if self.generator.deref().borrow().generates_empty_cids() {
@@ -574,7 +572,7 @@ impl ConnectionIdManager {
 
         while let Some(entry) = self.lost_new_connection_id.pop() {
             if entry.write(builder, stats) {
-                tokens.push(RecoveryToken::NewConnectionId(entry));
+                tokens.push(recovery::Token::NewConnectionId(entry));
             } else {
                 // This shouldn't happen often.
                 self.lost_new_connection_id.push(entry);
@@ -599,7 +597,7 @@ impl ConnectionIdManager {
 
                 let entry = ConnectionIdEntry::new(seqno, cid, srt);
                 entry.write(builder, stats);
-                tokens.push(RecoveryToken::NewConnectionId(entry));
+                tokens.push(recovery::Token::NewConnectionId(entry));
             }
         }
     }

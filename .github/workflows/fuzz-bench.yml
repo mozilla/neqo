@@ -14,10 +14,11 @@ permissions:
 
 jobs:
   fuzz-bench:
+    name: Check that the fuzz and bench targets work
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14] # FIXME: ubuntu-24.04-arm has issues
+        os: [ubuntu-24.04, macos-15] # FIXME: ubuntu-24.04-arm has issues
         check: [fuzz, bench]
     runs-on: ${{ matrix.os }}
 
@@ -39,7 +40,6 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-      # Check that the fuzz and bench targets work
       - if: ${{ matrix.check == 'fuzz' }}
         env:
           UBUNTU: ${{ startsWith(matrix.os, 'ubuntu') }}

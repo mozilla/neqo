@@ -27,9 +27,9 @@ use crate::{
         },
         CongestionControl as _,
     },
-    packet::PacketType,
+    packet,
     pmtud::Pmtud,
-    recovery::SentPacket,
+    recovery::{self, sent},
     rtt::RttEstimate,
 };
 
@@ -43,12 +43,12 @@ const fn cwnd_after_loss_slow_start(cwnd: usize, mtu: usize) -> usize {
 
 fn fill_cwnd(cc: &mut ClassicCongestionControl<Cubic>, mut next_pn: u64, now: Instant) -> u64 {
     while cc.bytes_in_flight() < cc.cwnd() {
-        let sent = SentPacket::new(
-            PacketType::Short,
+        let sent = sent::Packet::new(
+            packet::Type::Short,
             next_pn,
             now,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&sent, now);
@@ -58,12 +58,12 @@ fn fill_cwnd(cc: &mut ClassicCongestionControl<Cubic>, mut next_pn: u64, now: In
 }
 
 fn ack_packet(cc: &mut ClassicCongestionControl<Cubic>, pn: u64, now: Instant) {
-    let acked = SentPacket::new(
-        PacketType::Short,
+    let acked = sent::Packet::new(
+        packet::Type::Short,
         pn,
         now,
         true,
-        Vec::new(),
+        recovery::Tokens::new(),
         cc.max_datagram_size(),
     );
     cc.on_packets_acked(&[acked], &RttEstimate::from_duration(RTT), now);
@@ -71,12 +71,12 @@ fn ack_packet(cc: &mut ClassicCongestionControl<Cubic>, pn: u64, now: Instant) {
 
 fn packet_lost(cc: &mut ClassicCongestionControl<Cubic>, pn: u64) {
     const PTO: Duration = Duration::from_millis(120);
-    let p_lost = SentPacket::new(
-        PacketType::Short,
+    let p_lost = sent::Packet::new(
+        packet::Type::Short,
         pn,
         now(),
         true,
-        Vec::new(),
+        recovery::Tokens::new(),
         cc.max_datagram_size(),
     );
     cc.on_packets_lost(None, None, PTO, &[p_lost], now());

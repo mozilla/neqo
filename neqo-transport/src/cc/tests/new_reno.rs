@@ -13,9 +13,9 @@ use test_fixture::now;
 use super::{IP_ADDR, MTU, RTT};
 use crate::{
     cc::{new_reno::NewReno, ClassicCongestionControl, CongestionControl as _},
-    packet::PacketType,
+    packet,
     pmtud::Pmtud,
-    recovery::SentPacket,
+    recovery::{self, sent},
     rtt::RttEstimate,
 };
 
@@ -39,60 +39,60 @@ fn issue_876() {
     let after = now + Duration::from_millis(150);
 
     let sent_packets = &[
-        SentPacket::new(
-            PacketType::Short,
+        sent::Packet::new(
+            packet::Type::Short,
             1,
             before,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size() - 1,
         ),
-        SentPacket::new(
-            PacketType::Short,
+        sent::Packet::new(
+            packet::Type::Short,
             2,
             before,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size() - 2,
         ),
-        SentPacket::new(
-            PacketType::Short,
+        sent::Packet::new(
+            packet::Type::Short,
             3,
             before,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         ),
-        SentPacket::new(
-            PacketType::Short,
+        sent::Packet::new(
+            packet::Type::Short,
             4,
             before,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         ),
-        SentPacket::new(
-            PacketType::Short,
+        sent::Packet::new(
+            packet::Type::Short,
             5,
             before,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         ),
-        SentPacket::new(
-            PacketType::Short,
+        sent::Packet::new(
+            packet::Type::Short,
             6,
             before,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         ),
-        SentPacket::new(
-            PacketType::Short,
+        sent::Packet::new(
+            packet::Type::Short,
             7,
             after,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size() - 3,
         ),
     ];
@@ -142,12 +142,12 @@ fn issue_1465() {
     let mut now = now();
     let max_datagram_size = cc.max_datagram_size();
     let mut next_packet = |now| {
-        let p = SentPacket::new(
-            PacketType::Short,
+        let p = sent::Packet::new(
+            packet::Type::Short,
             pn,
             now,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             max_datagram_size,
         );
         pn += 1;
