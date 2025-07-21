@@ -176,7 +176,7 @@
       when: is_gcp
       ansible.builtin.lineinfile:
         path: /etc/default/grub
-        regexp: '^GRUB_CMDLINE_LINUX_DEFAULT=.*$'
+        regexp: '^GRUB_CMDLINE_LINUX=.*$'
         line: 'GRUB_CMDLINE_LINUX=systemd.unified_cgroup_hierarchy=false'
       notify: update-grub
 
