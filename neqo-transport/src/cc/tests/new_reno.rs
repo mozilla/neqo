@@ -15,7 +15,7 @@ use crate::{
     cc::{new_reno::NewReno, ClassicCongestionControl, CongestionControl as _},
     packet,
     pmtud::Pmtud,
-    recovery::sent,
+    recovery::{self, sent},
     rtt::RttEstimate,
 };
 
@@ -44,7 +44,7 @@ fn issue_876() {
             1,
             before,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size() - 1,
         ),
         sent::Packet::new(
@@ -52,7 +52,7 @@ fn issue_876() {
             2,
             before,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size() - 2,
         ),
         sent::Packet::new(
@@ -60,7 +60,7 @@ fn issue_876() {
             3,
             before,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         ),
         sent::Packet::new(
@@ -68,7 +68,7 @@ fn issue_876() {
             4,
             before,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         ),
         sent::Packet::new(
@@ -76,7 +76,7 @@ fn issue_876() {
             5,
             before,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         ),
         sent::Packet::new(
@@ -84,7 +84,7 @@ fn issue_876() {
             6,
             before,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         ),
         sent::Packet::new(
@@ -92,7 +92,7 @@ fn issue_876() {
             7,
             after,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size() - 3,
         ),
     ];
@@ -147,7 +147,7 @@ fn issue_1465() {
             pn,
             now,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             max_datagram_size,
         );
         pn += 1;

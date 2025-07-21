@@ -11,7 +11,11 @@ use std::{cmp::max, time::Duration};
 use neqo_common::{qtrace, Buffer};
 
 use crate::{
-    connection::params::ACK_RATIO_SCALE, frame::FrameType, packet, recovery, stats::FrameStats,
+    connection::params::ACK_RATIO_SCALE,
+    frame::FrameType,
+    packet,
+    recovery::{self},
+    stats::FrameStats,
     tracking::DEFAULT_REMOTE_ACK_DELAY,
 };
 
@@ -100,7 +104,7 @@ impl FlexibleAckRate {
     fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if !self.frame_outstanding
@@ -166,7 +170,7 @@ impl PeerAckDelay {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if let Self::Flexible(rate) = self {

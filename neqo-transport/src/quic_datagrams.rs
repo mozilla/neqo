@@ -94,13 +94,13 @@ impl QuicDatagrams {
         self.remote_datagram_size = min(v, MAX_QUIC_DATAGRAM);
     }
 
-    /// This function tries to write a datagram frame into a packet.
-    /// If the frame does not fit into the packet, the datagram will
-    /// be dropped and a `DatagramLost` event will be posted.
+    /// This function tries to write a datagram frame into a packet. If the
+    /// frame does not fit into the packet, the datagram will be dropped and a
+    /// [`OutgoingDatagramOutcome::DroppedTooBig`] event will be posted.
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut Stats,
     ) {
         while let Some(dgram) = self.datagrams.pop_front() {

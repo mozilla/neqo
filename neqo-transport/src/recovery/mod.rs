@@ -23,7 +23,7 @@ use enum_map::EnumMap;
 use enumset::enum_set;
 use neqo_common::{qdebug, qinfo, qlog::Qlog, qtrace, qwarn};
 use strum::IntoEnumIterator as _;
-pub use token::{StreamRecoveryToken, Token};
+pub use token::{StreamRecoveryToken, Token, Tokens};
 
 use crate::{
     ecn, packet,
@@ -577,7 +577,7 @@ impl Loss {
         primary_path: &PathRef,
         pn_space: PacketNumberSpace,
         acked_ranges: R,
-        ack_ecn: Option<ecn::Count>,
+        ack_ecn: Option<&ecn::Count>,
         ack_delay: Duration,
         now: Instant,
     ) -> (Vec<sent::Packet>, Vec<sent::Packet>)
@@ -990,7 +990,7 @@ mod tests {
             &mut self,
             pn_space: PacketNumberSpace,
             acked_ranges: Vec<RangeInclusive<packet::Number>>,
-            ack_ecn: Option<ecn::Count>,
+            ack_ecn: Option<&ecn::Count>,
             ack_delay: Duration,
             now: Instant,
         ) -> (Vec<sent::Packet>, Vec<sent::Packet>) {
@@ -1136,7 +1136,7 @@ mod tests {
                     pn,
                     pn_time(pn),
                     true,
-                    Vec::new(),
+                    recovery::Tokens::new(),
                     ON_SENT_SIZE,
                 ),
                 Instant::now(),
@@ -1163,7 +1163,7 @@ mod tests {
                 pn,
                 pn_time(pn),
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ));
         }
@@ -1287,7 +1287,7 @@ mod tests {
                 0,
                 pn_time(0),
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1298,7 +1298,7 @@ mod tests {
                 1,
                 pn_time(0) + TEST_RTT / 4,
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1396,7 +1396,7 @@ mod tests {
                 0,
                 pn_time(0),
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1407,7 +1407,7 @@ mod tests {
                 0,
                 pn_time(1),
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1418,7 +1418,7 @@ mod tests {
                 0,
                 pn_time(2),
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1430,7 +1430,14 @@ mod tests {
             packet::Type::Handshake,
             packet::Type::Short,
         ] {
-            let sent_pkt = sent::Packet::new(*sp, 1, pn_time(3), true, Vec::new(), ON_SENT_SIZE);
+            let sent_pkt = sent::Packet::new(
+                *sp,
+                1,
+                pn_time(3),
+                true,
+                recovery::Tokens::new(),
+                ON_SENT_SIZE,
+            );
             let pn_space = PacketNumberSpace::from(sent_pkt.packet_type());
             lr.on_packet_sent(sent_pkt, Instant::now());
             lr.on_ack_received(
@@ -1464,7 +1471,7 @@ mod tests {
                 0,
                 pn_time(3),
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1481,7 +1488,7 @@ mod tests {
                 0,
                 now(),
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1503,7 +1510,7 @@ mod tests {
                 0,
                 now(),
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1514,7 +1521,7 @@ mod tests {
                 0,
                 now(),
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),
@@ -1554,7 +1561,7 @@ mod tests {
                 0,
                 now(),
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
             Instant::now(),

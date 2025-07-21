@@ -58,7 +58,7 @@ impl RecvStreams {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
         now: Instant,
         rtt: Duration,
@@ -891,7 +891,7 @@ impl RecvStream {
     pub fn write_frame<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
         now: Instant,
         rtt: Duration,
@@ -1005,6 +1005,7 @@ mod tests {
     use crate::{
         fc::{ReceiverFlowControl, WINDOW_UPDATE_FRACTION},
         packet::{self, PACKET_LIMIT},
+        recovery,
         recv_stream::RxStreamOrderer,
         stats::FrameStats,
         ConnectionEvents, Error, StreamId, INITIAL_RECV_WINDOW_SIZE,
@@ -1473,7 +1474,7 @@ mod tests {
         // consume it
         let mut builder =
             packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
-        let mut token = Vec::new();
+        let mut token = recovery::Tokens::new();
         s.write_frame(
             &mut builder,
             &mut token,
@@ -1594,7 +1595,7 @@ mod tests {
         // consume it
         let mut builder =
             packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
-        let mut token = Vec::new();
+        let mut token = recovery::Tokens::new();
         session_fc
             .borrow_mut()
             .write_frames(&mut builder, &mut token, &mut FrameStats::default());
@@ -1616,7 +1617,7 @@ mod tests {
         // consume it
         let mut builder =
             packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
-        let mut token = Vec::new();
+        let mut token = recovery::Tokens::new();
         session_fc
             .borrow_mut()
             .write_frames(&mut builder, &mut token, &mut FrameStats::default());
@@ -1921,7 +1922,7 @@ mod tests {
         // Write the fc update frame
         let mut builder =
             packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
-        let mut token = Vec::new();
+        let mut token = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         fc.borrow_mut()
             .write_frames(&mut builder, &mut token, &mut stats);

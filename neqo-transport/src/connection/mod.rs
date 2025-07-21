@@ -1737,6 +1737,7 @@ impl Connection {
         // Handle each packet in the datagram.
         while !slc.is_empty() {
             self.stats.borrow_mut().packets_rx += 1;
+            self.stats.borrow_mut().dscp_rx[tos.into()] += 1;
             let slc_len = slc.len();
             let (mut packet, remainder) =
                 match packet::Public::decode(slc, self.cid_manager.decoder().as_ref()) {
@@ -1747,7 +1748,6 @@ impl Connection {
                         break;
                     }
                 };
-            self.stats.borrow_mut().dscp_rx[tos.into()] += 1;
             match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
                 PreprocessResult::Continue => (),
                 PreprocessResult::Next => break,
@@ -2286,7 +2286,7 @@ impl Connection {
     fn write_appdata_frames(
         &mut self,
         builder: &mut packet::Builder<&mut Vec<u8>>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         now: Instant,
     ) {
         let rtt = self.paths.primary().map_or_else(
@@ -2385,7 +2385,7 @@ impl Connection {
         force_probe: bool,
         builder: &mut packet::Builder<B>,
         ack_end: usize,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         now: Instant,
     ) -> bool {
         let untracked = self.received_untracked && !self.state.connected();
@@ -2438,8 +2438,8 @@ impl Connection {
         builder: &mut packet::Builder<&mut Vec<u8>>,
         coalesced: bool, // Whether this packet is coalesced behind another one.
         now: Instant,
-    ) -> (Vec<recovery::Token>, bool, bool) {
-        let mut tokens = Vec::new();
+    ) -> (recovery::Tokens, bool, bool) {
+        let mut tokens = recovery::Tokens::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
 
@@ -2530,7 +2530,7 @@ impl Connection {
         space: PacketNumberSpace,
         now: Instant,
         path: &PathRef,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
     ) {
         if builder.remaining() > ClosingFrame::MIN_LENGTH + RecvdPackets::USEFUL_ACK_LEN {
             // Include an ACK frame with the CONNECTION_CLOSE.
@@ -2699,7 +2699,8 @@ impl Connection {
 
             // Add frames to the packet.
             let payload_start = builder.len();
-            let (mut tokens, mut ack_eliciting, mut padded) = (Vec::new(), false, false);
+            let (mut tokens, mut ack_eliciting, mut padded) =
+                (recovery::Tokens::new(), false, false);
             if let Some(close) = closing_frame {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
@@ -3146,6 +3147,7 @@ impl Connection {
                 .pmtud_mut()
                 .start(now, &mut self.stats.borrow_mut());
         }
+        self.paths.start_ecn(&mut self.stats.borrow_mut());
         Ok(())
     }
 
@@ -3198,7 +3200,7 @@ impl Connection {
 
                 let ranges =
                     Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
-                self.handle_ack(space, ranges, ecn_count, ack_delay, now)?;
+                self.handle_ack(space, ranges, ecn_count.as_ref(), ack_delay, now)?;
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
@@ -3226,6 +3228,14 @@ impl Connection {
                 }
             }
             Frame::NewToken { token } => {
+                if self.role == Role::Server || !self.state.connected() {
+                    // > Clients MUST NOT send NEW_TOKEN frames. A server MUST
+                    // > treat receipt of a NEW_TOKEN frame as a connection error of
+                    // > type PROTOCOL_VIOLATION.
+                    //
+                    // <https://www.rfc-editor.org/rfc/rfc9000.html#name-new_token-frames>
+                    return Err(Error::ProtocolViolation);
+                }
                 self.stats.borrow_mut().frame_rx.new_token += 1;
                 self.new_token.save_token(token.to_vec());
                 self.create_resumption_token(now);
@@ -3365,9 +3375,7 @@ impl Connection {
                             .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Lost);
                         self.stats.borrow_mut().datagram_tx.lost += 1;
                     }
-                    recovery::Token::EcnEct0 => self
-                        .paths
-                        .lost_ecn(lost.packet_type(), &mut self.stats.borrow_mut()),
+                    recovery::Token::EcnEct0 => self.paths.lost_ecn(&mut self.stats.borrow_mut()),
                 }
             }
         }
@@ -3396,7 +3404,7 @@ impl Connection {
         &mut self,
         space: PacketNumberSpace,
         ack_ranges: R,
-        ack_ecn: Option<ecn::Count>,
+        ack_ecn: Option<&ecn::Count>,
         ack_delay: u64,
         now: Instant,
     ) -> Res<()>

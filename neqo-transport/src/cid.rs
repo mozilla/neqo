@@ -555,7 +555,7 @@ impl ConnectionIdManager {
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         if self.generator.deref().borrow().generates_empty_cids() {

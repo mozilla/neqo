@@ -184,16 +184,6 @@ jobs:
           persist-credentials: false
       - run: cargo update -w --locked
 
-  bench:
-    needs: [check]
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' && github.event_name != 'merge_group' }}
-    uses: ./.github/workflows/bench.yml
-
-  perfcompare:
-    needs: [check]
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' && github.event_name != 'merge_group' }}
-    uses: ./.github/workflows/perfcompare.yml
-
   check-android:
     name: Check Android
     runs-on: ubuntu-24.04

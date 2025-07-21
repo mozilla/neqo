@@ -212,7 +212,7 @@ impl Streams {
     pub fn write_maintenance_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
         now: Instant,
         rtt: Duration,
@@ -256,7 +256,7 @@ impl Streams {
         &mut self,
         priority: TransmissionPriority,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         self.send.write_frames(priority, builder, tokens, stats);
