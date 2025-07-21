@@ -15,8 +15,7 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::Qlog, qtrace,
-    Datagram, Decoder, Encoder, Header, MessageType, Role,
+    event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::Qlog, qtrace, Buffer, Datagram, Decoder, Encoder, Header, MessageType, Role
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
@@ -926,7 +925,8 @@ impl Http3Client {
     /// output datagram only.
     #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     pub fn process_output(&mut self, now: Instant) -> Output {
-        self.process_multiple_output(now, 1.try_into().expect(">0"))
+        let send_buffer = vec![];
+        self.process_multiple_output(now, 1.try_into().expect(">0"), send_buffer)
             .try_into()
             .expect("max_datagrams is 1")
     }
@@ -958,17 +958,18 @@ impl Http3Client {
     /// [1]: ../neqo_transport/enum.Output.html
     /// [2]: ../neqo_transport/struct.ConnectionEvents.html
     /// [3]: ../neqo_transport/struct.Connection.html#method.process_output
-    pub fn process_multiple_output(
+    pub fn process_multiple_output<B: Buffer>(
         &mut self,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
+        send_buffer: B,
+    ) -> OutputBatch<B> {
         qtrace!("[{self}] Process output");
 
         // Maybe send() stuff on http3-managed streams
         self.process_http3(now);
 
-        let out = self.conn.process_multiple_output(now, max_datagrams);
+        let out = self.conn.process_multiple_output(now, send_buffer, max_datagrams);
 
         // Update H3 for any transport state changes and events
         self.process_http3(now);

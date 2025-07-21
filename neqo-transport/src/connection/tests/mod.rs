@@ -181,7 +181,7 @@ pub fn rttvar_after_n_updates(n: usize, rtt: Duration) -> Duration {
 struct PingWriter {}
 
 impl test_internal::FrameWriter for PingWriter {
-    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<Vec<u8>>) {
         builder.encode_varint(FrameType::Ping);
     }
 }

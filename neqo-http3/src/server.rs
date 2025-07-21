@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qtrace, Datagram};
+use neqo_common::{qtrace, Buffer, Datagram, DatagramBatch};
 use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
@@ -126,29 +126,52 @@ impl Http3Server {
         dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
-        self.process_multiple(dgram, now, 1.try_into().expect(">0"))
+        let send_buffer = vec![];
+        self.process_multiple(dgram, now, 1.try_into().expect(">0"), send_buffer)
             .try_into()
             .expect("max_datagrams is 1")
     }
 
-    pub fn process_multiple(
+    pub fn process_multiple<B: Buffer>(
         &mut self,
         dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
+        mut send_buffer: B,
+    ) -> OutputBatch<B> {
         qtrace!("[{self}] Process");
-        let out = self.server.process_multiple(dgram, now, max_datagrams);
+        let out = self
+            .server
+            .process_multiple(dgram, now, max_datagrams, &mut send_buffer);
         self.process_http3(now);
         // If we do not that a dgram already try again after process_http3.
-        match out {
+        let out = match out {
             OutputBatch::DatagramBatch(d) => {
                 qtrace!("[{self}] Send packet: {d:?}");
                 OutputBatch::DatagramBatch(d)
             }
-            _ => self
-                .server
-                .process_multiple(Option::<Datagram>::None, now, max_datagrams),
+            _ => self.server.process_multiple(
+                Option::<Datagram>::None,
+                now,
+                max_datagrams,
+                &mut send_buffer,
+            ),
+        };
+
+        match out {
+            OutputBatch::None => OutputBatch::None,
+            OutputBatch::DatagramBatch(DatagramBatch { src, dst, tos , datagram_size, d: _}) => {
+                // TODO
+                // qtrace!("[{self}] Send packet: {dgram:?}");
+                OutputBatch::DatagramBatch(DatagramBatch {
+                    src,
+                    dst,
+                    tos,
+                    datagram_size,
+                    d: send_buffer,
+                })
+            }
+            OutputBatch::Callback(duration) => OutputBatch::Callback(duration),
         }
     }
 
