@@ -175,7 +175,7 @@
     - name: Disable systemd unified cgroups
       when: is_gcp
       block:
-        - name: Ensure systemd is installed
+        - name: Modify GRUB configuration
           ansible.builtin.lineinfile:
             path: /etc/default/grub
             regexp: '^GRUB_CMDLINE_LINUX=.*$'
