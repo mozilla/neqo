@@ -46,7 +46,9 @@ ignored = ["log"]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
 
-[[bench]]
-name = "streams"
-harness = false
-required-features = ["bench"]
+# FIXME: These benches have a high rate of variability and are hence not very useful
+# in their current form. See https://github.com/mozilla/neqo/issues/2804
+# [[bench]]
+# name = "streams"
+# harness = false
+# required-features = ["bench"]
