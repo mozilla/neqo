@@ -5,10 +5,19 @@
 // except according to those terms.
 
 use clap::Parser as _;
+use neqo_bin::server::{http09, http3, Res};
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), neqo_bin::server::Error> {
+async fn main() -> Res<()> {
     let args = neqo_bin::server::Args::parse();
 
-    neqo_bin::server::server(args)?.run().await
+    if args.get_shared().get_alpn() == "h3" {
+        neqo_bin::server::server::<http3::HttpServer>(args)?
+            .run()
+            .await
+    } else {
+        neqo_bin::server::server::<http09::HttpServer>(args)?
+            .run()
+            .await
+    }
 }
