@@ -11,6 +11,9 @@ description.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme.workspace = true
+# FIXME: These benches have a high rate of variability and are hence not very useful
+# in their current form. See https://github.com/mozilla/neqo/issues/2804
+autobenches = false
 
 [lints]
 workspace = true
