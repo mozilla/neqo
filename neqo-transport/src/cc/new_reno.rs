@@ -46,12 +46,4 @@ impl WindowAdjustment for NewReno {
     }
 
     fn on_app_limited(&mut self) {}
-
-    #[cfg(test)]
-    fn last_max_cwnd(&self) -> f64 {
-        0.0
-    }
-
-    #[cfg(test)]
-    fn set_last_max_cwnd(&mut self, _last_max_cwnd: f64) {}
 }
