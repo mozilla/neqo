@@ -99,7 +99,7 @@ runs:
         fi
         # Don't fail CI if the interop test fails
         set -o pipefail
-        python -u run.py $ARGS 2>&1 | tee ../summary.txt || true
+        python -u run.py -d $ARGS 2>&1 | tee ../summary.txt || true
         # But do fail if any log contains 'RUST_BACKTRACE=full', which indicates a panic
         # (that we assume happened in neqo.)
         for log in ../logs/*/*/output.txt; do
