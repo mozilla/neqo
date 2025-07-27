@@ -9,7 +9,9 @@ use neqo_bin::server::{http09, http3, Res};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Res<()> {
-    let args = neqo_bin::server::Args::parse();
+    let mut args = neqo_bin::server::Args::parse();
+
+    args.update_for_tests();
 
     if args.get_shared().get_alpn() == "h3" {
         neqo_bin::server::server::<http3::HttpServer>(args)?
