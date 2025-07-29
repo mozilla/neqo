@@ -198,6 +198,46 @@ impl Args {
     pub fn set_hosts(&mut self, hosts: Vec<String>) {
         self.hosts = hosts;
     }
+
+    pub fn update_for_tests(&mut self) {
+        if let Some(testcase) = self.shared.qns_test.as_ref() {
+            if self.shared.quic_parameters.quic_version.is_empty() {
+                // Quic Interop Runner expects the server to support `Version1`
+                // only. Exceptions are testcases `versionnegotiation` (not yet
+                // implemented) and `v2`.
+                if testcase != "v2" {
+                    self.shared.quic_parameters.quic_version = vec![Version::Version1];
+                }
+            } else {
+                qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions");
+            }
+
+            // These are the default for all tests except http3.
+            self.shared.alpn = String::from("hq-interop");
+            // TODO: More options to deduplicate with client?
+            match testcase.as_str() {
+                "http3" => {
+                    self.shared.alpn = String::from("h3");
+                }
+                "zerortt" => self.shared.quic_parameters.max_streams_bidi = 100,
+                "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" | "ecn" => {}
+                "connectionmigration" => {
+                    if self.shared.quic_parameters.preferred_address().is_none() {
+                        qerror!("No preferred addresses set for connectionmigration test");
+                        exit(127);
+                    }
+                }
+                "chacha20" => {
+                    self.shared.ciphers.clear();
+                    self.shared
+                        .ciphers
+                        .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
+                }
+                "retry" => self.retry = true,
+                _ => exit(127),
+            }
+        }
+    }
 }
 
 fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
@@ -405,7 +445,7 @@ enum Ready {
     Timeout,
 }
 
-pub fn server<S: HttpServer>(mut args: Args) -> Res<Runner<S>> {
+pub fn server<S: HttpServer>(args: Args) -> Res<Runner<S>> {
     neqo_common::log::init(
         args.shared
             .verbose
@@ -415,44 +455,6 @@ pub fn server<S: HttpServer>(mut args: Args) -> Res<Runner<S>> {
     assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone())?;
-
-    if let Some(testcase) = args.shared.qns_test.as_ref() {
-        if args.shared.quic_parameters.quic_version.is_empty() {
-            // Quic Interop Runner expects the server to support `Version1`
-            // only. Exceptions are testcases `versionnegotiation` (not yet
-            // implemented) and `v2`.
-            if testcase != "v2" {
-                args.shared.quic_parameters.quic_version = vec![Version::Version1];
-            }
-        } else {
-            qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions");
-        }
-
-        // These are the default for all tests except http3.
-        args.shared.alpn = String::from("hq-interop");
-        // TODO: More options to deduplicate with client?
-        match testcase.as_str() {
-            "http3" => {
-                args.shared.alpn = String::from("h3");
-            }
-            "zerortt" => args.shared.quic_parameters.max_streams_bidi = 100,
-            "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" | "ecn" => {}
-            "connectionmigration" => {
-                if args.shared.quic_parameters.preferred_address().is_none() {
-                    qerror!("No preferred addresses set for connectionmigration test");
-                    exit(127);
-                }
-            }
-            "chacha20" => {
-                args.shared.ciphers.clear();
-                args.shared
-                    .ciphers
-                    .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
-            }
-            "retry" => args.retry = true,
-            _ => exit(127),
-        }
-    }
 
     let hosts = args.listen_addresses();
     if hosts.is_empty() {
