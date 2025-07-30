@@ -614,6 +614,32 @@ impl<'a> Public<'a> {
         data: &'a mut [u8],
         dcid_decoder: &dyn ConnectionIdDecoder,
     ) -> Res<(Self, &'a mut [u8])> {
+        Self::decode_inner(data, dcid_decoder, false)
+    }
+
+    /// Like `decode()`, but allow unknown versions.
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if the packet could not be decoded.
+    pub fn decode_server(
+        data: &'a mut [u8],
+        dcid_decoder: &dyn ConnectionIdDecoder,
+    ) -> Res<(Self, &'a mut [u8])> {
+        Self::decode_inner(data, dcid_decoder, true)
+    }
+
+    /// Decode the common parts of a packet.  This provides minimal parsing and validation.
+    /// Returns a tuple of a `Public` and a slice with any remainder from the datagram.
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if the packet could not be decoded.
+    fn decode_inner(
+        data: &'a mut [u8],
+        dcid_decoder: &dyn ConnectionIdDecoder,
+        accept_other_version: bool,
+    ) -> Res<(Self, &'a mut [u8])> {
         let mut decoder = Decoder::new(data);
         let first = Self::opt(decoder.decode_uint::<u8>())?;
 
@@ -679,18 +705,22 @@ impl<'a> Public<'a> {
 
         // Check that this is a long header from a supported version.
         let Ok(version) = Version::try_from(version) else {
-            return Ok((
-                Self {
-                    packet_type: Type::OtherVersion,
-                    dcid: ConnectionId::from(dcid),
-                    scid: Some(ConnectionId::from(scid)),
-                    token: vec![],
-                    header_len: decoder.offset(),
-                    version: Some(version),
-                    data,
-                },
-                &mut [],
-            ));
+            return if accept_other_version {
+                Ok((
+                    Self {
+                        packet_type: Type::OtherVersion,
+                        dcid: ConnectionId::from(dcid),
+                        scid: Some(ConnectionId::from(scid)),
+                        token: vec![],
+                        header_len: decoder.offset(),
+                        version: Some(version),
+                        data,
+                    },
+                    &mut [],
+                ))
+            } else {
+                Err(Error::InvalidPacket)
+            };
         };
 
         if dcid.len() > MAX_CONNECTION_ID_LEN || scid.len() > MAX_CONNECTION_ID_LEN {
