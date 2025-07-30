@@ -1424,7 +1424,7 @@ fn zero_rtt_with_ech() {
 
 #[test]
 fn scone() {
-    fn add_scone(d: Datagram) -> Datagram {
+    fn add_scone(d: &Datagram) -> Datagram {
         const SCONE: &[u8] = &[0xff, 0x6f, 0x7d, 0xc0, 0xfd, 0x00, 0x00];
         let mut sconed = SCONE.to_vec();
         sconed.extend_from_slice(&d[..]);
@@ -1440,9 +1440,9 @@ fn scone() {
     let client_stats = client.stats();
     let server_stats = server.stats();
     let d = send_something(&mut client, now());
-    server.process_input(add_scone(d), now());
+    server.process_input(add_scone(&d), now());
     let d = send_something(&mut server, now());
-    client.process_input(add_scone(d), now());
+    client.process_input(add_scone(&d), now());
 
     // The SCONE packets are effectively invisible.
     assert_eq!(server.stats().packets_rx, server_stats.packets_rx + 1);
