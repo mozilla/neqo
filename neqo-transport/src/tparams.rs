@@ -51,6 +51,7 @@ pub enum TransportParameterId {
     InitialSourceConnectionId = 0x0f,
     RetrySourceConnectionId = 0x10,
     VersionInformation = 0x11,
+    Scone = 0x219e,
     GreaseQuicBit = 0x2ab2,
     MinAckDelay = 0xff02_de1a,
     MaxDatagramFrameSize = 0x0020,
@@ -315,9 +316,9 @@ impl TransportParameter {
                 Some(v) if v >= 2 => Self::Integer(v),
                 _ => return Err(Error::TransportParameter),
             },
-            TransportParameterId::DisableMigration | TransportParameterId::GreaseQuicBit => {
-                Self::Empty
-            }
+            TransportParameterId::DisableMigration
+            | TransportParameterId::GreaseQuicBit
+            | TransportParameterId::Scone => Self::Empty,
             TransportParameterId::PreferredAddress => Self::decode_preferred_address(&mut d)?,
             TransportParameterId::MinAckDelay => match d.decode_varint() {
                 Some(v) if v < (1 << 24) => Self::Integer(v),
@@ -482,7 +483,9 @@ impl TransportParameters {
     /// When the transport parameter isn't recognized as being empty.
     pub fn set_empty(&mut self, tp: TransportParameterId) {
         match tp {
-            TransportParameterId::DisableMigration | TransportParameterId::GreaseQuicBit => {
+            TransportParameterId::DisableMigration
+            | TransportParameterId::GreaseQuicBit
+            | TransportParameterId::Scone => {
                 self.set(tp, TransportParameter::Empty);
             }
             _ => panic!("Transport parameter not known or not type empty"),
@@ -548,6 +551,7 @@ impl TransportParameters {
                         | TransportParameterId::MaxAckDelay
                         | TransportParameterId::ActiveConnectionIdLimit
                         | TransportParameterId::PreferredAddress
+                        | TransportParameterId::Scone
                 )
             {
                 continue;
@@ -912,6 +916,8 @@ mod tests {
         assert!(!tps2.has_value(OriginalDestinationConnectionId));
         assert!(!tps2.has_value(InitialSourceConnectionId));
         assert!(!tps2.has_value(RetrySourceConnectionId));
+        assert!(!tps2.has_value(Scone));
+        assert!(!tps2.has_value(PreferredAddress));
         assert!(tps2.has_value(StatelessResetToken));
 
         let mut enc = Encoder::default();
