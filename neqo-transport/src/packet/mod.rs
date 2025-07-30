@@ -14,6 +14,7 @@ use std::{
 };
 
 use enum_map::Enum;
+use log::info;
 use neqo_common::{hex, hex_with_len, qtrace, qwarn, Buffer, Decoder, Encoder};
 use neqo_crypto::{random, Aead};
 use strum::{EnumIter, FromRepr};
@@ -666,6 +667,10 @@ impl<'a> Public<'a> {
             Version::SCONE1 | Version::SCONE2 => {
                 // Note: this outright ignores SCONE packets.
                 // It does not even validate that the connection ID is correct.
+                info!(
+                    "Received SCONE indication {i}",
+                    i = u8::try_from((version >> 25) & 0x40)? | (first & 0x3f)
+                );
                 let (_scone, remainder) = data.split_at_mut(decoder.offset());
                 return Self::decode(remainder, dcid_decoder);
             }
