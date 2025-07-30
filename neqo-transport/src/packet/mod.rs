@@ -644,23 +644,32 @@ impl<'a> Public<'a> {
 
         // Generic long header.
         let version = Self::opt(decoder.decode_uint())?;
-        let dcid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?).into();
-        let scid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?).into();
+        let dcid = ConnectionId::from(Self::opt(decoder.decode_vec(1))?);
+        let scid = ConnectionId::from(Self::opt(decoder.decode_vec(1))?);
 
         // Version negotiation.
-        if version == 0 {
-            return Ok((
-                Self {
-                    packet_type: Type::VersionNegotiation,
-                    dcid,
-                    scid: Some(scid),
-                    token: vec![],
-                    header_len: decoder.offset(),
-                    version: None,
-                    data,
-                },
-                &mut [],
-            ));
+        match version {
+            0 => {
+                return Ok((
+                    Self {
+                        packet_type: Type::VersionNegotiation,
+                        dcid,
+                        scid: Some(scid),
+                        token: vec![],
+                        header_len: decoder.offset(),
+                        version: None,
+                        data,
+                    },
+                    &mut [],
+                ))
+            }
+            Version::SCONE1 | Version::SCONE2 => {
+                // Note: this outright ignores SCONE packets.
+                // It does not even validate that the connection ID is correct.
+                let (_scone, remainder) = data.split_at_mut(decoder.offset());
+                return Self::decode(remainder, dcid_decoder);
+            }
+            _ => {}
         }
 
         // Check that this is a long header from a supported version.
@@ -687,8 +696,7 @@ impl<'a> Public<'a> {
         // The type-specific code includes a token.  This consumes the remainder of the packet.
         let (token, header_len) = Public::decode_long(&mut decoder, packet_type, version)?;
         let token = token.to_vec();
-        let end = data.len() - decoder.remaining();
-        let (data, remainder) = data.split_at_mut(end);
+        let (data, remainder) = data.split_at_mut(decoder.offset());
         Ok((
             Self {
                 packet_type,
@@ -973,7 +981,7 @@ mod tests {
             Builder, Public, Type, PACKET_BIT_FIXED_QUIC, PACKET_BIT_LONG, PACKET_BIT_SPIN,
             PACKET_LIMIT,
         },
-        ConnectionId, EmptyConnectionIdGenerator, RandomConnectionIdGenerator, Version,
+        ConnectionId, EmptyConnectionIdGenerator, Error, RandomConnectionIdGenerator, Version,
     };
 
     const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
@@ -1124,10 +1132,9 @@ mod tests {
         assert!(!firsts.iter().all(is_set(PACKET_BIT_SPIN)));
     }
 
-    #[test]
-    fn decode_short() {
+    fn decode_sample_short(packet: &[u8]) {
         fixture_init();
-        let mut sample_short = SAMPLE_SHORT.to_vec();
+        let mut sample_short = packet.to_vec();
         let (mut packet, remainder) = Public::decode(&mut sample_short, &cid_mgr()).unwrap();
         assert_eq!(packet.packet_type(), Type::Short);
         assert!(remainder.is_empty());
@@ -1135,6 +1142,11 @@ mod tests {
             .decrypt(&mut CryptoStates::test_default(), now())
             .unwrap();
         assert_eq!(&decrypted[..], SAMPLE_SHORT_PAYLOAD);
+    }
+
+    #[test]
+    fn decode_short() {
+        decode_sample_short(SAMPLE_SHORT);
     }
 
     /// By telling the decoder that the connection ID is shorter than it really is, we get a
@@ -1548,5 +1560,37 @@ mod tests {
         let mut data = [179, 255, 0, 0, 29, 0, 0];
         let res = Public::decode(&mut data, &EmptyConnectionIdGenerator::default());
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn ignore_scone() {
+        /// A minimal SCONE packet.
+        const SCONE1: &[u8] = &[0xff, 0x6f, 0x7d, 0xc0, 0xfd, 0x00, 0x00];
+        /// A generous SCONE packet, including a connection ID that is too long for QUIC v1/v2.
+        const SCONE2: &[u8] = &[
+            0xff, 0xef, 0x7d, 0xc0, 0xfd, 0x01, 0x00, 0x15, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00,
+        ];
+
+        let mut scone1 = SCONE1.to_vec();
+        scone1.extend_from_slice(SAMPLE_SHORT);
+        decode_sample_short(&scone1);
+        let mut scone2 = SCONE2.to_vec();
+        scone2.extend_from_slice(SAMPLE_SHORT);
+        decode_sample_short(&scone2);
+
+        // Add several SCONE packets.
+        let mut scone3 = SCONE1.to_vec();
+        scone3.extend_from_slice(SCONE1);
+        scone3.extend_from_slice(SCONE2);
+        scone3.extend_from_slice(SCONE1);
+        scone3.extend_from_slice(SAMPLE_SHORT);
+        decode_sample_short(&scone3);
+
+        // A SCONE-only packet is an error.
+        let mut scone_only = SCONE1.to_vec();
+        let res = Public::decode(&mut scone_only, &cid_mgr());
+        assert!(matches!(res, Err(Error::NoMoreData)));
     }
 }
