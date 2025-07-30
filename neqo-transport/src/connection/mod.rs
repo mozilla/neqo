@@ -373,6 +373,8 @@ impl Connection {
     /// A long default for timer resolution, so that we don't tax the
     /// system too hard when we don't need to.
     const LOOSE_TIMER_RESOLUTION: Duration = Duration::from_millis(50);
+    /// The SCONE indicator.
+    const SCONE_INDICATION: &[u8] = &[0xc8, 0x13];
 
     /// Create a new QUIC connection with Client role.
     /// # Errors
@@ -2664,7 +2666,7 @@ impl Connection {
             let limit = if path.borrow().pmtud().needs_probe() {
                 needs_padding = true;
                 debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
-                path.borrow().pmtud().probe_size() - aead_expansion
+                path.borrow().pmtud().probe_size() - aead_expansion - Self::SCONE_INDICATION.len()
             } else {
                 profile.limit() - aead_expansion
             };
@@ -2799,21 +2801,43 @@ impl Connection {
         } else {
             // Perform additional padding for Initial packets as necessary.
             if let Some(mut initial) = initial_sent.take() {
-                if needs_padding && encoder.len() < profile.limit() {
-                    qdebug!(
-                        "[{self}] pad Initial from {} to PLPMTU {}",
-                        encoder.len(),
-                        profile.limit()
-                    );
-                    initial.track_padding(profile.limit() - encoder.len());
-                    // These zeros aren't padding frames, they are an invalid all-zero coalesced
-                    // packet, which is why we don't increase `frame_tx.padding` count here.
-                    encoder.pad_to(profile.limit(), 0);
+                if needs_padding {
+                    self.pad_initial(&mut encoder, &mut initial, profile);
                 }
                 self.loss_recovery.on_packet_sent(path, initial, now);
             }
             path.borrow_mut().add_sent(encoder.len());
             Ok(SendOption::Yes)
+        }
+    }
+
+    fn pad_initial(
+        &self,
+        encoder: &mut Encoder<&mut Vec<u8>>,
+        initial: &mut sent::Packet,
+        profile: &SendProfile,
+    ) {
+        if encoder.len() >= profile.limit() {
+            return;
+        }
+
+        qdebug!(
+            "[{self}] pad Initial from {} to {}",
+            encoder.len(),
+            profile.limit()
+        );
+        let pad_amount = profile.limit() - encoder.len();
+        initial.track_padding(pad_amount);
+        // This ensures that the last bytes are a SCONE indication, if there is enough space.
+        // This is not tracked, other than for congestion control (above)
+        if pad_amount >= Self::SCONE_INDICATION.len() {
+            encoder.pad_to(
+                profile.limit() - Self::SCONE_INDICATION.len() + 1,
+                Self::SCONE_INDICATION[0],
+            );
+            encoder.encode(&Self::SCONE_INDICATION[1..]);
+        } else {
+            encoder.pad_to(profile.limit(), Self::SCONE_INDICATION[0]);
         }
     }
 

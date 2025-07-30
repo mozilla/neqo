@@ -664,23 +664,24 @@ fn reorder_1rtt() {
 fn corrupted_initial() {
     let mut client = default_client();
     let mut server = default_server();
+
     let d = client.process_output(now()).dgram().unwrap();
     let mut corrupted = Vec::from(&d[..]);
-    // Find the last non-zero value and corrupt that.
+    // Find the last non-padding value and corrupt that.
     let (idx, _) = corrupted
         .iter()
         .enumerate()
         .rev()
-        .find(|(_, &v)| v != 0)
+        .skip(1) // Skip the last byte, which might be a SCONE indicator.
+        .find(|(_, &v)| v != Connection::SCONE_INDICATION[0]) // The SCONE padding value.
         .unwrap();
     corrupted[idx] ^= 0x76;
+
     let dgram = Datagram::new(d.source(), d.destination(), d.tos(), corrupted);
     server.process_input(dgram, now());
-    // The server should have received two packets,
-    // the first should be dropped, the second saved.
+    // The server should have received two "packets", both corrupted.
     assert_eq!(server.stats().packets_rx, 2);
     assert_eq!(server.stats().dropped_rx, 2);
-    assert_eq!(server.stats().saved_datagrams, 0);
 }
 
 #[test]

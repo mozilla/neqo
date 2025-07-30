@@ -644,8 +644,8 @@ impl<'a> Public<'a> {
 
         // Generic long header.
         let version = Self::opt(decoder.decode_uint())?;
-        let dcid = ConnectionId::from(Self::opt(decoder.decode_vec(1))?);
-        let scid = ConnectionId::from(Self::opt(decoder.decode_vec(1))?);
+        let dcid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?);
+        let scid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?);
 
         // Version negotiation.
         match version {
@@ -653,8 +653,8 @@ impl<'a> Public<'a> {
                 return Ok((
                     Self {
                         packet_type: Type::VersionNegotiation,
-                        dcid,
-                        scid: Some(scid),
+                        dcid: ConnectionId::from(dcid),
+                        scid: Some(ConnectionId::from(scid)),
                         token: vec![],
                         header_len: decoder.offset(),
                         version: None,
@@ -677,8 +677,8 @@ impl<'a> Public<'a> {
             return Ok((
                 Self {
                     packet_type: Type::OtherVersion,
-                    dcid,
-                    scid: Some(scid),
+                    dcid: ConnectionId::from(dcid),
+                    scid: Some(ConnectionId::from(scid)),
                     token: vec![],
                     header_len: decoder.offset(),
                     version: Some(version),
@@ -696,12 +696,14 @@ impl<'a> Public<'a> {
         // The type-specific code includes a token.  This consumes the remainder of the packet.
         let (token, header_len) = Public::decode_long(&mut decoder, packet_type, version)?;
         let token = token.to_vec();
+        let dcid = ConnectionId::from(dcid);
+        let scid = Some(ConnectionId::from(scid));
         let (data, remainder) = data.split_at_mut(decoder.offset());
         Ok((
             Self {
                 packet_type,
                 dcid,
-                scid: Some(scid),
+                scid,
                 token,
                 header_len,
                 version: Some(version.wire_version()),
