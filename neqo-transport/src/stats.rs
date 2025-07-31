@@ -15,7 +15,7 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{qwarn, Dscp, Ecn};
+use neqo_common::{qdebug, Dscp, Ecn};
 use strum::IntoEnumIterator as _;
 
 use crate::{ecn, packet};
@@ -331,7 +331,7 @@ impl Stats {
 
     pub fn pkt_dropped<A: AsRef<str>>(&mut self, reason: A) {
         self.dropped_rx += 1;
-        qwarn!(
+        qdebug!(
             "[{}] Dropped received packet: {}; Total: {}",
             self.info,
             reason.as_ref(),
