@@ -237,7 +237,7 @@ jobs:
 
       - env:
           MATRIX_TARGET: ${{ matrix.target }}
-        run: cargo ndk --bindgen --platform "$API_LEVEL" --target "$MATRIX_TARGET" test --no-run
+        run: cargo ndk --platform "$API_LEVEL" --target "$MATRIX_TARGET" test --no-run
 
       - env:
           TARGET: ${{ matrix.target }}
