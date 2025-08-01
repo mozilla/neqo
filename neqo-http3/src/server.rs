@@ -121,24 +121,24 @@ impl Http3Server {
     /// Wrapper around [`Http3Server::process_multiple`] that processes a single
     /// output datagram only.
     #[expect(clippy::missing_panics_doc, reason = "see expect()")]
-    pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
+    pub fn process<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
         &mut self,
-        dgram: Option<Datagram<A>>,
+        dgrams: I,
         now: Instant,
     ) -> Output {
-        self.process_multiple(dgram, now, 1.try_into().expect(">0"))
+        self.process_multiple(dgrams, now, 1.try_into().expect(">0"))
             .try_into()
             .expect("max_datagrams is 1")
     }
 
-    pub fn process_multiple(
+    pub fn process_multiple<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
         &mut self,
-        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        dgrams: I,
         now: Instant,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
         qtrace!("[{self}] Process");
-        let out = self.server.process_multiple(dgram, now, max_datagrams);
+        let out = self.server.process_multiple(dgrams, now, max_datagrams);
         self.process_http3(now);
         // If we do not that a dgram already try again after process_http3.
         match out {
@@ -447,7 +447,7 @@ mod tests {
         let needs_auth = client
             .events()
             .any(|e| e == ConnectionEvent::AuthenticationNeeded);
-        let c2 = if needs_auth {
+        let c3 = if needs_auth {
             assert!(!resume);
             // c2 should just be an ACK, so absorb that.
             let s_ack = server.process(c2.dgram(), now());
@@ -457,12 +457,13 @@ mod tests {
             client.process_output(now())
         } else {
             assert!(resume);
-            c2
+            let s3 = server.process(c2.dgram(), now()).dgram();
+            client.process(s3, now())
         };
         assert!(client.state().connected());
-        let s2 = server.process(c2.dgram(), now());
+        let s4 = server.process(c3.dgram(), now());
         assert_connected(server);
-        _ = client.process(s2.dgram(), now());
+        _ = client.process(s4.dgram(), now());
     }
 
     // Start a client/server and check setting frame.

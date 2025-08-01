@@ -894,3 +894,46 @@ fn has_active_connections() {
 
     assert!(server.has_active_connections());
 }
+
+/// If a server has to react immediately to a datagram in a batch, it will
+/// service the remaining datagrams in consecutive calls.
+#[test]
+fn saved_datagrams() {
+    let mut server = default_server();
+    let mut client = default_client();
+
+    // Any packet will do, but let's make something that looks real.
+    let damaged_dgram = {
+        let dgram = client.process_output(now()).dgram().expect("a datagram");
+        let mut input = dgram.to_vec();
+        input[1] ^= 0x12;
+        Datagram::new(
+            dgram.source(),
+            dgram.destination(),
+            dgram.tos(),
+            input.clone(),
+        )
+    };
+
+    // Server sends a version negotation immediately. Saves second input datagram for later.
+    server
+        .process_multiple(
+            vec![damaged_dgram.clone(), damaged_dgram.clone()],
+            now(),
+            1.try_into().expect("1>0"),
+        )
+        .dgram()
+        .expect("first vn");
+
+    // Server processes the second datagram and saves the third.
+    server
+        .process_multiple(vec![damaged_dgram], now(), 1.try_into().expect("1>0"))
+        .dgram()
+        .expect("second vn");
+
+    // Server processes the third datagram.
+    server
+        .process_multiple(Vec::<Datagram>::new(), now(), 1.try_into().expect("1>0"))
+        .dgram()
+        .expect("third vn");
+}

@@ -7,9 +7,9 @@
   become: true
   tasks:
     # See: https://stackoverflow.com/questions/30911775/how-to-know-if-a-machine-is-an-google-compute-engine-instance
-    - name: "Detect GCP"
+    - name: Detect GCP
       block:
-        - name: "Probe for GCP"
+        - name: Probe for GCP
           become: true
           ansible.builtin.shell: dmidecode -s bios-version | grep -iq "google"
           changed_when: false
@@ -172,8 +172,11 @@
       args:
         creates: "/home/{{ bench_user }}/.cargo/bin/cargo"
 
+    - name: Exit on GCP
+      ansible.builtin.meta: end_play
+      when: is_gcp
+
     - name: Create bench directory
-      when: not is_gcp
       ansible.builtin.file:
         dest: "{{ bench_path }}"
         owner: "{{ bench_user }}"
@@ -182,7 +185,6 @@
         mode: "0755"
 
     - name: Download GitHub Actions Runner
-      when: not is_gcp
       become: true
       become_user: "{{ bench_user }}"
       ansible.builtin.get_url:
@@ -197,7 +199,6 @@
         checksum: "{{ runner_sha }}"
 
     - name: Extract GitHub Actions Runner
-      when: not is_gcp
       become: true
       become_user: "{{ bench_user }}"
       ansible.builtin.unarchive:
@@ -211,7 +212,6 @@
         creates: "{{ bench_path }}/bin/Runner.Listener"
 
     - name: Check if GitHub Actions Runner is already configured
-      when: not is_gcp
       become: true
       become_user: "{{ bench_user }}"
       register: runner_credentials_file
@@ -239,7 +239,6 @@
       changed_when: not runner_credentials_file.stat.exists
 
     - name: Check if GitHub Actions Runner is already running
-      when: not is_gcp
       register: runner_running
       ignore_errors: true
       ansible.builtin.command:
@@ -255,7 +254,6 @@
       changed_when: runner_running.rc != 0
 
     - name: Starts GitHub Actions Runner service
-      when: not is_gcp
       ansible.builtin.command:
         chdir: "{{ bench_path }}"
         cmd: ./svc.sh start

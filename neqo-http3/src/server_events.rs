@@ -308,7 +308,7 @@ impl WebTransportRequest {
         self.stream_handler.stream_id()
     }
 
-    /// Close sending side.
+    /// Create `WebTransport` stream.
     ///
     /// # Errors
     ///

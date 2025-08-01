@@ -21,7 +21,7 @@ ENV NSS_DIR=/nss \
     NSS_PREBUILT=1 \
     NSPR_DIR=/nspr \
     LD_LIBRARY_PATH=/dist/Release/lib \
-    NSPR_VERSION=4.36
+    NSPR_VERSION=4.37
 
 RUN set -eux; \
     mkdir -p "$NSPR_DIR"; \
