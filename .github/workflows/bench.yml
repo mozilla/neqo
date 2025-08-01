@@ -155,7 +155,7 @@ jobs:
         run: |
           for f in *.perf; do
             # Convert for profiler.firefox.com
-            samply import "$f" -o "$f.samply.json.gz" --save-only --unstable-presymbolicate
+            samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
             # Generate flamegraphs
             flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}"
           done

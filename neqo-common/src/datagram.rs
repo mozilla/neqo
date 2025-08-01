@@ -65,6 +65,16 @@ impl<D: AsRef<[u8]>> Datagram<D> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    #[must_use]
+    pub fn to_owned(&self) -> Datagram {
+        Datagram {
+            src: self.src,
+            dst: self.dst,
+            tos: self.tos,
+            d: self.d.as_ref().to_vec(),
+        }
+    }
 }
 
 impl<D: AsMut<[u8]> + AsRef<[u8]>> AsMut<[u8]> for Datagram<D> {
@@ -114,16 +124,6 @@ impl<'a> Datagram<&'a mut [u8]> {
     #[must_use]
     pub fn from_slice(src: SocketAddr, dst: SocketAddr, tos: Tos, d: &'a mut [u8]) -> Self {
         Self { src, dst, tos, d }
-    }
-
-    #[must_use]
-    pub fn to_owned(&self) -> Datagram {
-        Datagram {
-            src: self.src,
-            dst: self.dst,
-            tos: self.tos,
-            d: self.d.to_vec(),
-        }
     }
 }
 
