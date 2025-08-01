@@ -336,7 +336,7 @@ impl Http3Connection {
     /// This function is called when a not default feature needs to be negotiated. This is currently
     /// only used for the `WebTransport` feature. The negotiation is done via the `SETTINGS` frame
     /// and when the peer's `SETTINGS` frame has been received the listener will be called.
-    pub fn set_features_listener(&mut self, feature_listener: Http3ClientEvents) {
+    pub(crate) fn set_features_listener(&mut self, feature_listener: Http3ClientEvents) {
         self.webtransport.set_listener(feature_listener);
     }
 
@@ -377,12 +377,12 @@ impl Http3Connection {
 
     /// Inform an [`Http3Connection`] that a stream has data to send and that
     /// [`SendStream::send`] should be called for the stream.
-    pub fn stream_has_pending_data(&mut self, stream_id: StreamId) {
+    pub(crate) fn stream_has_pending_data(&mut self, stream_id: StreamId) {
         self.streams_with_pending_data.insert(stream_id);
     }
 
     /// Return true if there is a stream that needs to send data.
-    pub fn has_data_to_send(&self) -> bool {
+    pub(crate) fn has_data_to_send(&self) -> bool {
         !self.streams_with_pending_data.is_empty()
     }
 
@@ -415,7 +415,7 @@ impl Http3Connection {
 
     /// Call `send` for all streams that need to send data. See explanation for the main structure
     /// for more details.
-    pub fn process_sending(&mut self, conn: &mut Connection) -> Res<()> {
+    pub(crate) fn process_sending(&mut self, conn: &mut Connection) -> Res<()> {
         // check if control stream has data to send.
         self.control_stream_local
             .send(conn, &mut self.recv_streams)?;
@@ -433,7 +433,11 @@ impl Http3Connection {
     }
 
     /// We have a resumption token which remembers previous settings. Update the setting.
-    pub fn set_0rtt_settings(&mut self, conn: &mut Connection, settings: HSettings) -> Res<()> {
+    pub(crate) fn set_0rtt_settings(
+        &mut self,
+        conn: &mut Connection,
+        settings: HSettings,
+    ) -> Res<()> {
         self.initialize_http3_connection(conn)?;
         self.set_qpack_settings(&settings)?;
         self.settings_state = Http3RemoteSettingsState::ZeroRtt(settings);
@@ -442,7 +446,7 @@ impl Http3Connection {
     }
 
     /// Returns the settings for a connection. This is used for creating a resumption token.
-    pub fn get_settings(&self) -> Option<HSettings> {
+    pub(crate) fn get_settings(&self) -> Option<HSettings> {
         if let Http3RemoteSettingsState::Received(settings) = &self.settings_state {
             Some(settings.clone())
         } else {
@@ -452,7 +456,7 @@ impl Http3Connection {
 
     /// This is called when a `ConnectionEvent::NewStream` event is received. This register the
     /// stream with a `NewStreamHeadReader` handler.
-    pub fn add_new_stream(&mut self, stream_id: StreamId) {
+    pub(crate) fn add_new_stream(&mut self, stream_id: StreamId) {
         qtrace!("[{self}] A new stream: {stream_id}");
         self.recv_streams.insert(
             stream_id,
@@ -501,7 +505,7 @@ impl Http3Connection {
     ///    be handled by `Http3Client`/`Server`.
     ///
     /// The function returns `ReceiveOutput`.
-    pub fn handle_stream_readable(
+    pub(crate) fn handle_stream_readable(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
@@ -539,7 +543,7 @@ impl Http3Connection {
     }
 
     /// This is called when a RESET frame has been received.
-    pub fn handle_stream_reset(
+    pub(crate) fn handle_stream_reset(
         &mut self,
         stream_id: StreamId,
         app_error: AppError,
@@ -550,7 +554,7 @@ impl Http3Connection {
         self.close_recv(stream_id, CloseType::ResetRemote(app_error), conn)
     }
 
-    pub fn handle_stream_stop_sending(
+    pub(crate) fn handle_stream_stop_sending(
         &mut self,
         stream_id: StreamId,
         app_error: AppError,
@@ -568,7 +572,11 @@ impl Http3Connection {
 
     /// This is called when `neqo_transport::Connection` state has been change to take proper
     /// actions in the HTTP3 layer.
-    pub fn handle_state_change(&mut self, conn: &mut Connection, state: &State) -> Res<bool> {
+    pub(crate) fn handle_state_change(
+        &mut self,
+        conn: &mut Connection,
+        state: &State,
+    ) -> Res<bool> {
         qdebug!("[{self}] Handle state change {state:?}");
         match state {
             State::Handshaking => {
@@ -615,7 +623,7 @@ impl Http3Connection {
 
     /// This is called when 0RTT has been reset to clear `send_streams`, `recv_streams` and
     /// settings.
-    pub fn handle_zero_rtt_rejected(&mut self) -> Res<()> {
+    pub(crate) fn handle_zero_rtt_rejected(&mut self) -> Res<()> {
         if self.state == Http3State::ZeroRtt {
             self.state = Http3State::Initializing;
             self.control_stream_local = ControlStreamLocal::new();
@@ -638,7 +646,7 @@ impl Http3Connection {
         }
     }
 
-    pub fn handle_datagram(&mut self, datagram: &[u8]) {
+    pub(crate) fn handle_datagram(&mut self, datagram: &[u8]) {
         let mut decoder = Decoder::new(datagram);
         let session = decoder
             .decode_varint()
@@ -1223,7 +1231,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub fn webtransport_create_stream_local(
+    pub(crate) fn webtransport_create_stream_local(
         &mut self,
         conn: &mut Connection,
         session_id: StreamId,
@@ -1260,7 +1268,7 @@ impl Http3Connection {
         Ok(stream_id)
     }
 
-    pub fn webtransport_create_stream_remote(
+    pub(crate) fn webtransport_create_stream_remote(
         &mut self,
         session_id: StreamId,
         stream_id: StreamId,
@@ -1445,7 +1453,7 @@ impl Http3Connection {
     }
 
     /// Adds a new send and receive stream.
-    pub fn add_streams(
+    pub(crate) fn add_streams(
         &mut self,
         stream_id: StreamId,
         send_stream: Box<dyn SendStream>,
@@ -1459,15 +1467,23 @@ impl Http3Connection {
     }
 
     /// Add a new recv stream. This is used for push streams.
-    pub fn add_recv_stream(&mut self, stream_id: StreamId, recv_stream: Box<dyn RecvStream>) {
+    pub(crate) fn add_recv_stream(
+        &mut self,
+        stream_id: StreamId,
+        recv_stream: Box<dyn RecvStream>,
+    ) {
         self.recv_streams.insert(stream_id, recv_stream);
     }
 
-    pub fn queue_control_frame(&mut self, frame: &HFrame) {
+    pub(crate) fn queue_control_frame(&mut self, frame: &HFrame) {
         self.control_stream_local.queue_frame(frame);
     }
 
-    pub fn queue_update_priority(&mut self, stream_id: StreamId, priority: Priority) -> Res<bool> {
+    pub(crate) fn queue_update_priority(
+        &mut self,
+        stream_id: StreamId,
+        priority: Priority,
+    ) -> Res<bool> {
         let stream = self
             .recv_streams
             .get_mut(&stream_id)
