@@ -88,7 +88,7 @@ runs:
       with:
         cache-bin: ${{ runner.environment != 'github-hosted' }}
         cache-all-crates: true
-        key: ${{ inputs.targets }}-${{ env.RUNNER_OS }}
+        key: '${{ inputs.targets }}-${{ env.RUNNER_OS }}'
         workspaces: ${{ inputs.workspaces }}
         save-if: ${{ github.ref == 'refs/heads/main' }} # Only cache runs from `main`.
 
