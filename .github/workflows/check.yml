@@ -224,7 +224,7 @@ jobs:
         with:
           version: stable
           targets: ${{ matrix.target }}
-          tools: cargo-ndk
+          tools: cargo-ndk@4
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
