@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn u8_into_dscp_all() {
-        for i in 0..u8::MAX {
+        for i in 0..=u8::MAX {
             _ = Dscp::from(i);
         }
     }
