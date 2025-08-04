@@ -112,6 +112,10 @@ fn build_nss(dir: PathBuf, nsstarget: &str) {
     let mut build_nss = vec![
         String::from("./build.sh"),
         String::from("-Ddisable_tests=1"),
+        String::from("-Ddisable_dbm=1"),
+        String::from("-Ddisable_libpkix=1"),
+        String::from("-Ddisable_ckbi=1"),
+        String::from("-Ddisable_fips=1"),
         // Generate static libraries in addition to shared libraries.
         String::from("--static"),
     ];

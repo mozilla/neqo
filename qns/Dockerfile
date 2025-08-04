@@ -28,7 +28,7 @@ RUN set -eux; \
     curl -L "https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz" | tar xz --strip-components=2 -C "$NSPR_DIR"; \
     git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
 
-RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -o
+RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 -o
 
 COPY --from=planner /app/recipe.json recipe.json
 # Build dependencies
