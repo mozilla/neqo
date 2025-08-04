@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn u8_into_ecn_all() {
-        for i in 0..u8::MAX {
+        for i in 0..=u8::MAX {
             _ = Ecn::from(i);
         }
     }
