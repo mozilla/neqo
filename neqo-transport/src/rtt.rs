@@ -25,7 +25,7 @@ use crate::{
 /// `select()`, or similar) can reliably deliver; see `neqo_common::hrtime`.
 pub const GRANULARITY: Duration = Duration::from_millis(1);
 // Defined in -recovery 6.2 as 333ms but using lower value.
-pub const INITIAL_RTT: Duration = Duration::from_millis(100);
+pub const DEFAULT_INITIAL_RTT: Duration = Duration::from_millis(100);
 
 /// The source of the RTT measurement.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -50,6 +50,18 @@ pub struct RttEstimate {
 }
 
 impl RttEstimate {
+    pub fn new(initial_rtt: Duration) -> Self {
+        Self {
+            first_sample_time: None,
+            latest_rtt: initial_rtt,
+            smoothed_rtt: initial_rtt,
+            rttvar: initial_rtt / 2,
+            min_rtt: initial_rtt,
+            ack_delay: PeerAckDelay::default(),
+            best_source: RttSource::Guesstimate,
+        }
+    }
+
     fn init(&mut self, rtt: Duration) {
         // Only allow this when there are no samples.
         debug_assert!(self.first_sample_time.is_none());
@@ -57,19 +69,6 @@ impl RttEstimate {
         self.min_rtt = rtt;
         self.smoothed_rtt = rtt;
         self.rttvar = rtt / 2;
-    }
-
-    #[cfg(test)]
-    pub fn from_duration(rtt: Duration) -> Self {
-        Self {
-            first_sample_time: None,
-            latest_rtt: rtt,
-            smoothed_rtt: rtt,
-            rttvar: Duration::from_millis(0),
-            min_rtt: rtt,
-            ack_delay: PeerAckDelay::default(),
-            best_source: RttSource::Ack,
-        }
     }
 
     pub fn set_initial(&mut self, rtt: Duration) {
@@ -208,19 +207,5 @@ impl RttEstimate {
 
     pub fn frame_acked(&mut self, acked: &AckRate) {
         self.ack_delay.frame_acked(acked);
-    }
-}
-
-impl Default for RttEstimate {
-    fn default() -> Self {
-        Self {
-            first_sample_time: None,
-            latest_rtt: INITIAL_RTT,
-            smoothed_rtt: INITIAL_RTT,
-            rttvar: INITIAL_RTT / 2,
-            min_rtt: INITIAL_RTT,
-            ack_delay: PeerAckDelay::default(),
-            best_source: RttSource::Guesstimate,
-        }
     }
 }
