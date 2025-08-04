@@ -217,6 +217,8 @@ runs:
         } >> "$GITHUB_ENV"
         if [ "$RUNNER_OS" == "Windows" ]; then
           echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
+          # Make the NSPR configure script architecture agnostic.
+          sed -i'' 's/ -arch:IA32//g' nspr/configure
         fi
 
     - name: Build
