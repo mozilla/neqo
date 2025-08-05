@@ -90,7 +90,8 @@ runs:
         cache-all-crates: true
         key: ${{ inputs.targets }}-${{ env.RUNNER_OS }}
         workspaces: ${{ inputs.workspaces }}
-        save-if: ${{ github.ref == 'refs/heads/main' || github.event.merge_group.base_ref == 'refs/heads/main' }} # Only cache runs from `main`.
+         # Only create the cache when we push to `main` (also via a merge group).
+        save-if: ${{ github.ref == 'refs/heads/main' || github.event.merge_group.base_ref == 'refs/heads/main' }}
 
     - name: Set up MSVC (Windows)
       if: ${{ runner.os == 'Windows' }}
