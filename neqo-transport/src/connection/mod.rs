@@ -2569,7 +2569,10 @@ impl Connection {
         max_datagrams: NonZeroUsize,
     ) -> Res<SendOptionBatch> {
         let packet_tos = path.borrow().tos();
-        let mut send_buffer = Vec::new();
+        let mut send_buffer = Vec::with_capacity(min(
+            DatagramBatch::MAX,
+            path.borrow().plpmtu() * max_datagrams.get(),
+        ));
 
         let mut datagram_size = None;
         let mut num_datagrams = 0;
@@ -3211,7 +3214,7 @@ impl Connection {
                     .streams_mut()
                     .inbound_frame(space, offset, data)?;
                 if self.crypto.streams().data_ready(space) {
-                    let mut buf = Vec::new();
+                    let mut buf = Vec::with_capacity(16384); // Typical handshake message size
                     let read = self.crypto.streams_mut().read_to_end(space, &mut buf);
                     qdebug!("Read {read:?} bytes");
                     self.handshake(now, packet_version, space, Some(&buf))?;
@@ -3797,7 +3800,7 @@ impl Connection {
         };
         let path = self.paths.primary().ok_or(Error::NotAvailable)?;
         let mtu = path.borrow().plpmtu();
-        let mut buffer = Vec::new();
+        let mut buffer = Vec::with_capacity(mtu);
         let encoder = Encoder::new_borrowed_vec(&mut buffer);
 
         let (_, mut builder) = Self::build_packet_header(

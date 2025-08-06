@@ -630,7 +630,7 @@ impl Loss {
             return (Vec::new(), Vec::new());
         };
         let loss_delay = primary_path.borrow().rtt().loss_delay();
-        let mut lost = Vec::new();
+        let mut lost = Vec::with_capacity(8); // Typically few packets are lost at once
         sp.detect_lost_packets(now, loss_delay, cleanup_delay, &mut lost);
         self.stats.borrow_mut().lost += lost.len();
 
@@ -873,7 +873,7 @@ impl Loss {
         let loss_delay = primary_path.borrow().rtt().loss_delay();
         let confirmed = self.confirmed();
 
-        let mut lost_packets = Vec::new();
+        let mut lost_packets = Vec::with_capacity(16); // Pre-allocate for typical PTO scenarios
         for space in self.spaces.iter_mut() {
             let first = lost_packets.len(); // The first packet lost in this space.
             let pto = Self::pto_period_inner(
