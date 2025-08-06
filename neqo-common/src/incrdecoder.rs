@@ -70,9 +70,9 @@ pub struct IncrementalDecoderBuffer {
 
 impl IncrementalDecoderBuffer {
     #[must_use]
-    pub const fn new(n: usize) -> Self {
+    pub fn new(n: usize) -> Self {
         Self {
-            v: Vec::new(),
+            v: Vec::with_capacity(n),
             remaining: n,
         }
     }

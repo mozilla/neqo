@@ -98,15 +98,47 @@ impl<'a> Decoder<'a> {
         if self.remaining() < n {
             return None;
         }
-        Some(if n == 1 {
-            let v = u64::from(self.buf[self.offset]);
-            self.offset += 1;
-            v
-        } else {
-            let mut buf = [0; 8];
-            buf[8 - n..].copy_from_slice(&self.buf[self.offset..self.offset + n]);
-            self.offset += n;
-            u64::from_be_bytes(buf)
+        Some(match n {
+            1 => {
+                let v = u64::from(self.buf[self.offset]);
+                self.offset += 1;
+                v
+            }
+            2 => {
+                let bytes = [self.buf[self.offset], self.buf[self.offset + 1]];
+                self.offset += 2;
+                u64::from(u16::from_be_bytes(bytes))
+            }
+            4 => {
+                let bytes = [
+                    self.buf[self.offset],
+                    self.buf[self.offset + 1],
+                    self.buf[self.offset + 2],
+                    self.buf[self.offset + 3],
+                ];
+                self.offset += 4;
+                u64::from(u32::from_be_bytes(bytes))
+            }
+            8 => {
+                let bytes = [
+                    self.buf[self.offset],
+                    self.buf[self.offset + 1],
+                    self.buf[self.offset + 2],
+                    self.buf[self.offset + 3],
+                    self.buf[self.offset + 4],
+                    self.buf[self.offset + 5],
+                    self.buf[self.offset + 6],
+                    self.buf[self.offset + 7],
+                ];
+                self.offset += 8;
+                u64::from_be_bytes(bytes)
+            }
+            _ => {
+                let mut buf = [0; 8];
+                buf[8 - n..].copy_from_slice(&self.buf[self.offset..self.offset + n]);
+                self.offset += n;
+                u64::from_be_bytes(buf)
+            }
         })
     }
 
