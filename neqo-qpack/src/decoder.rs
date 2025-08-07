@@ -54,7 +54,7 @@ impl Decoder {
             local_stream_id: None,
             max_table_size: qpack_settings.max_table_size_decoder,
             max_blocked_streams: usize::from(qpack_settings.max_blocked_streams),
-            blocked_streams: Vec::new(),
+            blocked_streams: Vec::with_capacity(qpack_settings.max_blocked_streams.into()),
             stats: Stats::default(),
         }
     }
