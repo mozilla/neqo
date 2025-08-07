@@ -44,11 +44,12 @@ fn stapled_ocsp_responses(fd: *mut PRFileDesc) -> Option<Vec<Vec<u8>>> {
     let ocsp_nss = unsafe { SSL_PeerStapledOCSPResponses(fd) };
     match NonNull::new(ocsp_nss as *mut SECItemArray) {
         Some(ocsp_ptr) => {
-            let mut ocsp_helper: Vec<Vec<u8>> = Vec::new();
             let Ok(len) = isize::try_from(unsafe { ocsp_ptr.as_ref().len }) else {
                 qerror!("[{fd:p}] Received illegal OSCP length");
                 return None;
             };
+            #[expect(clippy::cast_sign_loss, reason = "OK because <= 2^24")]
+            let mut ocsp_helper: Vec<Vec<u8>> = Vec::with_capacity(len as usize);
             for idx in 0..len {
                 let itemp: *const SECItem = unsafe { ocsp_ptr.as_ref().items.offset(idx).cast() };
                 let item = unsafe { null_safe_slice((*itemp).data, (*itemp).len) };

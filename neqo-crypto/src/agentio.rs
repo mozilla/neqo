@@ -222,13 +222,13 @@ pub struct AgentIo {
 }
 
 impl AgentIo {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             input: AgentIoInput {
                 input: null(),
                 available: 0,
             },
-            output: Vec::new(),
+            output: Vec::with_capacity(1500), // Pre-allocate for typical TLS record output
         }
     }
 

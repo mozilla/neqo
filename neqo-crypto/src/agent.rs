@@ -459,9 +459,9 @@ impl SecretAgent {
             alert: Box::pin(None),
             now: TimeHolder::default(),
 
-            extension_handlers: Vec::new(),
+            extension_handlers: Vec::with_capacity(4), // Typical number of TLS extensions
 
-            ech_config: Vec::new(),
+            ech_config: Vec::with_capacity(1), // Usually 0 or 1 ECH config
         })
     }
 
@@ -1040,7 +1040,7 @@ impl Client {
         let mut client = Self {
             agent,
             server_name,
-            resumption: Box::pin(Vec::new()),
+            resumption: Box::pin(Vec::with_capacity(256)), // Typical TLS resumption token size
         };
         client.ready()?;
         Ok(client)
