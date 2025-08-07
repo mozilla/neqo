@@ -44,11 +44,12 @@ pub struct Handler<'a> {
 
 impl<'a> Handler<'a> {
     pub(crate) fn new(url_queue: VecDeque<Url>, args: &'a Args) -> Self {
+        let queue_len = url_queue.len();
         let url_handler = UrlHandler {
             url_queue,
-            handled_urls: Vec::new(),
+            handled_urls: Vec::with_capacity(queue_len),
             stream_handlers: HashMap::default(),
-            all_paths: Vec::new(),
+            all_paths: Vec::with_capacity(queue_len),
             args,
         };
 

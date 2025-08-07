@@ -173,7 +173,7 @@ impl super::HttpServer for HttpServer {
                     }
                     if fin {
                         if let Some(received) = self.posts.remove(&stream) {
-                            let msg = received.to_string().as_bytes().to_vec();
+                            let msg = received.to_string().into_bytes();
                             stream
                                 .send_headers(&[Header::new(":status", "200")])
                                 .unwrap();

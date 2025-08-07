@@ -232,11 +232,12 @@ impl super::Client for Connection {
 
 impl<'b> Handler<'b> {
     pub fn new(url_queue: VecDeque<Url>, args: &'b Args) -> Self {
+        let queue_len = url_queue.len();
         Self {
             streams: HashMap::default(),
             url_queue,
-            handled_urls: Vec::new(),
-            all_paths: Vec::new(),
+            handled_urls: Vec::with_capacity(queue_len),
+            all_paths: Vec::with_capacity(queue_len),
             args,
             token: None,
             needs_key_update: args.key_update,
