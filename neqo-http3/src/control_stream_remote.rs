@@ -66,7 +66,7 @@ impl RecvStream for ControlStreamRemote {
     }
 
     fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
-        let mut control_frames = Vec::new();
+        let mut control_frames = Vec::with_capacity(8); // Typical number of control frames per receive
 
         loop {
             if let Some(f) = self.receive_single(conn)? {

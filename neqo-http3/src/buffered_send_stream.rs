@@ -29,10 +29,10 @@ impl Display for BufferedStream {
 
 impl BufferedStream {
     #[must_use]
-    pub const fn new(stream_id: StreamId) -> Self {
+    pub fn new(stream_id: StreamId) -> Self {
         Self::Initialized {
             stream_id,
-            buf: Vec::new(),
+            buf: Vec::with_capacity(1500), // Pre-allocate for typical HTTP message size
         }
     }
 
@@ -43,7 +43,7 @@ impl BufferedStream {
         debug_assert!(&Self::Uninitialized == self);
         *self = Self::Initialized {
             stream_id,
-            buf: Vec::new(),
+            buf: Vec::with_capacity(1500), // Pre-allocate for typical HTTP message size
         };
     }
 
