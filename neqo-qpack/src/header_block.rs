@@ -215,7 +215,7 @@ impl<'a> HeaderDecoder<'a> {
             );
             return Ok(HeaderDecoderResult::Blocked(self.req_insert_cnt));
         }
-        let mut h: Vec<Header> = Vec::with_capacity(8); // Typical number of headers in HTTP request/response
+        let mut h: Vec<Header> = Vec::new();
 
         while !self.buf.done() {
             let b = Error::map_error(self.buf.peek(), Error::Decompression)?;
