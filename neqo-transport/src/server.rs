@@ -550,7 +550,6 @@ impl Server {
             return o;
         }
 
-        #[expect(clippy::needless_match, reason = "false positive")]
         let maybe_callback = match self.process_next_output(now, max_datagrams) {
             // Return immediately. Do any maintenance on next call.
             o @ OutputBatch::DatagramBatch(_) => return o,
