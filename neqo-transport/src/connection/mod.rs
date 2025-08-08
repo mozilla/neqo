@@ -46,6 +46,7 @@ use crate::{
     recovery::{self, sent, SendProfile},
     recv_stream,
     rtt::{RttEstimate, GRANULARITY, INITIAL_RTT},
+    saved::SavedDatagrams,
     send_stream::{self, SendStream},
     stats::{Stats, StatsCell},
     stream_id::StreamType,
@@ -66,7 +67,6 @@ use crate::{
 
 mod idle;
 pub mod params;
-mod saved;
 mod state;
 #[cfg(test)]
 pub mod test_internal;
@@ -76,7 +76,6 @@ pub use params::ConnectionParameters;
 use params::PreferredAddressConfig;
 #[cfg(test)]
 pub use params::ACK_RATIO_SCALE;
-use saved::SavedDatagrams;
 use state::StateSignaling;
 pub use state::{ClosingFrame, State};
 
@@ -1737,6 +1736,7 @@ impl Connection {
         // Handle each packet in the datagram.
         while !slc.is_empty() {
             self.stats.borrow_mut().packets_rx += 1;
+            self.stats.borrow_mut().dscp_rx[tos.into()] += 1;
             let slc_len = slc.len();
             let (mut packet, remainder) =
                 match packet::Public::decode(slc, self.cid_manager.decoder().as_ref()) {
@@ -1747,7 +1747,6 @@ impl Connection {
                         break;
                     }
                 };
-            self.stats.borrow_mut().dscp_rx[tos.into()] += 1;
             match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
                 PreprocessResult::Continue => (),
                 PreprocessResult::Next => break,
@@ -3147,6 +3146,7 @@ impl Connection {
                 .pmtud_mut()
                 .start(now, &mut self.stats.borrow_mut());
         }
+        self.paths.start_ecn(&mut self.stats.borrow_mut());
         Ok(())
     }
 
@@ -3227,6 +3227,14 @@ impl Connection {
                 }
             }
             Frame::NewToken { token } => {
+                if self.role == Role::Server || !self.state.connected() {
+                    // > Clients MUST NOT send NEW_TOKEN frames. A server MUST
+                    // > treat receipt of a NEW_TOKEN frame as a connection error of
+                    // > type PROTOCOL_VIOLATION.
+                    //
+                    // <https://www.rfc-editor.org/rfc/rfc9000.html#name-new_token-frames>
+                    return Err(Error::ProtocolViolation);
+                }
                 self.stats.borrow_mut().frame_rx.new_token += 1;
                 self.new_token.save_token(token.to_vec());
                 self.create_resumption_token(now);
@@ -3366,9 +3374,7 @@ impl Connection {
                             .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Lost);
                         self.stats.borrow_mut().datagram_tx.lost += 1;
                     }
-                    recovery::Token::EcnEct0 => self
-                        .paths
-                        .lost_ecn(lost.packet_type(), &mut self.stats.borrow_mut()),
+                    recovery::Token::EcnEct0 => self.paths.lost_ecn(&mut self.stats.borrow_mut()),
                 }
             }
         }

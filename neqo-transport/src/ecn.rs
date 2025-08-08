@@ -22,8 +22,12 @@ const TEST_COUNT_INITIAL_PHASE: usize = 3;
 
 /// The state information related to testing a path for ECN capability.
 /// See RFC9000, Appendix A.4.
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Default)]
 enum ValidationState {
+    /// ECN validation not started yet. Reason might e.g. be still handshaking
+    /// or not being the primary path.
+    #[default]
+    NotStarted,
     /// The path is currently being tested for ECN capability, with the number of probes sent so
     /// far on the path during the ECN validation.
     Testing {
@@ -39,27 +43,17 @@ enum ValidationState {
     Capable,
 }
 
-impl Default for ValidationState {
-    fn default() -> Self {
-        Self::Testing {
-            probes_sent: 0,
-            initial_probes_acked: 0,
-            initial_probes_lost: 0,
-        }
-    }
-}
-
 impl ValidationState {
     fn set(&mut self, new: Self, stats: &mut Stats) {
         let old = std::mem::replace(self, new);
 
         match old {
-            Self::Testing { .. } | Self::Unknown => {}
+            Self::NotStarted | Self::Testing { .. } | Self::Unknown => {}
             Self::Failed(_) => debug_assert!(false, "Failed is a terminal state"),
             Self::Capable => stats.ecn_path_validation[ValidationOutcome::Capable] -= 1,
         }
         match new {
-            Self::Testing { .. } | Self::Unknown => {}
+            Self::NotStarted | Self::Testing { .. } | Self::Unknown => {}
             Self::Failed(error) => {
                 stats.ecn_path_validation[ValidationOutcome::NotCapable(error)] += 1;
             }
@@ -176,6 +170,21 @@ pub(crate) struct Info {
 }
 
 impl Info {
+    pub(crate) fn start(&mut self, stats: &mut Stats) {
+        if !matches!(self.state, ValidationState::NotStarted) {
+            return;
+        }
+
+        self.state.set(
+            ValidationState::Testing {
+                probes_sent: 0,
+                initial_probes_acked: 0,
+                initial_probes_lost: 0,
+            },
+            stats,
+        );
+    }
+
     /// Set the baseline (= the ECN counts from the last ACK Frame).
     pub(crate) fn set_baseline(&mut self, baseline: Count) {
         self.baseline = baseline;
@@ -235,11 +244,7 @@ impl Info {
     }
 
     /// An [`Ecn::Ect0`] marked packet has been declared lost.
-    pub(crate) fn lost_ecn(&mut self, pt: packet::Type, stats: &mut Stats) {
-        if pt != packet::Type::Initial {
-            return;
-        }
-
+    pub(crate) fn lost_ecn(&mut self, stats: &mut Stats) {
         if let ValidationState::Testing {
             initial_probes_acked: probes_acked,
             initial_probes_lost: probes_lost,
@@ -281,7 +286,9 @@ impl Info {
         // > (see Section 13.4.2.1) causes the ECN state for the path to become "capable", unless
         // > no marked packet has been acknowledged.
         match self.state {
-            ValidationState::Testing { .. } | ValidationState::Failed(_) => return,
+            ValidationState::NotStarted
+            | ValidationState::Testing { .. }
+            | ValidationState::Failed(_) => return,
             ValidationState::Unknown | ValidationState::Capable => {}
         }
 
@@ -302,8 +309,6 @@ impl Info {
         let ack_ecn = *ack_ecn;
         stats.ecn_tx_acked[largest_acked.packet_type()] = ack_ecn;
 
-        // We always mark with ECT(0) - if at all - so we only need to check for that.
-        //
         // > ECN validation also fails if the sum of the increase in ECT(0) and ECN-CE counts is
         // > less than the number of newly acknowledged packets that were originally sent with an
         // > ECT(0) marking.
@@ -313,11 +318,6 @@ impl Info {
             .count()
             .try_into()
             .expect("usize fits into u64");
-        if newly_acked_sent_with_ect0 == 0 {
-            qwarn!("ECN validation failed, no ECT(0) packets were newly acked");
-            self.disable_ecn(stats, ValidationError::Bleaching);
-            return;
-        }
         let ecn_diff = ack_ecn - self.baseline;
         let sum_inc = ecn_diff[Ecn::Ect0] + ecn_diff[Ecn::Ce];
         if sum_inc < newly_acked_sent_with_ect0 {
@@ -339,11 +339,13 @@ impl Info {
     pub(crate) const fn is_marking(&self) -> bool {
         match self.state {
             ValidationState::Testing { .. } | ValidationState::Capable => true,
-            ValidationState::Failed(_) | ValidationState::Unknown => false,
+            ValidationState::NotStarted | ValidationState::Failed(_) | ValidationState::Unknown => {
+                false
+            }
         }
     }
 
-    /// The ECN mark ([`Ecn`]) to use for an outgoing UDP datagram.
+    /// The ECN mark to use for an outgoing UDP datagram.
     pub(crate) const fn ecn_mark(&self) -> Ecn {
         if self.is_marking() {
             Ecn::Ect0

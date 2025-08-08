@@ -1,12 +1,14 @@
 #! /usr/bin/bash
 set -x
-#set -x -Eeuo pipefail
-#shopt -s globstar
 
 echo '-1' >/proc/sys/kernel/perf_event_paranoid
 
-echo 1 >/sys/devices/system/cpu/intel_pstate/no_turbo
-cpupower frequency-set -g performance
+if [ -e /sys/devices/system/cpu/intel_pstate/no_turbo ]; then
+        echo "Intel P-state driver detected, disabling turbo boost"
+        echo 1 >/sys/devices/system/cpu/intel_pstate/no_turbo
+fi
+cpupower frequency-info
+cpupower frequency-set -g performance || true
 
 echo 0 >/sys/devices/system/cpu/cpu6/online # sibling of 2
 echo 0 >/sys/devices/system/cpu/cpu7/online # sibling of 3

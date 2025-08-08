@@ -90,7 +90,8 @@ runs:
         cache-all-crates: true
         key: ${{ inputs.targets }}-${{ env.RUNNER_OS }}
         workspaces: ${{ inputs.workspaces }}
-        save-if: ${{ github.ref == 'refs/heads/main' }} # Only cache runs from `main`.
+         # Only create the cache when we push to `main` (also via a merge group).
+        save-if: ${{ github.ref == 'refs/heads/main' || github.event.merge_group.base_ref == 'refs/heads/main' }}
 
     - name: Set up MSVC (Windows)
       if: ${{ runner.os == 'Windows' }}
@@ -113,8 +114,8 @@ runs:
       run: |
         for tool in $(echo $TOOLS | tr -d ","); do
           if [ "$tool" == "samply" ]; then
-            # TODO: Install released version once `--unstable-presymbolicate` is released.
-            cargo install --git https://github.com/mstange/samply samply
+            # TODO: Install released version once `--presymbolicate` (https://github.com/mstange/samply/pull/634) is released.
+            cargo install --git https://github.com/mstange/samply --rev f6ff5dedc73ab84a8ef45231f41cd3e721fb5cd4 samply
           else
             # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
             cargo install --locked --force "$tool"

@@ -6,12 +6,6 @@ on:
     branches: ["main"]
   merge_group:
   workflow_dispatch:
-    inputs:
-      run_benchmarks:
-        description: 'Run benchmarks'
-        type: boolean
-        required: false
-        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -224,7 +218,7 @@ jobs:
         with:
           version: stable
           targets: ${{ matrix.target }}
-          tools: cargo-ndk
+          tools: cargo-ndk@^4
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -237,7 +231,7 @@ jobs:
 
       - env:
           MATRIX_TARGET: ${{ matrix.target }}
-        run: cargo ndk --bindgen --platform "$API_LEVEL" --target "$MATRIX_TARGET" test --no-run
+        run: cargo ndk --platform "$API_LEVEL" --target "$MATRIX_TARGET" test --no-run
 
       - env:
           TARGET: ${{ matrix.target }}

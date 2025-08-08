@@ -35,6 +35,7 @@ mod quic_datagrams;
 pub mod recovery;
 #[cfg(not(feature = "bench"))]
 mod recovery;
+mod saved;
 // #[cfg(feature = "bench")]
 pub mod recv_stream;
 // #[cfg(not(feature = "bench"))]
