@@ -144,10 +144,7 @@ mod tests {
 
     #[test]
     fn from_str_errors() {
-        assert_eq!(
-            Header::from_str("").err(),
-            Some(FromStrError::MissingColon)
-        );
+        assert_eq!(Header::from_str("").err(), Some(FromStrError::MissingColon));
         assert_eq!(
             Header::from_str(" : text/html").err(),
             Some(FromStrError::MissingName)
