@@ -514,15 +514,11 @@ impl<'a> Frame<'a> {
         let t = t.try_into()?;
         match t {
             FrameType::Padding => {
-                let mut length: u16 = 1;
-                while let Some(b) = dec.peek_byte() {
-                    if b != u8::from(FrameType::Padding) {
-                        break;
-                    }
-                    length += 1;
-                    dec.skip(1);
-                }
-                Ok(Self::Padding(length))
+                // t itself + any additional `Frame::Padding`
+                (1 + dec.skip_while(u8::from(FrameType::Padding)))
+                    .try_into()
+                    .map(Self::Padding)
+                    .map_err(|_| Error::TooMuchData)
             }
             FrameType::Ping => Ok(Self::Ping),
             FrameType::ResetStream => Ok(Self::ResetStream {
