@@ -1085,4 +1085,14 @@ mod tests {
 
         just_dec(&f, "4030010203");
     }
+
+    /// See bug in <https://github.com/mozilla/neqo/issues/2838>.
+    #[test]
+    fn padding_frame_u16_overflow() {
+        let mut e = Encoder::new();
+        e.encode_varint(FrameType::Padding);
+        // `Frame::Padding` uses u16 to store length. Try to overflow length.
+        e.pad_to(u16::MAX as usize + 1, 0);
+        assert_eq!(Frame::decode(&mut e.as_decoder()), Err(Error::TooMuchData));
+    }
 }
