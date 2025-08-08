@@ -17,10 +17,10 @@ use crate::{
     tparams::{
         PreferredAddress, TransportParameter,
         TransportParameterId::{
-            self, ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit, InitialMaxData,
+            ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit, IdleTimeout, InitialMaxData,
             InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni,
             InitialMaxStreamsBidi, InitialMaxStreamsUni, MaxAckDelay, MaxDatagramFrameSize,
-            MinAckDelay,
+            MinAckDelay, PreferredAddress as PreferredAddressTp, Scone,
         },
         TransportParametersHandler,
     },
@@ -444,6 +444,7 @@ impl ConnectionParameters {
         if self.grease {
             tps.local_mut().set_empty(GreaseQuicBit);
         }
+        tps.local_mut().set_empty(Scone);
         tps.local_mut().set_integer(
             MaxAckDelay,
             u64::try_from(DEFAULT_LOCAL_ACK_DELAY.as_millis())?,
@@ -468,14 +469,14 @@ impl ConnectionParameters {
         tps.local_mut()
             .set_integer(InitialMaxStreamsUni, self.max_streams_uni);
         tps.local_mut().set_integer(
-            TransportParameterId::IdleTimeout,
+            IdleTimeout,
             u64::try_from(self.idle_timeout.as_millis()).unwrap_or(0),
         );
         if let PreferredAddressConfig::Address(preferred) = &self.preferred_address {
             if role == Role::Server {
                 let (cid, srt) = cid_manager.preferred_address_cid()?;
                 tps.local_mut().set(
-                    TransportParameterId::PreferredAddress,
+                    PreferredAddressTp,
                     TransportParameter::PreferredAddress {
                         v4: preferred.ipv4(),
                         v6: preferred.ipv6(),
