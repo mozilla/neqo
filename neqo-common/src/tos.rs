@@ -62,50 +62,91 @@ pub enum Dscp {
     #[default]
     /// Class Selector 0, RFC2474
     Cs0 = 0b0000_0000,
-    /// Class Selector 1, RFC2474
-    Cs1 = 0b0010_0000,
-    /// Class Selector 2, RFC2474
-    Cs2 = 0b0100_0000,
-    /// Class Selector 3, RFC2474
-    Cs3 = 0b0110_0000,
-    /// Class Selector 4, RFC2474
-    Cs4 = 0b1000_0000,
-    /// Class Selector 5, RFC2474
-    Cs5 = 0b1010_0000,
-    /// Class Selector 6, RFC2474
-    Cs6 = 0b1100_0000,
-    /// Class Selector 7, RFC2474
-    Cs7 = 0b1110_0000,
-    /// Assured Forwarding 11, RFC2597
-    Af11 = 0b0010_1000,
-    /// Assured Forwarding 12, RFC2597
-    Af12 = 0b0011_0000,
-    /// Assured Forwarding 13, RFC2597
-    Af13 = 0b0011_1000,
-    /// Assured Forwarding 21, RFC2597
-    Af21 = 0b0100_1000,
-    /// Assured Forwarding 22, RFC2597
-    Af22 = 0b0101_0000,
-    /// Assured Forwarding 23, RFC2597
-    Af23 = 0b0101_1000,
-    /// Assured Forwarding 31, RFC2597
-    Af31 = 0b0110_1000,
-    /// Assured Forwarding 32, RFC2597
-    Af32 = 0b0111_0000,
-    /// Assured Forwarding 33, RFC2597
-    Af33 = 0b0111_1000,
-    /// Assured Forwarding 41, RFC2597
-    Af41 = 0b1000_1000,
-    /// Assured Forwarding 42, RFC2597
-    Af42 = 0b1001_0000,
-    /// Assured Forwarding 43, RFC2597
-    Af43 = 0b1001_1000,
-    /// Expedited Forwarding, RFC3246
-    Ef = 0b1011_1000,
-    /// Capacity-Admitted Traffic, RFC5865
-    VoiceAdmit = 0b1011_0000,
     /// Lower-Effort, RFC8622
     Le = 0b0000_0100,
+    Reserved2 = 0b0000_1000,
+    Reserved3 = 0b0000_1100,
+    Reserved4 = 0b0001_0000,
+    Reserved5 = 0b0001_0100,
+    Reserved6 = 0b0001_1000,
+    Reserved7 = 0b0001_1100,
+    /// Class Selector 1, RFC2474
+    Cs1 = 0b0010_0000,
+    Reserved9 = 0b0010_0100,
+    Af11 = 0b0010_1000,
+    /// Assured Forwarding 12, RFC2597
+    Reserved11 = 0b0010_1100,
+    /// Assured Forwarding 11, RFC2597
+    Af12 = 0b0011_0000,
+    Reserved13 = 0b0011_0100,
+    /// Assured Forwarding 13, RFC2597
+    Af13 = 0b0011_1000,
+    Reserved15 = 0b0011_1100,
+    /// Class Selector 2, RFC2474
+    Cs2 = 0b0100_0000,
+    Reserved17 = 0b0100_0100,
+    /// Assured Forwarding 21, RFC2597
+    Af21 = 0b0100_1000,
+    Reserved19 = 0b0100_1100,
+    /// Assured Forwarding 22, RFC2597
+    Af22 = 0b0101_0000,
+    Reserved21 = 0b0101_0100,
+    /// Assured Forwarding 23, RFC2597
+    Af23 = 0b0101_1000,
+    Reserved23 = 0b0101_1100,
+    /// Class Selector 3, RFC2474
+    Cs3 = 0b0110_0000,
+    Reserved25 = 0b0110_0100,
+    /// Assured Forwarding 31, RFC2597
+    Af31 = 0b0110_1000,
+    Reserved27 = 0b0110_1100,
+    /// Assured Forwarding 32, RFC2597
+    Af32 = 0b0111_0000,
+    Reserved29 = 0b0111_0100,
+    /// Assured Forwarding 33, RFC2597
+    Af33 = 0b0111_1000,
+    Reserved31 = 0b0111_1100,
+    /// Class Selector 4, RFC2474
+    Cs4 = 0b1000_0000,
+    Reserved33 = 0b1000_0100,
+    /// Assured Forwarding 41, RFC2597
+    Af41 = 0b1000_1000,
+    Reserved35 = 0b1000_1100,
+    /// Assured Forwarding 42, RFC2597
+    Af42 = 0b1001_0000,
+    Reserved37 = 0b1001_0100,
+    /// Assured Forwarding 43, RFC2597
+    Af43 = 0b1001_1000,
+    Reserved39 = 0b1001_1100,
+    /// Class Selector 5, RFC2474
+    Cs5 = 0b1010_0000,
+    Reserved41 = 0b1010_0100,
+    Reserved42 = 0b1010_1000,
+    Reserved43 = 0b1010_1100,
+    /// Capacity-Admitted Traffic, RFC5865
+    VoiceAdmit = 0b1011_0000,
+    Reserved45 = 0b1011_0100,
+    /// Expedited Forwarding, RFC3246
+    Ef = 0b1011_1000,
+    Reserved47 = 0b1011_1100,
+    /// Class Selector 6, RFC2474
+    Cs6 = 0b1100_0000,
+    Reserved49 = 0b1100_0100,
+    Reserved50 = 0b1100_1000,
+    Reserved51 = 0b1100_1100,
+    Reserved52 = 0b1101_0000,
+    Reserved53 = 0b1101_0100,
+    Reserved54 = 0b1101_1000,
+    Reserved55 = 0b1101_1100,
+    /// Class Selector 7, RFC2474
+    Cs7 = 0b1110_0000,
+    Reserved57 = 0b1110_0100,
+    Reserved58 = 0b1110_1000,
+    Reserved59 = 0b1110_1100,
+    Reserved60 = 0b1111_0000,
+    Reserved61 = 0b1111_0100,
+    Reserved62 = 0b1111_1000,
+    Reserved63 = 0b1111_1100,
 }
 
 impl From<Dscp> for u8 {
@@ -211,6 +252,13 @@ mod tests {
     }
 
     #[test]
+    fn u8_into_ecn_all() {
+        for i in 0..=u8::MAX {
+            _ = Ecn::from(i);
+        }
+    }
+
+    #[test]
     fn dscp_into_u8() {
         assert_eq!(u8::from(Dscp::Cs0), 0b0000_0000);
         assert_eq!(u8::from(Dscp::Cs1), 0b0010_0000);
@@ -235,6 +283,13 @@ mod tests {
         assert_eq!(u8::from(Dscp::Ef), 0b1011_1000);
         assert_eq!(u8::from(Dscp::VoiceAdmit), 0b1011_0000);
         assert_eq!(u8::from(Dscp::Le), 0b0000_0100);
+    }
+
+    #[test]
+    fn u8_into_dscp_all() {
+        for i in 0..=u8::MAX {
+            _ = Dscp::from(i);
+        }
     }
 
     #[test]
