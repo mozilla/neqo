@@ -21,7 +21,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram, Header};
+use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
@@ -399,7 +399,7 @@ impl UrlHandler<'_> {
             Instant::now(),
             &self.args.method,
             &url,
-            &to_headers(&self.args.header),
+            &self.args.headers,
             Priority::default(),
         ) {
             Ok(client_stream_id) => {
@@ -448,19 +448,4 @@ impl UrlHandler<'_> {
         self.stream_handlers.remove(&stream_id);
         self.process_urls(client);
     }
-}
-
-fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
-    values
-        .iter()
-        .scan(None, |state, value| {
-            if let Some(name) = state.take() {
-                *state = None;
-                Some(Header::new(name, value.as_ref()))
-            } else {
-                *state = Some(value.as_ref().to_string());
-                None
-            }
-        })
-        .collect()
 }
