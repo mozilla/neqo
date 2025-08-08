@@ -172,6 +172,17 @@
       args:
         creates: "/home/{{ bench_user }}/.cargo/bin/cargo"
 
+    - name: Disable systemd unified cgroups
+      when: is_gcp
+      block:
+        - name: Modify GRUB configuration
+          ansible.builtin.lineinfile:
+            path: /etc/default/grub
+            regexp: '^GRUB_CMDLINE_LINUX=.*$'
+            line: "GRUB_CMDLINE_LINUX='systemd.unified_cgroup_hierarchy=false'"
+        - name: Update GRUB
+          ansible.builtin.command: update-grub
+
     - name: Exit on GCP
       ansible.builtin.meta: end_play
       when: is_gcp
