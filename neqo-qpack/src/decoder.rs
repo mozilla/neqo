@@ -45,6 +45,7 @@ impl Decoder {
         qdebug!("Decoder: creating a new qpack decoder");
         let mut send_buf = Data::default();
         send_buf.encode_varint(QPACK_UNI_STREAM_TYPE_DECODER);
+        let max_blocked_streams = usize::from(qpack_settings.max_blocked_streams);
         Self {
             instruction_reader: EncoderInstructionReader::new(),
             table: HeaderTable::new(false),
@@ -53,8 +54,8 @@ impl Decoder {
             send_buf,
             local_stream_id: None,
             max_table_size: qpack_settings.max_table_size_decoder,
-            max_blocked_streams: usize::from(qpack_settings.max_blocked_streams),
-            blocked_streams: Vec::new(),
+            max_blocked_streams,
+            blocked_streams: Vec::with_capacity(max_blocked_streams),
             stats: Stats::default(),
         }
     }

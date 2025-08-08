@@ -77,7 +77,7 @@ impl<'a> BitReader<'a> {
 /// Never, but rust can't know that.
 pub fn decode(input: &[u8]) -> Res<Vec<u8>> {
     let mut reader = BitReader::new(input);
-    let mut output = Vec::new();
+    let mut output = Vec::with_capacity(input.len() * 2); // Huffman typically expands, so start with a reasonable guestimate.
     while reader.has_more_data() {
         if let Some(c) = decode_character(&mut reader)? {
             output.push(u8::try_from(c).map_err(|_| Error::HuffmanDecompression)?);
@@ -116,7 +116,7 @@ fn decode_character(reader: &mut BitReader) -> Res<Option<u16>> {
 /// Never, but rust doesn't know that.
 #[must_use]
 pub fn encode(input: &[u8]) -> Vec<u8> {
-    let mut output: Vec<u8> = Vec::new();
+    let mut output: Vec<u8> = Vec::with_capacity(input.len()); // Huffman compresses, so this should be big enough to not reallocate.
     let mut left: u8 = 8;
     let mut saved: u8 = 0;
     for c in input {
