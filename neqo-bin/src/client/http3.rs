@@ -23,7 +23,9 @@ use std::{
 
 use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
-use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
+use neqo_http3::{
+    ConnectUdpEvent, Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority,
+};
 use neqo_transport::{
     AppError, CloseReason, Connection, EmptyConnectionIdGenerator, Error as TransportError,
     OutputBatch, RandomConnectionIdGenerator, StreamId,
@@ -31,19 +33,20 @@ use neqo_transport::{
 use rustc_hash::FxHashMap as HashMap;
 use url::Url;
 
-use super::{get_output_file, qlog_new, Args, CloseState, Res};
-use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};
+use super::{qlog_new, Args, CloseState, Res};
+use crate::{client::get_output_file, send_data::SendData, STREAM_IO_BUFFER_SIZE};
 
-pub struct Handler<'a> {
+pub struct Handler {
     #[expect(clippy::struct_field_names, reason = "This name is more descriptive.")]
-    url_handler: UrlHandler<'a>,
+    url_handler: UrlHandler,
     token: Option<ResumptionToken>,
     output_read_data: bool,
     read_buffer: Vec<u8>,
 }
 
-impl<'a> Handler<'a> {
-    pub(crate) fn new(url_queue: VecDeque<Url>, args: &'a Args) -> Self {
+impl Handler {
+    pub(crate) fn new(url_queue: VecDeque<Url>, args: Args) -> Self {
+        let output_read_data = args.output_read_data;
         let url_handler = UrlHandler {
             url_queue,
             handled_urls: Vec::new(),
@@ -55,7 +58,7 @@ impl<'a> Handler<'a> {
         Self {
             url_handler,
             token: None,
-            output_read_data: args.output_read_data,
+            output_read_data,
             read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
         }
     }
@@ -82,7 +85,10 @@ pub fn create_client(
         cid_generator,
         local_addr,
         remote_addr,
-        args.shared.quic_parameters.get(args.shared.alpn.as_str()),
+        args.shared
+            .quic_parameters
+            .get(args.shared.alpn.as_str())
+            .datagram_size(1500),
         Instant::now(),
     )?;
     let ciphers = args.get_ciphers();
@@ -95,7 +101,8 @@ pub fn create_client(
             .max_table_size_encoder(args.shared.max_table_size_encoder)
             .max_table_size_decoder(args.shared.max_table_size_decoder)
             .max_blocked_streams(args.shared.max_blocked_streams)
-            .max_concurrent_push_streams(args.max_concurrent_push_streams),
+            .max_concurrent_push_streams(args.max_concurrent_push_streams)
+            .http3_datagram(true),
     );
 
     let qlog = qlog_new(args, hostname, client.connection_id())?;
@@ -167,7 +174,7 @@ impl super::Client for Http3Client {
     }
 }
 
-impl Handler<'_> {
+impl Handler {
     fn reinit(&mut self) {
         for url in self.url_handler.handled_urls.drain(..) {
             self.url_handler.url_queue.push_front(url);
@@ -177,7 +184,7 @@ impl Handler<'_> {
     }
 }
 
-impl super::Handler for Handler<'_> {
+impl super::Handler for Handler {
     type Client = Http3Client;
 
     fn handle(&mut self, client: &mut Http3Client) -> Res<bool> {
@@ -258,6 +265,25 @@ impl super::Handler for Handler<'_> {
                     self.url_handler.process_urls(client);
                 }
                 Http3ClientEvent::ResumptionToken(t) => self.token = Some(t),
+                Http3ClientEvent::ConnectUdp(event) => match event {
+                    ConnectUdpEvent::Negotiated(_) => todo!(),
+                    ConnectUdpEvent::Session {
+                        stream_id: _,
+                        status: _,
+                        headers: _,
+                    } => {
+                        todo!();
+                    }
+                    ConnectUdpEvent::SessionClosed {
+                        stream_id: _,
+                        reason: _,
+                        headers: _,
+                    } => todo!(),
+                    ConnectUdpEvent::Datagram {
+                        session_id: _,
+                        datagram: _,
+                    } => todo!(),
+                },
                 _ => {
                     qwarn!("Unhandled event {event:?}");
                 }
@@ -363,15 +389,15 @@ impl StreamHandler for UploadStreamHandler {
     }
 }
 
-struct UrlHandler<'a> {
+struct UrlHandler {
     url_queue: VecDeque<Url>,
     handled_urls: Vec<Url>,
     stream_handlers: HashMap<StreamId, Box<dyn StreamHandler>>,
     all_paths: Vec<PathBuf>,
-    args: &'a Args,
+    args: Args,
 }
 
-impl UrlHandler<'_> {
+impl UrlHandler {
     fn stream_handler(&mut self, stream_id: StreamId) -> Option<&mut Box<dyn StreamHandler>> {
         self.stream_handlers.get_mut(&stream_id)
     }
@@ -450,17 +476,19 @@ impl UrlHandler<'_> {
     }
 }
 
-fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
-    values
-        .iter()
-        .scan(None, |state, value| {
-            if let Some(name) = state.take() {
-                *state = None;
-                Some(Header::new(name, value.as_ref()))
-            } else {
-                *state = Some(value.as_ref().to_string());
-                None
-            }
-        })
-        .collect()
+// TODO: pub
+pub fn to_headers(input: &[impl AsRef<str>]) -> Vec<Header> {
+    let mut headers = vec![];
+    let mut input = input.into_iter();
+    loop {
+        let Some(name) = input.next() else {
+            break headers;
+        };
+
+        let Some(value) = input.next() else {
+            panic!("Header name without value: {:?}", name.as_ref());
+        };
+
+        headers.push(Header::new(name.as_ref(), value.as_ref()));
+    }
 }

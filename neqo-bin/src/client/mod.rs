@@ -39,6 +39,7 @@ use crate::SharedArgs;
 
 mod http09;
 mod http3;
+mod proxy;
 
 const BUFWRITER_BUFFER_SIZE: usize = 64 * 1024;
 
@@ -109,6 +110,7 @@ type Res<T> = Result<T, Error>;
     clippy::struct_excessive_bools,
     reason = "Not a good use of that lint."
 )]
+#[derive(Clone)]
 pub struct Args {
     #[command(flatten)]
     shared: SharedArgs,
@@ -179,6 +181,9 @@ pub struct Args {
     #[arg(name = "cid-length", short = 'l', long, default_value = "0",
           value_parser = clap::value_parser!(u8).range(..=20))]
     cid_len: u8,
+
+    #[arg(name = "proxy", long)]
+    proxy: Option<Url>,
 }
 
 impl Args {
@@ -220,6 +225,7 @@ impl Args {
             upload_size,
             stats: false,
             cid_len: 0,
+            proxy: None,
         }
     }
 
@@ -387,6 +393,7 @@ trait Handler {
     fn take_token(&mut self) -> Option<ResumptionToken>;
 }
 
+#[derive(Debug)]
 enum CloseState {
     NotClosing,
     Closing,
@@ -596,6 +603,63 @@ pub async fn client(mut args: Args) -> Res<()> {
 
     init()?;
 
+    if let Some(proxy_url) = &args.proxy {
+        let url = args.urls.pop().expect("TODO");
+        let Origin::Tuple( _scheme, host, _port) =  url.clone().origin() else {
+            panic!();
+        };
+        let Origin::Tuple(_scheme, proxy_host, proxy_port) = proxy_url.origin() else {
+            panic!();
+        };
+        let proxy_addr = format!("{proxy_host}:{proxy_port}").to_socket_addrs()?.find(|addr| {
+            !matches!(
+                (addr, args.ipv4_only, args.ipv6_only),
+                (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
+            )
+        });
+
+        let remote_addr = format!("{proxy_host}:{proxy_port}").to_socket_addrs()?.find(|addr| {
+            !matches!(
+                (addr, args.ipv4_only, args.ipv6_only),
+                (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
+            )
+        }).unwrap();
+        let Some(proxy_addr) = proxy_addr else {
+            qerror!("No compatible address found for: {proxy_host}");
+            exit(1);
+        };
+        let mut socket = crate::udp::Socket::bind(local_addr_for(&proxy_addr, 0))?;
+        let real_local = socket.local_addr().unwrap();
+        qinfo!(
+            "{} Client connecting: {real_local:?} -> {proxy_addr:?}",
+            args.shared.alpn
+        );
+
+        let hostname = format!("{host}");
+        let proxy_hostname = format!("{proxy_host}");
+        let mut client_args = args.clone();
+        client_args.header = vec![]; // don't share proxy authorization with origin server
+        let client = http3::create_client(&client_args, real_local, remote_addr, &hostname, None)
+            .expect("failed to create client");
+
+        let proxy = http3::create_client(&args, real_local, proxy_addr, &proxy_hostname, None)
+            .expect("failed to create client");
+
+            let mut urls = VecDeque::new();
+            urls.push_back(url.clone());
+        let handler = http3::Handler::new(urls, args.clone());
+
+        let proxy = proxy::Proxy::new(client, handler, proxy, proxy_url.clone(), http3::to_headers(&args.header).into_iter().next());
+
+        let proxy_handler = proxy::Handler::new();
+
+        Runner::new(real_local, &mut socket,proxy, proxy_handler, &args)
+            .run()
+            .await?;
+
+        return Ok(());
+    }
+
     for ((host, port), mut urls) in urls_by_origin(&args.urls) {
         if args.resume && urls.len() < 2 {
             qerror!("Resumption to {host} cannot work without at least 2 URLs");
@@ -635,7 +699,7 @@ pub async fn client(mut args: Args) -> Res<()> {
                 let client = http3::create_client(&args, real_local, remote_addr, &hostname, token)
                     .expect("failed to create client");
 
-                let handler = http3::Handler::new(to_request, &args);
+                let handler = http3::Handler::new(to_request, args.clone());
 
                 Runner::new(real_local, &mut socket, client, handler, &args)
                     .run()
