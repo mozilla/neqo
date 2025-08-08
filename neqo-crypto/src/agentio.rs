@@ -228,7 +228,7 @@ impl AgentIo {
                 input: null(),
                 available: 0,
             },
-            output: Vec::with_capacity(1500), // Pre-allocate for typical TLS record output
+            output: Vec::with_capacity(256), // Pre-allocate for typical TLS record output.
         }
     }
 
