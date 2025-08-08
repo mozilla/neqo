@@ -2733,7 +2733,7 @@ impl Connection {
             );
 
             self.stats.borrow_mut().packets_tx += 1;
-            if pt == PacketType::Initial && self.stats.borrow().first_initial_pn.is_none() {
+            if pt == packet::Type::Initial && self.stats.borrow().first_initial_pn.is_none() {
                 self.stats.borrow_mut().first_initial_pn = Some(pn);
             }
             // Track which packet types are sent with which ECN codepoints. For

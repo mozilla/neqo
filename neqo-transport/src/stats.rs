@@ -275,7 +275,7 @@ pub struct Stats {
     pub resumed: bool,
 
     /// The packet number of the first Initial packet sent.
-    pub first_initial_pn: Option<PacketNumber>,
+    pub first_initial_pn: Option<packet::Number>,
 
     /// The current, estimated round-trip time on the primary path.
     pub rtt: Duration,
