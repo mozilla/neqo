@@ -174,6 +174,7 @@ fn receive_data_client(
             Http3ClientEvent::WebTransport(WebTransportEvent::NewStream { stream_id, .. }) => {
                 assert_eq!(stream_id, expected_stream_id);
                 new_stream_received = true;
+                assert!(!data_received, "expect NewStream before DataReadable");
             }
             Http3ClientEvent::DataReadable { stream_id } => {
                 assert_eq!(stream_id, expected_stream_id);

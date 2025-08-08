@@ -17,12 +17,16 @@ inputs:
   targets:
     description: Comma-separated list of target triples to install for this toolchain
     required: false
+  workspaces:
+    description: Newline-separated list of workspaces
+    required: false
 
 runs:
   using: composite
   steps:
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
+      # TODO: Manually upate this, Dependabot will skip it because no tags associated with SHA:
+      uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # zizmor: ignore[stale-action-refs]
       with:
         toolchain: ${{ inputs.version  }}
         components: ${{ inputs.components }}
@@ -54,15 +58,17 @@ runs:
       shell: bash
       env:
         TARGETS: ${{ inputs.targets }}
+        RUNNER_OS: ${{ runner.os }}
       run: |
         {
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
-          if [[ "${{ runner.os }}" == "Linux" && "$TARGETS" == "" && "$(command -v mold)" ]]; then
+          if [[ "$RUNNER_OS" == "Linux" && "$TARGETS" == "" && "$(command -v mold)" ]]; then
             echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold $RUSTFLAGS"
-          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
             echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld $RUSTFLAGS"
           fi
+          echo "RUNNER_OS=$(uname -srm)"
         } >> "$GITHUB_ENV"
 
     - name: Enable sscache
@@ -80,9 +86,12 @@ runs:
     - name: Enable Rust cache
       uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
       with:
-        cache-bin: ${{ runner.environment == 'github-hosted' }}
-        key: ${{ inputs.targets }}
-        save-if: ${{ github.ref == 'refs/heads/main' }} # Only cache runs from `main`
+        cache-bin: ${{ runner.environment != 'github-hosted' }}
+        cache-all-crates: true
+        key: ${{ inputs.targets }}-${{ env.RUNNER_OS }}
+        workspaces: ${{ inputs.workspaces }}
+         # Only create the cache when we push to `main` (also via a merge group).
+        save-if: ${{ github.ref == 'refs/heads/main' || github.event.merge_group.base_ref == 'refs/heads/main' }}
 
     - name: Set up MSVC (Windows)
       if: ${{ runner.os == 'Windows' }}
@@ -96,18 +105,19 @@ runs:
       if: ${{ runner.os == 'Windows' }}
       run: rm /usr/bin/link.exe || true
 
-    - name: Install cargo-quickinstall
-      shell: bash
-      if: ${{ inputs.tools != '' }}
-      env:
-        GITHUB_TOKEN: ${{ inputs.token }}
-      run: cargo install --locked cargo-quickinstall
-
     - name: Install Rust tools
       shell: bash
       if: ${{ inputs.tools != '' }}
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
         TOOLS: ${{ inputs.tools }}
-      # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
-      run: cargo quickinstall --force $(echo $TOOLS | tr -d ",")
+      run: |
+        for tool in $(echo $TOOLS | tr -d ","); do
+          if [ "$tool" == "samply" ]; then
+            # TODO: Install released version once `--presymbolicate` (https://github.com/mstange/samply/pull/634) is released.
+            cargo install --git https://github.com/mstange/samply --rev f6ff5dedc73ab84a8ef45231f41cd3e721fb5cd4 samply
+          else
+            # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
+            cargo install --locked --force "$tool"
+          fi
+        done

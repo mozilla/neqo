@@ -6,7 +6,8 @@
 
 use std::time::Duration;
 
-use neqo_common::{Datagram, IpTos, IpTosEcn};
+use neqo_common::{event::Provider as _, Datagram, Ecn, Tos};
+use strum::IntoEnumIterator as _;
 use test_fixture::{
     assertions::{assert_v4_path, assert_v6_path},
     fixture_init, now, DEFAULT_ADDR_V4,
@@ -19,20 +20,20 @@ use crate::{
         new_server, send_and_receive, send_something, send_something_with_modifier,
         send_with_modifier_and_receive, DEFAULT_RTT,
     },
-    ecn,
+    ecn, packet,
     path::MAX_PATH_PROBES,
-    ConnectionId, ConnectionParameters, StreamType,
+    ConnectionEvent, ConnectionId, ConnectionParameters, Output, StreamType,
 };
 
-fn assert_ecn_enabled(tos: IpTos) {
+fn assert_ecn_enabled(tos: Tos) {
     assert!(tos.is_ecn_marked());
 }
 
-fn assert_ecn_disabled(tos: IpTos) {
+fn assert_ecn_disabled(tos: Tos) {
     assert!(!tos.is_ecn_marked());
 }
 
-fn set_tos(mut d: Datagram, ecn: IpTosEcn) -> Datagram {
+fn set_tos(mut d: Datagram, ecn: Ecn) -> Datagram {
     d.set_tos(ecn.into());
     d
 }
@@ -42,13 +43,13 @@ fn noop() -> fn(Datagram) -> Option<Datagram> {
 }
 
 fn bleach() -> fn(Datagram) -> Option<Datagram> {
-    |d| Some(set_tos(d, IpTosEcn::NotEct))
+    |d| Some(set_tos(d, Ecn::NotEct))
 }
 
 fn remark() -> fn(Datagram) -> Option<Datagram> {
     |d| {
         if d.tos().is_ecn_marked() {
-            Some(set_tos(d, IpTosEcn::Ect1))
+            Some(set_tos(d, Ecn::Ect1))
         } else {
             Some(d)
         }
@@ -58,7 +59,7 @@ fn remark() -> fn(Datagram) -> Option<Datagram> {
 fn ce() -> fn(Datagram) -> Option<Datagram> {
     |d| {
         if d.tos().is_ecn_marked() {
-            Some(set_tos(d, IpTosEcn::Ce))
+            Some(set_tos(d, Ecn::Ce))
         } else {
             Some(d)
         }
@@ -73,6 +74,8 @@ fn drop_ecn_marked_datagrams() -> fn(Datagram) -> Option<Datagram> {
     |d| (!d.tos().is_ecn_marked()).then_some(d)
 }
 
+/// Given that ECN validation only starts after the handshake, it does not delay
+/// connection establishment.
 #[test]
 fn handshake_delay_with_ecn_blackhole() {
     let start = now();
@@ -88,10 +91,78 @@ fn handshake_delay_with_ecn_blackhole() {
         drop_ecn_marked_datagrams(),
     );
 
+    assert!(client.state().connected());
+    assert!(server.state().connected());
+
     assert_eq!(
         (finish - start).as_millis() / DEFAULT_RTT.as_millis(),
-        15,
-        "expected 6 RTT for client to detect blackhole, 6 RTT for server to detect blackhole and 3 RTT for handshake to be confirmed",
+        3,
+        "expect ECN path validation to start after handshake",
+    );
+}
+
+#[test]
+fn request_response_delay_after_handshake_with_ecn_blackhole() {
+    let mut now = now();
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
+    let mut server = default_server();
+    now = handshake_with_modifier(
+        &mut client,
+        &mut server,
+        now,
+        DEFAULT_RTT,
+        drop_ecn_marked_datagrams(),
+    );
+
+    let start = now;
+    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    client.stream_send(stream_id, b"ping").unwrap();
+    client.stream_close_send(stream_id).unwrap();
+
+    // Wait for client to send a non-ECN-marked datagram.
+    let client_dg = loop {
+        match client.process_output(now) {
+            Output::Datagram(dg) if !dg.tos().is_ecn_marked() => break dg,
+            Output::Callback(dur) => now += dur,
+            _ => {}
+        }
+    };
+
+    server.process_input(client_dg, now);
+    let stream_id = server
+        .events()
+        .find_map(|e| match e {
+            ConnectionEvent::RecvStreamReadable { stream_id, .. } => Some(stream_id),
+            _ => None,
+        })
+        .unwrap();
+    let mut buf = vec![];
+    server.stream_recv(stream_id, &mut buf).unwrap();
+    server.stream_send(stream_id, b"pong").unwrap();
+    server.stream_close_send(stream_id).unwrap();
+
+    // Wait for server to send a non-ECN-marked datagram.
+    let server_dg = loop {
+        match server.process_output(now) {
+            Output::Datagram(dg) if !dg.tos().is_ecn_marked() => break dg,
+            Output::Callback(dur) => now += dur,
+            _ => {}
+        }
+    };
+
+    client.process_input(server_dg, now);
+    client
+        .events()
+        .find_map(|e| match e {
+            ConnectionEvent::RecvStreamReadable { stream_id, .. } => Some(stream_id),
+            _ => None,
+        })
+        .unwrap();
+
+    assert_eq!(
+        (now - start).as_millis() / DEFAULT_RTT.as_millis(),
+        8,
+        "expect ECN path validation to start after handshake",
     );
 }
 
@@ -114,10 +185,10 @@ fn migration_delay_to_ecn_blackhole() {
     let mut probes = 0;
     while probes < MAX_PATH_PROBES * 2 {
         match client.process_output(now) {
-            crate::Output::Callback(t) => {
+            Output::Callback(t) => {
                 now += t;
             }
-            crate::Output::Datagram(d) => {
+            Output::Datagram(d) => {
                 // The new path is IPv4.
                 if d.source().is_ipv4() {
                     // This should be a PATH_CHALLENGE.
@@ -133,9 +204,47 @@ fn migration_delay_to_ecn_blackhole() {
                     }
                 }
             }
-            crate::Output::None => panic!("unexpected output"),
+            Output::None => panic!("unexpected output"),
         }
     }
+}
+
+#[test]
+fn debug() {
+    let stats = crate::Stats::default();
+    assert_eq!(
+        format!("{stats:?}"),
+        "stats for\u{0020}
+  rx: 0 drop 0 dup 0 saved 0
+  tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
+  pmtud: 0 sent 0 acked 0 lost 0 change 0 iface_mtu 0 pmtu
+  resumed: false
+  frames rx:
+    crypto 0 done 0 token 0 close 0
+    ack 0 (max 0) ping 0 padding 0
+    stream 0 reset 0 stop 0
+    max: stream 0 data 0 stream_data 0
+    blocked: stream 0 data 0 stream_data 0
+    datagram 0
+    ncid 0 rcid 0 pchallenge 0 presponse 0
+    ack_frequency 0
+  frames tx:
+    crypto 0 done 0 token 0 close 0
+    ack 0 (max 0) ping 0 padding 0
+    stream 0 reset 0 stop 0
+    max: stream 0 data 0 stream_data 0
+    blocked: stream 0 data 0 stream_data 0
+    datagram 0
+    ncid 0 rcid 0 pchallenge 0 presponse 0
+    ack_frequency 0
+  ecn:
+    tx:
+    acked:
+    rx:
+    path validation outcomes: ValidationCount({Capable: 0, NotCapable(BlackHole): 0, NotCapable(Bleaching): 0, NotCapable(ReceivedUnsentECT1): 0})
+    mark transitions:
+  dscp: \n"
+    );
 }
 
 #[test]
@@ -163,14 +272,33 @@ fn stats() {
             }
         }
 
-        for codepoint in [IpTosEcn::Ect1, IpTosEcn::Ce] {
-            assert_eq!(stats.ecn_tx[codepoint], 0);
-            assert_eq!(stats.ecn_rx[codepoint], 0);
+        for packet_type in packet::Type::iter() {
+            for codepoint in [Ecn::Ect1, Ecn::Ce] {
+                assert_eq!(stats.ecn_tx[packet_type][codepoint], 0);
+                assert_eq!(stats.ecn_tx_acked[packet_type][codepoint], 0);
+                assert_eq!(stats.ecn_rx[packet_type][codepoint], 0);
+            }
         }
     }
 
-    assert!(client.stats().ecn_tx[IpTosEcn::Ect0] <= server.stats().ecn_rx[IpTosEcn::Ect0]);
-    assert!(server.stats().ecn_tx[IpTosEcn::Ect0] <= client.stats().ecn_rx[IpTosEcn::Ect0]);
+    for packet_type in packet::Type::iter() {
+        assert!(
+            client.stats().ecn_tx_acked[packet_type][Ecn::Ect0]
+                <= server.stats().ecn_rx[packet_type][Ecn::Ect0]
+        );
+        assert!(
+            server.stats().ecn_tx_acked[packet_type][Ecn::Ect0]
+                <= client.stats().ecn_rx[packet_type][Ecn::Ect0]
+        );
+        assert_eq!(
+            client.stats().ecn_tx[packet_type][Ecn::Ect0],
+            server.stats().ecn_rx[packet_type][Ecn::Ect0]
+        );
+        assert_eq!(
+            server.stats().ecn_tx[packet_type][Ecn::Ect0],
+            client.stats().ecn_rx[packet_type][Ecn::Ect0]
+        );
+    }
 }
 
 #[test]
@@ -220,7 +348,7 @@ pub fn migration_with_modifiers(
     orig_path_modifier: fn(Datagram) -> Option<Datagram>,
     new_path_modifier: fn(Datagram) -> Option<Datagram>,
     burst: usize,
-) -> (IpTos, IpTos, bool) {
+) -> (Tos, Tos, bool) {
     fixture_init();
     let mut client = new_client(ConnectionParameters::default().max_streams(StreamType::UniDi, 64));
     let mut server = new_server(ConnectionParameters::default().max_streams(StreamType::UniDi, 64));
@@ -228,7 +356,7 @@ pub fn migration_with_modifiers(
     connect_force_idle_with_modifier(&mut client, &mut server, orig_path_modifier);
     let mut now = now();
 
-    // Right after the handshake, the ECN validation should still be in progress.
+    // Right after the handshake, the ECN validation should be in progress.
     let client_pkt = send_something(&mut client, now);
     assert_ecn_enabled(client_pkt.tos());
     server.process_input(orig_path_modifier(client_pkt).unwrap(), now);
@@ -322,7 +450,7 @@ pub fn migration_with_modifiers(
         let client_confirmation = client.process_output(now).dgram().unwrap();
         assert_v4_path(&client_confirmation, false);
 
-        // The server has now sent 2 packets, so it is blocked on the pacer.  Wait.
+        // The server has now sent 2 packets, so it is blocked on the pacer. Wait.
         let server_pacing = server.process_output(now).callback();
         assert_ne!(server_pacing, Duration::new(0, 0));
         // ... then confirm that the server sends on the new path still.

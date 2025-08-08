@@ -4,15 +4,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::time::Duration;
+use std::{hint::black_box, time::Duration};
 
 use criterion::{criterion_group, criterion_main, BatchSize::SmallInput, Criterion};
 use neqo_transport::{ConnectionParameters, State};
 use test_fixture::{
     boxed,
     sim::{
-        connection::{ConnectionNode, ReachState, ReceiveData, SendData},
-        network::{Delay, TailDrop},
+        connection::{Node, ReachState, ReceiveData, SendData},
+        network::{RandomDelay, TailDrop},
         ReadySimulator, Simulator,
     },
 };
@@ -35,7 +35,7 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
             b.iter_batched(
                 || {
                     let nodes = boxed![
-                        ConnectionNode::new_client(
+                        Node::new_client(
                             ConnectionParameters::default()
                                 .pmtud(true)
                                 .pacing(pacing)
@@ -44,8 +44,8 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
                             boxed![SendData::new(TRANSFER_AMOUNT)]
                         ),
                         TailDrop::dsl_uplink(),
-                        Delay::new(ZERO..JITTER),
-                        ConnectionNode::new_server(
+                        RandomDelay::new(ZERO..JITTER),
+                        Node::new_server(
                             ConnectionParameters::default()
                                 .pmtud(true)
                                 .pacing(pacing)
@@ -54,7 +54,7 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
                             boxed![ReceiveData::new(TRANSFER_AMOUNT)]
                         ),
                         TailDrop::dsl_downlink(),
-                        Delay::new(ZERO..JITTER),
+                        RandomDelay::new(ZERO..JITTER),
                     ];
                     let mut sim = Simulator::new(label, nodes);
                     if let Some(seed) = &seed {
@@ -62,7 +62,7 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
                     }
                     sim.setup()
                 },
-                ReadySimulator::run,
+                black_box(ReadySimulator::run),
                 SmallInput,
             );
         });

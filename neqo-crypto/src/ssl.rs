@@ -27,8 +27,6 @@ mod SSLOption {
     include!(concat!(env!("OUT_DIR"), "/nss_sslopt.rs"));
 }
 
-// I clearly don't understand how bindgen operates.
-// pub enum PLArenaPool {}
 pub enum PRFileDesc {}
 
 // Remap some constants.
@@ -118,6 +116,11 @@ experimental_api!(SSL_GetResumptionTokenInfo(
 
 experimental_api!(SSL_DestroyResumptionTokenInfo(
     info: *mut SSLResumptionTokenInfo,
+));
+
+experimental_api!(SSL_SetCertificateCompressionAlgorithm(
+    fd: *mut PRFileDesc,
+    t: SSLCertificateCompressionAlgorithm,
 ));
 
 #[cfg(test)]

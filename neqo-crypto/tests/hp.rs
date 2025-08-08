@@ -9,16 +9,15 @@ use neqo_crypto::{
         Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
         TLS_VERSION_1_3,
     },
-    hkdf,
-    hp::HpKey,
+    hkdf, hp,
 };
 use test_fixture::fixture_init;
 
-fn make_hp(cipher: Cipher) -> HpKey {
+fn make_hp(cipher: Cipher) -> hp::Key {
     fixture_init();
     let ikm = hkdf::import_key(TLS_VERSION_1_3, &[0; 16]).expect("import IKM");
     let prk = hkdf::extract(TLS_VERSION_1_3, cipher, None, &ikm).expect("extract works");
-    HpKey::extract(TLS_VERSION_1_3, cipher, &prk, "hp").expect("extract label works")
+    hp::Key::extract(TLS_VERSION_1_3, cipher, &prk, "hp").expect("extract label works")
 }
 
 fn hp_test(cipher: Cipher, expected: &[u8]) {
@@ -26,7 +25,11 @@ fn hp_test(cipher: Cipher, expected: &[u8]) {
     let mask = hp.mask(&[0; 16]).expect("should produce a mask");
     assert_eq!(mask, expected, "first invocation should be correct");
 
-    #[expect(clippy::redundant_clone, reason = "This is deliberate.")]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::redundant_clone,
+        reason = "False positive; remove once MSRV >= 1.88."
+    )]
     let hp2 = hp.clone();
     let mask = hp2.mask(&[0; 16]).expect("clone produces mask");
     assert_eq!(mask, expected, "clone should produce the same mask");

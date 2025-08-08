@@ -20,15 +20,16 @@ permissions:
 
 jobs:
   check-vm:
+    name: Run checks for VM-only platforms
     if: github.actor != 'dependabot[bot]'
     strategy:
       fail-fast: false
       matrix:
         os: [
               freebsd,
-              # openbsd, # FIXME: Re-enable once their NSS package is new enough.
-              # netbsd, # FIXME: NSS package is new enough, but test_fixture::fixture_init dies with `NssError { name: "SEC_ERROR_LEGACY_DATABASE", code: -8015, desc: "The certificate/key database is in an old, unsupported format." }`
-              # solaris # FIXME: Re-enable once their NSS package is new enough.
+              # openbsd, # FIXME: libfuzzer/FuzzerPlatform.h:72:2: error: "Support for your platform has not been implemented"
+              # netbsd, # FIXME: NSS package is too old.
+              # solaris # FIXME: NSS package is too old.
             ]
     runs-on: ubuntu-24.04
 
@@ -43,7 +44,7 @@ jobs:
       - run: curl -o rustup.sh --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
 
       - if: ${{ matrix.os == 'freebsd' }}
-        uses: vmactions/freebsd-vm@8873d98fd1413b5977cb2f7348fe329775159892 # v1.1.9
+        uses: vmactions/freebsd-vm@966989c456d41351f095a421f60e71342d3bce41 # v1.2.1
         with:
           usesh: true
           envs: "CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG GITHUB_ACTIONS"
@@ -69,13 +70,14 @@ jobs:
             rm -rf target # Don't sync this back to host
 
       - if: ${{ matrix.os == 'openbsd' }}
-        uses: vmactions/openbsd-vm@7ac70b6de6f33efc74a90c1964afa3bcf0ee4401 # v1.1.6
+        uses: vmactions/openbsd-vm@0d65352eee1508bab7cb12d130536d3a556be487 # v1.1.8
         with:
           usesh: true
           envs: "CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG GITHUB_ACTIONS"
           prepare: | # This executes as root
             set -e
-            pkg_add rust rust-clippy llvm-16.0.6p30 nss pkgconf # rustup doesn't support OpenBSD at all
+            # TODO: Is there a way to not pin the version of llvm? -z to pkg_add doesn't work.
+            pkg_add rust rust-clippy llvm-19.1.7p3 nss pkgconf # rustup doesn't support OpenBSD at all
           run: | # This executes as user
             set -e
             # FIXME: We're only comparing the NSS minor version here.
@@ -85,14 +87,14 @@ jobs:
               echo "System NSS package too old (minorversion $NSS_MINOR_VERSION < $NSS_MINIMUM_VERSION); skipping checks"
               exit 0
             fi
-            export LIBCLANG_PATH=/usr/local/llvm16/lib
+            export LIBCLANG_PATH=/usr/local/llvm19/lib
             cargo check --locked --all-targets
             cargo clippy -- -D warnings
             # FIXME: No profiler support in openbsd currently, error is:
             # > error[E0463]: can't find crate for `profiler_builtins`
             # > = note: the compiler may have been built without the profiler runtime
-            # export LLVM_COV=/usr/local/llvm16/bin/llvm-cov
-            # export LLVM_PROFDATA=/usr/local/llvm16/bin/llvm-profdata
+            # export LLVM_COV=/usr/local/llvm19/bin/llvm-cov
+            # export LLVM_PROFDATA=/usr/local/llvm19/bin/llvm-profdata
             # cargo install cargo-llvm-cov --locked
             # cargo llvm-cov test --locked --no-fail-fast --lcov --output-path lcov.info
             cargo test --locked --no-fail-fast # Remove this once profiler is supported
@@ -133,7 +135,7 @@ jobs:
             rm -rf target # Don't sync this back to host
 
       - if: ${{ matrix.os == 'solaris' }}
-        uses: vmactions/solaris-vm@cc8f82fa1a7cc746153ec3f71bf11f311f16e225 # v1.1.1
+        uses: vmactions/solaris-vm@170f1f96f376cf7467cc41627e0c7590932fccaa # v1.1.4
         with:
           release: "11.4-gcc"
           usesh: true
@@ -163,7 +165,7 @@ jobs:
             cargo test --locked --no-fail-fast --release
             rm -rf target # Don't sync this back to host
 
-      - uses: codecov/codecov-action@0565863a31f2c772f9f0395002a31e3f06189574 # v5.4.0
+      - uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24 # v5.4.3
         with:
           files: lcov.info
           fail_ci_if_error: false

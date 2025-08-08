@@ -11,20 +11,16 @@ use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
 use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
 use neqo_common::{qtrace, Datagram, Decoder, Encoder, Role};
 use neqo_crypto::{
-    generate_ech_keys, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
+    generate_ech_keys, Aead, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
 };
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
-    version::WireVersion,
-    CloseReason, Connection, ConnectionParameters, Error, Output, State, StreamType, Version,
-    MIN_INITIAL_PACKET_SIZE,
+    version, CloseReason, Connection, ConnectionParameters, Error, Output, State, StreamType,
+    Version, MIN_INITIAL_PACKET_SIZE,
 };
 use test_fixture::{
     assertions, datagram, default_client,
-    header_protection::{
-        apply_header_protection, decode_initial_header, initial_aead_and_hp,
-        remove_header_protection,
-    },
+    header_protection::{self, decode_initial_header, initial_aead_and_hp},
     new_client, now, split_datagram, CountingConnectionIdGenerator,
 };
 
@@ -438,7 +434,7 @@ fn bad_client_initial() {
     let dgram = client.process_output(now()).dgram().expect("a datagram");
     let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram, Role::Client).unwrap();
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
-    let (fixed_header, pn) = remove_header_protection(&hp, header, payload);
+    let (fixed_header, pn) = header_protection::remove(&hp, header, payload);
     let payload = &payload[(fixed_header.len() - header.len())..];
 
     let mut plaintext_buf = vec![0; dgram.len()];
@@ -457,11 +453,11 @@ fn bad_client_initial() {
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + 1).unwrap())
+        .encode_varint(u64::try_from(payload_enc.len() + Aead::expansion() + 1).unwrap())
         .encode_byte(u8::try_from(pn).unwrap());
 
     let mut ciphertext = header_enc.as_ref().to_vec();
-    ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
+    ciphertext.resize(header_enc.len() + payload_enc.len() + Aead::expansion(), 0);
     let v = aead
         .encrypt(
             pn,
@@ -474,7 +470,7 @@ fn bad_client_initial() {
     // Pad with zero to get up to MIN_INITIAL_PACKET_SIZE.
     ciphertext.resize(MIN_INITIAL_PACKET_SIZE, 0);
 
-    apply_header_protection(
+    header_protection::apply(
         &hp,
         &mut ciphertext,
         (header_enc.len() - 1)..header_enc.len(),
@@ -503,9 +499,13 @@ fn bad_client_initial() {
     assert_ne!(delay, Duration::from_secs(0));
     assert!(matches!(
         *client.state(),
-        State::Draining { error: CloseReason::Transport(Error::PeerError(code)), .. } if code == Error::ProtocolViolation.code()
+        State::Draining { error: CloseReason::Transport(Error::Peer(code)), .. } if code == Error::ProtocolViolation.code()
     ));
 
+    #[expect(
+        clippy::iter_over_hash_type,
+        reason = "OK to loop over active connections in an undefined order."
+    )]
     for server in server.active_connections() {
         assert_eq!(
             *server.borrow().state(),
@@ -526,7 +526,7 @@ fn bad_client_initial_connection_close() {
     let dgram = client.process_output(now()).dgram().expect("a datagram");
     let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram, Role::Client).unwrap();
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
-    let (_, pn) = remove_header_protection(&hp, header, payload);
+    let (_, pn) = header_protection::remove(&hp, header, payload);
 
     let mut payload_enc = Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE);
     payload_enc.encode(&[0x1c, 0x01, 0x00, 0x00]); // Add a CONNECTION_CLOSE frame.
@@ -539,11 +539,11 @@ fn bad_client_initial_connection_close() {
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + 1).unwrap())
+        .encode_varint(u64::try_from(payload_enc.len() + Aead::expansion() + 1).unwrap())
         .encode_byte(u8::try_from(pn).unwrap());
 
     let mut ciphertext = header_enc.as_ref().to_vec();
-    ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
+    ciphertext.resize(header_enc.len() + payload_enc.len() + Aead::expansion(), 0);
     let v = aead
         .encrypt(
             pn,
@@ -556,7 +556,7 @@ fn bad_client_initial_connection_close() {
     // Pad with zero to get up to MIN_INITIAL_PACKET_SIZE.
     ciphertext.resize(MIN_INITIAL_PACKET_SIZE, 0);
 
-    apply_header_protection(
+    header_protection::apply(
         &hp,
         &mut ciphertext,
         (header_enc.len() - 1)..header_enc.len(),
@@ -602,7 +602,9 @@ fn version_negotiation_ignored() {
     assert_eq!(dec.decode_vec(1).expect("VN SCID"), &d_cid[..]);
     let mut found = false;
     while dec.remaining() > 0 {
-        let v = dec.decode_uint::<WireVersion>().expect("supported version");
+        let v = dec
+            .decode_uint::<version::Wire>()
+            .expect("supported version");
         found |= v == Version::default().wire_version();
     }
     assert!(found, "valid version not found");
@@ -765,7 +767,7 @@ fn can_create_streams(c: &mut Connection, t: StreamType, n: u64) {
     for _ in 0..n {
         c.stream_create(t).unwrap();
     }
-    assert_eq!(c.stream_create(t), Err(Error::StreamLimitError));
+    assert_eq!(c.stream_create(t), Err(Error::StreamLimit));
 }
 
 #[test]
@@ -891,4 +893,47 @@ fn has_active_connections() {
     _ = server.process(initial.dgram(), now()).dgram();
 
     assert!(server.has_active_connections());
+}
+
+/// If a server has to react immediately to a datagram in a batch, it will
+/// service the remaining datagrams in consecutive calls.
+#[test]
+fn saved_datagrams() {
+    let mut server = default_server();
+    let mut client = default_client();
+
+    // Any packet will do, but let's make something that looks real.
+    let damaged_dgram = {
+        let dgram = client.process_output(now()).dgram().expect("a datagram");
+        let mut input = dgram.to_vec();
+        input[1] ^= 0x12;
+        Datagram::new(
+            dgram.source(),
+            dgram.destination(),
+            dgram.tos(),
+            input.clone(),
+        )
+    };
+
+    // Server sends a version negotation immediately. Saves second input datagram for later.
+    server
+        .process_multiple(
+            vec![damaged_dgram.clone(), damaged_dgram.clone()],
+            now(),
+            1.try_into().expect("1>0"),
+        )
+        .dgram()
+        .expect("first vn");
+
+    // Server processes the second datagram and saves the third.
+    server
+        .process_multiple(vec![damaged_dgram], now(), 1.try_into().expect("1>0"))
+        .dgram()
+        .expect("second vn");
+
+    // Server processes the third datagram.
+    server
+        .process_multiple(Vec::<Datagram>::new(), now(), 1.try_into().expect("1>0"))
+        .dgram()
+        .expect("third vn");
 }

@@ -7,7 +7,7 @@
 #![expect(clippy::unwrap_used, reason = "This is test code.")]
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     fmt::{self, Debug},
     ops::Range,
     time::{Duration, Instant},
@@ -20,13 +20,13 @@ use super::{Node, Rng};
 
 /// An iterator that shares a `Random` instance and produces uniformly
 /// random `Duration`s within a specified range.
-pub struct RandomDelay {
+pub struct RandomDelayIter {
     start: Duration,
     max: u64,
     rng: Option<Rng>,
 }
 
-impl RandomDelay {
+impl RandomDelayIter {
     /// Make a new random `Duration` generator.  This panics if the range provided
     /// is inverted (i.e., `bounds.start > bounds.end`), or spans 2^64
     /// or more nanoseconds.
@@ -51,16 +51,16 @@ impl RandomDelay {
     }
 }
 
-pub struct Delay {
-    random: RandomDelay,
+pub struct RandomDelay {
+    random: RandomDelayIter,
     queue: BTreeMap<Instant, Datagram>,
 }
 
-impl Delay {
+impl RandomDelay {
     #[must_use]
     pub fn new(bounds: Range<Duration>) -> Self {
         Self {
-            random: RandomDelay::new(bounds),
+            random: RandomDelayIter::new(bounds),
             queue: BTreeMap::default(),
         }
     }
@@ -76,7 +76,7 @@ impl Delay {
     }
 }
 
-impl Node for Delay {
+impl Node for RandomDelay {
     fn init(&mut self, rng: Rng, _now: Instant) {
         self.random.set_rng(rng);
     }
@@ -88,6 +88,58 @@ impl Node for Delay {
         if let Some((&k, _)) = self.queue.range(..=now).next() {
             Output::Datagram(self.queue.remove(&k).unwrap())
         } else if let Some(&t) = self.queue.keys().next() {
+            Output::Callback(t - now)
+        } else {
+            Output::None
+        }
+    }
+}
+
+impl Debug for RandomDelay {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("random_delay")
+    }
+}
+
+pub struct Delay {
+    delay: Duration,
+    queue: BTreeMap<Instant, VecDeque<Datagram>>,
+}
+
+impl Delay {
+    #[must_use]
+    pub fn new(delay: Duration) -> Self {
+        Self {
+            delay,
+            queue: BTreeMap::default(),
+        }
+    }
+
+    fn insert(&mut self, d: Datagram, now: Instant) {
+        self.queue.entry(now + self.delay).or_default().push_back(d);
+    }
+}
+
+impl Node for Delay {
+    fn init(&mut self, _rng: Rng, _now: Instant) {}
+
+    fn process(&mut self, d: Option<Datagram>, now: Instant) -> Output {
+        if let Some(dgram) = d {
+            self.insert(dgram, now);
+        }
+
+        while let Some((&k, _)) = self.queue.range(..=now).next() {
+            let same_time_queue = self.queue.get_mut(&k).unwrap();
+            if let Some(d) = same_time_queue.pop_front() {
+                if same_time_queue.is_empty() {
+                    self.queue.remove(&k);
+                }
+
+                return Output::Datagram(d);
+            }
+        }
+
+        if let Some(&t) = self.queue.keys().next() {
             Output::Callback(t - now)
         } else {
             Output::None

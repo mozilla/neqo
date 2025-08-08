@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   mutants:
+    name: Find mutants
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
     steps:
@@ -43,14 +44,14 @@ jobs:
         run: |
           git diff "origin/$BASE_REF".. > pr.diff
           set -o pipefail
-          cargo mutants --test-tool=nextest --no-shuffle -j 2 -vV --in-diff pr.diff | tee results.txt || true
+          cargo mutants --no-shuffle -j 2 -vV --in-diff pr.diff | tee results.txt || true
           echo 'title=Incremental Mutants' >> "$GITHUB_OUTPUT"
 
       - name: Find mutants
         if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
           set -o pipefail
-          cargo mutants --test-tool=nextest -vV --in-place | tee results.txt || true
+          cargo mutants -vV --in-place | tee results.txt || true
           echo 'title=All Mutants' >> "$GITHUB_OUTPUT"
 
       - name: Post step summary
@@ -65,7 +66,7 @@ jobs:
             echo '```'
           } > "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: mutants.out
           path: mutants.out

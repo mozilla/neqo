@@ -22,17 +22,18 @@ defaults:
 
 jobs:
   sanitize:
+    name: Sanitize
     if: github.actor != 'dependabot[bot]'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14] # No Windows support for sanitizers.
+        os: [ubuntu-24.04, macos-15] # No Windows support for sanitizers.
         sanitizer: [address, thread, leak] # TODO: memory
         exclude:
           # Memory and leak sanitizers are not supported on macOS.
-          - os: macos-14
+          - os: macos-15
             sanitizer: leak
-          # - os: macos-14
+          # - os: macos-15
           #   sanitizer: memory
     runs-on: ${{ matrix.os }}
 
@@ -45,7 +46,6 @@ jobs:
         with:
           version: nightly
           components: rust-src
-          tools: cargo-nextest
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -61,13 +61,15 @@ jobs:
           RUSTDOCFLAGS: "-Z sanitizer=${{ matrix.sanitizer }}"
           ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
           RUST_BACKTRACE: 1
+          OS: ${{ matrix.os }}
+          SANITIZER: ${{ matrix.sanitizer }}
         run: |
           # Append to RUSTFLAGS, which may already be set by the Rust action.
-          export RUSTFLAGS="-Z sanitizer=${{ matrix.sanitizer }} $RUSTFLAGS"
-          if [ "${{ matrix.os }}" = "ubuntu-24.04" ]; then
+          export RUSTFLAGS="-Z sanitizer=$SANITIZER $RUSTFLAGS"
+          if [ "$OS" = "ubuntu-24.04" ]; then
             sudo apt-get install -y --no-install-recommends llvm
             TARGET="x86_64-unknown-linux-gnu"
-          elif [ "${{ matrix.os }}" = "macos-14" ]; then
+          elif [ "$OS" = "macos-15" ]; then
             # llvm-symbolizer (as part of llvm) is installed by default on macOS runners
             TARGET="aarch64-apple-darwin"
             # Suppress non-neqo leaks on macOS. TODO: Check occasionally if these are still needed.
@@ -79,11 +81,11 @@ jobs:
             PWD=$(pwd)
             export LSAN_OPTIONS="suppressions=$PWD/suppressions.txt"
           fi
-          cargo nextest run --locked -Z build-std --features ci --profile ci --target "$TARGET"
+          cargo test --locked -Z build-std --features ci --target "$TARGET"
 
       - name: Save simulation seeds artifact
         if: ${{ env.DUMP_SIMULATION_SEEDS }}
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: simulation-seeds-${{ matrix.os }}-sanitizer-${{ matrix.sanitizer }}
           path: ${{ env.DUMP_SIMULATION_SEEDS }}

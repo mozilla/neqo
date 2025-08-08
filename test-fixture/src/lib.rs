@@ -9,7 +9,7 @@
 use std::{
     cell::{OnceCell, RefCell},
     cmp::max,
-    fmt::Display,
+    fmt::{self, Display, Formatter},
     io::{self, Cursor, Result, Write},
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -22,14 +22,14 @@ use std::{
 use neqo_common::{
     event::Provider as _,
     hex,
-    qlog::{new_trace, NeqoQlog},
-    qtrace, Datagram, Decoder, IpTosEcn, Role,
+    qlog::{new_trace, Qlog},
+    qtrace, Datagram, Decoder, Ecn, Role,
 };
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
 use neqo_transport::{
-    version::WireVersion, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder,
-    ConnectionIdGenerator, ConnectionIdRef, ConnectionParameters, State, Version,
+    version, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
+    ConnectionIdRef, ConnectionParameters, State, Version,
 };
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 
@@ -38,7 +38,16 @@ pub mod header_protection;
 pub mod sim;
 
 /// The path for the database used in tests.
-pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
+///
+/// Initialized via the `NSS_DB_PATH` environment variable. If that is not set,
+/// it defaults to the `db` directory in the current crate. If the environment
+/// variable is set to `$ARGV0`, it will be initialized to the directory of the
+/// current executable.
+pub const NSS_DB_PATH: &str = if let Some(dir) = option_env!("NSS_DB_PATH") {
+    dir
+} else {
+    concat!(env!("CARGO_MANIFEST_DIR"), "/db")
+};
 
 /// Initialize the test fixture.  Only call this if you aren't also calling a
 /// fixture function that depends on setup.  Other functions in the fixture
@@ -48,7 +57,14 @@ pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
 ///
 /// When the NSS initialization fails.
 pub fn fixture_init() {
-    init_db(NSS_DB_PATH).unwrap();
+    if NSS_DB_PATH == "$ARGV0" {
+        let mut current_exe = std::env::current_exe().unwrap();
+        current_exe.pop();
+        let nss_db_path = current_exe.to_str().unwrap();
+        init_db(nss_db_path).unwrap();
+    } else {
+        init_db(NSS_DB_PATH).unwrap();
+    }
 }
 
 // This needs to be > 2ms to avoid it being rounded to zero.
@@ -98,7 +114,7 @@ pub const DEFAULT_ADDR_V4: SocketAddr = addr_v4();
 // Create a default datagram with the given data.
 #[must_use]
 pub fn datagram(data: Vec<u8>) -> Datagram {
-    Datagram::new(DEFAULT_ADDR, DEFAULT_ADDR, IpTosEcn::Ect0.into(), data)
+    Datagram::new(DEFAULT_ADDR, DEFAULT_ADDR, Ecn::Ect0.into(), data)
 }
 
 /// Create a default socket address.
@@ -156,7 +172,6 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 #[must_use]
 pub fn new_client(params: ConnectionParameters) -> Connection {
     fixture_init();
-    let (log, _contents) = new_neqo_qlog();
     let mut client = Connection::new_client(
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
@@ -167,7 +182,23 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
         now(),
     )
     .expect("create a client");
-    client.set_qlog(log);
+
+    if let Ok(dir) = std::env::var("QLOGDIR") {
+        let cid = client.odcid().unwrap();
+        client.set_qlog(
+            Qlog::enabled_with_file(
+                dir.parse().unwrap(),
+                Role::Client,
+                Some("Neqo client qlog".to_string()),
+                Some("Neqo client qlog".to_string()),
+                format!("client-{cid}"),
+            )
+            .unwrap(),
+        );
+    } else {
+        let (log, _contents) = new_neqo_qlog();
+        client.set_qlog(log);
+    }
     client
 }
 
@@ -186,7 +217,10 @@ pub fn default_server() -> Connection {
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server_h3() -> Connection {
-    new_server(DEFAULT_ALPN_H3, ConnectionParameters::default())
+    new_server(
+        DEFAULT_ALPN_H3,
+        ConnectionParameters::default().pacing(false),
+    )
 }
 
 /// Create a transport server with a configuration.
@@ -195,9 +229,8 @@ pub fn default_server_h3() -> Connection {
 ///
 /// If this doesn't work.
 #[must_use]
-pub fn new_server(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection {
+pub fn new_server<A: AsRef<str>>(alpn: &[A], params: ConnectionParameters) -> Connection {
     fixture_init();
-    let (log, _contents) = new_neqo_qlog();
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
         alpn,
@@ -205,7 +238,21 @@ pub fn new_server(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Con
         params.ack_ratio(255),
     )
     .expect("create a server");
-    c.set_qlog(log);
+    if let Ok(dir) = std::env::var("QLOGDIR") {
+        c.set_qlog(
+            Qlog::enabled_with_file(
+                dir.parse().unwrap(),
+                Role::Server,
+                Some("Neqo server qlog".to_string()),
+                Some("Neqo server qlog".to_string()),
+                "server".to_string(),
+            )
+            .unwrap(),
+        );
+    } else {
+        let (log, _contents) = new_neqo_qlog();
+        c.set_qlog(log);
+    }
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
         .expect("enable 0-RTT");
     c
@@ -335,7 +382,7 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
     }
     let mut dec = Decoder::from(buf);
     let first: u8 = dec.decode_uint().unwrap();
-    let v = Version::try_from(dec.decode_uint::<WireVersion>().unwrap()).unwrap(); // Version.
+    let v = Version::try_from(dec.decode_uint::<version::Wire>().unwrap()).unwrap(); // Version.
     let (initial_type, retry_type) = if v == Version::Version2 {
         (0b1001_0000, 0b1000_0000)
     } else {
@@ -385,21 +432,21 @@ impl Write for SharedVec {
 }
 
 impl Display for SharedVec {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(
             &String::from_utf8(
                 self.buf
                     .lock()
-                    .map_err(|_| std::fmt::Error)?
+                    .map_err(|_| fmt::Error)?
                     .clone()
                     .into_inner(),
             )
-            .map_err(|_| std::fmt::Error)?,
+            .map_err(|_| fmt::Error)?,
         )
     }
 }
 
-/// Returns a pair of new enabled `NeqoQlog` that is backed by a [`Vec<u8>`]
+/// Returns a pair of new enabled `Qlog` that is backed by a [`Vec<u8>`]
 /// together with a [`Cursor<Vec<u8>>`] that can be used to read the contents of
 /// the log.
 ///
@@ -407,11 +454,11 @@ impl Display for SharedVec {
 ///
 /// Panics if the log cannot be created.
 #[must_use]
-pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
+pub fn new_neqo_qlog() -> (Qlog, SharedVec) {
     let buf = SharedVec::default();
 
     if cfg!(feature = "bench") {
-        return (NeqoQlog::disabled(), buf);
+        return (Qlog::disabled(), buf);
     }
 
     let mut trace = new_trace(Role::Client);
@@ -428,7 +475,7 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
         EventImportance::Base,
         Box::new(buf),
     );
-    let log = NeqoQlog::enabled(streamer, PathBuf::from(""));
+    let log = Qlog::enabled(streamer, PathBuf::from(""));
     (log.expect("to be able to write to new log"), contents)
 }
 
@@ -437,3 +484,22 @@ pub const EXPECTED_LOG_HEADER: &str = concat!(
     r#"{"qlog_version":"0.3","qlog_format":"JSON-SEQ","trace":{"vantage_point":{"name":"neqo-Client","type":"client"},"title":"neqo-Client trace","description":"neqo-Client trace","configuration":{"time_offset":0.0},"common_fields":{"reference_time":0.0,"time_format":"relative"}}}"#,
     "\n"
 );
+
+/// Take a valid ECH config (as bytes) and produce a damaged version of the same.
+///
+/// This will appear valid, but it will contain a different ECH config ID.
+/// If given to a client, this should trigger an ECH retry.
+/// This only damages the config ID, which works as we only support one on our server.
+///
+/// # Panics
+/// When the provided `config` has the wrong version.
+#[must_use]
+pub fn damage_ech_config(config: &[u8]) -> Vec<u8> {
+    let mut cfg = config.to_owned();
+    // Ensure that the version is correct.
+    assert_eq!(cfg[2], 0xfe);
+    assert_eq!(cfg[3], 0x0d);
+    // Change the config_id so that the server doesn't recognize it.
+    cfg[6] ^= 0x94;
+    cfg
+}

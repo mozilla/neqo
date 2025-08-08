@@ -6,6 +6,8 @@
 
 #![expect(clippy::unwrap_used, reason = "OK in a bench.")]
 
+use std::{hint::black_box, iter::repeat_with};
+
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server, Priority};
@@ -35,19 +37,19 @@ fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server, is_hands
 }
 
 fn use_streams(client: &mut Http3Client, server: &mut Http3Server, streams: usize, data: &[u8]) {
-    let stream_ids = (0..streams)
-        .map(|_| {
-            client
-                .fetch(
-                    now(),
-                    "GET",
-                    &("https", DEFAULT_SERVER_NAME, "/"),
-                    &[],
-                    Priority::default(),
-                )
-                .unwrap()
-        })
-        .collect::<Vec<_>>();
+    let stream_ids = repeat_with(|| {
+        client
+            .fetch(
+                now(),
+                "GET",
+                &("https", DEFAULT_SERVER_NAME, "/"),
+                &[],
+                Priority::default(),
+            )
+            .unwrap()
+    })
+    .take(streams)
+    .collect::<Vec<_>>();
     exchange_packets(client, server, false);
     for stream_id in &stream_ids {
         client.send_data(*stream_id, data).unwrap();
@@ -76,21 +78,18 @@ fn connect() -> (Http3Client, Http3Server) {
 fn criterion_benchmark(c: &mut Criterion) {
     fixture_init();
 
-    for (streams, data_size) in [
-        (1, 1),
-        (1000, 1),
-        (10000, 1),
-        (1, 1000),
-        (100, 1000),
-        (1000, 1000),
-    ] {
+    for (streams, data_size) in [(1_000, 1), (1_000, 1_000)] {
         let mut group = c.benchmark_group(format!("{streams} streams of {data_size} bytes"));
+
+        // High variance benchmark. Increase default sample size (100).
+        group.sample_size(500);
+
         group.bench_function("multistream", |b| {
             let data = vec![0; data_size];
             b.iter_batched_ref(
                 connect,
-                |(client, server)| use_streams(client, server, streams, &data),
-                BatchSize::PerIteration,
+                |_| black_box(|(client, server)| use_streams(client, server, streams, &data)),
+                BatchSize::SmallInput,
             );
         });
         group.finish();

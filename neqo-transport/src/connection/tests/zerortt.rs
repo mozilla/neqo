@@ -12,7 +12,7 @@ use test_fixture::{assertions, now};
 
 use super::{
     super::Connection, connect, default_client, default_server, exchange_ticket, new_server,
-    resumed_server, CountingConnectionIdGenerator,
+    resumed_server, CountingConnectionIdGenerator, Output,
 };
 use crate::{
     events::ConnectionEvent, ConnectionParameters, Error, StreamType, Version,
@@ -340,4 +340,90 @@ fn zero_rtt_loss_accepted() {
             "rejected 0-RTT after {i} extra dropped packets"
         );
     }
+}
+
+/// Before the first ACK within a packet space, there should be no time
+/// threshold based loss detection:
+///
+/// > Once a later packet within the same packet number space has been
+/// > acknowledged, an endpoint SHOULD declare an earlier packet lost if it was
+/// > sent a threshold amount of time in the past.
+///
+/// <https://www.rfc-editor.org/rfc/rfc9002.html#section-6.1.2>
+///
+/// Previously Neqo client would prematurely declare 0-RTT stream data frame as
+/// lost based on time threshold.
+///
+/// See <https://github.com/mozilla/neqo/issues/2476> for details.
+#[test]
+fn zero_rtt_no_time_threshold_loss_detection_before_first_ack() {
+    const RTT: Duration = Duration::from_millis(4);
+    let mut now = now();
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now);
+
+    let mut client = default_client();
+    client
+        .enable_resumption(now, token)
+        .expect("should set token");
+    let mut server = resumed_server(&client);
+
+    // Send ClientHello.
+    let client_hs = client.process_output(now);
+    let client_hs2 = client.process_output(now);
+    assert!(client_hs.as_dgram_ref().is_some() && client_hs2.as_dgram_ref().is_some());
+
+    // Attempt sending 0-RTT stream data.
+    let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
+    // Blocked due to pacing.
+    let delay = client.process_output(now).callback();
+    // Wait for pacer, then send.
+    let client_0rtt = client.process_output(now + delay);
+    assert!(client_0rtt.as_dgram_ref().is_some());
+
+    now += RTT / 2;
+
+    // Receive ClientHello.
+    server.process_input(client_hs.dgram().unwrap(), now);
+    let server_hs = server.process(client_hs2.dgram(), now);
+    assert!(server_hs.as_dgram_ref().is_some()); // ServerHello, etc...
+
+    now += delay;
+
+    // Receive 0-RTT stream data.
+    let server_process_0rtt = server.process(client_0rtt.dgram(), now);
+    assert!(server_process_0rtt.as_dgram_ref().is_some());
+
+    let server_stream_id = server
+        .events()
+        .find_map(|evt| match evt {
+            ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
+            _ => None,
+        })
+        .expect("should have received a new stream event");
+    assert_eq!(client_stream_id, server_stream_id.as_u64());
+
+    now += RTT / 2;
+
+    // Process Server packets. Note that this will not contain an ACK for the
+    // 0-RTT stream data, given that the server does not yet have 1-RTT keys and
+    // it will delay the ACK.
+    let _client_pkt1 = client.process(server_hs.dgram(), now);
+    let _client_pkt2 = client.process(server_process_0rtt.dgram(), now);
+    assert!(matches!(client.process_output(now), Output::Callback(_)));
+
+    // Progress time by half an RTT. Thus ~1.5 RTT have elapsed since the client
+    // sent the 0-RTT application data. ~1.5 RTT is past the time threshold
+    // based loss detection (~ 9/8 RTT).
+    now += RTT / 2;
+
+    // Despite the missing ACK from the server, expect client to neither declare
+    // 0-RTT stream data lost, nor attempt to retransmit it. Given that thus far
+    // no Application space ACK has been received, time threshold based loss
+    // detection does not yet apply.
+    assert!(client.process_output(now).dgram().is_none());
+    assert_eq!(client.stats().lost, 0);
 }

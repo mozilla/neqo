@@ -5,7 +5,7 @@
 // except according to those terms.
 
 #[derive(Debug, Copy, Clone)]
-pub struct HuffmanTableEntry {
+pub struct Entry {
     pub len: u8,
     pub val: u32,
 }
@@ -13,13 +13,13 @@ pub struct HuffmanTableEntry {
 macro_rules! huffman_table {
     [$($v:expr => $l:expr),+ $(,)?] => {
         &[
-            $(HuffmanTableEntry { len: $l, val: $v }),+
+            $(Entry { len: $l, val: $v }),+
         ]
     };
 }
 
 // Table contains the raw HPACK Huffman table
-pub const HUFFMAN_TABLE: &[HuffmanTableEntry] = huffman_table![
+pub const HUFFMAN_TABLE: &[Entry] = huffman_table![
     0x1ff8 => 13,
     0x007f_ffd8 => 23,
     0x0fff_ffe2 => 28,

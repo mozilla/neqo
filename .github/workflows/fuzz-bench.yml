@@ -14,7 +14,14 @@ permissions:
 
 jobs:
   fuzz-bench:
-    runs-on: ubuntu-24.04
+    name: Check that the fuzz and bench targets work
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15] # FIXME: ubuntu-24.04-arm has issues
+        check: [fuzz, bench]
+    runs-on: ${{ matrix.os }}
+
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -23,7 +30,7 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: nightly
-          tools: cargo-fuzz
+          tools: ${{ matrix.check == 'fuzz' && 'cargo-fuzz' || ''}}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -33,6 +40,14 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-      # Check that the fuzz and bench targets build
-      - run: cargo fuzz check
-      - run: cargo bench --features bench --no-run
+      - if: ${{ matrix.check == 'fuzz' }}
+        env:
+          UBUNTU: ${{ startsWith(matrix.os, 'ubuntu') }}
+        run: |
+          cargo fuzz build --dev
+          for fuzzer in $(cargo fuzz list); do
+            cargo fuzz run --dev --sanitizer none "$fuzzer" -- -runs=1
+          done
+
+      - if: ${{ matrix.check == 'bench' }}
+        run: cargo bench --features bench --profile dev --  --profile-time 1

@@ -6,12 +6,13 @@ on:
     branches: ["main"]
   merge_group:
   workflow_dispatch:
-    inputs:
-      run_benchmarks:
-        description: 'Run benchmarks'
-        type: boolean
-        required: false
-        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUST_TEST_TIME_UNIT: 10,30
+  RUST_TEST_TIME_INTEGRATION: 10,30
+  RUST_TEST_TIME_DOCTEST: 10,30
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -26,6 +27,7 @@ defaults:
 
 jobs:
   toolchains:
+    name: Determine toolchains
     runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
@@ -41,17 +43,44 @@ jobs:
           echo "toolchains=[\"$msrv\", \"stable\", \"nightly\"]" >> "$GITHUB_OUTPUT"
 
   check:
+    name: Run checks
     needs: toolchains
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, windows-2025]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
         rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
         type: [debug]
+        # Include some dynamically-linked release builds, to check that that works on all platforms.
         include:
           - os: ubuntu-24.04
             rust-toolchain: stable
             type: release
+          - os: macos-15
+            rust-toolchain: stable
+            type: release
+          - os: windows-2025
+            rust-toolchain: stable
+            type: release
+          # TODO: Remove once Neqo's MSRV is increased to 1.82.0. NSS build
+          # fails on Windows with Rust 1.81.0. Firefox does not use Rust 1.81.0
+          # (except for testing, see
+          # https://bugzilla.mozilla.org/show_bug.cgi?id=1968057#c1). Firefox
+          # uses Rust 1.82.0. Thus this is not worth fixing. Let's explicitly
+          # use Rust 1.82.0 here for now.
+          - os: windows-2025
+            rust-toolchain: 1.82.0
+            type: debug
+        exclude:
+          # TODO: Remove once Neqo's MSRV is increased to 1.82.0. NSS build
+          # fails on Windows with Rust 1.81.0. Firefox does not use Rust 1.81.0
+          # (except for testing, see
+          # https://bugzilla.mozilla.org/show_bug.cgi?id=1968057#c1). Firefox
+          # uses Rust 1.82.0. Thus this is not worth fixing. Let's explicitly
+          # use Rust 1.82.0 here for now.
+          - os: windows-2025
+            rust-toolchain: 1.81.0
+            type: debug
     env:
       BUILD_TYPE: ${{ matrix.type == 'release' && '--release' || '' }}
     runs-on: ${{ matrix.os }}
@@ -64,8 +93,8 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
-          components: ${{ matrix.rust-toolchain == 'nightly' && 'llvm-tools' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'nightly' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
+          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }}
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -84,15 +113,18 @@ jobs:
         env:
           RUST_LOG: trace
           RUST_BACKTRACE: 1
+          RUST_TEST_TIME_UNIT: 10,30
+          RUST_TEST_TIME_INTEGRATION: 10,30
+          RUST_TEST_TIME_DOCTEST: 10,30
           TOOLCHAIN: ${{ matrix.rust-toolchain }}
         run: |
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
-          if [ "$TOOLCHAIN" == "nightly" ]; then
-            cargo llvm-cov nextest $BUILD_TYPE --locked --mcdc --include-ffi --features ci --profile ci --codecov --output-path codecov.json
+          if [ "$TOOLCHAIN" == "stable" ]; then
+            cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
-            cargo nextest run $BUILD_TYPE --locked --features ci --profile ci
+            cargo test $BUILD_TYPE --locked --features ci
           fi
 
       - name: Run client/server transfer
@@ -112,7 +144,14 @@ jobs:
           RUST_LOG: warn
           BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
-      - uses: codecov/codecov-action@0565863a31f2c772f9f0395002a31e3f06189574 # v5.4.0
+      - name: CodeCov Windows workaround
+        if: matrix.os == 'windows-2025' && matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
+        run: |
+          # FIXME: Without this, the codecov/codecov-action fails. No idea why it's looking under C:/msys64 now, it shouldn't.
+          mkdir -p C:/msys64/home/runneradmin/
+          touch C:/msys64/home/runneradmin/.gitconfig
+
+      - uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24 # v5.4.3
         with:
           files: codecov.json
           fail_ci_if_error: false
@@ -120,19 +159,11 @@ jobs:
           verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        if: ${{ matrix.type == 'debug' && matrix.rust-toolchain == 'nightly' }}
-
-      - uses: codecov/test-results-action@f2dba722c67b86c6caa034178c6e4d35335f6706 # v1.1.0
-        if: ${{ always() }}
-        with:
-          files: target/nextest/ci/junit.xml
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
-          verbose: true
+        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
 
       - name: Save simulation seeds artifact
         if: ${{ always() }}
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
           path: simulation-seeds
@@ -147,13 +178,9 @@ jobs:
           persist-credentials: false
       - run: cargo update -w --locked
 
-  bench:
-    needs: [check]
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || github.event.inputs.run_benchmarks) && github.actor != 'dependabot[bot]' }}
-    uses: ./.github/workflows/bench.yml
-
   check-android:
-    runs-on: ubuntu-latest
+    name: Check Android
+    runs-on: ubuntu-24.04
     env:
       # https://searchfox.org/mozilla-central/search?q=NDK_VERSION =&path=python/mozboot/mozboot/android.py
       NDK_VERSION: 27.2.12479018 # r27c
@@ -179,19 +206,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: zulu
           java-version: 23
 
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
-      - run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+      - run: sdkmanager --install "ndk;$NDK_VERSION"
 
       - uses: ./.github/actions/rust
         with:
           version: stable
           targets: ${{ matrix.target }}
-          tools: cargo-ndk
+          tools: cargo-ndk@^4
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -202,7 +229,9 @@ jobs:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
           target: ${{ matrix.target }}
 
-      - run: cargo ndk --bindgen --platform "$API_LEVEL" --target ${{ matrix.target }} test --no-run
+      - env:
+          MATRIX_TARGET: ${{ matrix.target }}
+        run: cargo ndk --platform "$API_LEVEL" --target "$MATRIX_TARGET" test --no-run
 
       - env:
           TARGET: ${{ matrix.target }}
@@ -230,7 +259,7 @@ jobs:
           EOF
           chmod a+x /tmp/rust-android-run-tests-on-emulator.sh
 
-      - uses: reactivecircus/android-emulator-runner@62dbb605bba737720e10b196cb4220d374026a6d # v2.33.0
+      - uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
         with:
           api-level: ${{ env.API_LEVEL }}
           arch: ${{ matrix.emulator-arch == 'arm64-v8' && 'arm64-v8a' || matrix.emulator-arch }}

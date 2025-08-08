@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cmp::max, collections::HashMap};
+use std::{cmp::max, collections::HashMap, fmt::Debug};
 
 use neqo_common::{event::Provider as _, qdebug};
 use test_fixture::now;
@@ -17,9 +17,9 @@ use super::{
 use crate::{
     events::ConnectionEvent,
     frame::FrameType,
-    packet::PacketBuilder,
-    recv_stream::RECV_BUFFER_SIZE,
-    send_stream::{OrderGroup, SendStreamState, SEND_BUFFER_SIZE},
+    packet,
+    recv_stream::INITIAL_RECV_WINDOW_SIZE,
+    send_stream::{self, OrderGroup},
     streams::{SendOrder, StreamOrder},
     tparams::{TransportParameter, TransportParameterId::*},
     CloseReason, Connection, ConnectionParameters, Error, StreamId, StreamType,
@@ -224,7 +224,7 @@ fn fairness_test<S, R>(source: S, number_iterates: usize, truncate_to: usize, re
 where
     S: IntoIterator,
     S::Item: Into<StreamId>,
-    R: IntoIterator + std::fmt::Debug,
+    R: IntoIterator + Debug,
     R::Item: Into<StreamId>,
     Vec<u64>: PartialEq<R>,
 {
@@ -438,18 +438,7 @@ fn max_data() {
     client.streams.handle_max_data(100_000_000);
     assert_eq!(
         client.stream_avail_send_space(stream_id).unwrap(),
-        SEND_BUFFER_SIZE - SMALL_MAX_DATA
-    );
-
-    // Increase max stream data. Avail space now limited by tx buffer
-    client
-        .streams
-        .get_send_stream_mut(stream_id)
-        .unwrap()
-        .set_max_stream_data(100_000_000);
-    assert_eq!(
-        client.stream_avail_send_space(stream_id).unwrap(),
-        SEND_BUFFER_SIZE - SMALL_MAX_DATA + 4096
+        INITIAL_RECV_WINDOW_SIZE - SMALL_MAX_DATA
     );
 
     let evts = client.events().collect::<Vec<_>>();
@@ -495,9 +484,9 @@ fn exceed_max_data() {
 
     assert_error(
         &client,
-        &CloseReason::Transport(Error::PeerError(Error::FlowControlError.code())),
+        &CloseReason::Transport(Error::Peer(Error::FlowControl.code())),
     );
-    assert_error(&server, &CloseReason::Transport(Error::FlowControlError));
+    assert_error(&server, &CloseReason::Transport(Error::FlowControl));
 }
 
 #[test]
@@ -525,7 +514,7 @@ fn do_not_accept_data_after_stop_sending() {
     // Call stop sending.
     assert_eq!(
         Ok(()),
-        server.stream_stop_sending(stream_id, Error::NoError.code())
+        server.stream_stop_sending(stream_id, Error::None.code())
     );
 
     // Receive the second data frame. The frame should be ignored and
@@ -535,7 +524,7 @@ fn do_not_accept_data_after_stop_sending() {
 
     drop(client.process(out.dgram(), now()));
     assert_eq!(
-        Err(Error::FinalSizeError),
+        Err(Error::FinalSize),
         client.stream_send(stream_id, &[0x00])
     );
 }
@@ -543,7 +532,7 @@ fn do_not_accept_data_after_stop_sending() {
 struct Writer(Vec<u64>);
 
 impl crate::connection::test_internal::FrameWriter for Writer {
-    fn write_frames(&mut self, builder: &mut PacketBuilder) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder.write_varint_frame(&self.0);
     }
 }
@@ -702,7 +691,7 @@ fn late_stream_related_frames() {
             }
             FrameType::StreamDataBlocked => {
                 let internal_stream = server.streams.get_send_stream_mut(stream_id).unwrap();
-                if let SendStreamState::Ready { fc, .. } = internal_stream.state() {
+                if let send_stream::State::Ready { fc, .. } = internal_stream.state() {
                     fc.blocked();
                 } else {
                     panic!("unexpected stream state");
@@ -835,9 +824,7 @@ fn after_stream_stop_sending_is_called_conn_events_for_stream_should_be_removed(
     drop(client.process(out, now()));
 
     // send stop sending.
-    client
-        .stream_stop_sending(id, Error::NoError.code())
-        .unwrap();
+    client.stream_stop_sending(id, Error::None.code()).unwrap();
 
     // Make sure we do not have RecvStreamReadable events for the stream after stream_stop_sending
     // has been called.
@@ -869,7 +856,7 @@ fn stream_data_blocked_generates_max_stream_data() {
 
     // Now send `STREAM_DATA_BLOCKED`.
     let internal_stream = server.streams.get_send_stream_mut(stream_id).unwrap();
-    if let SendStreamState::Send { fc, .. } = internal_stream.state() {
+    if let send_stream::State::Send { fc, .. } = internal_stream.state() {
         fc.blocked();
     } else {
         panic!("unexpected stream state");
@@ -898,7 +885,7 @@ fn stream_data_blocked_generates_max_stream_data() {
         }
         written += amount;
     }
-    assert_eq!(written, RECV_BUFFER_SIZE);
+    assert_eq!(written, INITIAL_RECV_WINDOW_SIZE);
 }
 
 /// See <https://github.com/mozilla/neqo/issues/871>
@@ -927,7 +914,7 @@ fn max_streams_after_bidi_closed() {
     // The server shouldn't have released more stream credit.
     client.process_input(dgram.unwrap(), now());
     let e = client.stream_create(StreamType::BiDi).unwrap_err();
-    assert!(matches!(e, Error::StreamLimitError));
+    assert!(matches!(e, Error::StreamLimit));
 
     // Closing the stream isn't enough.
     server.stream_close_send(stream_id).unwrap();
@@ -1101,7 +1088,7 @@ fn session_flow_control_stop_sending_state_recv() {
     exchange_data(&mut client, &mut server);
 
     server
-        .stream_stop_sending(stream_id, Error::NoError.code())
+        .stream_stop_sending(stream_id, Error::None.code())
         .unwrap();
 
     assert_eq!(
@@ -1160,7 +1147,7 @@ fn session_flow_control_stop_sending_state_size_known() {
     server.process_input(out2.unwrap(), now());
 
     server
-        .stream_stop_sending(stream_id, Error::NoError.code())
+        .stream_stop_sending(stream_id, Error::None.code())
         .unwrap();
 
     // In this case the final size is known when stream_stop_sending is called
@@ -1209,7 +1196,7 @@ fn session_flow_control_stop_sending_state_data_recvd() {
 
     // The stream is DataRecvd state
     server
-        .stream_stop_sending(stream_id, Error::NoError.code())
+        .stream_stop_sending(stream_id, Error::None.code())
         .unwrap();
 
     exchange_data(&mut client, &mut server);

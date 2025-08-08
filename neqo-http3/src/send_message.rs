@@ -4,10 +4,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, cmp::min, fmt::Debug, num::NonZeroUsize, rc::Rc};
+use std::{
+    cell::RefCell,
+    cmp::min,
+    fmt::{self, Debug, Display, Formatter},
+    num::NonZeroUsize,
+    rc::Rc,
+};
 
-use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType};
-use neqo_qpack::encoder::QPackEncoder;
+use neqo_common::{qdebug, qtrace, Buffer, Encoder, Header, MessageType};
+use neqo_qpack as qpack;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -104,10 +110,11 @@ impl MessageState {
 #[derive(Debug)]
 pub struct SendMessage {
     state: MessageState,
+    stream_info: Http3StreamInfo,
     message_type: MessageType,
     stream_type: Http3StreamType,
     stream: BufferedStream,
-    encoder: Rc<RefCell<QPackEncoder>>,
+    encoder: Rc<RefCell<qpack::Encoder>>,
     conn_events: Box<dyn SendStreamEvents>,
 }
 
@@ -116,12 +123,13 @@ impl SendMessage {
         message_type: MessageType,
         stream_type: Http3StreamType,
         stream_id: StreamId,
-        encoder: Rc<RefCell<QPackEncoder>>,
+        encoder: Rc<RefCell<qpack::Encoder>>,
         conn_events: Box<dyn SendStreamEvents>,
     ) -> Self {
         qdebug!("Create a request stream_id={stream_id}");
         Self {
             state: MessageState::WaitingForHeaders,
+            stream_info: Http3StreamInfo::new(stream_id, Http3StreamType::Http),
             message_type,
             stream_type,
             stream: BufferedStream::new(stream_id),
@@ -134,28 +142,23 @@ impl SendMessage {
     ///
     /// `ClosedCriticalStream` if the encoder stream is closed.
     /// `InternalError` if an unexpected error occurred.
-    fn encode(
-        encoder: &mut QPackEncoder,
+    fn encode<B: Buffer>(
+        encoder: &mut Encoder<B>,
+        qpack_encoder: &mut qpack::Encoder,
         headers: &[Header],
         conn: &mut Connection,
         stream_id: StreamId,
-    ) -> Vec<u8> {
+    ) {
         qdebug!("Encoding headers");
-        let header_block = encoder.encode_header_block(conn, headers, stream_id);
+        let header_block = qpack_encoder.encode_header_block(conn, headers, stream_id);
         let hframe = HFrame::Headers {
             header_block: header_block.to_vec(),
         };
-        let mut d = Encoder::default();
-        hframe.encode(&mut d);
-        d.into()
+        hframe.encode(encoder);
     }
 
     fn stream_id(&self) -> StreamId {
         Option::<StreamId>::from(&self.stream).expect("stream has ID")
-    }
-
-    fn get_stream_info(&self) -> Http3StreamInfo {
-        Http3StreamInfo::new(self.stream_id(), Http3StreamType::Http)
     }
 }
 
@@ -230,7 +233,7 @@ impl SendStream for SendMessage {
             // DataWritable is just a signal for an application to try to write more data,
             // if writing fails it is fine. Therefore we do not need to properly check
             // whether more credits are available on the transport layer.
-            self.conn_events.data_writable(self.get_stream_info());
+            self.conn_events.data_writable(&self.stream_info);
         }
     }
 
@@ -257,7 +260,7 @@ impl SendStream for SendMessage {
                 // DataWritable is just a signal for an application to try to write more data,
                 // if writing fails it is fine. Therefore we do not need to properly check
                 // whether more credits are available on the transport layer.
-                self.conn_events.data_writable(self.get_stream_info());
+                self.conn_events.data_writable(&self.stream_info);
             }
         }
         Ok(())
@@ -277,14 +280,13 @@ impl SendStream for SendMessage {
         }
 
         self.conn_events
-            .send_closed(self.get_stream_info(), CloseType::Done);
+            .send_closed(&self.stream_info, CloseType::Done);
         Ok(())
     }
 
     fn handle_stop_sending(&mut self, close_type: CloseType) {
         if !self.state.done() {
-            self.conn_events
-                .send_closed(self.get_stream_info(), close_type);
+            self.conn_events.send_closed(&self.stream_info, close_type);
         }
     }
 
@@ -296,9 +298,7 @@ impl SendStream for SendMessage {
         let data_frame = HFrame::Data {
             len: buf.len() as u64,
         };
-        let mut enc = Encoder::default();
-        data_frame.encode(&mut enc);
-        self.stream.buffer(enc.as_ref());
+        self.stream.encode_with(|e| data_frame.encode(e));
         self.stream.buffer(buf);
         _ = self.stream.send_buffer(conn)?;
         Ok(())
@@ -308,13 +308,10 @@ impl SendStream for SendMessage {
 impl HttpSendStream for SendMessage {
     fn send_headers(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()> {
         self.state.new_headers(headers, self.message_type)?;
-        let buf = Self::encode(
-            &mut self.encoder.borrow_mut(),
-            headers,
-            conn,
-            self.stream_id(),
-        );
-        self.stream.buffer(&buf);
+        let stream_id = self.stream_id();
+        self.stream.encode_with(|e| {
+            Self::encode(e, &mut self.encoder.borrow_mut(), headers, conn, stream_id);
+        });
         Ok(())
     }
 
@@ -324,8 +321,8 @@ impl HttpSendStream for SendMessage {
     }
 }
 
-impl ::std::fmt::Display for SendMessage {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for SendMessage {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "SendMesage {}", self.stream_id())
     }
 }

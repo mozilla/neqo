@@ -2,6 +2,27 @@
 
 ![neqo logo](https://github.com/mozilla/neqo/raw/main/neqo.png "neqo logo")
 
+Neqo is the QUIC implementation used by Mozilla in Firefox and other products.
+It is written in Rust and provides a library for QUIC transport, HTTP/3, and
+QPACK. The TLS security backend is the Mozilla NSS library, which is also used
+by Firefox.
+
+Neqo is designed to be used in Firefox, but it can also be used
+standalone. We include command line tools for testing and debugging, such as
+`neqo-client` and `neqo-server`, which can be used to test HTTP/3 servers
+and clients.
+
+**Note: The neqo server functionality is experimental**, since
+it is not in production use at Mozilla, and it is not as mature as the
+client functionality. It is intended to be standards-compliant when
+interoperating with a compliant client, but it may not implement all
+optional protocol features, and it may not handle all edge cases.
+It is also not optimized for performance or resource usage, and
+while it implements many of the necessary features for a server,
+it does not include configuration of a number of options that
+is suited to a live deployment.
+**Do not use the neqo server code in production.**
+
 To build Neqo:
 
 ```shell
@@ -20,8 +41,8 @@ To run test HTTP/3 programs (`neqo-client` and `neqo-server`):
 ## Build with separate NSS/NSPR
 
 You can clone [NSS][NSS] and [NSPR][NSPR] into the same directory and export an
-environment variable called `NSS_DIR` pointing to NSS.  This causes the build to
-use the existing NSS checkout.  However, in order to run anything that depends
+environment variable called `NSS_DIR` pointing to NSS. This causes the build to
+use the existing NSS checkout. However, in order to run anything that depends
 on NSS, you need to set an environment as follows:
 
 ### Linux
@@ -53,6 +74,13 @@ target/debug/neqo-client 'https://[::]:12345/' --qlog-dir .
 
 You can of course specify a different directory for the QLOG files.
 You can upload QLOG files to [qvis][QVIS] to visualize the flows.
+
+To export QLOG files for [Neqo Simulator](./test-fixture/src/sim) runs, set the
+environment variable `QLOGDIR`. For example:
+
+```shell
+QLOGDIR=/tmp/qlog cargo bench --bench min_bandwidth --features bench
+```
 
 ### Using `SSLKEYLOGFILE` to decrypt Wireshark logs
 
@@ -126,8 +154,8 @@ something has changed.
 
 1. Run `neqo-server` via `cargo run --bin neqo-server -- 'localhost:12345' --db ./test-fixture/db`.
 2. On Firefox, set `about:config` preferences:
-  - `network.http.http3.alt-svc-mapping-for-testing` to `localhost;h3=":12345"`
-  - `network.http.http3.disable_when_third_party_roots_found` to `false`
+   - `network.http.http3.alt-svc-mapping-for-testing` to `localhost;h3=":12345"`
+   - `network.http.http3.disable_when_third_party_roots_found` to `false`
 3. Optionally enable logging via `about:logging` or profiling via <https://profiler.firefox.com/>.
 4. Navigate to <https://localhost:12345> and accept self-signed certificate.
 

@@ -11,13 +11,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qlog::NeqoQlog, qtrace};
+use neqo_common::{qlog::Qlog, qtrace, Buffer};
 
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
-    packet::PacketBuilder,
+    packet,
     qlog::{self, QlogMetric},
-    recovery::RecoveryToken,
+    recovery,
     stats::FrameStats,
 };
 
@@ -100,7 +100,7 @@ impl RttEstimate {
 
     pub fn update(
         &mut self,
-        qlog: &NeqoQlog,
+        qlog: &Qlog,
         mut rtt_sample: Duration,
         ack_delay: Duration,
         source: RttSource,
@@ -129,11 +129,7 @@ impl RttEstimate {
             self.first_sample_time = Some(now);
         } else {
             // Calculate EWMA RTT (based on {{?RFC6298}}).
-            let rttvar_sample = if self.smoothed_rtt > rtt_sample {
-                self.smoothed_rtt - rtt_sample
-            } else {
-                rtt_sample - self.smoothed_rtt
-            };
+            let rttvar_sample = self.smoothed_rtt.abs_diff(rtt_sample);
 
             self.latest_rtt = rtt_sample;
             self.rttvar = (self.rttvar * 3 + rttvar_sample) / 4;
@@ -197,10 +193,10 @@ impl RttEstimate {
         self.min_rtt
     }
 
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         self.ack_delay.write_frames(builder, tokens, stats);

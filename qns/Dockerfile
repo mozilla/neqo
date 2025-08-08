@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef@sha256:3e85036483f39ef11825362de3b51545673a605f9e0df841b96f7283dfeb50df AS chef
+FROM lukemathwalker/cargo-chef@sha256:116399b1296ed6fc9fb2e530650e229caeb0e1883e68c7f2a82f2b0b9b639a9e AS chef
 
 WORKDIR /app
 
@@ -20,13 +20,15 @@ ENV NSS_DIR=/nss \
     NSS_TARGET=Release \
     NSS_PREBUILT=1 \
     NSPR_DIR=/nspr \
-    LD_LIBRARY_PATH=/dist/Release/lib
+    LD_LIBRARY_PATH=/dist/Release/lib \
+    NSPR_VERSION=4.37
 
 RUN set -eux; \
-    git clone --depth=1 https://github.com/nss-dev/nspr "$NSPR_DIR"; \
+    mkdir -p "$NSPR_DIR"; \
+    curl -L "https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz" | tar xz --strip-components=2 -C "$NSPR_DIR"; \
     git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
 
-RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -o
+RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 -o
 
 COPY --from=planner /app/recipe.json recipe.json
 # Build dependencies
@@ -39,7 +41,7 @@ RUN set -eux; \
 
 # Copy only binaries to the final image to keep it small.
 
-FROM martenseemann/quic-network-simulator-endpoint@sha256:42d79cc04b88f2e4b4c8beb418b0843c123f26852ff6bbba4caa6badc0043d23
+FROM martenseemann/quic-network-simulator-endpoint@sha256:3c373d0bac88ac0a005c56628e551fe980e44bf2dd50b9c6904d58d7f8d54089
 
 ENV LD_LIBRARY_PATH=/neqo/lib
 COPY --from=builder /neqo/target/release/neqo-client /neqo/target/release/neqo-server /neqo/bin/

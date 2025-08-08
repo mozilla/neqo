@@ -8,13 +8,12 @@
 
 use std::ops::RangeInclusive;
 
-use neqo_common::{qtrace, Decoder, Encoder};
+use neqo_common::{qtrace, Decoder, Encoder, MAX_VARINT};
 use strum::FromRepr;
 
 use crate::{
     cid::MAX_CONNECTION_ID_LEN,
-    ecn,
-    packet::PacketType,
+    ecn, packet,
     stream_id::{StreamId, StreamType},
     AppError, CloseReason, Error, Res, TransportError,
 };
@@ -118,7 +117,7 @@ impl TryFrom<FrameType> for StreamType {
         match value {
             FrameType::MaxStreamsBiDi | FrameType::StreamsBlockedBiDi => Ok(Self::BiDi),
             FrameType::MaxStreamsUniDi | FrameType::StreamsBlockedUniDi => Ok(Self::UniDi),
-            _ => Err(Error::FrameEncodingError),
+            _ => Err(Error::FrameEncoding),
         }
     }
 }
@@ -149,14 +148,14 @@ impl From<CloseReason> for CloseError {
 
 impl From<std::array::TryFromSliceError> for Error {
     fn from(_err: std::array::TryFromSliceError) -> Self {
-        Self::FrameEncodingError
+        Self::FrameEncoding
     }
 }
 
 #[derive(PartialEq, Eq, Debug, Default, Clone)]
 pub struct AckRange {
-    pub(crate) gap: u64,
-    pub(crate) range: u64,
+    gap: u64,
+    range: u64,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -367,11 +366,11 @@ impl<'a> Frame<'a> {
         let mut acked_ranges = Vec::with_capacity(ack_ranges.len() + 1);
 
         if largest_acked < first_ack_range {
-            return Err(Error::FrameEncodingError);
+            return Err(Error::FrameEncoding);
         }
         acked_ranges.push((largest_acked - first_ack_range)..=largest_acked);
         if !ack_ranges.is_empty() && largest_acked < first_ack_range + 1 {
-            return Err(Error::FrameEncodingError);
+            return Err(Error::FrameEncoding);
         }
         let mut cur = if ack_ranges.is_empty() {
             0
@@ -380,12 +379,12 @@ impl<'a> Frame<'a> {
         };
         for r in ack_ranges {
             if cur < r.gap + 1 {
-                return Err(Error::FrameEncodingError);
+                return Err(Error::FrameEncoding);
             }
             cur = cur - r.gap - 1;
 
             if cur < r.range {
-                return Err(Error::FrameEncodingError);
+                return Err(Error::FrameEncoding);
             }
             acked_ranges.push((cur - r.range)..=cur);
 
@@ -424,7 +423,7 @@ impl<'a> Frame<'a> {
     }
 
     #[must_use]
-    pub fn is_allowed(&self, pt: PacketType) -> bool {
+    pub fn is_allowed(&self, pt: packet::Type) -> bool {
         match self {
             Self::Padding { .. } | Self::Ping => true,
             Self::Crypto { .. }
@@ -432,9 +431,9 @@ impl<'a> Frame<'a> {
             | Self::ConnectionClose {
                 error_code: CloseError::Transport(_),
                 ..
-            } => pt != PacketType::ZeroRtt,
-            Self::NewToken { .. } | Self::ConnectionClose { .. } => pt == PacketType::Short,
-            _ => pt == PacketType::ZeroRtt || pt == PacketType::Short,
+            } => pt != packet::Type::ZeroRtt,
+            Self::NewToken { .. } | Self::ConnectionClose { .. } => pt == packet::Type::Short,
+            _ => pt == packet::Type::ZeroRtt || pt == packet::Type::Short,
         }
     }
 
@@ -543,15 +542,15 @@ impl<'a> Frame<'a> {
             FrameType::Crypto => {
                 let offset = dv(dec)?;
                 let data = d(dec.decode_vvec())?;
-                if offset + u64::try_from(data.len())? > ((1 << 62) - 1) {
-                    return Err(Error::FrameEncodingError);
+                if offset + u64::try_from(data.len())? > MAX_VARINT {
+                    return Err(Error::FrameEncoding);
                 }
                 Ok(Self::Crypto { offset, data })
             }
             FrameType::NewToken => {
                 let token = d(dec.decode_vvec())?;
                 if token.is_empty() {
-                    return Err(Error::FrameEncodingError);
+                    return Err(Error::FrameEncoding);
                 }
                 Ok(Self::NewToken { token })
             }
@@ -577,8 +576,8 @@ impl<'a> Frame<'a> {
                     qtrace!("STREAM frame, with length");
                     d(dec.decode_vvec())?
                 };
-                if o + u64::try_from(data.len())? > ((1 << 62) - 1) {
-                    return Err(Error::FrameEncodingError);
+                if o + u64::try_from(data.len())? > MAX_VARINT {
+                    return Err(Error::FrameEncoding);
                 }
                 Ok(Self::Stream {
                     fin: t.is_stream_with_fin(),
@@ -598,7 +597,7 @@ impl<'a> Frame<'a> {
             FrameType::MaxStreamsBiDi | FrameType::MaxStreamsUniDi => {
                 let m = dv(dec)?;
                 if m > (1 << 60) {
-                    return Err(Error::StreamLimitError);
+                    return Err(Error::StreamLimit);
                 }
                 Ok(Self::MaxStreams {
                     stream_type: t.try_into()?,
@@ -623,7 +622,7 @@ impl<'a> Frame<'a> {
                 let retire_prior = dv(dec)?;
                 let connection_id = d(dec.decode_vec(1))?;
                 if connection_id.len() > MAX_CONNECTION_ID_LEN {
-                    return Err(Error::FrameEncodingError);
+                    return Err(Error::FrameEncoding);
                 }
                 let srt = d(dec.decode(16))?;
                 let stateless_reset_token = <&[_; 16]>::try_from(srt)?;
@@ -669,13 +668,13 @@ impl<'a> Frame<'a> {
                 let seqno = dv(dec)?;
                 let tolerance = dv(dec)?;
                 if tolerance == 0 {
-                    return Err(Error::FrameEncodingError);
+                    return Err(Error::FrameEncoding);
                 }
                 let delay = dv(dec)?;
                 let ignore_order = match d(dec.decode_uint::<u8>())? {
                     0 => false,
                     1 => true,
-                    _ => return Err(Error::FrameEncodingError),
+                    _ => return Err(Error::FrameEncoding),
                 };
                 Ok(Self::AckFrequency {
                     seqno,
@@ -806,10 +805,7 @@ mod tests {
     #[test]
     fn empty_new_token() {
         let mut dec = Decoder::from(&[0x07, 0x00][..]);
-        assert_eq!(
-            Frame::decode(&mut dec).unwrap_err(),
-            Error::FrameEncodingError
-        );
+        assert_eq!(Frame::decode(&mut dec).unwrap_err(), Error::FrameEncoding);
     }
 
     #[test]
@@ -935,7 +931,7 @@ mod tests {
         enc.encode(&[0x11; 16][..]);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
-            Error::FrameEncodingError
+            Error::FrameEncoding
         );
     }
 
@@ -1035,7 +1031,7 @@ mod tests {
         let enc = Encoder::from_hex("40af0a0547d003"); // ignore_order of 3
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
-            Error::FrameEncodingError
+            Error::FrameEncoding
         );
     }
 
@@ -1045,7 +1041,7 @@ mod tests {
         let enc = Encoder::from_hex("40af0a000101"); // packets of 0
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
-            Error::FrameEncodingError
+            Error::FrameEncoding
         );
     }
 

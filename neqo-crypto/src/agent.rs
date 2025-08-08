@@ -12,12 +12,14 @@
 use std::{
     cell::RefCell,
     ffi::{CStr, CString},
+    fmt::{self, Debug, Display, Formatter},
     mem::MaybeUninit,
     ops::{Deref, DerefMut},
     os::raw::{c_uint, c_void},
     pin::Pin,
-    ptr::{null, null_mut},
+    ptr::{null, null_mut, NonNull},
     rc::Rc,
+    slice,
     time::Instant,
 };
 
@@ -36,7 +38,7 @@ use crate::{
     },
     ech,
     err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res},
-    ext::{ExtensionHandler, ExtensionTracker},
+    ext::{ExtensionHandler, ExtensionTracker, SSL_CallExtensionWriterOnEchInner},
     null_safe_slice,
     p11::{self, PrivateKey, PublicKey},
     prio,
@@ -45,6 +47,145 @@ use crate::{
     ssl::{self, PRBool},
     time::{Time, TimeHolder},
 };
+
+/// Private trait for Certificate Compression implementation
+/// Use `SafeCertCompression` to implement an encoder/decoder instead.
+trait UnsafeCertCompression {
+    extern "C" fn decode_callback(
+        input: *const ssl::SECItem,
+        output: *mut ::std::os::raw::c_uchar,
+        output_len: usize,
+        used_len: *mut usize,
+    ) -> ssl::SECStatus;
+
+    extern "C" fn encode_callback(
+        input: *const ssl::SECItem,
+        output: *mut ssl::SECItem,
+    ) -> ssl::SECStatus;
+}
+
+/// The trait is used to represent a certificate compression data structure
+/// Used in order to enable Certificate Compression extension during TLS connection
+pub trait CertificateCompressor {
+    /// Certificate Compression identifier as in RFC8879
+    const ID: u16;
+    /// Certification Compression name (used only for logging/debugging)
+    const NAME: &CStr;
+    /// Certificate Compression could be used to encode and decode a certificate
+    /// though the encoding is not frequently used
+    /// Enable decoding field is used to signal to the implementation
+    /// to use the encoding as well
+    const ENABLE_ENCODING: bool = false;
+
+    /// Certificate Compression encoding function
+    ///
+    /// This default implementation effectively does nothing.
+    /// However, this is only run if `ENABLE_ENCODING` is `true`.
+    /// Implementations that set `ENABLE_ENCODING` to `true` need to implement this function.
+    ///
+    /// # Errors
+    /// Encoding was unsuccessful, for example, not enough memory
+    fn encode(input: &[u8], output: &mut [u8]) -> Res<usize> {
+        let len = std::cmp::min(input.len(), output.len());
+        output[..len].copy_from_slice(&input[..len]);
+        Ok(len)
+    }
+
+    /// Certificate Compression decoding function.
+    /// # Errors
+    /// Decoding was unsuccessful.
+    /// We require a decoder internally to check the length of the decoded buffer.
+    /// If the decoded length is not equal to the length of the provided slice
+    /// the decoder should return an error.
+    fn decode(input: &[u8], output: &mut [u8]) -> Res<()>;
+}
+
+/// The trait is responsible for calling `CertificateCompression` encoding and decoding
+/// functions using the NSS types
+impl<T: CertificateCompressor> UnsafeCertCompression for T {
+    extern "C" fn decode_callback(
+        input: *const ssl::SECItem,
+        output: *mut ::std::os::raw::c_uchar,
+        output_len: usize,
+        used_len: *mut usize,
+    ) -> ssl::SECStatus {
+        let Some(input) = NonNull::new(input.cast_mut()) else {
+            return ssl::SECFailure;
+        };
+        if unsafe { input.as_ref().data.is_null() || input.as_ref().len == 0 } {
+            return ssl::SECFailure;
+        }
+
+        let input_slice = unsafe { null_safe_slice(input.as_ref().data, input.as_ref().len) };
+        let output_slice = unsafe { slice::from_raw_parts_mut(output, output_len) };
+
+        if T::decode(input_slice, output_slice).is_err() {
+            return ssl::SECFailure;
+        }
+
+        unsafe {
+            *used_len = output_len;
+        }
+        ssl::SECSuccess
+    }
+
+    extern "C" fn encode_callback(
+        input: *const ssl::SECItem,
+        output: *mut ssl::SECItem,
+    ) -> ssl::SECStatus {
+        let Some(input) = NonNull::new(input.cast_mut()) else {
+            return ssl::SECFailure;
+        };
+
+        let (input_data, input_len) = unsafe {
+            let input_ref = input.as_ref();
+            (input_ref.data, input_ref.len)
+        };
+
+        if input_data.is_null() || input_len == 0 {
+            return ssl::SECFailure;
+        }
+        let input_slice = unsafe { null_safe_slice(input_data, input_len) };
+
+        unsafe {
+            p11::SECITEM_AllocItem(
+                null_mut(),
+                // p11::SECItem is the same as ssl::SECItem
+                output.cast::<p11::SECItemStr>(),
+                // Compression shouldn't make the thing *longer*,
+                // but allocate one extra byte anyway to enable simple testing modes.
+                input_len + 1,
+            );
+        }
+
+        if unsafe { (*output).data.is_null() } {
+            return ssl::SECFailure;
+        }
+
+        let Ok(output_len) = (unsafe { (*output).len.try_into() }) else {
+            return ssl::SECFailure;
+        };
+
+        let output_slice = unsafe { slice::from_raw_parts_mut((*output).data, output_len) };
+
+        let Ok(encoded_len) = T::encode(input_slice, output_slice) else {
+            return ssl::SECFailure;
+        };
+
+        if encoded_len == 0 || encoded_len > output_len {
+            return ssl::SECFailure;
+        }
+
+        let Ok(encoded_len) = encoded_len.try_into() else {
+            return ssl::SECFailure;
+        };
+
+        unsafe {
+            (*output).len = encoded_len;
+        }
+        ssl::SECSuccess
+    }
+}
 
 /// The maximum number of tickets to remember for a given connection.
 const MAX_TICKETS: usize = 4;
@@ -56,7 +197,7 @@ pub enum HandshakeState {
     AuthenticationPending,
     /// When encrypted client hello is enabled, the server might engage a fallback.
     /// This is the status that is returned.  The included value is the public
-    /// name of the server, which should be used to validated the certificate.
+    /// name of the server, which should be used to validate the certificate.
     EchFallbackAuthenticationPending(String),
     Authenticated(PRErrorCode),
     Complete(SecretAgentInfo),
@@ -107,7 +248,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
             chosen.truncate(usize::try_from(chosen_len)?);
             Some(match String::from_utf8(chosen) {
                 Ok(a) => a,
-                Err(_) => return Err(Error::InternalError),
+                Err(_) => return Err(Error::Internal),
             })
         }
         _ => None,
@@ -281,6 +422,7 @@ impl SecretAgentInfo {
 
 /// `SecretAgent` holds the common parts of client and server.
 #[derive(Debug)]
+#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub struct SecretAgent {
     fd: *mut ssl::PRFileDesc,
     secrets: SecretHolder,
@@ -438,7 +580,7 @@ impl SecretAgent {
     pub fn set_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
         if self.state != HandshakeState::New {
             qwarn!("[{self}] Cannot enable ciphers in state {:?}", self.state);
-            return Err(Error::InternalError);
+            return Err(Error::Internal);
         }
 
         let all_ciphers = unsafe { ssl::SSL_GetImplementedCiphers() };
@@ -530,7 +672,7 @@ impl SecretAgent {
     /// If any of the provided `protocols` are more than 255 bytes long.
     ///
     /// [RFC7301]: https://datatracker.ietf.org/doc/html/rfc7301
-    pub fn set_alpn(&mut self, protocols: &[impl AsRef<str>]) -> Res<()> {
+    pub fn set_alpn<A: AsRef<str>>(&mut self, protocols: &[A]) -> Res<()> {
         // Validate and set length.
         let mut encoded_len = protocols.len();
         for v in protocols {
@@ -550,7 +692,7 @@ impl SecretAgent {
 
         // NSS inherited an idiosyncratic API as a result of having implemented NPN
         // before ALPN.  For that reason, we need to put the "best" option last.
-        let (first, rest) = protocols.split_first().ok_or(Error::InternalError)?;
+        let (first, rest) = protocols.split_first().ok_or(Error::Internal)?;
         for v in rest {
             add(v.as_ref());
         }
@@ -567,6 +709,30 @@ impl SecretAgent {
         })
     }
 
+    /// Install a certificate compression mechanism.
+    ///
+    /// # Errors
+    /// If the compression mechanism with the same id is already registered
+    /// If too many compression mechanisms are already registered
+    ///
+    /// This returns an error if the certificate compression could not be established
+    ///
+    /// [RFC8879]: https://datatracker.ietf.org/doc/rfc8879/
+    pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
+        if T::ID == 0 {
+            return Err(Error::InvalidCertificateCompressionID);
+        }
+
+        let compressor: ssl::SSLCertificateCompressionAlgorithm =
+            ssl::SSLCertificateCompressionAlgorithm {
+                id: T::ID,
+                name: T::NAME.as_ptr(),
+                encode: T::ENABLE_ENCODING.then_some(<T as UnsafeCertCompression>::encode_callback),
+                decode: Some(<T as UnsafeCertCompression>::decode_callback),
+            };
+        unsafe { ssl::SSL_SetCertificateCompressionAlgorithm(self.fd, compressor) }
+    }
+
     /// Install an extension handler.
     ///
     /// This can be called multiple times with different values for `ext`.  The handler is provided
@@ -581,7 +747,7 @@ impl SecretAgent {
         ext: Extension,
         handler: Rc<RefCell<dyn ExtensionHandler>>,
     ) -> Res<()> {
-        let tracker = unsafe { ExtensionTracker::new(self.fd, ext, handler) }?;
+        let tracker = unsafe { ExtensionTracker::new(self.fd, ext, handler)? };
         self.extension_handlers.push(tracker);
         Ok(())
     }
@@ -633,14 +799,9 @@ impl SecretAgent {
     }
 
     /// Return any fatal alert that the TLS stack might have sent.
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     #[must_use]
-    pub fn alert(&self) -> Option<&Alert> {
-        (*self.alert).as_ref()
+    pub fn alert(&self) -> Option<Alert> {
+        *self.alert
     }
 
     /// Call this function to mark the peer as authenticated.
@@ -769,7 +930,7 @@ impl SecretAgent {
         }
         #[expect(
             clippy::branches_sharing_code,
-            reason = "Moving the PR_Close call after the conditional crashes things?!"
+            reason = "The PR_Close calls cannot be run after dropping the returned values."
         )]
         if self.raw == Some(true) {
             // Need to hold the record list in scope until the close is done.
@@ -807,11 +968,6 @@ impl SecretAgent {
     }
 
     /// Get the active ECH configuration, which is empty if ECH is disabled.
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     #[must_use]
     pub fn ech_config(&self) -> &[u8] {
         &self.ech_config
@@ -824,8 +980,8 @@ impl Drop for SecretAgent {
     }
 }
 
-impl ::std::fmt::Display for SecretAgent {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for SecretAgent {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Agent {:p}", self.fd)
     }
 }
@@ -875,7 +1031,7 @@ impl Client {
     /// # Errors
     ///
     /// Errors returned if the socket can't be created or configured.
-    pub fn new(server_name: impl Into<String>, grease: bool) -> Res<Self> {
+    pub fn new<I: Into<String>>(server_name: I, grease: bool) -> Res<Self> {
         let server_name = server_name.into();
         let mut agent = SecretAgent::new()?;
         let url = CString::new(server_name.as_bytes())?;
@@ -929,11 +1085,6 @@ impl Client {
         ssl::SECSuccess
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "TODO: False positive on nightly."
-    )]
     #[must_use]
     pub fn server_name(&self) -> &str {
         &self.server_name
@@ -968,7 +1119,7 @@ impl Client {
     ///
     /// Error returned when the resumption token is invalid or
     /// the socket is not able to use the value.
-    pub fn enable_resumption(&mut self, token: impl AsRef<[u8]>) -> Res<()> {
+    pub fn enable_resumption<A: AsRef<[u8]>>(&mut self, token: A) -> Res<()> {
         unsafe {
             ssl::SSL_SetResumptionToken(
                 self.agent.fd,
@@ -991,7 +1142,7 @@ impl Client {
     /// # Errors
     ///
     /// Error returned when the configuration is invalid.
-    pub fn enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
+    pub fn enable_ech<A: AsRef<[u8]>>(&mut self, ech_config_list: A) -> Res<()> {
         let config = ech_config_list.as_ref();
         qdebug!("[{self}] Enable ECH for a server: {}", hex_with_len(config));
         self.ech_config = Vec::from(config);
@@ -1003,7 +1154,15 @@ impl Client {
                     self.agent.fd,
                     config.as_ptr(),
                     c_uint::try_from(config.len())?,
-                )
+                )?;
+                // If the ECH configuration is valid, and only then,
+                // allow writing of different transport parameters to the inner and outer
+                // ClientHello. Avoid setting this otherwise, as the transport
+                // parameter extension handler filters out essential values from the
+                // outer ClientHello. Under normal operation, NSS reports to
+                // extension writers that an ordinary, non-ECH ClientHello is an
+                // outer ClientHello, resulting in unwanted filtering.
+                SSL_CallExtensionWriterOnEchInner(self.fd, PRBool::from(true))
             }
         }
     }
@@ -1022,8 +1181,8 @@ impl DerefMut for Client {
     }
 }
 
-impl ::std::fmt::Display for Client {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Client {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Client {:p}", self.agent.fd)
     }
 }
@@ -1043,7 +1202,7 @@ pub enum ZeroRttCheckResult {
 
 /// A `ZeroRttChecker` is used by the agent to validate the application token (as provided by
 /// `send_ticket`)
-pub trait ZeroRttChecker: std::fmt::Debug + Unpin {
+pub trait ZeroRttChecker: Debug + Unpin {
     fn check(&self, token: &[u8]) -> ZeroRttCheckResult;
 }
 
@@ -1085,7 +1244,7 @@ impl Server {
     /// # Errors
     ///
     /// Errors returned when NSS fails.
-    pub fn new(certificates: &[impl AsRef<str>]) -> Res<Self> {
+    pub fn new<A: AsRef<str>>(certificates: &[A]) -> Res<Self> {
         let mut agent = SecretAgent::new()?;
 
         for n in certificates {
@@ -1136,7 +1295,7 @@ impl Server {
                 // Don't bother propagating errors from this, because it should be caught in
                 // testing.
                 assert!(tok.len() <= usize::try_from(retry_token_max).unwrap());
-                let slc = std::slice::from_raw_parts_mut(retry_token, tok.len());
+                let slc = slice::from_raw_parts_mut(retry_token, tok.len());
                 slc.copy_from_slice(&tok);
                 *retry_token_len = c_uint::try_from(tok.len()).unwrap();
                 ssl::SSLHelloRetryRequestAction::ssl_hello_retry_request
@@ -1230,8 +1389,8 @@ impl DerefMut for Server {
     }
 }
 
-impl ::std::fmt::Display for Server {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Server {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Server {:p}", self.agent.fd)
     }
 }

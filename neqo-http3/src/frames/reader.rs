@@ -4,18 +4,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::Debug;
+use std::{cmp::min, fmt::Debug};
 
 use neqo_common::{
-    hex_with_len, qtrace, Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore,
-    IncrementalDecoderUint,
+    hex_snip_middle, hex_with_len, qtrace, Decoder, IncrementalDecoderBuffer,
+    IncrementalDecoderIgnore, IncrementalDecoderUint,
 };
 use neqo_transport::{Connection, StreamId};
 
 use super::hframe::HFrameType;
 use crate::{Error, RecvStream, Res};
 
-const MAX_READ_SIZE: usize = 4096;
+const MAX_READ_SIZE: usize = 2048; // Given a practical MTU of 1500 bytes, this seems reasonable.
 
 pub trait FrameDecoder<T> {
     fn is_known_type(frame_type: HFrameType) -> bool;
@@ -33,6 +33,7 @@ pub trait FrameDecoder<T> {
     fn decode(frame_type: HFrameType, frame_len: u64, data: Option<&[u8]>) -> Res<Option<T>>;
 }
 
+#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub trait StreamReader {
     /// # Errors
     ///
@@ -91,11 +92,27 @@ enum FrameReaderState {
     UnknownFrameDischargeData { decoder: IncrementalDecoderIgnore },
 }
 
-#[derive(Debug)]
+#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub struct FrameReader {
     state: FrameReaderState,
     frame_type: HFrameType,
     frame_len: u64,
+    buffer: [u8; MAX_READ_SIZE],
+}
+
+impl Debug for FrameReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let frame_len = self
+            .frame_len
+            .try_into()
+            .unwrap_or(usize::MAX)
+            .min(self.buffer.len());
+        f.debug_struct("FrameReader")
+            .field("state", &self.state)
+            .field("frame_type", &self.frame_type)
+            .field("frame", &hex_snip_middle(&self.buffer[..frame_len]))
+            .finish()
+    }
 }
 
 impl Default for FrameReader {
@@ -113,6 +130,7 @@ impl FrameReader {
             },
             frame_type: HFrameType(u64::MAX),
             frame_len: 0,
+            buffer: [0; MAX_READ_SIZE],
         }
     }
 
@@ -124,6 +142,7 @@ impl FrameReader {
             },
             frame_type,
             frame_len: 0,
+            buffer: [0; MAX_READ_SIZE],
         }
     }
 
@@ -162,16 +181,15 @@ impl FrameReader {
         stream_reader: &mut dyn StreamReader,
     ) -> Res<(Option<T>, bool)> {
         loop {
-            let to_read = std::cmp::min(self.min_remaining(), MAX_READ_SIZE);
-            let mut buf = vec![0; to_read];
+            let to_read = min(self.min_remaining(), self.buffer.len());
             let (output, read, fin) = match stream_reader
-                .read_data(&mut buf)
+                .read_data(&mut self.buffer[..to_read])
                 .map_err(|e| Error::map_stream_recv_errors(&e))?
             {
                 (0, f) => (None, false, f),
                 (amount, f) => {
                     qtrace!("FrameReader::receive: reading {amount} byte, fin={f}");
-                    (self.consume::<T>(Decoder::from(&buf[..amount]))?, true, f)
+                    (self.consume::<T>(amount)?, true, f)
                 }
             };
 
@@ -196,7 +214,8 @@ impl FrameReader {
     /// # Errors
     ///
     /// May return `HttpFrame` if a frame cannot be decoded.
-    fn consume<T: FrameDecoder<T>>(&mut self, mut input: Decoder) -> Res<Option<T>> {
+    fn consume<T: FrameDecoder<T>>(&mut self, amount: usize) -> Res<Option<T>> {
+        let mut input = Decoder::from(&self.buffer[..amount]);
         match &mut self.state {
             FrameReaderState::GetType { decoder } => {
                 if let Some(v) = decoder.consume(&mut input) {

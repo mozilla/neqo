@@ -11,30 +11,42 @@ use std::{
     cell::RefCell,
     cmp::max,
     collections::BTreeMap,
+    fmt::Debug,
     mem,
     rc::{Rc, Weak},
+    time::{Duration, Instant},
 };
 
-use neqo_common::{qtrace, Role};
+use neqo_common::{qtrace, Buffer, Role};
 use smallvec::SmallVec;
+use strum::Display;
 
 use crate::{
     events::ConnectionEvents,
     fc::ReceiverFlowControl,
     frame::FrameType,
-    packet::PacketBuilder,
-    recovery::{RecoveryToken, StreamRecoveryToken},
+    packet,
+    recovery::{self, StreamRecoveryToken},
     send_stream::SendStreams,
     stats::FrameStats,
     stream_id::StreamId,
     AppError, Error, Res,
 };
 
-const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
+pub const INITIAL_RECV_WINDOW_SIZE: usize = 1024 * 1024;
 
-// Export as usize for consistency with SEND_BUFFER_SIZE
-#[expect(clippy::cast_possible_truncation, reason = "Value fits.")]
-pub const RECV_BUFFER_SIZE: usize = RX_STREAM_DATA_WINDOW as usize;
+/// Limit for the maximum amount of bytes active on a single stream, i.e. limit
+/// for the size of the stream receive window.
+///
+/// A value of 10 MiB allows for:
+///
+/// - 10ms rtt and 8.3 GBit/s
+/// - 20ms rtt and 4.2 GBit/s
+/// - 40ms rtt and 2.1 GBit/s
+/// - 100ms rtt and 0.8 GBit/s
+///
+/// Keep in sync with [`crate::send_stream::MAX_SEND_BUFFER_SIZE`].
+pub const MAX_RECV_WINDOW_SIZE: u64 = 10 * 1024 * 1024;
 
 #[derive(Debug, Default)]
 pub struct RecvStreams {
@@ -43,14 +55,16 @@ pub struct RecvStreams {
 }
 
 impl RecvStreams {
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
+        now: Instant,
+        rtt: Duration,
     ) {
         for stream in self.streams.values_mut() {
-            stream.write_frame(builder, tokens, stats);
+            stream.write_frame(builder, tokens, stats, now, rtt);
             if builder.is_full() {
                 return;
             }
@@ -122,7 +136,7 @@ impl RecvStreams {
 pub struct RxStreamOrderer {
     data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
     retired: u64,                        // Number of bytes the application has read
-    received: u64,                       // The number of bytes has stored in `data_ranges`
+    received: u64,                       // The number of bytes stored in `data_ranges`
 }
 
 impl RxStreamOrderer {
@@ -363,7 +377,7 @@ impl RxStreamOrderer {
 }
 
 /// QUIC receiving states, based on -transport 3.2.
-#[derive(Debug)]
+#[derive(Debug, Display)]
 // Because a dead_code warning is easier than clippy::unused_self, see https://github.com/rust-lang/rust/issues/68408
 enum RecvStreamState {
     Recv {
@@ -420,18 +434,6 @@ impl RecvStreamState {
         }
     }
 
-    const fn name(&self) -> &str {
-        match self {
-            Self::Recv { .. } => "Recv",
-            Self::SizeKnown { .. } => "SizeKnown",
-            Self::DataRecvd { .. } => "DataRecvd",
-            Self::DataRead { .. } => "DataRead",
-            Self::AbortReading { .. } => "AbortReading",
-            Self::WaitForReset { .. } => "WaitForReset",
-            Self::ResetRecvd { .. } => "ResetRecvd",
-        }
-    }
-
     const fn recv_buf(&self) -> Option<&RxStreamOrderer> {
         match self {
             Self::Recv { recv_buf, .. }
@@ -475,7 +477,7 @@ impl RecvStreamState {
         };
 
         if !final_size_ok {
-            return Err(Error::FinalSizeError);
+            return Err(Error::FinalSize);
         }
 
         let new_bytes_consumed = fc.set_consumed(consumed)?;
@@ -490,7 +492,7 @@ impl RecvStreamState {
 
 // See https://www.w3.org/TR/webtransport/#receive-stream-stats
 #[derive(Debug, Clone, Copy)]
-pub struct RecvStreamStats {
+pub struct Stats {
     // An indicator of progress on how many of the server application’s bytes
     // intended for this stream have been received so far.
     // Only sequential bytes up to, but not including, the first missing byte,
@@ -502,7 +504,7 @@ pub struct RecvStreamStats {
     pub bytes_read: u64,
 }
 
-impl RecvStreamStats {
+impl Stats {
     #[must_use]
     pub const fn new(bytes_received: u64, bytes_read: u64) -> Self {
         Self {
@@ -554,8 +556,8 @@ impl RecvStream {
         qtrace!(
             "RecvStream {} state {} -> {}",
             self.stream_id.as_u64(),
-            self.state.name(),
-            new_state.name()
+            self.state,
+            new_state
         );
 
         match new_state {
@@ -577,14 +579,14 @@ impl RecvStream {
     }
 
     #[must_use]
-    pub const fn stats(&self) -> RecvStreamStats {
+    pub const fn stats(&self) -> Stats {
         match &self.state {
             RecvStreamState::Recv { recv_buf, .. }
             | RecvStreamState::SizeKnown { recv_buf, .. }
             | RecvStreamState::DataRecvd { recv_buf, .. } => {
                 let received = recv_buf.received();
                 let read = recv_buf.retired();
-                RecvStreamStats::new(received, read)
+                Stats::new(received, read)
             }
             RecvStreamState::AbortReading {
                 final_received,
@@ -606,7 +608,7 @@ impl RecvStream {
             } => {
                 let received = *final_received;
                 let read = *final_read;
-                RecvStreamStats::new(received, read)
+                Stats::new(received, read)
             }
         }
     }
@@ -674,7 +676,7 @@ impl RecvStream {
             | RecvStreamState::AbortReading { .. }
             | RecvStreamState::WaitForReset { .. }
             | RecvStreamState::ResetRecvd { .. } => {
-                qtrace!("data received when we are in state {}", self.state.name());
+                qtrace!("data received when we are in state {}", self.state);
             }
         }
 
@@ -835,7 +837,7 @@ impl RecvStream {
     }
 
     pub fn stop_sending(&mut self, err: AppError) {
-        qtrace!("stop_sending called when in state {}", self.state.name());
+        qtrace!("stop_sending called when in state {}", self.state);
         match &mut self.state {
             RecvStreamState::Recv {
                 fc,
@@ -886,15 +888,17 @@ impl RecvStream {
     }
 
     /// Maybe write a `MAX_STREAM_DATA` frame.
-    pub fn write_frame(
+    pub fn write_frame<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
+        now: Instant,
+        rtt: Duration,
     ) {
         match &mut self.state {
             // Maybe send MAX_STREAM_DATA
-            RecvStreamState::Recv { fc, .. } => fc.write_frames(builder, tokens, stats),
+            RecvStreamState::Recv { fc, .. } => fc.write_frames(builder, tokens, stats, now, rtt),
             // Maybe send STOP_SENDING
             RecvStreamState::AbortReading {
                 frame_needed, err, ..
@@ -906,7 +910,7 @@ impl RecvStream {
                         *err,
                     ])
                 {
-                    tokens.push(RecoveryToken::Stream(StreamRecoveryToken::StopSending {
+                    tokens.push(recovery::Token::Stream(StreamRecoveryToken::StopSending {
                         stream_id: self.stream_id,
                     }));
                     stats.stop_sending += 1;
@@ -987,17 +991,24 @@ impl RecvStream {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, ops::Range, rc::Rc};
+    use std::{
+        cell::RefCell,
+        fmt::Debug,
+        ops::Range,
+        rc::Rc,
+        time::{Duration, Instant},
+    };
 
     use neqo_common::{qtrace, Encoder};
 
     use super::RecvStream;
     use crate::{
-        fc::ReceiverFlowControl,
-        packet::PacketBuilder,
-        recv_stream::{RxStreamOrderer, RX_STREAM_DATA_WINDOW},
+        fc::{ReceiverFlowControl, WINDOW_UPDATE_FRACTION},
+        packet::{self, PACKET_LIMIT},
+        recovery,
+        recv_stream::RxStreamOrderer,
         stats::FrameStats,
-        ConnectionEvents, Error, StreamId, RECV_BUFFER_SIZE,
+        ConnectionEvents, Error, StreamId, INITIAL_RECV_WINDOW_SIZE,
     };
 
     const SESSION_WINDOW: usize = 1024;
@@ -1447,23 +1458,30 @@ mod tests {
 
     #[test]
     fn stream_flowc_update() {
-        let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
-        let mut buf = vec![0u8; RECV_BUFFER_SIZE + 100]; // Make it overlarge
+        let mut s = create_stream(1024 * INITIAL_RECV_WINDOW_SIZE as u64);
+        let mut buf = vec![0u8; INITIAL_RECV_WINDOW_SIZE + 100]; // Make it overlarge
 
         assert!(!s.has_frames_to_write());
-        let big_buf = vec![0; RECV_BUFFER_SIZE];
+        let big_buf = vec![0; INITIAL_RECV_WINDOW_SIZE];
         s.inbound_stream_frame(false, 0, &big_buf).unwrap();
         assert!(!s.has_frames_to_write());
-        assert_eq!(s.read(&mut buf).unwrap(), (RECV_BUFFER_SIZE, false));
+        assert_eq!(s.read(&mut buf).unwrap(), (INITIAL_RECV_WINDOW_SIZE, false));
         assert!(!s.data_ready());
 
         // flow msg generated!
         assert!(s.has_frames_to_write());
 
         // consume it
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
-        let mut token = Vec::new();
-        s.write_frame(&mut builder, &mut token, &mut FrameStats::default());
+        let mut builder =
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+        let mut token = recovery::Tokens::new();
+        s.write_frame(
+            &mut builder,
+            &mut token,
+            &mut FrameStats::default(),
+            Instant::now(),
+            Duration::from_millis(100),
+        );
 
         // it should be gone
         assert!(!s.has_frames_to_write());
@@ -1473,7 +1491,7 @@ mod tests {
         let conn_events = ConnectionEvents::default();
         RecvStream::new(
             StreamId::from(67),
-            RX_STREAM_DATA_WINDOW,
+            INITIAL_RECV_WINDOW_SIZE as u64,
             Rc::new(RefCell::new(ReceiverFlowControl::new((), session_fc))),
             conn_events,
         )
@@ -1481,11 +1499,11 @@ mod tests {
 
     #[test]
     fn stream_max_stream_data() {
-        let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
+        let mut s = create_stream(1024 * INITIAL_RECV_WINDOW_SIZE as u64);
         assert!(!s.has_frames_to_write());
-        let big_buf = vec![0; RECV_BUFFER_SIZE];
+        let big_buf = vec![0; INITIAL_RECV_WINDOW_SIZE];
         s.inbound_stream_frame(false, 0, &big_buf).unwrap();
-        s.inbound_stream_frame(false, RX_STREAM_DATA_WINDOW, &[1; 1])
+        s.inbound_stream_frame(false, INITIAL_RECV_WINDOW_SIZE as u64, &[1; 1])
             .unwrap_err();
     }
 
@@ -1526,14 +1544,14 @@ mod tests {
 
     #[test]
     fn no_stream_flowc_event_after_exiting_recv() {
-        let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
-        let mut buf = vec![0; RECV_BUFFER_SIZE];
+        let mut s = create_stream(1024 * INITIAL_RECV_WINDOW_SIZE as u64);
+        let mut buf = vec![0; INITIAL_RECV_WINDOW_SIZE];
         // Write from buf at first.
         s.inbound_stream_frame(false, 0, &buf).unwrap();
         // Then read into it.
         s.read(&mut buf).unwrap();
         assert!(s.has_frames_to_write());
-        s.inbound_stream_frame(true, RX_STREAM_DATA_WINDOW, &[])
+        s.inbound_stream_frame(true, INITIAL_RECV_WINDOW_SIZE as u64, &[])
             .unwrap();
         assert!(!s.has_frames_to_write());
     }
@@ -1551,13 +1569,13 @@ mod tests {
     }
 
     fn create_stream_session_flow_control() -> (RecvStream, Rc<RefCell<ReceiverFlowControl<()>>>) {
-        assert!(RX_STREAM_DATA_WINDOW > u64::try_from(SESSION_WINDOW).unwrap());
+        static_assertions::const_assert!(INITIAL_RECV_WINDOW_SIZE > SESSION_WINDOW);
         let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
             (),
             u64::try_from(SESSION_WINDOW).unwrap(),
         )));
         (
-            create_stream_with_fc(Rc::clone(&session_fc), RX_STREAM_DATA_WINDOW),
+            create_stream_with_fc(Rc::clone(&session_fc), INITIAL_RECV_WINDOW_SIZE as u64),
             session_fc,
         )
     }
@@ -1575,8 +1593,9 @@ mod tests {
         s.read(&mut buf).unwrap();
         assert!(session_fc.borrow().frame_needed());
         // consume it
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
-        let mut token = Vec::new();
+        let mut builder =
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+        let mut token = recovery::Tokens::new();
         session_fc
             .borrow_mut()
             .write_frames(&mut builder, &mut token, &mut FrameStats::default());
@@ -1596,8 +1615,9 @@ mod tests {
         s.read(&mut buf).unwrap();
         assert!(session_fc.borrow().frame_needed());
         // consume it
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
-        let mut token = Vec::new();
+        let mut builder =
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+        let mut token = recovery::Tokens::new();
         session_fc
             .borrow_mut()
             .write_frames(&mut builder, &mut token, &mut FrameStats::default());
@@ -1609,7 +1629,7 @@ mod tests {
         )));
         let mut s = RecvStream::new(
             StreamId::from(567),
-            RX_STREAM_DATA_WINDOW,
+            INITIAL_RECV_WINDOW_SIZE as u64,
             Rc::clone(&session_fc),
             ConnectionEvents::default(),
         );
@@ -1629,15 +1649,12 @@ mod tests {
             .unwrap();
         assert!(!session_fc.borrow().frame_needed());
 
-        s.reset(
-            Error::NoError.code(),
-            u64::try_from(SESSION_WINDOW).unwrap(),
-        )
-        .unwrap();
+        s.reset(Error::None.code(), u64::try_from(SESSION_WINDOW).unwrap())
+            .unwrap();
         assert!(session_fc.borrow().frame_needed());
     }
 
-    fn check_fc<T: std::fmt::Debug>(fc: &ReceiverFlowControl<T>, consumed: u64, retired: u64) {
+    fn check_fc<T: Debug>(fc: &ReceiverFlowControl<T>, consumed: u64, retired: u64) {
         assert_eq!(fc.consumed(), consumed);
         assert_eq!(fc.retired(), retired);
     }
@@ -1794,76 +1811,157 @@ mod tests {
         // Receiving frame past the flow control will cause an error.
         assert_eq!(
             s.inbound_stream_frame(false, 0, &[0; SW_US * 3 / 4 + 1]),
-            Err(Error::FlowControlError)
+            Err(Error::FlowControl)
         );
     }
 
     /// Test that the flow controls will send updates.
+    #[expect(
+        clippy::too_many_lines,
+        clippy::cast_possible_truncation,
+        reason = "This is test code."
+    )]
     #[test]
     fn fc_state_recv_7() {
-        const SW: u64 = 1024;
-        const SW_US: usize = 1024;
-        let fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), SW)));
-        let mut s = create_stream_with_fc(Rc::clone(&fc), SW / 2);
+        const CONNECTION_WINDOW: u64 = 1024;
+        const CONNECTION_WINDOW_US: usize = CONNECTION_WINDOW as usize;
+
+        const STREAM_WINDOW: u64 = CONNECTION_WINDOW / 2;
+        const STREAM_WINDOW_US: usize = STREAM_WINDOW as usize;
+
+        const WINDOW_UPDATE_FRACTION_US: usize = WINDOW_UPDATE_FRACTION as usize;
+
+        let fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
+            (),
+            CONNECTION_WINDOW,
+        )));
+        let mut s = create_stream_with_fc(Rc::clone(&fc), STREAM_WINDOW);
 
         check_fc(&fc.borrow(), 0, 0);
         check_fc(s.fc().unwrap(), 0, 0);
 
-        s.inbound_stream_frame(false, 0, &[0; SW_US / 4]).unwrap();
-        let mut buf = [1; SW_US];
-        assert_eq!(s.read(&mut buf).unwrap(), (SW_US / 4, false));
-        check_fc(&fc.borrow(), SW / 4, SW / 4);
-        check_fc(s.fc().unwrap(), SW / 4, SW / 4);
+        // Receive data up to but not over the fc update trigger point.
+        s.inbound_stream_frame(false, 0, &[0; STREAM_WINDOW_US / WINDOW_UPDATE_FRACTION_US])
+            .unwrap();
+        let mut buf = [1; CONNECTION_WINDOW_US];
+        assert_eq!(
+            s.read(&mut buf).unwrap(),
+            (STREAM_WINDOW_US / WINDOW_UPDATE_FRACTION_US, false)
+        );
+        check_fc(
+            &fc.borrow(),
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION,
+        );
+        check_fc(
+            s.fc().unwrap(),
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION,
+        );
 
         // Still no fc update needed.
         assert!(!fc.borrow().frame_needed());
         assert!(!s.fc().unwrap().frame_needed());
 
         // Receive one more byte that will cause a fc update after it is read.
-        s.inbound_stream_frame(false, SW / 4, &[0]).unwrap();
-        check_fc(&fc.borrow(), SW / 4 + 1, SW / 4);
-        check_fc(s.fc().unwrap(), SW / 4 + 1, SW / 4);
+        s.inbound_stream_frame(false, STREAM_WINDOW / WINDOW_UPDATE_FRACTION, &[0])
+            .unwrap();
+        check_fc(
+            &fc.borrow(),
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION,
+        );
+        check_fc(
+            s.fc().unwrap(),
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION,
+        );
         // Only consuming data does not cause a fc update to be sent.
         assert!(!fc.borrow().frame_needed());
         assert!(!s.fc().unwrap().frame_needed());
 
         assert_eq!(s.read(&mut buf).unwrap(), (1, false));
-        check_fc(&fc.borrow(), SW / 4 + 1, SW / 4 + 1);
-        check_fc(s.fc().unwrap(), SW / 4 + 1, SW / 4 + 1);
+        check_fc(
+            &fc.borrow(),
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION + 1,
+        );
+        check_fc(
+            s.fc().unwrap(),
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION + 1,
+        );
         // Data are retired and the stream fc will send an update.
         assert!(!fc.borrow().frame_needed());
         assert!(s.fc().unwrap().frame_needed());
 
         // Receive more data to increase fc further.
-        s.inbound_stream_frame(false, SW / 4, &[0; SW_US / 4])
-            .unwrap();
-        assert_eq!(s.read(&mut buf).unwrap(), (SW_US / 4 - 1, false));
-        check_fc(&fc.borrow(), SW / 2, SW / 2);
-        check_fc(s.fc().unwrap(), SW / 2, SW / 2);
+        s.inbound_stream_frame(
+            false,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION,
+            &[0; STREAM_WINDOW_US / WINDOW_UPDATE_FRACTION_US],
+        )
+        .unwrap();
+        assert_eq!(
+            s.read(&mut buf).unwrap(),
+            (STREAM_WINDOW_US / WINDOW_UPDATE_FRACTION_US - 1, false)
+        );
+        check_fc(
+            &fc.borrow(),
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION,
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION,
+        );
+        check_fc(
+            s.fc().unwrap(),
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION,
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION,
+        );
         assert!(!fc.borrow().frame_needed());
         assert!(s.fc().unwrap().frame_needed());
 
         // Write the fc update frame
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
-        let mut token = Vec::new();
+        let mut builder =
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+        let mut token = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         fc.borrow_mut()
             .write_frames(&mut builder, &mut token, &mut stats);
         assert_eq!(stats.max_data, 0);
-        s.write_frame(&mut builder, &mut token, &mut stats);
+        s.write_frame(
+            &mut builder,
+            &mut token,
+            &mut stats,
+            Instant::now(),
+            Duration::from_millis(100),
+        );
         assert_eq!(stats.max_stream_data, 1);
 
-        // Receive 1 byte that will case a session fc update after it is read.
-        s.inbound_stream_frame(false, SW / 2, &[0]).unwrap();
+        // Receive 1 byte that will cause a session fc update after it is read.
+        s.inbound_stream_frame(false, STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION, &[0])
+            .unwrap();
         assert_eq!(s.read(&mut buf).unwrap(), (1, false));
-        check_fc(&fc.borrow(), SW / 2 + 1, SW / 2 + 1);
-        check_fc(s.fc().unwrap(), SW / 2 + 1, SW / 2 + 1);
+        check_fc(
+            &fc.borrow(),
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION + 1,
+        );
+        check_fc(
+            s.fc().unwrap(),
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION + 1,
+        );
         assert!(fc.borrow().frame_needed());
         assert!(!s.fc().unwrap().frame_needed());
         fc.borrow_mut()
             .write_frames(&mut builder, &mut token, &mut stats);
         assert_eq!(stats.max_data, 1);
-        s.write_frame(&mut builder, &mut token, &mut stats);
+        s.write_frame(
+            &mut builder,
+            &mut token,
+            &mut stats,
+            Instant::now(),
+            Duration::from_millis(100),
+        );
         assert_eq!(stats.max_stream_data, 1);
     }
 
@@ -1900,7 +1998,7 @@ mod tests {
         // Receiving frame past the final size of a stream will return an error.
         assert_eq!(
             s.inbound_stream_frame(true, SW / 4, &[0; SW_US / 4 + 1]),
-            Err(Error::FinalSizeError)
+            Err(Error::FinalSize)
         );
         check_fc(&fc.borrow(), SW / 2, 0);
         check_fc(s.fc().unwrap(), SW / 2, 0);
@@ -1956,7 +2054,7 @@ mod tests {
         // Receiving frame past the final size of a stream will return an error.
         assert_eq!(
             s.inbound_stream_frame(true, SW / 4, &[0; SW_US / 4 + 1]),
-            Err(Error::FinalSizeError)
+            Err(Error::FinalSize)
         );
         check_fc(&fc.borrow(), SW / 2, 0);
         check_fc(s.fc().unwrap(), SW / 2, 0);
@@ -2023,7 +2121,7 @@ mod tests {
         check_fc(&fc.borrow(), SW / 2, 0);
         check_fc(s.fc().unwrap(), SW / 2, 0);
 
-        s.stop_sending(Error::NoError.code());
+        s.stop_sending(Error::None.code());
         // All data will de retired
         check_fc(&fc.borrow(), SW / 2, SW / 2);
         check_fc(s.fc().unwrap(), SW / 2, SW / 2);
@@ -2043,7 +2141,7 @@ mod tests {
         // Receiving frame past the final size of a stream will return an error.
         assert_eq!(
             s.inbound_stream_frame(true, SW / 4, &[0; SW_US / 4 + 1]),
-            Err(Error::FinalSizeError)
+            Err(Error::FinalSize)
         );
         check_fc(&fc.borrow(), SW / 2, SW / 2);
         check_fc(s.fc().unwrap(), SW / 2, SW / 2);
@@ -2064,7 +2162,7 @@ mod tests {
         check_fc(&fc.borrow(), SW / 2, 0);
         check_fc(s.fc().unwrap(), SW / 2, 0);
 
-        s.stop_sending(Error::NoError.code());
+        s.stop_sending(Error::None.code());
         // All data will de retired
         check_fc(&fc.borrow(), SW / 2, SW / 2);
         check_fc(s.fc().unwrap(), SW / 2, SW / 2);
@@ -2078,7 +2176,7 @@ mod tests {
         // Receiving data past the flow control limit will cause an error.
         assert_eq!(
             s.inbound_stream_frame(false, 0, &[0; SW_US * 3 / 4 + 1]),
-            Err(Error::FlowControlError)
+            Err(Error::FlowControl)
         );
 
         // The stream can still receive duplicate data without a fin bit.
@@ -2101,7 +2199,7 @@ mod tests {
         // Receiving frame past the final size of a stream will return an error.
         assert_eq!(
             s.inbound_stream_frame(true, SW / 2, &[0; 21]),
-            Err(Error::FinalSizeError)
+            Err(Error::FinalSize)
         );
         check_fc(&fc.borrow(), SW / 2 + 20, SW / 2 + 20);
         check_fc(s.fc().unwrap(), SW / 2 + 20, SW / 2 + 20);
@@ -2122,7 +2220,7 @@ mod tests {
         check_fc(&fc.borrow(), SW / 2, 0);
         check_fc(s.fc().unwrap(), SW / 2, 0);
 
-        s.stop_sending(Error::NoError.code());
+        s.stop_sending(Error::None.code());
         check_fc(&fc.borrow(), SW / 2, SW / 2);
         check_fc(s.fc().unwrap(), SW / 2, SW / 2);
 
@@ -2139,7 +2237,7 @@ mod tests {
         // Receiving data past the flow control limit will cause an error.
         assert_eq!(
             s.inbound_stream_frame(false, 0, &[0; SW_US * 3 / 4 + 1]),
-            Err(Error::FlowControlError)
+            Err(Error::FlowControl)
         );
 
         // The stream can still receive duplicate data without a fin bit.

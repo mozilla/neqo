@@ -13,20 +13,17 @@ use std::{
     time::Duration,
 };
 
-use common::{connected_server, default_server, generate_ticket};
+use common::{assert_dscp, connected_server, default_server, generate_ticket};
 use neqo_common::{hex_with_len, qdebug, qtrace, Datagram, Encoder, Role};
-use neqo_crypto::AuthenticationStatus;
+use neqo_crypto::{generate_ech_keys, AuthenticationStatus};
 use neqo_transport::{
     server::ValidateAddress, CloseReason, ConnectionParameters, Error, State, StreamType,
     MIN_INITIAL_PACKET_SIZE,
 };
 use test_fixture::{
-    assertions, datagram, default_client,
-    header_protection::{
-        apply_header_protection, decode_initial_header, initial_aead_and_hp,
-        remove_header_protection,
-    },
-    now, split_datagram,
+    assertions, damage_ech_config, datagram, default_client,
+    header_protection::{self, decode_initial_header, initial_aead_and_hp},
+    now,
 };
 
 #[test]
@@ -58,6 +55,54 @@ fn retry_basic() {
     let dgram = server.process(dgram, now()).dgram(); // (done)
     assert!(dgram.is_some()); // Note that this packet will be dropped...
     connected_server(&server);
+    assert_dscp(&client.stats());
+}
+
+/// Verify that ECH fallback works, even when there is a retry.
+///
+/// This is necessary to demonstrate that the transport parameters
+/// in the outer `ClientHello` are sufficient to establish a connection.
+#[test]
+fn retry_ech_fallback() {
+    const CONFIG_ID: u8 = 12;
+    const PUBLIC_NAME: &str = "public.name.example";
+
+    let mut server = default_server();
+    server.set_validation(ValidateAddress::Always);
+    let mut client = default_client();
+
+    let (sk, pk) = generate_ech_keys().unwrap();
+    server.enable_ech(CONFIG_ID, PUBLIC_NAME, &sk, &pk).unwrap();
+    client
+        .client_enable_ech(damage_ech_config(server.ech_config()))
+        .unwrap();
+
+    let dgram = client.process_output(now()).dgram(); // Initial
+    let dgram2 = client.process_output(now()).dgram(); // Initial
+    assert!(dgram.is_some() && dgram2.is_some());
+    _ = server.process(dgram, now()).dgram().unwrap(); // Retry
+    let dgram = server.process(dgram2, now()).dgram().unwrap(); // Retry
+    assertions::assert_retry(&dgram);
+
+    let dgram = client.process(Some(dgram), now()).dgram(); // Initial w/token
+    let dgram2 = client.process_output(now()).dgram(); // Initial
+    assert!(dgram.is_some() && dgram2.is_some());
+    _ = server.process(dgram, now()).dgram().unwrap();
+    let dgram = server.process(dgram2, now()).dgram();
+    let dgram = client.process(dgram, now()).dgram();
+    let dgram = server.process(dgram, now()).dgram(); // Initial, HS
+    assert!(dgram.is_some());
+    drop(client.process(dgram, now()).dgram()); // Ingest, drop any ACK.
+    client.authenticated(AuthenticationStatus::Ok, now());
+    let dgram = client.process_output(now()).dgram(); // Send Finished
+    assert!(dgram.is_some());
+    let State::Closing { error: err, .. } = client.state() else {
+        panic!("client should be closing");
+    };
+    let CloseReason::Transport(Error::EchRetry(fallback_config)) = err else {
+        panic!("client should provide fallback config");
+    };
+    assert_eq!(fallback_config, server.ech_config());
 }
 
 /// Receiving a Retry is enough to infer something about the RTT.
@@ -78,6 +123,7 @@ fn implicit_rtt_retry() {
     client.process_input(dgram.unwrap(), now);
 
     assert_eq!(client.stats().rtt, RTT);
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -100,6 +146,7 @@ fn retry_expired() {
     now += Duration::from_secs(60); // Too long for Retry.
     let dgram = server.process(dgram, now).dgram(); // Initial, HS
     assert!(dgram.is_none());
+    assert_dscp(&client.stats());
 }
 
 // Attempt a retry with 0-RTT, and have 0-RTT packets sent with the second ClientHello.
@@ -144,6 +191,7 @@ fn retry_0rtt() {
     assert!(dgram.is_some());
     connected_server(&server);
     assert!(client.tls_info().unwrap().resumed());
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -169,6 +217,7 @@ fn retry_different_ip() {
     let from_other = Datagram::new(other_addr, dgram.destination(), dgram.tos(), &dgram[..]);
     let dgram = server.process(Some(from_other), now()).dgram();
     assert!(dgram.is_none());
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -191,6 +240,7 @@ fn new_token_different_ip() {
     let dgram = server.process(dgram, now()).dgram(); // Retry
     assert!(dgram.is_some());
     assertions::assert_retry(dgram.as_ref().unwrap());
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -216,10 +266,12 @@ fn new_token_expired() {
     let dgram = server.process(dgram, the_future).dgram(); // Retry
     assert!(dgram.is_some());
     assertions::assert_retry(dgram.as_ref().unwrap());
+    assert_dscp(&client.stats());
 }
 
 #[test]
 fn retry_after_initial() {
+    neqo_common::log::init(None);
     let mut server = default_server();
     let mut retry_server = default_server();
     retry_server.set_validation(ValidateAddress::Always);
@@ -229,14 +281,10 @@ fn retry_after_initial() {
     let cinit2 = client.process_output(now()).dgram(); // Initial
     assert!(cinit.is_some() && cinit2.is_some());
     _ = server.process(cinit.clone(), now()).dgram(); // Initial
-    let server_flight = server.process(cinit2, now()).dgram(); // Initial
-    assert!(server_flight.is_some());
-
-    let dgram = client.process(server_flight, now()).dgram();
-    let server_flight = server.process(dgram, now()).dgram();
+    let server_initial = server.process(cinit2, now()).dgram().unwrap();
+    let server_handshake = server.process_output(now()).dgram().unwrap();
 
     // We need to have the client just process the Initial.
-    let (server_initial, _other) = split_datagram(server_flight.as_ref().unwrap());
     let dgram = client.process(Some(server_initial), now()).dgram();
     assert!(dgram.is_some());
     assert!(*client.state() != State::Connected);
@@ -249,8 +297,8 @@ fn retry_after_initial() {
     let junk = client.process(retry, now()).dgram();
     assert!(junk.is_none());
 
-    // Either way, the client should still be able to process the server flight and connect.
-    let dgram = client.process(server_flight, now()).dgram();
+    // Either way, the client should still be able to process the server handshake and connect.
+    let dgram = client.process(Some(server_handshake), now()).dgram();
     assert!(dgram.is_some()); // Drop this one.
     assert!(test_fixture::maybe_authenticate(&mut client));
     let dgram = server.process(dgram, now()).dgram();
@@ -261,6 +309,7 @@ fn retry_after_initial() {
     let dgram = server.process(dgram, now()).dgram(); // (done)
     assert!(dgram.is_some());
     connected_server(&server);
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -286,6 +335,7 @@ fn retry_bad_integrity() {
     // The client should ignore this packet.
     let dgram = client.process(Some(tweaked_packet), now()).dgram();
     assert!(dgram.is_none());
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -305,6 +355,7 @@ fn retry_bad_token() {
 
     let dgram = server.process(client_initial2, now()).dgram();
     assert!(dgram.is_none());
+    assert_dscp(&client.stats());
 }
 
 // This is really a client test, but we need a server with Retry to test it.
@@ -337,6 +388,7 @@ fn retry_after_pto() {
 
     let ci2 = client.process(retry, now).dgram();
     assert!(ci2.unwrap().len() >= MIN_INITIAL_PACKET_SIZE);
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -371,6 +423,7 @@ fn vn_after_retry() {
         client.process(Some(vn), now()).callback(),
         Duration::from_secs(0)
     );
+    assert_dscp(&client.stats());
 }
 
 // This tests a simulated on-path attacker that intercepts the first
@@ -412,7 +465,7 @@ fn mitm_retry() {
 
     // Now we have enough information to make keys.
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
-    let (header, pn) = remove_header_protection(&hp, protected_header, payload);
+    let (header, pn) = header_protection::remove(&hp, protected_header, payload);
     let pn_len = header.len() - protected_header.len();
 
     // Decrypt.
@@ -449,7 +502,7 @@ fn mitm_retry() {
     // Unlike with decryption, don't truncate.
     // All MIN_INITIAL_PACKET_SIZE bytes are needed to reach the minimum datagram size.
 
-    apply_header_protection(&hp, &mut notoken_packet, pn_offset..(pn_offset + pn_len));
+    header_protection::apply(&hp, &mut notoken_packet, pn_offset..(pn_offset + pn_len));
     qtrace!("packet={}", hex_with_len(&notoken_packet));
 
     let new_datagram = Datagram::new(
@@ -476,4 +529,5 @@ fn mitm_retry() {
             ..
         }
     ));
+    assert_dscp(&client.stats());
 }

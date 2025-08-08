@@ -34,9 +34,13 @@ jobs:
       packages: write
     steps:
       - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
-      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
         with:
-          cache-binary: ${{ github.event_name == 'pull_request' }} # zizmor: ignore[cache-poisoning]
+          platforms: arm64
+          cache-image: false
+
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        with:
+          cache-binary: false
 
       - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
@@ -44,7 +48,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
+      - uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}-qns
@@ -57,7 +61,7 @@ jobs:
             # set latest tag for default branch
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         if: ${{ github.event_name != 'pull_request' }}
         with:
           push: true
@@ -66,7 +70,7 @@ jobs:
           build-args: RUST_VERSION=stable
           platforms: 'linux/amd64, linux/arm64'
 
-      - uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         id: docker_build_and_push
         with:
           tags: ${{ steps.meta.outputs.tags }}
@@ -75,7 +79,7 @@ jobs:
           platforms: 'linux/amd64'
           outputs: type=docker,dest=/tmp/${{ env.LATEST }}.tar
 
-      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: '${{ env.LATEST }} Docker image'
           path: /tmp/${{ env.LATEST }}.tar
@@ -98,6 +102,7 @@ jobs:
           # Add neqo-latest and some non-default implementations.
           # tquic: https://github.com/quic-interop/quic-interop-runner/pull/385/files
           # openssl: https://github.com/quic-interop/quic-interop-runner/pull/402/files
+          # linuxquic: https://github.com/quic-interop/quic-interop-runner/pull/428
           cat <<EOF > additional.json
           {
             "neqo-latest": {
@@ -114,6 +119,11 @@ jobs:
               "image": "quay.io/openssl-ci/openssl-quic-interop",
               "url": "https://github.com/openssl/openssl",
               "role": "client"
+            },
+            "linuxquic": {
+              "image": "quay.io/lxin/linuxquic-interop:latest",
+              "url": "https://github.com/lxin/quic",
+              "role": "both"
             }
           }
           EOF
@@ -149,12 +159,19 @@ jobs:
         pair: ${{ fromJson(needs.implementations.outputs.pairs) }}
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+      # quic-interop-runner requires Docker v28.1. GitHub's ubuntu-24.04 comes
+      # with v28.0.4. Install newer version.
+      - name: Set up Docker
+        uses: docker/setup-docker-action@b60f85385d03ac8acfca6d9996982511d8620a19 # v4.3.0
+        with:
+          version: 'v28.1.0'
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: '${{ env.LATEST }} Docker image'
           path: /tmp
 
-      - run: docker load --input /tmp/${{ env.LATEST }}.tar
+      - run: docker load --input "/tmp/$LATEST.tar"
 
       - id: depair
         env:
@@ -171,10 +188,17 @@ jobs:
       # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
       - uses: ./.github/actions/quic-interop-runner
         timeout-minutes: ${{ fromJSON(env.TIMEOUT) }}
+        continue-on-error: true
+        id: run
         with:
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
+
+      - if: ${{ always() }}
+        env:
+          RESULT: ${{ steps.run.outputs.result }}
+        run: test "$RESULT" != "error"
 
   report:
     name: Report results
@@ -185,12 +209,12 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: '*results'
           path: results
 
-      - uses: actions/cache/restore@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+      - uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: results-main
           key: qns-${{ github.sha }}
@@ -300,13 +324,15 @@ jobs:
           } >> comment.md
 
       - if: ${{ github.ref == 'refs/heads/main' }}
+        env:
+          SHA: ${{ github.sha }}
         run: |
           rm -rf results-main || true
           mv results results-main
-          echo "${{ github.sha }}" > results-main/baseline-sha.txt
+          echo "$SHA" > results-main/baseline-sha.txt
 
       - if: ${{ github.ref == 'refs/heads/main' }}
-        uses: actions/cache/save@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: results-main
           key: qns-${{ github.sha }}

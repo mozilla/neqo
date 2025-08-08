@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use neqo_common::{event::Provider as _, Decoder, Encoder};
+use neqo_common::{event::Provider as _, Decoder, Dscp, Encoder};
 use test_fixture::{assertions, datagram, now};
 
 use super::{
@@ -17,11 +17,19 @@ use super::{
 use crate::{
     packet::PACKET_BIT_LONG,
     tparams::{TransportParameter, TransportParameterId::*},
-    ConnectionParameters, Error, Version, MIN_INITIAL_PACKET_SIZE,
+    ConnectionParameters, Error, Stats, Version, MIN_INITIAL_PACKET_SIZE,
 };
 
 // The expected PTO duration after the first Initial is sent.
 const INITIAL_PTO: Duration = Duration::from_millis(300);
+
+/// # Panics
+///
+/// When the count of received packets doesn't match the count of received packets with the
+/// (default) DSCP.
+pub fn assert_dscp(stats: &Stats) {
+    assert_eq!(stats.dscp_rx[Dscp::Cs0], stats.packets_rx);
+}
 
 #[test]
 fn unknown_version() {
@@ -33,6 +41,7 @@ fn unknown_version() {
     unknown_version_packet.resize(MIN_INITIAL_PACKET_SIZE, 0x0);
     drop(client.process(Some(datagram(unknown_version_packet)), now()));
     assert_eq!(1, client.stats().dropped_rx);
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -48,6 +57,7 @@ fn server_receive_unknown_first_packet() {
     );
 
     assert_eq!(1, server.stats().dropped_rx);
+    assert_dscp(&server.stats());
 }
 
 fn create_vn(initial_pkt: &[u8], versions: &[u32]) -> Vec<u8> {
@@ -89,6 +99,7 @@ fn version_negotiation_current_version() {
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -110,6 +121,7 @@ fn version_negotiation_version0() {
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -132,6 +144,7 @@ fn version_negotiation_only_reserved() {
         }
         _ => panic!("Invalid client state"),
     }
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -153,6 +166,7 @@ fn version_negotiation_corrupted() {
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -174,6 +188,7 @@ fn version_negotiation_empty() {
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -195,6 +210,7 @@ fn version_negotiation_not_supported() {
         }
         _ => panic!("Invalid client state"),
     }
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -217,6 +233,7 @@ fn version_negotiation_bad_cid() {
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
+    assert_dscp(&client.stats());
 }
 
 #[test]
@@ -227,6 +244,8 @@ fn compatible_upgrade() {
     connect(&mut client, &mut server);
     assert_eq!(client.version(), Version::Version2);
     assert_eq!(server.version(), Version::Version2);
+    assert_dscp(&client.stats());
+    assert_dscp(&server.stats());
 }
 
 /// When the first packet from the client is gigantic, the server might generate acknowledgment
@@ -264,6 +283,15 @@ fn compatible_upgrade_large_initial() {
     // Only handshake padding is "dropped".
     assert_eq!(client.stats().dropped_rx, 1);
     assert!(matches!(server.stats().dropped_rx, 2 | 3));
+    assert_dscp(&client.stats());
+    assert!(
+        server.stats().dscp_rx[Dscp::Cs0] == server.stats().packets_rx
+            || server.stats().dscp_rx[Dscp::Cs0] == server.stats().packets_rx + 1
+            || server.stats().dscp_rx[Dscp::Cs0] == server.stats().packets_rx - 1,
+        "dscp_rx[Dscp::Cs0] {} != packets_rx {} (possibly +/- 1)",
+        server.stats().dscp_rx[Dscp::Cs0],
+        server.stats().packets_rx
+    );
 }
 
 /// A server that supports versions 1 and 2 might prefer version 1 and that's OK.
@@ -326,7 +354,7 @@ fn version_negotiation_downgrade() {
         &mut client,
         &mut server,
         Error::VersionNegotiation,
-        Error::PeerError(Error::VersionNegotiation.code()),
+        Error::Peer(Error::VersionNegotiation.code()),
     );
 }
 
@@ -383,7 +411,7 @@ fn invalid_current_version_client() {
     connect_fail(
         &mut client,
         &mut server,
-        Error::PeerError(Error::CryptoAlert(47).code()),
+        Error::Peer(Error::CryptoAlert(47).code()),
         Error::CryptoAlert(47),
     );
 }
@@ -416,7 +444,7 @@ fn invalid_current_version_server() {
         &mut client,
         &mut server,
         Error::CryptoAlert(47),
-        Error::PeerError(Error::CryptoAlert(47).code()),
+        Error::Peer(Error::CryptoAlert(47).code()),
     );
 }
 
@@ -441,7 +469,7 @@ fn no_compatible_version() {
     connect_fail(
         &mut client,
         &mut server,
-        Error::PeerError(Error::CryptoAlert(47).code()),
+        Error::Peer(Error::CryptoAlert(47).code()),
         Error::CryptoAlert(47),
     );
 }
