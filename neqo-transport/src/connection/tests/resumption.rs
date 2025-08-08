@@ -21,8 +21,7 @@ use super::{
 use crate::{
     addr_valid::{AddressValidation, ValidateAddress},
     frame::FrameType,
-    rtt::INITIAL_RTT,
-    ConnectionParameters, Error, State, Version, MIN_INITIAL_PACKET_SIZE,
+    ConnectionParameters, Error, State, Version, DEFAULT_INITIAL_RTT, MIN_INITIAL_PACKET_SIZE,
 };
 
 #[test]
@@ -192,7 +191,7 @@ fn ticket_rtt_less_than_default() {
 
 #[test]
 fn ticket_rtt_larger_than_default() {
-    assert_eq!(ticket_rtt(Duration::from_millis(500)), INITIAL_RTT);
+    assert_eq!(ticket_rtt(Duration::from_millis(500)), DEFAULT_INITIAL_RTT);
 }
 
 /// Check that a resumed connection uses a token on Initial packets.

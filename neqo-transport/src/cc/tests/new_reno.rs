@@ -121,7 +121,11 @@ fn issue_876() {
     assert_eq!(cc.bytes_in_flight(), 6 * cc.max_datagram_size() - 5);
 
     // and ack it. cwnd increases slightly
-    cc.on_packets_acked(&sent_packets[6..], &RttEstimate::default(), now);
+    cc.on_packets_acked(
+        &sent_packets[6..],
+        &RttEstimate::new(crate::DEFAULT_INITIAL_RTT),
+        now,
+    );
     assert_eq!(cc.acked_bytes(), sent_packets[6].len());
     cwnd_is_halved(&cc);
     assert_eq!(cc.bytes_in_flight(), 5 * cc.max_datagram_size() - 2);
@@ -186,7 +190,7 @@ fn issue_1465() {
 
     // the acked packets before on_packet_sent were the cause of
     // https://github.com/mozilla/neqo/pull/1465
-    cc.on_packets_acked(&[p2], &RttEstimate::default(), now);
+    cc.on_packets_acked(&[p2], &RttEstimate::new(crate::DEFAULT_INITIAL_RTT), now);
 
     assert_eq!(cc.bytes_in_flight(), 0);
 
@@ -194,7 +198,7 @@ fn issue_1465() {
     let p4 = send_next(&mut cc, now);
     cc.on_packet_sent(&p4, now);
     now += RTT;
-    cc.on_packets_acked(&[p4], &RttEstimate::default(), now);
+    cc.on_packets_acked(&[p4], &RttEstimate::new(crate::DEFAULT_INITIAL_RTT), now);
 
     // do the same as in the first rtt but now the bug appears
     let p5 = send_next(&mut cc, now);
