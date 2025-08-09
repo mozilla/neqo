@@ -219,6 +219,7 @@ fn debug() {
   tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
   pmtud: 0 sent 0 acked 0 lost 0 change 0 iface_mtu 0 pmtu
   resumed: false
+  first initial pn: None
   frames rx:
     crypto 0 done 0 token 0 close 0
     ack 0 (max 0) ping 0 padding 0
