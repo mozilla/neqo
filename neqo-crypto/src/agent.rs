@@ -986,10 +986,19 @@ impl Display for SecretAgent {
     }
 }
 
-#[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
+#[derive(PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub struct ResumptionToken {
     token: Vec<u8>,
     expiration_time: Instant,
+}
+
+impl Debug for ResumptionToken {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ResumptionToken")
+            .field("token", &hex_snip_middle(&self.token))
+            .field("expiration_time", &self.expiration_time)
+            .finish()
+    }
 }
 
 impl AsRef<[u8]> for ResumptionToken {
