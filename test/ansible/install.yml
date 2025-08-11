@@ -172,14 +172,18 @@
       args:
         creates: "/home/{{ bench_user }}/.cargo/bin/cargo"
 
-    - name: Disable systemd unified cgroups
-      when: is_gcp
+    - name: Modify GRUB configuration
       block:
-        - name: Modify GRUB configuration
+        - name: Disable systemd unified cgroups
           ansible.builtin.lineinfile:
             path: /etc/default/grub
             regexp: '^GRUB_CMDLINE_LINUX=.*$'
             line: "GRUB_CMDLINE_LINUX='systemd.unified_cgroup_hierarchy=false'"
+        - name: Boot Linux 6.11.0-28-generic
+          ansible.builtin.lineinfile:
+            path: /etc/default/grub
+            regexp: '^GRUB_DEFAULT=0'
+            line: "GRUB_DEFAULT=2"
         - name: Update GRUB
           ansible.builtin.command: update-grub
 
@@ -269,3 +273,6 @@
         chdir: "{{ bench_path }}"
         cmd: ./svc.sh start
       changed_when: true
+
+    - name: Reboot the machine
+      ansible.builtin.reboot:
