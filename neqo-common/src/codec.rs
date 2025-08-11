@@ -847,6 +847,7 @@ mod tests {
         let mut dec = enc.as_decoder();
         dec.skip_vvec();
     }
+
     #[test]
     fn skip_while() {
         let enc = Encoder::from_hex("000001020202");
