@@ -2733,9 +2733,6 @@ impl Connection {
             );
 
             self.stats.borrow_mut().packets_tx += 1;
-            if pt == packet::Type::Initial && self.stats.borrow().first_initial_pn.is_none() {
-                self.stats.borrow_mut().first_initial_pn = Some(pn);
-            }
             // Track which packet types are sent with which ECN codepoints. For
             // coalesced packets, this increases the counts for each packet type
             // contained in the coalesced packet. This is per Section 13.4.1 of

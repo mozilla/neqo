@@ -274,9 +274,6 @@ pub struct Stats {
     /// Whether the connection was resumed successfully.
     pub resumed: bool,
 
-    /// The packet number of the first Initial packet sent.
-    pub first_initial_pn: Option<packet::Number>,
-
     /// The current, estimated round-trip time on the primary path.
     pub rtt: Duration,
     /// The current, estimated round-trip time variation on the primary path.
@@ -383,7 +380,6 @@ impl Debug for Stats {
             self.pmtud_pmtu
         )?;
         writeln!(f, "  resumed: {}", self.resumed)?;
-        writeln!(f, "  first initial pn: {:?}", self.first_initial_pn)?;
         writeln!(f, "  frames rx:")?;
         self.frame_rx.fmt(f)?;
         writeln!(f, "  frames tx:")?;
