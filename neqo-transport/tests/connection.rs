@@ -322,3 +322,25 @@ fn handshake_mlkem768x25519() {
         neqo_crypto::TLS_GRP_KEM_MLKEM768X25519
     );
 }
+
+#[test]
+fn client_initial_packet_number() {
+    // Check that the initial packet number is randomized (i.e, > 0) if the `randomize_ci_pn`
+    // connection parameter is set, and that it is zero when not.
+    for randomize_ci_pn in [true, false] {
+        // This test needs to decrypt the CI, so turn off MLKEM.
+        let mut client = new_client(
+            ConnectionParameters::default()
+                .versions(Version::Version1, vec![Version::Version1])
+                .mlkem(false)
+                .randomize_ci_pn(randomize_ci_pn),
+        );
+
+        let client_initial = client.process_output(now());
+        let (protected_header, client_dcid, _, payload) =
+            decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client).unwrap();
+        let (_, hp) = initial_aead_and_hp(client_dcid, Role::Client);
+        let (_, pn) = header_protection::remove(&hp, protected_header, payload);
+        assert!(randomize_ci_pn && pn > 0 || !randomize_ci_pn && pn == 0);
+    }
+}
