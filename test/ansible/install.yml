@@ -187,7 +187,7 @@
           ansible.builtin.lineinfile:
             path: "{{ '/etc/default/grub.d/50-cloudimg-settings.cfg' if is_gcp else '/etc/default/grub' }}"
             regexp: '^GRUB_DEFAULT=.*'
-            line: GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux {{ '6.11.0-1017-gcp' if is_gcp else '6.11.0-28-generic' }}""
+            line: GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux {{ '6.11.0-1017-gcp' if is_gcp else '6.11.0-28-generic' }}"
         - name: Update GRUB
           ansible.builtin.command: update-grub
 
