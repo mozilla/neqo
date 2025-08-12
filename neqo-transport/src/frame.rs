@@ -514,15 +514,11 @@ impl<'a> Frame<'a> {
         let t = t.try_into()?;
         match t {
             FrameType::Padding => {
-                let mut length: u16 = 1;
-                while let Some(b) = dec.peek_byte() {
-                    if b != u8::from(FrameType::Padding) {
-                        break;
-                    }
-                    length += 1;
-                    dec.skip(1);
-                }
-                Ok(Self::Padding(length))
+                // t itself + any additional `Frame::Padding`
+                (1 + dec.skip_while(u8::from(FrameType::Padding)))
+                    .try_into()
+                    .map(Self::Padding)
+                    .map_err(|_| Error::TooMuchData)
             }
             FrameType::Ping => Ok(Self::Ping),
             FrameType::ResetStream => Ok(Self::ResetStream {
@@ -1084,5 +1080,15 @@ mod tests {
         };
 
         just_dec(&f, "4030010203");
+    }
+
+    /// See bug in <https://github.com/mozilla/neqo/issues/2838>.
+    #[test]
+    fn padding_frame_u16_overflow() {
+        let mut e = Encoder::new();
+        e.encode_varint(FrameType::Padding);
+        // `Frame::Padding` uses u16 to store length. Try to overflow length.
+        e.pad_to(u16::MAX as usize + 1, 0);
+        assert_eq!(Frame::decode(&mut e.as_decoder()), Err(Error::TooMuchData));
     }
 }
