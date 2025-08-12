@@ -93,6 +93,8 @@
         state: present
         name:
           - linux-image-6.11.0-1017-gcp
+          - linux-tools-6.11.0-1017-gcp
+          - linux-cloud-tools-6.11.0-1017-gcp
       register: apt_install
 
     - name: Set kernel.perf_event_paranoid
