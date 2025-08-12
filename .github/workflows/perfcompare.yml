@@ -151,8 +151,8 @@ jobs:
       - name: Build google/quiche
         run: |
           cd google-quiche
-          bazel build -c opt --copt=-fno-omit-frame-pointer --copt=-g --strip=never --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
-          bazel shutdown
+          bazel-7.0.0 build -c opt --copt=-fno-omit-frame-pointer --copt=-g --strip=never --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
+          bazel-7.0.0 shutdown
 
       - name: Build cloudflare/quiche
         run: |
