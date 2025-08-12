@@ -96,7 +96,7 @@ jobs:
 
       - name: Set PATH and environment
         run: |
-          echo "~/.cargo/bin" >> "${GITHUB_PATH}"
+          echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
         uses: ./neqo/.github/actions/rust
@@ -151,7 +151,7 @@ jobs:
       - name: Build google/quiche
         run: |
           cd google-quiche
-          bazel-7.0.0 build -c opt --copt=-fno-omit-frame-pointer --copt=-g --strip=never --sandbox_writable_path=~/.cache/sccache quiche:quic_server quiche:quic_client
+          bazel-7.0.0 build -c opt --copt=-fno-omit-frame-pointer --copt=-g --strip=never --sandbox_writable_path=$HOME/.cache/sccache quiche:quic_server quiche:quic_client
           bazel-7.0.0 shutdown
 
       - name: Build cloudflare/quiche
