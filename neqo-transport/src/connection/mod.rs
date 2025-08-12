@@ -1622,6 +1622,15 @@ impl Connection {
             State::Closing { .. } => {
                 // Don't bother processing the packet. Instead ask to get a
                 // new close frame.
+                //
+                // > In the closing state, an endpoint retains only enough
+                // > information to generate a packet containing a
+                // > CONNECTION_CLOSE frame and to identify packets as belonging
+                // > to the connection. An endpoint in the closing state sends a
+                // > packet containing a CONNECTION_CLOSE frame in response to any
+                // > incoming packet that it attributes to the connection.
+                //
+                // <https://www.rfc-editor.org/rfc/rfc9000.html#section-10.2.1-2>
                 self.state_signaling.send_close();
                 PreprocessResult::Next
             }
