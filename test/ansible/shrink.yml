@@ -1,5 +1,5 @@
 - name: Shrink the Ubuntu installation
-  hosts: moonshots
+  hosts: all
   become: true
   tasks:
     - name: Remove unnecessary packages
