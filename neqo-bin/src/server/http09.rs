@@ -201,13 +201,21 @@ impl HttpServer {
 }
 
 impl super::HttpServer for HttpServer {
-    fn process_multiple(
+    fn new(
+        args: &Args,
+        anti_replay: AntiReplay,
+        cid_mgr: Rc<RefCell<dyn ConnectionIdGenerator>>,
+    ) -> Self {
+        Self::new(args, anti_replay, cid_mgr).expect("We cannot make a server!")
+    }
+
+    fn process_multiple<'a>(
         &mut self,
-        dgram: Option<Datagram<&mut [u8]>>,
+        dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
         now: Instant,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
-        self.server.process_multiple(dgram, now, max_datagrams)
+        self.server.process_multiple(dgrams, now, max_datagrams)
     }
 
     fn process_events(&mut self, now: Instant) {

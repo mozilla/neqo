@@ -151,8 +151,8 @@ jobs:
       - name: Build google/quiche
         run: |
           cd google-quiche
-          bazel build -c opt --copt=-fno-omit-frame-pointer --copt=-g --strip=never --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
-          bazel shutdown
+          bazel-7.0.0 build -c opt --copt=-fno-omit-frame-pointer --copt=-g --strip=never --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
+          bazel-7.0.0 shutdown
 
       - name: Build cloudflare/quiche
         run: |
@@ -445,7 +445,7 @@ jobs:
         run: |
           for f in *.perf; do
             # Convert for profiler.firefox.com
-            samply import "$f" -o "$f.samply.json.gz" --save-only --unstable-presymbolicate
+            samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
             # Generate flamegraphs
             flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}"
           done
@@ -476,7 +476,6 @@ jobs:
           name: ${{ github.event.repository.name }}-${{ github.sha }}-perfcompare-samply
           path: |
             *.samply.json.gz
-            *.syms.json
             binaries
           compression-level: 9
 

@@ -193,7 +193,8 @@ impl Args {
     ) -> Self {
         use std::{iter::repeat_with, str::FromStr as _};
 
-        let addr = server_addr.map_or("[::1]:12345".into(), |a| format!("[::1]:{}", a.port()));
+        let addr =
+            server_addr.map_or_else(|| "[::1]:12345".into(), |a| format!("[::1]:{}", a.port()));
         Self {
             shared: SharedArgs::default(),
             urls: repeat_with(|| Url::from_str(&format!("http://{addr}/{download_size}")).unwrap())

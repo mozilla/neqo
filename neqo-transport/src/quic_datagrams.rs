@@ -137,7 +137,7 @@ impl QuicDatagrams {
         }
     }
 
-    /// Returns true if there was an unsent datagram that has been dismissed.
+    /// Add a datagram to the send queue.
     ///
     /// # Error
     ///

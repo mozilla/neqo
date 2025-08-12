@@ -46,6 +46,7 @@ use crate::{
     recovery::{self, sent, SendProfile},
     recv_stream,
     rtt::{RttEstimate, GRANULARITY, INITIAL_RTT},
+    saved::SavedDatagrams,
     send_stream::{self, SendStream},
     stats::{Stats, StatsCell},
     stream_id::StreamType,
@@ -66,7 +67,6 @@ use crate::{
 
 mod idle;
 pub mod params;
-mod saved;
 mod state;
 #[cfg(test)]
 pub mod test_internal;
@@ -76,7 +76,6 @@ pub use params::ConnectionParameters;
 use params::PreferredAddressConfig;
 #[cfg(test)]
 pub use params::ACK_RATIO_SCALE;
-use saved::SavedDatagrams;
 use state::StateSignaling;
 pub use state::{ClosingFrame, State};
 
@@ -1621,6 +1620,15 @@ impl Connection {
             State::Closing { .. } => {
                 // Don't bother processing the packet. Instead ask to get a
                 // new close frame.
+                //
+                // > In the closing state, an endpoint retains only enough
+                // > information to generate a packet containing a
+                // > CONNECTION_CLOSE frame and to identify packets as belonging
+                // > to the connection. An endpoint in the closing state sends a
+                // > packet containing a CONNECTION_CLOSE frame in response to any
+                // > incoming packet that it attributes to the connection.
+                //
+                // <https://www.rfc-editor.org/rfc/rfc9000.html#section-10.2.1-2>
                 self.state_signaling.send_close();
                 PreprocessResult::Next
             }
