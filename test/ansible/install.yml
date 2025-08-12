@@ -86,6 +86,15 @@
           - zlib1g-dev
       register: apt_install
 
+    - name: Install required GCP dependencies
+      when: is_gcp
+      ansible.builtin.apt:
+        install_recommends: true
+        state: present
+        name:
+          - linux-image-6.11.0-1017-gcp
+      register: apt_install
+
     - name: Set kernel.perf_event_paranoid
       ansible.posix.sysctl:
         name: kernel.perf_event_paranoid
@@ -174,17 +183,11 @@
 
     - name: Modify GRUB configuration
       block:
-        - name: Undo disabling of systemd unified cgroups
-          # We enabled this previously, so we need to undo it.
+        - name: Boot Linux 6.11.0
           ansible.builtin.lineinfile:
-            path: /etc/default/grub
-            regexp: '^GRUB_CMDLINE_LINUX=(.*)'
-            line: '#GRUB_CMDLINE_LINUX=\1'
-        - name: Boot Linux 6.11.0-28-generic
-          ansible.builtin.lineinfile:
-            path: /etc/default/grub
+            path: "{{ '/etc/default/grub.d/50-cloudimg-settings.cfg' if is_gcp else '/etc/default/grub' }}"
             regexp: '^GRUB_DEFAULT=.*'
-            line: 'GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux 6.11.0-28-generic"'
+            line: GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux {{ '6.11.0-1017-gcp' if is_gcp else '6.11.0-28-generic' }}""
         - name: Update GRUB
           ansible.builtin.command: update-grub
 
