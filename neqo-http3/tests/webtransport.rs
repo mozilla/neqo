@@ -17,8 +17,8 @@ use neqo_http3::{
 };
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use test_fixture::{
-    anti_replay, fixture_init, now, CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3,
-    DEFAULT_KEYS, DEFAULT_SERVER_NAME,
+    anti_replay, exchange_packets, fixture_init, now, CountingConnectionIdGenerator, DEFAULT_ADDR,
+    DEFAULT_ALPN_H3, DEFAULT_KEYS, DEFAULT_SERVER_NAME,
 };
 
 fn connect() -> (Http3Client, Http3Server) {
@@ -77,22 +77,11 @@ fn connect() -> (Http3Client, Http3Server) {
     (client, server)
 }
 
-fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
-    let mut out = None;
-    loop {
-        out = client.process(out, now()).dgram();
-        out = server.process(out, now()).dgram();
-        if out.is_none() {
-            break;
-        }
-    }
-}
-
 fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebTransportRequest {
     let wt_session_id = client
         .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
         .unwrap();
-    exchange_packets(client, server);
+    exchange_packets(client, server, false, None);
 
     let mut wt_server_session = None;
     while let Some(event) = server.next_event() {
@@ -117,7 +106,7 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
         }
     }
 
-    exchange_packets(client, server);
+    exchange_packets(client, server, false, None);
 
     let wt_session_negotiated_event = |e| {
         matches!(
@@ -147,7 +136,7 @@ fn send_data_client(
     data: &[u8],
 ) {
     assert_eq!(client.send_data(wt_stream_id, data).unwrap(), data.len());
-    exchange_packets(client, server);
+    exchange_packets(client, server, false, None);
 }
 
 fn send_data_server(
@@ -157,7 +146,7 @@ fn send_data_server(
     data: &[u8],
 ) {
     assert_eq!(wt_stream.send_data(data).unwrap(), data.len());
-    exchange_packets(client, server);
+    exchange_packets(client, server, false, None);
 }
 
 fn receive_data_client(
@@ -200,7 +189,7 @@ fn receive_data_server(
     expected_data: &[u8],
     expected_fin: bool,
 ) -> Http3OrWebTransportStream {
-    exchange_packets(client, server);
+    exchange_packets(client, server, false, None);
     let mut new_stream_received = false;
     let mut data_received = false;
     let mut wt_stream = None;
@@ -253,7 +242,7 @@ fn wt_client_stream_uni() {
         .webtransport_create_stream(wt_session.stream_id(), StreamType::UniDi)
         .unwrap();
     send_data_client(&mut client, &mut server, wt_stream, BUF_CLIENT);
-    exchange_packets(&mut client, &mut server);
+    exchange_packets(&mut client, &mut server, false, None);
     receive_data_server(&mut client, &mut server, wt_stream, true, BUF_CLIENT, false);
 }
 
