@@ -989,8 +989,8 @@ impl CryptoStates {
         };
 
         let min_pn = if randomize_ci_pn {
-            let r = random::<1>()[0];
-            packet::Number::from((r >> 3) + (r & 0x7)) + 1
+            let r = random::<2>();
+            packet::Number::from(r[0] & r[1]) + 1
         } else {
             0
         };
