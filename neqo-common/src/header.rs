@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::str::FromStr;
+
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
 pub struct Header {
     name: String,
@@ -70,5 +72,82 @@ where
     fn find_header<T: AsRef<str> + 'h>(self, name: T) -> Option<&'h Header> {
         let name = name.as_ref();
         self.into_iter().find(|h| h.name == name)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum FromStrError {
+    MissingColon,
+    MissingName,
+}
+
+impl std::fmt::Display for FromStrError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingColon => write!(f, "Header string missing colon"),
+            Self::MissingName => write!(f, "Header string missing name"),
+        }
+    }
+}
+
+impl std::error::Error for FromStrError {}
+
+impl FromStr for Header {
+    type Err = FromStrError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (seperator, _) = s
+            .match_indices(':')
+            // Pseudo-header starts with a ':'. Skip it.
+            .find(|(i, _)| *i != 0)
+            .ok_or(FromStrError::MissingColon)?;
+
+        let name = s[..seperator].trim().to_ascii_lowercase();
+        if name.is_empty() {
+            return Err(FromStrError::MissingName);
+        }
+
+        let value = s[seperator + 1..].trim();
+
+        Ok(Self::new(name, value))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_str_valid() {
+        let header = Header::from_str("Content-Type: text/html").unwrap();
+        assert_eq!(header.name(), "content-type");
+        assert_eq!(header.value(), "text/html");
+
+        let header = Header::from_str("Content-Type:").unwrap();
+        assert_eq!(header.name(), "content-type");
+        assert_eq!(header.value(), "");
+    }
+
+    #[test]
+    fn from_str_pseudo_header() {
+        let header = Header::from_str(":scheme: https").unwrap();
+        assert_eq!(header.name(), ":scheme");
+        assert_eq!(header.value(), "https");
+    }
+
+    #[test]
+    fn from_str_pseudo_header_with_value_with_colon() {
+        let header = Header::from_str(":some: he:ader").unwrap();
+        assert_eq!(header.name(), ":some");
+        assert_eq!(header.value(), "he:ader");
+    }
+
+    #[test]
+    fn from_str_errors() {
+        assert_eq!(Header::from_str("").err(), Some(FromStrError::MissingColon));
+        assert_eq!(
+            Header::from_str(" : text/html").err(),
+            Some(FromStrError::MissingName)
+        );
     }
 }
