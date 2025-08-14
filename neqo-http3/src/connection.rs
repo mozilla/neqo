@@ -662,23 +662,18 @@ impl Http3Connection {
 
     pub(crate) fn handle_datagram(&mut self, datagram: &[u8]) {
         let mut decoder = Decoder::new(datagram);
-        let session = decoder
+        let stream = decoder
             .decode_varint()
-            .and_then(|id| self.recv_streams.get_mut(&StreamId::from(id * 4)))
-            .and_then(|stream| stream.webtransport());
-        if let Some(s) = session {
+            .and_then(|id| self.recv_streams.get_mut(&StreamId::from(id * 4)));
+
+        if let Some(s) = stream.webtransport() {
+            // TODO: This is re-allocating the datagram.
+            s.borrow_mut().datagram(decoder.decode_remainder().to_vec());
+        } else if let Some(s) = stream.connect_udp() {
+            // TODO: This is re-allocating the datagram.
             s.borrow_mut().datagram(decoder.decode_remainder().to_vec());
         } else {
-            // TODO: Cleanup
-            let session = decoder
-                .decode_varint()
-                .and_then(|id| self.recv_streams.get_mut(&StreamId::from(id * 4)))
-                .and_then(|stream| stream.connect_udp())
-                .expect("TODO");
-
-            session
-                .borrow_mut()
-                .datagram(decoder.decode_remainder().to_vec());
+            qdebug!("[{self}] handle_datagram for unknown extended connect feature");
         }
     }
 

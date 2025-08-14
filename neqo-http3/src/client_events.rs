@@ -413,7 +413,6 @@ impl Http3ClientEvents {
                     WebTransportEvent::Negotiated(succeeded),
                 ));
             }
-            // TODO: Technically this is for extended connect and not just connect-udp.
             HSettingType::EnableConnect => {
                 self.insert(Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Negotiated(
                     succeeded,

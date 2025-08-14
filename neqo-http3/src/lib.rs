@@ -485,7 +485,7 @@ trait RecvStream: Stream {
     }
 
     fn connect_udp(&self) -> Option<Rc<RefCell<ConnectUdpSession>>> {
-        todo!();
+        None
     }
 
     /// This function is only implemented by `WebTransportRecvStream`.
