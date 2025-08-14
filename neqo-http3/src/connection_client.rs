@@ -332,9 +332,11 @@ impl Http3Client {
     pub fn new_with_conn(c: Connection, http3_parameters: Http3Parameters) -> Self {
         let events = Http3ClientEvents::default();
         let webtransport = http3_parameters.get_webtransport();
+        let connect = http3_parameters.get_connect();
         let push_streams = http3_parameters.get_max_concurrent_push_streams();
         let mut base_handler = Http3Connection::new(http3_parameters, Role::Client);
-        if webtransport {
+        // TODO: Only set the listener in a specific case.
+        if webtransport | connect {
             base_handler.set_features_listener(events.clone());
         }
         Self {
@@ -688,7 +690,7 @@ impl Http3Client {
     }
 
     // API WebTransport
-    //
+
     /// # Errors
     ///
     /// If `WebTransport` cannot be created, e.g. the `WebTransport` support is
@@ -703,6 +705,30 @@ impl Http3Client {
         T: AsRequestTarget<'x> + ?Sized + Debug,
     {
         let output = self.base_handler.webtransport_create_session(
+            &mut self.conn,
+            Box::new(self.events.clone()),
+            target,
+            headers,
+        );
+
+        if let Err(e) = &output {
+            if e.connection_error() {
+                self.close(now, e.code(), "");
+            }
+        }
+        output
+    }
+
+    pub fn connect_udp_create_session<'x, 't: 'x, T>(
+        &mut self,
+        now: Instant,
+        target: &'t T,
+        headers: &'t [Header],
+    ) -> Res<StreamId>
+    where
+        T: AsRequestTarget<'x> + ?Sized + Debug,
+    {
+        let output = self.base_handler.connect_udp_create_session(
             &mut self.conn,
             Box::new(self.events.clone()),
             target,
@@ -734,6 +760,17 @@ impl Http3Client {
     ) -> Res<()> {
         self.base_handler
             .webtransport_close_session(&mut self.conn, session_id, error, message)
+    }
+
+    /// Close `WebTransport` cleanly
+    pub fn connect_udp_close_session(
+        &mut self,
+        session_id: StreamId,
+        error: u32,
+        message: &str,
+    ) -> Res<()> {
+        self.base_handler
+            .connect_udp_close_session(&mut self.conn, session_id, error, message)
     }
 
     /// # Errors
@@ -770,6 +807,24 @@ impl Http3Client {
         qtrace!("webtransport_send_datagram session:{session_id:?}");
         self.base_handler
             .webtransport_send_datagram(session_id, &mut self.conn, buf, id)
+    }
+
+    /// Send `ConnectUdp` datagram.
+    ///
+    /// # Errors
+    ///
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    /// The function returns `TooMuchData` if the supply buffer is bigger than
+    /// the allowed remote datagram size.
+    pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
+        &mut self,
+        session_id: StreamId,
+        buf: &[u8],
+        id: I,
+    ) -> Res<()> {
+        qtrace!("connect_udp_send_datagram session:{session_id:?}");
+        self.base_handler
+            .connect_udp_send_datagram(session_id, &mut self.conn, buf, id)
     }
 
     /// Returns the current max size of a datagram that can fit into a packet.
@@ -2353,7 +2408,7 @@ mod tests {
 
     #[test]
     fn settings_frame_on_push_stream() {
-        test_wrong_frame_on_push_stream(&[0x4, 0x4, 0x6, 0x4, 0x8, 0x4]);
+        test_wrong_frame_on_push_stream(&[0x4, 0x4, 0x6, 0x4, 0x8, 0x1]);
     }
 
     #[test]
@@ -2441,7 +2496,7 @@ mod tests {
 
     #[test]
     fn settings_frame_on_request_stream() {
-        test_wrong_frame_on_request_stream(&[0x4, 0x4, 0x6, 0x4, 0x8, 0x4]);
+        test_wrong_frame_on_request_stream(&[0x4, 0x4, 0x6, 0x4, 0x8, 0x1]);
     }
 
     #[test]
