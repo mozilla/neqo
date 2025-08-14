@@ -26,7 +26,7 @@ use crate::{
     },
     tracking::DEFAULT_LOCAL_ACK_DELAY,
     version::{self, Version},
-    CongestionControlAlgorithm, Res,
+    CongestionControlAlgorithm, Res, DEFAULT_INITIAL_RTT,
 };
 
 const LOCAL_MAX_DATA: u64 = MAX_VARINT;
@@ -88,6 +88,7 @@ pub struct ConnectionParameters {
     datagram_size: u64,
     outgoing_datagram_queue: usize,
     incoming_datagram_queue: usize,
+    initial_rtt: Duration,
     fast_pto: u8,
     grease: bool,
     disable_migration: bool,
@@ -122,6 +123,7 @@ impl Default for ConnectionParameters {
             datagram_size: 0,
             outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             incoming_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
+            initial_rtt: DEFAULT_INITIAL_RTT,
             fast_pto: FAST_PTO_SCALE,
             grease: true,
             disable_migration: false,
@@ -287,6 +289,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn get_idle_timeout(&self) -> Duration {
         self.idle_timeout
+    }
+
+    #[must_use]
+    pub const fn get_initial_rtt(&self) -> Duration {
+        self.initial_rtt
+    }
+
+    #[must_use]
+    pub const fn initial_rtt(mut self, init_rtt: Duration) -> Self {
+        self.initial_rtt = init_rtt;
+        self
     }
 
     #[must_use]
