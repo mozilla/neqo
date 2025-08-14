@@ -664,23 +664,24 @@ fn reorder_1rtt() {
 fn corrupted_initial() {
     let mut client = default_client();
     let mut server = default_server();
+
     let d = client.process_output(now()).dgram().unwrap();
     let mut corrupted = Vec::from(&d[..]);
-    // Find the last non-zero value and corrupt that.
+    // Find the last non-padding value and corrupt that.
     let (idx, _) = corrupted
         .iter()
         .enumerate()
         .rev()
-        .find(|(_, &v)| v != 0)
+        .skip(1) // Skip the last byte, which might be a SCONE indicator.
+        .find(|(_, &v)| v != Connection::SCONE_INDICATION[0]) // The SCONE padding value.
         .unwrap();
     corrupted[idx] ^= 0x76;
+
     let dgram = Datagram::new(d.source(), d.destination(), d.tos(), corrupted);
     server.process_input(dgram, now());
-    // The server should have received two packets,
-    // the first should be dropped, the second saved.
+    // The server should have received two "packets", both corrupted.
     assert_eq!(server.stats().packets_rx, 2);
     assert_eq!(server.stats().dropped_rx, 2);
-    assert_eq!(server.stats().saved_datagrams, 0);
 }
 
 #[test]
@@ -1444,4 +1445,31 @@ fn zero_rtt_with_ech() {
     assert!(server.tls_info().unwrap().ech_accepted());
     assert!(client.tls_info().unwrap().early_data_accepted());
     assert!(server.tls_info().unwrap().early_data_accepted());
+}
+
+#[test]
+fn scone() {
+    fn add_scone(d: &Datagram) -> Datagram {
+        const SCONE: &[u8] = &[0xff, 0x6f, 0x7d, 0xc0, 0xfd, 0x00, 0x00];
+        let mut sconed = SCONE.to_vec();
+        sconed.extend_from_slice(&d[..]);
+        Datagram::new(d.source(), d.destination(), d.tos(), sconed)
+    }
+
+    let mut server = default_server();
+    let mut client = default_client();
+    connect(&mut client, &mut server);
+    assert!(client.tps.borrow_mut().remote().get_empty(Scone));
+    assert!(server.tps.borrow_mut().remote().get_empty(Scone));
+
+    let client_stats = client.stats();
+    let server_stats = server.stats();
+    let d = send_something(&mut client, now());
+    server.process_input(add_scone(&d), now());
+    let d = send_something(&mut server, now());
+    client.process_input(add_scone(&d), now());
+
+    // The SCONE packets are effectively invisible.
+    assert_eq!(server.stats().packets_rx, server_stats.packets_rx + 1);
+    assert_eq!(client.stats().packets_rx, client_stats.packets_rx + 1);
 }
