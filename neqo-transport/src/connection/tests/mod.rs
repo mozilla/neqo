@@ -709,8 +709,8 @@ fn create_client() {
     assert!(matches!(client.state(), State::Init));
     let stats = client.stats();
     assert_default_stats(&stats);
-    assert_eq!(stats.rtt, crate::rtt::INITIAL_RTT);
-    assert_eq!(stats.rttvar, crate::rtt::INITIAL_RTT / 2);
+    assert_eq!(stats.rtt, crate::DEFAULT_INITIAL_RTT);
+    assert_eq!(stats.rttvar, crate::DEFAULT_INITIAL_RTT / 2);
 }
 
 #[test]

@@ -66,7 +66,7 @@ fn ack_packet(cc: &mut ClassicCongestionControl<Cubic>, pn: u64, now: Instant) {
         recovery::Tokens::new(),
         cc.max_datagram_size(),
     );
-    cc.on_packets_acked(&[acked], &RttEstimate::from_duration(RTT), now);
+    cc.on_packets_acked(&[acked], &RttEstimate::new(RTT), now);
 }
 
 fn packet_lost(cc: &mut ClassicCongestionControl<Cubic>, pn: u64) {

@@ -437,7 +437,7 @@ impl Paths {
         // That is more expensive, but it should be rare and breaking encapsulation
         // is worse, especially as this is only used in tests.
         self.primary().map_or_else(
-            || RttEstimate::default().estimate(),
+            || RttEstimate::new(crate::DEFAULT_INITIAL_RTT).estimate(),
             |p| p.borrow().rtt().estimate(),
         )
     }
@@ -570,7 +570,7 @@ impl Path {
             state: ProbeState::ProbeNeeded { probe_count: 0 },
             validated: None,
             challenge: None,
-            rtt: RttEstimate::default(),
+            rtt: RttEstimate::new(conn_params.get_initial_rtt()),
             sender,
             received_bytes: 0,
             sent_bytes: 0,

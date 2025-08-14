@@ -1324,6 +1324,31 @@ fn client_initial_retransmits_identical() {
 }
 
 #[test]
+fn client_initial_pto_matches_custom_initial_rtt() {
+    let custom_initial_rtt = Duration::from_millis(500);
+    let now = now();
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .initial_rtt(custom_initial_rtt)
+            .pacing(false),
+    );
+
+    let ci = client.process_output(now).dgram().unwrap();
+    assert_eq!(ci.len(), client.plpmtu());
+    let ci2 = client.process_output(now).dgram().unwrap();
+    assert_eq!(ci2.len(), client.plpmtu());
+    assert_eq!(
+        client.stats().frame_tx,
+        FrameStats {
+            crypto: 3,
+            ..Default::default()
+        }
+    );
+    let pto = client.process_output(now).callback();
+    assert_eq!(pto, custom_initial_rtt * 3);
+}
+
+#[test]
 fn server_initial_retransmits_identical() {
     let mut now = now();
     let mut client = default_client();

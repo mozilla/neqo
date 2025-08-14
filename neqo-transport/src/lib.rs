@@ -71,6 +71,7 @@ pub use self::{
     pmtud::Pmtud,
     quic_datagrams::DatagramTracking,
     recv_stream::INITIAL_RECV_WINDOW_SIZE,
+    rtt::DEFAULT_INITIAL_RTT,
     sni::find_sni,
     stats::Stats,
     stream_id::{StreamId, StreamType},
