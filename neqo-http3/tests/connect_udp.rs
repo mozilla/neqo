@@ -188,36 +188,47 @@ fn exchange_packets_through_proxy(
 fn session_lifecycle() {
     fixture_init();
     neqo_common::log::init(None);
+
+    const PING: &[u8] = b"ping";
+    const PONG: &[u8] = b"pong";
+
     let (mut client, mut proxy, session_id, proxy_session) = new_session();
 
     client
-        .connect_udp_send_datagram(session_id, b"ping", None)
+        .connect_udp_send_datagram(session_id, PING, None)
         .unwrap();
 
     exchange_packets(&mut client, &mut proxy, false, None);
 
-    proxy.events()
-        .find(|event| {
-            matches!(
-                event,
-                Http3ServerEvent::ConnectUdp(ConnectUdpServerEvent::Datagram { session, .. }) if session.stream_id() == session_id
-            )
+    let (id, datagram) = proxy.events()
+        .find_map(|event| {
+            if let Http3ServerEvent::ConnectUdp(ConnectUdpServerEvent::Datagram { session, datagram}) = event {
+                Some((session.stream_id(), datagram))
+            } else {
+                None
+            }
         })
         .unwrap();
+    assert_eq!(session_id, id);
+    assert_eq!(datagram, PING);
 
-    proxy_session.send_datagram(b"pong", None).unwrap();
+    proxy_session.send_datagram(PONG, None).unwrap();
 
     exchange_packets(&mut client, &mut proxy, false, None);
 
-    client
+    let (id, datagram) = client
         .events()
-        .find(|event| {
-            matches!(
-                event,
-                Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Datagram { session_id: id, .. }) if *id == session_id
-            )
+        .find_map(|event| {
+            if let  Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Datagram {session_id:id, datagram }) = event {
+                Some((id, datagram) )
+            } else {
+                None
+            }
         })
         .unwrap();
+
+    assert_eq!(session_id, id);
+    assert_eq!(datagram, PONG);
 
     client
         .connect_udp_close_session(session_id, 0, "kthxbye")
