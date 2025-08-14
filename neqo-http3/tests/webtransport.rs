@@ -321,3 +321,81 @@ fn wt_server_stream_bidi() {
         wt_server_stream.stream_id()
     );
 }
+
+#[test]
+fn wt_race_condition_server_stream_before_confirmation() {
+    let now = now();
+    let (mut client, mut server) = connect();
+
+    // Client creates a WebTransport session.
+    client
+        .webtransport_create_session(now, &("https", "something.com", "/"), &[])
+        .unwrap();
+    exchange_packets(&mut client, &mut server);
+    assert_eq!(server.process_output(now).dgram(), None);
+    while client.next_event().is_some() {}
+
+    // Server accepts the session, but hold back the UDP datagram.
+    let wt_server_session = server
+        .events()
+        .find_map(|event| {
+            if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
+                session,
+                ..
+            }) = event
+            {
+                Some(session)
+            } else {
+                None
+            }
+        })
+        .expect("Should receive WebTransport session request");
+    wt_server_session
+        .response(&WebTransportSessionAcceptAction::Accept)
+        .unwrap();
+    let server_accept_dgram = server
+        .process_output(now)
+        .dgram()
+        .expect("Expected server to produce session acceptance datagram");
+    assert_eq!(server.process_output(now).dgram(), None);
+
+    // Server creates a stream, but hold back the UDP datagram.
+    let wt_server_stream = wt_server_session.create_stream(StreamType::UniDi).unwrap();
+    assert_eq!(wt_server_stream.send_data(&[42]).unwrap(), 1);
+    let server_stream_dgram = server
+        .process_output(now)
+        .dgram()
+        .expect("Expected server to produce a datagram with stream data");
+
+    // Client process the server UDP datagrams out-of-order, i.e. the stream data before the session
+    // acceptance.
+    client.process_input(server_stream_dgram, now);
+    client.process_input(server_accept_dgram, now);
+
+    client
+        .events()
+        .find(|e| {
+            matches!(
+                e,
+                Http3ClientEvent::WebTransport(WebTransportEvent::Session { .. })
+            )
+        })
+        .expect("Should receive session acceptance event");
+
+    client
+        .events()
+        .find(|e| {
+            matches!(
+                e,
+                Http3ClientEvent::WebTransport(WebTransportEvent::NewStream { .. })
+            )
+        })
+        .expect("Should receive early stream event");
+
+    client.events().find(|e| {
+        matches!(
+            e,
+            Http3ClientEvent::DataReadable { stream_id, .. } if *stream_id == wt_server_stream.stream_id()
+        )
+    }).expect("Should receive data readable event for early stream");
+}
