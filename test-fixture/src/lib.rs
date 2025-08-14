@@ -372,6 +372,28 @@ pub fn http3_server_with_params(params: Http3Parameters) -> Http3Server {
     .expect("create a server")
 }
 
+pub fn exchange_packets(
+    client: &mut Http3Client,
+    server: &mut Http3Server,
+    is_handshake: bool,
+    out_ex: Option<Datagram>,
+) {
+    let mut out = out_ex;
+    let mut auth_needed = is_handshake;
+    loop {
+        out = client.process(out, now()).dgram();
+        let client_out_is_none = out.is_none();
+        if auth_needed && client.peer_certificate().is_some() {
+            client.authenticated(AuthenticationStatus::Ok, now());
+            auth_needed = false;
+        }
+        out = server.process(out, now()).dgram();
+        if client_out_is_none && out.is_none() {
+            break;
+        }
+    }
+}
+
 /// Split the first packet off a coalesced packet.
 fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
     const TYPE_MASK: u8 = 0b1011_0000;
