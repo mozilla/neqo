@@ -850,6 +850,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_derive",
+ "smallvec",
  "strum",
  "test-fixture",
  "toml",

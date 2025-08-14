@@ -24,6 +24,7 @@ use std::{
 };
 
 use neqo_common::{hex_snip_middle, hex_with_len, qdebug, qtrace, qwarn};
+use smallvec::SmallVec;
 
 pub use crate::{
     agentio::{as_c_void, Record, RecordList},
@@ -437,7 +438,7 @@ pub struct SecretAgent {
     /// The current time.
     now: TimeHolder,
 
-    extension_handlers: Vec<ExtensionTracker>,
+    extension_handlers: SmallVec<[ExtensionTracker; 1]>,
 
     /// The encrypted client hello (ECH) configuration that is in use.
     /// Empty if ECH is not enabled.
@@ -459,7 +460,7 @@ impl SecretAgent {
             alert: Box::pin(None),
             now: TimeHolder::default(),
 
-            extension_handlers: Vec::new(),
+            extension_handlers: SmallVec::new(),
 
             ech_config: Vec::new(),
         })
@@ -1049,7 +1050,7 @@ impl Client {
         let mut client = Self {
             agent,
             server_name,
-            resumption: Box::pin(Vec::new()),
+            resumption: Box::pin(Vec::with_capacity(1024)), // Tokens are 840 or 856 bytes in tests.
         };
         client.ready()?;
         Ok(client)
