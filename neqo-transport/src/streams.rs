@@ -12,13 +12,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qtrace, qwarn, Role};
+use neqo_common::{qtrace, qwarn, Buffer, Role};
 
 use crate::{
     fc::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl},
     frame::Frame,
-    packet::PacketBuilder,
-    recovery::{RecoveryToken, StreamRecoveryToken},
+    packet,
+    recovery::{self, StreamRecoveryToken},
     recv_stream::{RecvStream, RecvStreams},
     send_stream::{SendStream, SendStreams, TransmissionPriority},
     stats::FrameStats,
@@ -192,7 +192,7 @@ impl Streams {
                 // Terminate connection with STREAM_STATE_ERROR if send-only
                 // stream (-transport 19.13)
                 if stream_id.is_send_only(self.role) {
-                    return Err(Error::StreamStateError);
+                    return Err(Error::StreamState);
                 }
 
                 if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
@@ -204,15 +204,15 @@ impl Streams {
                 // We send an update every time we retire a stream. There is no need to
                 // trigger flow updates here.
             }
-            _ => return Err(Error::InternalError), // This is not a stream frame.
+            _ => return Err(Error::Internal), // This is not a stream frame.
         }
         Ok(())
     }
 
-    pub fn write_maintenance_frames(
+    pub fn write_maintenance_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
         now: Instant,
         rtt: Duration,
@@ -252,11 +252,11 @@ impl Streams {
         self.local_stream_limits[StreamType::UniDi].write_frames(builder, tokens, stats);
     }
 
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         self.send.write_frames(priority, builder, tokens, stats);
@@ -417,7 +417,7 @@ impl Streams {
             && !stream_id.is_remote_initiated(self.role)
             && self.local_stream_limits[stream_id.stream_type()].used() <= stream_id.index()
         {
-            return Err(Error::StreamStateError);
+            return Err(Error::StreamState);
         }
         Ok((ss, rs))
     }
@@ -438,7 +438,7 @@ impl Streams {
     /// When a stream cannot be created, which might be temporary.
     pub fn stream_create(&mut self, st: StreamType) -> Res<StreamId> {
         match self.local_stream_limits.take_stream_id(st) {
-            None => Err(Error::StreamLimitError),
+            None => Err(Error::StreamLimit),
             Some(new_id) => {
                 let send_limit_tp = match st {
                     StreamType::UniDi => InitialMaxStreamDataUni,

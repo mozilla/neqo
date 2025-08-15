@@ -1,0 +1,61 @@
+- name: Shrink the Ubuntu installation
+  hosts: all
+  become: true
+  tasks:
+    - name: Remove unnecessary packages
+      ansible.builtin.apt:
+        autoclean: true
+        autoremove: true
+        install_recommends: false
+        state: absent
+        purge: true
+        name:
+          - "*gnome*"
+          - ansible
+          - avahi*
+          - bluez*
+          - branding-ubuntu
+          - cups*
+          - firefox
+          - fonts-*
+          - fwupd
+          - gcc-10
+          - gcc-11
+          - gcc-12
+          - gcc-13
+          - gcc-9
+          - ghostscript
+          - gnome*
+          - gstreamer*
+          - hunspell*
+          - imagemagick*
+          - kerneloops
+          - language-*
+          - libreoffice*
+          - lpr
+          - modemmanager
+          - mythes*
+          - printer-driver-*
+          - ruby*
+          - samba*
+          - snapd
+          - sound*
+          - speech*
+          - system-config-*
+          - thunderbird
+          - transmission*
+          - ubuntu-wallpapers
+          - unattended-upgrades
+          - usb-*
+          - wpasupplicant
+          - x11*
+          - xdg-*
+
+    - name: Disable some systemd services
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: false
+        state: stopped
+      loop:
+        - upower.service

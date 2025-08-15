@@ -18,7 +18,7 @@ use crate::{
     connection::tests::DEFAULT_ADDR,
     events::{ConnectionEvent, OutgoingDatagramOutcome},
     frame::FrameType,
-    packet::PacketBuilder,
+    packet,
     quic_datagrams::MAX_QUIC_DATAGRAM,
     send_stream::{RetransmissionPriority, TransmissionPriority},
     CloseReason, Connection, ConnectionParameters, Error, Pmtud, StreamType,
@@ -43,7 +43,7 @@ struct InsertDatagram<'a> {
 }
 
 impl crate::connection::test_internal::FrameWriter for InsertDatagram<'_> {
-    fn write_frames(&mut self, builder: &mut PacketBuilder) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder.encode_varint(FrameType::Datagram);
         builder.encode(self.data);
     }
@@ -605,7 +605,7 @@ fn multiple_quic_datagrams_in_one_packet() {
 fn datagram_fill() {
     struct PanickingFrameWriter {}
     impl crate::connection::test_internal::FrameWriter for PanickingFrameWriter {
-        fn write_frames(&mut self, builder: &mut PacketBuilder) {
+        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
             panic!(
                 "builder invoked with {} bytes remaining",
                 builder.remaining()
@@ -616,7 +616,7 @@ fn datagram_fill() {
         called: Rc<RefCell<bool>>,
     }
     impl crate::connection::test_internal::FrameWriter for TrackingFrameWriter {
-        fn write_frames(&mut self, builder: &mut PacketBuilder) {
+        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
             assert_eq!(builder.remaining(), 2);
             *self.called.borrow_mut() = true;
         }

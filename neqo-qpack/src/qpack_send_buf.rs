@@ -8,14 +8,14 @@ use std::ops::Deref;
 
 use neqo_common::Encoder;
 
-use crate::{huffman::encode_huffman, prefix::Prefix};
+use crate::{huffman, prefix::Prefix};
 
 #[derive(Default, Debug, PartialEq, Eq)]
-pub struct QpackData {
+pub struct Data {
     buf: Vec<u8>,
 }
 
-impl QpackData {
+impl Data {
     pub fn len(&self) -> usize {
         self.buf.len()
     }
@@ -25,9 +25,7 @@ impl QpackData {
     }
 
     pub fn encode_varint(&mut self, i: u64) {
-        let mut enc = Encoder::default();
-        enc.encode_varint(i);
-        self.buf.append(&mut enc.into());
+        Encoder::new_borrowed_vec(&mut self.buf).encode_varint(i);
     }
 
     pub(crate) fn encode_prefixed_encoded_int(&mut self, prefix: Prefix, mut val: u64) -> usize {
@@ -74,7 +72,7 @@ impl QpackData {
         );
 
         if use_huffman {
-            let encoded = encode_huffman(value);
+            let encoded = huffman::encode(value);
             self.encode_prefixed_encoded_int(
                 real_prefix,
                 u64::try_from(encoded.len()).expect("usize fits in u64"),
@@ -102,7 +100,7 @@ impl QpackData {
     }
 }
 
-impl Deref for QpackData {
+impl Deref for Data {
     type Target = [u8];
     fn deref(&self) -> &Self::Target {
         &self.buf
@@ -111,32 +109,32 @@ impl Deref for QpackData {
 
 #[cfg(test)]
 mod tests {
-    use super::{Prefix, QpackData};
+    use super::{Data, Prefix};
 
     #[test]
     fn encode_prefixed_encoded_int_1() {
-        let mut d = QpackData::default();
+        let mut d = Data::default();
         d.encode_prefixed_encoded_int(Prefix::new(0xC0, 2), 5);
         assert_eq!(d[..], [0xc5]);
     }
 
     #[test]
     fn encode_prefixed_encoded_int_2() {
-        let mut d = QpackData::default();
+        let mut d = Data::default();
         d.encode_prefixed_encoded_int(Prefix::new(0xC0, 2), 65);
         assert_eq!(d[..], [0xff, 0x02]);
     }
 
     #[test]
     fn encode_prefixed_encoded_int_3() {
-        let mut d = QpackData::default();
+        let mut d = Data::default();
         d.encode_prefixed_encoded_int(Prefix::new(0xC0, 2), 100_000);
         assert_eq!(d[..], [0xff, 0xe1, 0x8c, 0x06]);
     }
 
     #[test]
     fn max_int() {
-        let mut d = QpackData::default();
+        let mut d = Data::default();
         d.encode_prefixed_encoded_int(Prefix::new(0x80, 1), u64::MAX);
         assert_eq!(
             d[..],
@@ -153,14 +151,14 @@ mod tests {
 
     #[test]
     fn encode_literal() {
-        let mut d = QpackData::default();
+        let mut d = Data::default();
         d.encode_literal(false, Prefix::new(0xC0, 2), VALUE);
         assert_eq!(&&d[..], &LITERAL);
     }
 
     #[test]
     fn encode_literal_huffman() {
-        let mut d = QpackData::default();
+        let mut d = Data::default();
         d.encode_literal(true, Prefix::new(0xC0, 2), VALUE);
         assert_eq!(&&d[..], &LITERAL_HUFFMAN);
     }

@@ -25,8 +25,8 @@ use crate::{
         TransportParametersHandler,
     },
     tracking::DEFAULT_LOCAL_ACK_DELAY,
-    version::{Version, VersionConfig},
-    CongestionControlAlgorithm, Res,
+    version::{self, Version},
+    CongestionControlAlgorithm, Res, DEFAULT_INITIAL_RTT,
 };
 
 const LOCAL_MAX_DATA: u64 = MAX_VARINT;
@@ -58,7 +58,7 @@ pub enum PreferredAddressConfig {
 #[expect(clippy::struct_excessive_bools, reason = "We need that many, sorry.")]
 #[derive(Debug, Clone)]
 pub struct ConnectionParameters {
-    versions: VersionConfig,
+    versions: version::Config,
     cc_algorithm: CongestionControlAlgorithm,
     /// Initial connection-level flow control limit.
     max_data: u64,
@@ -88,6 +88,7 @@ pub struct ConnectionParameters {
     datagram_size: u64,
     outgoing_datagram_queue: usize,
     incoming_datagram_queue: usize,
+    initial_rtt: Duration,
     fast_pto: u8,
     grease: bool,
     disable_migration: bool,
@@ -105,7 +106,7 @@ pub struct ConnectionParameters {
 impl Default for ConnectionParameters {
     fn default() -> Self {
         Self {
-            versions: VersionConfig::default(),
+            versions: version::Config::default(),
             cc_algorithm: CongestionControlAlgorithm::Cubic,
             max_data: LOCAL_MAX_DATA,
             max_stream_data_bidi_remote: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
@@ -122,6 +123,7 @@ impl Default for ConnectionParameters {
             datagram_size: 0,
             outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             incoming_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
+            initial_rtt: DEFAULT_INITIAL_RTT,
             fast_pto: FAST_PTO_SCALE,
             grease: true,
             disable_migration: false,
@@ -136,11 +138,11 @@ impl Default for ConnectionParameters {
 
 impl ConnectionParameters {
     #[must_use]
-    pub const fn get_versions(&self) -> &VersionConfig {
+    pub const fn get_versions(&self) -> &version::Config {
         &self.versions
     }
 
-    pub(crate) fn get_versions_mut(&mut self) -> &mut VersionConfig {
+    pub(crate) fn get_versions_mut(&mut self) -> &mut version::Config {
         &mut self.versions
     }
 
@@ -150,7 +152,7 @@ impl ConnectionParameters {
     /// before less preferred.
     #[must_use]
     pub fn versions(mut self, initial: Version, all: Vec<Version>) -> Self {
-        self.versions = VersionConfig::new(initial, all);
+        self.versions = version::Config::new(initial, all);
         self
     }
 
@@ -287,6 +289,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn get_idle_timeout(&self) -> Duration {
         self.idle_timeout
+    }
+
+    #[must_use]
+    pub const fn get_initial_rtt(&self) -> Duration {
+        self.initial_rtt
+    }
+
+    #[must_use]
+    pub const fn initial_rtt(mut self, init_rtt: Duration) -> Self {
+        self.initial_rtt = init_rtt;
+        self
     }
 
     #[must_use]

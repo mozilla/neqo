@@ -4,11 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
-
 use std::fmt::{self, Debug, Formatter};
 
 use enum_map::Enum;
@@ -19,7 +14,7 @@ use strum::{EnumIter, FromRepr};
 /// <https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml>
 #[derive(Copy, Clone, PartialEq, Eq, Enum, Default, Debug, FromRepr, EnumIter)]
 #[repr(u8)]
-pub enum IpTosEcn {
+pub enum Ecn {
     #[default]
     /// Not-ECT, Not ECN-Capable Transport, RFC3168
     NotEct = 0b00,
@@ -31,27 +26,27 @@ pub enum IpTosEcn {
     Ce = 0b11,
 }
 
-impl From<IpTosEcn> for u8 {
-    fn from(v: IpTosEcn) -> Self {
+impl From<Ecn> for u8 {
+    fn from(v: Ecn) -> Self {
         v as Self
     }
 }
 
-impl From<u8> for IpTosEcn {
+impl From<u8> for Ecn {
     fn from(v: u8) -> Self {
         Self::from_repr(v & 0b0000_0011).expect("all ECN values are covered")
     }
 }
 
-impl From<IpTos> for IpTosEcn {
-    fn from(v: IpTos) -> Self {
+impl From<Tos> for Ecn {
+    fn from(v: Tos) -> Self {
         Self::from(u8::from(v))
     }
 }
 
-impl IpTosEcn {
+impl Ecn {
     #[must_use]
-    pub const fn is_ecn_marked(&self) -> bool {
+    pub const fn is_ecn_marked(self) -> bool {
         match self {
             Self::Ect0 | Self::Ect1 | Self::Ce => true,
             Self::NotEct => false,
@@ -63,264 +58,319 @@ impl IpTosEcn {
 /// <https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml>
 #[derive(Copy, Clone, PartialEq, Eq, Enum, Default, Debug, FromRepr)]
 #[repr(u8)]
-pub enum IpTosDscp {
+pub enum Dscp {
     #[default]
     /// Class Selector 0, RFC2474
     Cs0 = 0b0000_0000,
-    /// Class Selector 1, RFC2474
-    Cs1 = 0b0010_0000,
-    /// Class Selector 2, RFC2474
-    Cs2 = 0b0100_0000,
-    /// Class Selector 3, RFC2474
-    Cs3 = 0b0110_0000,
-    /// Class Selector 4, RFC2474
-    Cs4 = 0b1000_0000,
-    /// Class Selector 5, RFC2474
-    Cs5 = 0b1010_0000,
-    /// Class Selector 6, RFC2474
-    Cs6 = 0b1100_0000,
-    /// Class Selector 7, RFC2474
-    Cs7 = 0b1110_0000,
-    /// Assured Forwarding 11, RFC2597
-    Af11 = 0b0010_1000,
-    /// Assured Forwarding 12, RFC2597
-    Af12 = 0b0011_0000,
-    /// Assured Forwarding 13, RFC2597
-    Af13 = 0b0011_1000,
-    /// Assured Forwarding 21, RFC2597
-    Af21 = 0b0100_1000,
-    /// Assured Forwarding 22, RFC2597
-    Af22 = 0b0101_0000,
-    /// Assured Forwarding 23, RFC2597
-    Af23 = 0b0101_1000,
-    /// Assured Forwarding 31, RFC2597
-    Af31 = 0b0110_1000,
-    /// Assured Forwarding 32, RFC2597
-    Af32 = 0b0111_0000,
-    /// Assured Forwarding 33, RFC2597
-    Af33 = 0b0111_1000,
-    /// Assured Forwarding 41, RFC2597
-    Af41 = 0b1000_1000,
-    /// Assured Forwarding 42, RFC2597
-    Af42 = 0b1001_0000,
-    /// Assured Forwarding 43, RFC2597
-    Af43 = 0b1001_1000,
-    /// Expedited Forwarding, RFC3246
-    Ef = 0b1011_1000,
-    /// Capacity-Admitted Traffic, RFC5865
-    VoiceAdmit = 0b1011_0000,
     /// Lower-Effort, RFC8622
     Le = 0b0000_0100,
+    Reserved2 = 0b0000_1000,
+    Reserved3 = 0b0000_1100,
+    Reserved4 = 0b0001_0000,
+    Reserved5 = 0b0001_0100,
+    Reserved6 = 0b0001_1000,
+    Reserved7 = 0b0001_1100,
+    /// Class Selector 1, RFC2474
+    Cs1 = 0b0010_0000,
+    Reserved9 = 0b0010_0100,
+    Af11 = 0b0010_1000,
+    /// Assured Forwarding 12, RFC2597
+    Reserved11 = 0b0010_1100,
+    /// Assured Forwarding 11, RFC2597
+    Af12 = 0b0011_0000,
+    Reserved13 = 0b0011_0100,
+    /// Assured Forwarding 13, RFC2597
+    Af13 = 0b0011_1000,
+    Reserved15 = 0b0011_1100,
+    /// Class Selector 2, RFC2474
+    Cs2 = 0b0100_0000,
+    Reserved17 = 0b0100_0100,
+    /// Assured Forwarding 21, RFC2597
+    Af21 = 0b0100_1000,
+    Reserved19 = 0b0100_1100,
+    /// Assured Forwarding 22, RFC2597
+    Af22 = 0b0101_0000,
+    Reserved21 = 0b0101_0100,
+    /// Assured Forwarding 23, RFC2597
+    Af23 = 0b0101_1000,
+    Reserved23 = 0b0101_1100,
+    /// Class Selector 3, RFC2474
+    Cs3 = 0b0110_0000,
+    Reserved25 = 0b0110_0100,
+    /// Assured Forwarding 31, RFC2597
+    Af31 = 0b0110_1000,
+    Reserved27 = 0b0110_1100,
+    /// Assured Forwarding 32, RFC2597
+    Af32 = 0b0111_0000,
+    Reserved29 = 0b0111_0100,
+    /// Assured Forwarding 33, RFC2597
+    Af33 = 0b0111_1000,
+    Reserved31 = 0b0111_1100,
+    /// Class Selector 4, RFC2474
+    Cs4 = 0b1000_0000,
+    Reserved33 = 0b1000_0100,
+    /// Assured Forwarding 41, RFC2597
+    Af41 = 0b1000_1000,
+    Reserved35 = 0b1000_1100,
+    /// Assured Forwarding 42, RFC2597
+    Af42 = 0b1001_0000,
+    Reserved37 = 0b1001_0100,
+    /// Assured Forwarding 43, RFC2597
+    Af43 = 0b1001_1000,
+    Reserved39 = 0b1001_1100,
+    /// Class Selector 5, RFC2474
+    Cs5 = 0b1010_0000,
+    Reserved41 = 0b1010_0100,
+    Reserved42 = 0b1010_1000,
+    Reserved43 = 0b1010_1100,
+    /// Capacity-Admitted Traffic, RFC5865
+    VoiceAdmit = 0b1011_0000,
+    Reserved45 = 0b1011_0100,
+    /// Expedited Forwarding, RFC3246
+    Ef = 0b1011_1000,
+    Reserved47 = 0b1011_1100,
+    /// Class Selector 6, RFC2474
+    Cs6 = 0b1100_0000,
+    Reserved49 = 0b1100_0100,
+    Reserved50 = 0b1100_1000,
+    Reserved51 = 0b1100_1100,
+    Reserved52 = 0b1101_0000,
+    Reserved53 = 0b1101_0100,
+    Reserved54 = 0b1101_1000,
+    Reserved55 = 0b1101_1100,
+    /// Class Selector 7, RFC2474
+    Cs7 = 0b1110_0000,
+    Reserved57 = 0b1110_0100,
+    Reserved58 = 0b1110_1000,
+    Reserved59 = 0b1110_1100,
+    Reserved60 = 0b1111_0000,
+    Reserved61 = 0b1111_0100,
+    Reserved62 = 0b1111_1000,
+    Reserved63 = 0b1111_1100,
 }
 
-impl From<IpTosDscp> for u8 {
-    fn from(v: IpTosDscp) -> Self {
+impl From<Dscp> for u8 {
+    fn from(v: Dscp) -> Self {
         v as Self
     }
 }
 
-impl From<u8> for IpTosDscp {
+impl From<u8> for Dscp {
     fn from(v: u8) -> Self {
         Self::from_repr(v & 0b1111_1100).expect("all DCSP values are covered")
     }
 }
 
-impl From<IpTos> for IpTosDscp {
-    fn from(v: IpTos) -> Self {
+impl From<Tos> for Dscp {
+    fn from(v: Tos) -> Self {
         Self::from(u8::from(v))
     }
 }
 
 /// The type-of-service field in an IP packet.
 #[derive(Copy, Clone, PartialEq, Eq, Default)]
-pub struct IpTos(u8);
+pub struct Tos(u8);
 
-impl From<IpTosEcn> for IpTos {
-    fn from(v: IpTosEcn) -> Self {
+impl From<Ecn> for Tos {
+    fn from(v: Ecn) -> Self {
         Self(u8::from(v))
     }
 }
 
-impl From<IpTosDscp> for IpTos {
-    fn from(v: IpTosDscp) -> Self {
+impl From<Dscp> for Tos {
+    fn from(v: Dscp) -> Self {
         Self(u8::from(v))
     }
 }
 
-impl From<(IpTosDscp, IpTosEcn)> for IpTos {
-    fn from(v: (IpTosDscp, IpTosEcn)) -> Self {
+impl From<(Dscp, Ecn)> for Tos {
+    fn from(v: (Dscp, Ecn)) -> Self {
         Self(u8::from(v.0) | u8::from(v.1))
     }
 }
 
-impl From<(IpTosEcn, IpTosDscp)> for IpTos {
-    fn from(v: (IpTosEcn, IpTosDscp)) -> Self {
+impl From<(Ecn, Dscp)> for Tos {
+    fn from(v: (Ecn, Dscp)) -> Self {
         Self(u8::from(v.0) | u8::from(v.1))
     }
 }
 
-impl From<IpTos> for u8 {
-    fn from(v: IpTos) -> Self {
+impl From<Tos> for u8 {
+    fn from(v: Tos) -> Self {
         v.0
     }
 }
 
-impl From<u8> for IpTos {
+impl From<u8> for Tos {
     fn from(v: u8) -> Self {
         Self(v)
     }
 }
 
-impl Debug for IpTos {
+impl Debug for Tos {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("IpTos")
-            .field(&IpTosDscp::from(*self))
-            .field(&IpTosEcn::from(*self))
+        f.debug_tuple("Tos")
+            .field(&Dscp::from(*self))
+            .field(&Ecn::from(*self))
             .finish()
     }
 }
 
-impl IpTos {
-    pub fn set_ecn(&mut self, ecn: IpTosEcn) {
-        self.0 = u8::from(IpTosDscp::from(*self)) | u8::from(ecn);
+impl Tos {
+    pub fn set_ecn(&mut self, ecn: Ecn) {
+        self.0 = u8::from(Dscp::from(*self)) | u8::from(ecn);
     }
 
-    pub fn set_dscp(&mut self, dscp: IpTosDscp) {
-        self.0 = u8::from(IpTosEcn::from(*self)) | u8::from(dscp);
+    pub fn set_dscp(&mut self, dscp: Dscp) {
+        self.0 = u8::from(Ecn::from(*self)) | u8::from(dscp);
     }
 
     #[must_use]
-    pub fn is_ecn_marked(&self) -> bool {
-        IpTosEcn::from(*self).is_ecn_marked()
+    pub fn is_ecn_marked(self) -> bool {
+        Ecn::from(self).is_ecn_marked()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{IpTos, IpTosDscp, IpTosEcn};
+    use crate::{Dscp, Ecn, Tos};
 
     #[test]
-    fn iptosecn_into_u8() {
-        assert_eq!(u8::from(IpTosEcn::NotEct), 0b00);
-        assert_eq!(u8::from(IpTosEcn::Ect1), 0b01);
-        assert_eq!(u8::from(IpTosEcn::Ect0), 0b10);
-        assert_eq!(u8::from(IpTosEcn::Ce), 0b11);
+    fn ecn_into_u8() {
+        assert_eq!(u8::from(Ecn::NotEct), 0b00);
+        assert_eq!(u8::from(Ecn::Ect1), 0b01);
+        assert_eq!(u8::from(Ecn::Ect0), 0b10);
+        assert_eq!(u8::from(Ecn::Ce), 0b11);
     }
 
     #[test]
-    fn u8_into_iptosecn() {
-        assert_eq!(IpTosEcn::from(0b00), IpTosEcn::NotEct);
-        assert_eq!(IpTosEcn::from(0b01), IpTosEcn::Ect1);
-        assert_eq!(IpTosEcn::from(0b10), IpTosEcn::Ect0);
-        assert_eq!(IpTosEcn::from(0b11), IpTosEcn::Ce);
+    fn u8_into_ecn() {
+        assert_eq!(Ecn::from(0b00), Ecn::NotEct);
+        assert_eq!(Ecn::from(0b01), Ecn::Ect1);
+        assert_eq!(Ecn::from(0b10), Ecn::Ect0);
+        assert_eq!(Ecn::from(0b11), Ecn::Ce);
     }
 
     #[test]
-    fn iptosdscp_into_u8() {
-        assert_eq!(u8::from(IpTosDscp::Cs0), 0b0000_0000);
-        assert_eq!(u8::from(IpTosDscp::Cs1), 0b0010_0000);
-        assert_eq!(u8::from(IpTosDscp::Cs2), 0b0100_0000);
-        assert_eq!(u8::from(IpTosDscp::Cs3), 0b0110_0000);
-        assert_eq!(u8::from(IpTosDscp::Cs4), 0b1000_0000);
-        assert_eq!(u8::from(IpTosDscp::Cs5), 0b1010_0000);
-        assert_eq!(u8::from(IpTosDscp::Cs6), 0b1100_0000);
-        assert_eq!(u8::from(IpTosDscp::Cs7), 0b1110_0000);
-        assert_eq!(u8::from(IpTosDscp::Af11), 0b0010_1000);
-        assert_eq!(u8::from(IpTosDscp::Af12), 0b0011_0000);
-        assert_eq!(u8::from(IpTosDscp::Af13), 0b0011_1000);
-        assert_eq!(u8::from(IpTosDscp::Af21), 0b0100_1000);
-        assert_eq!(u8::from(IpTosDscp::Af22), 0b0101_0000);
-        assert_eq!(u8::from(IpTosDscp::Af23), 0b0101_1000);
-        assert_eq!(u8::from(IpTosDscp::Af31), 0b0110_1000);
-        assert_eq!(u8::from(IpTosDscp::Af32), 0b0111_0000);
-        assert_eq!(u8::from(IpTosDscp::Af33), 0b0111_1000);
-        assert_eq!(u8::from(IpTosDscp::Af41), 0b1000_1000);
-        assert_eq!(u8::from(IpTosDscp::Af42), 0b1001_0000);
-        assert_eq!(u8::from(IpTosDscp::Af43), 0b1001_1000);
-        assert_eq!(u8::from(IpTosDscp::Ef), 0b1011_1000);
-        assert_eq!(u8::from(IpTosDscp::VoiceAdmit), 0b1011_0000);
-        assert_eq!(u8::from(IpTosDscp::Le), 0b0000_0100);
+    fn u8_into_ecn_all() {
+        for i in 0..=u8::MAX {
+            _ = Ecn::from(i);
+        }
     }
 
     #[test]
-    fn u8_into_iptosdscp() {
-        assert_eq!(IpTosDscp::from(0b0000_0000), IpTosDscp::Cs0);
-        assert_eq!(IpTosDscp::from(0b0010_0000), IpTosDscp::Cs1);
-        assert_eq!(IpTosDscp::from(0b0100_0000), IpTosDscp::Cs2);
-        assert_eq!(IpTosDscp::from(0b0110_0000), IpTosDscp::Cs3);
-        assert_eq!(IpTosDscp::from(0b1000_0000), IpTosDscp::Cs4);
-        assert_eq!(IpTosDscp::from(0b1010_0000), IpTosDscp::Cs5);
-        assert_eq!(IpTosDscp::from(0b1100_0000), IpTosDscp::Cs6);
-        assert_eq!(IpTosDscp::from(0b1110_0000), IpTosDscp::Cs7);
-        assert_eq!(IpTosDscp::from(0b0010_1000), IpTosDscp::Af11);
-        assert_eq!(IpTosDscp::from(0b0011_0000), IpTosDscp::Af12);
-        assert_eq!(IpTosDscp::from(0b0011_1000), IpTosDscp::Af13);
-        assert_eq!(IpTosDscp::from(0b0100_1000), IpTosDscp::Af21);
-        assert_eq!(IpTosDscp::from(0b0101_0000), IpTosDscp::Af22);
-        assert_eq!(IpTosDscp::from(0b0101_1000), IpTosDscp::Af23);
-        assert_eq!(IpTosDscp::from(0b0110_1000), IpTosDscp::Af31);
-        assert_eq!(IpTosDscp::from(0b0111_0000), IpTosDscp::Af32);
-        assert_eq!(IpTosDscp::from(0b0111_1000), IpTosDscp::Af33);
-        assert_eq!(IpTosDscp::from(0b1000_1000), IpTosDscp::Af41);
-        assert_eq!(IpTosDscp::from(0b1001_0000), IpTosDscp::Af42);
-        assert_eq!(IpTosDscp::from(0b1001_1000), IpTosDscp::Af43);
-        assert_eq!(IpTosDscp::from(0b1011_1000), IpTosDscp::Ef);
-        assert_eq!(IpTosDscp::from(0b1011_0000), IpTosDscp::VoiceAdmit);
-        assert_eq!(IpTosDscp::from(0b0000_0100), IpTosDscp::Le);
+    fn dscp_into_u8() {
+        assert_eq!(u8::from(Dscp::Cs0), 0b0000_0000);
+        assert_eq!(u8::from(Dscp::Cs1), 0b0010_0000);
+        assert_eq!(u8::from(Dscp::Cs2), 0b0100_0000);
+        assert_eq!(u8::from(Dscp::Cs3), 0b0110_0000);
+        assert_eq!(u8::from(Dscp::Cs4), 0b1000_0000);
+        assert_eq!(u8::from(Dscp::Cs5), 0b1010_0000);
+        assert_eq!(u8::from(Dscp::Cs6), 0b1100_0000);
+        assert_eq!(u8::from(Dscp::Cs7), 0b1110_0000);
+        assert_eq!(u8::from(Dscp::Af11), 0b0010_1000);
+        assert_eq!(u8::from(Dscp::Af12), 0b0011_0000);
+        assert_eq!(u8::from(Dscp::Af13), 0b0011_1000);
+        assert_eq!(u8::from(Dscp::Af21), 0b0100_1000);
+        assert_eq!(u8::from(Dscp::Af22), 0b0101_0000);
+        assert_eq!(u8::from(Dscp::Af23), 0b0101_1000);
+        assert_eq!(u8::from(Dscp::Af31), 0b0110_1000);
+        assert_eq!(u8::from(Dscp::Af32), 0b0111_0000);
+        assert_eq!(u8::from(Dscp::Af33), 0b0111_1000);
+        assert_eq!(u8::from(Dscp::Af41), 0b1000_1000);
+        assert_eq!(u8::from(Dscp::Af42), 0b1001_0000);
+        assert_eq!(u8::from(Dscp::Af43), 0b1001_1000);
+        assert_eq!(u8::from(Dscp::Ef), 0b1011_1000);
+        assert_eq!(u8::from(Dscp::VoiceAdmit), 0b1011_0000);
+        assert_eq!(u8::from(Dscp::Le), 0b0000_0100);
     }
 
     #[test]
-    fn iptosecn_into_iptos() {
-        let ecn = IpTosEcn::default();
-        let iptos_ecn: IpTos = ecn.into();
-        assert_eq!(u8::from(iptos_ecn), ecn as u8);
+    fn u8_into_dscp_all() {
+        for i in 0..=u8::MAX {
+            _ = Dscp::from(i);
+        }
     }
 
     #[test]
-    fn iptosdscp_into_iptos() {
-        let dscp = IpTosDscp::default();
-        let iptos_dscp: IpTos = dscp.into();
-        assert_eq!(u8::from(iptos_dscp), dscp as u8);
+    fn u8_into_dscp() {
+        assert_eq!(Dscp::from(0b0000_0000), Dscp::Cs0);
+        assert_eq!(Dscp::from(0b0010_0000), Dscp::Cs1);
+        assert_eq!(Dscp::from(0b0100_0000), Dscp::Cs2);
+        assert_eq!(Dscp::from(0b0110_0000), Dscp::Cs3);
+        assert_eq!(Dscp::from(0b1000_0000), Dscp::Cs4);
+        assert_eq!(Dscp::from(0b1010_0000), Dscp::Cs5);
+        assert_eq!(Dscp::from(0b1100_0000), Dscp::Cs6);
+        assert_eq!(Dscp::from(0b1110_0000), Dscp::Cs7);
+        assert_eq!(Dscp::from(0b0010_1000), Dscp::Af11);
+        assert_eq!(Dscp::from(0b0011_0000), Dscp::Af12);
+        assert_eq!(Dscp::from(0b0011_1000), Dscp::Af13);
+        assert_eq!(Dscp::from(0b0100_1000), Dscp::Af21);
+        assert_eq!(Dscp::from(0b0101_0000), Dscp::Af22);
+        assert_eq!(Dscp::from(0b0101_1000), Dscp::Af23);
+        assert_eq!(Dscp::from(0b0110_1000), Dscp::Af31);
+        assert_eq!(Dscp::from(0b0111_0000), Dscp::Af32);
+        assert_eq!(Dscp::from(0b0111_1000), Dscp::Af33);
+        assert_eq!(Dscp::from(0b1000_1000), Dscp::Af41);
+        assert_eq!(Dscp::from(0b1001_0000), Dscp::Af42);
+        assert_eq!(Dscp::from(0b1001_1000), Dscp::Af43);
+        assert_eq!(Dscp::from(0b1011_1000), Dscp::Ef);
+        assert_eq!(Dscp::from(0b1011_0000), Dscp::VoiceAdmit);
+        assert_eq!(Dscp::from(0b0000_0100), Dscp::Le);
     }
 
     #[test]
-    fn u8_to_iptos() {
-        let tos = 0x8b;
-        let iptos: IpTos = (IpTosEcn::Ce, IpTosDscp::Af41).into();
-        assert_eq!(tos, u8::from(iptos));
-        assert_eq!(IpTos::from(tos), iptos);
+    fn ecn_into_tos() {
+        let ecn = Ecn::default();
+        let tos: Tos = ecn.into();
+        assert_eq!(u8::from(tos), ecn as u8);
     }
 
     #[test]
-    fn iptos_to_iptosdscp() {
-        let tos = IpTos::from((IpTosDscp::Af41, IpTosEcn::NotEct));
-        let dscp = IpTosDscp::from(tos);
-        assert_eq!(dscp, IpTosDscp::Af41);
+    fn dscp_into_tos() {
+        let dscp = Dscp::default();
+        let tos_dscp: Tos = dscp.into();
+        assert_eq!(u8::from(tos_dscp), dscp as u8);
+    }
+
+    #[test]
+    fn u8_to_tos() {
+        let tos_u8 = 0x8b;
+        let tos = Tos::from((Ecn::Ce, Dscp::Af41));
+        assert_eq!(tos_u8, u8::from(tos));
+        assert_eq!(Tos::from(tos_u8), tos);
+    }
+
+    #[test]
+    fn tos_to_dscp() {
+        let tos = Tos::from((Dscp::Af41, Ecn::NotEct));
+        let dscp = Dscp::from(tos);
+        assert_eq!(dscp, Dscp::Af41);
     }
 
     #[test]
     fn tos_modify_ecn() {
-        let mut iptos: IpTos = (IpTosDscp::Af41, IpTosEcn::NotEct).into();
-        iptos.set_ecn(IpTosEcn::Ce);
-        assert_eq!(u8::from(iptos), 0b1000_1011);
+        let mut tos: Tos = (Dscp::Af41, Ecn::NotEct).into();
+        tos.set_ecn(Ecn::Ce);
+        assert_eq!(u8::from(tos), 0b1000_1011);
     }
 
     #[test]
     fn tos_modify_dscp() {
-        let mut iptos: IpTos = (IpTosDscp::Af41, IpTosEcn::Ect1).into();
-        iptos.set_dscp(IpTosDscp::Le);
-        assert_eq!(u8::from(iptos), 0b0000_0101);
+        let mut tos: Tos = (Dscp::Af41, Ecn::Ect1).into();
+        tos.set_dscp(Dscp::Le);
+        assert_eq!(u8::from(tos), 0b0000_0101);
     }
 
     #[test]
-    fn iptos_is_ecn_marked() {
-        let iptos: IpTos = (IpTosDscp::Af41, IpTosEcn::Ce).into();
-        assert!(iptos.is_ecn_marked());
+    fn tos_is_ecn_marked() {
+        let tos: Tos = (Dscp::Af41, Ecn::Ce).into();
+        assert!(tos.is_ecn_marked());
     }
 
     #[test]
-    fn iptosecn_is_ecn_marked() {
-        assert!(IpTosEcn::Ce.is_ecn_marked());
-        assert!(!IpTosEcn::NotEct.is_ecn_marked());
+    fn ecn_is_ecn_marked() {
+        assert!(Ecn::Ce.is_ecn_marked());
+        assert!(!Ecn::NotEct.is_ecn_marked());
     }
 }

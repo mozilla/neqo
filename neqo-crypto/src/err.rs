@@ -56,26 +56,29 @@ pub type Res<T> = Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub enum Error {
-    AeadError,
+    Aead,
+    CertificateDecoding,
+    CertificateEncoding,
     CertificateLoading,
-    CipherInitFailure,
+    CipherInit,
     CreateSslSocket,
     EchRetry(Vec<u8>),
-    HkdfError,
-    InternalError,
+    Hkdf,
+    Internal,
     IntegerOverflow,
     InvalidEpoch,
+    InvalidCertificateCompressionID,
     MixedHandshakeMethod,
     NoDataAvailable,
-    NssError {
+    Nss {
         name: String,
         code: PRErrorCode,
         desc: String,
     },
-    OverrunError,
-    SelfEncryptFailure,
-    StringError,
-    TimeTravelError,
+    Overrun,
+    SelfEncrypt,
+    String,
+    TimeTravel,
     UnsupportedCipher,
     UnsupportedVersion,
 }
@@ -108,12 +111,12 @@ impl From<std::num::TryFromIntError> for Error {
 }
 impl From<std::ffi::NulError> for Error {
     fn from(_: std::ffi::NulError) -> Self {
-        Self::InternalError
+        Self::Internal
     }
 }
 impl From<Utf8Error> for Error {
     fn from(_: Utf8Error) -> Self {
-        Self::StringError
+        Self::String
     }
 }
 impl From<PRErrorCode> for Error {
@@ -123,7 +126,7 @@ impl From<PRErrorCode> for Error {
             || unsafe { PR_ErrorToString(code, PR_LANGUAGE_I_DEFAULT) },
             "...",
         );
-        Self::NssError { name, code, desc }
+        Self::Nss { name, code, desc }
     }
 }
 
@@ -152,7 +155,7 @@ pub fn secstatus_to_res(rv: SECStatus) -> Res<()> {
 
 pub const fn is_blocked(result: &Res<()>) -> bool {
     match result {
-        Err(Error::NssError { code, .. }) => *code == nspr::PR_WOULD_BLOCK_ERROR,
+        Err(Error::Nss { code, .. }) => *code == nspr::PR_WOULD_BLOCK_ERROR,
         _ => false,
     }
 }
@@ -193,7 +196,7 @@ mod tests {
         let r = secstatus_to_res(SECFailure);
         assert!(r.is_err());
         match r.unwrap_err() {
-            Error::NssError { name, code, desc } => {
+            Error::Nss { name, code, desc } => {
                 assert_eq!(name, "SSL_ERROR_BAD_MAC_READ");
                 assert_eq!(code, -12273);
                 assert_eq!(
@@ -211,7 +214,7 @@ mod tests {
         let r = secstatus_to_res(SECFailure);
         assert!(r.is_err());
         match r.unwrap_err() {
-            Error::NssError { name, code, .. } => {
+            Error::Nss { name, code, .. } => {
                 assert_eq!(name, "UNKNOWN_ERROR");
                 assert_eq!(code, 0);
                 // Note that we don't test |desc| here because that comes from
@@ -228,7 +231,7 @@ mod tests {
         assert!(r.is_err());
         assert!(is_blocked(&r));
         match r.unwrap_err() {
-            Error::NssError { name, code, desc } => {
+            Error::Nss { name, code, desc } => {
                 assert_eq!(name, "PR_WOULD_BLOCK_ERROR");
                 assert_eq!(code, -5998);
                 assert_eq!(desc, "The operation would have blocked");

@@ -19,6 +19,10 @@ pub const AEAD_NULL_TAG: &[u8] = &[0x0a; 16];
 pub struct AeadNull {}
 
 impl AeadNull {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "Need to replicate the API of aead::RealAead."
+    )]
     pub const fn new(
         _version: Version,
         _cipher: Cipher,
@@ -29,10 +33,15 @@ impl AeadNull {
     }
 
     #[must_use]
-    pub const fn expansion(&self) -> usize {
+    pub const fn expansion() -> usize {
         AEAD_NULL_TAG.len()
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        clippy::unused_self,
+        reason = "Need to replicate the API of aead::RealAead."
+    )]
     pub fn encrypt<'a>(
         &self,
         _count: u64,
@@ -42,29 +51,38 @@ impl AeadNull {
     ) -> Res<&'a [u8]> {
         let l = input.len();
         output[..l].copy_from_slice(input);
-        output[l..l + self.expansion()].copy_from_slice(AEAD_NULL_TAG);
-        Ok(&output[..l + self.expansion()])
+        output[l..l + Self::expansion()].copy_from_slice(AEAD_NULL_TAG);
+        Ok(&output[..l + Self::expansion()])
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        clippy::unused_self,
+        reason = "Need to replicate the API of aead::RealAead."
+    )]
     pub fn encrypt_in_place<'a>(
         &self,
         _count: u64,
         _aad: &[u8],
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
-        let pos = data.len() - self.expansion();
+        let pos = data.len() - Self::expansion();
         data[pos..].copy_from_slice(AEAD_NULL_TAG);
         Ok(data)
     }
 
+    #[expect(
+        clippy::unused_self,
+        reason = "Need to replicate the API of aead::RealAead."
+    )]
     fn decrypt_check(&self, _count: u64, _aad: &[u8], input: &[u8]) -> Res<usize> {
-        if input.len() < self.expansion() {
+        if input.len() < Self::expansion() {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
 
         let len_encrypted = input
             .len()
-            .checked_sub(self.expansion())
+            .checked_sub(Self::expansion())
             .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
         // Check that:
         // 1) expansion is all zeros and

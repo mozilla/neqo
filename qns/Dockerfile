@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef@sha256:cf4bd956000c0b18613ce4e485e4a0c7719921fcc5e34ba0e7e08e3dfcff8964 AS chef
+FROM lukemathwalker/cargo-chef@sha256:116399b1296ed6fc9fb2e530650e229caeb0e1883e68c7f2a82f2b0b9b639a9e AS chef
 
 WORKDIR /app
 
@@ -21,14 +21,14 @@ ENV NSS_DIR=/nss \
     NSS_PREBUILT=1 \
     NSPR_DIR=/nspr \
     LD_LIBRARY_PATH=/dist/Release/lib \
-    NSPR_VERSION=4.36
+    NSPR_VERSION=4.37
 
 RUN set -eux; \
     mkdir -p "$NSPR_DIR"; \
     curl -L "https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz" | tar xz --strip-components=2 -C "$NSPR_DIR"; \
     git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
 
-RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -o
+RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 -o
 
 COPY --from=planner /app/recipe.json recipe.json
 # Build dependencies

@@ -10,10 +10,7 @@ use neqo_common::{Datagram, Decoder, Role};
 use neqo_crypto::AuthenticationStatus;
 use test_fixture::{
     assertions,
-    header_protection::{
-        apply_header_protection, decode_initial_header, initial_aead_and_hp,
-        remove_header_protection,
-    },
+    header_protection::{self, decode_initial_header, initial_aead_and_hp},
     now, split_datagram,
 };
 
@@ -24,8 +21,7 @@ use super::{
 use crate::{
     addr_valid::{AddressValidation, ValidateAddress},
     frame::FrameType,
-    rtt::INITIAL_RTT,
-    ConnectionParameters, Error, State, Version, MIN_INITIAL_PACKET_SIZE,
+    ConnectionParameters, Error, State, Version, DEFAULT_INITIAL_RTT, MIN_INITIAL_PACKET_SIZE,
 };
 
 #[test]
@@ -87,8 +83,8 @@ fn remember_smoothed_rtt() {
 }
 
 fn ticket_rtt(rtt: Duration) -> Duration {
-    // A simple ACK_ECN frame for a single packet with packet number 0 with a single ECT(0) mark.
-    const ACK_FRAME_1: &[u8] = &[0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00];
+    // A simple ACK frame for a single packet with packet number 0.
+    const ACK_FRAME_1: &[u8] = &[0x02, 0x00, 0x00, 0x00, 0x00];
 
     // This test needs to decrypt the CI, so turn off MLKEM.
     let mut client = new_client(
@@ -112,7 +108,7 @@ fn ticket_rtt(rtt: Duration) -> Duration {
 
     // Now decrypt the packet.
     let (aead, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
-    let (header, pn) = remove_header_protection(&hp, protected_header, payload);
+    let (header, pn) = header_protection::remove(&hp, protected_header, payload);
     assert_eq!(pn, 0);
     let pn_len = header.len() - protected_header.len();
     let mut buf = vec![0; payload.len()];
@@ -136,7 +132,7 @@ fn ticket_rtt(rtt: Duration) -> Duration {
     packet.resize(MIN_INITIAL_PACKET_SIZE, 0);
     aead.encrypt(pn, &header, &plaintext, &mut packet[header.len()..])
         .unwrap();
-    apply_header_protection(&hp, &mut packet, protected_header.len()..header.len());
+    header_protection::apply(&hp, &mut packet, protected_header.len()..header.len());
     let si = Datagram::new(
         server_initial.source(),
         server_initial.destination(),
@@ -195,7 +191,7 @@ fn ticket_rtt_less_than_default() {
 
 #[test]
 fn ticket_rtt_larger_than_default() {
-    assert_eq!(ticket_rtt(Duration::from_millis(500)), INITIAL_RTT);
+    assert_eq!(ticket_rtt(Duration::from_millis(500)), DEFAULT_INITIAL_RTT);
 }
 
 /// Check that a resumed connection uses a token on Initial packets.

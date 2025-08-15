@@ -4,10 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
 #![expect(
     clippy::unwrap_used,
     reason = "Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed."
@@ -21,8 +17,9 @@ use std::{
     ops::{Deref, DerefMut},
     os::raw::{c_uint, c_void},
     pin::Pin,
-    ptr::{null, null_mut},
+    ptr::{null, null_mut, NonNull},
     rc::Rc,
+    slice,
     time::Instant,
 };
 
@@ -50,6 +47,145 @@ use crate::{
     ssl::{self, PRBool},
     time::{Time, TimeHolder},
 };
+
+/// Private trait for Certificate Compression implementation
+/// Use `SafeCertCompression` to implement an encoder/decoder instead.
+trait UnsafeCertCompression {
+    extern "C" fn decode_callback(
+        input: *const ssl::SECItem,
+        output: *mut ::std::os::raw::c_uchar,
+        output_len: usize,
+        used_len: *mut usize,
+    ) -> ssl::SECStatus;
+
+    extern "C" fn encode_callback(
+        input: *const ssl::SECItem,
+        output: *mut ssl::SECItem,
+    ) -> ssl::SECStatus;
+}
+
+/// The trait is used to represent a certificate compression data structure
+/// Used in order to enable Certificate Compression extension during TLS connection
+pub trait CertificateCompressor {
+    /// Certificate Compression identifier as in RFC8879
+    const ID: u16;
+    /// Certification Compression name (used only for logging/debugging)
+    const NAME: &CStr;
+    /// Certificate Compression could be used to encode and decode a certificate
+    /// though the encoding is not frequently used
+    /// Enable decoding field is used to signal to the implementation
+    /// to use the encoding as well
+    const ENABLE_ENCODING: bool = false;
+
+    /// Certificate Compression encoding function
+    ///
+    /// This default implementation effectively does nothing.
+    /// However, this is only run if `ENABLE_ENCODING` is `true`.
+    /// Implementations that set `ENABLE_ENCODING` to `true` need to implement this function.
+    ///
+    /// # Errors
+    /// Encoding was unsuccessful, for example, not enough memory
+    fn encode(input: &[u8], output: &mut [u8]) -> Res<usize> {
+        let len = std::cmp::min(input.len(), output.len());
+        output[..len].copy_from_slice(&input[..len]);
+        Ok(len)
+    }
+
+    /// Certificate Compression decoding function.
+    /// # Errors
+    /// Decoding was unsuccessful.
+    /// We require a decoder internally to check the length of the decoded buffer.
+    /// If the decoded length is not equal to the length of the provided slice
+    /// the decoder should return an error.
+    fn decode(input: &[u8], output: &mut [u8]) -> Res<()>;
+}
+
+/// The trait is responsible for calling `CertificateCompression` encoding and decoding
+/// functions using the NSS types
+impl<T: CertificateCompressor> UnsafeCertCompression for T {
+    extern "C" fn decode_callback(
+        input: *const ssl::SECItem,
+        output: *mut ::std::os::raw::c_uchar,
+        output_len: usize,
+        used_len: *mut usize,
+    ) -> ssl::SECStatus {
+        let Some(input) = NonNull::new(input.cast_mut()) else {
+            return ssl::SECFailure;
+        };
+        if unsafe { input.as_ref().data.is_null() || input.as_ref().len == 0 } {
+            return ssl::SECFailure;
+        }
+
+        let input_slice = unsafe { null_safe_slice(input.as_ref().data, input.as_ref().len) };
+        let output_slice = unsafe { slice::from_raw_parts_mut(output, output_len) };
+
+        if T::decode(input_slice, output_slice).is_err() {
+            return ssl::SECFailure;
+        }
+
+        unsafe {
+            *used_len = output_len;
+        }
+        ssl::SECSuccess
+    }
+
+    extern "C" fn encode_callback(
+        input: *const ssl::SECItem,
+        output: *mut ssl::SECItem,
+    ) -> ssl::SECStatus {
+        let Some(input) = NonNull::new(input.cast_mut()) else {
+            return ssl::SECFailure;
+        };
+
+        let (input_data, input_len) = unsafe {
+            let input_ref = input.as_ref();
+            (input_ref.data, input_ref.len)
+        };
+
+        if input_data.is_null() || input_len == 0 {
+            return ssl::SECFailure;
+        }
+        let input_slice = unsafe { null_safe_slice(input_data, input_len) };
+
+        unsafe {
+            p11::SECITEM_AllocItem(
+                null_mut(),
+                // p11::SECItem is the same as ssl::SECItem
+                output.cast::<p11::SECItemStr>(),
+                // Compression shouldn't make the thing *longer*,
+                // but allocate one extra byte anyway to enable simple testing modes.
+                input_len + 1,
+            );
+        }
+
+        if unsafe { (*output).data.is_null() } {
+            return ssl::SECFailure;
+        }
+
+        let Ok(output_len) = (unsafe { (*output).len.try_into() }) else {
+            return ssl::SECFailure;
+        };
+
+        let output_slice = unsafe { slice::from_raw_parts_mut((*output).data, output_len) };
+
+        let Ok(encoded_len) = T::encode(input_slice, output_slice) else {
+            return ssl::SECFailure;
+        };
+
+        if encoded_len == 0 || encoded_len > output_len {
+            return ssl::SECFailure;
+        }
+
+        let Ok(encoded_len) = encoded_len.try_into() else {
+            return ssl::SECFailure;
+        };
+
+        unsafe {
+            (*output).len = encoded_len;
+        }
+        ssl::SECSuccess
+    }
+}
 
 /// The maximum number of tickets to remember for a given connection.
 const MAX_TICKETS: usize = 4;
@@ -112,7 +248,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
             chosen.truncate(usize::try_from(chosen_len)?);
             Some(match String::from_utf8(chosen) {
                 Ok(a) => a,
-                Err(_) => return Err(Error::InternalError),
+                Err(_) => return Err(Error::Internal),
             })
         }
         _ => None,
@@ -286,6 +422,7 @@ impl SecretAgentInfo {
 
 /// `SecretAgent` holds the common parts of client and server.
 #[derive(Debug)]
+#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub struct SecretAgent {
     fd: *mut ssl::PRFileDesc,
     secrets: SecretHolder,
@@ -443,7 +580,7 @@ impl SecretAgent {
     pub fn set_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
         if self.state != HandshakeState::New {
             qwarn!("[{self}] Cannot enable ciphers in state {:?}", self.state);
-            return Err(Error::InternalError);
+            return Err(Error::Internal);
         }
 
         let all_ciphers = unsafe { ssl::SSL_GetImplementedCiphers() };
@@ -555,7 +692,7 @@ impl SecretAgent {
 
         // NSS inherited an idiosyncratic API as a result of having implemented NPN
         // before ALPN.  For that reason, we need to put the "best" option last.
-        let (first, rest) = protocols.split_first().ok_or(Error::InternalError)?;
+        let (first, rest) = protocols.split_first().ok_or(Error::Internal)?;
         for v in rest {
             add(v.as_ref());
         }
@@ -570,6 +707,30 @@ impl SecretAgent {
                 c_uint::try_from(encoded.len())?,
             )
         })
+    }
+
+    /// Install a certificate compression mechanism.
+    ///
+    /// # Errors
+    /// If the compression mechanism with the same id is already registered
+    /// If too many compression mechanisms are already registered
+    ///
+    /// This returns an error if the certificate compression could not be established
+    ///
+    /// [RFC8879]: https://datatracker.ietf.org/doc/rfc8879/
+    pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
+        if T::ID == 0 {
+            return Err(Error::InvalidCertificateCompressionID);
+        }
+
+        let compressor: ssl::SSLCertificateCompressionAlgorithm =
+            ssl::SSLCertificateCompressionAlgorithm {
+                id: T::ID,
+                name: T::NAME.as_ptr(),
+                encode: T::ENABLE_ENCODING.then_some(<T as UnsafeCertCompression>::encode_callback),
+                decode: Some(<T as UnsafeCertCompression>::decode_callback),
+            };
+        unsafe { ssl::SSL_SetCertificateCompressionAlgorithm(self.fd, compressor) }
     }
 
     /// Install an extension handler.
@@ -825,10 +986,19 @@ impl Display for SecretAgent {
     }
 }
 
-#[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
+#[derive(PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub struct ResumptionToken {
     token: Vec<u8>,
     expiration_time: Instant,
+}
+
+impl Debug for ResumptionToken {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ResumptionToken")
+            .field("token", &hex_snip_middle(&self.token))
+            .field("expiration_time", &self.expiration_time)
+            .finish()
+    }
 }
 
 impl AsRef<[u8]> for ResumptionToken {
@@ -989,18 +1159,19 @@ impl Client {
             unsafe { ech::SSL_EnableTls13GreaseEch(self.agent.fd, PRBool::from(true)) }
         } else {
             unsafe {
-                // Allow writing of different transport parameters to the inner and outer
+                ech::SSL_SetClientEchConfigs(
+                    self.agent.fd,
+                    config.as_ptr(),
+                    c_uint::try_from(config.len())?,
+                )?;
+                // If the ECH configuration is valid, and only then,
+                // allow writing of different transport parameters to the inner and outer
                 // ClientHello. Avoid setting this otherwise, as the transport
                 // parameter extension handler filters out essential values from the
                 // outer ClientHello. Under normal operation, NSS reports to
                 // extension writers that an ordinary, non-ECH ClientHello is an
                 // outer ClientHello, resulting in unwanted filtering.
-                SSL_CallExtensionWriterOnEchInner(self.fd, PRBool::from(true))?;
-                ech::SSL_SetClientEchConfigs(
-                    self.agent.fd,
-                    config.as_ptr(),
-                    c_uint::try_from(config.len())?,
-                )
+                SSL_CallExtensionWriterOnEchInner(self.fd, PRBool::from(true))
             }
         }
     }
@@ -1133,7 +1304,7 @@ impl Server {
                 // Don't bother propagating errors from this, because it should be caught in
                 // testing.
                 assert!(tok.len() <= usize::try_from(retry_token_max).unwrap());
-                let slc = std::slice::from_raw_parts_mut(retry_token, tok.len());
+                let slc = slice::from_raw_parts_mut(retry_token, tok.len());
                 slc.copy_from_slice(&tok);
                 *retry_token_len = c_uint::try_from(tok.len()).unwrap();
                 ssl::SSLHelloRetryRequestAction::ssl_hello_retry_request
@@ -1268,5 +1439,63 @@ impl From<Client> for Agent {
 impl From<Server> for Agent {
     fn from(s: Server) -> Self {
         Self::Server(s)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use crate::ResumptionToken;
+
+    #[test]
+    fn resumption_token_debug_impl() {
+        let now = Instant::now();
+        let token = [
+            2, 0, 6, 60, 37, 21, 238, 165, 182, 0, 6, 60, 77, 81, 157, 101, 182, 0, 6, 60, 37, 21,
+            238, 165, 182, 0, 2, 163, 0, 0, 0, 0, 1, 72, 146, 254, 127, 255, 255, 255, 255, 0, 1,
+            73, 48, 130, 1, 69, 48, 129, 236, 160, 3, 2, 1, 2, 2, 5, 0, 176, 13, 245, 143, 48, 10,
+            6, 8, 42, 134, 72, 206, 61, 4, 3, 2, 48, 15, 49, 13, 48, 11, 6, 3, 85, 4, 3, 19, 4,
+            116, 101, 115, 116, 48, 30, 23, 13, 49, 57, 48, 49, 50, 55, 49, 50, 50, 54, 52, 55, 90,
+            23, 13, 49, 57, 48, 52, 50, 55, 49, 50, 50, 54, 52, 55, 90, 48, 15, 49, 13, 48, 11, 6,
+            3, 85, 4, 3, 19, 4, 116, 101, 115, 116, 48, 89, 48, 19, 6, 7, 42, 134, 72, 206, 61, 2,
+            1, 6, 8, 42, 134, 72, 206, 61, 3, 1, 7, 3, 66, 0, 4, 42, 240, 199, 17, 152, 64, 127,
+            175, 32, 106, 156, 147, 147, 171, 185, 13, 157, 177, 225, 249, 112, 141, 249, 175, 72,
+            224, 44, 119, 74, 249, 38, 109, 45, 217, 239, 119, 190, 34, 246, 151, 97, 85, 39, 175,
+            182, 174, 5, 16, 183, 139, 81, 228, 52, 245, 172, 45, 183, 68, 82, 214, 10, 3, 114, 4,
+            163, 53, 48, 51, 48, 25, 6, 3, 85, 29, 17, 4, 18, 48, 16, 130, 14, 115, 101, 114, 118,
+            101, 114, 46, 101, 120, 97, 109, 112, 108, 101, 48, 9, 6, 3, 85, 29, 19, 4, 2, 48, 0,
+            48, 11, 6, 3, 85, 29, 15, 4, 4, 3, 2, 7, 128, 48, 10, 6, 8, 42, 134, 72, 206, 61, 4, 3,
+            2, 3, 72, 0, 48, 69, 2, 32, 118, 227, 238, 3, 17, 159, 222, 78, 215, 173, 203, 63, 51,
+            101, 41, 145, 17, 156, 179, 18, 64, 146, 197, 54, 64, 212, 255, 201, 133, 92, 244, 58,
+            2, 33, 0, 148, 138, 31, 164, 15, 1, 107, 82, 152, 245, 77, 127, 251, 227, 229, 183, 33,
+            162, 111, 169, 222, 240, 171, 167, 99, 81, 10, 183, 76, 80, 130, 65, 0, 0, 0, 5, 91,
+            58, 58, 49, 93, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0, 3,
+            4, 0, 6, 60, 37, 21, 238, 165, 182, 0, 4, 0, 0, 1, 0, 0, 8, 0, 0, 0, 255, 0, 17, 236,
+            0, 4, 3, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 19, 1, 1, 48, 245, 92, 231, 183, 9, 67, 178, 200, 227, 203, 91,
+            5, 146, 135, 61, 159, 135, 68, 96, 200, 86, 35, 189, 174, 81, 95, 157, 75, 177, 235,
+            124, 93, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 1,
+            50, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 2,
+            104, 51, 1, 34, 56, 7, 64, 215, 199, 178, 229, 41, 63, 246, 119, 142, 0, 0, 0, 0, 86,
+            68, 109, 48, 102, 65, 96, 24, 170, 163, 83, 214, 9, 243, 208, 236, 0, 224, 110, 111,
+            243, 244, 243, 4, 172, 188, 247, 135, 255, 109, 241, 240, 77, 178, 162, 32, 255, 45,
+            207, 25, 89, 74, 86, 140, 114, 11, 192, 20, 144, 139, 49, 228, 250, 252, 228, 107, 5,
+            62, 203, 139, 146, 248, 73, 124, 72, 94, 138, 216, 190, 223, 150, 181, 55, 62, 32, 13,
+            231, 230, 104, 142, 27, 182, 15, 13, 116, 26, 234, 154, 228, 241, 134, 131, 25, 214,
+            229, 187, 181, 219, 209, 217, 53, 162, 177, 203, 100, 80, 175, 64, 226, 159, 115, 202,
+            43, 68, 72, 160, 34, 214, 158, 4, 242, 7, 13, 132, 20, 128, 160, 237, 168, 122, 66, 37,
+            54, 11, 116, 148, 94, 173, 80, 228, 7, 89, 223, 156, 249, 22, 50, 62, 33, 22, 157, 115,
+            28, 195, 4, 220, 57, 62, 204, 222, 188, 211, 82, 34, 121, 54, 106, 197, 183, 98, 155,
+            36, 249, 164, 205, 114, 61, 39, 144, 54, 43, 180, 25, 28, 130, 80, 22, 109, 133, 27,
+            87, 184, 66, 54, 117, 151, 113, 36, 172, 98, 31, 60, 42, 85, 190, 148, 160, 65, 222,
+            186, 200, 101, 183, 103, 23, 95, 97, 7, 248, 159, 114, 229, 74, 252, 55, 68, 254, 63,
+            244, 195, 194, 99, 118, 60, 231, 118, 219, 241, 146, 94, 249, 94, 40, 231, 103, 238,
+            215, 120, 60, 213, 142, 121, 11, 15, 251, 195, 120, 39, 17, 117, 183, 1, 90, 178, 149,
+            74, 184, 51, 9, 38, 114, 144, 66, 153,
+        ];
+        let resumption_token = ResumptionToken::new(token.to_vec(), now);
+        let expected = format!("ResumptionToken {{ token: \"[848]: 0200063c2515eea5..b833092672904299\", expiration_time: {now:?} }}");
+        assert_eq!(format!("{resumption_token:?}"), expected);
     }
 }
