@@ -41,13 +41,10 @@ pub enum WebTransportEvent {
     },
 }
 
-// TODO: Why is the client side called ConnectUdpEvent, but the server side is called
-// ConnectUdpServerEvent? Also in WebTransport. TODO: All needed?
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ConnectUdpEvent {
     Negotiated(bool),
-    // TODO: The server side calls this NewSession, right? Also in WebTransport.
-    Session {
+    NewSession {
         stream_id: StreamId,
         status: u16,
         headers: Vec<Header>,
@@ -221,7 +218,7 @@ impl ExtendedConnectEvents for Http3ClientEvents {
                 }));
             }
             ExtendedConnectType::ConnectUdp => {
-                self.insert(Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Session {
+                self.insert(Http3ClientEvent::ConnectUdp(ConnectUdpEvent::NewSession {
                     stream_id,
                     status,
                     headers,

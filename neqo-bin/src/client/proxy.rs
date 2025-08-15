@@ -133,7 +133,7 @@ impl Client for Proxy {
                             .connect_udp_create_session(Instant::now(), &self.url, &self.headers)
                             .unwrap();
                     }
-                    ConnectUdpEvent::Session { stream_id, .. } => {
+                    ConnectUdpEvent::NewSession { stream_id, .. } => {
                         self.session_id = Some(stream_id);
                     }
                     ConnectUdpEvent::Datagram {

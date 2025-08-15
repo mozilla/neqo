@@ -89,7 +89,7 @@ fn new_session() -> (
         .events()
         .find(|e| matches!(
             e,
-            Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Session { stream_id, status, ..}) if *stream_id == connect_udp_session_id && *status == 200)
+            Http3ClientEvent::ConnectUdp(ConnectUdpEvent::NewSession { stream_id, status, ..}) if *stream_id == connect_udp_session_id && *status == 200)
         )
         .unwrap();
     (client, proxy, connect_udp_session_id, proxy_session)
