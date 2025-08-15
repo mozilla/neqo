@@ -23,7 +23,7 @@ use super::{
 use crate::{
     connection::{test_internal::FrameWriter, tests::cwnd_min},
     frame::FrameType,
-    packet::PacketBuilder,
+    packet,
     recovery::{
         FAST_PTO_SCALE, MAX_OUTSTANDING_UNACK, MAX_PTO_PACKET_COUNT, MIN_OUTSTANDING_UNACK,
     },
@@ -231,13 +231,11 @@ fn pto_handshake_complete() {
 
     now += HALF_RTT;
     let pkt = server.process(pkt, now).dgram();
-    assert_initial(pkt.as_ref().unwrap(), false);
+    assert_handshake(pkt.as_ref().unwrap());
 
     now += HALF_RTT;
     let pkt = client.process(pkt, now).dgram();
-    let (initial, handshake) = split_datagram(&pkt.clone().unwrap());
-    assert_initial(&initial, false);
-    assert_handshake(handshake.as_ref().unwrap());
+    assert_handshake(pkt.as_ref().unwrap());
 
     let cb = client.process_output(now).callback();
     // The client now has a single RTT estimate (20ms), so
@@ -910,7 +908,7 @@ fn ack_for_unsent() {
     struct AckforUnsentWriter {}
 
     impl FrameWriter for AckforUnsentWriter {
-        fn write_frames(&mut self, builder: &mut PacketBuilder) {
+        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
             builder.encode_varint(FrameType::Ack);
             builder.encode_varint(666u16); // Largest ACKed
             builder.encode_varint(0u8); // ACK delay

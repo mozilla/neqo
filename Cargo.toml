@@ -20,7 +20,7 @@ description = "Neqo, the Mozilla implementation of QUIC in Rust."
 keywords = ["quic", "http3", "neqo", "mozilla", "ietf", "firefox"]
 categories = ["network-programming", "web-programming"]
 readme = "README.md"
-version = "0.13.4"
+version = "0.14.1"
 # Keep in sync with `.rustfmt.toml` `edition`.
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -36,11 +36,13 @@ enumset = { version = "1.1", default-features = false }
 hex = { version = "0.4", default-features = false }
 log = { version = "0.4", default-features = false }
 qlog = { version = "0.15.1", default-features = false }
-quinn-udp = { version = "0.5.11", default-features = false, features = ["direct-log"] }
+quinn-udp = { version = "0.5.13", default-features = false, features = ["direct-log"] }
 regex = { version = "1.9", default-features = false }
+rustc-hash = { version = "2.1", default-features = false, features = [ "std" ]}
 static_assertions = { version = "1.1", default-features = false }
 strum = { version = "0.27", default-features = false, features = ["derive"] }
 url = { version = "2.5", default-features = false, features = ["std"] }
+windows = { version = "0.58", default-features = false }
 
 [workspace.lints.rust]
 absolute_paths_not_starting_with_crate = "warn"
@@ -114,7 +116,6 @@ return_and_then = "warn"
 self_named_module_files = "warn"
 semicolon_inside_block = "warn"
 string_lit_chars_any = "warn"
-string_to_string = "warn"
 suspicious_xor_used_as_pow = "warn"
 try_err = "warn"
 unnecessary_safety_comment = "warn"

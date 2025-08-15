@@ -12,7 +12,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Encoder, IpTos};
+use neqo_common::{
+    hex, qdebug, qinfo, qlog::Qlog, qtrace, qwarn, Buffer, DatagramBatch, Encoder, Tos,
+};
 use neqo_crypto::random;
 
 use crate::{
@@ -20,9 +22,9 @@ use crate::{
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn,
     frame::FrameType,
-    packet::{PacketBuilder, PacketType},
+    packet,
     pmtud::Pmtud,
-    recovery::{RecoveryToken, SentPacket},
+    recovery::{self, sent},
     rtt::{RttEstimate, RttSource},
     sender::PacketSender,
     stats::FrameStats,
@@ -62,7 +64,7 @@ pub struct Paths {
     to_retire: Vec<u64>,
 
     /// `QLog` handler.
-    qlog: NeqoQlog,
+    qlog: Qlog,
 }
 
 impl Paths {
@@ -190,6 +192,7 @@ impl Paths {
             |p| p.borrow().ecn_info.baseline(),
         );
         path.borrow_mut().set_ecn_baseline(baseline);
+        path.borrow_mut().start_ecn(stats);
         if force || path.borrow().is_valid() {
             path.borrow_mut().set_valid(now);
             drop(self.select_primary(path, now));
@@ -365,10 +368,10 @@ impl Paths {
     }
 
     /// Write out any `RETIRE_CONNECTION_ID` frames that are outstanding.
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         while let Some(seqno) = self.to_retire.pop() {
@@ -378,7 +381,7 @@ impl Paths {
             }
             builder.encode_varint(FrameType::RetireConnectionId);
             builder.encode_varint(seqno);
-            tokens.push(RecoveryToken::RetireConnectionId(seqno));
+            tokens.push(recovery::Token::RetireConnectionId(seqno));
             stats.retire_connection_id += 1;
         }
 
@@ -414,9 +417,15 @@ impl Paths {
         }
     }
 
-    pub fn lost_ecn(&self, pt: PacketType, stats: &mut Stats) {
+    pub fn lost_ecn(&self, stats: &mut Stats) {
         if let Some(path) = self.primary() {
-            path.borrow_mut().lost_ecn(pt, stats);
+            path.borrow_mut().lost_ecn(stats);
+        }
+    }
+
+    pub fn start_ecn(&self, stats: &mut Stats) {
+        if let Some(path) = self.primary() {
+            path.borrow_mut().start_ecn(stats);
         }
     }
 
@@ -428,12 +437,12 @@ impl Paths {
         // That is more expensive, but it should be rare and breaking encapsulation
         // is worse, especially as this is only used in tests.
         self.primary().map_or_else(
-            || RttEstimate::default().estimate(),
+            || RttEstimate::new(crate::DEFAULT_INITIAL_RTT).estimate(),
             |p| p.borrow().rtt().estimate(),
         )
     }
 
-    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+    pub fn set_qlog(&mut self, qlog: Qlog) {
         for p in &mut self.paths {
             p.borrow_mut().set_qlog(qlog.clone());
         }
@@ -515,7 +524,7 @@ pub struct Path {
     /// The ECN-related state for this path (see RFC9000, Section 13.4 and Appendix A.4)
     ecn_info: ecn::Info,
     /// For logging of events.
-    qlog: NeqoQlog,
+    qlog: Qlog,
 }
 
 impl Path {
@@ -525,7 +534,7 @@ impl Path {
         local: SocketAddr,
         remote: SocketAddr,
         conn_params: &ConnectionParameters,
-        qlog: NeqoQlog,
+        qlog: Qlog,
         now: Instant,
         stats: &mut Stats,
     ) -> Self {
@@ -561,7 +570,7 @@ impl Path {
             state: ProbeState::ProbeNeeded { probe_count: 0 },
             validated: None,
             challenge: None,
-            rtt: RttEstimate::default(),
+            rtt: RttEstimate::new(conn_params.get_initial_rtt()),
             sender,
             received_bytes: 0,
             sent_bytes: 0,
@@ -575,8 +584,8 @@ impl Path {
     }
 
     /// Return the DSCP/ECN marking to use for outgoing packets on this path.
-    pub fn tos(&self, tokens: &mut Vec<RecoveryToken>) -> IpTos {
-        self.ecn_info.ecn_mark(tokens).into()
+    pub fn tos(&self) -> Tos {
+        self.ecn_info.ecn_mark().into()
     }
 
     /// Whether this path is the primary or current path for the connection.
@@ -686,17 +695,19 @@ impl Path {
     }
 
     /// Make a datagram.
-    pub fn datagram<V: Into<Vec<u8>>>(
+    pub fn datagram_batch(
         &mut self,
-        payload: V,
-        tos: IpTos,
+        payload: Vec<u8>,
+        tos: Tos,
+        num_datagrams: usize,
+        datagram_size: usize,
         stats: &mut Stats,
-    ) -> Datagram {
+    ) -> DatagramBatch {
         // Make sure to use the TOS value from before calling ecn::Info::on_packet_sent, which may
         // update the ECN state and can hence change it - this packet should still be sent
         // with the current value.
-        self.ecn_info.on_packet_sent(stats);
-        Datagram::new(self.local, self.remote, tos, payload.into())
+        self.ecn_info.on_packet_sent(num_datagrams, stats);
+        DatagramBatch::new(self.local, self.remote, tos, datagram_size, payload)
     }
 
     /// Get local address as `SocketAddr`
@@ -769,9 +780,9 @@ impl Path {
         self.challenge.is_some() || self.state.probe_needed()
     }
 
-    pub fn write_frames(
+    pub fn write_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
+        builder: &mut packet::Builder<B>,
         stats: &mut FrameStats,
         mtu: bool, // Whether the packet we're writing into will be a full MTU.
         now: Instant,
@@ -819,10 +830,10 @@ impl Path {
     }
 
     /// Write `ACK_FREQUENCY` frames.
-    pub fn write_cc_frames(
+    pub fn write_cc_frames<B: Buffer>(
         &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         self.rtt.write_frames(builder, tokens, stats);
@@ -836,8 +847,12 @@ impl Path {
         self.ecn_info.acked_ecn();
     }
 
-    pub fn lost_ecn(&mut self, pt: PacketType, stats: &mut Stats) {
-        self.ecn_info.lost_ecn(pt, stats);
+    pub fn lost_ecn(&mut self, stats: &mut Stats) {
+        self.ecn_info.lost_ecn(stats);
+    }
+
+    pub fn start_ecn(&mut self, stats: &mut Stats) {
+        self.ecn_info.start(stats);
     }
 
     pub fn acked_ack_frequency(&mut self, acked: &AckRate) {
@@ -943,7 +958,7 @@ impl Path {
     }
 
     /// Record a packet as having been sent on this path.
-    pub fn packet_sent(&mut self, sent: &mut SentPacket, now: Instant) {
+    pub fn packet_sent(&mut self, sent: &mut sent::Packet, now: Instant) {
         if !self.is_primary() {
             sent.clear_primary_path();
         }
@@ -951,7 +966,7 @@ impl Path {
     }
 
     /// Discard a packet that previously might have been in-flight.
-    pub fn discard_packet(&mut self, sent: &SentPacket, now: Instant, stats: &mut Stats) {
+    pub fn discard_packet(&mut self, sent: &sent::Packet, now: Instant, stats: &mut Stats) {
         if self.rtt.first_sample_time().is_none() {
             // When discarding a packet there might not be a good RTT estimate.
             // But discards only occur after receiving something, so that means
@@ -978,8 +993,8 @@ impl Path {
     /// Record packets as acknowledged with the sender.
     pub fn on_packets_acked(
         &mut self,
-        acked_pkts: &[SentPacket],
-        ack_ecn: Option<ecn::Count>,
+        acked_pkts: &[sent::Packet],
+        ack_ecn: Option<&ecn::Count>,
         now: Instant,
         stats: &mut Stats,
     ) {
@@ -1004,7 +1019,7 @@ impl Path {
         &mut self,
         prev_largest_acked_sent: Option<Instant>,
         confirmed: bool,
-        lost_packets: &[SentPacket],
+        lost_packets: &[sent::Packet],
         stats: &mut Stats,
         now: Instant,
     ) {
@@ -1053,8 +1068,8 @@ impl Path {
         }
     }
 
-    /// Update the `NeqoQLog` instance.
-    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+    /// Update the `QLog` instance.
+    pub fn set_qlog(&mut self, qlog: Qlog) {
         self.sender.set_qlog(qlog);
     }
 }

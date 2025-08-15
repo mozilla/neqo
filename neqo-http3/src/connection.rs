@@ -6,18 +6,18 @@
 
 use std::{
     cell::RefCell,
-    collections::{BTreeSet, HashMap},
     fmt::{self, Debug, Display, Formatter},
     mem,
     rc::Rc,
 };
 
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, MessageType, Role};
-use neqo_qpack::{decoder::QPackDecoder, encoder::QPackEncoder};
+use neqo_qpack as qpack;
 use neqo_transport::{
     streams::SendOrder, AppError, CloseReason, Connection, DatagramTracking, State, StreamId,
     StreamType, ZeroRttState,
 };
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use strum::Display;
 
 use crate::{
@@ -102,48 +102,6 @@ impl Http3State {
 
 This is the core implementation of HTTP/3 protocol. It implements most of the features of the
 protocol. `Http3Client` and `Http3ServerHandler` implement only client and server side behavior.
-
-The API consists of:
-- functions that correspond to the `Http3Client` and `Http3ServerHandler` API:
-  - `new`
-  - `close`
-  - `fetch` -  only used by the client-side implementation
-  - `read_data`
-  - `stream_reset_send`
-  - `stream_stop_sending`
-  - `cancel_fetch`
-  - `stream_close_send`
-- functions that correspond to [`WebTransport`](https://w3c.github.io/webtransport/) functions:
-  - `webtransport_create_session` -  only used by the client-side implementation
-  - `webtransport_session_accept` -  only used by the server-side implementation
-  - `webtransport_close_session`
-  - `webtransport_create_stream_local` -  this function is called when an application wants to open
-    a new `WebTransport` stream. For example `Http3Client::webtransport_create_stream` will call
-    this function.
-  - `webtransport_create_stream_remote` -  this is called when a `WebTransport` stream has been
-    opened by the peer and this function sets up the appropriate handler for the stream.
-- functions that are called by `process_http3`
-  - `process_sending` - some send-streams are buffered streams(see the Streams section) and this
-    function is called to trigger sending of the buffer data.
-- functions that are called to  handle `ConnectionEvent`s:
-  - `add_new_stream`
-  - `handle_stream_readable`
-  - `handle_stream_reset`
-  - `handle_stream_stop_sending`
-  - `handle_state_change`
-  - `handle_zero_rtt_rejected`
-- Additional functions:
-  - `set_features_listener`
-  - `stream_has_pending_data`
-  - `has_data_to_send`
-  - `add_streams`
-  - `add_recv_stream`
-  - `queue_control_frame`
-  - `queue_update_priority`
-  - `set_0rtt_settings`
-  - `get_settings`
-  - `state`
-  - `webtransport_enabled`
 
 ## Streams
 
@@ -239,8 +197,8 @@ frames read (the list may be empty). The control frames are handled by `Http3Con
 
 ### `DecoderRecvStream` and `EncoderRecvStream`
 
-The `receive` functions of these handlers call corresponding `receive` functions of `QPackDecoder`
-and `QPackDecoder`.
+The `receive` functions of these handlers call corresponding `receive` functions of `decoder::QPack`
+and `decoder::QPack`.
 
 `DecoderRecvStream` returns `ReceiveOutput::UnblockedStreams(_)` that may contain a list of stream
 ids that are unblocked by receiving qpack decoder commands. `Http3Connection` will handle this
@@ -292,10 +250,10 @@ pub struct Http3Connection {
     state: Http3State,
     local_params: Http3Parameters,
     control_stream_local: ControlStreamLocal,
-    qpack_encoder: Rc<RefCell<QPackEncoder>>,
-    qpack_decoder: Rc<RefCell<QPackDecoder>>,
+    qpack_encoder: Rc<RefCell<qpack::Encoder>>,
+    qpack_decoder: Rc<RefCell<qpack::Decoder>>,
     settings_state: Http3RemoteSettingsState,
-    streams_with_pending_data: BTreeSet<StreamId>,
+    streams_with_pending_data: HashSet<StreamId>,
     send_streams: HashMap<StreamId, Box<dyn SendStream>>,
     recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
     webtransport: ExtendedConnectFeature,
@@ -313,11 +271,11 @@ impl Http3Connection {
         Self {
             state: Http3State::Initializing,
             control_stream_local: ControlStreamLocal::new(),
-            qpack_encoder: Rc::new(RefCell::new(QPackEncoder::new(
+            qpack_encoder: Rc::new(RefCell::new(qpack::Encoder::new(
                 conn_params.get_qpack_settings(),
                 true,
             ))),
-            qpack_decoder: Rc::new(RefCell::new(QPackDecoder::new(
+            qpack_decoder: Rc::new(RefCell::new(qpack::Decoder::new(
                 conn_params.get_qpack_settings(),
             ))),
             webtransport: ExtendedConnectFeature::new(
@@ -326,9 +284,9 @@ impl Http3Connection {
             ),
             local_params: conn_params,
             settings_state: Http3RemoteSettingsState::NotReceived,
-            streams_with_pending_data: BTreeSet::new(),
-            send_streams: HashMap::new(),
-            recv_streams: HashMap::new(),
+            streams_with_pending_data: HashSet::default(),
+            send_streams: HashMap::default(),
+            recv_streams: HashMap::default(),
             role,
         }
     }
@@ -336,7 +294,7 @@ impl Http3Connection {
     /// This function is called when a not default feature needs to be negotiated. This is currently
     /// only used for the `WebTransport` feature. The negotiation is done via the `SETTINGS` frame
     /// and when the peer's `SETTINGS` frame has been received the listener will be called.
-    pub fn set_features_listener(&mut self, feature_listener: Http3ClientEvents) {
+    pub(crate) fn set_features_listener(&mut self, feature_listener: Http3ClientEvents) {
         self.webtransport.set_listener(feature_listener);
     }
 
@@ -377,12 +335,12 @@ impl Http3Connection {
 
     /// Inform an [`Http3Connection`] that a stream has data to send and that
     /// [`SendStream::send`] should be called for the stream.
-    pub fn stream_has_pending_data(&mut self, stream_id: StreamId) {
+    pub(crate) fn stream_has_pending_data(&mut self, stream_id: StreamId) {
         self.streams_with_pending_data.insert(stream_id);
     }
 
     /// Return true if there is a stream that needs to send data.
-    pub fn has_data_to_send(&self) -> bool {
+    pub(crate) fn has_data_to_send(&self) -> bool {
         !self.streams_with_pending_data.is_empty()
     }
 
@@ -392,6 +350,10 @@ impl Http3Connection {
     /// Control and QPACK streams are handled differently and are never added to the list.
     fn send_non_control_streams(&mut self, conn: &mut Connection) -> Res<()> {
         let to_send = mem::take(&mut self.streams_with_pending_data);
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over active streams in an undefined order."
+        )]
         for stream_id in to_send {
             let done = if let Some(s) = &mut self.send_streams.get_mut(&stream_id) {
                 s.send(conn)?;
@@ -411,7 +373,7 @@ impl Http3Connection {
 
     /// Call `send` for all streams that need to send data. See explanation for the main structure
     /// for more details.
-    pub fn process_sending(&mut self, conn: &mut Connection) -> Res<()> {
+    pub(crate) fn process_sending(&mut self, conn: &mut Connection) -> Res<()> {
         // check if control stream has data to send.
         self.control_stream_local
             .send(conn, &mut self.recv_streams)?;
@@ -423,13 +385,17 @@ impl Http3Connection {
             Ok(())
             | Err(neqo_qpack::Error::EncoderStreamBlocked | neqo_qpack::Error::DynamicTableFull) => {
             }
-            Err(e) => return Err(Error::QpackError(e)),
+            Err(e) => return Err(Error::Qpack(e)),
         }
         Ok(())
     }
 
     /// We have a resumption token which remembers previous settings. Update the setting.
-    pub fn set_0rtt_settings(&mut self, conn: &mut Connection, settings: HSettings) -> Res<()> {
+    pub(crate) fn set_0rtt_settings(
+        &mut self,
+        conn: &mut Connection,
+        settings: HSettings,
+    ) -> Res<()> {
         self.initialize_http3_connection(conn)?;
         self.set_qpack_settings(&settings)?;
         self.settings_state = Http3RemoteSettingsState::ZeroRtt(settings);
@@ -438,7 +404,7 @@ impl Http3Connection {
     }
 
     /// Returns the settings for a connection. This is used for creating a resumption token.
-    pub fn get_settings(&self) -> Option<HSettings> {
+    pub(crate) fn get_settings(&self) -> Option<HSettings> {
         if let Http3RemoteSettingsState::Received(settings) = &self.settings_state {
             Some(settings.clone())
         } else {
@@ -448,7 +414,7 @@ impl Http3Connection {
 
     /// This is called when a `ConnectionEvent::NewStream` event is received. This register the
     /// stream with a `NewStreamHeadReader` handler.
-    pub fn add_new_stream(&mut self, stream_id: StreamId) {
+    pub(crate) fn add_new_stream(&mut self, stream_id: StreamId) {
         qtrace!("[{self}] A new stream: {stream_id}");
         self.recv_streams.insert(
             stream_id,
@@ -497,7 +463,7 @@ impl Http3Connection {
     ///    be handled by `Http3Client`/`Server`.
     ///
     /// The function returns `ReceiveOutput`.
-    pub fn handle_stream_readable(
+    pub(crate) fn handle_stream_readable(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
@@ -535,7 +501,7 @@ impl Http3Connection {
     }
 
     /// This is called when a RESET frame has been received.
-    pub fn handle_stream_reset(
+    pub(crate) fn handle_stream_reset(
         &mut self,
         stream_id: StreamId,
         app_error: AppError,
@@ -546,7 +512,7 @@ impl Http3Connection {
         self.close_recv(stream_id, CloseType::ResetRemote(app_error), conn)
     }
 
-    pub fn handle_stream_stop_sending(
+    pub(crate) fn handle_stream_stop_sending(
         &mut self,
         stream_id: StreamId,
         app_error: AppError,
@@ -564,7 +530,11 @@ impl Http3Connection {
 
     /// This is called when `neqo_transport::Connection` state has been change to take proper
     /// actions in the HTTP3 layer.
-    pub fn handle_state_change(&mut self, conn: &mut Connection, state: &State) -> Res<bool> {
+    pub(crate) fn handle_state_change(
+        &mut self,
+        conn: &mut Connection,
+        state: &State,
+    ) -> Res<bool> {
         qdebug!("[{self}] Handle state change {state:?}");
         match state {
             State::Handshaking => {
@@ -611,15 +581,15 @@ impl Http3Connection {
 
     /// This is called when 0RTT has been reset to clear `send_streams`, `recv_streams` and
     /// settings.
-    pub fn handle_zero_rtt_rejected(&mut self) -> Res<()> {
+    pub(crate) fn handle_zero_rtt_rejected(&mut self) -> Res<()> {
         if self.state == Http3State::ZeroRtt {
             self.state = Http3State::Initializing;
             self.control_stream_local = ControlStreamLocal::new();
-            self.qpack_encoder = Rc::new(RefCell::new(QPackEncoder::new(
+            self.qpack_encoder = Rc::new(RefCell::new(qpack::Encoder::new(
                 self.local_params.get_qpack_settings(),
                 true,
             )));
-            self.qpack_decoder = Rc::new(RefCell::new(QPackDecoder::new(
+            self.qpack_decoder = Rc::new(RefCell::new(qpack::Decoder::new(
                 self.local_params.get_qpack_settings(),
             )));
             self.settings_state = Http3RemoteSettingsState::NotReceived;
@@ -634,7 +604,7 @@ impl Http3Connection {
         }
     }
 
-    pub fn handle_datagram(&mut self, datagram: &[u8]) {
+    pub(crate) fn handle_datagram(&mut self, datagram: &[u8]) {
         let mut decoder = Decoder::new(datagram);
         let session = decoder
             .decode_varint()
@@ -1219,7 +1189,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub fn webtransport_create_stream_local(
+    pub(crate) fn webtransport_create_stream_local(
         &mut self,
         conn: &mut Connection,
         session_id: StreamId,
@@ -1256,7 +1226,7 @@ impl Http3Connection {
         Ok(stream_id)
     }
 
-    pub fn webtransport_create_stream_remote(
+    pub(crate) fn webtransport_create_stream_remote(
         &mut self,
         session_id: StreamId,
         stream_id: StreamId,
@@ -1419,7 +1389,7 @@ impl Http3Connection {
                     match st {
                         HSettingType::MaxTableCapacity => {
                             if zero_rtt_value != 0 {
-                                return Err(Error::QpackError(neqo_qpack::Error::DecoderStream));
+                                return Err(Error::Qpack(neqo_qpack::Error::DecoderStream));
                             }
                             qpack_changed = true;
                         }
@@ -1441,7 +1411,7 @@ impl Http3Connection {
     }
 
     /// Adds a new send and receive stream.
-    pub fn add_streams(
+    pub(crate) fn add_streams(
         &mut self,
         stream_id: StreamId,
         send_stream: Box<dyn SendStream>,
@@ -1455,15 +1425,23 @@ impl Http3Connection {
     }
 
     /// Add a new recv stream. This is used for push streams.
-    pub fn add_recv_stream(&mut self, stream_id: StreamId, recv_stream: Box<dyn RecvStream>) {
+    pub(crate) fn add_recv_stream(
+        &mut self,
+        stream_id: StreamId,
+        recv_stream: Box<dyn RecvStream>,
+    ) {
         self.recv_streams.insert(stream_id, recv_stream);
     }
 
-    pub fn queue_control_frame(&mut self, frame: &HFrame) {
+    pub(crate) fn queue_control_frame(&mut self, frame: &HFrame) {
         self.control_stream_local.queue_frame(frame);
     }
 
-    pub fn queue_update_priority(&mut self, stream_id: StreamId, priority: Priority) -> Res<bool> {
+    pub(crate) fn queue_update_priority(
+        &mut self,
+        stream_id: StreamId,
+        priority: Priority,
+    ) -> Res<bool> {
         let stream = self
             .recv_streams
             .get_mut(&stream_id)
@@ -1523,6 +1501,10 @@ impl Http3Connection {
     ) {
         let (recv, send) = wt.borrow_mut().take_sub_streams();
 
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over active streams in an undefined order."
+        )]
         for id in recv {
             qtrace!("Remove the extended connect sub receiver stream {id}");
             // Use CloseType::ResetRemote so that an event will be sent. CloseType::LocalError would
@@ -1532,6 +1514,10 @@ impl Http3Connection {
             }
             drop(conn.stream_stop_sending(id, Error::HttpRequestCancelled.code()));
         }
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over active streams in an undefined order."
+        )]
         for id in send {
             qtrace!("Remove the extended connect sub send stream {id}");
             if let Some(mut s) = self.send_streams.remove(&id) {
@@ -1593,12 +1579,12 @@ impl Http3Connection {
     }
 
     #[must_use]
-    pub const fn qpack_encoder(&self) -> &Rc<RefCell<QPackEncoder>> {
+    pub const fn qpack_encoder(&self) -> &Rc<RefCell<qpack::Encoder>> {
         &self.qpack_encoder
     }
 
     #[must_use]
-    pub const fn qpack_decoder(&self) -> &Rc<RefCell<QPackDecoder>> {
+    pub const fn qpack_decoder(&self) -> &Rc<RefCell<qpack::Decoder>> {
         &self.qpack_decoder
     }
 

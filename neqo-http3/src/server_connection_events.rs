@@ -68,30 +68,40 @@ pub struct Http3ServerConnEvents {
 }
 
 impl SendStreamEvents for Http3ServerConnEvents {
-    fn send_closed(&self, stream_info: Http3StreamInfo, close_type: CloseType) {
+    fn send_closed(&self, stream_info: &Http3StreamInfo, close_type: CloseType) {
         if close_type != CloseType::Done {
             if let Some(error) = close_type.error() {
-                self.insert(Http3ServerConnEvent::StreamStopSending { stream_info, error });
+                self.insert(Http3ServerConnEvent::StreamStopSending {
+                    stream_info: *stream_info,
+                    error,
+                });
             }
         }
     }
 
-    fn data_writable(&self, stream_info: Http3StreamInfo) {
-        self.insert(Http3ServerConnEvent::DataWritable { stream_info });
+    fn data_writable(&self, stream_info: &Http3StreamInfo) {
+        self.insert(Http3ServerConnEvent::DataWritable {
+            stream_info: *stream_info,
+        });
     }
 }
 
 impl RecvStreamEvents for Http3ServerConnEvents {
     /// Add a new `DataReadable` event
-    fn data_readable(&self, stream_info: Http3StreamInfo) {
-        self.insert(Http3ServerConnEvent::DataReadable { stream_info });
+    fn data_readable(&self, stream_info: &Http3StreamInfo) {
+        self.insert(Http3ServerConnEvent::DataReadable {
+            stream_info: *stream_info,
+        });
     }
 
-    fn recv_closed(&self, stream_info: Http3StreamInfo, close_type: CloseType) {
+    fn recv_closed(&self, stream_info: &Http3StreamInfo, close_type: CloseType) {
         if close_type != CloseType::Done {
             self.remove_events_for_stream_id(stream_info);
             if let Some(error) = close_type.error() {
-                self.insert(Http3ServerConnEvent::StreamReset { stream_info, error });
+                self.insert(Http3ServerConnEvent::StreamReset {
+                    stream_info: *stream_info,
+                    error,
+                });
             }
         }
     }
@@ -101,13 +111,13 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
     /// Add a new `HeaderReady` event.
     fn header_ready(
         &self,
-        stream_info: Http3StreamInfo,
+        stream_info: &Http3StreamInfo,
         headers: Vec<Header>,
         _interim: bool,
         fin: bool,
     ) {
         self.insert(Http3ServerConnEvent::Headers {
-            stream_info,
+            stream_info: *stream_info,
             headers,
             fin,
         });
@@ -187,10 +197,10 @@ impl Http3ServerConnEvents {
         });
     }
 
-    fn remove_events_for_stream_id(&self, stream_info: Http3StreamInfo) {
+    fn remove_events_for_stream_id(&self, stream_info: &Http3StreamInfo) {
         self.remove(|evt| {
             matches!(evt,
-                Http3ServerConnEvent::Headers { stream_info: x, .. } | Http3ServerConnEvent::DataReadable { stream_info: x, .. } if *x == stream_info)
+                Http3ServerConnEvent::Headers { stream_info: x, .. } | Http3ServerConnEvent::DataReadable { stream_info: x, .. } if x == stream_info)
         });
     }
 }

@@ -19,23 +19,6 @@ use test_fixture::{
 const STREAM_TYPE: StreamType = StreamType::BiDi;
 const STREAMS_MAX: u64 = 1 << 60;
 
-fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server, is_handshake: bool) {
-    let mut out = None;
-    let mut auth_needed = is_handshake;
-    loop {
-        out = client.process(out, now()).dgram();
-        let client_out_is_none = out.is_none();
-        if auth_needed && client.peer_certificate().is_some() {
-            client.authenticated(AuthenticationStatus::Ok, now());
-            auth_needed = false;
-        }
-        out = server.process(out, now()).dgram();
-        if client_out_is_none && out.is_none() {
-            break;
-        }
-    }
-}
-
 fn use_streams(client: &mut Http3Client, server: &mut Http3Server, streams: usize, data: &[u8]) {
     let stream_ids = repeat_with(|| {
         client

@@ -22,14 +22,14 @@ use std::{
 use neqo_common::{
     event::Provider as _,
     hex,
-    qlog::{new_trace, NeqoQlog},
-    qtrace, Datagram, Decoder, IpTosEcn, Role,
+    qlog::{new_trace, Qlog},
+    qtrace, Datagram, Decoder, Ecn, Role,
 };
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
 use neqo_transport::{
-    version::WireVersion, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder,
-    ConnectionIdGenerator, ConnectionIdRef, ConnectionParameters, State, Version,
+    version, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
+    ConnectionIdRef, ConnectionParameters, State, Version,
 };
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 
@@ -114,7 +114,7 @@ pub const DEFAULT_ADDR_V4: SocketAddr = addr_v4();
 // Create a default datagram with the given data.
 #[must_use]
 pub fn datagram(data: Vec<u8>) -> Datagram {
-    Datagram::new(DEFAULT_ADDR, DEFAULT_ADDR, IpTosEcn::Ect0.into(), data)
+    Datagram::new(DEFAULT_ADDR, DEFAULT_ADDR, Ecn::Ect0.into(), data)
 }
 
 /// Create a default socket address.
@@ -186,7 +186,7 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
     if let Ok(dir) = std::env::var("QLOGDIR") {
         let cid = client.odcid().unwrap();
         client.set_qlog(
-            NeqoQlog::enabled_with_file(
+            Qlog::enabled_with_file(
                 dir.parse().unwrap(),
                 Role::Client,
                 Some("Neqo client qlog".to_string()),
@@ -240,7 +240,7 @@ pub fn new_server<A: AsRef<str>>(alpn: &[A], params: ConnectionParameters) -> Co
     .expect("create a server");
     if let Ok(dir) = std::env::var("QLOGDIR") {
         c.set_qlog(
-            NeqoQlog::enabled_with_file(
+            Qlog::enabled_with_file(
                 dir.parse().unwrap(),
                 Role::Server,
                 Some("Neqo server qlog".to_string()),
@@ -372,6 +372,28 @@ pub fn http3_server_with_params(params: Http3Parameters) -> Http3Server {
     .expect("create a server")
 }
 
+pub fn exchange_packets(
+    client: &mut Http3Client,
+    server: &mut Http3Server,
+    is_handshake: bool,
+    out_ex: Option<Datagram>,
+) {
+    let mut out = out_ex;
+    let mut auth_needed = is_handshake;
+    loop {
+        out = client.process(out, now()).dgram();
+        let client_out_is_none = out.is_none();
+        if auth_needed && client.peer_certificate().is_some() {
+            client.authenticated(AuthenticationStatus::Ok, now());
+            auth_needed = false;
+        }
+        out = server.process(out, now()).dgram();
+        if client_out_is_none && out.is_none() {
+            break;
+        }
+    }
+}
+
 /// Split the first packet off a coalesced packet.
 fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
     const TYPE_MASK: u8 = 0b1011_0000;
@@ -382,7 +404,7 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
     }
     let mut dec = Decoder::from(buf);
     let first: u8 = dec.decode_uint().unwrap();
-    let v = Version::try_from(dec.decode_uint::<WireVersion>().unwrap()).unwrap(); // Version.
+    let v = Version::try_from(dec.decode_uint::<version::Wire>().unwrap()).unwrap(); // Version.
     let (initial_type, retry_type) = if v == Version::Version2 {
         (0b1001_0000, 0b1000_0000)
     } else {
@@ -446,7 +468,7 @@ impl Display for SharedVec {
     }
 }
 
-/// Returns a pair of new enabled `NeqoQlog` that is backed by a [`Vec<u8>`]
+/// Returns a pair of new enabled `Qlog` that is backed by a [`Vec<u8>`]
 /// together with a [`Cursor<Vec<u8>>`] that can be used to read the contents of
 /// the log.
 ///
@@ -454,11 +476,11 @@ impl Display for SharedVec {
 ///
 /// Panics if the log cannot be created.
 #[must_use]
-pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
+pub fn new_neqo_qlog() -> (Qlog, SharedVec) {
     let buf = SharedVec::default();
 
     if cfg!(feature = "bench") {
-        return (NeqoQlog::disabled(), buf);
+        return (Qlog::disabled(), buf);
     }
 
     let mut trace = new_trace(Role::Client);
@@ -475,7 +497,7 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
         EventImportance::Base,
         Box::new(buf),
     );
-    let log = NeqoQlog::enabled(streamer, PathBuf::from(""));
+    let log = Qlog::enabled(streamer, PathBuf::from(""));
     (log.expect("to be able to write to new log"), contents)
 }
 

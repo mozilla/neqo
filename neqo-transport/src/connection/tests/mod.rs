@@ -25,7 +25,7 @@ use crate::{
     cid::ConnectionIdRef,
     events::ConnectionEvent,
     frame::FrameType,
-    packet::PacketBuilder,
+    packet,
     pmtud::Pmtud,
     recovery::ACK_ONLY_SIZE_LIMIT,
     stats::{FrameStats, Stats, MAX_PTO_COUNTS},
@@ -181,7 +181,7 @@ pub fn rttvar_after_n_updates(n: usize, rtt: Duration) -> Duration {
 struct PingWriter {}
 
 impl test_internal::FrameWriter for PingWriter {
-    fn write_frames(&mut self, builder: &mut PacketBuilder) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder.encode_varint(FrameType::Ping);
     }
 }
@@ -709,8 +709,8 @@ fn create_client() {
     assert!(matches!(client.state(), State::Init));
     let stats = client.stats();
     assert_default_stats(&stats);
-    assert_eq!(stats.rtt, crate::rtt::INITIAL_RTT);
-    assert_eq!(stats.rttvar, crate::rtt::INITIAL_RTT / 2);
+    assert_eq!(stats.rtt, crate::DEFAULT_INITIAL_RTT);
+    assert_eq!(stats.rttvar, crate::DEFAULT_INITIAL_RTT / 2);
 }
 
 #[test]
@@ -740,4 +740,37 @@ fn tp_disable_migration() {
         let disable_migration = client.tps.borrow_mut().local().get_empty(DisableMigration);
         assert_eq!(disable, disable_migration);
     }
+}
+
+#[test]
+fn server_receives_new_token() {
+    struct NewTokenWriter {}
+
+    impl test_internal::FrameWriter for NewTokenWriter {
+        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+            builder.encode_varint(FrameType::NewToken);
+            builder.encode_vvec(&[0; 4]);
+        }
+    }
+
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    assert_eq!(client.state(), &State::Confirmed);
+    assert_eq!(server.state(), &State::Confirmed);
+
+    let spoofed = client
+        .test_write_frames(NewTokenWriter {}, now())
+        .dgram()
+        .unwrap();
+
+    // Now deliver the packet with the spoofed NEW_TOKEN frame.
+    server.process_input(spoofed, now());
+    assert!(matches!(
+        server.state(),
+        State::Closing {
+            error: CloseReason::Transport(Error::ProtocolViolation),
+            ..
+        }
+    ));
 }

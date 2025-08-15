@@ -20,6 +20,12 @@ log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 quinn-udp = { workspace = true }
 
+[target."cfg(unix)".dependencies]
+libc = { version = "0.2.171", default-features = false }
+
+[target."cfg(windows)".dependencies]
+windows = { workspace = true , features = ["Win32_Networking_WinSock"] }
+
 [build-dependencies]
 cfg_aliases = "0.2"
 

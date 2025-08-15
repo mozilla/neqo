@@ -14,8 +14,9 @@ use tokio::runtime::Builder;
 
 struct Benchmark {
     name: String,
-    requests: Vec<usize>,
-    upload: bool,
+    num_requests: usize,
+    upload_size: usize,
+    download_size: usize,
 }
 
 fn transfer(c: &mut Criterion) {
@@ -24,44 +25,52 @@ fn transfer(c: &mut Criterion) {
     let mtu = env::var("MTU").map_or_else(|_| String::new(), |mtu| format!("/mtu-{mtu}"));
     for Benchmark {
         name,
-        requests,
-        upload,
+        num_requests,
+        upload_size,
+        download_size,
     } in [
         Benchmark {
             name: format!("1-conn/1-100mb-resp{mtu} (aka. Download)"),
-            requests: vec![100 * 1024 * 1024],
-            upload: false,
+            num_requests: 1,
+            upload_size: 0,
+            download_size: 100 * 1024 * 1024,
         },
         Benchmark {
             name: format!("1-conn/10_000-parallel-1b-resp{mtu} (aka. RPS)"),
-            requests: vec![1; 10_000],
-            upload: false,
+            num_requests: 10_000,
+            upload_size: 0,
+            download_size: 1,
         },
         Benchmark {
             name: format!("1-conn/1-1b-resp{mtu} (aka. HPS)"),
-            requests: vec![1; 1],
-            upload: false,
+            num_requests: 1,
+            upload_size: 0,
+            download_size: 1,
         },
         Benchmark {
             name: format!("1-conn/1-100mb-req{mtu} (aka. Upload)"),
-            requests: vec![100 * 1024 * 1024],
-            upload: true,
+            num_requests: 1,
+            upload_size: 100 * 1024 * 1024,
+            download_size: 0,
         },
     ] {
         let mut group = c.benchmark_group(name);
-        group.throughput(if requests[0] > 1 {
-            assert_eq!(requests.len(), 1);
-            Throughput::Bytes(requests[0] as u64)
+        group.throughput(if num_requests == 1 {
+            Throughput::Bytes((upload_size + download_size) as u64)
         } else {
-            Throughput::Elements(requests.len() as u64)
+            Throughput::Elements(num_requests as u64)
         });
         group.bench_function("client", |b| {
             b.to_async(Builder::new_current_thread().enable_all().build().unwrap())
                 .iter_batched(
                     || {
                         let (server_handle, server_addr) = spawn_server();
-                        let client =
-                            client::client(client::Args::new(Some(server_addr), &requests, upload));
+                        let client = client::client(client::Args::new(
+                            Some(server_addr),
+                            num_requests,
+                            upload_size,
+                            download_size,
+                        ));
                         (server_handle, client)
                     },
                     |(server_handle, client)| {
@@ -86,7 +95,8 @@ fn spawn_server() -> (tokio::sync::oneshot::Sender<()>, SocketAddr) {
 
         let mut args = server::Args::default();
         args.set_hosts(vec!["[::]:0".to_string()]);
-        let server = runtime.block_on(async { server::server(args).unwrap() });
+        let server =
+            runtime.block_on(async { server::server::<server::http3::HttpServer>(args).unwrap() });
 
         addr_sender
             .send(

@@ -4,15 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
-)]
 use std::{cmp::min, fmt::Debug};
 
 use neqo_common::{
-    hex_with_len, qtrace, Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore,
-    IncrementalDecoderUint,
+    hex_snip_middle, hex_with_len, qtrace, Decoder, IncrementalDecoderBuffer,
+    IncrementalDecoderIgnore, IncrementalDecoderUint,
 };
 use neqo_transport::{Connection, StreamId};
 
@@ -37,6 +33,7 @@ pub trait FrameDecoder<T> {
     fn decode(frame_type: HFrameType, frame_len: u64, data: Option<&[u8]>) -> Res<Option<T>>;
 }
 
+#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub trait StreamReader {
     /// # Errors
     ///
@@ -95,12 +92,27 @@ enum FrameReaderState {
     UnknownFrameDischargeData { decoder: IncrementalDecoderIgnore },
 }
 
-#[derive(Debug)]
+#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub struct FrameReader {
     state: FrameReaderState,
     frame_type: HFrameType,
     frame_len: u64,
     buffer: [u8; MAX_READ_SIZE],
+}
+
+impl Debug for FrameReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let frame_len = self
+            .frame_len
+            .try_into()
+            .unwrap_or(usize::MAX)
+            .min(self.buffer.len());
+        f.debug_struct("FrameReader")
+            .field("state", &self.state)
+            .field("frame_type", &self.frame_type)
+            .field("frame", &hex_snip_middle(&self.buffer[..frame_len]))
+            .finish()
+    }
 }
 
 impl Default for FrameReader {

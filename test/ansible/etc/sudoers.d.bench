@@ -1,0 +1,5 @@
+ALL    ALL = (root) NOPASSWD: /root/bin/prep.sh
+ALL    ALL = (root) NOPASSWD: /root/bin/unprep.sh
+ALL    ALL = (root) NOPASSWD: /usr/bin/nice
+ALL    ALL = (root) NOPASSWD: /usr/sbin/ip
+ALL    ALL = (root) NOPASSWD: /usr/bin/cset

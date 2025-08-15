@@ -24,11 +24,11 @@ use strum::Display;
 #[cfg(feature = "build-fuzzing-corpus")]
 pub use self::fuzz::write_item_to_fuzzing_corpus;
 pub use self::{
-    codec::{Decoder, Encoder, MAX_VARINT},
-    datagram::Datagram,
+    codec::{Buffer, Decoder, Encoder, MAX_VARINT},
+    datagram::{Datagram, DatagramBatch},
     header::Header,
     incrdecoder::{IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint},
-    tos::{IpTos, IpTosDscp, IpTosEcn},
+    tos::{Dscp, Ecn, Tos},
 };
 
 #[must_use]
@@ -73,11 +73,11 @@ pub fn hex_with_len<A: AsRef<[u8]>>(buf: A) -> String {
 
 #[must_use]
 pub const fn const_max(a: usize, b: usize) -> usize {
-    [a, b][(a < b) as usize]
+    [a, b][(a <= b) as usize]
 }
 #[must_use]
 pub const fn const_min(a: usize, b: usize) -> usize {
-    [a, b][(a >= b) as usize]
+    [a, b][(a > b) as usize]
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Enum, Display)]

@@ -51,7 +51,7 @@ fn seal_rotate_twice_open() {
     se.rotate().expect("rotate should be infallible");
     se.rotate().expect("rotate should be infallible");
     let res = se.open(AAD, &sealed);
-    assert_eq!(res.unwrap_err(), Error::SelfEncryptFailure);
+    assert_eq!(res.unwrap_err(), Error::SelfEncrypt);
 }
 
 #[test]
@@ -59,11 +59,11 @@ fn damage_version() {
     let (se, mut sealed) = sealed();
     sealed[0] ^= 0x80;
     let res = se.open(AAD, &sealed);
-    assert_eq!(res.unwrap_err(), Error::SelfEncryptFailure);
+    assert_eq!(res.unwrap_err(), Error::SelfEncrypt);
 }
 
 fn assert_bad_data<T>(res: Result<T, Error>) {
-    if let Err(Error::NssError { name, .. }) = res {
+    if let Err(Error::Nss { name, .. }) = res {
         assert_eq!(name, "SEC_ERROR_BAD_DATA");
     }
 }

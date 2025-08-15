@@ -10,11 +10,12 @@
 
 use std::{
     cell::RefCell,
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     fmt::Display,
     fs::File,
     io::{BufWriter, Write as _},
     net::SocketAddr,
+    num::NonZeroUsize,
     path::PathBuf,
     rc::Rc,
     time::Instant,
@@ -24,8 +25,9 @@ use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
     CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator, EmptyConnectionIdGenerator,
-    Error, Output, RandomConnectionIdGenerator, State, StreamId, StreamType,
+    Error, OutputBatch, RandomConnectionIdGenerator, State, StreamId, StreamType,
 };
+use rustc_hash::FxHashMap as HashMap;
 use url::Url;
 
 use super::{get_output_file, qlog_new, Args, CloseState, Res};
@@ -165,7 +167,7 @@ pub fn create_client(
     client.set_qlog(qlog_new(
         args,
         hostname,
-        client.odcid().ok_or(Error::InternalError)?,
+        client.odcid().ok_or(Error::Internal)?,
     )?);
 
     Ok(client)
@@ -190,8 +192,12 @@ impl TryFrom<&State> for CloseState {
 }
 
 impl super::Client for Connection {
-    fn process_output(&mut self, now: Instant) -> Output {
-        self.process_output(now)
+    fn process_multiple_output(
+        &mut self,
+        now: Instant,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch {
+        self.process_multiple_output(now, max_datagrams)
     }
 
     fn process_multiple_input<'a>(
@@ -227,7 +233,7 @@ impl super::Client for Connection {
 impl<'b> Handler<'b> {
     pub fn new(url_queue: VecDeque<Url>, args: &'b Args) -> Self {
         Self {
-            streams: HashMap::new(),
+            streams: HashMap::default(),
             url_queue,
             handled_urls: Vec::new(),
             all_paths: Vec::new(),
@@ -275,7 +281,7 @@ impl<'b> Handler<'b> {
                 self.handled_urls.push(url);
                 true
             }
-            Err(e @ (Error::StreamLimitError | Error::ConnectionState)) => {
+            Err(e @ (Error::StreamLimit | Error::ConnectionState)) => {
                 qwarn!("Cannot create stream {e:?}");
                 self.url_queue.push_front(url);
                 false

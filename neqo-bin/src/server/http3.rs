@@ -8,8 +8,8 @@
 
 use std::{
     cell::RefCell,
-    collections::HashMap,
     fmt::{self, Display},
+    num::NonZeroUsize,
     rc::Rc,
     slice,
     time::Instant,
@@ -20,7 +20,8 @@ use neqo_crypto::{generate_ech_keys, random, AntiReplay};
 use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
 };
-use neqo_transport::{server::ValidateAddress, ConnectionIdGenerator};
+use neqo_transport::{server::ValidateAddress, ConnectionIdGenerator, OutputBatch};
+use rustc_hash::FxHashMap as HashMap;
 
 use super::{qns_read_response, Args};
 use crate::send_data::SendData;
@@ -68,8 +69,8 @@ impl HttpServer {
         }
         Self {
             server,
-            remaining_data: HashMap::new(),
-            posts: HashMap::new(),
+            remaining_data: HashMap::default(),
+            posts: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
         }
     }
@@ -82,8 +83,21 @@ impl Display for HttpServer {
 }
 
 impl super::HttpServer for HttpServer {
-    fn process(&mut self, dgram: Option<Datagram<&mut [u8]>>, now: Instant) -> neqo_http3::Output {
-        self.server.process(dgram, now)
+    fn new(
+        args: &Args,
+        anti_replay: AntiReplay,
+        cid_mgr: Rc<RefCell<dyn ConnectionIdGenerator>>,
+    ) -> Self {
+        Self::new(args, anti_replay, cid_mgr)
+    }
+
+    fn process_multiple<'a>(
+        &mut self,
+        dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
+        now: Instant,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch {
+        self.server.process_multiple(dgrams, now, max_datagrams)
     }
 
     fn process_events(&mut self, _now: Instant) {
