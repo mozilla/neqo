@@ -11,7 +11,6 @@ use std::fmt::Debug;
 
 use neqo_common::Header;
 use neqo_transport::{AppError, StreamId};
-pub(crate) use webtransport_session::WebTransportSession;
 
 use crate::{
     client_events::Http3ClientEvents,
