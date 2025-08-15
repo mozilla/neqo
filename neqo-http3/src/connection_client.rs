@@ -175,7 +175,7 @@ const fn alpn_from_quic_version(version: Version) -> &'static str {
 ///
 ///     while let Some(event) = client.next_event() {
 ///         match event {
-///             Http3ClientEvent::WebTransport(WebTransportEvent::Session{
+///             Http3ClientEvent::WebTransport(WebTransportEvent::NewSession{
 ///                 stream_id,
 ///                 status,
 ///                 ..
