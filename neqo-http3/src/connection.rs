@@ -103,48 +103,6 @@ impl Http3State {
 This is the core implementation of HTTP/3 protocol. It implements most of the features of the
 protocol. `Http3Client` and `Http3ServerHandler` implement only client and server side behavior.
 
-The API consists of:
-- functions that correspond to the `Http3Client` and `Http3ServerHandler` API:
-  - `new`
-  - `close`
-  - `fetch` -  only used by the client-side implementation
-  - `read_data`
-  - `stream_reset_send`
-  - `stream_stop_sending`
-  - `cancel_fetch`
-  - `stream_close_send`
-- functions that correspond to [`WebTransport`](https://w3c.github.io/webtransport/) functions:
-  - `webtransport_create_session` -  only used by the client-side implementation
-  - `webtransport_session_accept` -  only used by the server-side implementation
-  - `webtransport_close_session`
-  - `webtransport_create_stream_local` -  this function is called when an application wants to open
-    a new `WebTransport` stream. For example `Http3Client::webtransport_create_stream` will call
-    this function.
-  - `webtransport_create_stream_remote` -  this is called when a `WebTransport` stream has been
-    opened by the peer and this function sets up the appropriate handler for the stream.
-- functions that are called by `process_http3`
-  - `process_sending` - some send-streams are buffered streams(see the Streams section) and this
-    function is called to trigger sending of the buffer data.
-- functions that are called to  handle `ConnectionEvent`s:
-  - `add_new_stream`
-  - `handle_stream_readable`
-  - `handle_stream_reset`
-  - `handle_stream_stop_sending`
-  - `handle_state_change`
-  - `handle_zero_rtt_rejected`
-- Additional functions:
-  - `set_features_listener`
-  - `stream_has_pending_data`
-  - `has_data_to_send`
-  - `add_streams`
-  - `add_recv_stream`
-  - `queue_control_frame`
-  - `queue_update_priority`
-  - `set_0rtt_settings`
-  - `get_settings`
-  - `state`
-  - `webtransport_enabled`
-
 ## Streams
 
 Each `Http3Connection` holds a list of stream handlers. Each send and receive-handler is registered in
