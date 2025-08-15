@@ -14,6 +14,7 @@
 
 use std::time::Duration;
 
+use neqo_common::qinfo;
 use neqo_transport::{ConnectionParameters, State};
 use test_fixture::{
     boxed,
@@ -69,6 +70,12 @@ pub fn main() {
     .run();
 
     let achieved_bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
+
+    qinfo!(
+        "achieved bandwidth: {} Mbit/s, that's {}% of the path capacity",
+        achieved_bandwidth / MBIT as f64,
+        achieved_bandwidth / LINK_BANDWIDTH as f64 * 100.0
+    );
 
     assert!(
         LINK_BANDWIDTH as f64 * MINIMUM_EXPECTED_UTILIZATION < achieved_bandwidth,
