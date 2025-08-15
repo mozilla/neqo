@@ -110,6 +110,12 @@ pub trait WindowAdjustment: Display + Debug {
     /// Helper for CUBIC tests and overridden in [`cubic::Cubic`]
     #[cfg(test)]
     fn set_w_max(&mut self, _w_max: f64) {}
+
+    /// Helper for CUBIC tests and overridden in [`cubic::Cubic`]
+    #[cfg(test)]
+    fn alpha(&self) -> f64 {
+        0.0
+    }
 }
 
 #[derive(Debug)]
@@ -451,6 +457,11 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     #[cfg(test)]
     pub fn set_w_max(&mut self, w_max: f64) {
         self.cc_algorithm.set_w_max(w_max);
+    }
+
+    #[cfg(test)]
+    pub fn alpha(&self) -> f64 {
+        self.cc_algorithm.alpha()
     }
 
     #[cfg(test)]

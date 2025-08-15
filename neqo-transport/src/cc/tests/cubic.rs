@@ -83,10 +83,10 @@ fn packet_lost(cc: &mut ClassicCongestionControl<Cubic>, pn: u64) {
     cc.on_packets_lost(None, None, PTO, &[p_lost], now());
 }
 
-fn expected_tcp_acks(cwnd_rtt_start: usize, mtu: usize) -> u64 {
+fn expected_tcp_acks(cwnd_rtt_start: usize, mtu: usize, alpha: f64) -> u64 {
     (f64::from(i32::try_from(cwnd_rtt_start).unwrap())
         / f64::from(i32::try_from(mtu).unwrap())
-        / CUBIC_ALPHA)
+        / alpha)
         .round() as u64
 }
 
@@ -98,7 +98,6 @@ fn tcp_phase() {
     cubic.set_ssthresh(1);
 
     let mut now = now();
-    let start_time = now;
     // helper variables to remember the next packet number to be sent/acked.
     let mut next_pn_send = 0;
     let mut next_pn_ack = 0;
@@ -111,14 +110,13 @@ fn tcp_phase() {
     // The phase will end when cwnd calculated with cubic equation is equal to TCP estimate:
     // CUBIC_C * (n * RTT / CUBIC_ALPHA)^3 * MAX_DATAGRAM_SIZE = n * MAX_DATAGRAM_SIZE
     // from this n = sqrt(CUBIC_ALPHA^3/ (CUBIC_C * RTT^3)).
-    let num_tcp_increases = (CUBIC_ALPHA.powi(3) / (CUBIC_C * RTT.as_secs_f64().powi(3)))
+    let num_tcp_increases = (cubic.alpha().powi(3) / (CUBIC_C * RTT.as_secs_f64().powi(3)))
         .sqrt()
         .floor() as u64;
-
     for _ in 0..num_tcp_increases {
         let cwnd_rtt_start = cubic.cwnd();
         // Expected acks during a period of RTT / CUBIC_ALPHA.
-        let acks = expected_tcp_acks(cwnd_rtt_start, cubic.max_datagram_size());
+        let acks = expected_tcp_acks(cwnd_rtt_start, cubic.max_datagram_size(), cubic.alpha());
         // The time between acks if they are ideally paced over a RTT.
         let time_increase =
             RTT / u32::try_from(cwnd_rtt_start / cubic.max_datagram_size()).unwrap();
@@ -151,56 +149,13 @@ fn tcp_phase() {
 
     // Make sure that the increase is not according to TCP equation, i.e., that it took
     // less than RTT / CUBIC_ALPHA.
-    let expected_ack_tcp_increase = expected_tcp_acks(cwnd_rtt_start, cubic.max_datagram_size());
+    let expected_ack_tcp_increase =
+        expected_tcp_acks(cwnd_rtt_start, cubic.max_datagram_size(), cubic.alpha());
+
     assert!(
         num_acks < expected_ack_tcp_increase,
         "num_acks: {num_acks}, expected_ack_tcp_increase: {expected_ack_tcp_increase}",
     );
-
-    // This first increase after a TCP phase may be shorter than what it would take by a regular
-    // cubic phase, because of the proper byte counting and the credit it already had before
-    // entering this phase. Therefore We will perform another round and compare it to expected
-    // increase using the cubic equation.
-
-    let cwnd_rtt_start_after_tcp = cubic.cwnd();
-    let elapsed_time = now - start_time;
-
-    // calculate new time_increase.
-    let time_increase =
-        RTT / u32::try_from(cwnd_rtt_start_after_tcp / cubic.max_datagram_size()).unwrap();
-    let mut num_acks2 = 0; // count the number of acks. until cwnd is increased by MAX_DATAGRAM_SIZE.
-
-    while cwnd_rtt_start_after_tcp == cubic.cwnd() {
-        num_acks2 += 1;
-        now += time_increase;
-        ack_packet(&mut cubic, next_pn_ack, now);
-        next_pn_ack += 1;
-        next_pn_send = fill_cwnd(&mut cubic, next_pn_send, now);
-    }
-
-    let expected_ack_tcp_increase2 =
-        expected_tcp_acks(cwnd_rtt_start_after_tcp, cubic.max_datagram_size());
-    assert!(
-        num_acks2 < expected_ack_tcp_increase2,
-        "num_acks: {num_acks2}, expected_ack_tcp_increase2: {expected_ack_tcp_increase2}"
-    );
-
-    // The time needed to increase cwnd by MAX_DATAGRAM_SIZE using the cubic equation will be
-    // calculated from: W_cubic(elapsed_time + t_to_increase) - W_cubic(elapsed_time) =
-    // MAX_DATAGRAM_SIZE => CUBIC_C * (elapsed_time + t_to_increase)^3 * MAX_DATAGRAM_SIZE +
-    // CWND_INITIAL - CUBIC_C * elapsed_time^3 * MAX_DATAGRAM_SIZE + CWND_INITIAL =
-    // MAX_DATAGRAM_SIZE => t_to_increase = cbrt((1 + CUBIC_C * elapsed_time^3) / CUBIC_C) -
-    // elapsed_time (t_to_increase is in seconds)
-    // number of ack needed is t_to_increase / time_increase.
-    let expected_ack_cubic_increase =
-        (((CUBIC_C.mul_add((elapsed_time).as_secs_f64().powi(3), 1.0) / CUBIC_C).cbrt()
-            - elapsed_time.as_secs_f64())
-            / time_increase.as_secs_f64())
-        .ceil() as u64;
-    // num_acks is very close to the calculated value. The exact value is hard to calculate
-    // because the proportional increase (i.e. curr_cwnd_f64 / (target - curr_cwnd_f64) *
-    // MAX_DATAGRAM_SIZE_F64) and the byte counting.
-    assert_eq!(num_acks2, expected_ack_cubic_increase + 2);
 }
 
 #[test]

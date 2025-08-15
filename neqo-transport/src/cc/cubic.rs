@@ -220,15 +220,17 @@ impl Cubic {
         self.alpha = CUBIC_ALPHA;
         self.t_epoch = Some(now);
         self.w_est = cwnd_epoch;
-        // If `w_max > cwnd_epoch` we take the cubic root from a negative value in `calc_k()`. That
+        // If `w_max < cwnd_epoch` we take the cubic root from a negative value in `calc_k()`. That
         // could only happen if somehow `cwnd` get's increased between calling `reduce_cwnd()` and
-        // `start_epoch()`, which is only possible if we go through slow start in between. It could
-        // also happen if we never had a congestion event, so never called `reduce_cwnd()` thus
-        // `w_max` was never set (so is still it's default `0.0` value). In any
-        // case we reset/initialize `w_max`, `cwnd_prior` and `k` here.
+        // `start_epoch()`, which is only possible after persistent congestion. It could also happen
+        // if we never had a congestion event, so never called `reduce_cwnd()` thus `w_max` was
+        // never set (so is still it's default `0.0` value). In any case we reset/initialize
+        // `w_max`, `cwnd_prior` and `k` here. We also set `alpha` to `1.0`, since
+        // `w_est >= cwnd_prior` is true here.
         self.k = if self.w_max < cwnd_epoch {
             self.cwnd_prior = cwnd_epoch;
             self.w_max = cwnd_epoch;
+            self.alpha = 1.0;
             0.0
         } else {
             self.calc_k(cwnd_epoch, max_datagram_size_f64)
@@ -433,5 +435,14 @@ impl WindowAdjustment for Cubic {
     #[cfg(test)]
     fn set_w_max(&mut self, w_max: f64) {
         self.w_max = w_max;
+    }
+
+    #[cfg(test)]
+    fn alpha(&self) -> f64 {
+        if self.alpha == 0.0 {
+            1.0
+        } else {
+            self.alpha
+        }
     }
 }
