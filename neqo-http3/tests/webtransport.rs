@@ -111,7 +111,7 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
     let wt_session_negotiated_event = |e| {
         matches!(
             e,
-            Http3ClientEvent::WebTransport(WebTransportEvent::Session{
+            Http3ClientEvent::WebTransport(WebTransportEvent::NewSession{
                 stream_id,
                 status,
                 headers,

@@ -21,7 +21,7 @@ use crate::{
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum WebTransportEvent {
     Negotiated(bool),
-    Session {
+    NewSession {
         stream_id: StreamId,
         status: u16,
         headers: Vec<Header>,
@@ -214,7 +214,7 @@ impl ExtendedConnectEvents for Http3ClientEvents {
     ) {
         match connect_type {
             ExtendedConnectType::WebTransport => {
-                self.insert(Http3ClientEvent::WebTransport(WebTransportEvent::Session {
+                self.insert(Http3ClientEvent::WebTransport(WebTransportEvent::NewSession {
                     stream_id,
                     status,
                     headers,
