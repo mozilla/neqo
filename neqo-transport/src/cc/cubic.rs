@@ -175,7 +175,6 @@ impl Display for Cubic {
     }
 }
 
-#[expect(clippy::doc_markdown, reason = "Not doc items; names from RFC.")]
 impl Cubic {
     /// Original equation is:
     ///
