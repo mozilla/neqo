@@ -346,9 +346,12 @@ impl Http3Connection {
         }
     }
 
-    /// This function is called when a not default feature needs to be negotiated. This is currently
-    /// only used for the `WebTransport` feature. The negotiation is done via the `SETTINGS` frame
-    /// and when the peer's `SETTINGS` frame has been received the listener will be called.
+    /// This function is called when a not default feature needs to be
+    /// negotiated. This is currently only used for the
+    /// [`crate::features::extended_connect::webtransport_session`] and
+    /// [`crate::features::extended_connect::connect_udp`] feature. The
+    /// negotiation is done via the `SETTINGS` frame and when the peer's
+    /// `SETTINGS` frame has been received the listener will be called.
     pub(crate) fn set_features_listener(&mut self, feature_listener: Http3ClientEvents) {
         self.webtransport.set_listener(feature_listener.clone());
         self.connect_udp.set_listener(feature_listener);
@@ -676,7 +679,7 @@ impl Http3Connection {
         } else if let Some(s) = stream.connect_udp() {
             // Handle expect and probably best to move into `connect_udp.rs`.
             decoder.decode_varint().expect("TODO"); // skip the context ID
-            // TODO: This is re-allocating the datagram.
+                                                    // TODO: This is re-allocating the datagram.
             s.borrow_mut().datagram(decoder.decode_remainder().to_vec());
         } else {
             qdebug!("[{self}] handle_datagram for unknown extended connect feature");
