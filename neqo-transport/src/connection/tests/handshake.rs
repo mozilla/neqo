@@ -927,17 +927,31 @@ fn drop_handshake_packet_from_wrong_address() {
 
     let (s_in, s_hs) = split_datagram(&out.dgram().unwrap());
 
-    // Pass the initial packet.
-    drop(client.process(Some(s_in), now()).dgram());
+    // Pass the initial packet to the client.
+    client.process_input(s_in, now());
 
-    let p = s_hs.unwrap();
+    // The server packet might be all Initial.  If it is, then ask for another one.
+    let s_hs = s_hs.unwrap_or_else(|| {
+        let dgram = server.process_output(now()).dgram();
+        let (s_in, s_hs) = split_datagram(&dgram.unwrap());
+        // Let the client process any Initial, then keep the Handshake packet.
+        if let Some(s_hs) = s_hs {
+            client.process_input(s_in, now());
+            s_hs
+        } else {
+            s_in // This is Handshake, not Initial
+        }
+    });
+
+    // Let the client acknowledge the packet(s) it received.
+    drop(client.process_output(now()));
+
     let dgram = Datagram::new(
         SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
-        p.destination(),
-        p.tos(),
-        &p[..],
+        s_hs.destination(),
+        s_hs.tos(),
+        &s_hs[..],
     );
-
     let out = client.process(Some(dgram), now());
     assert!(out.as_dgram_ref().is_none());
 }
