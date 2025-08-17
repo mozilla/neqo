@@ -28,7 +28,12 @@ use crate::{
 
 #[derive(Debug, PartialEq)]
 enum SessionState {
-    Negotiating,
+    Negotiating {
+        /// Remote initiated streams received before session confirmation.
+        ///
+        /// [`HashSet`] size limited by QUIC connection stream limit.
+        pending_streams: HashSet<StreamId>,
+    },
     Active,
     FinPending,
     Done,
@@ -92,7 +97,9 @@ impl WebTransportSession {
             )),
             stream_event_listener,
             session_id,
-            state: SessionState::Negotiating,
+            state: SessionState::Negotiating {
+                pending_streams: HashSet::default(),
+            },
             frame_reader: FrameReader::new(),
             events,
             send_streams: HashSet::default(),
@@ -227,9 +234,9 @@ impl WebTransportSession {
     ///
     /// This cannot panic because headers are checked before this function called.
     pub fn maybe_check_headers(&mut self) -> Res<()> {
-        if SessionState::Negotiating != self.state {
+        let SessionState::Negotiating { pending_streams } = &mut self.state else {
             return Ok(());
-        }
+        };
 
         if let Some((headers, interim, fin)) = self.stream_event_listener.borrow_mut().get_headers()
         {
@@ -279,6 +286,28 @@ impl WebTransportSession {
                             status,
                             headers,
                         );
+                        // > WebTransport endpoints SHOULD buffer streams and
+                        // > datagrams until they can be associated with an
+                        // > established session.
+                        //
+                        // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#section-4.5>
+                        #[expect(
+                            clippy::iter_over_hash_type,
+                            reason = "no defined order necessary"
+                        )]
+                        for stream_id in pending_streams.drain() {
+                            self.events.extended_connect_new_stream(
+                                Http3StreamInfo::new(
+                                    stream_id,
+                                    ExtendedConnectType::WebTransport
+                                        .get_stream_type(self.session_id),
+                                ),
+                                // Explicitly emit a stream readable event. Such
+                                // event was previously suppressed as the
+                                // session was still negotiating.
+                                true,
+                            )?;
+                        }
                         SessionState::Active
                     }
                 } else {
@@ -296,22 +325,49 @@ impl WebTransportSession {
     }
 
     pub fn add_stream(&mut self, stream_id: StreamId) -> Res<()> {
-        if self.state == SessionState::Active {
-            if stream_id.is_bidi() {
-                self.send_streams.insert(stream_id);
-                self.recv_streams.insert(stream_id);
-            } else if stream_id.is_self_initiated(self.role) {
-                self.send_streams.insert(stream_id);
-            } else {
-                self.recv_streams.insert(stream_id);
-            }
+        match &self.state {
+            SessionState::Negotiating { .. } | SessionState::Active => {}
+            SessionState::FinPending | SessionState::Done => return Ok(()),
+        }
 
-            if !stream_id.is_self_initiated(self.role) {
-                self.events
-                    .extended_connect_new_stream(Http3StreamInfo::new(
-                        stream_id,
-                        ExtendedConnectType::WebTransport.get_stream_type(self.session_id),
-                    ))?;
+        if stream_id.is_bidi() {
+            self.send_streams.insert(stream_id);
+            self.recv_streams.insert(stream_id);
+        } else if stream_id.is_self_initiated(self.role) {
+            self.send_streams.insert(stream_id);
+        } else {
+            self.recv_streams.insert(stream_id);
+        }
+
+        match &mut self.state {
+            SessionState::FinPending | SessionState::Done => {
+                unreachable!("see match above");
+            }
+            SessionState::Negotiating { pending_streams } => {
+                // > a client may receive a server-initiated stream or a datagram
+                // > before receiving the CONNECT response headers from the
+                // > server.
+                // >
+                // > To handle this case, WebTransport endpoints SHOULD buffer
+                // > streams and datagrams until they can be associated with an
+                // > established session.
+                //
+                // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#section-4.5>
+                pending_streams.insert(stream_id);
+            }
+            SessionState::Active => {
+                if !stream_id.is_self_initiated(self.role) {
+                    self.events.extended_connect_new_stream(
+                        Http3StreamInfo::new(
+                            stream_id,
+                            ExtendedConnectType::WebTransport.get_stream_type(self.session_id),
+                        ),
+                        // Don't emit an additional stream readable event. Given
+                        // that the session is already active, this event will
+                        // be emitted through the WebTransport stream itself.
+                        false,
+                    )?;
+                }
             }
         }
         Ok(())
