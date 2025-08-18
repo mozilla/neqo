@@ -669,7 +669,7 @@ impl SecretAgent {
     /// contains a value longer than 255 bytes.
     ///
     /// [RFC7301]: https://datatracker.ietf.org/doc/html/rfc7301
-    pub fn set_alpn<A: AsRef<str>>(&mut self, protocols: &[A]) -> Res<()> {
+    pub fn set_alpn<A: AsRef<[u8]>>(&mut self, protocols: &[A]) -> Res<()> {
         // Prepare to encode.
         let len = protocols.len() + protocols.iter().map(|p| p.as_ref().len()).sum::<usize>();
         let mut encoded = Vec::with_capacity(len);
@@ -678,7 +678,7 @@ impl SecretAgent {
             u8::try_from(v.len()).map_or(Err(Error::InvalidAlpn), |s| {
                 if s > 0 {
                     encoded.push(s);
-                    encoded.extend_from_slice(v.as_bytes());
+                    encoded.extend_from_slice(v);
                     Ok(())
                 } else {
                     Err(Error::InvalidAlpn)

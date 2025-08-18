@@ -626,7 +626,7 @@ impl Connection {
     /// higher preference.
     /// # Errors
     /// When the operation fails, which is usually due to bad inputs or bad connection state.
-    pub fn set_alpn<A: AsRef<str>>(&mut self, protocols: &[A]) -> Res<()> {
+    pub fn set_alpn<A: AsRef<[u8]>>(&mut self, protocols: &[A]) -> Res<()> {
         self.crypto.tls_mut().set_alpn(protocols)?;
         Ok(())
     }
