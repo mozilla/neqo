@@ -19,7 +19,7 @@ use neqo_crypto::{
 use test_fixture::datagram;
 use test_fixture::{
     assertions::{self, assert_coalesced_0rtt, assert_initial},
-    damage_ech_config, fixture_init, now, split_datagram, DEFAULT_ADDR,
+    damage_ech_config, fixture_init, now, split_datagram, strip_padding, DEFAULT_ADDR,
 };
 
 use super::{
@@ -475,34 +475,32 @@ fn coalesce_05rtt() {
     // The server should then send its entire flight again,
     // including the application data, which it sends in a 1-RTT packet.
     now += AT_LEAST_PTO;
-    let c2 = client.process_output(now).dgram();
-    let c21 = client.process_output(now).dgram();
-    assert!(c2.is_some() && c21.is_some());
+    let c2_1 = client.process_output(now).dgram();
+    let c2_2 = client.process_output(now).dgram();
+    assert!(c2_1.is_some() && c2_2.is_some());
     now += RTT / 2;
-    server.process_input(c21.unwrap(), now);
-    let s2 = server.process(c2, now).dgram();
+    server.process_input(c2_2.unwrap(), now);
+    let s2 = server.process(c2_1, now).dgram();
 
-    let dgram = client.process(s2, now).dgram();
+    // s2 is just an Initial, which might be padded.  Strip that off.
+    let dgram = client.process(s2.map(strip_padding), now).dgram();
     // `s2` is padded to PMTU. Padding is dropped at the client as garbage packet.
-    assert_eq!(client.stats().dropped_rx, 1);
+    assert_eq!(client.stats().dropped_rx, 0);
     let s2 = server.process(dgram, now).dgram();
 
     // The client should process the datagram.  It can't process the 1-RTT
     // packet until authentication completes though.  So it saves it.
     now += RTT / 2;
-    assert_eq!(client.stats().dropped_rx, 1); // still padding.
     drop(client.process(s2, now).dgram());
     // This packet will contain an ACK, but we can ignore it.
-    assert_eq!(client.stats().dropped_rx, 1); // still padding
-    assert_eq!(client.stats().packets_rx, 4);
+    assert_eq!(client.stats().packets_rx, 3);
     assert_eq!(client.stats().saved_datagrams, 1);
 
     // After (successful) authentication, the packet is processed.
     maybe_authenticate(&mut client);
     let c3 = client.process_output(now).dgram();
     assert!(c3.is_some());
-    assert_eq!(client.stats().dropped_rx, 1); // still padding
-    assert_eq!(client.stats().packets_rx, 5);
+    assert_eq!(client.stats().packets_rx, 4);
     assert_eq!(client.stats().saved_datagrams, 1);
 
     client
@@ -519,7 +517,8 @@ fn coalesce_05rtt() {
     drop(client.process(s3, now).dgram());
     assert_eq!(*client.state(), State::Confirmed);
 
-    assert_eq!(client.stats().dropped_rx, 1); // still padding
+    // The client should never have received padding.
+    assert_eq!(client.stats().dropped_rx, 0);
 }
 
 #[test]
