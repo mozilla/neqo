@@ -23,8 +23,8 @@ use crate::{
     cc::{
         classic_cc::ClassicCongestionControl,
         cubic::{
-            convert_to_f64, Cubic, CUBIC_ALPHA, CUBIC_BETA_USIZE_DIVIDEND,
-            CUBIC_BETA_USIZE_DIVISOR, CUBIC_C, CUBIC_FAST_CONVERGENCE_FACTOR,
+            convert_to_f64, Cubic, CUBIC_BETA_USIZE_DIVIDEND, CUBIC_BETA_USIZE_DIVISOR, CUBIC_C,
+            CUBIC_FAST_CONVERGENCE_FACTOR,
         },
         CongestionControl as _,
     },
