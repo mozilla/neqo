@@ -18,8 +18,9 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::Qlog, qtrace, qwarn, Buffer, Datagram, DatagramBatch, Decoder, Ecn, Encoder, Role, Tos,
+    event::Provider as EventProvider, hex, hex_snip_middle, hex_with_len, hrtime, qdebug, qerror,
+    qinfo, qlog::Qlog, qtrace, qwarn, Buffer, Datagram, DatagramBatch, Decoder, Ecn, Encoder, Role,
+    Tos,
 };
 use neqo_crypto::{
     agent::{CertificateCompressor, CertificateInfo},
