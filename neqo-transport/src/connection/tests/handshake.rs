@@ -693,9 +693,8 @@ fn verify_pkt_honors_mtu() {
 
     let now = now();
 
-    let res = client.process_output(now);
-    let idle_timeout = ConnectionParameters::default().get_idle_timeout();
-    assert_eq!(res, Output::Callback(idle_timeout));
+    let cb = client.process_output(now).callback();
+    assert_eq!(cb, ConnectionParameters::DEFAULT_IDLE_TIMEOUT);
 
     // Try to send a large stream and verify first packet is correctly sized
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();

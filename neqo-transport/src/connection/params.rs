@@ -32,13 +32,6 @@ use crate::{
 const LOCAL_MAX_DATA: u64 = MAX_VARINT;
 const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
-/// See `ConnectionParameters.ack_ratio` for a discussion of this value.
-pub const ACK_RATIO_SCALE: u8 = 10;
-/// By default, aim to have the peer acknowledge 4 times per round trip time.
-/// See `ConnectionParameters.ack_ratio` for more.
-pub const DEFAULT_ACK_RATIO: u8 = 4 * ACK_RATIO_SCALE;
-/// The local value for the idle timeout period.
-const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
 
 /// What to do with preferred addresses.
@@ -117,8 +110,8 @@ impl Default for ConnectionParameters {
                 .expect("usize fits in u64"),
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
-            ack_ratio: DEFAULT_ACK_RATIO,
-            idle_timeout: DEFAULT_IDLE_TIMEOUT,
+            ack_ratio: Self::DEFAULT_ACK_RATIO,
+            idle_timeout: Self::DEFAULT_IDLE_TIMEOUT,
             preferred_address: PreferredAddressConfig::Default,
             datagram_size: 0,
             outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
@@ -137,6 +130,14 @@ impl Default for ConnectionParameters {
 }
 
 impl ConnectionParameters {
+    /// See `ConnectionParameters.ack_ratio` for a discussion of this value.
+    pub const ACK_RATIO_SCALE: u8 = 10;
+    /// By default, aim to have the peer acknowledge 4 times per round trip time.
+    /// See `ConnectionParameters.ack_ratio` for more.
+    pub const DEFAULT_ACK_RATIO: u8 = 4 * Self::ACK_RATIO_SCALE;
+    /// The local value for the idle timeout period.
+    pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
     #[must_use]
     pub const fn get_versions(&self) -> &version::Config {
         &self.versions
