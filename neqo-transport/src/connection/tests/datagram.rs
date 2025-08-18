@@ -601,8 +601,8 @@ fn multiple_quic_datagrams_in_one_packet() {
 /// Datagrams that are close to the capacity of the packet need special
 /// handling.  They need to use the packet-filling frame type and
 /// they cannot allow other frames to follow.
-#[test]
-fn datagram_fill() {
+fn datagram_overfill(client: &mut Connection, server: &mut Connection, gap: usize) {
+    /// This `FrameWriter` should not be invoked.
     struct PanickingFrameWriter {}
     impl crate::connection::test_internal::FrameWriter for PanickingFrameWriter {
         fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
@@ -612,17 +612,6 @@ fn datagram_fill() {
             );
         }
     }
-    struct TrackingFrameWriter {
-        called: Rc<RefCell<bool>>,
-    }
-    impl crate::connection::test_internal::FrameWriter for TrackingFrameWriter {
-        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
-            assert_eq!(builder.remaining(), 2);
-            *self.called.borrow_mut() = true;
-        }
-    }
-
-    let (mut client, mut server) = connect_datagram();
 
     // Work out how much space we have for a datagram.
     let space = {
@@ -635,25 +624,61 @@ fn datagram_fill() {
     assert!(space >= 64); // Unlikely, but this test depends on the datagram being this large.
 
     // This should not be called.
-    client.test_frame_writer = Some(Box::new(PanickingFrameWriter {}));
+    if client.test_frame_writer.is_none() {
+        client.test_frame_writer = Some(Box::new(PanickingFrameWriter {}));
+    }
 
-    let buf = vec![9; space];
-    // This will completely fill available space.
-    send_datagram(&mut client, &mut server, buf.clone());
-    // This will leave 1 byte free, but more frames won't be added in this space.
-    send_datagram(&mut client, &mut server, buf[..buf.len() - 1].to_vec());
-    // This will leave 2 bytes free, which is enough space for a length field,
-    // but not enough space for another frame after that.
-    send_datagram(&mut client, &mut server, buf[..buf.len() - 2].to_vec());
-    // Three bytes free will be space enough for a length frame, but not enough
-    // space left over for another frame (we need 2 bytes).
-    send_datagram(&mut client, &mut server, buf[..buf.len() - 3].to_vec());
+    // This will completely fill available space, so the packet is completely full.
+    send_datagram(client, server, vec![9; space - gap]);
+}
+
+#[test]
+#[should_panic(expected = "test_frame_writer set on full packet")]
+fn datagram_fill_gap0() {
+    let (mut client, mut server) = connect_datagram();
+    datagram_overfill(&mut client, &mut server, 0);
+}
+
+#[test]
+#[should_panic(expected = "test_frame_writer set on full packet")]
+fn datagram_fill_gap1() {
+    let (mut client, mut server) = connect_datagram();
+    datagram_overfill(&mut client, &mut server, 1);
+}
+
+#[test]
+#[should_panic(expected = "test_frame_writer set on full packet")]
+fn datagram_fill_gap2() {
+    let (mut client, mut server) = connect_datagram();
+    datagram_overfill(&mut client, &mut server, 2);
+}
+
+#[test]
+#[should_panic(expected = "test_frame_writer set on full packet")]
+fn datagram_fill_gap3() {
+    let (mut client, mut server) = connect_datagram();
+    datagram_overfill(&mut client, &mut server, 3);
+}
+
+#[test]
+fn datagram_fill_gap4() {
+    struct TrackingFrameWriter {
+        called: Rc<RefCell<bool>>,
+    }
+    impl crate::connection::test_internal::FrameWriter for TrackingFrameWriter {
+        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+            assert_eq!(builder.remaining(), 2);
+            *self.called.borrow_mut() = true;
+        }
+    }
+
+    let (mut client, mut server) = connect_datagram();
 
     // Four bytes free is enough space for another frame.
     let called = Rc::new(RefCell::new(false));
     client.test_frame_writer = Some(Box::new(TrackingFrameWriter {
         called: Rc::clone(&called),
     }));
-    send_datagram(&mut client, &mut server, buf[..buf.len() - 4].to_vec());
+    datagram_overfill(&mut client, &mut server, 4);
     assert!(*called.borrow());
 }

@@ -7,7 +7,10 @@
 use std::time::Duration;
 
 use neqo_common::{event::Provider as _, Decoder, Dscp, Encoder};
-use test_fixture::{assertions, datagram, now, strip_padding};
+use test_fixture::{
+    assertions::{self, assert_version},
+    datagram, now, strip_padding,
+};
 
 use super::{
     super::{CloseReason, ConnectionEvent, Output, State, ZeroRttState},
@@ -268,14 +271,14 @@ fn compatible_upgrade_large_initial() {
 
     // Client Initial should take 2 packets.
     // Each should elicit a Version 1 ACK from the server.
-    let dgram = client.process_output(now()).dgram();
-    let dgram2 = client.process_output(now()).dgram();
+    let dgram = client.process_output(now()).dgram().map(strip_padding);
+    let dgram2 = client.process_output(now()).dgram().map(strip_padding);
     assert!(dgram.is_some() && dgram2.is_some());
     server.process_input(dgram.unwrap(), now());
-    let dgram = server.process(dgram2, now()).dgram();
+    let dgram = server.process(dgram2, now()).dgram().map(strip_padding);
     assert!(dgram.is_some());
-    // The following uses the Version from *outside* this crate.
-    assertions::assert_version(dgram.as_ref().unwrap(), Version::Version1.wire_version());
+    // The server doesn't have a full Initial, so it should stick with v1.
+    assert_version(dgram.as_ref().unwrap(), Version::Version1.wire_version());
     client.process_input(dgram.unwrap(), now());
 
     // Connect, but strip padding from all the packets to keep the accounting tight.
@@ -497,7 +500,7 @@ fn compatible_upgrade_0rtt_rejected() {
     // Create a packet with 0-RTT from the client.
     let initial = send_something(&mut client, now());
     let initial2 = send_something(&mut client, now());
-    assertions::assert_version(&initial, Version::Version1.wire_version());
+    assert_version(&initial, Version::Version1.wire_version());
     assertions::assert_coalesced_0rtt(&initial2);
     server.process_input(initial, now());
     server.process_input(initial2, now());
