@@ -41,7 +41,7 @@ pub const CUBIC_C: f64 = 0.4;
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
 ///
-/// This constant is used to set the default value of [`cubic::Cubic::alpha`].
+/// This constant is used to set the default value of `neqo_transport::cc::cubic::Cubic::alpha`.
 pub const CUBIC_ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7); // with CUBIC_BETA = 0.7
 
 /// > CUBIC multiplicative decrease factor
