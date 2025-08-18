@@ -148,16 +148,8 @@ fn handshake_failed_authentication() {
 #[test]
 fn no_alpn() {
     fixture_init();
-    let mut client = Connection::new_client(
-        "example.com",
-        &["bad-alpn"],
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
-        ConnectionParameters::default(),
-        now(),
-    )
-    .unwrap();
+    let mut client = default_client();
+    client.set_alpn(&["bad-alpn"]).unwrap();
     let mut server = default_server();
 
     handshake(&mut client, &mut server, now(), Duration::new(0, 0));
