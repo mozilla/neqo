@@ -19,7 +19,7 @@ use neqo_crypto::{
 use test_fixture::datagram;
 use test_fixture::{
     assertions, assertions::assert_coalesced_0rtt, damage_ech_config, fixture_init, now,
-    split_datagram, DEFAULT_ADDR,
+    split_datagram, strip_padding, DEFAULT_ADDR,
 };
 
 use super::{
