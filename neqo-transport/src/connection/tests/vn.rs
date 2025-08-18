@@ -7,7 +7,10 @@
 use std::time::Duration;
 
 use neqo_common::{event::Provider as _, Decoder, Dscp, Encoder};
-use test_fixture::{assertions, datagram, now};
+use test_fixture::{
+    assertions::{self},
+    datagram, now,
+};
 
 use super::{
     super::{CloseReason, ConnectionEvent, Output, State, ZeroRttState},
