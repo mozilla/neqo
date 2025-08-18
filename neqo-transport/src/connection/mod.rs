@@ -3098,7 +3098,10 @@ impl Connection {
         space: PacketNumberSpace,
         data: Option<&[u8]>,
     ) -> Res<()> {
-        qtrace!("[{self}] Handshake space={space} data={data:0x?}");
+        qtrace!(
+            "[{self}] Handshake space={space} data: {:?}",
+            data.as_ref().map(hex_with_len),
+        );
 
         let was_authentication_pending =
             *self.crypto.tls().state() == HandshakeState::AuthenticationPending;
@@ -3207,8 +3210,8 @@ impl Connection {
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
-                    "[{self}] Crypto frame on space={space} offset={offset}, data={:0x?}",
-                    &data
+                    "[{self}] Crypto frame on space={space} offset={offset}: {d}",
+                    d = hex_snip_middle(data),
                 );
                 self.stats.borrow_mut().frame_rx.crypto += 1;
                 self.crypto

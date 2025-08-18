@@ -227,7 +227,7 @@ fn packet_with_only_padding() {
 }
 
 /// Overflow the crypto buffer.
-#[expect(clippy::similar_names, reason = "scid simiar to dcic.")]
+#[expect(clippy::similar_names, reason = "scid simiar to dcid.")]
 #[test]
 fn overflow_crypto() {
     let mut client = new_client(

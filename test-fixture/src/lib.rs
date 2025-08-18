@@ -57,6 +57,7 @@ pub const NSS_DB_PATH: &str = if let Some(dir) = option_env!("NSS_DB_PATH") {
 ///
 /// When the NSS initialization fails.
 pub fn fixture_init() {
+    neqo_common::log::init(None);
     if NSS_DB_PATH == "$ARGV0" {
         let mut current_exe = std::env::current_exe().unwrap();
         current_exe.pop();
