@@ -18,8 +18,8 @@ use neqo_crypto::{
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
 use test_fixture::{
-    assertions, assertions::assert_coalesced_0rtt, damage_ech_config, fixture_init, now,
-    split_datagram, DEFAULT_ADDR,
+    assertions::{self, assert_coalesced_0rtt},
+    damage_ech_config, fixture_init, now, split_datagram, DEFAULT_ADDR,
 };
 
 use super::{
@@ -707,29 +707,29 @@ fn verify_pkt_honors_mtu() {
 
 #[test]
 fn extra_initial_hs() {
-    let mut client = default_client();
+    // Disable MLKEM here because we need to have the client Initial in a single packet.
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let mut server = default_server();
     let mut now = now();
 
     let c_init = client.process_output(now).dgram();
-    let c_init2 = client.process_output(now).dgram();
-    assert!(c_init.is_some() && c_init2.is_some());
+    assert!(c_init.is_some());
     now += DEFAULT_RTT / 2;
-    server.process_input(c_init.unwrap(), now);
-    let s_init = server.process(c_init2, now).dgram();
-    assert!(s_init.is_some());
+    let s_init = server.process(c_init, now).dgram().unwrap();
     now += DEFAULT_RTT / 2;
 
-    // Drop the Initial packet, keep only the Handshake.
-    let (_, undecryptable) = split_datagram(&s_init.unwrap());
-    assert!(undecryptable.is_some());
-
-    // Feed the same undecryptable packet into the client a few times.
-    // Do that EXTRA_INITIALS times and each time the client will emit
+    let (mut undecryptable, _) = split_datagram(&s_init);
+    assert_eq!(undecryptable[0] & 0x80, 0x80, "is long header packet");
+    // Turn the Initial packet from the server into a Handshake packet.
+    // It will be a badly formatted one, but the client will save it
+    // and send back an Initial each time.
+    undecryptable[0] += 0x20;
+    // Feed that undecryptable packet into the client a few times.
+    // Do that MAX_SAVED_DATAGRAMS times and each time the client will emit
     // another Initial packet.
-    for _ in 0..super::super::EXTRA_INITIALS {
-        let c_init = match client.process(undecryptable.clone(), now) {
-            Output::None => todo!(),
+    for _ in 0..crate::saved::MAX_SAVED_DATAGRAMS {
+        let c_init = match client.process(Some(undecryptable.clone()), now) {
+            Output::None => unreachable!(),
             Output::Datagram(c_init) => Some(c_init),
             Output::Callback(duration) => {
                 now += duration;
@@ -740,20 +740,21 @@ fn extra_initial_hs() {
         now += DEFAULT_RTT / 10;
     }
 
-    // After EXTRA_INITIALS, the client stops sending Initial packets.
-    let nothing = client.process(undecryptable, now).dgram();
-    assert!(nothing.is_none());
+    // After MAX_SAVED_DATAGRAMS, the client stops sending Initial packets.
+    // This is why we disable MLKEM: a large Initial would force the client
+    // to send two packets in response to each undecryptable packet.
+    // In that case, the client would still be probing the Initial space on PTO.
+    let nothing = client.process(Some(undecryptable), now);
+    assert!(nothing.as_dgram_ref().is_none());
 
     // Until PTO, where another Initial can be used to complete the handshake.
-    now += client.process_output(now).callback();
+    now += nothing.callback();
     let c_init = client.process_output(now).dgram();
     assertions::assert_initial(c_init.as_ref().unwrap(), false);
     now += DEFAULT_RTT / 2;
     let s_init = server.process(c_init, now).dgram();
-    let s_init_2 = server.process_output(now).dgram();
     now += DEFAULT_RTT / 2;
     client.process_input(s_init.unwrap(), now);
-    client.process_input(s_init_2.unwrap(), now);
     maybe_authenticate(&mut client);
     let c_fin = client.process_output(now).dgram();
     assert_eq!(*client.state(), State::Connected);
