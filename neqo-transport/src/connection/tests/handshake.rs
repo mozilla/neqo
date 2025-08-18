@@ -18,7 +18,7 @@ use neqo_crypto::{
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
 use test_fixture::{
-    assertions::{self, assert_coalesced_0rtt},
+    assertions::{self, assert_coalesced_0rtt, assert_initial},
     damage_ech_config, fixture_init, now, split_datagram, strip_padding, DEFAULT_ADDR,
 };
 
@@ -541,7 +541,7 @@ fn reorder_handshake() {
     // It can only send another Initial packet.
     now += RTT + RTT / 2; // With multi-packet MLKEM flights, client needs more time here.
     let dgram = client.process(Some(s_handshake), now).dgram();
-    assertions::assert_initial(dgram.as_ref().unwrap(), false);
+    assert_initial(dgram.as_ref().unwrap(), false);
     assert_eq!(client.stats().saved_datagrams, 1);
     assert_eq!(client.stats().packets_rx, 0);
 
@@ -733,7 +733,7 @@ fn extra_initial_hs() {
                 client.process_output(now).dgram()
             }
         };
-        assertions::assert_initial(c_init.as_ref().unwrap(), false);
+        assert_initial(c_init.as_ref().unwrap(), false);
         now += DEFAULT_RTT / 10;
     }
 
@@ -747,7 +747,7 @@ fn extra_initial_hs() {
     // Until PTO, where another Initial can be used to complete the handshake.
     now += nothing.callback();
     let c_init = client.process_output(now).dgram();
-    assertions::assert_initial(c_init.as_ref().unwrap(), false);
+    assert_initial(c_init.as_ref().unwrap(), false);
     now += DEFAULT_RTT / 2;
     let s_init = server.process(c_init, now).dgram();
     now += DEFAULT_RTT / 2;
@@ -1151,22 +1151,25 @@ fn only_server_initial() {
     let _server_handshake2 = server.process_output(now + AT_LEAST_PTO).dgram().unwrap();
 
     // The client sends an Initial ACK.
+    let (s_init_1, s_hs_1) = split_datagram(&server_initial1);
     assert_eq!(client.stats().frame_tx.ack, 0);
-    let probe = client.process(Some(server_initial1), now).dgram();
-    assertions::assert_initial(&probe.unwrap(), false);
-    assert_eq!(client.stats().dropped_rx, 1);
+    let probe = client.process(Some(s_init_1), now).dgram();
+    assert_initial(&probe.unwrap(), false);
+    assert_eq!(client.stats().dropped_rx, 0);
     assert_eq!(client.stats().frame_tx.ack, 1);
 
     // The same happens after a PTO.
     now += AT_LEAST_PTO;
-    assert_eq!(client.stats().frame_tx.ack, 1);
-    let discarded = client.stats().dropped_rx;
-    let probe = client.process(Some(server_initial2), now).dgram();
-    assertions::assert_initial(&probe.unwrap(), false);
+    let (s_init_2, _s_hs_2) = split_datagram(&server_initial2);
+    let probe = client.process(Some(s_init_2), now).dgram();
+    assert_initial(&probe.unwrap(), false);
     assert_eq!(client.stats().frame_tx.ack, 2);
-    assert_eq!(client.stats().dropped_rx, discarded);
+    assert_eq!(client.stats().dropped_rx, 0);
 
-    // Pass the Handshake packet and complete the handshake.
+    // Pass the Handshake packet(s) and complete the handshake.
+    if let Some(s_hs_1) = s_hs_1 {
+        client.process_input(s_hs_1, now);
+    }
     client.process_input(server_handshake1, now);
     maybe_authenticate(&mut client);
     let dgram = client.process_output(now).dgram();
@@ -1242,7 +1245,7 @@ fn implicit_rtt_server() {
     client.process_input(dgram, now);
     let dgram = client.process(dgram2, now).dgram();
     let (initial, handshake) = split_datagram(dgram.as_ref().unwrap());
-    assertions::assert_initial(&initial, false);
+    assert_initial(&initial, false);
     assertions::assert_handshake(handshake.as_ref().unwrap());
     now += RTT / 2;
     server.process_input(initial, now);
