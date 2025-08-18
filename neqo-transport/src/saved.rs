@@ -38,7 +38,7 @@ impl SavedDatagrams {
     }
 
     /// Return whether either store of datagrams is currently full.
-    pub fn is_full(&self) -> bool {
+    pub fn is_either_full(&self) -> bool {
         self.handshake.len() == MAX_SAVED_DATAGRAMS
             || self.application_data.len() == MAX_SAVED_DATAGRAMS
     }

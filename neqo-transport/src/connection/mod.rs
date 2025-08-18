@@ -1571,7 +1571,7 @@ impl Connection {
                 // data as lost.
                 if dcid.is_none()
                     && self.cid_manager.is_valid(packet.dcid())
-                    && !self.saved_datagrams.is_full()
+                    && !self.saved_datagrams.is_either_full()
                 {
                     qtrace!("Resending Initial in response to an undecryptable packet");
                     self.crypto.resend_unacked(PacketNumberSpace::Initial);
