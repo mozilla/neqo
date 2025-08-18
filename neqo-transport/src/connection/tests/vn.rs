@@ -6,8 +6,8 @@
 
 use std::time::Duration;
 
-use neqo_common::{event::Provider as _, Decoder, Dscp, Encoder};
-use test_fixture::{assertions, datagram, now};
+use neqo_common::{event::Provider as _, Datagram, Decoder, Dscp, Encoder};
+use test_fixture::{assertions, datagram, now, split_datagram};
 
 use super::{
     super::{CloseReason, ConnectionEvent, Output, State, ZeroRttState},
@@ -15,6 +15,7 @@ use super::{
     send_something,
 };
 use crate::{
+    connection::tests::connect_rtt_idle_with_modifier,
     packet::PACKET_BIT_LONG,
     tparams::{TransportParameter, TransportParameterId::*},
     ConnectionParameters, Error, Stats, Version, MIN_INITIAL_PACKET_SIZE,
@@ -277,21 +278,26 @@ fn compatible_upgrade_large_initial() {
     assertions::assert_version(dgram.as_ref().unwrap(), Version::Version1.wire_version());
     client.process_input(dgram.unwrap(), now());
 
-    connect(&mut client, &mut server);
+    // Connect, but strip padding from all the packets to keep the accounting tight.
+    connect_rtt_idle_with_modifier(&mut client, &mut server, Duration::new(0, 0), |dgram| {
+        fn is_padding(dgram: &Datagram) -> bool {
+            // Minimum packet size is 19 (1 type, 1 packet len, 1 content, 16 tag)
+            dgram.len() < 20 || dgram[1..dgram.len() - 1].iter().all(|&x| x == dgram[0])
+        }
+        let (first, second) = split_datagram(&dgram);
+        if second.as_ref().is_some_and(is_padding) {
+            Some(first)
+        } else {
+            Some(dgram)
+        }
+    });
     assert_eq!(client.version(), Version::Version2);
     assert_eq!(server.version(), Version::Version2);
-    // Only handshake padding is "dropped".
-    assert_eq!(client.stats().dropped_rx, 1);
-    assert!(matches!(server.stats().dropped_rx, 2 | 3));
+    // We removed padding, so no packets should be dropped.
+    assert_eq!(client.stats().dropped_rx, 0);
+    assert_eq!(server.stats().dropped_rx, 0);
     assert_dscp(&client.stats());
-    assert!(
-        server.stats().dscp_rx[Dscp::Cs0] == server.stats().packets_rx
-            || server.stats().dscp_rx[Dscp::Cs0] == server.stats().packets_rx + 1
-            || server.stats().dscp_rx[Dscp::Cs0] == server.stats().packets_rx - 1,
-        "dscp_rx[Dscp::Cs0] {} != packets_rx {} (possibly +/- 1)",
-        server.stats().dscp_rx[Dscp::Cs0],
-        server.stats().packets_rx
-    );
+    assert_dscp(&server.stats());
 }
 
 /// A server that supports versions 1 and 2 might prefer version 1 and that's OK.
