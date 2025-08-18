@@ -11,7 +11,7 @@ use std::{cmp::max, time::Duration};
 use neqo_common::{qtrace, Buffer};
 
 use crate::{
-    connection::params::ACK_RATIO_SCALE,
+    connection::params::ConnectionParameters,
     frame::FrameType,
     packet,
     recovery::{self},
@@ -29,12 +29,12 @@ pub struct AckRate {
 
 impl AckRate {
     pub fn new(minimum: Duration, ratio: u8, cwnd: usize, mtu: usize, rtt: Duration) -> Self {
-        const PACKET_RATIO: usize = ACK_RATIO_SCALE as usize;
+        const PACKET_RATIO: usize = ConnectionParameters::ACK_RATIO_SCALE as usize;
         // At worst, ask for an ACK for every other packet.
         const MIN_PACKETS: usize = 2;
         // At worst, require an ACK every 256 packets.
         const MAX_PACKETS: usize = 256;
-        const RTT_RATIO: u32 = ACK_RATIO_SCALE as u32;
+        const RTT_RATIO: u32 = ConnectionParameters::ACK_RATIO_SCALE as u32;
         const MAX_DELAY: Duration = Duration::from_millis(50);
 
         let packets = cwnd * PACKET_RATIO / mtu / usize::from(ratio);
@@ -87,7 +87,7 @@ impl FlexibleAckRate {
         rtt: Duration,
     ) -> Self {
         qtrace!("FlexibleAckRate: {max_ack_delay:?} {min_ack_delay:?} {ratio}");
-        let ratio = max(ACK_RATIO_SCALE, ratio); // clamp it
+        let ratio = max(ConnectionParameters::ACK_RATIO_SCALE, ratio); // clamp it
         Self {
             current: AckRate {
                 packets: 1,
