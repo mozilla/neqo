@@ -152,9 +152,7 @@ fn no_alpn() {
     let mut server = default_server();
 
     handshake(&mut client, &mut server, now(), Duration::new(0, 0));
-    // TODO (mt): errors are immediate, which means that we never send CONNECTION_CLOSE
-    // and the client never sees the server's rejection of its handshake.
-    // assert_error(&client, CloseReason::Transport(Error::CryptoAlert(120)));
+    assert_error(&client, &CloseReason::Transport(Error::Peer(376)));
     assert_error(&server, &CloseReason::Transport(Error::CryptoAlert(120)));
 }
 
