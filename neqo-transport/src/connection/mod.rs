@@ -74,17 +74,10 @@ pub mod test_internal;
 use idle::IdleTimeout;
 pub use params::ConnectionParameters;
 use params::PreferredAddressConfig;
-#[cfg(test)]
-pub use params::ACK_RATIO_SCALE;
 use state::StateSignaling;
 pub use state::{ClosingFrame, State};
 
 pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
-
-/// The number of Initial packets that the client will send in response
-/// to receiving an undecryptable packet during the early part of the
-/// handshake.  This is a hack, but a useful one.
-const EXTRA_INITIALS: usize = 4;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ZeroRttState {
@@ -626,7 +619,7 @@ impl Connection {
     /// higher preference.
     /// # Errors
     /// When the operation fails, which is usually due to bad inputs or bad connection state.
-    pub fn set_alpn<A: AsRef<str>>(&mut self, protocols: &[A]) -> Res<()> {
+    pub fn set_alpn<A: AsRef<[u8]>>(&mut self, protocols: &[A]) -> Res<()> {
         self.crypto.tls_mut().set_alpn(protocols)?;
         Ok(())
     }
@@ -1576,8 +1569,9 @@ impl Connection {
                 // data as lost.
                 if dcid.is_none()
                     && self.cid_manager.is_valid(packet.dcid())
-                    && self.stats.borrow().saved_datagrams <= EXTRA_INITIALS
+                    && !self.saved_datagrams.is_either_full()
                 {
+                    qtrace!("Resending Initial in response to an undecryptable packet");
                     self.crypto.resend_unacked(PacketNumberSpace::Initial);
                     self.resend_0rtt(now);
                 }
@@ -2379,11 +2373,6 @@ impl Connection {
 
         self.streams
             .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats);
-
-        #[cfg(test)]
-        if let Some(w) = &mut self.test_frame_writer {
-            w.write_frames(builder);
-        }
     }
 
     // Maybe send a probe.  Return true if the packet was ack-eliciting.
@@ -2507,6 +2496,12 @@ impl Connection {
                     &mut tokens,
                     stats,
                 );
+            }
+
+            #[cfg(test)]
+            if let Some(w) = &mut self.test_frame_writer {
+                assert!(!builder.is_full(), "test_frame_writer set on full packet");
+                w.write_frames(builder);
             }
         }
 
