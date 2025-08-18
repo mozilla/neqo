@@ -12,7 +12,7 @@ use crate::crypto::Epoch;
 
 /// The number of datagrams that are saved during the handshake when
 /// keys to decrypt them are not yet available.
-const MAX_SAVED_DATAGRAMS: usize = 4;
+pub const MAX_SAVED_DATAGRAMS: usize = 4;
 
 pub struct SavedDatagram {
     /// The datagram.
@@ -35,6 +35,12 @@ impl SavedDatagrams {
             Epoch::ApplicationData => &mut self.application_data,
             _ => panic!("unexpected space"),
         }
+    }
+
+    /// Return whether either store of datagrams is currently full.
+    pub fn is_full(&self) -> bool {
+        self.handshake.len() == MAX_SAVED_DATAGRAMS
+            || self.application_data.len() == MAX_SAVED_DATAGRAMS
     }
 
     pub fn save(&mut self, epoch: Epoch, d: Datagram, t: Instant) {
