@@ -147,7 +147,6 @@ fn handshake_failed_authentication() {
 
 #[test]
 fn no_alpn() {
-    fixture_init();
     let mut client = default_client();
     client.set_alpn(&["bad-alpn"]).unwrap();
     let mut server = default_server();
