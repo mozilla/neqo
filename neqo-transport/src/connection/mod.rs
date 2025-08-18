@@ -18,8 +18,9 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::Qlog, qtrace, qwarn, Buffer, Datagram, DatagramBatch, Decoder, Ecn, Encoder, Role, Tos,
+    event::Provider as EventProvider, hex, hex_snip_middle, hex_with_len, hrtime, qdebug, qerror,
+    qinfo, qlog::Qlog, qtrace, qwarn, Buffer, Datagram, DatagramBatch, Decoder, Ecn, Encoder, Role,
+    Tos,
 };
 use neqo_crypto::{
     agent::{CertificateCompressor, CertificateInfo},
@@ -3132,7 +3133,10 @@ impl Connection {
         space: PacketNumberSpace,
         data: Option<&[u8]>,
     ) -> Res<()> {
-        qtrace!("[{self}] Handshake space={space} data={data:0x?}");
+        qtrace!(
+            "[{self}] Handshake space={space} data: {:?}",
+            data.as_ref().map(hex_with_len),
+        );
 
         let was_authentication_pending =
             *self.crypto.tls().state() == HandshakeState::AuthenticationPending;
@@ -3241,8 +3245,8 @@ impl Connection {
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
-                    "[{self}] Crypto frame on space={space} offset={offset}, data={:0x?}",
-                    &data
+                    "[{self}] Crypto frame on space={space} offset={offset}: {d}",
+                    d = hex_snip_middle(data),
                 );
                 self.stats.borrow_mut().frame_rx.crypto += 1;
                 self.crypto
