@@ -2666,10 +2666,17 @@ impl Connection {
             let limit = if path.borrow().pmtud().needs_probe() {
                 needs_padding = true;
                 debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
-                path.borrow().pmtud().probe_size() - aead_expansion - Self::SCONE_INDICATION.len()
+                path.borrow().pmtud().probe_size()
+                    - if space == PacketNumberSpace::Initial {
+                        // Note that this will not reserve space for the indication
+                        // if packets are coalesced (with Handshake or 0-RTT).
+                        Self::SCONE_INDICATION.len()
+                    } else {
+                        0
+                    }
             } else {
-                profile.limit() - aead_expansion
-            };
+                profile.limit()
+            } - aead_expansion;
 
             let (pt, mut builder) = Self::build_packet_header(
                 &path.borrow(),
