@@ -260,7 +260,7 @@ fn bad_alpn() {
     client.set_alpn::<&[u8]>(&[]).expect_err("empty list");
     client.set_alpn(&[""]).expect_err("list with empty value");
     client
-        .set_alpn(&[&[0; 256]])
+        .set_alpn(&[[0; 256]])
         .expect_err("list with too long value");
 }
 
