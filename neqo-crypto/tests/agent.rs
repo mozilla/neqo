@@ -254,6 +254,17 @@ fn alpn() {
 }
 
 #[test]
+fn bad_alpn() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).unwrap();
+    client.set_alpn::<&[u8]>(&[]).expect_err("empty list");
+    client.set_alpn(&[""]).expect_err("list with empty value");
+    client
+        .set_alpn(&[[0; 256]])
+        .expect_err("list with too long value");
+}
+
+#[test]
 fn alpn_multi() {
     fixture_init();
     let mut client = Client::new("server.example", true).expect("should create client");

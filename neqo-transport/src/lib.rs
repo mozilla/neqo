@@ -62,8 +62,7 @@ pub use self::{
         EmptyConnectionIdGenerator, RandomConnectionIdGenerator,
     },
     connection::{
-        params::{ConnectionParameters, ACK_RATIO_SCALE},
-        Connection, Output, OutputBatch, State, ZeroRttState,
+        params::ConnectionParameters, Connection, Output, OutputBatch, State, ZeroRttState,
     },
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,

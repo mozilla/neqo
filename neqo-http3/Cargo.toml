@@ -27,7 +27,7 @@ neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
 qlog = { workspace = true }
 rustc-hash = { workspace = true}
-sfv = { version = "0.9", default-features = false }
+sfv = { version = "0.14", default-features = false, features = ["parsed-types"] }
 strum = { workspace = true}
 url = { workspace = true }
 

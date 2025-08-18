@@ -665,39 +665,35 @@ impl SecretAgent {
     ///
     /// # Errors
     ///
-    /// This should always panic rather than return an error.
-    ///
-    /// # Panics
-    ///
-    /// If any of the provided `protocols` are more than 255 bytes long.
+    /// If the list of protocols is empty, contains an empty value, or
+    /// contains a value longer than 255 bytes.
     ///
     /// [RFC7301]: https://datatracker.ietf.org/doc/html/rfc7301
-    pub fn set_alpn<A: AsRef<str>>(&mut self, protocols: &[A]) -> Res<()> {
-        // Validate and set length.
-        let mut encoded_len = protocols.len();
-        for v in protocols {
-            assert!(v.as_ref().len() < 256);
-            assert!(!v.as_ref().is_empty());
-            encoded_len += v.as_ref().len();
-        }
-
+    pub fn set_alpn<A: AsRef<[u8]>>(&mut self, protocols: &[A]) -> Res<()> {
         // Prepare to encode.
-        let mut encoded = Vec::with_capacity(encoded_len);
-        let mut add = |v: &str| {
-            if let Ok(s) = u8::try_from(v.len()) {
-                encoded.push(s);
-                encoded.extend_from_slice(v.as_bytes());
-            }
+        let len = protocols.len() + protocols.iter().map(|p| p.as_ref().len()).sum::<usize>();
+        let mut encoded = Vec::with_capacity(len);
+        let mut add = |v: &A| -> Res<()> {
+            let v = v.as_ref();
+            u8::try_from(v.len()).map_or(Err(Error::InvalidAlpn), |s| {
+                if s > 0 {
+                    encoded.push(s);
+                    encoded.extend_from_slice(v);
+                    Ok(())
+                } else {
+                    Err(Error::InvalidAlpn)
+                }
+            })
         };
 
         // NSS inherited an idiosyncratic API as a result of having implemented NPN
         // before ALPN.  For that reason, we need to put the "best" option last.
-        let (first, rest) = protocols.split_first().ok_or(Error::Internal)?;
+        let (first, rest) = protocols.split_first().ok_or(Error::InvalidAlpn)?;
         for v in rest {
-            add(v.as_ref());
+            add(v)?;
         }
-        add(first.as_ref());
-        assert_eq!(encoded_len, encoded.len());
+        add(first)?;
+        debug_assert_eq!(len, encoded.len());
 
         // Now give the result to NSS.
         secstatus_to_res(unsafe {
