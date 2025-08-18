@@ -803,15 +803,19 @@ impl<'a> Public<'a> {
 
     /// Decrypt the header of the packet.
     fn decrypt_header(&mut self, crypto: &CryptoDxState) -> Res<(bool, Number, Range<usize>)> {
-        assert_ne!(self.packet_type, Type::Retry);
-        assert_ne!(self.packet_type, Type::VersionNegotiation);
+        debug_assert_ne!(self.packet_type, Type::Retry);
+        debug_assert_ne!(self.packet_type, Type::VersionNegotiation);
 
         let sample_offset = self.header_len + SAMPLE_OFFSET;
         let mask = self
             .data
             .get(sample_offset..(sample_offset + SAMPLE_SIZE))
             .map_or(Err(Error::NoMoreData), |sample| {
-                qtrace!("unmask hdr={}", hex(&self.data[..sample_offset]));
+                qtrace!(
+                    "{:?} unmask hdr={}",
+                    crypto.version(),
+                    hex(&self.data[..sample_offset])
+                );
                 crypto.compute_mask(sample)
             })?;
 
@@ -869,7 +873,6 @@ impl<'a> Public<'a> {
             // fail is if the cryptographic module is bad or the packet is
             // too small (which is public information).
             let (key_phase, pn, header) = self.decrypt_header(rx)?;
-            qtrace!("[{rx}] decoded header: {header:?}");
             let Some(rx) = crypto.rx(version, epoch, key_phase) else {
                 return Err(Error::Decrypt);
             };
