@@ -7,7 +7,10 @@
 use std::time::Duration;
 
 use neqo_common::{event::Provider as _, Decoder, Dscp, Encoder};
-use test_fixture::{assertions, datagram, now};
+use test_fixture::{
+    assertions::{self, assert_version},
+    datagram, now, strip_padding,
+};
 
 use super::{
     super::{CloseReason, ConnectionEvent, Output, State, ZeroRttState},
@@ -15,6 +18,7 @@ use super::{
     send_something,
 };
 use crate::{
+    connection::tests::connect_rtt_idle_with_modifier,
     packet::PACKET_BIT_LONG,
     tparams::{TransportParameter, TransportParameterId::*},
     ConnectionParameters, Error, Stats, Version, MIN_INITIAL_PACKET_SIZE,
@@ -267,31 +271,27 @@ fn compatible_upgrade_large_initial() {
 
     // Client Initial should take 2 packets.
     // Each should elicit a Version 1 ACK from the server.
-    let dgram = client.process_output(now()).dgram();
-    let dgram2 = client.process_output(now()).dgram();
+    let dgram = client.process_output(now()).dgram().map(strip_padding);
+    let dgram2 = client.process_output(now()).dgram().map(strip_padding);
     assert!(dgram.is_some() && dgram2.is_some());
     server.process_input(dgram.unwrap(), now());
-    let dgram = server.process(dgram2, now()).dgram();
+    let dgram = server.process(dgram2, now()).dgram().map(strip_padding);
     assert!(dgram.is_some());
-    // The following uses the Version from *outside* this crate.
-    assertions::assert_version(dgram.as_ref().unwrap(), Version::Version1.wire_version());
+    // The server doesn't have a full Initial, so it should stick with v1.
+    assert_version(dgram.as_ref().unwrap(), Version::Version1.wire_version());
     client.process_input(dgram.unwrap(), now());
 
-    connect(&mut client, &mut server);
+    // Connect, but strip padding from all the packets to keep the accounting tight.
+    connect_rtt_idle_with_modifier(&mut client, &mut server, Duration::new(0, 0), |dgram| {
+        Some(strip_padding(dgram))
+    });
     assert_eq!(client.version(), Version::Version2);
     assert_eq!(server.version(), Version::Version2);
-    // Only handshake padding is "dropped".
-    assert_eq!(client.stats().dropped_rx, 1);
-    assert!(matches!(server.stats().dropped_rx, 2 | 3));
+    // We removed padding, so no packets should be dropped.
+    assert_eq!(client.stats().dropped_rx, 0);
+    assert_eq!(server.stats().dropped_rx, 0);
     assert_dscp(&client.stats());
-    assert!(
-        server.stats().dscp_rx[Dscp::Cs0] == server.stats().packets_rx
-            || server.stats().dscp_rx[Dscp::Cs0] == server.stats().packets_rx + 1
-            || server.stats().dscp_rx[Dscp::Cs0] == server.stats().packets_rx - 1,
-        "dscp_rx[Dscp::Cs0] {} != packets_rx {} (possibly +/- 1)",
-        server.stats().dscp_rx[Dscp::Cs0],
-        server.stats().packets_rx
-    );
+    assert_dscp(&server.stats());
 }
 
 /// A server that supports versions 1 and 2 might prefer version 1 and that's OK.
@@ -500,7 +500,7 @@ fn compatible_upgrade_0rtt_rejected() {
     // Create a packet with 0-RTT from the client.
     let initial = send_something(&mut client, now());
     let initial2 = send_something(&mut client, now());
-    assertions::assert_version(&initial, Version::Version1.wire_version());
+    assert_version(&initial, Version::Version1.wire_version());
     assertions::assert_coalesced_0rtt(&initial2);
     server.process_input(initial, now());
     server.process_input(initial2, now());
