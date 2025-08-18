@@ -66,6 +66,7 @@ pub enum Error {
     Hkdf,
     Internal,
     IntegerOverflow,
+    InvalidAlpn,
     InvalidEpoch,
     InvalidCertificateCompressionID,
     MixedHandshakeMethod,
