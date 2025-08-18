@@ -168,61 +168,49 @@ fn no_alpn() {
 }
 
 #[test]
-#[expect(clippy::cognitive_complexity, reason = "OK in a test.")]
 fn dup_server_flight1() {
-    qdebug!("---- client: generate CH");
     let mut client = default_client();
-    let out = client.process_output(now());
-    let out2 = client.process_output(now());
-    assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), client.plpmtu());
-    assert_eq!(out2.as_dgram_ref().unwrap().len(), client.plpmtu());
-    qdebug!(
-        "Output={:0x?} {:0x?}",
-        out.as_dgram_ref(),
-        out2.as_dgram_ref()
-    );
+    let c_hs_1 = client.process_output(now()).dgram();
+    let c_hs_2 = client.process_output(now()).dgram();
+    assert!(c_hs_1.is_some() && c_hs_2.is_some());
+    assert_eq!(c_hs_1.as_ref().unwrap().len(), client.plpmtu());
+    assert_eq!(c_hs_2.as_ref().unwrap().len(), client.plpmtu());
 
-    qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
-    server.process_input(out.dgram().unwrap(), now());
-    let out_to_rep = server.process(out2.dgram(), now());
-    assert!(out_to_rep.as_dgram_ref().is_some());
-    qdebug!("Output={:0x?}", out_to_rep.as_dgram_ref());
+    server.process_input(c_hs_1.unwrap(), now());
+    let s_hs_1 = server.process(c_hs_2, now()).dgram().unwrap();
+    let s_hs_2 = server.process_output(now()).dgram().unwrap();
+    let s_hs_1 = strip_padding(s_hs_1);
+    let s_hs_2 = strip_padding(s_hs_2);
 
-    qdebug!("---- client: cert verification");
-    let out = client.process(Some(out_to_rep.as_dgram_ref().cloned().unwrap()), now());
-    let out_to_rep2 = server.process(out.dgram(), now());
-    let out = client.process(out_to_rep2.clone().dgram(), now());
-
-    assert!(out.as_dgram_ref().is_some());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
-
-    let out = server.process(out.dgram(), now());
-    assert!(out.as_dgram_ref().is_none());
-
+    client.process_input(s_hs_1.clone(), now());
+    client.process_input(s_hs_2.clone(), now());
     assert!(maybe_authenticate(&mut client));
 
-    qdebug!("---- client: SH..FIN -> FIN");
-    let out = client.process_output(now());
-    assert!(out.as_dgram_ref().is_some());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
+    let out = client.process_output(now()).dgram();
+    assert!(out.is_some());
 
-    assert_eq!(3, client.stats().packets_rx);
-    assert_eq!(0, client.stats().dups_rx);
-    assert_eq!(1, client.stats().dropped_rx);
+    let before = client.stats();
+    assert_eq!(0, before.dups_rx);
+    assert_eq!(0, before.dropped_rx);
 
-    qdebug!("---- Dup, ignored");
-    client.process_input(out_to_rep.dgram().unwrap(), now());
-    let out = client.process(out_to_rep2.dgram(), now());
-    assert!(out.as_dgram_ref().is_none());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
+    // By now, the client should have dropped Initial keys.
+    // So it should drop any of those that it receives.
+    // We have three cases to cover:
+    // 1. s_hs_1 contains Initial and Handshake, s_hs_2 contains Handshake
+    // 2. s_hs_1 contains Initial, s_hs_2 contains Handshake
+    // 3. s_hs_1 contains Initial, s_hs_2 contains Initial and Handshake
+    client.process_input(s_hs_1, now());
+    let in_between = client.stats();
+    assert_eq!(1, in_between.dropped_rx);
+    assert!((0..=1).contains(&in_between.dups_rx));
 
-    // Four packets total received, 1 of them is a dup and one has been dropped because Initial keys
-    // are dropped.  Add 2 counts of the padding that the server adds to Initial packets.
-    assert_eq!(6, client.stats().packets_rx);
-    assert_eq!(1, client.stats().dups_rx);
-    assert_eq!(3, client.stats().dropped_rx);
+    client.process_input(s_hs_2, now());
+    let after = client.stats();
+    assert!((1..=2).contains(&after.dropped_rx));
+    // In cases 1 and 2, there is only one duplicated packet.
+    assert!(after.dropped_rx == 1 || after.dups_rx == 1);
+    assert_eq!(in_between.dups_rx + 1, after.dups_rx);
 }
 
 // Test that we split crypto data if they cannot fit into one packet.
