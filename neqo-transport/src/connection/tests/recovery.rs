@@ -42,9 +42,8 @@ fn pto_works_basic() {
 
     let mut now = now();
 
-    let res = client.process_output(now);
-    let idle_timeout = ConnectionParameters::default().get_idle_timeout();
-    assert_eq!(res, Output::Callback(idle_timeout));
+    let cb = client.process_output(now).callback();
+    assert_eq!(cb, ConnectionParameters::DEFAULT_IDLE_TIMEOUT);
 
     // Send data on two streams
     let stream1 = client.stream_create(StreamType::UniDi).unwrap();
@@ -825,7 +824,7 @@ fn fast_pto() {
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 
     let res = client.process_output(now);
-    let idle_timeout = ConnectionParameters::default().get_idle_timeout() - (DEFAULT_RTT / 2);
+    let idle_timeout = ConnectionParameters::DEFAULT_IDLE_TIMEOUT - (DEFAULT_RTT / 2);
     assert_eq!(res, Output::Callback(idle_timeout));
 
     // Send data on two streams
@@ -868,7 +867,7 @@ fn fast_pto_persistent_congestion() {
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 
     let res = client.process_output(now);
-    let idle_timeout = ConnectionParameters::default().get_idle_timeout() - (DEFAULT_RTT / 2);
+    let idle_timeout = ConnectionParameters::DEFAULT_IDLE_TIMEOUT - (DEFAULT_RTT / 2);
     assert_eq!(res, Output::Callback(idle_timeout));
 
     // Send packets spaced by the PTO timer.  And lose them.
