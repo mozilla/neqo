@@ -147,23 +147,12 @@ fn handshake_failed_authentication() {
 
 #[test]
 fn no_alpn() {
-    fixture_init();
-    let mut client = Connection::new_client(
-        "example.com",
-        &["bad-alpn"],
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
-        ConnectionParameters::default(),
-        now(),
-    )
-    .unwrap();
+    let mut client = default_client();
+    client.set_alpn(&["bad-alpn"]).unwrap();
     let mut server = default_server();
 
     handshake(&mut client, &mut server, now(), Duration::new(0, 0));
-    // TODO (mt): errors are immediate, which means that we never send CONNECTION_CLOSE
-    // and the client never sees the server's rejection of its handshake.
-    // assert_error(&client, CloseReason::Transport(Error::CryptoAlert(120)));
+    assert_error(&client, &CloseReason::Transport(Error::Peer(376)));
     assert_error(&server, &CloseReason::Transport(Error::CryptoAlert(120)));
 }
 
