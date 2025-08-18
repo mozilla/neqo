@@ -9,7 +9,7 @@
 use neqo_common::{event::Provider as _, header::HeadersExt as _, qinfo, Datagram, Tos};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
-    ConnectUdpEvent, ConnectUdpRequest, ConnectUdpServerEvent, ConnectUdpSessionAcceptAction,
+    ConnectUdpEvent, ConnectUdpRequest, ConnectUdpServerEvent, SessionAcceptAction,
     Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
 };
 use neqo_transport::ConnectionParameters;
@@ -76,7 +76,7 @@ fn new_session() -> (
                 );
 
                 session
-                    .response(&ConnectUdpSessionAcceptAction::Accept)
+                    .response(&SessionAcceptAction::Accept)
                     .unwrap();
                 Some(session)
             } else {

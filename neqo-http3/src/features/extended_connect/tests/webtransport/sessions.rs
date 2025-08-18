@@ -18,7 +18,7 @@ use crate::{
     frames::WebTransportFrame,
     Error, Header, Http3ClientEvent, Http3OrWebTransportStream, Http3Server, Http3ServerEvent,
     Http3State, Priority, WebTransportEvent, WebTransportServerEvent,
-    WebTransportSessionAcceptAction,
+    SessionAcceptAction,
 };
 
 #[test]
@@ -31,7 +31,7 @@ fn wt_session() {
 fn wt_session_reject() {
     let mut wt = WtTest::new();
     let headers = vec![Header::new(":status", "404")];
-    let accept_res = WebTransportSessionAcceptAction::Reject(headers.clone());
+    let accept_res = SessionAcceptAction::Reject(headers.clone());
     let (wt_session_id, _wt_session) = wt.negotiate_wt_session(&accept_res);
 
     wt.check_session_closed_event_client(
@@ -144,7 +144,7 @@ fn wt_session_response_with_1xx() {
         .send_headers(&[Header::new(":status", "111")])
         .unwrap();
     wt_server_session
-        .response(&WebTransportSessionAcceptAction::Accept)
+        .response(&SessionAcceptAction::Accept)
         .unwrap();
 
     wt.exchange_packets();
@@ -173,7 +173,7 @@ fn wt_session_response_with_redirect() {
     let headers = [Header::new(":status", "302"), Header::new("location", "/")].to_vec();
     let mut wt = WtTest::new();
 
-    let accept_res = WebTransportSessionAcceptAction::Reject(headers.clone());
+    let accept_res = SessionAcceptAction::Reject(headers.clone());
 
     let (wt_session_id, _wt_session) = wt.negotiate_wt_session(&accept_res);
 
@@ -207,7 +207,7 @@ fn wt_session_respone_200_with_fin() {
 
     let wt_server_session = wt_server_session.unwrap();
     wt_server_session
-        .response(&WebTransportSessionAcceptAction::Accept)
+        .response(&SessionAcceptAction::Accept)
         .unwrap();
     wt_server_session.stream_close_send().unwrap();
 

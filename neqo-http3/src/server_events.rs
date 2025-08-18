@@ -18,7 +18,7 @@ use neqo_transport::{
 };
 
 use crate::{
-    connection::{ConnectUdpSessionAcceptAction, Http3State, WebTransportSessionAcceptAction},
+    connection::{SessionAcceptAction, Http3State, },
     connection_server::Http3ServerHandler,
     features::extended_connect::SessionCloseReason,
     Error, Http3StreamInfo, Http3StreamType, Priority, Res,
@@ -285,7 +285,7 @@ impl WebTransportRequest {
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn response(&self, accept: &WebTransportSessionAcceptAction) -> Res<()> {
+    pub fn response(&self, accept: &SessionAcceptAction) -> Res<()> {
         qdebug!("[{self}] Set a response for a WebTransport session");
         self.stream_handler
             .handler
@@ -414,7 +414,7 @@ impl ConnectUdpRequest {
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn response(&self, accept: &ConnectUdpSessionAcceptAction) -> Res<()> {
+    pub fn response(&self, accept: &SessionAcceptAction) -> Res<()> {
         qdebug!("[{self}] Set a response for a ConnectUdp session");
         self.stream_handler
             .handler

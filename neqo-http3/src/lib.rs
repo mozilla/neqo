@@ -167,9 +167,8 @@ use std::{
 use buffered_send_stream::BufferedStream;
 pub use client_events::{ConnectUdpEvent, Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
-pub use connection::{ConnectUdpSessionAcceptAction, Http3State, WebTransportSessionAcceptAction};
+pub use connection::{Http3State, SessionAcceptAction};
 pub use connection_client::Http3Client;
-use features::extended_connect::WebTransportSession;
 use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;
@@ -185,9 +184,7 @@ pub use server_events::{
 };
 use stream_type_reader::NewStreamType;
 
-use crate::{
-    features::extended_connect::connect_udp::ConnectUdpSession, priority::PriorityHandler,
-};
+use crate::{features::extended_connect::Session, priority::PriorityHandler};
 
 type Res<T> = Result<T, Error>;
 
@@ -480,11 +477,8 @@ trait RecvStream: Stream {
         None
     }
 
-    fn webtransport(&self) -> Option<Rc<RefCell<WebTransportSession>>> {
-        None
-    }
-
-    fn connect_udp(&self) -> Option<Rc<RefCell<ConnectUdpSession>>> {
+    // TODO: Better import
+    fn extended_connect_session(&self) -> Option<Rc<RefCell<Session>>> {
         None
     }
 

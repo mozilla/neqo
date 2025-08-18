@@ -22,7 +22,7 @@ use crate::{
     features::extended_connect::SessionCloseReason, Error, Header, Http3Client, Http3ClientEvent,
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
     WebTransportEvent, WebTransportRequest, WebTransportServerEvent,
-    WebTransportSessionAcceptAction,
+    SessionAcceptAction,
 };
 
 // Leave space for large QUIC header.
@@ -144,7 +144,7 @@ impl WtTest {
     }
     fn negotiate_wt_session(
         &mut self,
-        accept: &WebTransportSessionAcceptAction,
+        accept: &SessionAcceptAction,
     ) -> (StreamId, Option<WebTransportRequest>) {
         let wt_session_id = self
             .client
@@ -176,7 +176,7 @@ impl WtTest {
 
     fn create_wt_session(&mut self) -> WebTransportRequest {
         let (wt_session_id, wt_server_session) =
-            self.negotiate_wt_session(&WebTransportSessionAcceptAction::Accept);
+            self.negotiate_wt_session(&SessionAcceptAction::Accept);
         let wt_session_negotiated_event = |e| {
             matches!(
                 e,

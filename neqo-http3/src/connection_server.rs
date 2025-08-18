@@ -16,9 +16,7 @@ use neqo_transport::{
 };
 
 use crate::{
-    connection::{
-        ConnectUdpSessionAcceptAction, Http3Connection, Http3State, WebTransportSessionAcceptAction,
-    },
+    connection::{Http3Connection, Http3State, SessionAcceptAction},
     frames::HFrame,
     recv_message::{RecvMessage, RecvMessageInfo},
     send_message::SendMessage,
@@ -159,7 +157,7 @@ impl Http3ServerHandler {
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
-        accept: &WebTransportSessionAcceptAction,
+        accept: &SessionAcceptAction,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler.webtransport_session_accept(
@@ -175,7 +173,7 @@ impl Http3ServerHandler {
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
-        accept: &ConnectUdpSessionAcceptAction,
+        accept: &SessionAcceptAction,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler.connect_udp_session_accept(
