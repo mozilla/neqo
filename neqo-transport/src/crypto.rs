@@ -929,7 +929,7 @@ impl CryptoStates {
     /// This only needs to be run once, so run it when getting header protection.
     fn maybe_continue_initial_rx(&mut self, version: Version) {
         // Only do this if this version hasn't been used...
-        // This would be better with `is_none_or`, but that needs rust 1.82
+        // This would be better with `is_none_or`, but that needs MSRV >= 1.82
         if !self.initials[version]
             .as_ref()
             .is_some_and(|dx| dx.rx.next_pn() == 0)
