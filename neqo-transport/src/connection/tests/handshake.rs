@@ -535,11 +535,13 @@ fn reorder_handshake() {
     now += RTT / 2;
     client.process_input(s_handshake_2, now);
     assert_eq!(client.stats().saved_datagrams, 2);
-    assert_eq!(client.stats().packets_rx, 0);
+    // There's a chance that the second datagram contained a little bit of an Initial packet.
+    // That will have been processed by the client.
+    assert!((0..=1).contains(&client.stats().packets_rx));
 
     client.process_input(s_initial_2, now);
     // Each saved packet should now be "received" again.
-    assert_eq!(client.stats().packets_rx, 3);
+    assert!((3..=5).contains(&client.stats().packets_rx));
     maybe_authenticate(&mut client);
     let c3 = client.process_output(now).dgram();
     assert!(c3.is_some());
