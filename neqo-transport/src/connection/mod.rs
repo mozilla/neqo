@@ -3059,10 +3059,6 @@ impl Connection {
     }
 
     /// Commit to a particular version.
-    ///
-    /// `packet_version` is set to `Some` when the client is calling,
-    /// because that is what determines the version.
-    /// For a server, the version is taken from the transport parameters.
     fn compatible_upgrade(&mut self, packet_version: Version) -> Res<()> {
         if !matches!(self.state, State::WaitInitial | State::WaitVersion) {
             return Ok(());
