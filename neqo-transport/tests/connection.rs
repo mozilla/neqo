@@ -290,7 +290,7 @@ fn overflow_crypto() {
             packet,
         );
         client.process_input(dgram, now());
-        if let State::Closing { error, .. } = client.state() {
+        if let State::Closing { error, .. } | State::Closed(error) = client.state() {
             assert!(
                 matches!(error, CloseReason::Transport(Error::CryptoBufferExceeded)),
                 "the connection need to abort on crypto buffer"
@@ -299,7 +299,7 @@ fn overflow_crypto() {
             return;
         }
     }
-    panic!("Was not able to overflow the crypto buffer");
+    panic!("unable to overflow the crypto buffer: {:?}", client.state());
 }
 
 #[test]

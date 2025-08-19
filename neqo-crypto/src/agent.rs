@@ -951,6 +951,12 @@ impl SecretAgent {
         &self.state
     }
 
+    /// Check if the indicated secret is ready for installation.
+    #[must_use]
+    pub fn has_secret(&self, epoch: Epoch) -> bool {
+        self.secrets.has(epoch)
+    }
+
     /// Take a read secret.  This will only return a non-`None` value once.
     #[must_use]
     pub fn read_secret(&mut self, epoch: Epoch) -> Option<p11::SymKey> {
