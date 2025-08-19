@@ -14,8 +14,7 @@ use std::{
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, MessageType, Role};
 use neqo_qpack as qpack;
 use neqo_transport::{
-    streams::SendOrder, AppError, CloseReason, Connection, DatagramTracking, State, StreamId,
-    StreamType, ZeroRttState,
+    AppError, CloseReason, Connection, DatagramTracking, State, StreamId, StreamType, ZeroRttState,
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use strum::Display;
@@ -938,36 +937,6 @@ impl Http3Connection {
         // Stream may be already be closed and we may get an error here, but we do not care.
         conn.stream_stop_sending(stream_id, error)?;
         Ok(())
-    }
-
-    /// Set the stream `SendOrder`.
-    ///
-    /// # Errors
-    ///
-    /// Returns `InvalidStreamId` if the stream id doesn't exist
-    pub fn stream_set_sendorder(
-        conn: &mut Connection,
-        stream_id: StreamId,
-        sendorder: Option<SendOrder>,
-    ) -> Res<()> {
-        conn.stream_sendorder(stream_id, sendorder)
-            .map_err(|_| Error::InvalidStreamId)
-    }
-
-    /// Set the stream Fairness.   Fair streams will share bandwidth with other
-    /// streams of the same sendOrder group (or the unordered group).  Unfair streams
-    /// will give bandwidth preferentially to the lowest streamId with data to send.
-    ///
-    /// # Errors
-    ///
-    /// Returns `InvalidStreamId` if the stream id doesn't exist
-    pub fn stream_set_fairness(
-        conn: &mut Connection,
-        stream_id: StreamId,
-        fairness: bool,
-    ) -> Res<()> {
-        conn.stream_fairness(stream_id, fairness)
-            .map_err(|_| Error::InvalidStreamId)
     }
 
     pub fn cancel_fetch(

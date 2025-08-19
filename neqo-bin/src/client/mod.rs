@@ -436,7 +436,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             handler,
             args,
             timeout: None,
-            recv_buf: RecvBuf::new(),
+            recv_buf: RecvBuf::default(),
         }
     }
 

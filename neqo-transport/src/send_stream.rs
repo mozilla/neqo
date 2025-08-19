@@ -722,20 +722,6 @@ impl SendStream {
         ss
     }
 
-    pub fn write_frames<B: Buffer>(
-        &mut self,
-        priority: TransmissionPriority,
-        builder: &mut packet::Builder<B>,
-        tokens: &mut recovery::Tokens,
-        stats: &mut FrameStats,
-    ) {
-        qtrace!("write STREAM frames at priority {priority:?}");
-        if !self.write_reset_frame(priority, builder, tokens, stats) {
-            self.write_blocked_frame(priority, builder, tokens, stats);
-            self.write_stream_frame(priority, builder, tokens, stats);
-        }
-    }
-
     // return false if the builder is full and the caller should stop iterating
     pub fn write_frames_with_early_return<B: Buffer>(
         &mut self,

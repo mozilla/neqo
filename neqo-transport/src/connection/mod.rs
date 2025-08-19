@@ -23,9 +23,9 @@ use neqo_common::{
     Tos,
 };
 use neqo_crypto::{
-    agent::{CertificateCompressor, CertificateInfo},
-    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
-    PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttChecker,
+    agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
+    HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
+    Server, ZeroRttChecker,
 };
 use smallvec::SmallVec;
 use strum::IntoEnumIterator as _;
@@ -51,7 +51,7 @@ use crate::{
     send_stream::{self, SendStream},
     stats::{Stats, StatsCell},
     stream_id::StreamType,
-    streams::{SendOrder, Streams},
+    streams::Streams,
     tparams::{
         self,
         TransportParameterId::{
@@ -144,17 +144,6 @@ impl OutputBatch {
             _ => None,
         }
     }
-
-    #[must_use]
-    pub fn or_else<F>(self, f: F) -> Self
-    where
-        F: FnOnce() -> Self,
-    {
-        match self {
-            x @ (Self::DatagramBatch(_) | Self::Callback(_)) => x,
-            Self::None => f(),
-        }
-    }
 }
 
 impl Output {
@@ -182,17 +171,6 @@ impl Output {
         match self {
             Self::Callback(t) => *t,
             _ => Duration::new(0, 0),
-        }
-    }
-
-    #[must_use]
-    pub fn or_else<F>(self, f: F) -> Self
-    where
-        F: FnOnce() -> Self,
-    {
-        match self {
-            x @ (Self::Datagram(_) | Self::Callback(_)) => x,
-            Self::None => f(),
         }
     }
 }
@@ -505,13 +483,6 @@ impl Connection {
     ) -> Res<()> {
         self.crypto
             .server_enable_0rtt(Rc::clone(&self.tps), anti_replay, zero_rtt_checker)
-    }
-
-    /// # Errors
-    /// When the operation fails.
-    pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
-        self.crypto.tls_mut().set_certificate_compression::<T>()?;
-        Ok(())
     }
 
     /// # Errors
@@ -3601,18 +3572,6 @@ impl Connection {
         Ok(())
     }
 
-    /// Set the `SendOrder` of a stream.  Re-enqueues to keep the ordering correct
-    ///
-    /// # Errors
-    /// When the stream does not exist.
-    pub fn stream_sendorder(
-        &mut self,
-        stream_id: StreamId,
-        sendorder: Option<SendOrder>,
-    ) -> Res<()> {
-        self.streams.set_sendorder(stream_id, sendorder)
-    }
-
     /// Set the Fairness of a stream
     ///
     /// # Errors
@@ -3775,11 +3734,6 @@ impl Connection {
     /// side is closed.
     pub fn stream_keep_alive(&mut self, stream_id: StreamId, keep: bool) -> Res<()> {
         self.streams.keep_alive(stream_id, keep)
-    }
-
-    #[must_use]
-    pub const fn remote_datagram_size(&self) -> u64 {
-        self.quic_datagrams.remote_datagram_size()
     }
 
     /// Returns the current max size of a datagram that can fit into a packet.
