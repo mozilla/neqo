@@ -42,7 +42,6 @@ impl std::hash::Hash for StreamHandler {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.conn.hash(state);
         state.write_u64(self.stream_info.stream_id().as_u64());
-        _ = state.finish();
     }
 }
 
@@ -226,7 +225,6 @@ impl DerefMut for Http3OrWebTransportStream {
 impl std::hash::Hash for Http3OrWebTransportStream {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.stream_handler.hash(state);
-        _ = state.finish();
     }
 }
 
@@ -394,7 +392,6 @@ impl DerefMut for WebTransportRequest {
 impl std::hash::Hash for WebTransportRequest {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.stream_handler.hash(state);
-        _ = state.finish();
     }
 }
 
