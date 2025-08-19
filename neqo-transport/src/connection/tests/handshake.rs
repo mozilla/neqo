@@ -1433,6 +1433,16 @@ fn scone() {
 
     let mut server = default_server();
     let mut client = default_client();
+
+    let ci = client.process_output(now()).dgram().unwrap();
+    let ci_len = ci.len();
+    assert_eq!(
+        &ci[ci_len - Connection::SCONE_INDICATION.len()..],
+        Connection::SCONE_INDICATION,
+        "Client should send indication"
+    );
+    server.process_input(ci, now());
+
     connect(&mut client, &mut server);
     assert!(client.tps.borrow_mut().remote().get_empty(Scone));
     assert!(server.tps.borrow_mut().remote().get_empty(Scone));

@@ -2667,15 +2667,18 @@ impl Connection {
                 needs_padding = true;
                 debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
                 path.borrow().pmtud().probe_size()
+            } else {
+                profile.limit()
                     - if space == PacketNumberSpace::Initial {
-                        // Note that this will not reserve space for the indication
-                        // if packets are coalesced (with Handshake or 0-RTT).
+                        // Reserve some space for the SCONE indication in an Initial.
+                        // This reduces the amount available for building the packet,
+                        // but we'll pad to `profile.limit()` when padding.
+                        // This will not reserve space for the indication if packets
+                        // are coalesced (with Handshake or 0-RTT). That's too bad.
                         Self::SCONE_INDICATION.len()
                     } else {
                         0
                     }
-            } else {
-                profile.limit()
             } - aead_expansion;
 
             let (pt, mut builder) = Self::build_packet_header(
