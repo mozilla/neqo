@@ -299,7 +299,7 @@ fn overflow_crypto() {
             return;
         }
     }
-    panic!("unable to overflow the crypto buffer: {:?}", client.state());
+    panic!("Unable to overflow the crypto buffer: {:?}", client.state());
 }
 
 #[test]
