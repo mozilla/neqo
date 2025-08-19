@@ -249,7 +249,6 @@ fn pto_handshake_complete() {
     now += HALF_RTT;
     client.authenticated(AuthenticationStatus::Ok, now);
 
-    qdebug!("---- client: SH..FIN -> FIN");
     let pkt1 = client.process_output(now).dgram();
     assert_handshake(pkt1.as_ref().unwrap());
     assert_eq!(*client.state(), State::Connected);
@@ -262,10 +261,13 @@ fn pto_handshake_complete() {
 
     // Wait for PTO to expire and resend a handshake packet.
     // Wait long enough that the 1-RTT PTO also fires.
-    qdebug!("---- client: PTO");
     now += pto;
     let pkt2 = client.process_output(now).dgram();
     assert_handshake(pkt2.as_ref().unwrap());
+
+    // Discard the ping that follows.
+    let ping = client.process_output(now).dgram();
+    assert_eq!(ping.as_ref().unwrap()[0] & 0x80, 0);
 
     pto_counts[0] = 1;
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
@@ -287,6 +289,10 @@ fn pto_handshake_complete() {
     assert_handshake(&pkt3_hs);
     assert!(pkt3_1rtt.is_some());
 
+    // Discard the ping that follows.
+    let ping = client.process_output(now).dgram();
+    assert_eq!(ping.as_ref().unwrap()[0] & 0x80, 0);
+
     // PTO has been doubled.
     let pto = pto * 2;
     let cb = client.process_output(now).callback();
@@ -298,7 +304,6 @@ fn pto_handshake_complete() {
     pto_counts[1] = 1;
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
-    qdebug!("---- server: receive FIN and send ACK");
     now += HALF_RTT;
     // Now let the server have pkt1 and expect an immediate Handshake ACK.
     // The output will be a Handshake packet with ACK and 1-RTT packet with
