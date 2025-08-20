@@ -414,6 +414,11 @@ impl SecretAgentInfo {
     pub const fn alpn(&self) -> Option<&String> {
         self.alpn.as_ref()
     }
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
+    #[must_use]
+    pub const fn signature_scheme(&self) -> SignatureScheme {
+        self.signature_scheme
+    }
 }
 
 /// `SecretAgent` holds the common parts of client and server.

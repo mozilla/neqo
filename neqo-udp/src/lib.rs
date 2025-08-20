@@ -240,6 +240,11 @@ impl<S: SocketRef> Socket<S> {
         send_inner(&self.state, (&self.inner).into(), d)
     }
 
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
+    pub fn max_gso_segments(&self) -> usize {
+        self.state.max_gso_segments()
+    }
+
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each
     /// set with the provided local address.
     pub fn recv<'a>(

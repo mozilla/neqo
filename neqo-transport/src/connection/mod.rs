@@ -23,9 +23,9 @@ use neqo_common::{
     Tos,
 };
 use neqo_crypto::{
-    agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
-    HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
-    Server, ZeroRttChecker,
+    agent::{CertificateCompressor, CertificateInfo},
+    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
+    PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttChecker,
 };
 use smallvec::SmallVec;
 use strum::IntoEnumIterator as _;
@@ -51,7 +51,7 @@ use crate::{
     send_stream::{self, SendStream},
     stats::{Stats, StatsCell},
     stream_id::StreamType,
-    streams::Streams,
+    streams::{SendOrder, Streams},
     tparams::{
         self,
         TransportParameterId::{
@@ -483,6 +483,15 @@ impl Connection {
     ) -> Res<()> {
         self.crypto
             .server_enable_0rtt(Rc::clone(&self.tps), anti_replay, zero_rtt_checker)
+    }
+
+    /// # Errors
+    /// When the operation fails.
+    //
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
+    pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
+        self.crypto.tls_mut().set_certificate_compression::<T>()?;
+        Ok(())
     }
 
     /// # Errors
@@ -3570,6 +3579,18 @@ impl Connection {
             .get_send_stream_mut(stream_id)?
             .set_priority(transmission, retransmission);
         Ok(())
+    }
+
+    /// Set the `SendOrder` of a stream.  Re-enqueues to keep the ordering correct
+    ///
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn stream_sendorder(
+        &mut self,
+        stream_id: StreamId,
+        sendorder: Option<SendOrder>,
+    ) -> Res<()> {
+        self.streams.set_sendorder(stream_id, sendorder)
     }
 
     /// Set the Fairness of a stream

@@ -392,6 +392,13 @@ impl ConnectionParameters {
         self.pmtud_iface_mtu
     }
 
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
+    #[must_use]
+    pub const fn pmtud_iface_mtu(mut self, pmtud_iface_mtu: bool) -> Self {
+        self.pmtud_iface_mtu = pmtud_iface_mtu;
+        self
+    }
+
     #[must_use]
     pub const fn sni_slicing_enabled(&self) -> bool {
         self.sni_slicing

@@ -21,9 +21,7 @@ use neqo_common::{
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
-    recv_stream, send_stream, AppError, Connection, ConnectionEvent, ConnectionId,
-    ConnectionIdGenerator, DatagramTracking, Output, OutputBatch, Stats as TransportStats,
-    StreamId, StreamType, Version, ZeroRttState,
+    recv_stream, send_stream, streams::SendOrder, AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, DatagramTracking, Output, OutputBatch, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState
 };
 
 use crate::{
@@ -747,6 +745,21 @@ impl Http3Client {
         Ok(self.conn.max_datagram_size()?
             - u64::try_from(Encoder::varint_len(session_id.as_u64()))
                 .map_err(|_| Error::Internal)?)
+    }
+
+    /// Sets the `SendOrder` for a given stream
+    ///
+    /// # Errors
+    ///
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    //
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
+    pub fn webtransport_set_sendorder(
+        &mut self,
+        stream_id: StreamId,
+        sendorder: Option<SendOrder>,
+    ) -> Res<()> {
+        Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, sendorder)
     }
 
     /// Returns the current `send_stream::Stats` of a `WebTransportSendStream`.
