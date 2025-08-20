@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use neqo_common::{event::Provider as _, Decoder, Dscp, Encoder};
 use test_fixture::{
-    assertions::{self, assert_version},
-    datagram, now, strip_padding,
+    assertions::{self, assert_initial, assert_version},
+    datagram, now, split_datagram, strip_padding,
 };
 
 use super::{
@@ -18,8 +18,12 @@ use super::{
     send_something,
 };
 use crate::{
-    connection::tests::connect_rtt_idle_with_modifier,
-    packet::PACKET_BIT_LONG,
+    connection::{
+        test_internal,
+        tests::{connect_rtt_idle_with_modifier, AT_LEAST_PTO},
+    },
+    frame::FrameType,
+    packet::{self, PACKET_BIT_LONG},
     tparams::{TransportParameter, TransportParameterId::*},
     ConnectionParameters, Error, Stats, Version, MIN_INITIAL_PACKET_SIZE,
 };
@@ -525,4 +529,120 @@ fn compatible_upgrade_0rtt_rejected() {
         matches!(e, ConnectionEvent::ZeroRttRejected)
     }));
     assert_eq!(client.zero_rtt_state(), ZeroRttState::Rejected);
+}
+
+/// When the server confirms a new version the client will switch to using v2.
+/// If the client has sent a v1 packet with a packet number larger
+/// than 255 AND the server has acknowledged that packet,
+/// the client might send a v2 Initial packet with a truncated packet number.
+/// The server could fail to process that packet if it is not tracking
+/// packet receipt correctly.
+#[test]
+fn server_initial_versions() {
+    let mut client = new_client(ConnectionParameters::default().versions(
+        Version::Version1,
+        vec![Version::Version2, Version::Version1],
+    ));
+    let mut server = new_server(ConnectionParameters::default().versions(
+        Version::Version1,
+        vec![Version::Version2, Version::Version1],
+    ));
+    let now = now();
+
+    // Two handshake packets.
+    let c1 = client.process_output(now).dgram();
+    let c2 = client.process_output(now).dgram();
+    assert!(c1.is_some() && c2.is_some());
+
+    // Processing the first produces a v1 ACK.
+    let s1 = server.process(c1, now).dgram();
+    assert_version(s1.as_ref().unwrap(), Version::Version1.wire_version());
+    // The second confirms the use of v2.
+    let s2 = server.process(c2, now).dgram();
+    assert_version(s2.as_ref().unwrap(), Version::Version2.wire_version());
+
+    // Feeding the client just the Initial packets will force it to ACK.
+    // This should have a truncated packet number (if randomized enough).
+    client.process_input(s1.unwrap(), now);
+    let (s2_init, _s2_hs) = split_datagram(&s2.unwrap());
+    client.process_input(s2_init, now);
+    let c3 = client.process_output(now).dgram();
+    assert_initial(c3.as_ref().unwrap(), false);
+
+    // The server should be able to decrypt and process that packet.
+    // To avoid having Initial padding fouling the drop count,
+    // split the datagram so that it only includes the Initial packet.
+    let (c3_init, _padding) = split_datagram(&c3.unwrap());
+    let before = server.stats();
+    server.process_input(c3_init, now);
+    let after = server.stats();
+    assert_eq!(before.packets_rx + 1, after.packets_rx);
+    assert_eq!(before.dropped_rx, after.dropped_rx);
+}
+
+/// When the server confirms a new version it switches to sending v2 packets.
+/// If the server has sent a v1 packet with a packet number larger
+/// than 255 AND the client has acknowledged that packet,
+/// the server might send a v2 Initial packet with a truncated packet number.
+/// The client could fail to process that packet if it is not tracking
+/// packet receipt correctly.
+#[test]
+fn client_initial_versions() {
+    pub struct CryptoWriter {}
+
+    impl test_internal::FrameWriter for CryptoWriter {
+        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+            // A first byte of 2 is the byte that indicates a ServerHello.
+            builder.encode_varint(FrameType::Crypto);
+            builder.encode_varint(0_u64); // Offset
+            builder.encode_varint(1_u64); // Length
+            builder.encode_byte(2);
+        }
+    }
+
+    let mut client = new_client(ConnectionParameters::default().versions(
+        Version::Version1,
+        vec![Version::Version2, Version::Version1],
+    ));
+    let mut server = new_server(ConnectionParameters::default().versions(
+        Version::Version1,
+        vec![Version::Version2, Version::Version1],
+    ));
+    let mut now = now();
+
+    // Two handshake packets.
+    let c1 = client.process_output(now).dgram();
+    let c2 = client.process_output(now).dgram();
+    assert!(c1.is_some() && c2.is_some());
+
+    // Processing the first produces a v1 ACK.
+    // But we also need to force the client to send an ACK for this packet.
+    // We can do that with an injected CRYPTO frame.
+    server.test_frame_writer = Some(Box::new(CryptoWriter {}));
+    let s1 = server.process(c1, now).dgram();
+    server.test_frame_writer = None;
+    assert_version(s1.as_ref().unwrap(), Version::Version1.wire_version());
+
+    // Receiving the ACK then letting a PTO lapse means that the client
+    // sends the handshake again, with an ACK for the server.
+    client.process_input(s1.unwrap(), now);
+    now += AT_LEAST_PTO;
+    let c3 = client.process_output(now).dgram();
+    server.process_input(c3.unwrap(), now);
+
+    // Let the server have the second client packet (it shouldn't need it).
+    // The response should be a v2 packet with a truncated packet number.
+    // We can't really test that though.
+    let s2 = server.process(c2, now).dgram();
+    assert_version(s2.as_ref().unwrap(), Version::Version2.wire_version());
+
+    // The client should be able to decrypt and process that packet.
+    // To avoid having Initial padding fouling the drop count,
+    // split the datagram so that it only includes the Initial packet.
+    let (s2_init, _padding) = split_datagram(&s2.unwrap());
+    let before = client.stats();
+    client.process_input(s2_init, now);
+    let after = client.stats();
+    assert_eq!(before.packets_rx + 1, after.packets_rx);
+    assert_eq!(before.dropped_rx, after.dropped_rx);
 }
