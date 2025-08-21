@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::{self, Display, Formatter};
-
 use neqo_common::Encoder;
 use neqo_transport::{Connection, StreamId};
 
@@ -19,12 +17,6 @@ pub enum BufferedStream {
         stream_id: StreamId,
         buf: Vec<u8>,
     },
-}
-
-impl Display for BufferedStream {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "BufferedStream {:?}", Option::<StreamId>::from(self))
-    }
 }
 
 impl BufferedStream {

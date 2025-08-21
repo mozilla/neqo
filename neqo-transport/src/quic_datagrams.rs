@@ -29,15 +29,6 @@ impl From<Option<u64>> for DatagramTracking {
     }
 }
 
-impl From<DatagramTracking> for Option<u64> {
-    fn from(v: DatagramTracking) -> Self {
-        match v {
-            DatagramTracking::Id(id) => Some(id),
-            DatagramTracking::None => None,
-        }
-    }
-}
-
 struct QuicDatagram {
     data: Vec<u8>,
     tracking: DatagramTracking,
