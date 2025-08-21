@@ -535,13 +535,24 @@ fn reorder_handshake() {
     now += RTT / 2;
     client.process_input(s_handshake_2, now);
     assert_eq!(client.stats().saved_datagrams, 2);
-    // There's a chance that the second datagram contained a little bit of an Initial packet.
+    // There's a chance that each "handshake" datagram contained a little bit of an Initial packet.
     // That will have been processed by the client.
-    assert!((0..=1).contains(&client.stats().packets_rx));
+    assert!((0..=2).contains(&client.stats().packets_rx));
 
     client.process_input(s_initial_2, now);
     // Each saved packet should now be "received" again.
-    assert!((3..=5).contains(&client.stats().packets_rx));
+    // That means:
+    // s_handshake - initial?, handshake, padding?
+    // s_handshake_2 - initial?, handshake, padding?
+    // s_initial_2 - initial, handshake? (but not if the others have initial), padding
+    //
+    // As of writing, there are 6 packets, two of which are padding (dropped):
+    // s_handshake - handshake
+    // s_handshake_2 - initial, handshake, padding
+    // s_initial_2 - initial, padding
+    // This can only happen when Initial packets are in a very small range of sizes.
+    assert!((4..=8).contains(&client.stats().packets_rx));
+    assert!((1..=3).contains(&client.stats().dropped_rx));
     maybe_authenticate(&mut client);
     let c3 = client.process_output(now).dgram();
     assert!(c3.is_some());
