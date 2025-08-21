@@ -83,14 +83,6 @@ impl Display for HttpServer {
 }
 
 impl super::HttpServer for HttpServer {
-    fn new(
-        args: &Args,
-        anti_replay: AntiReplay,
-        cid_mgr: Rc<RefCell<dyn ConnectionIdGenerator>>,
-    ) -> Self {
-        Self::new(args, anti_replay, cid_mgr)
-    }
-
     fn process_multiple<'a>(
         &mut self,
         dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,

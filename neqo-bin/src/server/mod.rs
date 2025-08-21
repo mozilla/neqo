@@ -16,6 +16,7 @@ use std::{
     cell::RefCell,
     fmt::{self, Display},
     fs,
+    future::Future,
     io::{self},
     net::{SocketAddr, ToSocketAddrs as _},
     num::NonZeroUsize,
@@ -36,7 +37,7 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init_db, AntiReplay, Cipher,
 };
-use neqo_transport::{ConnectionIdGenerator, OutputBatch, RandomConnectionIdGenerator, Version};
+use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version};
 use neqo_udp::{DatagramIter, RecvBuf};
 use tokio::time::Sleep;
 
@@ -249,11 +250,6 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
 
 #[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub trait HttpServer: Display {
-    fn new(
-        args: &Args,
-        anti_replay: AntiReplay,
-        cid_mgr: Rc<RefCell<dyn ConnectionIdGenerator>>,
-    ) -> Self;
     fn process_multiple<'a>(
         &mut self,
         dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
@@ -445,13 +441,20 @@ enum Ready {
     Timeout,
 }
 
-pub fn server<S: HttpServer>(args: Args) -> Res<Runner<S>> {
+#[expect(clippy::type_complexity, reason = "pinned and boxed future")]
+pub fn run(
+    mut args: Args,
+) -> Res<(
+    Pin<Box<dyn Future<Output = Res<()>> + 'static>>,
+    Vec<SocketAddr>,
+)> {
     neqo_common::log::init(
         args.shared
             .verbose
             .as_ref()
             .map(clap_verbosity_flag::Verbosity::log_level_filter),
     );
+    args.update_for_tests();
     assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone())?;
@@ -479,9 +482,21 @@ pub fn server<S: HttpServer>(args: Args) -> Res<Runner<S>> {
         .expect("unable to setup anti-replay");
     let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
 
-    Ok(Runner::new(
-        S::new(&args, anti_replay, cid_mgr),
-        Box::new(move || args.now()),
-        sockets,
-    ))
+    if args.shared.alpn == "h3" {
+        let runner = Runner::new(
+            http3::HttpServer::new(&args, anti_replay, cid_mgr),
+            Box::new(move || args.now()),
+            sockets,
+        );
+        let local_addrs = runner.local_addresses();
+        Ok((Box::pin(runner.run()), local_addrs))
+    } else {
+        let runner = Runner::new(
+            http09::HttpServer::new(&args, anti_replay, cid_mgr).expect("We cannot make a server!"),
+            Box::new(move || args.now()),
+            sockets,
+        );
+        let local_addrs = runner.local_addresses();
+        Ok((Box::pin(runner.run()), local_addrs))
+    }
 }
