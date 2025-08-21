@@ -770,6 +770,7 @@ impl Http3Connection {
         output
     }
 
+    // TODO: Rename?
     fn create_fetch_headers<'b, 't, T>(request: &RequestDescription<'b, 't, T>) -> Res<Vec<Header>>
     where
         T: AsRequestTarget<'t> + ?Sized + Debug,
@@ -780,12 +781,28 @@ impl Http3Connection {
             .map_err(|_| Error::InvalidRequestTarget)?;
 
         // Transform pseudo-header fields
-        let mut final_headers = vec![
-            Header::new(":method", request.method),
-            Header::new(":scheme", target.scheme()),
-            Header::new(":authority", target.authority()),
-            Header::new(":path", target.path()),
-        ];
+        // TODO: Remove hack for classic CONNECT
+        let is_classic_connect = request.connect_type.is_none()
+            && request
+                .headers
+                .iter()
+                .any(|h| h.name() == ":method" && h.value() == "CONNECT");
+        let mut final_headers = if is_classic_connect {
+            // > The :scheme and :path pseudo-header fields are omitted
+            //
+            // <https://datatracker.ietf.org/doc/html/rfc9114#section-4.4>
+            vec![
+                Header::new(":method", request.method),
+                Header::new(":authority", target.authority()),
+            ]
+        } else {
+            vec![
+                Header::new(":method", request.method),
+                Header::new(":scheme", target.scheme()),
+                Header::new(":authority", target.authority()),
+                Header::new(":path", target.path()),
+            ]
+        };
         if let Some(conn_type) = request.connect_type {
             final_headers.push(Header::new(":protocol", conn_type.string()));
         }
@@ -847,6 +864,7 @@ impl Http3Connection {
     {
         let final_headers = Self::create_fetch_headers(request)?;
 
+        // TODO: Why is this here? WebTransport goes a different route, no?
         let stream_type = if request.connect_type.is_some() {
             Http3StreamType::ExtendedConnect
         } else {
@@ -1109,7 +1127,6 @@ impl Http3Connection {
     where
         T: AsRequestTarget<'x> + ?Sized + Debug,
     {
-
         let id = self.create_bidi_transport_stream(conn)?;
 
         let extended_conn = Rc::new(RefCell::new(Session::new(
@@ -1632,11 +1649,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn remove_extended_connect(
-        &mut self,
-        wt: &Rc<RefCell<Session>>,
-        conn: &mut Connection,
-    ) {
+    fn remove_extended_connect(&mut self, wt: &Rc<RefCell<Session>>, conn: &mut Connection) {
         let (recv, send) = wt.borrow_mut().take_sub_streams();
 
         #[expect(
@@ -1690,7 +1703,11 @@ impl Http3Connection {
         let stream = self.send_streams.remove(&stream_id);
         if let Some(s) = &stream {
             if s.stream_type() == Http3StreamType::ExtendedConnect {
-                if let Some(wt) = self.recv_streams.remove(&stream_id)?.extended_connect_session() {
+                if let Some(wt) = self
+                    .recv_streams
+                    .remove(&stream_id)?
+                    .extended_connect_session()
+                {
                     self.remove_extended_connect(&wt, conn);
                 }
             }
