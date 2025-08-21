@@ -7,7 +7,7 @@
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Formatter},
-    ops::{Deref, DerefMut},
+    ops::Deref,
     os::raw::c_uint,
     ptr::null_mut,
     slice::Iter as SliceIter,
@@ -65,12 +65,6 @@ macro_rules! scoped_ptr {
             type Target = *mut $target;
             fn deref(&self) -> &*mut $target {
                 &self.ptr
-            }
-        }
-
-        impl DerefMut for $scoped {
-            fn deref_mut(&mut self) -> &mut *mut $target {
-                &mut self.ptr
             }
         }
 

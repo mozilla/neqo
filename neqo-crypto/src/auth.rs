@@ -44,6 +44,7 @@ impl From<AuthenticationStatus> for PRErrorCode {
 
 // Note that this mapping should be removed after gecko eventually learns how to
 // map into the enumerated type.
+// TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
 impl From<PRErrorCode> for AuthenticationStatus {
     fn from(v: PRErrorCode) -> Self {
         Self::from_repr(v).unwrap_or(Self::Unknown)

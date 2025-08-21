@@ -57,6 +57,7 @@ pub const NSS_DB_PATH: &str = if let Some(dir) = option_env!("NSS_DB_PATH") {
 ///
 /// When the NSS initialization fails.
 pub fn fixture_init() {
+    neqo_common::log::init(None);
     if NSS_DB_PATH == "$ARGV0" {
         let mut current_exe = std::env::current_exe().unwrap();
         current_exe.pop();
@@ -431,6 +432,24 @@ pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
         Datagram::new(d.source(), d.destination(), d.tos(), a.to_vec()),
         b.map(|b| Datagram::new(d.source(), d.destination(), d.tos(), b.to_vec())),
     )
+}
+
+/// Strip any padding off the packet.
+/// This uses a heuristic to detect padding packets.  Don't rely on that too much.
+#[must_use]
+pub fn strip_padding(dgram: Datagram) -> Datagram {
+    fn is_padding(dgram: &Datagram) -> bool {
+        // This is a pretty rough heuristic, but it works for now.
+        // Below the minimum packets size of 19 (1 type, 1 packet len, 1 content, 16 tag)
+        // OR all values the same (except the last, in anticipation of SCONE indications).
+        dgram.len() < 19 || dgram[1..dgram.len() - 1].iter().all(|&x| x == dgram[0])
+    }
+    let (first, second) = split_datagram(&dgram);
+    if second.as_ref().is_some_and(is_padding) {
+        first
+    } else {
+        dgram
+    }
 }
 
 #[derive(Clone, Default)]

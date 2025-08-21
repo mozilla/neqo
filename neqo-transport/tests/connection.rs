@@ -106,7 +106,6 @@ fn reorder_server_initial() {
     // Now decrypt the packet.
     let (aead, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
     let (header, pn) = header_protection::remove(&hp, protected_header, payload);
-    assert_eq!(pn, 0);
     let pn_len = header.len() - protected_header.len();
     let mut buf = vec![0; payload.len()];
     let mut plaintext = aead
@@ -163,13 +162,17 @@ fn set_payload(server_packet: Option<&Datagram>, client_dcid: &[u8], payload: &[
     // Now decrypt the packet.
     let (aead, hp) = initial_aead_and_hp(client_dcid, Role::Server);
     let (mut header, pn) = header_protection::remove(&hp, protected_header, orig_payload);
-    assert_eq!(pn, 0);
     // Re-encode the packet number as four bytes, so we have enough material for the header
     // protection sample if payload is empty.
-    let pn_pos = header.len() - 2;
-    header[pn_pos] = u8::try_from(4 + Aead::expansion()).unwrap();
-    header.resize(header.len() + 3, 0);
-    header[0] |= 0b0000_0011; // Set the packet number length to 4.
+    let pn_len = usize::from(header[0] & 0b0000_0011) + 1;
+    let len_pos = header.len()
+        - pn_len
+        - Encoder::varint_len(u64::try_from(pn_len + orig_payload.len()).unwrap());
+    header.truncate(len_pos);
+    let mut enc = Encoder::new_borrowed_vec(&mut header);
+    enc.encode_varint(u64::try_from(4 + payload.len() + Aead::expansion()).unwrap());
+    enc.encode_uint(4, pn);
+    header[0] = header[0] & 0xfc | 0b0000_0011; // Set the packet number length to 4.
 
     // And build a packet containing the given payload.
     let mut packet = header.clone();
@@ -223,11 +226,11 @@ fn packet_with_only_padding() {
     let server_packet = server.process(client_initial.dgram(), now()).dgram();
     let modified = set_payload(server_packet.as_ref(), client_dcid, &[0]);
     client.process_input(modified, now());
-    assert_eq!(client.state(), &State::WaitInitial);
+    assert_eq!(client.state(), &State::WaitVersion);
 }
 
 /// Overflow the crypto buffer.
-#[expect(clippy::similar_names, reason = "scid simiar to dcic.")]
+#[expect(clippy::similar_names, reason = "scid simiar to dcid.")]
 #[test]
 fn overflow_crypto() {
     let mut client = new_client(
@@ -287,7 +290,7 @@ fn overflow_crypto() {
             packet,
         );
         client.process_input(dgram, now());
-        if let State::Closing { error, .. } = client.state() {
+        if let State::Closing { error, .. } | State::Closed(error) = client.state() {
             assert!(
                 matches!(error, CloseReason::Transport(Error::CryptoBufferExceeded)),
                 "the connection need to abort on crypto buffer"
@@ -296,7 +299,7 @@ fn overflow_crypto() {
             return;
         }
     }
-    panic!("Was not able to overflow the crypto buffer");
+    panic!("Unable to overflow the crypto buffer: {:?}", client.state());
 }
 
 #[test]

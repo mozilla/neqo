@@ -621,6 +621,7 @@ impl TransportParameters {
 pub struct TransportParametersHandler {
     role: Role,
     versions: version::Config,
+    version_selected: bool,
     local: TransportParameters,
     remote_handshake: Option<TransportParameters>,
     remote_0rtt: Option<TransportParameters>,
@@ -634,6 +635,7 @@ impl TransportParametersHandler {
         Self {
             role,
             versions,
+            version_selected: false,
             local,
             remote_handshake: None,
             remote_0rtt: None,
@@ -666,49 +668,57 @@ impl TransportParametersHandler {
     }
 
     fn compatible_upgrade(&mut self, remote_tp: &TransportParameters) -> Res<()> {
-        if let Some((current, other)) = remote_tp.get_versions() {
-            qtrace!(
-                "Peer versions: {current:x} {other:x?}; config {:?}",
-                self.versions,
-            );
+        if self.version_selected {
+            // A second call to this is only possible on the server,
+            // if we need to send a TLS HelloRetryRequest.
+            debug_assert_eq!(self.role, Role::Server);
+            return Ok(());
+        }
 
-            if self.role == Role::Client {
-                let chosen = Version::try_from(current)?;
-                if self.versions.compatible().any(|&v| v == chosen) {
-                    Ok(())
-                } else {
-                    qinfo!(
-                        "Chosen version {current:x} is not compatible with initial version {:x}",
-                        self.versions.initial().wire_version(),
-                    );
-                    Err(Error::TransportParameter)
-                }
+        let Some((current, other)) = remote_tp.get_versions() else {
+            return Ok(());
+        };
+        qtrace!(
+            "Peer versions: {current:x} {other:x?}; config {:?}",
+            self.versions,
+        );
+
+        if self.role == Role::Client {
+            let chosen = Version::try_from(current)?;
+            if self.versions.compatible().any(|&v| v == chosen) {
+                self.version_selected = true;
+                Ok(())
             } else {
-                if current != self.versions.initial().wire_version() {
-                    qinfo!(
-                        "Current version {current:x} != own version {:x}",
-                        self.versions.initial().wire_version(),
-                    );
-                    return Err(Error::TransportParameter);
-                }
-
-                if let Some(preferred) = self.versions.preferred_compatible(other) {
-                    if preferred != self.versions.initial() {
-                        qinfo!(
-                            "Compatible upgrade {:?} ==> {preferred:?}",
-                            self.versions.initial()
-                        );
-                        self.versions.set_initial(preferred);
-                        self.local.compatible_upgrade(preferred);
-                    }
-                    Ok(())
-                } else {
-                    qinfo!("Unable to find any compatible version");
-                    Err(Error::TransportParameter)
-                }
+                qinfo!(
+                    "Chosen version {current:x} is not compatible with initial version {:x}",
+                    self.versions.initial().wire_version(),
+                );
+                Err(Error::TransportParameter)
             }
         } else {
-            Ok(())
+            if current != self.versions.initial().wire_version() {
+                qinfo!(
+                    "Current version {current:x} != own version {:x}",
+                    self.versions.initial().wire_version(),
+                );
+                return Err(Error::TransportParameter);
+            }
+
+            if let Some(preferred) = self.versions.preferred_compatible(other) {
+                if preferred != self.versions.initial() {
+                    qinfo!(
+                        "Compatible upgrade {:?} ==> {preferred:?}",
+                        self.versions.initial()
+                    );
+                    self.versions.set_initial(preferred);
+                    self.local.compatible_upgrade(preferred);
+                }
+                self.version_selected = true;
+                Ok(())
+            } else {
+                qinfo!("Unable to find any compatible version");
+                Err(Error::TransportParameter)
+            }
         }
     }
 

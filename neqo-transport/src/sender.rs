@@ -6,10 +6,7 @@
 
 // Congestion control
 
-use std::{
-    fmt::{self, Display},
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use neqo_common::{qdebug, qlog::Qlog};
 
@@ -29,12 +26,6 @@ pub const PACING_BURST_SIZE: usize = 2;
 pub struct PacketSender {
     cc: Box<dyn CongestionControl>,
     pacer: Pacer,
-}
-
-impl Display for PacketSender {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {}", self.cc, self.pacer)
-    }
 }
 
 impl PacketSender {

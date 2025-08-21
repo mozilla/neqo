@@ -9,7 +9,7 @@ use std::{
     cmp::{max, min},
     fmt::{self, Display, Formatter},
     mem,
-    ops::{Index, IndexMut, Range},
+    ops::Range,
     rc::Rc,
     time::Instant,
 };
@@ -188,12 +188,13 @@ impl Crypto {
         data: Option<&[u8]>,
     ) -> Res<&HandshakeState> {
         let input = data.map(|d| {
-            qtrace!("Handshake record received {d:0x?} ");
-            Record {
+            let rec = Record {
                 ct: TLS_CT_HANDSHAKE,
                 epoch: space.into(),
                 data: d.to_vec(),
-            }
+            };
+            qtrace!("Handshake record received {rec:?} ");
+            rec
         });
 
         match self.tls.handshake_raw(now, input) {
@@ -276,6 +277,11 @@ impl Crypto {
             .set_handshake_keys(self.version, &write_secret, &read_secret, cipher)?;
         qdebug!("[{self}] Handshake keys installed");
         Ok(true)
+    }
+
+    #[must_use]
+    pub const fn has_handshake_keys(&self) -> bool {
+        self.states.handshake.is_some() || self.states.app_write.is_some()
     }
 
     fn maybe_install_application_write_key(&mut self, version: Version) -> Res<()> {
@@ -750,26 +756,6 @@ pub struct CryptoState {
     rx: CryptoDxState,
 }
 
-impl Index<CryptoDxDirection> for CryptoState {
-    type Output = CryptoDxState;
-
-    fn index(&self, index: CryptoDxDirection) -> &Self::Output {
-        match index {
-            CryptoDxDirection::Read => &self.rx,
-            CryptoDxDirection::Write => &self.tx,
-        }
-    }
-}
-
-impl IndexMut<CryptoDxDirection> for CryptoState {
-    fn index_mut(&mut self, index: CryptoDxDirection) -> &mut Self::Output {
-        match index {
-            CryptoDxDirection::Read => &mut self.rx,
-            CryptoDxDirection::Write => &mut self.tx,
-        }
-    }
-}
-
 /// `CryptoDxAppData` wraps the state necessary for one direction of application data keys.
 /// This includes the secret needed to generate the next set of keys.
 #[derive(Debug)]
@@ -915,11 +901,60 @@ impl CryptoStates {
         }
     }
 
+    /// When decrypting Initial packets, there are potentially multiple active versions.
+    /// The `used_pn` range tracks what has been received on the version that was used.
+    /// But if the version changes, the version we select might have a value of 0,
+    /// rather than the actual value, which can cause packet number recovery to fail.
+    /// To avoid that, have the indicated `version` continue from the previous version.
+    /// This only needs to be run once, so run it when getting header protection.
+    fn maybe_continue_initial_rx(&mut self, version: Version) {
+        // Only do this if this version hasn't been used...
+        // This would be better with `is_none_or`, but that needs MSRV >= 1.82
+        if !self.initials[version]
+            .as_ref()
+            .is_some_and(|dx| dx.rx.next_pn() == 0)
+        {
+            return;
+        }
+        // ... and some other version has been.
+        // This assumes that there is just one other version in use,
+        // as the spec requires.
+        let Some(other) = self
+            .initials
+            .iter()
+            .find_map(|(k, v)| v.as_ref().is_some_and(|z| z.rx.next_pn() > 0).then_some(k))
+        else {
+            return;
+        };
+        debug_assert_ne!(version, other);
+
+        // This uses the take-modify-restore pattern to avoid
+        // having the borrow checker complain.
+        // It *ignores* errors from the `continuation()`
+        // so that the restore step isn't skipped.
+        //
+        // This doesn't need to be full anti-replay.
+        // Each version has separate keys, so nonce reuse is OK.
+        // After this, we might reject packets if the peer
+        // does reuse nonces, but they aren't allowed to do that.
+        //
+        // Note: these `if let Some(...)` conditions are always true.
+        if let Some(mut next) = self.initials[version].take() {
+            if let Some(prev) = &self.initials[other] {
+                _ = next.rx.continuation(&prev.rx);
+            }
+            self.initials[version] = Some(next);
+        }
+    }
+
     pub fn rx_hp(&mut self, version: Version, epoch: Epoch) -> Option<&mut CryptoDxState> {
-        if epoch == Epoch::ApplicationData {
-            self.app_read.as_mut().map(|ar| &mut ar.dx)
-        } else {
-            self.rx(version, epoch, false)
+        match epoch {
+            Epoch::ApplicationData => self.app_read.as_mut().map(|ar| &mut ar.dx),
+            Epoch::Initial => {
+                self.maybe_continue_initial_rx(version);
+                self.rx(version, epoch, false)
+            }
+            _ => self.rx(version, epoch, false),
         }
     }
 
@@ -994,6 +1029,7 @@ impl CryptoStates {
                     "[{self}] Continue packet numbers for initial after retry (write is {:?})",
                     prev.rx.used_pn,
                 );
+                initial.rx.continuation(&prev.rx)?;
                 initial.tx.continuation(&prev.tx)?;
             }
             self.initials[*v] = Some(initial);
@@ -1024,6 +1060,7 @@ impl CryptoStates {
                 let next = self.initials[confirmed]
                     .as_mut()
                     .ok_or(Error::VersionNegotiation)?;
+                next.rx.continuation(&prev.rx)?;
                 next.tx.continuation(&prev.tx)?;
                 self.initials[orig] = Some(prev);
             }

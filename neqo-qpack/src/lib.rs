@@ -109,9 +109,3 @@ impl From<neqo_transport::Error> for Error {
         Self::Transport(err)
     }
 }
-
-impl From<::qlog::Error> for Error {
-    fn from(_err: ::qlog::Error) -> Self {
-        Self::Qlog
-    }
-}

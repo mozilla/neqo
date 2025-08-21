@@ -115,12 +115,6 @@ impl Debug for FrameReader {
     }
 }
 
-impl Default for FrameReader {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl FrameReader {
     #[must_use]
     pub fn new() -> Self {
