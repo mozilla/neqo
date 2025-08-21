@@ -347,11 +347,6 @@ mod tests {
             self.pn
         }
     }
-    impl HasPacketNumber for &'_ Packet {
-        fn pn(&self) -> packet::Number {
-            self.pn
-        }
-    }
     impl HasPacketNumber for &'_ mut Packet {
         fn pn(&self) -> packet::Number {
             self.pn

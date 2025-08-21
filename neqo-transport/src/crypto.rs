@@ -9,7 +9,7 @@ use std::{
     cmp::{max, min},
     fmt::{self, Display, Formatter},
     mem,
-    ops::{Index, IndexMut, Range},
+    ops::Range,
     rc::Rc,
     time::Instant,
 };
@@ -754,26 +754,6 @@ impl Display for CryptoDxState {
 pub struct CryptoState {
     tx: CryptoDxState,
     rx: CryptoDxState,
-}
-
-impl Index<CryptoDxDirection> for CryptoState {
-    type Output = CryptoDxState;
-
-    fn index(&self, index: CryptoDxDirection) -> &Self::Output {
-        match index {
-            CryptoDxDirection::Read => &self.rx,
-            CryptoDxDirection::Write => &self.tx,
-        }
-    }
-}
-
-impl IndexMut<CryptoDxDirection> for CryptoState {
-    fn index_mut(&mut self, index: CryptoDxDirection) -> &mut Self::Output {
-        match index {
-            CryptoDxDirection::Read => &mut self.rx,
-            CryptoDxDirection::Write => &mut self.tx,
-        }
-    }
 }
 
 /// `CryptoDxAppData` wraps the state necessary for one direction of application data keys.
