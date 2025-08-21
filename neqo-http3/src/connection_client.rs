@@ -74,6 +74,7 @@ const fn alpn_from_quic_version(version: Version) -> &'static str {
 ///   - [`Http3Client::set_qlog`]
 /// - retrieving information about a connection:
 /// - [`Http3Client::peer_certificate`]
+///   - [`Http3Client::qpack_encoder_stats`]
 ///   - [`Http3Client::transport_stats`]
 ///   - [`Http3Client::state`]
 ///   - [`Http3Client::tls_info`]
@@ -89,6 +90,8 @@ const fn alpn_from_quic_version(version: Version) -> &'static str {
 ///   - [`Http3Client::cancel_fetch`]
 ///   - [`Http3Client::stream_reset_send`]
 ///   - [`Http3Client::stream_stop_sending`]
+/// - priority feature:
+///   - [`Http3Client::priority_update`]
 /// - `WebTransport` feature:
 ///   - [`Http3Client::webtransport_create_session`]
 ///   - [`Http3Client::webtransport_close_session`]
