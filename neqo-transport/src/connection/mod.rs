@@ -3763,6 +3763,11 @@ impl Connection {
         self.streams.keep_alive(stream_id, keep)
     }
 
+    #[must_use]
+    pub const fn remote_datagram_size(&self) -> u64 {
+        self.quic_datagrams.remote_datagram_size()
+    }
+
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
     /// packet number, ack frames, etc.

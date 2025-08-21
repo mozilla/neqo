@@ -344,6 +344,12 @@ impl WebTransportRequest {
             )
     }
 
+    // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.
+    #[must_use]
+    pub fn remote_datagram_size(&self) -> u64 {
+        self.stream_handler.conn.borrow().remote_datagram_size()
+    }
+
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
     /// packet number, ack frames, etc.

@@ -764,6 +764,17 @@ impl Http3Client {
         Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, sendorder)
     }
 
+    /// Sets the `Fairness` for a given stream
+    ///
+    /// # Errors
+    ///
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    //
+    // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.
+    pub fn webtransport_set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
+        Http3Connection::stream_set_fairness(&mut self.conn, stream_id, fairness)
+    }
+
     /// Returns the current `send_stream::Stats` of a `WebTransportSendStream`.
     ///
     /// # Errors
