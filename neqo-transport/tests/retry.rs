@@ -438,7 +438,8 @@ fn vn_after_retry() {
 // long enough connection ID.
 #[test]
 fn mitm_retry() {
-    // This test decrypts packets and hence does not work with MLKEM enabled.
+    // This test decrypts packets and hence does not work with MLKEM and packet number randomization
+    // enabled.
     let mut client = test_fixture::new_client(ConnectionParameters::default().mlkem(false));
     let mut retry_server = default_server();
     retry_server.set_validation(ValidateAddress::Always);
@@ -464,7 +465,6 @@ fn mitm_retry() {
     let pn_len = header.len() - protected_header.len();
 
     // Decrypt.
-    assert_eq!(pn, 1);
     let mut plaintext_buf = vec![0; client_initial2.len()];
     let plaintext = aead
         .decrypt(pn, &header, &payload[pn_len..], &mut plaintext_buf)
