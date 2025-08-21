@@ -54,7 +54,9 @@ impl Stream for WebTransportRecvStream {
 
 impl RecvStream for WebTransportRecvStream {
     fn receive(&mut self, _conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
-        self.events.data_readable(&self.stream_info);
+        if self.session.as_ref().borrow().is_active() {
+            self.events.data_readable(&self.stream_info);
+        }
         Ok((ReceiveOutput::NoOutput, false))
     }
 
