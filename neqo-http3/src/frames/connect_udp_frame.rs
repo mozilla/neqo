@@ -17,7 +17,7 @@ pub(crate) enum Frame {
 
 
 impl FrameDecoder<Self> for Frame {
-    fn decode(frame_type: HFrameType, frame_len: u64, data: Option<&[u8]>) -> Res<Option<Self>> {
+    fn decode(_frame_type: HFrameType, _frame_len: u64, _data: Option<&[u8]>) -> Res<Option<Self>> {
         // TODO: Correct?
         Ok(None)
     }

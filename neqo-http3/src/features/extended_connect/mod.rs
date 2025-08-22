@@ -263,12 +263,22 @@ impl Protocol {
         }
     }
 
-    fn prefix_datagram(&self, encoder: &mut Encoder) {
+    fn write_datagram_prefix(&self, encoder: &mut Encoder) {
         match self {
             Self::WebTransport(_) => {
                 // WebTransport does not add prefix (i.e. context ID).
             },
-            Self::ConnectUdp(_) => ConnectUdpSession::prefix_datagram(encoder),
+            Self::ConnectUdp(_) => ConnectUdpSession::write_datagram_prefix(encoder),
+        }
+    }
+
+    fn read_datagram_prefix<'a>(&self, datagram: &'a [u8]) -> &'a [u8] {
+        match self {
+            Self::WebTransport(_) => {
+                // WebTransport does not add prefix (i.e. context ID).
+                datagram
+            },
+            Self::ConnectUdp(_) => ConnectUdpSession::read_datagram_prefix(datagram),
         }
     }
     
@@ -592,7 +602,7 @@ impl Session {
         if self.state == SessionState::Active {
             let mut dgram_data = Encoder::default();
             dgram_data.encode_varint(self.session_id.as_u64() / 4);
-            self.protocol.prefix_datagram(&mut dgram_data);
+            self.protocol.write_datagram_prefix(&mut dgram_data);
             dgram_data.encode(buf);
             conn.send_datagram(dgram_data.into(), id)?;
         } else {
@@ -603,13 +613,8 @@ impl Session {
     }
 
     pub fn datagram(&self, datagram: &[u8]) {
-        let datagram = match &self.protocol {
-            Protocol::WebTransport(_) => datagram,
-            // TODO: Safe?
-            // TODO: move into connect-udp
-            Protocol::ConnectUdp(_) => &datagram[1..],
-        };
         if self.state == SessionState::Active {
+            let datagram = self.protocol.read_datagram_prefix(datagram);
             self.events.new_datagram(
                 self.session_id,
                 datagram.to_vec(),

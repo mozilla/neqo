@@ -82,7 +82,18 @@ impl ConnectUdpSession {
         (HashSet::default(), HashSet::default())
     }
 
-    pub(crate) fn prefix_datagram(encoder: &mut Encoder){
+    pub(crate) fn write_datagram_prefix(encoder: &mut Encoder){
         encoder.encode_varint(0u64);
+    }
+
+    pub(crate) fn read_datagram_prefix(datagram: &[u8]) -> &[u8] {
+        let Some((context_id, remainder)) = datagram.split_first() else {
+            // TODO: Return error instead? Is datagram without context ID allowed?
+            return datagram; // emtpy
+        };
+
+        debug_assert_eq!(*context_id, 0, "only supports context_id 0");
+
+        remainder
     }
 }
