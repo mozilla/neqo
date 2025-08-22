@@ -4,6 +4,7 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
+use neqo_common::Encoder;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -77,7 +78,11 @@ impl ConnectUdpSession {
     }
 
     // TODO: Faking it to simplify implementation in connection.rs. Can we do better?
-    pub fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
+    pub(crate) fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
         (HashSet::default(), HashSet::default())
+    }
+
+    pub(crate) fn prefix_datagram(encoder: &mut Encoder){
+        encoder.encode_varint(0u64);
     }
 }

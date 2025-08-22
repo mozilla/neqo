@@ -23,7 +23,7 @@ pub(crate) use webtransport_session::WebTransportSession;
 use crate::{
     client_events::Http3ClientEvents,
     features::{extended_connect::connect_udp::ConnectUdpSession, NegotiationState},
-    frames::{FrameReader, HFrame, StreamReaderRecvStreamWrapper, WebTransportFrame},
+    frames::HFrame,
     priority::PriorityHandler,
     recv_message::{RecvMessage, RecvMessageInfo},
     send_message::SendMessage,
@@ -153,7 +153,7 @@ pub(crate) struct Session {
 
 // TODO: Move
 #[derive(Debug, PartialEq)]
-enum SessionState {
+pub(crate) enum SessionState {
     Negotiating,
     Active,
     FinPending,
@@ -161,7 +161,7 @@ enum SessionState {
 }
 
 impl SessionState {
-    pub const fn closing_state(&self) -> bool {
+    pub(crate) const fn closing_state(&self) -> bool {
         matches!(self, Self::FinPending | Self::Done)
     }
 }
@@ -214,14 +214,14 @@ impl Protocol {
         }
     }
 
-    pub(crate) fn add_stream(
+    fn add_stream(
         &mut self,
         stream_id: StreamId,
         events: &mut Box<dyn ExtendedConnectEvents>,
     ) -> Res<()> {
         match self {
             Self::WebTransport(session) => session.add_stream(stream_id, events),
-            Self::ConnectUdp(session) => {
+            Self::ConnectUdp(_session) => {
                 let msg = "ConnectUdp does not support adding streams";
                 qdebug!("{msg}");
                 debug_assert!(false, "{msg}");
@@ -230,7 +230,7 @@ impl Protocol {
         }
     }
 
-    pub(crate) fn remove_recv_stream(&mut self, stream_id: StreamId) {
+    fn remove_recv_stream(&mut self, stream_id: StreamId) {
         match self {
             Self::WebTransport(session) => {
                 session.remove_recv_stream(stream_id);
@@ -243,7 +243,7 @@ impl Protocol {
         }
     }
 
-    pub(crate) fn remove_send_stream(&mut self, stream_id: StreamId) {
+    fn remove_send_stream(&mut self, stream_id: StreamId) {
         match self {
             Self::WebTransport(session) => {
                 session.remove_send_stream(stream_id);
@@ -256,12 +256,22 @@ impl Protocol {
         }
     }
 
-    pub fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
+   fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
         match self {
             Self::WebTransport(session) => session.take_sub_streams(),
             Self::ConnectUdp(session) => session.take_sub_streams(),
         }
     }
+
+    fn prefix_datagram(&self, encoder: &mut Encoder) {
+        match self {
+            Self::WebTransport(_) => {
+                // WebTransport does not add prefix (i.e. context ID).
+            },
+            Self::ConnectUdp(_) => ConnectUdpSession::prefix_datagram(encoder),
+        }
+    }
+    
 }
 
 impl Display for Session {
@@ -582,15 +592,7 @@ impl Session {
         if self.state == SessionState::Active {
             let mut dgram_data = Encoder::default();
             dgram_data.encode_varint(self.session_id.as_u64() / 4);
-
-            // TODO: Move into connect-udp
-            match &self.protocol {
-                Protocol::WebTransport(web_transport_session) => {}
-                Protocol::ConnectUdp(connect_udp_session) => {
-                    dgram_data.encode_varint(0u64);
-                }
-            }
-
+            self.protocol.prefix_datagram(&mut dgram_data);
             dgram_data.encode(buf);
             conn.send_datagram(dgram_data.into(), id)?;
         } else {
