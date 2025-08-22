@@ -256,7 +256,7 @@ impl Protocol {
         }
     }
 
-   fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
+    fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
         match self {
             Self::WebTransport(session) => session.take_sub_streams(),
             Self::ConnectUdp(session) => session.take_sub_streams(),
@@ -267,7 +267,7 @@ impl Protocol {
         match self {
             Self::WebTransport(_) => {
                 // WebTransport does not add prefix (i.e. context ID).
-            },
+            }
             Self::ConnectUdp(_) => ConnectUdpSession::write_datagram_prefix(encoder),
         }
     }
@@ -277,11 +277,10 @@ impl Protocol {
             Self::WebTransport(_) => {
                 // WebTransport does not add prefix (i.e. context ID).
                 datagram
-            },
+            }
             Self::ConnectUdp(_) => ConnectUdpSession::read_datagram_prefix(datagram),
         }
     }
-    
 }
 
 impl Display for Session {

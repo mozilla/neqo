@@ -82,7 +82,7 @@ impl ConnectUdpSession {
         (HashSet::default(), HashSet::default())
     }
 
-    pub(crate) fn write_datagram_prefix(encoder: &mut Encoder){
+    pub(crate) fn write_datagram_prefix(encoder: &mut Encoder) {
         encoder.encode_varint(0u64);
     }
 

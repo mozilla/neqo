@@ -5,11 +5,12 @@
 // except according to those terms.
 
 // TODO: pub(crate)?
+pub(crate) mod connect_udp_frame;
 pub mod hframe;
 pub mod reader;
 pub mod wtframe;
-pub(crate) mod connect_udp_frame;
 
+pub(crate) use connect_udp_frame::Frame as ConnectUdpFrame;
 #[allow(
     clippy::allow_attributes,
     unused_imports,
@@ -19,7 +20,6 @@ pub use hframe::{HFrame, H3_FRAME_TYPE_HEADERS, H3_FRAME_TYPE_SETTINGS, H3_RESER
 pub use reader::{FrameReader, StreamReaderConnectionWrapper, StreamReaderRecvStreamWrapper};
 // TODO: pub(crate)?
 pub use wtframe::WebTransportFrame;
-pub(crate) use connect_udp_frame::Frame as ConnectUdpFrame;
 
 #[cfg(test)]
 mod tests;

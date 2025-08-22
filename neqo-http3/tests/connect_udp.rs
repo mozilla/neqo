@@ -9,8 +9,8 @@
 use neqo_common::{event::Provider as _, header::HeadersExt as _, qinfo, Datagram, Tos};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
-    ConnectUdpEvent, ConnectUdpRequest, ConnectUdpServerEvent, SessionAcceptAction,
-    Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
+    ConnectUdpEvent, ConnectUdpRequest, ConnectUdpServerEvent, Http3Client, Http3ClientEvent,
+    Http3Parameters, Http3Server, Http3ServerEvent, Http3State, SessionAcceptAction,
 };
 use neqo_transport::ConnectionParameters;
 use test_fixture::{
@@ -75,9 +75,7 @@ fn new_session() -> (
                         && headers.contains_header(":protocol", "connect-udp")
                 );
 
-                session
-                    .response(&SessionAcceptAction::Accept)
-                    .unwrap();
+                session.response(&SessionAcceptAction::Accept).unwrap();
                 Some(session)
             } else {
                 None
@@ -200,9 +198,14 @@ fn session_lifecycle() {
 
     exchange_packets(&mut client, &mut proxy, false, None);
 
-    let (id, datagram) = proxy.events()
+    let (id, datagram) = proxy
+        .events()
         .find_map(|event| {
-            if let Http3ServerEvent::ConnectUdp(ConnectUdpServerEvent::Datagram { session, datagram}) = event {
+            if let Http3ServerEvent::ConnectUdp(ConnectUdpServerEvent::Datagram {
+                session,
+                datagram,
+            }) = event
+            {
                 Some((session.stream_id(), datagram))
             } else {
                 None
@@ -219,8 +222,12 @@ fn session_lifecycle() {
     let (id, datagram) = client
         .events()
         .find_map(|event| {
-            if let  Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Datagram {session_id:id, datagram }) = event {
-                Some((id, datagram) )
+            if let Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Datagram {
+                session_id: id,
+                datagram,
+            }) = event
+            {
+                Some((id, datagram))
             } else {
                 None
             }
@@ -244,8 +251,8 @@ fn session_lifecycle() {
     //     .find(|event| {
     //         matches!(
     //             event,
-    //             Http3ClientEvent::ConnectUdp(ConnectUdpEvent::SessionClosed { stream_id, .. }) if *stream_id == session_id
-    //         )
+    //             Http3ClientEvent::ConnectUdp(ConnectUdpEvent::SessionClosed { stream_id, .. }) if
+    // *stream_id == session_id         )
     //     })
     //     .unwrap();
 

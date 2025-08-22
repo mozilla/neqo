@@ -17,8 +17,7 @@ use crate::{
     },
     frames::WebTransportFrame,
     Error, Header, Http3ClientEvent, Http3OrWebTransportStream, Http3Server, Http3ServerEvent,
-    Http3State, Priority, WebTransportEvent, WebTransportServerEvent,
-    SessionAcceptAction,
+    Http3State, Priority, SessionAcceptAction, WebTransportEvent, WebTransportServerEvent,
 };
 
 #[test]

@@ -18,7 +18,7 @@ use neqo_transport::{
 };
 
 use crate::{
-    connection::{SessionAcceptAction, Http3State, },
+    connection::{Http3State, SessionAcceptAction},
     connection_server::Http3ServerHandler,
     features::extended_connect::SessionCloseReason,
     Error, Http3StreamInfo, Http3StreamType, Priority, Res,

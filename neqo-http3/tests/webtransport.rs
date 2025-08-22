@@ -12,8 +12,8 @@ use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
-    Http3ServerEvent, Http3State, WebTransportEvent, WebTransportRequest, WebTransportServerEvent,
-    SessionAcceptAction,
+    Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent, WebTransportRequest,
+    WebTransportServerEvent,
 };
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use test_fixture::{
@@ -94,9 +94,7 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
                     headers.contains_header(":method", "CONNECT")
                         && headers.contains_header(":protocol", "webtransport")
                 );
-                session
-                    .response(&SessionAcceptAction::Accept)
-                    .unwrap();
+                session.response(&SessionAcceptAction::Accept).unwrap();
                 wt_server_session = Some(session);
             }
             Http3ServerEvent::Data { .. } => {

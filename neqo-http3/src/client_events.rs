@@ -211,11 +211,13 @@ impl ExtendedConnectEvents for Http3ClientEvents {
     ) {
         match connect_type {
             ExtendedConnectType::WebTransport => {
-                self.insert(Http3ClientEvent::WebTransport(WebTransportEvent::NewSession {
-                    stream_id,
-                    status,
-                    headers,
-                }));
+                self.insert(Http3ClientEvent::WebTransport(
+                    WebTransportEvent::NewSession {
+                        stream_id,
+                        status,
+                        headers,
+                    },
+                ));
             }
             ExtendedConnectType::ConnectUdp => {
                 self.insert(Http3ClientEvent::ConnectUdp(ConnectUdpEvent::NewSession {

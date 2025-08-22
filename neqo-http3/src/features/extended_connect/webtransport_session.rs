@@ -6,7 +6,8 @@
 
 use std::{
     collections::HashSet,
-    fmt::{self, Display, Formatter}, mem,
+    fmt::{self, Display, Formatter},
+    mem,
 };
 
 use neqo_common::{qtrace, Encoder, Role};
