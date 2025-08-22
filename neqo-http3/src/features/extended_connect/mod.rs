@@ -146,7 +146,6 @@ pub(crate) struct Session {
     stream_event_listener: Rc<RefCell<Listener>>,
     session_id: StreamId,
     state: SessionState,
-    frame_reader: FrameReader,
     events: Box<dyn ExtendedConnectEvents>,
     send_streams: HashSet<StreamId>,
     recv_streams: HashSet<StreamId>,
@@ -178,6 +177,15 @@ enum Protocol {
 }
 
 impl Protocol {
+    fn new(connect_type: ExtendedConnectType, session_id: StreamId) -> Self {
+        match connect_type {
+            ExtendedConnectType::WebTransport => {
+                Self::WebTransport(WebTransportSession::new(session_id))
+            }
+            ExtendedConnectType::ConnectUdp => Self::ConnectUdp(ConnectUdpSession::new(session_id)),
+        }
+    }
+
     fn connect_type(&self) -> ExtendedConnectType {
         match self {
             Self::WebTransport(_) => ExtendedConnectType::WebTransport,
@@ -189,6 +197,22 @@ impl Protocol {
         match self {
             Self::WebTransport(session) => session.close_frame(error, message),
             Self::ConnectUdp(session) => session.close_frame(error, message),
+        }
+    }
+
+    fn read_control_stream(
+        &mut self,
+        conn: &mut Connection,
+        events: &mut Box<dyn ExtendedConnectEvents>,
+        control_stream_recv: &mut Box<dyn RecvStream>,
+    ) -> Res<Option<SessionState>> {
+        match self {
+            Self::WebTransport(session) => {
+                session.read_control_stream(conn, events, control_stream_recv)
+            }
+            Self::ConnectUdp(session) => {
+                session.read_control_stream(conn, events, control_stream_recv)
+            }
         }
     }
 }
@@ -211,10 +235,7 @@ impl Session {
         connect_type: ExtendedConnectType,
     ) -> Self {
         let stream_event_listener = Rc::new(RefCell::new(Listener::default()));
-        let protocol = match connect_type {
-            ExtendedConnectType::WebTransport => Protocol::WebTransport(WebTransportSession::new()),
-            ExtendedConnectType::ConnectUdp => Protocol::ConnectUdp(ConnectUdpSession::new()),
-        };
+        let protocol = Protocol::new(connect_type, session_id);
         Self {
             control_stream_recv: Box::new(RecvMessage::new(
                 &RecvMessageInfo {
@@ -238,7 +259,6 @@ impl Session {
             stream_event_listener,
             session_id,
             state: SessionState::Negotiating,
-            frame_reader: FrameReader::new(),
             events,
             send_streams: HashSet::default(),
             recv_streams: HashSet::default(),
@@ -260,10 +280,7 @@ impl Session {
         connect_type: ExtendedConnectType,
     ) -> Res<Self> {
         let stream_event_listener = Rc::new(RefCell::new(Listener::default()));
-        let protocol = match connect_type {
-            ExtendedConnectType::WebTransport => Protocol::WebTransport(WebTransportSession::new()),
-            ExtendedConnectType::ConnectUdp => Protocol::ConnectUdp(ConnectUdpSession::new()),
-        };
+        let protocol = Protocol::new(connect_type, session_id);
         control_stream_recv
             .http_stream()
             .ok_or(Error::Internal)?
@@ -278,7 +295,6 @@ impl Session {
             stream_event_listener,
             session_id,
             state: SessionState::Active,
-            frame_reader: FrameReader::new(),
             events,
             send_streams: HashSet::default(),
             recv_streams: HashSet::default(),
@@ -492,63 +508,15 @@ impl Session {
     ///
     /// It may return an error if the frame is not correctly decoded.
     pub fn read_control_stream(&mut self, conn: &mut Connection) -> Res<()> {
-        // Move into files
-        match &self.protocol {
-            Protocol::WebTransport(_) => {
-                let (f, fin) = self
-                    .frame_reader
-                    .receive::<WebTransportFrame>(&mut StreamReaderRecvStreamWrapper::new(
-                        conn,
-                        &mut self.control_stream_recv,
-                    ))
-                    .map_err(|_| Error::HttpGeneralProtocolStream)?;
-                qtrace!("[{self}] Received frame: {f:?} fin={fin}");
-                if let Some(WebTransportFrame::CloseSession { error, message }) = f {
-                    self.events.session_end(
-                        ExtendedConnectType::WebTransport,
-                        self.session_id,
-                        SessionCloseReason::Clean { error, message },
-                        None,
-                    );
-                    self.state = if fin {
-                        SessionState::Done
-                    } else {
-                        SessionState::FinPending
-                    };
-                } else if fin {
-                    self.events.session_end(
-                        ExtendedConnectType::WebTransport,
-                        self.session_id,
-                        SessionCloseReason::Clean {
-                            error: 0,
-                            message: String::new(),
-                        },
-                        None,
-                    );
-                    self.state = SessionState::Done;
-                }
-                Ok(())
-            }
-            Protocol::ConnectUdp(_) => {
-                qdebug!("[{self}]: read_control_stream");
-                // TODO
-                let mut buf = [0; 1500];
-                let (_, fin) = self.control_stream_recv.read_data(conn, buf.as_mut())?;
-                if fin {
-                    self.events.session_end(
-                        ExtendedConnectType::ConnectUdp,
-                        self.session_id,
-                        SessionCloseReason::Clean {
-                            error: 0,
-                            message: String::new(),
-                        },
-                        None,
-                    );
-                    self.state = SessionState::Done;
-                }
-                Ok(())
-            }
+        qdebug!("[{self}]: read_control_stream");
+        if let Some(new_state) = self.protocol.read_control_stream(
+            conn,
+            &mut self.events,
+            &mut self.control_stream_recv,
+        )? {
+            self.state = new_state;
         }
+        Ok(())
     }
 
     /// # Errors
