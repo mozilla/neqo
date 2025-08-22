@@ -36,10 +36,6 @@ impl ConnectUdpSession {
         }
     }
 
-    pub(crate) fn close_frame(&self, _error: u32, _message: &str) -> Option<Vec<u8>> {
-        // TODO: WebTransport sends a message. needed here as well?
-        None
-    }
 
     // TODO: De-duplicate further with webtransport_session.rs?
     pub(crate) fn read_control_stream(
@@ -78,7 +74,7 @@ impl ConnectUdpSession {
     }
 
     // TODO: Faking it to simplify implementation in connection.rs. Can we do better?
-    pub(crate) fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
+    pub(crate) fn take_sub_streams() -> (HashSet<StreamId>, HashSet<StreamId>) {
         (HashSet::default(), HashSet::default())
     }
 

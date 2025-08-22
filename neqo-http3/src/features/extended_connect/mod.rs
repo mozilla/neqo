@@ -194,7 +194,10 @@ impl Protocol {
     fn close_frame(&self, error: u32, message: &str) -> Option<Vec<u8>> {
         match self {
             Self::WebTransport(session) => session.close_frame(error, message),
-            Self::ConnectUdp(session) => session.close_frame(error, message),
+            Self::ConnectUdp(_) => {
+                // ConnectUdp does not have a close frame.
+                None
+            },
         }
     }
 
@@ -259,7 +262,7 @@ impl Protocol {
     fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
         match self {
             Self::WebTransport(session) => session.take_sub_streams(),
-            Self::ConnectUdp(session) => session.take_sub_streams(),
+            Self::ConnectUdp(session) => ConnectUdpSession::take_sub_streams(),
         }
     }
 
