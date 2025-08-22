@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use std::{
-    ops::{Deref, DerefMut},
+    ops::Deref,
     os::raw::c_uint,
     ptr::null_mut,
     time::{Duration, Instant},

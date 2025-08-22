@@ -414,6 +414,7 @@ impl SecretAgentInfo {
     pub const fn alpn(&self) -> Option<&String> {
         self.alpn.as_ref()
     }
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn signature_scheme(&self) -> SignatureScheme {
         self.signature_scheme
@@ -949,6 +950,12 @@ impl SecretAgent {
     #[must_use]
     pub const fn state(&self) -> &HandshakeState {
         &self.state
+    }
+
+    /// Check if the indicated secret is ready for installation.
+    #[must_use]
+    pub fn has_secret(&self, epoch: Epoch) -> bool {
+        self.secrets.has(epoch)
     }
 
     /// Take a read secret.  This will only return a non-`None` value once.

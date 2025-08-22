@@ -82,11 +82,6 @@ impl Qlog {
         })
     }
 
-    #[must_use]
-    pub fn inner(&self) -> Rc<RefCell<Option<SharedStreamer>>> {
-        Rc::clone(&self.inner)
-    }
-
     /// Create a disabled `Qlog` configuration.
     #[must_use]
     pub fn disabled() -> Self {

@@ -35,7 +35,7 @@ use crate::{
 
 pub type SendOrder = i64;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct StreamOrder {
     pub sendorder: Option<SendOrder>,
 }
@@ -57,14 +57,6 @@ impl PartialOrd for StreamOrder {
         Some(self.cmp(other))
     }
 }
-
-impl PartialEq for StreamOrder {
-    fn eq(&self, other: &Self) -> bool {
-        self.sendorder == other.sendorder
-    }
-}
-
-impl Eq for StreamOrder {}
 
 pub struct Streams {
     role: Role,

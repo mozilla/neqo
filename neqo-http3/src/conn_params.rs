@@ -68,11 +68,6 @@ impl Http3Parameters {
         self
     }
 
-    #[must_use]
-    pub const fn get_max_table_size_encoder(&self) -> u64 {
-        self.qpack_settings.max_table_size_encoder
-    }
-
     /// # Panics
     ///
     /// The table size must be smaller than 1 << 30 by the spec.
@@ -133,6 +128,7 @@ impl Http3Parameters {
         self.webtransport
     }
 
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn get_connect(&self) -> bool {
         self.connect

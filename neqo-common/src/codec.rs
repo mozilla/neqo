@@ -493,12 +493,6 @@ impl<B: Buffer> AsMut<[u8]> for Encoder<B> {
     }
 }
 
-impl<'a> From<Decoder<'a>> for Encoder {
-    fn from(dec: Decoder<'a>) -> Self {
-        Self::from(&dec.buf[dec.offset..])
-    }
-}
-
 impl From<&[u8]> for Encoder {
     fn from(buf: &[u8]) -> Self {
         Self {
