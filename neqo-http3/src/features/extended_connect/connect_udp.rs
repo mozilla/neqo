@@ -1,12 +1,17 @@
 // TODO: Rename to connect_udp_session.rs to be consistent with webtransport_session.rs?
-use std::fmt::{self, Display, Formatter};
+use std::{
+    collections::HashSet,
+    fmt::{self, Display, Formatter},
+};
 
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
     features::extended_connect::{
         ExtendedConnectEvents, ExtendedConnectType, SessionCloseReason, SessionState,
-    }, frames::{ConnectUdpFrame, FrameReader, StreamReaderRecvStreamWrapper}, Error, RecvStream, Res
+    },
+    frames::{ConnectUdpFrame, FrameReader, StreamReaderRecvStreamWrapper},
+    Error, RecvStream, Res,
 };
 
 #[derive(Debug)]
@@ -69,5 +74,10 @@ impl ConnectUdpSession {
         } else {
             Ok(None)
         }
+    }
+
+    // TODO: Faking it to simplify implementation in connection.rs. Can we do better?
+    pub fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
+        (HashSet::default(), HashSet::default())
     }
 }

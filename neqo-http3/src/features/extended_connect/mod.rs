@@ -147,9 +147,6 @@ pub(crate) struct Session {
     session_id: StreamId,
     state: SessionState,
     events: Box<dyn ExtendedConnectEvents>,
-    send_streams: HashSet<StreamId>,
-    recv_streams: HashSet<StreamId>,
-    role: Role,
     // TODO: Is `protocol` the right term?
     protocol: Protocol,
 }
@@ -170,6 +167,7 @@ impl SessionState {
 }
 
 // TODO: Move
+// TODO: Ideally this would be a trait. But that would make RecvStream no longer object safe.
 #[derive(Debug)]
 enum Protocol {
     WebTransport(WebTransportSession),
@@ -177,10 +175,10 @@ enum Protocol {
 }
 
 impl Protocol {
-    fn new(connect_type: ExtendedConnectType, session_id: StreamId) -> Self {
+    fn new(connect_type: ExtendedConnectType, session_id: StreamId, role: Role) -> Self {
         match connect_type {
             ExtendedConnectType::WebTransport => {
-                Self::WebTransport(WebTransportSession::new(session_id))
+                Self::WebTransport(WebTransportSession::new(session_id, role))
             }
             ExtendedConnectType::ConnectUdp => Self::ConnectUdp(ConnectUdpSession::new(session_id)),
         }
@@ -215,6 +213,55 @@ impl Protocol {
             }
         }
     }
+
+    pub(crate) fn add_stream(
+        &mut self,
+        stream_id: StreamId,
+        events: &mut Box<dyn ExtendedConnectEvents>,
+    ) -> Res<()> {
+        match self {
+            Self::WebTransport(session) => session.add_stream(stream_id, events),
+            Self::ConnectUdp(session) => {
+                let msg = "ConnectUdp does not support adding streams";
+                qdebug!("{msg}");
+                debug_assert!(false, "{msg}");
+                Ok(())
+            }
+        }
+    }
+
+    pub(crate) fn remove_recv_stream(&mut self, stream_id: StreamId) {
+        match self {
+            Self::WebTransport(session) => {
+                session.remove_recv_stream(stream_id);
+            }
+            Self::ConnectUdp(_) => {
+                let msg = "ConnectUdp does not support removing recv streams";
+                qdebug!("{msg}");
+                debug_assert!(false, "{msg}");
+            }
+        }
+    }
+
+    pub(crate) fn remove_send_stream(&mut self, stream_id: StreamId) {
+        match self {
+            Self::WebTransport(session) => {
+                session.remove_send_stream(stream_id);
+            }
+            Self::ConnectUdp(_) => {
+                let msg = "ConnectUdp does not support removing send streams";
+                qdebug!("{msg}");
+                debug_assert!(false, "{msg}");
+            }
+        }
+    }
+
+    pub fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
+        match self {
+            Self::WebTransport(session) => session.take_sub_streams(),
+            Self::ConnectUdp(session) => session.take_sub_streams(),
+        }
+    }
 }
 
 impl Display for Session {
@@ -235,7 +282,7 @@ impl Session {
         connect_type: ExtendedConnectType,
     ) -> Self {
         let stream_event_listener = Rc::new(RefCell::new(Listener::default()));
-        let protocol = Protocol::new(connect_type, session_id);
+        let protocol = Protocol::new(connect_type, session_id, role);
         Self {
             control_stream_recv: Box::new(RecvMessage::new(
                 &RecvMessageInfo {
@@ -260,9 +307,6 @@ impl Session {
             session_id,
             state: SessionState::Negotiating,
             events,
-            send_streams: HashSet::default(),
-            recv_streams: HashSet::default(),
-            role,
             protocol,
         }
     }
@@ -280,7 +324,7 @@ impl Session {
         connect_type: ExtendedConnectType,
     ) -> Res<Self> {
         let stream_event_listener = Rc::new(RefCell::new(Listener::default()));
-        let protocol = Protocol::new(connect_type, session_id);
+        let protocol = Protocol::new(connect_type, session_id, role);
         control_stream_recv
             .http_stream()
             .ok_or(Error::Internal)?
@@ -296,9 +340,6 @@ impl Session {
             session_id,
             state: SessionState::Active,
             events,
-            send_streams: HashSet::default(),
-            recv_streams: HashSet::default(),
-            role,
             protocol,
         })
     }
@@ -462,34 +503,17 @@ impl Session {
 
     pub fn add_stream(&mut self, stream_id: StreamId) -> Res<()> {
         if self.state == SessionState::Active {
-            if stream_id.is_bidi() {
-                self.send_streams.insert(stream_id);
-                self.recv_streams.insert(stream_id);
-            } else if stream_id.is_self_initiated(self.role) {
-                self.send_streams.insert(stream_id);
-            } else {
-                self.recv_streams.insert(stream_id);
-            }
-
-            if !stream_id.is_self_initiated(self.role) {
-                self.events
-                    .extended_connect_new_stream(Http3StreamInfo::new(
-                        stream_id,
-                        self.protocol
-                            .connect_type()
-                            .get_stream_type(self.session_id),
-                    ))?;
-            }
+            self.protocol.add_stream(stream_id, &mut self.events)?;
         }
         Ok(())
     }
 
     pub fn remove_recv_stream(&mut self, stream_id: StreamId) {
-        self.recv_streams.remove(&stream_id);
+        self.protocol.remove_recv_stream(stream_id);
     }
 
     pub fn remove_send_stream(&mut self, stream_id: StreamId) {
-        self.send_streams.remove(&stream_id);
+        self.protocol.remove_send_stream(stream_id);
     }
 
     #[must_use]
@@ -498,10 +522,7 @@ impl Session {
     }
 
     pub fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
-        (
-            mem::take(&mut self.recv_streams),
-            mem::take(&mut self.send_streams),
-        )
+        self.protocol.take_sub_streams()
     }
 
     /// # Errors

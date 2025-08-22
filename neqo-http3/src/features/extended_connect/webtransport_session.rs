@@ -4,21 +4,29 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::{self, Display, Formatter};
+use std::{
+    collections::HashSet,
+    fmt::{self, Display, Formatter}, mem,
+};
 
-use neqo_common::{qtrace, Encoder};
+use neqo_common::{qtrace, Encoder, Role};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
     features::extended_connect::{
         ExtendedConnectEvents, ExtendedConnectType, SessionCloseReason, SessionState,
-    }, frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame}, Error, RecvStream, Res
+    },
+    frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
+    Error, Http3StreamInfo, RecvStream, Res,
 };
 
 #[derive(Debug)]
 pub(crate) struct WebTransportSession {
     frame_reader: FrameReader,
     session_id: StreamId,
+    send_streams: HashSet<StreamId>,
+    recv_streams: HashSet<StreamId>,
+    role: Role,
 }
 
 impl Display for WebTransportSession {
@@ -29,10 +37,13 @@ impl Display for WebTransportSession {
 
 impl WebTransportSession {
     #[must_use]
-    pub(crate) fn new(session_id: StreamId) -> Self {
+    pub(crate) fn new(session_id: StreamId, role: Role) -> Self {
         Self {
             session_id,
             frame_reader: FrameReader::new(),
+            send_streams: HashSet::default(),
+            recv_streams: HashSet::default(),
+            role,
         }
     }
 
@@ -86,5 +97,43 @@ impl WebTransportSession {
         } else {
             Ok(None)
         }
+    }
+
+    pub(crate) fn add_stream(
+        &mut self,
+        stream_id: StreamId,
+        events: &mut Box<dyn ExtendedConnectEvents>,
+    ) -> Res<()> {
+        if stream_id.is_bidi() {
+            self.send_streams.insert(stream_id);
+            self.recv_streams.insert(stream_id);
+        } else if stream_id.is_self_initiated(self.role) {
+            self.send_streams.insert(stream_id);
+        } else {
+            self.recv_streams.insert(stream_id);
+        }
+
+        if !stream_id.is_self_initiated(self.role) {
+            events.extended_connect_new_stream(Http3StreamInfo::new(
+                stream_id,
+                ExtendedConnectType::WebTransport.get_stream_type(self.session_id),
+            ))?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn remove_recv_stream(&mut self, stream_id: StreamId) {
+        self.recv_streams.remove(&stream_id);
+    }
+
+    pub(crate) fn remove_send_stream(&mut self, stream_id: StreamId) {
+        self.send_streams.remove(&stream_id);
+    }
+
+    pub fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
+        (
+            mem::take(&mut self.recv_streams),
+            mem::take(&mut self.send_streams),
+        )
     }
 }
