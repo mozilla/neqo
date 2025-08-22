@@ -907,31 +907,24 @@ fn saved_datagrams() {
     };
 
     // Any packet will do, but let's make something that looks real.
-    let mut invalid_dgrams: Vec<_> = [0x12, 0x13, 0x14]
-        .into_iter()
-        .map(|damage| {
-            let mut client = default_client();
-            let dgram = client.process_output(now()).dgram().expect("a datagram");
-            let mut input = dgram.to_vec();
-            input[1] ^= damage;
-            Datagram::new(
-                dgram.source(),
-                dgram.destination(),
-                dgram.tos(),
-                input.clone(),
-            )
-        })
-        .collect();
+    let invalid_dgram = || {
+        let mut client = default_client();
+        let dgram = client.process_output(now()).dgram().expect("a datagram");
+        let mut input = dgram.to_vec();
+        input[1] ^= 0x12;
+        Datagram::new(
+            dgram.source(),
+            dgram.destination(),
+            dgram.tos(),
+            input.clone(),
+        )
+    };
 
     // Server sends a version negotation immediately. Saves second and third
     // input datagram for later.
     server
         .process_multiple(
-            vec![
-                invalid_dgrams.pop().unwrap(),
-                valid_dgram,
-                invalid_dgrams.pop().unwrap(),
-            ],
+            vec![invalid_dgram(), valid_dgram, invalid_dgram()],
             now(),
             1.try_into().expect("1>0"),
         )
@@ -943,7 +936,7 @@ fn saved_datagrams() {
     // which does require an immediate response. It thereby has to save the
     // fourth (new) datagram for the next call.
     server
-        .process_multiple(invalid_dgrams.pop(), now(), 1.try_into().expect("1>0"))
+        .process_multiple(Some(invalid_dgram()), now(), 1.try_into().expect("1>0"))
         .dgram()
         .expect("third packet triggers second vn");
 
