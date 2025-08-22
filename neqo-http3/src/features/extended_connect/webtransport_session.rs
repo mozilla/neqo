@@ -6,8 +6,12 @@
 
 use std::fmt::{self, Display, Formatter};
 
+use neqo_common::Encoder;
+
+use crate::frames::WebTransportFrame;
+
 #[derive(Debug)]
-pub struct WebTransportSession {}
+pub(crate) struct WebTransportSession {}
 
 impl Display for WebTransportSession {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
@@ -17,7 +21,17 @@ impl Display for WebTransportSession {
 
 impl WebTransportSession {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {}
+    }
+
+    pub(crate) fn close_frame(&self, error: u32, message: &str) -> Option<Vec<u8>> {
+        let close_frame = WebTransportFrame::CloseSession {
+            error,
+            message: message.to_string(),
+        };
+        let mut encoder = Encoder::default();
+        close_frame.encode(&mut encoder);
+        Some(encoder.into())
     }
 }

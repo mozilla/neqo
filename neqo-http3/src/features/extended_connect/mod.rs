@@ -184,6 +184,13 @@ impl Protocol {
             Self::ConnectUdp(_) => ExtendedConnectType::ConnectUdp,
         }
     }
+
+    fn close_frame(&self, error: u32, message: &str) -> Option<Vec<u8>> {
+        match self {
+            Self::WebTransport(session) => session.close_frame(error, message),
+            Self::ConnectUdp(session) => session.close_frame(error, message),
+        }
+    }
 }
 
 impl Display for Session {
@@ -549,40 +556,19 @@ impl Session {
     /// Return an error if the stream was closed on the transport layer, but that information is not
     /// yet consumed on the http/3 layer.
     pub fn close_session(&mut self, conn: &mut Connection, error: u32, message: &str) -> Res<()> {
+        qdebug!("[{self}]: close_session");
         self.state = SessionState::Done;
 
-        // TODO: Move to files
-        match &self.protocol {
-            Protocol::WebTransport(session) => {
-                let close_frame = WebTransportFrame::CloseSession {
-                    error,
-                    message: message.to_string(),
-                };
-                let mut encoder = Encoder::default();
-                close_frame.encode(&mut encoder);
-                self.control_stream_send
-                    .send_data_atomic(conn, encoder.as_ref())?;
-            }
-            Protocol::ConnectUdp(session) => {
-                qdebug!("[{self}]: close_session");
-                // TODO: WebTransport sends a message. needed here as well?
-
-                // TODO: WebTransport only does this on fin.
-                self.events.session_end(
-                    ExtendedConnectType::ConnectUdp,
-                    self.session_id,
-                    SessionCloseReason::Clean {
-                        error,
-                        message: message.to_string(),
-                    },
-                    None,
-                );
-            }
+        if let Some(close_frame) = self.protocol.close_frame(error, message) {
+            self.control_stream_send
+                .send_data_atomic(conn, close_frame.as_ref())?;
         }
 
         self.control_stream_send.close(conn)?;
         self.state = if self.control_stream_send.done() {
-            // TODO: In this case, don't we have to call self.events.session_end?
+            // TODO: In this case, don't we have to call
+            // self.events.session_end? Or does the caller of close_session not
+            // expect an event, as they already know it is now closed?
             SessionState::Done
         } else {
             SessionState::FinPending

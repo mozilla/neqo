@@ -15,4 +15,9 @@ impl ConnectUdpSession {
     pub fn new() -> Self {
         Self {}
     }
+
+    pub(crate) fn close_frame(&self, _error: u32, _message: &str) -> Option<Vec<u8>> {
+        // TODO: WebTransport sends a message. needed here as well?
+        None
+    }
 }
