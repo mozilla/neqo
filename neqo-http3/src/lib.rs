@@ -169,7 +169,7 @@ pub use client_events::{Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::{Http3State, WebTransportSessionAcceptAction};
 pub use connection_client::Http3Client;
-use features::extended_connect::WebTransportSession;
+use features::extended_connect::webtransport_session;
 use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;
@@ -442,7 +442,7 @@ trait RecvStream: Stream {
         None
     }
 
-    fn webtransport(&self) -> Option<Rc<RefCell<WebTransportSession>>> {
+    fn webtransport(&self) -> Option<Rc<RefCell<webtransport_session::Session>>> {
         None
     }
 
