@@ -1044,13 +1044,15 @@ impl CryptoStates {
         };
 
         let min_pn = if randomize_first_pn {
-            let r = random::<4>();
-            let pn = packet::Number::from;
-            // A random starting packet number. 5 uniformly random bits.
-            // Then maybe add up to 256 to occasionally nudge into a second byte for
-            // both varint and packet number encodings, heavily weighted to small values.
-            // And a small offset to ensure that the value is always non-zero.
-            (pn(r[0]) & 0x1f) + (pn(r[1]) + pn(r[2]) + pn(r[3])).saturating_sub(512) + 1
+            let r = random::<2>();
+            // A random starting packet number that is mostly less than 64,
+            // but can go as high as 1024, in three parts:
+            // - A value from 0..31.
+            // - A value from 0..1024 in steps of 32, but only one time in eight.
+            // - An extra 1, just to ensure that the result is always non-zero.
+            packet::Number::from(r[0] & 0x1f)
+                + (packet::Number::from(r[1].saturating_sub(224)) << 5)
+                + 1
         } else {
             0
         };
