@@ -145,7 +145,7 @@ jobs:
         run: |
           mkdir -p msquic/build
           cd msquic/build
-          cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
+          cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 -DQUIC_TLS_LIB=quictls ..
           cmake --build .
 
       - name: Build google/quiche
