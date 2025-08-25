@@ -39,9 +39,9 @@ pub fn main() {
 
     let gbit_link = || {
         let rate_byte = LINK_BANDWIDTH / 8;
-        // Router buffer set to bandwidth-delay product.
-        let capacity_byte = rate_byte * LINK_RTT_MS / 1_000;
-        TailDrop::new(rate_byte, capacity_byte, Duration::ZERO)
+        // BDP here is 5MB = 1e9 * 0.04 / 8: buffer an entire BDP here.
+        let capacity_byte = LINK_BANDWIDTH * LINK_RTT_MS / 1000;
+        TailDrop::new(rate_byte, capacity_byte, capacity_byte, Duration::ZERO)
     };
 
     let simulated_time = Simulator::new(

@@ -9,17 +9,59 @@
 use std::{
     cmp::max,
     collections::VecDeque,
-    fmt::{self, Debug},
+    fmt::{self, Debug, Display},
     time::{Duration, Instant},
 };
 
-use neqo_common::{qinfo, qtrace, Datagram};
+use neqo_common::{qinfo, qtrace, Datagram, Dscp, Ecn, Tos};
 use neqo_transport::Output;
 
 use super::Node;
 
 /// One second in nanoseconds.
 const ONE_SECOND_NS: u128 = 1_000_000_000;
+
+#[derive(Clone)]
+struct Stats {
+    /// The number of packets received.
+    received: usize,
+    /// The number of packets marked.
+    marked: usize,
+    /// The number of packets dropped.
+    dropped: usize,
+    /// The number of packets delivered.
+    delivered: usize,
+    /// The maximum amount of queue capacity ever used.
+    /// As packets leave the queue as soon as they start being used, this doesn't
+    /// count them.
+    maxq: usize,
+}
+
+impl Stats {
+    const fn new() -> Self {
+        Self {
+            received: 0,
+            marked: 0,
+            dropped: 0,
+            delivered: 0,
+            maxq: 0,
+        }
+    }
+
+    fn update_maxq(&mut self, used: usize) {
+        self.maxq = max(self.maxq, used);
+    }
+}
+
+impl Display for Stats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "rx {} mark {} drop {} tx {} maxq {}",
+            self.received, self.marked, self.dropped, self.delivered, self.maxq
+        )
+    }
+}
 
 /// This models a link with a tail drop router at the front of it.
 #[derive(Clone)]
@@ -31,6 +73,9 @@ pub struct TailDrop {
     rate: usize,
     /// The depth of the queue, in bytes.
     capacity: usize,
+    /// The depth of the queue where arriving packets get marked.
+    /// Set this to `capacity` or higher so that it has no effect.
+    mark_capacity: usize,
 
     /// A counter for how many bytes are enqueued.
     used: usize,
@@ -46,36 +91,25 @@ pub struct TailDrop {
     /// The packets that are on the link and when they can be delivered.
     on_link: VecDeque<(Instant, Datagram)>,
 
-    /// The number of packets received.
-    received: usize,
-    /// The number of packets dropped.
-    dropped: usize,
-    /// The number of packets delivered.
-    delivered: usize,
-    /// The maximum amount of queue capacity ever used.
-    /// As packets leave the queue as soon as they start being used, this doesn't
-    /// count them.
-    maxq: usize,
+    stats: Stats,
 }
 
 impl TailDrop {
     /// Make a new taildrop node with the given rate, queue capacity, and link delay.
     #[must_use]
-    pub const fn new(rate: usize, capacity: usize, delay: Duration) -> Self {
+    pub const fn new(rate: usize, capacity: usize, mark_capacity: usize, delay: Duration) -> Self {
         Self {
             overhead: 64,
             rate,
             capacity,
+            mark_capacity,
             used: 0,
             queue: VecDeque::new(),
             next_deque: None,
             sub_ns_delay: 0,
             delay,
             on_link: VecDeque::new(),
-            received: 0,
-            dropped: 0,
-            delivered: 0,
-            maxq: 0,
+            stats: Stats::new(),
         }
     }
 
@@ -83,13 +117,13 @@ impl TailDrop {
     /// with a fat 32k buffer (about 30ms), and the default forward delay of 50ms.
     #[must_use]
     pub const fn dsl_downlink() -> Self {
-        Self::new(1_000_000, 32_768, Duration::from_millis(50))
+        Self::new(1_000_000, 32_768, 32_768, Duration::from_millis(50))
     }
 
     /// Cut uplink to one fifth of the downlink (2Mbps), and reduce the buffer to 1/4.
     #[must_use]
     pub const fn dsl_uplink() -> Self {
-        Self::new(200_000, 8_192, Duration::from_millis(50))
+        Self::new(200_000, 8_192, 8_192, Duration::from_millis(50))
     }
 
     /// How "big" is this datagram, accounting for overheads.
@@ -125,18 +159,19 @@ impl TailDrop {
 
     /// Enqueue for sending.  Maybe.  If this overflows the queue, drop it instead.
     fn maybe_enqueue(&mut self, d: Datagram, now: Instant) {
-        self.received += 1;
+        self.stats.received += 1;
         if self.next_deque.is_none() {
             // Nothing in the queue and nothing still sending.
             debug_assert!(self.queue.is_empty());
             self.send(d, now);
         } else if self.used + self.size(&d) <= self.capacity {
             self.used += self.size(&d);
-            self.maxq = max(self.maxq, self.used);
+            self.stats.update_maxq(self.used);
+            let d = self.maybe_mark(d);
             self.queue.push_back(d);
         } else {
             qtrace!("taildrop dropping {} bytes", d.len());
-            self.dropped += 1;
+            self.stats.dropped += 1;
         }
     }
 
@@ -153,6 +188,15 @@ impl TailDrop {
             }
         }
     }
+
+    fn maybe_mark(&mut self, d: Datagram) -> Datagram {
+        if self.used <= self.mark_capacity {
+            return d;
+        }
+        self.stats.marked += 1;
+        let tos = Tos::from((Dscp::from(d.tos()), Ecn::Ce));
+        Datagram::new(d.source(), d.destination(), tos, d.to_vec())
+    }
 }
 
 impl Node for TailDrop {
@@ -166,7 +210,7 @@ impl Node for TailDrop {
         if let Some((t, _)) = self.on_link.front() {
             if *t <= now {
                 let (_, d) = self.on_link.pop_front().unwrap();
-                self.delivered += 1;
+                self.stats.delivered += 1;
                 Output::Datagram(d)
             } else {
                 Output::Callback(*t - now)
@@ -177,13 +221,7 @@ impl Node for TailDrop {
     }
 
     fn print_summary(&self, test_name: &str) {
-        qinfo!(
-            "{test_name}: taildrop: rx {} drop {} tx {} maxq {}",
-            self.received,
-            self.dropped,
-            self.delivered,
-            self.maxq,
-        );
+        qinfo!("{test_name}: taildrop: {stats}", stats = self.stats);
     }
 }
 
