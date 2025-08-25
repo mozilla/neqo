@@ -769,23 +769,23 @@ impl Http3Connection {
             .map_err(|_| Error::InvalidRequestTarget)?;
 
         // Transform pseudo-header fields
-        let mut final_headers = vec![
-            Header::new(":method", request.method),
-            Header::new(":authority", target.authority()),
-        ];
-        let is_classic_connect = request.connect_type.is_none()
-            && request
-                .headers
-                .iter()
-                .any(|h| h.name() == ":method" && h.value() == "CONNECT");
-        if is_classic_connect {
+        let is_classic_connect = request.connect_type.is_none() && request.method == "CONNECT";
+        let mut final_headers = if is_classic_connect {
             // > The :scheme and :path pseudo-header fields are omitted
             //
             // <https://datatracker.ietf.org/doc/html/rfc9114#section-4.4>
+            vec![
+                Header::new(":method", request.method),
+                Header::new(":authority", target.authority()),
+            ]
         } else {
-            final_headers.push(Header::new(":scheme", target.scheme()));
-            final_headers.push(Header::new(":path", target.path()));
-        }
+            vec![
+                Header::new(":method", request.method),
+                Header::new(":scheme", target.scheme()),
+                Header::new(":authority", target.authority()),
+                Header::new(":path", target.path()),
+            ]
+        };
         if let Some(conn_type) = request.connect_type {
             final_headers.push(Header::new(":protocol", conn_type.string()));
         }
