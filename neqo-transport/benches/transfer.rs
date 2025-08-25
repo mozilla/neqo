@@ -82,6 +82,7 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
                 let mut d_sum = Duration::ZERO;
                 for _i in 0..iters {
                     // run() returns the simulated time, excluding setup time.
+                    // No need for black_box(), because this doesn't measure compute.
                     d_sum += setup().run();
                 }
                 d_sum
