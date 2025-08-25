@@ -16,9 +16,9 @@ readme.workspace = true
 workspace = true
 
 [badges]
-codecov = { repository = "mozilla/mtu", branch = "main" }
-is-it-maintained-issue-resolution = { repository = "mozilla/mtu", branch = "main" }
-is-it-maintained-open-issues = { repository = "mozilla/mtu", branch = "main" }
+codecov = { repository = "mozilla/neqo/mtu", branch = "main" }
+is-it-maintained-issue-resolution = { repository = "mozilla/neqo/mtu", branch = "main" }
+is-it-maintained-open-issues = { repository = "mozilla/neqo/mtu", branch = "main" }
 maintenance = { status = "actively-developed", branch = "main" }
 
 [dependencies]
@@ -40,3 +40,8 @@ bindgen = { version = "0.69", default-features = false, features = ["runtime"] }
 
 [features]
 gecko = ["dep:mozbuild"]
+
+[lib]
+# See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
+bench = false
+

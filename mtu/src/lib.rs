@@ -130,6 +130,8 @@ pub fn interface_and_mtu(remote: IpAddr) -> Result<(String, usize)> {
 
 #[cfg(test)]
 mod test {
+    #![expect(clippy::unwrap_used, reason = "OK in tests.")]
+
     use std::{
         env,
         net::{IpAddr, Ipv4Addr, Ipv6Addr},
