@@ -782,11 +782,7 @@ impl Http3Connection {
 
         // Transform pseudo-header fields
         // TODO: Remove hack for classic CONNECT
-        let is_classic_connect = request.connect_type.is_none()
-            && request
-                .headers
-                .iter()
-                .any(|h| h.name() == ":method" && h.value() == "CONNECT");
+        let is_classic_connect = request.connect_type.is_none() && request.method == "CONNECT";
         let mut final_headers = if is_classic_connect {
             // > The :scheme and :path pseudo-header fields are omitted
             //
