@@ -280,7 +280,7 @@ impl<S: HttpServer> Runner<S> {
             server,
             timeout: None,
             sockets,
-            recv_buf: RecvBuf::new(),
+            recv_buf: RecvBuf::default(),
         }
     }
 

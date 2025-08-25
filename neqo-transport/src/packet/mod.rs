@@ -22,7 +22,6 @@ use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
     crypto::{CryptoDxState, CryptoStates, Epoch},
     frame::FrameType,
-    tracking::PacketNumberSpace,
     version::{self, Version},
     Error, Res,
 };
@@ -106,16 +105,6 @@ impl From<Epoch> for Type {
             Epoch::ZeroRtt => Self::ZeroRtt,
             Epoch::Handshake => Self::Handshake,
             Epoch::ApplicationData => Self::Short,
-        }
-    }
-}
-
-impl From<PacketNumberSpace> for Type {
-    fn from(space: PacketNumberSpace) -> Self {
-        match space {
-            PacketNumberSpace::Initial => Self::Initial,
-            PacketNumberSpace::Handshake => Self::Handshake,
-            PacketNumberSpace::ApplicationData => Self::Short,
         }
     }
 }

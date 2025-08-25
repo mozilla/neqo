@@ -184,12 +184,6 @@ impl From<CryptoError> for Error {
     }
 }
 
-impl From<::qlog::Error> for Error {
-    fn from(_err: ::qlog::Error) -> Self {
-        Self::Qlog
-    }
-}
-
 impl From<std::num::TryFromIntError> for Error {
     fn from(_: std::num::TryFromIntError) -> Self {
         Self::IntegerOverflow
@@ -224,28 +218,11 @@ pub enum CloseReason {
 }
 
 impl CloseReason {
-    #[must_use]
-    pub const fn app_code(&self) -> Option<AppError> {
-        match self {
-            Self::Application(e) => Some(*e),
-            Self::Transport(_) => None,
-        }
-    }
-
     /// Checks enclosed error for [`Error::None`] and
     /// [`CloseReason::Application(0)`].
     #[must_use]
     pub const fn is_error(&self) -> bool {
         !matches!(self, Self::Transport(Error::None) | Self::Application(0),)
-    }
-}
-
-impl From<CloseError> for CloseReason {
-    fn from(err: CloseError) -> Self {
-        match err {
-            CloseError::Transport(c) => Self::Transport(Error::Peer(c)),
-            CloseError::Application(c) => Self::Application(c),
-        }
     }
 }
 

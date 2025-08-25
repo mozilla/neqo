@@ -94,11 +94,13 @@ impl CertificateInfo {
         self.certs.into_iter()
     }
 
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn stapled_ocsp_responses(&self) -> Option<&Vec<Vec<u8>>> {
         self.stapled_ocsp_responses.as_ref()
     }
 
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn signed_cert_timestamp(&self) -> Option<&Vec<u8>> {
         self.signed_cert_timestamp.as_ref()

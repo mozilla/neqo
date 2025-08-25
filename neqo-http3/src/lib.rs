@@ -169,7 +169,7 @@ pub use client_events::{Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::{Http3State, WebTransportSessionAcceptAction};
 pub use connection_client::Http3Client;
-use features::extended_connect::WebTransportSession;
+use features::extended_connect::webtransport_session;
 use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;
@@ -338,14 +338,6 @@ impl Error {
         Self::TransportStreamDoesNotExist
     }
 
-    #[must_use]
-    pub const fn map_set_resumption_errors(err: &TransportError) -> Self {
-        match err {
-            TransportError::ConnectionState => Self::InvalidState,
-            _ => Self::InvalidResumptionToken,
-        }
-    }
-
     /// # Errors
     ///
     /// Any error is mapped to the indicated type.
@@ -373,32 +365,6 @@ impl From<QpackError> for Error {
         match err {
             QpackError::ClosedCriticalStream => Self::HttpClosedCriticalStream,
             e => Self::Qpack(e),
-        }
-    }
-}
-
-impl From<AppError> for Error {
-    fn from(error: AppError) -> Self {
-        match error {
-            0x100 => Self::HttpNone,
-            0x101 => Self::HttpGeneralProtocol,
-            0x103 => Self::HttpStreamCreation,
-            0x104 => Self::HttpClosedCriticalStream,
-            0x105 => Self::HttpFrameUnexpected,
-            0x106 => Self::HttpFrame,
-            0x107 => Self::HttpExcessiveLoad,
-            0x108 => Self::HttpId,
-            0x109 => Self::HttpSettings,
-            0x10a => Self::HttpMissingSettings,
-            0x10b => Self::HttpRequestRejected,
-            0x10c => Self::HttpRequestCancelled,
-            0x10d => Self::HttpRequestIncomplete,
-            0x10f => Self::HttpConnect,
-            0x110 => Self::HttpVersionFallback,
-            0x200 => Self::Qpack(QpackError::Decompression),
-            0x201 => Self::Qpack(QpackError::EncoderStream),
-            0x202 => Self::Qpack(QpackError::DecoderStream),
-            _ => Self::HttpInternal(0),
         }
     }
 }
@@ -476,7 +442,7 @@ trait RecvStream: Stream {
         None
     }
 
-    fn webtransport(&self) -> Option<Rc<RefCell<WebTransportSession>>> {
+    fn webtransport(&self) -> Option<Rc<RefCell<webtransport_session::Session>>> {
         None
     }
 

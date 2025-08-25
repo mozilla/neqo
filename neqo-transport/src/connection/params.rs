@@ -207,23 +207,6 @@ impl ConnectionParameters {
         self
     }
 
-    /// Get the maximum stream data that we will accept on different types of streams.
-    ///
-    /// # Panics
-    ///
-    /// If `StreamType::UniDi` and `false` are passed as that is not a valid combination.
-    #[must_use]
-    pub fn get_max_stream_data(&self, stream_type: StreamType, remote: bool) -> u64 {
-        match (stream_type, remote) {
-            (StreamType::BiDi, false) => self.max_stream_data_bidi_local,
-            (StreamType::BiDi, true) => self.max_stream_data_bidi_remote,
-            (StreamType::UniDi, false) => {
-                panic!("Can't get receive limit on a stream that can only be sent")
-            }
-            (StreamType::UniDi, true) => self.max_stream_data_uni,
-        }
-    }
-
     /// Set the maximum stream data that we will accept on different types of streams.
     ///
     /// # Panics
@@ -412,6 +395,7 @@ impl ConnectionParameters {
         self.pmtud_iface_mtu
     }
 
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn pmtud_iface_mtu(mut self, pmtud_iface_mtu: bool) -> Self {
         self.pmtud_iface_mtu = pmtud_iface_mtu;
