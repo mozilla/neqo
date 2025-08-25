@@ -8,10 +8,9 @@ use std::{cell::RefCell, rc::Rc};
 
 use neqo_common::event::Provider as _;
 use static_assertions::const_assert;
-use test_fixture::now;
 
 use super::{
-    assert_error, connect_force_idle, default_client, default_server, new_client, new_server,
+    assert_error, connect_force_idle, default_client, default_server, new_client, new_server, now,
     AT_LEAST_PTO,
 };
 use crate::{

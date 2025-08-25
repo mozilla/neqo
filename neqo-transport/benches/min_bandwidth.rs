@@ -14,6 +14,7 @@
 
 use std::time::Duration;
 
+use neqo_common::{log::init as init_log, qinfo};
 use neqo_transport::{ConnectionParameters, State};
 use test_fixture::{
     boxed,
@@ -44,11 +45,13 @@ pub fn main() {
         TailDrop::new(rate_byte, capacity_byte, Duration::ZERO)
     };
 
+    init_log(None);
+
     let simulated_time = Simulator::new(
         "gbit-bandwidth",
         boxed![
             Node::new_client(
-                ConnectionParameters::default(),
+                ConnectionParameters::default().ack_ratio(255),
                 boxed![ReachState::new(State::Confirmed)],
                 boxed![ReceiveData::new(TRANSFER_AMOUNT)]
             ),
@@ -56,7 +59,7 @@ pub fn main() {
             gbit_link(),
             Delay::new(Duration::from_millis(LINK_RTT_MS as u64 / 2)),
             Node::new_server(
-                ConnectionParameters::default(),
+                ConnectionParameters::default().ack_ratio(255),
                 boxed![ReachState::new(State::Confirmed)],
                 boxed![SendData::new(TRANSFER_AMOUNT)]
             ),
@@ -69,6 +72,10 @@ pub fn main() {
     .run();
 
     let achieved_bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
+    qinfo!(
+        "Achieved bandwidth {bw}",
+        bw = achieved_bandwidth / MBIT as f64
+    );
 
     assert!(
         LINK_BANDWIDTH as f64 * MINIMUM_EXPECTED_UTILIZATION < achieved_bandwidth,

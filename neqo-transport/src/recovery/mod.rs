@@ -533,7 +533,7 @@ impl Loss {
             path.borrow_mut().packet_sent(&mut sent_packet, now);
             space.on_packet_sent(sent_packet);
         } else {
-            qwarn!(
+            qinfo!(
                 "[{self}] ignoring {pn_space}-{} from dropped space",
                 sent_packet.pn()
             );

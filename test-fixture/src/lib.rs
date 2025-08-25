@@ -179,7 +179,7 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         DEFAULT_ADDR,
         DEFAULT_ADDR,
-        params.ack_ratio(255), // Tests work better with this set this way.
+        params,
         now(),
     )
     .expect("create a client");
@@ -236,7 +236,7 @@ pub fn new_server<A: AsRef<str>>(alpn: &[A], params: ConnectionParameters) -> Co
         DEFAULT_KEYS,
         alpn,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        params.ack_ratio(255),
+        params,
     )
     .expect("create a server");
     if let Ok(dir) = std::env::var("QLOGDIR") {

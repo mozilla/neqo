@@ -63,10 +63,10 @@ fn single_client() {
 #[test]
 fn connect_single_version_both() {
     fn connect_one_version(version: Version) {
-        let params = ConnectionParameters::default().versions(version, vec![version]);
-        let mut server = new_server(params.clone());
-
-        let mut client = new_client(params);
+        let mut server =
+            new_server(ConnectionParameters::default().versions(version, vec![version]));
+        let mut client =
+            new_client(ConnectionParameters::default().versions(version, vec![version]));
         let server_conn = connect(&mut client, &mut server);
         assert_eq!(client.version(), version);
         assert_eq!(server_conn.borrow().version(), version);
@@ -427,9 +427,11 @@ fn new_token_different_port() {
 
 #[test]
 fn bad_client_initial() {
-    // This test needs to decrypt the CI, so turn off MLKEM.
+    const PN_LEN: usize = 2;
     let mut client = new_client(ConnectionParameters::default().mlkem(false));
-    let mut server = default_server();
+    // There's some precise size counting we do in this test, so disable randomization
+    // of packet numbers.
+    let mut server = new_server(ConnectionParameters::default().randomize_first_pn(false));
 
     let dgram = client.process_output(now()).dgram().expect("a datagram");
     let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram, Role::Client).unwrap();
@@ -448,13 +450,14 @@ fn bad_client_initial() {
     // Make a new header with a 1 byte packet number length.
     let mut header_enc = Encoder::new();
     header_enc
-        .encode_byte(0xc0) // Initial with 1 byte packet number.
-        .encode_uint(4, Version::default().wire_version())
+        .encode_byte(0xc1) // Initial with 2 byte packet number.
+        .encode_uint(4, Version::Version1.wire_version())
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload_enc.len() + Aead::expansion() + 1).unwrap())
-        .encode_byte(u8::try_from(pn).unwrap());
+        .encode_varint(u64::try_from(payload_enc.len() + Aead::expansion() + PN_LEN).unwrap())
+        .encode_byte(u8::try_from(pn >> 8).unwrap())
+        .encode_byte(u8::try_from(pn & 0xff).unwrap());
 
     let mut ciphertext = header_enc.as_ref().to_vec();
     ciphertext.resize(header_enc.len() + payload_enc.len() + Aead::expansion(), 0);
@@ -473,7 +476,7 @@ fn bad_client_initial() {
     header_protection::apply(
         &hp,
         &mut ciphertext,
-        (header_enc.len() - 1)..header_enc.len(),
+        (header_enc.len() - PN_LEN)..header_enc.len(),
     );
     let bad_dgram = Datagram::new(dgram.source(), dgram.destination(), dgram.tos(), ciphertext);
 
@@ -520,7 +523,12 @@ fn bad_client_initial() {
 
 #[test]
 fn bad_client_initial_connection_close() {
-    let mut client = default_client();
+    // This test needs to decrypt the CI; turn off MLKEM and random client initial packet numbers.
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .mlkem(false)
+            .randomize_first_pn(false),
+    );
     let mut server = default_server();
 
     let dgram = client.process_output(now()).dgram().expect("a datagram");
