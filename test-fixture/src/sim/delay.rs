@@ -103,7 +103,7 @@ impl Debug for RandomDelay {
 
 pub struct Delay {
     delay: Duration,
-    queue: BTreeMap<Instant, VecDeque<Datagram>>,
+    queue: VecDeque<(Instant, Datagram)>,
 }
 
 impl Delay {
@@ -111,12 +111,12 @@ impl Delay {
     pub fn new(delay: Duration) -> Self {
         Self {
             delay,
-            queue: BTreeMap::default(),
+            queue: VecDeque::default(),
         }
     }
 
     fn insert(&mut self, d: Datagram, now: Instant) {
-        self.queue.entry(now + self.delay).or_default().push_back(d);
+        self.queue.push_back((now + self.delay, d));
     }
 }
 
@@ -128,19 +128,15 @@ impl Node for Delay {
             self.insert(dgram, now);
         }
 
-        while let Some((&k, _)) = self.queue.range(..=now).next() {
-            let same_time_queue = self.queue.get_mut(&k).unwrap();
-            if let Some(d) = same_time_queue.pop_front() {
-                if same_time_queue.is_empty() {
-                    self.queue.remove(&k);
-                }
-
-                return Output::Datagram(d);
+        if let Some((t, _)) = self.queue.front() {
+            if *t <= now {
+                let Some((_, d)) = self.queue.pop_front() else {
+                    unreachable!();
+                };
+                Output::Datagram(d)
+            } else {
+                Output::Callback(*t - now)
             }
-        }
-
-        if let Some(&t) = self.queue.keys().next() {
-            Output::Callback(t - now)
         } else {
             Output::None
         }
@@ -149,6 +145,6 @@ impl Node for Delay {
 
 impl Debug for Delay {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("delay")
+        write!(f, "delay-{:?}", self.delay)
     }
 }
