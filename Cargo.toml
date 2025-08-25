@@ -39,6 +39,7 @@ qlog = { version = "0.15.1", default-features = false }
 quinn-udp = { version = "0.5.13", default-features = false, features = ["direct-log"] }
 regex = { version = "1.9", default-features = false }
 rustc-hash = { version = "2.1", default-features = false, features = [ "std" ]}
+smallvec = { version = "1.13", default-features = false, features = ["union", "const_generics"] }
 static_assertions = { version = "1.1", default-features = false }
 strum = { version = "0.27", default-features = false, features = ["derive"] }
 url = { version = "2.5", default-features = false, features = ["std"] }
