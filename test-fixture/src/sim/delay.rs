@@ -130,9 +130,7 @@ impl Node for Delay {
 
         if let Some((t, _)) = self.queue.front() {
             if *t <= now {
-                let Some((_, d)) = self.queue.pop_front() else {
-                    unreachable!();
-                };
+                let (_, d) = self.queue.pop_front().expect("was Some above");
                 Output::Datagram(d)
             } else {
                 Output::Callback(*t - now)
