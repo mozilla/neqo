@@ -135,6 +135,9 @@ opt-level = 1
 
 [profile.release]
 lto = "fat"
+# TODO: Benchmark this separately.
+#codegen-units = 1
+#panic = "abort"
 
 [profile.bench]
 # Inherits from the "release" profile, so just provide overrides here:
