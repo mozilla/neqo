@@ -13,7 +13,7 @@ use test_fixture::{
     sim::{
         connection::{Node, ReachState, ReceiveData, SendData},
         network::{RandomDelay, TailDrop},
-        ReadySimulator, Simulator,
+        Simulator,
     },
 };
 
@@ -56,9 +56,6 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
             }
             sim.setup()
         };
-        let routine = |sim: ReadySimulator| {
-            black_box(sim.run());
-        };
 
         let mut group = c.benchmark_group(format!("transfer/pacing-{pacing}/{label}"));
         group.noise_threshold(0.03);
@@ -68,7 +65,7 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
             b.iter_batched(
                 setup,
                 |s| {
-                    routine(s);
+                    black_box(s.run());
                 },
                 SmallInput,
             );
@@ -84,6 +81,7 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
             b.iter_custom(|iters| {
                 let mut d_sum = Duration::ZERO;
                 for _i in 0..iters {
+                    // run() returns the simulated time, excluding setup time.
                     d_sum += setup().run();
                 }
                 d_sum
