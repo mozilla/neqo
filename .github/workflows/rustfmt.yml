@@ -27,6 +27,5 @@ jobs:
         with:
           version: nightly
           components: rustfmt
-          tools: cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
-      - run: cargo hack --workspace fmt --all -- --check
+      - run: cargo fmt --all -- --check

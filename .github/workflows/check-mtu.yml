@@ -1,4 +1,4 @@
-name: Check
+name: Check MTU crate
 on:
   push:
     branches: ["main"]
@@ -79,7 +79,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: .github/actions/rust
+      - uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'nightly' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && 'rust-src' || '' }}
