@@ -135,7 +135,7 @@ jobs:
             rm -rf target # Don't sync this back to host
 
       - if: ${{ matrix.os == 'solaris' }}
-        uses: vmactions/solaris-vm@170f1f96f376cf7467cc41627e0c7590932fccaa # v1.1.4
+        uses: vmactions/solaris-vm@58cbd70c6e051860f9b8f65908cc582938fbbdba # v1.1.5
         with:
           release: "11.4-gcc"
           usesh: true
