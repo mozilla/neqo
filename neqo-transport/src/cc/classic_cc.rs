@@ -100,10 +100,22 @@ pub trait WindowAdjustment: Display + Debug {
     ) -> (usize, usize);
     /// Cubic needs this signal to reset its epoch.
     fn on_app_limited(&mut self);
+
+    /// Helper for CUBIC tests and overridden in [`cubic::Cubic`]
     #[cfg(test)]
-    fn last_max_cwnd(&self) -> f64;
+    fn w_max(&self) -> f64 {
+        0.0
+    }
+
+    /// Helper for CUBIC tests and overridden in [`cubic::Cubic`]
     #[cfg(test)]
-    fn set_last_max_cwnd(&mut self, last_max_cwnd: f64);
+    fn set_w_max(&mut self, _w_max: f64) {}
+
+    /// Helper for CUBIC tests and overridden in [`cubic::Cubic`]
+    #[cfg(test)]
+    fn alpha(&self) -> f64 {
+        0.0
+    }
 }
 
 #[derive(Debug)]
@@ -250,6 +262,11 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                 self.max_datagram_size(),
                 now,
             );
+            // TODO: We increase possibly `2 * max_datagram_size` per acked packet here. RFC 9002
+            // states "A sender in congestion avoidance [...] MUST limit the increase to the
+            // congestion window to at most one maximum datagram size for each congestion window
+            // that is acknowledged.". Not sure if that also applies to Cubic, but as this is code
+            // that also runs for NewReno we should look at it anyways.
             debug_assert!(bytes_for_increase > 0);
             // If enough credit has been accumulated already, apply them gradually.
             // If we have sudden increase in allowed rate we actually increase cwnd gently.
@@ -260,11 +277,14 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             self.acked_bytes += new_acked;
             if self.acked_bytes >= bytes_for_increase {
                 self.acked_bytes -= bytes_for_increase;
-                self.congestion_window += self.max_datagram_size(); // or is this the current MTU?
+                self.congestion_window += self.max_datagram_size();
             }
             // The number of bytes we require can go down over time with Cubic.
             // That might result in an excessive rate of increase, so limit the number of unused
             // acknowledged bytes after increasing the congestion window twice.
+            // TODO: What is this based on? E.g. quiche does not limit their unused credits. Should
+            // maybe gather some data on it.
+            // Ref: <https://github.com/cloudflare/quiche/blob/a5311660df1b990a845757a5720d8506950fa30f/quiche/src/recovery/congestion/cubic.rs#L323-L326>
             self.acked_bytes = min(bytes_for_increase, self.acked_bytes);
         }
         qlog::metrics_updated(
@@ -435,13 +455,18 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     }
 
     #[cfg(test)]
-    pub fn last_max_cwnd(&self) -> f64 {
-        self.cc_algorithm.last_max_cwnd()
+    pub fn w_max(&self) -> f64 {
+        self.cc_algorithm.w_max()
     }
 
     #[cfg(test)]
-    pub fn set_last_max_cwnd(&mut self, last_max_cwnd: f64) {
-        self.cc_algorithm.set_last_max_cwnd(last_max_cwnd);
+    pub fn set_w_max(&mut self, w_max: f64) {
+        self.cc_algorithm.set_w_max(w_max);
+    }
+
+    #[cfg(test)]
+    pub fn alpha(&self) -> f64 {
+        self.cc_algorithm.alpha()
     }
 
     #[cfg(test)]
@@ -552,14 +577,14 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             return false;
         }
 
-        let (cwnd, acked_bytes) = self.cc_algorithm.reduce_cwnd(
+        let (ssthresh, acked_bytes) = self.cc_algorithm.reduce_cwnd(
             self.congestion_window,
             self.acked_bytes,
             self.max_datagram_size(),
         );
-        self.congestion_window = max(cwnd, self.cwnd_min());
+        self.ssthresh = max(ssthresh, self.cwnd_min());
         self.acked_bytes = acked_bytes;
-        self.ssthresh = self.congestion_window;
+        self.congestion_window = self.ssthresh;
         qdebug!(
             "[{self}] Cong event -> recovery; cwnd {}, ssthresh {}",
             self.congestion_window,
