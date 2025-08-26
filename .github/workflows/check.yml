@@ -94,7 +94,7 @@ jobs:
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }}
+          tools: cargo-hack ${{ matrix.rust-toolchain == 'stable' && ', cargo-llvm-cov' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -176,7 +176,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - run: cargo update -w --locked
+      - run: |
+          cargo update -w --locked
+          cargo hack update -w --locked
 
   check-android:
     name: Check Android

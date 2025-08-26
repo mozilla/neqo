@@ -38,6 +38,9 @@ cfg_aliases = { version = "0.2", default-features = false }
 mozbuild = { version = "0.1", default-features = false, optional = true }
 bindgen = { version = "0.69", default-features = false, features = ["runtime"] }
 
+[package.metadata.cargo-machete]
+ignored = ["bindgen", "cfg_aliases"]
+
 [features]
 gecko = ["dep:mozbuild"]
 
