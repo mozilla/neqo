@@ -88,6 +88,7 @@ jobs:
 
       - name: Check
         run: |
+          cd mtu
           OPTIONS=(--all-targets)
           if [ "$BUILD_TYPE" ]; then
             OPTIONS+=("$BUILD_TYPE")
@@ -101,6 +102,7 @@ jobs:
           WINDOWS: ${{ startsWith(matrix.os, 'windows') && 'windows' || '' }}"
           TYPE: ${{ matrix.type }}
         run: |
+          cd mtu
           OPTIONS=(--no-fail-fast)
           if [ "$BUILD_TYPE" ]; then
             OPTIONS+=("$BUILD_TYPE")
@@ -133,6 +135,7 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
           OS: ${{ matrix.os }}
         run: |
+          cd mtu
           if [ "$OS" = "ubuntu-24.04" ]; then
             sudo apt-get install -y --no-install-recommends llvm
             TARGET="x86_64-unknown-linux-gnu"
@@ -184,6 +187,7 @@ jobs:
             set -e
             pkg install -y curl llvm
           run: | # This executes as user
+            cd mtu
             set -e
             sh rustup.sh --default-toolchain nightly --profile minimal --component clippy,llvm-tools -y
             . "$HOME/.cargo/env"
@@ -204,6 +208,7 @@ jobs:
             # TODO: Is there a way to not pin the version of llvm? -z to pkg_add doesn't work.
             pkg_add rust rust-clippy llvm-19.1.7p3 # rustup doesn't support OpenBSD at all
           run: | # This executes as user
+            cd mtu
             set -e
             export LIBCLANG_PATH=/usr/local/llvm19/lib
             cargo check --all-targets
@@ -229,6 +234,7 @@ jobs:
             /usr/sbin/pkg_add pkgin
             pkgin -y install curl clang
           run: | # This executes as user
+            cd mtu
             set -e
             sh rustup.sh --default-toolchain nightly --profile minimal --component clippy,llvm-tools -y
             . "$HOME/.cargo/env"
@@ -253,6 +259,7 @@ jobs:
             set -e
             pkg install clang-libs
           run: | # This executes as also as root on Solaris
+            cd mtu
             set -e
             source <(curl -s https://raw.githubusercontent.com/psumbera/solaris-rust/refs/heads/main/sh.rust-web-install) || true # This doesn't exit with zero on success
             export LIBCLANG_PATH="/usr/lib/amd64"
@@ -321,11 +328,11 @@ jobs:
         NDK_VERSION: ${{ env.NDK_VERSION }}
       run: sdkmanager --install "ndk;$NDK_VERSION"
 
-    - uses: ./neqo/.github/actions/rust
+    - uses: ./.github/actions/rust
       with:
         version: stable
         targets: ${{ matrix.target }}
-        tools: cargo-ndk
+        tools: cargo-ndk@^4
         token: ${{ secrets.GITHUB_TOKEN }}
 
     - env:
