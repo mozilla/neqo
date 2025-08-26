@@ -338,11 +338,14 @@ jobs:
 
     - env:
         MATRIX_TARGET: ${{ matrix.target }}
-      run: cargo ndk --platform "$API_LEVEL" --target "$MATRIX_TARGET" test --no-run
+      run: |
+        cd mtu
+        cargo ndk --platform "$API_LEVEL" --target "$MATRIX_TARGET" test --no-run
 
     - env:
         TARGET: ${{ matrix.target }}
       run: |
+        cd mtu
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm
