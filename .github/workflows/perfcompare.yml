@@ -145,7 +145,8 @@ jobs:
         run: |
           mkdir -p msquic/build
           cd msquic/build
-          cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 -DQUIC_TLS_LIB=quictls ..
+          rm -f CMakeCache.txt # This seems to be needed now to avoid a spurious warning about "QUIC_TLS"...
+          cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
           cmake --build .
 
       - name: Build google/quiche
