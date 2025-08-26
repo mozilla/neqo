@@ -22,7 +22,6 @@ permissions:
 defaults:
   run:
     shell: bash
-    working-directory: mtu # Run all checks in the mtu directory
 
 jobs:
   toolchains:
@@ -176,7 +175,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - run: curl -o rustup.sh --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
+      - run: |
+          cd mtu
+          curl -o rustup.sh --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
 
       - if: matrix.os == 'freebsd'
         uses: vmactions/freebsd-vm@966989c456d41351f095a421f60e71342d3bce41 # v1.2.1
