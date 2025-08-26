@@ -6,6 +6,8 @@
 
 use std::str::FromStr;
 
+use thiserror::Error;
+
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
 pub struct Header {
     name: String,
@@ -75,22 +77,13 @@ where
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Error)]
 pub enum FromStrError {
+    #[error("Header string missing colon")]
     MissingColon,
+    #[error("Header string missing name")]
     MissingName,
 }
-
-impl std::fmt::Display for FromStrError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MissingColon => write!(f, "Header string missing colon"),
-            Self::MissingName => write!(f, "Header string missing name"),
-        }
-    }
-}
-
-impl std::error::Error for FromStrError {}
 
 impl FromStr for Header {
     type Err = FromStrError;
