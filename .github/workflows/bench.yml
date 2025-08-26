@@ -132,9 +132,8 @@ jobs:
           for BENCH in $BENCHES; do
             cp "$BENCH" ../binaries/neqo/
             # shellcheck disable=SC2086
-            # --baseline-lenient allows us to add new benchmarks in pull requests.
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --baseline-lenient main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
+              $BENCH -- --bench --baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
           done
           for BENCH in $BENCHES; do
             NAME=$(basename "$BENCH" | cut -d- -f1)
