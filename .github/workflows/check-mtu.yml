@@ -337,8 +337,8 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
 
     - env:
-        TARGET: ${{ matrix.target }}
-      run: cargo ndk --bindgen -t "$TARGET" test --no-run
+        MATRIX_TARGET: ${{ matrix.target }}
+      run: cargo ndk --platform "$API_LEVEL" --target "$MATRIX_TARGET" test --no-run
 
     - env:
         TARGET: ${{ matrix.target }}
