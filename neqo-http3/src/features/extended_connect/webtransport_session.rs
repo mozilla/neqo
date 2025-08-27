@@ -144,7 +144,7 @@ impl Protocol for Session {
         )
     }
 
-    fn write_datagram_prefix(&self, encoder: &mut Encoder) {
+    fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
         // WebTransport does not add prefix (i.e. context ID).
     }
 

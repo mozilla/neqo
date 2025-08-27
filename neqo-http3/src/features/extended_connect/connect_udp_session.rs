@@ -42,7 +42,7 @@ impl Protocol for Session {
         ExtendedConnectType::ConnectUdp
     }
 
-    fn close_frame(&self, error: u32, message: &str) -> Option<Vec<u8>> {
+    fn close_frame(&self, _error: u32, _message: &str) -> Option<Vec<u8>> {
         // ConnectUdp does not have a close frame.
         None
     }
@@ -85,8 +85,8 @@ impl Protocol for Session {
 
     fn add_stream(
         &mut self,
-        stream_id: StreamId,
-        events: &mut Box<dyn ExtendedConnectEvents>,
+        _stream_id: StreamId,
+        _events: &mut Box<dyn ExtendedConnectEvents>,
     ) -> Res<()> {
         // ConnectUdp does not support adding streams.
         let msg = "ConnectUdp does not support adding streams";
@@ -95,14 +95,14 @@ impl Protocol for Session {
         Ok(())
     }
 
-    fn remove_recv_stream(&mut self, stream_id: StreamId) {
+    fn remove_recv_stream(&mut self, _stream_id: StreamId) {
         // ConnectUdp does not support removing recv streams.
         let msg = "ConnectUdp does not support removing recv streams";
         qdebug!("{msg}");
         debug_assert!(false, "{msg}");
     }
 
-    fn remove_send_stream(&mut self, stream_id: StreamId) {
+    fn remove_send_stream(&mut self, _stream_id: StreamId) {
         // ConnectUdp does not support removing send streams.
         let msg = "ConnectUdp does not support removing send streams";
         qdebug!("{msg}");
