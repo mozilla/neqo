@@ -4,12 +4,12 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use neqo_common::Encoder;
+use neqo_common::{qdebug, Encoder};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
     features::extended_connect::{
-        ExtendedConnectEvents, ExtendedConnectType, SessionCloseReason, SessionState,
+        ExtendedConnectEvents, ExtendedConnectType, Protocol, SessionCloseReason, SessionState,
     },
     frames::{ConnectUdpFrame, FrameReader, StreamReaderRecvStreamWrapper},
     Error, RecvStream, Res,
@@ -21,12 +21,6 @@ pub struct ConnectUdpSession {
     session_id: StreamId,
 }
 
-impl Display for ConnectUdpSession {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "ConnectUdpSession",)
-    }
-}
-
 impl ConnectUdpSession {
     #[must_use]
     pub(crate) fn new(session_id: StreamId) -> Self {
@@ -35,10 +29,26 @@ impl ConnectUdpSession {
             frame_reader: FrameReader::new(),
         }
     }
+}
 
+impl Display for ConnectUdpSession {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "ConnectUdpSession",)
+    }
+}
+
+impl Protocol for ConnectUdpSession {
+    fn connect_type(&self) -> ExtendedConnectType {
+        ExtendedConnectType::ConnectUdp
+    }
+
+    fn close_frame(&self, error: u32, message: &str) -> Option<Vec<u8>> {
+        // ConnectUdp does not have a close frame.
+        None
+    }
 
     // TODO: De-duplicate further with webtransport_session.rs?
-    pub(crate) fn read_control_stream(
+    fn read_control_stream(
         &mut self,
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
@@ -73,16 +83,42 @@ impl ConnectUdpSession {
         }
     }
 
+    fn add_stream(
+        &mut self,
+        stream_id: StreamId,
+        events: &mut Box<dyn ExtendedConnectEvents>,
+    ) -> Res<()> {
+        // ConnectUdp does not support adding streams.
+        let msg = "ConnectUdp does not support adding streams";
+        qdebug!("{msg}");
+        debug_assert!(false, "{msg}");
+        Ok(())
+    }
+
+    fn remove_recv_stream(&mut self, stream_id: StreamId) {
+        // ConnectUdp does not support removing recv streams.
+        let msg = "ConnectUdp does not support removing recv streams";
+        qdebug!("{msg}");
+        debug_assert!(false, "{msg}");
+    }
+
+    fn remove_send_stream(&mut self, stream_id: StreamId) {
+        // ConnectUdp does not support removing send streams.
+        let msg = "ConnectUdp does not support removing send streams";
+        qdebug!("{msg}");
+        debug_assert!(false, "{msg}");
+    }
+
     // TODO: Faking it to simplify implementation in connection.rs. Can we do better?
-    pub(crate) fn take_sub_streams() -> (HashSet<StreamId>, HashSet<StreamId>) {
+    fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
         (HashSet::default(), HashSet::default())
     }
 
-    pub(crate) fn write_datagram_prefix(encoder: &mut Encoder) {
+    fn write_datagram_prefix(&self, encoder: &mut Encoder) {
         encoder.encode_varint(0u64);
     }
 
-    pub(crate) fn read_datagram_prefix(datagram: &[u8]) -> &[u8] {
+    fn read_datagram_prefix<'a>(&self, datagram: &'a [u8]) -> &'a [u8] {
         let Some((context_id, remainder)) = datagram.split_first() else {
             // TODO: Return error instead? Is datagram without context ID allowed?
             return datagram; // emtpy

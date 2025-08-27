@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-pub(crate) mod connect_udp;
+pub(crate) mod connect_udp_session;
 pub(crate) mod webtransport_session;
 pub(crate) mod webtransport_streams;
 
@@ -22,7 +22,7 @@ pub(crate) use webtransport_session::WebTransportSession;
 
 use crate::{
     client_events::Http3ClientEvents,
-    features::{extended_connect::connect_udp::ConnectUdpSession, NegotiationState},
+    features::{extended_connect::connect_udp_session::ConnectUdpSession, NegotiationState},
     frames::HFrame,
     priority::PriorityHandler,
     recv_message::{RecvMessage, RecvMessageInfo},
@@ -100,6 +100,13 @@ impl ExtendedConnectType {
             Self::ConnectUdp => Http3StreamType::ConnectUdp(session_id),
         }
     }
+
+    pub(crate) fn new_protocol(&self, session_id: StreamId, role: Role) -> Box<dyn Protocol> {
+        match self {
+            Self::WebTransport => Box::new(WebTransportSession::new(session_id, role)),
+            Self::ConnectUdp => Box::new(ConnectUdpSession::new(session_id)),
+        }
+    }
 }
 
 impl From<ExtendedConnectType> for HSettingType {
@@ -148,7 +155,7 @@ pub(crate) struct Session {
     state: SessionState,
     events: Box<dyn ExtendedConnectEvents>,
     // TODO: Is `protocol` the right term?
-    protocol: Protocol,
+    protocol: Box<dyn Protocol>,
 }
 
 // TODO: Move
@@ -163,126 +170,6 @@ pub(crate) enum SessionState {
 impl SessionState {
     pub(crate) const fn closing_state(&self) -> bool {
         matches!(self, Self::FinPending | Self::Done)
-    }
-}
-
-// TODO: Move
-// TODO: Ideally this would be a trait. But that would make RecvStream no longer object safe.
-#[derive(Debug)]
-enum Protocol {
-    WebTransport(WebTransportSession),
-    ConnectUdp(ConnectUdpSession),
-}
-
-impl Protocol {
-    fn new(connect_type: ExtendedConnectType, session_id: StreamId, role: Role) -> Self {
-        match connect_type {
-            ExtendedConnectType::WebTransport => {
-                Self::WebTransport(WebTransportSession::new(session_id, role))
-            }
-            ExtendedConnectType::ConnectUdp => Self::ConnectUdp(ConnectUdpSession::new(session_id)),
-        }
-    }
-
-    fn connect_type(&self) -> ExtendedConnectType {
-        match self {
-            Self::WebTransport(_) => ExtendedConnectType::WebTransport,
-            Self::ConnectUdp(_) => ExtendedConnectType::ConnectUdp,
-        }
-    }
-
-    fn close_frame(&self, error: u32, message: &str) -> Option<Vec<u8>> {
-        match self {
-            Self::WebTransport(session) => session.close_frame(error, message),
-            Self::ConnectUdp(_) => {
-                // ConnectUdp does not have a close frame.
-                None
-            },
-        }
-    }
-
-    fn read_control_stream(
-        &mut self,
-        conn: &mut Connection,
-        events: &mut Box<dyn ExtendedConnectEvents>,
-        control_stream_recv: &mut Box<dyn RecvStream>,
-    ) -> Res<Option<SessionState>> {
-        match self {
-            Self::WebTransport(session) => {
-                session.read_control_stream(conn, events, control_stream_recv)
-            }
-            Self::ConnectUdp(session) => {
-                session.read_control_stream(conn, events, control_stream_recv)
-            }
-        }
-    }
-
-    fn add_stream(
-        &mut self,
-        stream_id: StreamId,
-        events: &mut Box<dyn ExtendedConnectEvents>,
-    ) -> Res<()> {
-        match self {
-            Self::WebTransport(session) => session.add_stream(stream_id, events),
-            Self::ConnectUdp(_session) => {
-                let msg = "ConnectUdp does not support adding streams";
-                qdebug!("{msg}");
-                debug_assert!(false, "{msg}");
-                Ok(())
-            }
-        }
-    }
-
-    fn remove_recv_stream(&mut self, stream_id: StreamId) {
-        match self {
-            Self::WebTransport(session) => {
-                session.remove_recv_stream(stream_id);
-            }
-            Self::ConnectUdp(_) => {
-                let msg = "ConnectUdp does not support removing recv streams";
-                qdebug!("{msg}");
-                debug_assert!(false, "{msg}");
-            }
-        }
-    }
-
-    fn remove_send_stream(&mut self, stream_id: StreamId) {
-        match self {
-            Self::WebTransport(session) => {
-                session.remove_send_stream(stream_id);
-            }
-            Self::ConnectUdp(_) => {
-                let msg = "ConnectUdp does not support removing send streams";
-                qdebug!("{msg}");
-                debug_assert!(false, "{msg}");
-            }
-        }
-    }
-
-    fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
-        match self {
-            Self::WebTransport(session) => session.take_sub_streams(),
-            Self::ConnectUdp(session) => ConnectUdpSession::take_sub_streams(),
-        }
-    }
-
-    fn write_datagram_prefix(&self, encoder: &mut Encoder) {
-        match self {
-            Self::WebTransport(_) => {
-                // WebTransport does not add prefix (i.e. context ID).
-            }
-            Self::ConnectUdp(_) => ConnectUdpSession::write_datagram_prefix(encoder),
-        }
-    }
-
-    fn read_datagram_prefix<'a>(&self, datagram: &'a [u8]) -> &'a [u8] {
-        match self {
-            Self::WebTransport(_) => {
-                // WebTransport does not add prefix (i.e. context ID).
-                datagram
-            }
-            Self::ConnectUdp(_) => ConnectUdpSession::read_datagram_prefix(datagram),
-        }
     }
 }
 
@@ -304,7 +191,7 @@ impl Session {
         connect_type: ExtendedConnectType,
     ) -> Self {
         let stream_event_listener = Rc::new(RefCell::new(Listener::default()));
-        let protocol = Protocol::new(connect_type, session_id, role);
+        let protocol = connect_type.new_protocol(session_id, role);
         Self {
             control_stream_recv: Box::new(RecvMessage::new(
                 &RecvMessageInfo {
@@ -346,7 +233,7 @@ impl Session {
         connect_type: ExtendedConnectType,
     ) -> Res<Self> {
         let stream_event_listener = Rc::new(RefCell::new(Listener::default()));
-        let protocol = Protocol::new(connect_type, session_id, role);
+        let protocol = connect_type.new_protocol(session_id, role);
         control_stream_recv
             .http_stream()
             .ok_or(Error::Internal)?
@@ -741,6 +628,35 @@ impl HttpRecvStreamEvents for Rc<RefCell<Listener>> {
 }
 
 impl SendStreamEvents for Rc<RefCell<Listener>> {}
+
+trait Protocol: Debug + Display {
+    fn connect_type(&self) -> ExtendedConnectType;
+
+    fn close_frame(&self, error: u32, message: &str) -> Option<Vec<u8>>;
+
+    fn read_control_stream(
+        &mut self,
+        conn: &mut Connection,
+        events: &mut Box<dyn ExtendedConnectEvents>,
+        control_stream_recv: &mut Box<dyn RecvStream>,
+    ) -> Res<Option<SessionState>>;
+
+    fn add_stream(
+        &mut self,
+        stream_id: StreamId,
+        events: &mut Box<dyn ExtendedConnectEvents>,
+    ) -> Res<()>;
+
+    fn remove_recv_stream(&mut self, stream_id: StreamId);
+
+    fn remove_send_stream(&mut self, stream_id: StreamId);
+
+    fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>);
+
+    fn write_datagram_prefix(&self, encoder: &mut Encoder);
+
+    fn read_datagram_prefix<'a>(&self, datagram: &'a [u8]) -> &'a [u8];
+}
 
 #[cfg(test)]
 mod tests;

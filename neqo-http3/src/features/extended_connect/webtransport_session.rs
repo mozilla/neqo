@@ -15,7 +15,7 @@ use neqo_transport::{Connection, StreamId};
 
 use crate::{
     features::extended_connect::{
-        ExtendedConnectEvents, ExtendedConnectType, SessionCloseReason, SessionState,
+        ExtendedConnectEvents, ExtendedConnectType, Protocol, SessionCloseReason, SessionState,
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
     Error, Http3StreamInfo, RecvStream, Res,
@@ -47,8 +47,14 @@ impl WebTransportSession {
             role,
         }
     }
+}
 
-    pub(crate) fn close_frame(&self, error: u32, message: &str) -> Option<Vec<u8>> {
+impl Protocol for WebTransportSession {
+    fn connect_type(&self) -> ExtendedConnectType {
+        ExtendedConnectType::WebTransport
+    }
+
+    fn close_frame(&self, error: u32, message: &str) -> Option<Vec<u8>> {
         let close_frame = WebTransportFrame::CloseSession {
             error,
             message: message.to_string(),
@@ -58,7 +64,7 @@ impl WebTransportSession {
         Some(encoder.into())
     }
 
-    pub(crate) fn read_control_stream(
+    fn read_control_stream(
         &mut self,
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
@@ -100,7 +106,7 @@ impl WebTransportSession {
         }
     }
 
-    pub(crate) fn add_stream(
+    fn add_stream(
         &mut self,
         stream_id: StreamId,
         events: &mut Box<dyn ExtendedConnectEvents>,
@@ -123,18 +129,27 @@ impl WebTransportSession {
         Ok(())
     }
 
-    pub(crate) fn remove_recv_stream(&mut self, stream_id: StreamId) {
+    fn remove_recv_stream(&mut self, stream_id: StreamId) {
         self.recv_streams.remove(&stream_id);
     }
 
-    pub(crate) fn remove_send_stream(&mut self, stream_id: StreamId) {
+    fn remove_send_stream(&mut self, stream_id: StreamId) {
         self.send_streams.remove(&stream_id);
     }
 
-    pub fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
+    fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
         (
             mem::take(&mut self.recv_streams),
             mem::take(&mut self.send_streams),
         )
+    }
+
+    fn write_datagram_prefix(&self, encoder: &mut Encoder) {
+        // WebTransport does not add prefix (i.e. context ID).
+    }
+
+    fn read_datagram_prefix<'a>(&self, datagram: &'a [u8]) -> &'a [u8] {
+        // WebTransport does not use a prefix (i.e. context ID).
+        datagram
     }
 }
