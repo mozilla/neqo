@@ -629,6 +629,10 @@ impl HttpRecvStreamEvents for Rc<RefCell<Listener>> {
 
 impl SendStreamEvents for Rc<RefCell<Listener>> {}
 
+/// An extended connect protocol.
+///
+/// "Protocol" here corresponds to the `:protocol` pseudo header in the HTTP
+/// Extended CONNECT method.
 trait Protocol: Debug + Display {
     fn connect_type(&self) -> ExtendedConnectType;
 
