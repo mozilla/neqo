@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use neqo_common::{qdebug, Datagram};
-use test_fixture::now;
+use test_fixture::{now, split_datagram};
 
 use super::{
     super::{
@@ -24,8 +24,8 @@ fn check_discarded(
     peer: &mut Connection,
     pkt: &Datagram,
     response: bool,
-    dropped: usize,
-    dups: usize,
+    expected_drops: usize,
+    expected_dups: usize,
 ) {
     // Make sure to flush any saved datagrams before doing this.
     drop(peer.process_output(now()));
@@ -34,8 +34,8 @@ fn check_discarded(
     let out = peer.process(Some(pkt.clone()), now());
     assert_eq!(out.as_dgram_ref().is_some(), response);
     let after = peer.stats();
-    assert_eq!(dropped, after.dropped_rx - before.dropped_rx);
-    assert_eq!(dups, after.dups_rx - before.dups_rx);
+    assert_eq!(expected_drops, after.dropped_rx - before.dropped_rx);
+    assert_eq!(expected_dups, after.dups_rx - before.dups_rx);
 }
 
 fn assert_update_blocked(c: &mut Connection) {
@@ -55,54 +55,51 @@ fn overwrite_invocations(n: packet::Number) {
 fn discarded_initial_keys() {
     qdebug!("---- client: generate CH");
     let mut client = default_client();
-    let init_pkt_c = client.process_output(now()).dgram();
-    let init_pkt_c2 = client.process_output(now()).dgram();
-    assert!(init_pkt_c.is_some() && init_pkt_c2.is_some());
-    assert_eq!(init_pkt_c.as_ref().unwrap().len(), client.plpmtu());
-    assert_eq!(init_pkt_c2.as_ref().unwrap().len(), client.plpmtu());
+    let c_hs_1 = client.process_output(now()).dgram();
+    let c_hs_2 = client.process_output(now()).dgram();
+    assert!(c_hs_1.is_some() && c_hs_2.is_some());
+    assert_eq!(c_hs_1.as_ref().unwrap().len(), client.plpmtu());
+    assert_eq!(c_hs_2.as_ref().unwrap().len(), client.plpmtu());
 
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
-    server.process_input(init_pkt_c.clone().unwrap(), now());
-    let init_pkt_s = server.process(init_pkt_c2, now()).dgram();
-    assert!(init_pkt_s.is_some());
+    server.process_input(c_hs_1.clone().unwrap(), now());
+    let s_hs_1 = server.process(c_hs_2, now()).dgram();
+    assert!(s_hs_1.is_some());
+    let s_hs_2 = server.process_output(now()).dgram();
 
     qdebug!("---- client: cert verification");
-    let out = client.process(init_pkt_s.clone(), now()).dgram();
+    client.process_input(s_hs_1.clone().unwrap(), now());
+    let out = client.process(s_hs_2, now()).dgram();
     assert!(out.is_some());
 
-    let out = server.process(out, now()).dgram();
-    client.process_input(out.unwrap(), now());
-
     // The client has received a handshake packet. It will remove the Initial keys.
-    // We will check this by processing init_pkt_s a second time.
-    // The initial packet should be dropped. The packet contains a Handshake packet as well, which
-    // will be marked as dup.  And it will contain padding, which will be "dropped".
+    // Check this by processing the Intial part of `s_hs_1` a second time.
+    // That packet should be dropped.
     // The client will generate a Handshake packet here to avoid stalling.
-    check_discarded(&mut client, &init_pkt_s.unwrap(), true, 1, 0);
+    let (s_init, _s_hs) = split_datagram(&s_hs_1.unwrap());
+    check_discarded(&mut client, &s_init, true, 1, 0);
 
     assert!(maybe_authenticate(&mut client));
 
     // The server has not removed the Initial keys yet, because it has not yet received a Handshake
     // packet from the client.
-    // We will check this by processing init_pkt_c a second time.
-    // The dropped packet is padding. The Initial packet has been mark dup.
-    check_discarded(&mut server, &init_pkt_c.clone().unwrap(), false, 1, 1);
+    // Check this by processing the Initial part of `c_hs_1` a second time.
+    let (c_init, _c_hs) = split_datagram(c_hs_1.as_ref().unwrap());
+    check_discarded(&mut server, &c_init, false, 0, 1);
 
     qdebug!("---- client: SH..FIN -> FIN");
-    let out = client.process_output(now()).dgram();
-    assert!(out.is_some());
+    let c_fin = client.process_output(now()).dgram();
+    assert!(c_fin.is_some());
 
     // The server will process the first Handshake packet.
     // After this the Initial keys will be dropped.
-    let out = server.process(out, now()).dgram();
-    assert!(out.is_some());
+    let s_done = server.process(c_fin, now()).dgram();
+    assert!(s_done.is_some());
 
-    // Check that the Initial keys are dropped at the server
-    // We will check this by processing init_pkt_c a third time.
-    // The Initial packet has been dropped and padding that follows it.
-    // There is no dups, everything has been dropped.
-    check_discarded(&mut server, &init_pkt_c.unwrap(), false, 1, 0);
+    // The Initial keys are dropped at the server.
+    // Check this by processing the Initial part of `c_hs_1` a third time.
+    check_discarded(&mut server, &c_init, false, 1, 0);
 }
 
 #[test]
@@ -119,8 +116,10 @@ fn key_update_client() {
     assert_update_blocked(&mut client);
 
     // Initiating an update should only increase the write epoch.
-    let idle_timeout = ConnectionParameters::default().get_idle_timeout();
-    assert_eq!(Output::Callback(idle_timeout), client.process_output(now));
+    assert_eq!(
+        ConnectionParameters::DEFAULT_IDLE_TIMEOUT,
+        client.process_output(now).callback()
+    );
     assert_eq!(client.get_epochs(), (Some(4), Some(3)));
 
     // Send something to propagate the update.
@@ -131,7 +130,7 @@ fn key_update_client() {
     assert_eq!(server.get_epochs(), (Some(4), Some(3)));
     let res = server.process_output(now);
     if let Output::Callback(t) = res {
-        assert!(t < idle_timeout);
+        assert!(t < ConnectionParameters::DEFAULT_IDLE_TIMEOUT);
     } else {
         panic!("server should now be waiting to clear keys");
     }
@@ -163,7 +162,7 @@ fn key_update_client() {
     // This is the first packet that the client has received from the server
     // with new keys, so its read timer just started.
     if let Output::Callback(t) = res {
-        assert!(t < ConnectionParameters::default().get_idle_timeout());
+        assert!(t < ConnectionParameters::DEFAULT_IDLE_TIMEOUT);
     } else {
         panic!("client should now be waiting to clear keys");
     }

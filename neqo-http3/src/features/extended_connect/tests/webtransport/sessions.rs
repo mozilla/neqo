@@ -152,7 +152,7 @@ fn wt_session_response_with_1xx() {
     let wt_session_negotiated_event = |e| {
         matches!(
             e,
-            Http3ClientEvent::WebTransport(WebTransportEvent::Session{
+            Http3ClientEvent::WebTransport(WebTransportEvent::NewSession{
                 stream_id,
                 status,
                 headers,

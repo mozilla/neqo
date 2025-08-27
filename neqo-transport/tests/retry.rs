@@ -23,7 +23,7 @@ use neqo_transport::{
 use test_fixture::{
     assertions, damage_ech_config, datagram, default_client,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
-    now, split_datagram,
+    now,
 };
 
 #[test]
@@ -271,6 +271,7 @@ fn new_token_expired() {
 
 #[test]
 fn retry_after_initial() {
+    neqo_common::log::init(None);
     let mut server = default_server();
     let mut retry_server = default_server();
     retry_server.set_validation(ValidateAddress::Always);
@@ -280,14 +281,10 @@ fn retry_after_initial() {
     let cinit2 = client.process_output(now()).dgram(); // Initial
     assert!(cinit.is_some() && cinit2.is_some());
     _ = server.process(cinit.clone(), now()).dgram(); // Initial
-    let server_flight = server.process(cinit2, now()).dgram(); // Initial
-    assert!(server_flight.is_some());
-
-    let dgram = client.process(server_flight, now()).dgram();
-    let server_flight = server.process(dgram, now()).dgram();
+    let server_initial = server.process(cinit2, now()).dgram().unwrap();
+    let server_handshake = server.process_output(now()).dgram().unwrap();
 
     // We need to have the client just process the Initial.
-    let (server_initial, _other) = split_datagram(server_flight.as_ref().unwrap());
     let dgram = client.process(Some(server_initial), now()).dgram();
     assert!(dgram.is_some());
     assert!(*client.state() != State::Connected);
@@ -300,8 +297,8 @@ fn retry_after_initial() {
     let junk = client.process(retry, now()).dgram();
     assert!(junk.is_none());
 
-    // Either way, the client should still be able to process the server flight and connect.
-    let dgram = client.process(server_flight, now()).dgram();
+    // Either way, the client should still be able to process the server handshake and connect.
+    let dgram = client.process(Some(server_handshake), now()).dgram();
     assert!(dgram.is_some()); // Drop this one.
     assert!(test_fixture::maybe_authenticate(&mut client));
     let dgram = server.process(dgram, now()).dgram();
@@ -441,7 +438,8 @@ fn vn_after_retry() {
 // long enough connection ID.
 #[test]
 fn mitm_retry() {
-    // This test decrypts packets and hence does not work with MLKEM enabled.
+    // This test decrypts packets and hence does not work with MLKEM and packet number randomization
+    // enabled.
     let mut client = test_fixture::new_client(ConnectionParameters::default().mlkem(false));
     let mut retry_server = default_server();
     retry_server.set_validation(ValidateAddress::Always);
@@ -467,7 +465,6 @@ fn mitm_retry() {
     let pn_len = header.len() - protected_header.len();
 
     // Decrypt.
-    assert_eq!(pn, 1);
     let mut plaintext_buf = vec![0; client_initial2.len()];
     let plaintext = aead
         .decrypt(pn, &header, &payload[pn_len..], &mut plaintext_buf)

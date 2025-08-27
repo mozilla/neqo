@@ -95,20 +95,17 @@ fn spawn_server() -> (tokio::sync::oneshot::Sender<()>, SocketAddr) {
 
         let mut args = server::Args::default();
         args.set_hosts(vec!["[::]:0".to_string()]);
-        let server = runtime.block_on(async { server::server(args).unwrap() });
+        // `server.run` calls tokio's `UdpSocket::from_std` which requires a
+        // Tokio runtime. Ensure one is available by running it in
+        // `runtime.block_on`.
+        let (server, local_addrs) = runtime.block_on(async { server::run(args).unwrap() });
 
         addr_sender
-            .send(
-                server
-                    .local_addresses()
-                    .into_iter()
-                    .find(SocketAddr::is_ipv6)
-                    .unwrap(),
-            )
+            .send(local_addrs.into_iter().find(SocketAddr::is_ipv6).unwrap())
             .unwrap();
 
         runtime.block_on(async {
-            let mut server = Box::pin(server.run());
+            let mut server = Box::pin(server);
             tokio::select! {
                 _ = &mut done_receiver => {}
                 res = &mut server  => panic!("expect server not to terminate: {res:?}"),

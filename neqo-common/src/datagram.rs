@@ -65,6 +65,16 @@ impl<D: AsRef<[u8]>> Datagram<D> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    #[must_use]
+    pub fn to_owned(&self) -> Datagram {
+        Datagram {
+            src: self.src,
+            dst: self.dst,
+            tos: self.tos,
+            d: self.d.as_ref().to_vec(),
+        }
+    }
 }
 
 impl<D: AsMut<[u8]> + AsRef<[u8]>> AsMut<[u8]> for Datagram<D> {
@@ -114,16 +124,6 @@ impl<'a> Datagram<&'a mut [u8]> {
     #[must_use]
     pub fn from_slice(src: SocketAddr, dst: SocketAddr, tos: Tos, d: &'a mut [u8]) -> Self {
         Self { src, dst, tos, d }
-    }
-
-    #[must_use]
-    pub fn to_owned(&self) -> Datagram {
-        Datagram {
-            src: self.src,
-            dst: self.dst,
-            tos: self.tos,
-            d: self.d.to_vec(),
-        }
     }
 }
 
@@ -216,6 +216,10 @@ impl DatagramBatch {
         self.tos
     }
 
+    pub fn set_tos(&mut self, tos: Tos) {
+        self.tos = tos;
+    }
+
     #[must_use]
     pub const fn datagram_size(&self) -> usize {
         self.datagram_size
@@ -243,7 +247,7 @@ mod tests {
 
     use test_fixture::datagram;
 
-    use crate::{DatagramBatch, Tos};
+    use crate::{DatagramBatch, Ecn, Tos};
 
     #[test]
     fn fmt_datagram() {
@@ -282,5 +286,18 @@ mod tests {
         // 6 bytes, segment size 5 -> 2 datagrams (5+1)
         let batch = DatagramBatch::new(src, dst, tos, 5, vec![0u8; 6]);
         assert_eq!(batch.num_datagrams(), 2);
+    }
+
+    #[test]
+    fn batch_tos() {
+        let mut batch = DatagramBatch::new(
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234),
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678),
+            Tos::default(),
+            4,
+            vec![0u8; 10],
+        );
+        batch.set_tos(Ecn::Ce.into());
+        assert_eq!(batch.tos(), Ecn::Ce.into());
     }
 }

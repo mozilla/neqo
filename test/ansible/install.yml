@@ -7,9 +7,9 @@
   become: true
   tasks:
     # See: https://stackoverflow.com/questions/30911775/how-to-know-if-a-machine-is-an-google-compute-engine-instance
-    - name: "Detect GCP"
+    - name: Detect GCP
       block:
-        - name: "Probe for GCP"
+        - name: Probe for GCP
           become: true
           ansible.builtin.shell: dmidecode -s bios-version | grep -iq "google"
           changed_when: false
@@ -77,13 +77,23 @@
           - linux-tools-common
           - "linux-generic-hwe-{{ ansible_facts['lsb']['release'] }}"
           - lld
-          - mold
           - ninja-build
           - python-is-python3
           - r-base-core
           - ripgrep
           - sccache
           - zlib1g-dev
+      register: apt_install
+
+    - name: Install required GCP dependencies
+      when: is_gcp
+      ansible.builtin.apt:
+        install_recommends: true
+        state: present
+        name:
+          - linux-image-6.11.0-1017-gcp
+          - linux-tools-6.11.0-1017-gcp
+          - linux-cloud-tools-6.11.0-1017-gcp
       register: apt_install
 
     - name: Set kernel.perf_event_paranoid
@@ -172,8 +182,21 @@
       args:
         creates: "/home/{{ bench_user }}/.cargo/bin/cargo"
 
+    - name: Modify GRUB configuration
+      block:
+        - name: Boot Linux 6.11.0
+          ansible.builtin.lineinfile:
+            path: "{{ '/etc/default/grub.d/50-cloudimg-settings.cfg' if is_gcp else '/etc/default/grub' }}"
+            regexp: '^GRUB_DEFAULT=.*'
+            line: GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux {{ '6.11.0-1017-gcp' if is_gcp else '6.11.0-28-generic' }}"
+        - name: Update GRUB
+          ansible.builtin.command: update-grub
+
+    - name: Exit on GCP
+      ansible.builtin.meta: end_play
+      when: is_gcp
+
     - name: Create bench directory
-      when: not is_gcp
       ansible.builtin.file:
         dest: "{{ bench_path }}"
         owner: "{{ bench_user }}"
@@ -182,7 +205,6 @@
         mode: "0755"
 
     - name: Download GitHub Actions Runner
-      when: not is_gcp
       become: true
       become_user: "{{ bench_user }}"
       ansible.builtin.get_url:
@@ -197,7 +219,6 @@
         checksum: "{{ runner_sha }}"
 
     - name: Extract GitHub Actions Runner
-      when: not is_gcp
       become: true
       become_user: "{{ bench_user }}"
       ansible.builtin.unarchive:
@@ -211,7 +232,6 @@
         creates: "{{ bench_path }}/bin/Runner.Listener"
 
     - name: Check if GitHub Actions Runner is already configured
-      when: not is_gcp
       become: true
       become_user: "{{ bench_user }}"
       register: runner_credentials_file
@@ -239,7 +259,6 @@
       changed_when: not runner_credentials_file.stat.exists
 
     - name: Check if GitHub Actions Runner is already running
-      when: not is_gcp
       register: runner_running
       ignore_errors: true
       ansible.builtin.command:
@@ -255,8 +274,10 @@
       changed_when: runner_running.rc != 0
 
     - name: Starts GitHub Actions Runner service
-      when: not is_gcp
       ansible.builtin.command:
         chdir: "{{ bench_path }}"
         cmd: ./svc.sh start
       changed_when: true
+
+    - name: Reboot the machine
+      ansible.builtin.reboot:

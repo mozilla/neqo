@@ -560,7 +560,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         self.congestion_window = max(cwnd, self.cwnd_min());
         self.acked_bytes = acked_bytes;
         self.ssthresh = self.congestion_window;
-        qdebug!(
+        qinfo!(
             "[{self}] Cong event -> recovery; cwnd {}, ssthresh {}",
             self.congestion_window,
             self.ssthresh
@@ -612,7 +612,10 @@ mod tests {
             CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS,
         },
         packet,
-        recovery::sent::{self},
+        recovery::{
+            self,
+            sent::{self},
+        },
         rtt::RttEstimate,
         Pmtud,
     };
@@ -643,7 +646,7 @@ mod tests {
             pn,
             now() + t,
             ack_eliciting,
-            Vec::new(),
+            recovery::Tokens::new(),
             100,
         )
     }
@@ -857,7 +860,7 @@ mod tests {
                     u64::try_from(i).unwrap(),
                     by_pto(t),
                     true,
-                    Vec::new(),
+                    recovery::Tokens::new(),
                     1000,
                 )
             })
@@ -978,7 +981,7 @@ mod tests {
             lost[0].pn(),
             lost[0].time_sent(),
             false,
-            lost[0].tokens().to_vec(),
+            lost[0].tokens().clone(),
             lost[0].len(),
         );
         assert!(!persistent_congestion_by_pto(
@@ -1079,7 +1082,7 @@ mod tests {
                     next_pn,
                     now,
                     true,
-                    Vec::new(),
+                    recovery::Tokens::new(),
                     cc.max_datagram_size(),
                 );
                 next_pn += 1;
@@ -1091,7 +1094,7 @@ mod tests {
                 packet_burst_size * cc.max_datagram_size()
             );
             now += RTT;
-            cc.on_packets_acked(&pkts, &RttEstimate::default(), now);
+            cc.on_packets_acked(&pkts, &RttEstimate::new(crate::DEFAULT_INITIAL_RTT), now);
             assert_eq!(cc.bytes_in_flight(), 0);
             assert_eq!(cc.acked_bytes, 0);
             assert_eq!(cwnd, cc.congestion_window); // CWND doesn't grow because we're app limited
@@ -1106,7 +1109,7 @@ mod tests {
                 next_pn,
                 now,
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 cc.max_datagram_size(),
             );
             next_pn += 1;
@@ -1120,7 +1123,7 @@ mod tests {
         now += RTT;
         // Check if congestion window gets increased for all packets currently in flight
         for (i, pkt) in pkts.into_iter().enumerate() {
-            cc.on_packets_acked(&[pkt], &RttEstimate::default(), now);
+            cc.on_packets_acked(&[pkt], &RttEstimate::new(crate::DEFAULT_INITIAL_RTT), now);
 
             assert_eq!(
                 cc.bytes_in_flight(),
@@ -1156,7 +1159,7 @@ mod tests {
             1,
             now,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&p_lost, now);
@@ -1169,12 +1172,16 @@ mod tests {
             2,
             now,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&p_not_lost, now);
         now += RTT;
-        cc.on_packets_acked(&[p_not_lost], &RttEstimate::default(), now);
+        cc.on_packets_acked(
+            &[p_not_lost],
+            &RttEstimate::new(crate::DEFAULT_INITIAL_RTT),
+            now,
+        );
         cwnd_is_halved(&cc);
         // cc is app limited therefore cwnd in not increased.
         assert_eq!(cc.acked_bytes, 0);
@@ -1192,7 +1199,7 @@ mod tests {
                     next_pn,
                     now,
                     true,
-                    Vec::new(),
+                    recovery::Tokens::new(),
                     cc.max_datagram_size(),
                 );
                 next_pn += 1;
@@ -1205,7 +1212,7 @@ mod tests {
             );
             now += RTT;
             for (i, pkt) in pkts.into_iter().enumerate() {
-                cc.on_packets_acked(&[pkt], &RttEstimate::default(), now);
+                cc.on_packets_acked(&[pkt], &RttEstimate::new(crate::DEFAULT_INITIAL_RTT), now);
 
                 assert_eq!(
                     cc.bytes_in_flight(),
@@ -1225,7 +1232,7 @@ mod tests {
                 next_pn,
                 now,
                 true,
-                Vec::new(),
+                recovery::Tokens::new(),
                 cc.max_datagram_size(),
             );
             next_pn += 1;
@@ -1240,7 +1247,7 @@ mod tests {
         let mut last_acked_bytes = 0;
         // Check if congestion window gets increased for all packets currently in flight
         for (i, pkt) in pkts.into_iter().enumerate() {
-            cc.on_packets_acked(&[pkt], &RttEstimate::default(), now);
+            cc.on_packets_acked(&[pkt], &RttEstimate::new(crate::DEFAULT_INITIAL_RTT), now);
 
             assert_eq!(
                 cc.bytes_in_flight(),
@@ -1264,7 +1271,7 @@ mod tests {
             1,
             now,
             true,
-            Vec::new(),
+            recovery::Tokens::new(),
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&p_ce, now);

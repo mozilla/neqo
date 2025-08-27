@@ -8,7 +8,7 @@ use std::{
     cell::RefCell,
     collections::VecDeque,
     fmt::{self, Display, Formatter},
-    ops::{Deref, DerefMut},
+    ops::Deref,
     rc::Rc,
 };
 
@@ -42,7 +42,6 @@ impl std::hash::Hash for StreamHandler {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.conn.hash(state);
         state.write_u64(self.stream_info.stream_id().as_u64());
-        _ = state.finish();
     }
 }
 
@@ -217,16 +216,9 @@ impl Deref for Http3OrWebTransportStream {
     }
 }
 
-impl DerefMut for Http3OrWebTransportStream {
-    fn deref_mut(&mut self) -> &mut StreamHandler {
-        &mut self.stream_handler
-    }
-}
-
 impl std::hash::Hash for Http3OrWebTransportStream {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.stream_handler.hash(state);
-        _ = state.finish();
     }
 }
 
@@ -308,7 +300,7 @@ impl WebTransportRequest {
         self.stream_handler.stream_id()
     }
 
-    /// Close sending side.
+    /// Create `WebTransport` stream.
     ///
     /// # Errors
     ///
@@ -352,6 +344,7 @@ impl WebTransportRequest {
             )
     }
 
+    // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.
     #[must_use]
     pub fn remote_datagram_size(&self) -> u64 {
         self.stream_handler.conn.borrow().remote_datagram_size()
@@ -382,25 +375,6 @@ impl Deref for WebTransportRequest {
     type Target = StreamHandler;
     fn deref(&self) -> &Self::Target {
         &self.stream_handler
-    }
-}
-
-impl DerefMut for WebTransportRequest {
-    fn deref_mut(&mut self) -> &mut StreamHandler {
-        &mut self.stream_handler
-    }
-}
-
-impl std::hash::Hash for WebTransportRequest {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.stream_handler.hash(state);
-        _ = state.finish();
-    }
-}
-
-impl PartialEq for WebTransportRequest {
-    fn eq(&self, other: &Self) -> bool {
-        self.stream_handler == other.stream_handler
     }
 }
 

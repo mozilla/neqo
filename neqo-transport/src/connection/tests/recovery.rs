@@ -42,9 +42,8 @@ fn pto_works_basic() {
 
     let mut now = now();
 
-    let res = client.process_output(now);
-    let idle_timeout = ConnectionParameters::default().get_idle_timeout();
-    assert_eq!(res, Output::Callback(idle_timeout));
+    let cb = client.process_output(now).callback();
+    assert_eq!(cb, ConnectionParameters::DEFAULT_IDLE_TIMEOUT);
 
     // Send data on two streams
     let stream1 = client.stream_create(StreamType::UniDi).unwrap();
@@ -231,13 +230,11 @@ fn pto_handshake_complete() {
 
     now += HALF_RTT;
     let pkt = server.process(pkt, now).dgram();
-    assert_initial(pkt.as_ref().unwrap(), false);
+    assert_handshake(pkt.as_ref().unwrap());
 
     now += HALF_RTT;
     let pkt = client.process(pkt, now).dgram();
-    let (initial, handshake) = split_datagram(&pkt.clone().unwrap());
-    assert_initial(&initial, false);
-    assert_handshake(handshake.as_ref().unwrap());
+    assert_handshake(pkt.as_ref().unwrap());
 
     let cb = client.process_output(now).callback();
     // The client now has a single RTT estimate (20ms), so
@@ -252,7 +249,6 @@ fn pto_handshake_complete() {
     now += HALF_RTT;
     client.authenticated(AuthenticationStatus::Ok, now);
 
-    qdebug!("---- client: SH..FIN -> FIN");
     let pkt1 = client.process_output(now).dgram();
     assert_handshake(pkt1.as_ref().unwrap());
     assert_eq!(*client.state(), State::Connected);
@@ -265,10 +261,13 @@ fn pto_handshake_complete() {
 
     // Wait for PTO to expire and resend a handshake packet.
     // Wait long enough that the 1-RTT PTO also fires.
-    qdebug!("---- client: PTO");
     now += pto;
     let pkt2 = client.process_output(now).dgram();
     assert_handshake(pkt2.as_ref().unwrap());
+
+    // Discard the ping that follows.
+    let ping = client.process_output(now).dgram();
+    assert_eq!(ping.as_ref().unwrap()[0] & 0x80, 0);
 
     pto_counts[0] = 1;
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
@@ -290,6 +289,10 @@ fn pto_handshake_complete() {
     assert_handshake(&pkt3_hs);
     assert!(pkt3_1rtt.is_some());
 
+    // Discard the ping that follows.
+    let ping = client.process_output(now).dgram();
+    assert_eq!(ping.as_ref().unwrap()[0] & 0x80, 0);
+
     // PTO has been doubled.
     let pto = pto * 2;
     let cb = client.process_output(now).callback();
@@ -301,7 +304,6 @@ fn pto_handshake_complete() {
     pto_counts[1] = 1;
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
-    qdebug!("---- server: receive FIN and send ACK");
     now += HALF_RTT;
     // Now let the server have pkt1 and expect an immediate Handshake ACK.
     // The output will be a Handshake packet with ACK and 1-RTT packet with
@@ -827,7 +829,7 @@ fn fast_pto() {
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 
     let res = client.process_output(now);
-    let idle_timeout = ConnectionParameters::default().get_idle_timeout() - (DEFAULT_RTT / 2);
+    let idle_timeout = ConnectionParameters::DEFAULT_IDLE_TIMEOUT - (DEFAULT_RTT / 2);
     assert_eq!(res, Output::Callback(idle_timeout));
 
     // Send data on two streams
@@ -870,7 +872,7 @@ fn fast_pto_persistent_congestion() {
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 
     let res = client.process_output(now);
-    let idle_timeout = ConnectionParameters::default().get_idle_timeout() - (DEFAULT_RTT / 2);
+    let idle_timeout = ConnectionParameters::DEFAULT_IDLE_TIMEOUT - (DEFAULT_RTT / 2);
     assert_eq!(res, Output::Callback(idle_timeout));
 
     // Send packets spaced by the PTO timer.  And lose them.

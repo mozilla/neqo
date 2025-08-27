@@ -35,6 +35,7 @@ mod quic_datagrams;
 pub mod recovery;
 #[cfg(not(feature = "bench"))]
 mod recovery;
+mod saved;
 // #[cfg(feature = "bench")]
 pub mod recv_stream;
 // #[cfg(not(feature = "bench"))]
@@ -61,8 +62,7 @@ pub use self::{
         EmptyConnectionIdGenerator, RandomConnectionIdGenerator,
     },
     connection::{
-        params::{ConnectionParameters, ACK_RATIO_SCALE},
-        Connection, Output, OutputBatch, State, ZeroRttState,
+        params::ConnectionParameters, Connection, Output, OutputBatch, State, ZeroRttState,
     },
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
@@ -70,6 +70,7 @@ pub use self::{
     pmtud::Pmtud,
     quic_datagrams::DatagramTracking,
     recv_stream::INITIAL_RECV_WINDOW_SIZE,
+    rtt::DEFAULT_INITIAL_RTT,
     sni::find_sni,
     stats::Stats,
     stream_id::{StreamId, StreamType},
@@ -183,12 +184,6 @@ impl From<CryptoError> for Error {
     }
 }
 
-impl From<::qlog::Error> for Error {
-    fn from(_err: ::qlog::Error) -> Self {
-        Self::Qlog
-    }
-}
-
 impl From<std::num::TryFromIntError> for Error {
     fn from(_: std::num::TryFromIntError) -> Self {
         Self::IntegerOverflow
@@ -223,28 +218,11 @@ pub enum CloseReason {
 }
 
 impl CloseReason {
-    #[must_use]
-    pub const fn app_code(&self) -> Option<AppError> {
-        match self {
-            Self::Application(e) => Some(*e),
-            Self::Transport(_) => None,
-        }
-    }
-
     /// Checks enclosed error for [`Error::None`] and
     /// [`CloseReason::Application(0)`].
     #[must_use]
     pub const fn is_error(&self) -> bool {
         !matches!(self, Self::Transport(Error::None) | Self::Application(0),)
-    }
-}
-
-impl From<CloseError> for CloseReason {
-    fn from(err: CloseError) -> Self {
-        match err {
-            CloseError::Transport(c) => Self::Transport(Error::Peer(c)),
-            CloseError::Application(c) => Self::Application(c),
-        }
     }
 }
 

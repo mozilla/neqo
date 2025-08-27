@@ -14,7 +14,7 @@ use std::{
 use clap::Parser;
 use neqo_transport::{
     tparams::PreferredAddress, CongestionControlAlgorithm, ConnectionParameters, StreamType,
-    Version,
+    Version, DEFAULT_INITIAL_RTT,
 };
 
 pub mod client;
@@ -81,6 +81,13 @@ impl Default for SharedArgs {
     }
 }
 
+impl SharedArgs {
+    #[must_use]
+    pub fn get_alpn(&self) -> &str {
+        &self.alpn
+    }
+}
+
 #[derive(Debug, Parser)]
 pub struct QuicParameters {
     #[arg(
@@ -108,6 +115,10 @@ pub struct QuicParameters {
     #[arg(long = "idle", default_value = "30")]
     /// The idle timeout for connections, in seconds.
     pub idle_timeout: u64,
+
+    #[arg(long = "init_rtt", default_value_t = DEFAULT_INITIAL_RTT.as_millis() as u64)]
+    /// The initial round-trip time, in milliseconds.
+    pub initial_rtt_ms: u64,
 
     #[arg(long = "cc", default_value = "cubic")]
     /// The congestion controller to use.
@@ -142,6 +153,8 @@ impl Default for QuicParameters {
             max_streams_bidi: 16,
             max_streams_uni: 16,
             idle_timeout: 30,
+            initial_rtt_ms: u64::try_from(DEFAULT_INITIAL_RTT.as_millis())
+                .expect("this value will always be less than u64::MAX"),
             congestion_control: CongestionControlAlgorithm::Cubic,
             no_pacing: false,
             no_pmtud: false,
@@ -218,6 +231,7 @@ impl QuicParameters {
             .max_streams(StreamType::BiDi, self.max_streams_bidi)
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .idle_timeout(Duration::from_secs(self.idle_timeout))
+            .initial_rtt(Duration::from_millis(self.initial_rtt_ms))
             .cc_algorithm(self.congestion_control)
             .pacing(!self.no_pacing)
             .pmtud(!self.no_pmtud)
@@ -314,7 +328,7 @@ mod tests {
         server_args.set_qlog_dir(temp_dir.path());
 
         let client = client::client(client_args);
-        let server = Box::pin(server::server(server_args).unwrap().run());
+        let (server, _local_addrs) = server::run(server_args).unwrap();
         tokio::select! {
             _ = client => {}
             res = server  => panic!("expect server not to terminate: {res:?}"),

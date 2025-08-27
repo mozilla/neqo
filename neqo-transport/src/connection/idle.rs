@@ -122,7 +122,7 @@ impl IdleTimeout {
         &mut self,
         now: Instant,
         pto: Duration,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
     ) -> bool {
         if !self.keep_alive_outstanding && now >= self.keep_alive_timeout(now, pto) {
             self.keep_alive_outstanding = true;

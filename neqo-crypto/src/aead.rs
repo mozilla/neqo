@@ -6,7 +6,7 @@
 
 use std::{
     fmt,
-    ops::{Deref, DerefMut},
+    ops::Deref,
     os::raw::{c_char, c_uint},
     ptr::null_mut,
 };

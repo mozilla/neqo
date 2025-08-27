@@ -102,7 +102,7 @@ jobs:
             rm -rf target # Don't sync this back to host
 
       - if: ${{ matrix.os == 'netbsd' }}
-        uses: vmactions/netbsd-vm@46a58bbf03682b4cb24142b97fa315ae52bed573 # v1.1.8
+        uses: vmactions/netbsd-vm@d0228be27fbaba19418cc1b332609a895cf16561 # v1.1.9
         with:
           usesh: true
           envs: "CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG GITHUB_ACTIONS"
@@ -135,7 +135,7 @@ jobs:
             rm -rf target # Don't sync this back to host
 
       - if: ${{ matrix.os == 'solaris' }}
-        uses: vmactions/solaris-vm@170f1f96f376cf7467cc41627e0c7590932fccaa # v1.1.4
+        uses: vmactions/solaris-vm@58cbd70c6e051860f9b8f65908cc582938fbbdba # v1.1.5
         with:
           release: "11.4-gcc"
           usesh: true
@@ -165,7 +165,7 @@ jobs:
             cargo test --locked --no-fail-fast --release
             rm -rf target # Don't sync this back to host
 
-      - uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24 # v5.4.3
+      - uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0
         with:
           files: lcov.info
           fail_ci_if_error: false

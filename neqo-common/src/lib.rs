@@ -73,11 +73,11 @@ pub fn hex_with_len<A: AsRef<[u8]>>(buf: A) -> String {
 
 #[must_use]
 pub const fn const_max(a: usize, b: usize) -> usize {
-    [a, b][(a < b) as usize]
+    [a, b][(a <= b) as usize]
 }
 #[must_use]
 pub const fn const_min(a: usize, b: usize) -> usize {
-    [a, b][(a >= b) as usize]
+    [a, b][(a > b) as usize]
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Enum, Display)]

@@ -6,12 +6,6 @@ on:
     branches: ["main"]
   merge_group:
   workflow_dispatch:
-    inputs:
-      run_benchmarks:
-        description: 'Run benchmarks'
-        type: boolean
-        required: false
-        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -159,7 +153,7 @@ jobs:
           mkdir -p C:/msys64/home/runneradmin/
           touch C:/msys64/home/runneradmin/.gitconfig
 
-      - uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24 # v5.4.3
+      - uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0
         with:
           files: codecov.json
           fail_ci_if_error: false
@@ -214,7 +208,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
         with:
           distribution: zulu
           java-version: 23
@@ -226,7 +220,7 @@ jobs:
         with:
           version: stable
           targets: ${{ matrix.target }}
-          tools: cargo-ndk
+          tools: cargo-ndk@^4
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -239,7 +233,7 @@ jobs:
 
       - env:
           MATRIX_TARGET: ${{ matrix.target }}
-        run: cargo ndk --bindgen --platform "$API_LEVEL" --target "$MATRIX_TARGET" test --no-run
+        run: cargo ndk --platform "$API_LEVEL" --target "$MATRIX_TARGET" test --no-run
 
       - env:
           TARGET: ${{ matrix.target }}

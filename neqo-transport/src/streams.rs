@@ -35,7 +35,7 @@ use crate::{
 
 pub type SendOrder = i64;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct StreamOrder {
     pub sendorder: Option<SendOrder>,
 }
@@ -57,14 +57,6 @@ impl PartialOrd for StreamOrder {
         Some(self.cmp(other))
     }
 }
-
-impl PartialEq for StreamOrder {
-    fn eq(&self, other: &Self) -> bool {
-        self.sendorder == other.sendorder
-    }
-}
-
-impl Eq for StreamOrder {}
 
 pub struct Streams {
     role: Role,
@@ -212,7 +204,7 @@ impl Streams {
     pub fn write_maintenance_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
         now: Instant,
         rtt: Duration,
@@ -256,7 +248,7 @@ impl Streams {
         &mut self,
         priority: TransmissionPriority,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
         self.send.write_frames(priority, builder, tokens, stats);

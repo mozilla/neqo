@@ -36,7 +36,7 @@ permissions:
 jobs:
   bench:
     name: cargo bench
-    runs-on: ${{ inputs.bencher == 'on-prem' && fromJson('["self-hosted", "moonshot"]') || format('cirun-gcp-bencher--{0}', github.run_id) }}
+    runs-on: ${{ inputs.bencher == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || 'self-hosted' }}
     defaults:
       run:
         shell: bash
@@ -56,7 +56,7 @@ jobs:
 
       - name: Set PATH and environment
         run: |
-          echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
+          echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
         uses: ./neqo/.github/actions/rust
@@ -132,8 +132,9 @@ jobs:
           for BENCH in $BENCHES; do
             cp "$BENCH" ../binaries/neqo/
             # shellcheck disable=SC2086
+            # --baseline-lenient allows us to add new benchmarks in pull requests.
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
+              $BENCH -- --bench --baseline-lenient main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
           done
           for BENCH in $BENCHES; do
             NAME=$(basename "$BENCH" | cut -d- -f1)
@@ -155,7 +156,7 @@ jobs:
         run: |
           for f in *.perf; do
             # Convert for profiler.firefox.com
-            samply import "$f" -o "$f.samply.json.gz" --save-only --unstable-presymbolicate
+            samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
             # Generate flamegraphs
             flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}"
           done
