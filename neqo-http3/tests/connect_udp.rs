@@ -184,11 +184,10 @@ fn exchange_packets_through_proxy(
 
 #[test]
 fn session_lifecycle() {
-    fixture_init();
-    neqo_common::log::init(None);
-
     const PING: &[u8] = b"ping";
     const PONG: &[u8] = b"pong";
+    fixture_init();
+    neqo_common::log::init(None);
 
     let (mut client, mut proxy, session_id, proxy_session) = new_session();
 
@@ -304,7 +303,7 @@ fn connect_via_proxy() {
             &mut proxy,
             &mut server,
             connect_udp_session_id,
-            &mut proxy_session,
+            &proxy_session,
         );
     }
 
@@ -327,7 +326,7 @@ fn connect_via_proxy() {
             &mut proxy,
             &mut server,
             connect_udp_session_id,
-            &mut proxy_session,
+            & proxy_session,
         );
     }
 }

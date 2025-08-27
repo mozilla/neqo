@@ -18,11 +18,10 @@ use std::{
 
 use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType, Role};
 use neqo_transport::{AppError, Connection, DatagramTracking, StreamId};
-pub(crate) use webtransport_session::WebTransportSession;
 
 use crate::{
     client_events::Http3ClientEvents,
-    features::{extended_connect::connect_udp_session::ConnectUdpSession, NegotiationState},
+    features::NegotiationState,
     frames::HFrame,
     priority::PriorityHandler,
     recv_message::{RecvMessage, RecvMessageInfo},
@@ -103,8 +102,8 @@ impl ExtendedConnectType {
 
     pub(crate) fn new_protocol(&self, session_id: StreamId, role: Role) -> Box<dyn Protocol> {
         match self {
-            Self::WebTransport => Box::new(WebTransportSession::new(session_id, role)),
-            Self::ConnectUdp => Box::new(ConnectUdpSession::new(session_id)),
+            Self::WebTransport => Box::new(webtransport_session::Session::new(session_id, role)),
+            Self::ConnectUdp => Box::new(connect_udp_session::Session::new(session_id)),
         }
     }
 }
@@ -633,7 +632,7 @@ impl SendStreamEvents for Rc<RefCell<Listener>> {}
 ///
 /// "Protocol" here corresponds to the `:protocol` pseudo header in the HTTP
 /// Extended CONNECT method.
-trait Protocol: Debug + Display {
+pub(crate) trait Protocol: Debug + Display {
     fn connect_type(&self) -> ExtendedConnectType;
 
     fn close_frame(&self, error: u32, message: &str) -> Option<Vec<u8>>;

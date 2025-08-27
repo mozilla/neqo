@@ -16,12 +16,12 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct ConnectUdpSession {
+pub struct Session {
     frame_reader: FrameReader,
     session_id: StreamId,
 }
 
-impl ConnectUdpSession {
+impl Session {
     #[must_use]
     pub(crate) fn new(session_id: StreamId) -> Self {
         Self {
@@ -31,13 +31,13 @@ impl ConnectUdpSession {
     }
 }
 
-impl Display for ConnectUdpSession {
+impl Display for Session {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "ConnectUdpSession",)
     }
 }
 
-impl Protocol for ConnectUdpSession {
+impl Protocol for Session {
     fn connect_type(&self) -> ExtendedConnectType {
         ExtendedConnectType::ConnectUdp
     }

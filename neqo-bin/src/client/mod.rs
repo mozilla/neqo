@@ -40,7 +40,7 @@ use crate::SharedArgs;
 
 mod http09;
 mod http3;
-mod proxy;
+mod proxied_http3;
 
 const BUFWRITER_BUFFER_SIZE: usize = 64 * 1024;
 
@@ -659,14 +659,14 @@ pub async fn client(mut args: Args) -> Res<()> {
         let handler = http3::Handler::new(urls, args.clone());
 
         // Combine proxy connection and proxied connection into `Proxy`.
-        let proxy = proxy::Proxy::new(
+        let proxy = proxied_http3::ProxiedHttp3::new(
             client,
             handler,
             proxy_conn,
             proxy_url.clone(),
             args.headers.clone(),
         );
-        let proxy_handler = proxy::Handler::new();
+        let proxy_handler = proxied_http3::Handler::new();
         Runner::new(local_addr, &mut socket, proxy, proxy_handler, &args)
             .run()
             .await?;

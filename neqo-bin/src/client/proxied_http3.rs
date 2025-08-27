@@ -26,7 +26,7 @@ impl Handler {
     }
 }
 
-pub struct Proxy {
+pub struct ProxiedHttp3 {
     proxied_conn: Http3Client,
     handler: super::http3::Handler,
     proxy_conn: Http3Client,
@@ -37,7 +37,7 @@ pub struct Proxy {
     remote: Option<SocketAddr>,
     headers: Vec<Header>,
 }
-impl Proxy {
+impl ProxiedHttp3 {
     pub(crate) const fn new(
         proxied_conn: Http3Client,
         handler: super::http3::Handler,
@@ -58,7 +58,7 @@ impl Proxy {
     }
 }
 
-impl Client for Proxy {
+impl Client for ProxiedHttp3 {
     fn process_multiple_output(
         &mut self,
         now: Instant,
@@ -194,9 +194,9 @@ impl Client for Proxy {
 }
 
 impl super::Handler for Handler {
-    type Client = Proxy;
+    type Client = ProxiedHttp3;
 
-    fn handle(&mut self, client: &mut Proxy) -> Res<bool> {
+    fn handle(&mut self, client: &mut ProxiedHttp3) -> Res<bool> {
         let done = client.handler.handle(&mut client.proxied_conn)?;
 
         if matches!(client.proxied_conn.is_closed()?, CloseState::Closed) {

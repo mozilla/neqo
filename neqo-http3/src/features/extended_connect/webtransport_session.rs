@@ -22,7 +22,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub(crate) struct WebTransportSession {
+pub(crate) struct Session {
     frame_reader: FrameReader,
     session_id: StreamId,
     send_streams: HashSet<StreamId>,
@@ -30,13 +30,13 @@ pub(crate) struct WebTransportSession {
     role: Role,
 }
 
-impl Display for WebTransportSession {
+impl Display for Session {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "WebTransportSession")
     }
 }
 
-impl WebTransportSession {
+impl Session {
     #[must_use]
     pub(crate) fn new(session_id: StreamId, role: Role) -> Self {
         Self {
@@ -49,7 +49,7 @@ impl WebTransportSession {
     }
 }
 
-impl Protocol for WebTransportSession {
+impl Protocol for Session {
     fn connect_type(&self) -> ExtendedConnectType {
         ExtendedConnectType::WebTransport
     }
