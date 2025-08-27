@@ -27,4 +27,5 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - run: |
-          cargo semver-checks --default-features --baseline-rev main --workspace
+          git branch -a
+          cargo semver-checks --default-features --baseline-rev origin/main --workspace
