@@ -299,7 +299,7 @@ impl Http3Connection {
     /// This function is called when a not default feature needs to be
     /// negotiated. This is currently only used for the
     /// [`crate::features::extended_connect::webtransport_session`] and
-    /// [`crate::features::extended_connect::connect_udp`] feature. The
+    /// [`crate::features::extended_connect::connect_udp_session`] feature. The
     /// negotiation is done via the `SETTINGS` frame and when the peer's
     /// `SETTINGS` frame has been received the listener will be called.
     pub(crate) fn set_features_listener(&mut self, feature_listener: Http3ClientEvents) {

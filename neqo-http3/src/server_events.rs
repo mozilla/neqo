@@ -235,20 +235,9 @@ pub struct WebTransportRequest {
     stream_handler: StreamHandler,
 }
 
-#[derive(Debug, Clone)]
-pub struct ConnectUdpRequest {
-    stream_handler: StreamHandler,
-}
-
 impl Display for WebTransportRequest {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "WebTransport session {}", self.stream_handler)
-    }
-}
-
-impl Display for ConnectUdpRequest {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "ConnectUdp session {}", self.stream_handler)
     }
 }
 
@@ -379,6 +368,18 @@ impl WebTransportRequest {
                 self.stream_handler.stream_id().as_u64(),
             ))
             .map_err(|_| Error::Internal)?)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectUdpRequest {
+    stream_handler: StreamHandler,
+}
+
+
+impl Display for ConnectUdpRequest {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "ConnectUdp session {}", self.stream_handler)
     }
 }
 

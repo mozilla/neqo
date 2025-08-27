@@ -725,7 +725,7 @@ impl Http3Client {
             .webtransport_close_session(&mut self.conn, session_id, error, message)
     }
 
-    /// Close `WebTransport` cleanly
+    /// Close `ConnectUdp` cleanly
     pub fn connect_udp_close_session(
         &mut self,
         session_id: StreamId,
