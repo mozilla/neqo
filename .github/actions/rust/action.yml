@@ -42,17 +42,6 @@ runs:
       if: ${{ env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted' }}
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
-    - name: Install mold (Linux)
-      shell: bash
-      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && !contains(inputs.targets, '-android')}}
-      env:
-        DEBIAN_FRONTEND: noninteractive
-      run: |
-        if [ "$(apt-cache search --names-only '^mold$' | wc -l)" -ge 1 ]; then
-          [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
-          sudo apt-get install -y --no-install-recommends mold
-        fi
-
     # See https://corrode.dev/blog/tips-for-faster-ci-builds/
     - name: Set up build environment
       shell: bash

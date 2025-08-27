@@ -21,8 +21,7 @@ use super::{
 use crate::{
     addr_valid::{AddressValidation, ValidateAddress},
     frame::FrameType,
-    rtt::INITIAL_RTT,
-    ConnectionParameters, Error, State, Version, MIN_INITIAL_PACKET_SIZE,
+    ConnectionParameters, Error, State, Version, DEFAULT_INITIAL_RTT, MIN_INITIAL_PACKET_SIZE,
 };
 
 #[test]
@@ -87,11 +86,12 @@ fn ticket_rtt(rtt: Duration) -> Duration {
     // A simple ACK frame for a single packet with packet number 0.
     const ACK_FRAME_1: &[u8] = &[0x02, 0x00, 0x00, 0x00, 0x00];
 
-    // This test needs to decrypt the CI, so turn off MLKEM.
+    // This test needs to predicts the exact shape of an ACK frame, so disable randomization.
     let mut client = new_client(
         ConnectionParameters::default()
             .versions(Version::Version1, vec![Version::Version1])
-            .mlkem(false),
+            .mlkem(false)
+            .randomize_first_pn(false),
     );
     let mut server = default_server();
     let mut now = now();
@@ -110,7 +110,6 @@ fn ticket_rtt(rtt: Duration) -> Duration {
     // Now decrypt the packet.
     let (aead, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
     let (header, pn) = header_protection::remove(&hp, protected_header, payload);
-    assert_eq!(pn, 0);
     let pn_len = header.len() - protected_header.len();
     let mut buf = vec![0; payload.len()];
     let mut plaintext = aead
@@ -192,7 +191,7 @@ fn ticket_rtt_less_than_default() {
 
 #[test]
 fn ticket_rtt_larger_than_default() {
-    assert_eq!(ticket_rtt(Duration::from_millis(500)), INITIAL_RTT);
+    assert_eq!(ticket_rtt(Duration::from_millis(500)), DEFAULT_INITIAL_RTT);
 }
 
 /// Check that a resumed connection uses a token on Initial packets.

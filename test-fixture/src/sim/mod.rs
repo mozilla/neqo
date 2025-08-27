@@ -239,7 +239,7 @@ impl Simulator {
             if dgram.is_none() {
                 let next = self.next_time(now);
                 if next > now {
-                    qinfo!(
+                    qdebug!(
                         "[{}] advancing time by {:?} to {:?}",
                         self.name,
                         next - now,

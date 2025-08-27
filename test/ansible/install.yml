@@ -77,7 +77,6 @@
           - linux-tools-common
           - "linux-generic-hwe-{{ ansible_facts['lsb']['release'] }}"
           - lld
-          - mold
           - ninja-build
           - python-is-python3
           - r-base-core

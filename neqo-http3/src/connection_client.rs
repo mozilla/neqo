@@ -71,15 +71,12 @@ const fn alpn_from_quic_version(version: Version) -> &'static str {
 ///   - [`Http3Client::authenticated`]
 ///   - [`Http3Client::enable_ech`]
 ///   - [`Http3Client::enable_resumption`]
-///   - [`Http3Client::initiate_key_update`]
 ///   - [`Http3Client::set_qlog`]
 /// - retrieving information about a connection:
 /// - [`Http3Client::peer_certificate`]
-///   - [`Http3Client::qpack_decoder_stats`]
 ///   - [`Http3Client::qpack_encoder_stats`]
 ///   - [`Http3Client::transport_stats`]
 ///   - [`Http3Client::state`]
-///   - [`Http3Client::take_resumption_token`]
 ///   - [`Http3Client::tls_info`]
 /// - driving HTTP/3 session:
 ///   - [`Http3Client::process_output`]
@@ -93,7 +90,6 @@ const fn alpn_from_quic_version(version: Version) -> &'static str {
 ///   - [`Http3Client::cancel_fetch`]
 ///   - [`Http3Client::stream_reset_send`]
 ///   - [`Http3Client::stream_stop_sending`]
-///   - [`Http3Client::set_stream_max_data`]
 /// - priority feature:
 ///   - [`Http3Client::priority_update`]
 /// - `WebTransport` feature:
@@ -175,7 +171,7 @@ const fn alpn_from_quic_version(version: Version) -> &'static str {
 ///
 ///     while let Some(event) = client.next_event() {
 ///         match event {
-///             Http3ClientEvent::WebTransport(WebTransportEvent::Session{
+///             Http3ClientEvent::WebTransport(WebTransportEvent::NewSession{
 ///                 stream_id,
 ///                 status,
 ///                 ..
@@ -345,11 +341,6 @@ impl Http3Client {
         }
     }
 
-    #[must_use]
-    pub const fn role(&self) -> Role {
-        self.conn.role()
-    }
-
     /// The function returns the current state of the connection.
     #[must_use]
     pub fn state(&self) -> Http3State {
@@ -408,23 +399,6 @@ impl Http3Client {
             enc.encode(token.as_ref());
             ResumptionToken::new(enc.into(), token.expiration_time())
         })
-    }
-
-    /// The correct way to obtain a resumption token is to wait for the
-    /// `Http3ClientEvent::ResumptionToken` event. To emit the event we are waiting for a
-    /// resumption token and a `NEW_TOKEN` frame to arrive. Some servers don't send `NEW_TOKEN`
-    /// frames and in this case, we wait for 3xPTO before emitting an event. This is especially a
-    /// problem for short-lived connections, where the connection is closed before any events are
-    /// released. This function retrieves the token, without waiting for a `NEW_TOKEN` frame to
-    /// arrive.
-    ///
-    /// In addition to the token, HTTP/3 settings are encoded into the token before giving it to
-    /// the application(`encode_resumption_token`). When the resumption token is supplied to a new
-    /// connection the HTTP/3 setting will be decoded and used until the setting are received from
-    /// the server.
-    pub fn take_resumption_token(&mut self, now: Instant) -> Option<ResumptionToken> {
-        let t = self.conn.take_resumption_token(now)?;
-        self.encode_resumption_token(&t)
     }
 
     /// This may be call if an application has a resumption token. This must be called before
@@ -494,17 +468,6 @@ impl Http3Client {
             self.events
                 .connection_state_change(self.base_handler.state().clone());
         }
-    }
-
-    /// Attempt to force a key update.
-    ///
-    /// # Errors
-    ///
-    /// If the connection isn't confirmed, or there is an outstanding key update, this
-    /// returns `Err(Error::TransportError(neqo_transport::Error::KeyUpdateBlocked))`.
-    pub fn initiate_key_update(&mut self) -> Res<()> {
-        self.conn.initiate_key_update()?;
-        Ok(())
     }
 
     // API: Request/response
@@ -794,10 +757,8 @@ impl Http3Client {
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    ///
-    /// # Panics
-    ///
-    /// This cannot panic.
+    //
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     pub fn webtransport_set_sendorder(
         &mut self,
         stream_id: StreamId,
@@ -811,6 +772,8 @@ impl Http3Client {
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    //
+    // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.
     pub fn webtransport_set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         Http3Connection::stream_set_fairness(&mut self.conn, stream_id, fairness)
     }
@@ -1254,22 +1217,6 @@ impl Http3Client {
         Ok(())
     }
 
-    /// Increases `max_stream_data` for a `stream_id`.
-    ///
-    /// # Errors
-    ///
-    /// Returns `InvalidStreamId` if a stream does not exist or the receiving
-    /// side is closed.
-    pub fn set_stream_max_data(&mut self, stream_id: StreamId, max_data: u64) -> Res<()> {
-        self.conn.set_stream_max_data(stream_id, max_data)?;
-        Ok(())
-    }
-
-    #[must_use]
-    pub fn qpack_decoder_stats(&self) -> QpackStats {
-        self.base_handler.qpack_decoder().borrow().stats()
-    }
-
     #[must_use]
     pub fn qpack_encoder_stats(&self) -> QpackStats {
         self.base_handler.qpack_encoder().borrow().stats()
@@ -1390,6 +1337,8 @@ mod tests {
     const CLIENT_SIDE_CONTROL_STREAM_ID: StreamId = StreamId::new(2);
     const CLIENT_SIDE_ENCODER_STREAM_ID: StreamId = StreamId::new(6);
     const CLIENT_SIDE_DECODER_STREAM_ID: StreamId = StreamId::new(10);
+
+    const DEFAULT_IDLE_TIMEOUT: Duration = ConnectionParameters::DEFAULT_IDLE_TIMEOUT;
 
     struct TestServer {
         settings: HFrame,
@@ -2638,8 +2587,10 @@ mod tests {
         let (mut client, mut server, _request_stream_id) = connect_and_send_request(true);
         force_idle(&mut client, &mut server);
 
-        let idle_timeout = ConnectionParameters::default().get_idle_timeout();
-        assert_eq!(client.process_output(now()).callback(), idle_timeout / 2);
+        assert_eq!(
+            client.process_output(now()).callback(),
+            DEFAULT_IDLE_TIMEOUT / 2
+        );
     }
 
     // Helper function: read response when a server sends HTTP_RESPONSE_2.
@@ -5114,7 +5065,6 @@ mod tests {
     #[test]
     fn push_keep_alive() {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
-        let idle_timeout = ConnectionParameters::default().get_idle_timeout();
 
         // Promise a push and deliver, but don't close the stream.
         send_push_promise(&mut server.conn, request_stream_id, PushId::new(0));
@@ -5137,7 +5087,10 @@ mod tests {
 
         // The client will become idle here.
         force_idle(&mut client, &mut server);
-        assert_eq!(client.process_output(now()).callback(), idle_timeout);
+        assert_eq!(
+            client.process_output(now()).callback(),
+            DEFAULT_IDLE_TIMEOUT
+        );
 
         // Reading push data will stop the client from being idle.
         _ = send_push_data(&mut server.conn, PushId::new(0), false);
@@ -5152,7 +5105,10 @@ mod tests {
         assert!(!fin);
 
         force_idle(&mut client, &mut server);
-        assert_eq!(client.process_output(now()).callback(), idle_timeout / 2);
+        assert_eq!(
+            client.process_output(now()).callback(),
+            DEFAULT_IDLE_TIMEOUT / 2
+        );
     }
 
     #[test]

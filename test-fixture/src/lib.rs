@@ -57,6 +57,7 @@ pub const NSS_DB_PATH: &str = if let Some(dir) = option_env!("NSS_DB_PATH") {
 ///
 /// When the NSS initialization fails.
 pub fn fixture_init() {
+    neqo_common::log::init(None);
     if NSS_DB_PATH == "$ARGV0" {
         let mut current_exe = std::env::current_exe().unwrap();
         current_exe.pop();
@@ -178,7 +179,7 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         DEFAULT_ADDR,
         DEFAULT_ADDR,
-        params.ack_ratio(255), // Tests work better with this set this way.
+        params,
         now(),
     )
     .expect("create a client");
@@ -235,7 +236,7 @@ pub fn new_server<A: AsRef<str>>(alpn: &[A], params: ConnectionParameters) -> Co
         DEFAULT_KEYS,
         alpn,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        params.ack_ratio(255),
+        params,
     )
     .expect("create a server");
     if let Ok(dir) = std::env::var("QLOGDIR") {
@@ -372,6 +373,28 @@ pub fn http3_server_with_params(params: Http3Parameters) -> Http3Server {
     .expect("create a server")
 }
 
+pub fn exchange_packets(
+    client: &mut Http3Client,
+    server: &mut Http3Server,
+    is_handshake: bool,
+    out_ex: Option<Datagram>,
+) {
+    let mut out = out_ex;
+    let mut auth_needed = is_handshake;
+    loop {
+        out = client.process(out, now()).dgram();
+        let client_out_is_none = out.is_none();
+        if auth_needed && client.peer_certificate().is_some() {
+            client.authenticated(AuthenticationStatus::Ok, now());
+            auth_needed = false;
+        }
+        out = server.process(out, now()).dgram();
+        if client_out_is_none && out.is_none() {
+            break;
+        }
+    }
+}
+
 /// Split the first packet off a coalesced packet.
 fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
     const TYPE_MASK: u8 = 0b1011_0000;
@@ -409,6 +432,24 @@ pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
         Datagram::new(d.source(), d.destination(), d.tos(), a.to_vec()),
         b.map(|b| Datagram::new(d.source(), d.destination(), d.tos(), b.to_vec())),
     )
+}
+
+/// Strip any padding off the packet.
+/// This uses a heuristic to detect padding packets.  Don't rely on that too much.
+#[must_use]
+pub fn strip_padding(dgram: Datagram) -> Datagram {
+    fn is_padding(dgram: &Datagram) -> bool {
+        // This is a pretty rough heuristic, but it works for now.
+        // Below the minimum packets size of 19 (1 type, 1 packet len, 1 content, 16 tag)
+        // OR all values the same (except the last, in anticipation of SCONE indications).
+        dgram.len() < 19 || dgram[1..dgram.len() - 1].iter().all(|&x| x == dgram[0])
+    }
+    let (first, second) = split_datagram(&dgram);
+    if second.as_ref().is_some_and(is_padding) {
+        first
+    } else {
+        dgram
+    }
 }
 
 #[derive(Clone, Default)]

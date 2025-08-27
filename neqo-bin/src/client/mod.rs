@@ -29,6 +29,7 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, Cipher, ResumptionToken,
 };
+use neqo_http3::Header;
 use neqo_transport::{AppError, CloseReason, ConnectionId, OutputBatch, Version};
 use neqo_udp::RecvBuf;
 use rustc_hash::FxHashMap as HashMap;
@@ -118,8 +119,8 @@ pub struct Args {
     #[arg(short = 'm', default_value = "GET")]
     method: String,
 
-    #[arg(short = 'H', long, number_of_values = 2)]
-    header: Vec<String>,
+    #[arg(name = "header", short = 'H', long)]
+    headers: Vec<Header>,
 
     #[arg(name = "max-push", short = 'p', long, default_value = "10")]
     max_concurrent_push_streams: u64,
@@ -205,7 +206,7 @@ impl Args {
             } else {
                 "POST".into()
             },
-            header: vec![],
+            headers: vec![],
             max_concurrent_push_streams: 10,
             download_in_series: false,
             concurrency: 100,
@@ -435,7 +436,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             handler,
             args,
             timeout: None,
-            recv_buf: RecvBuf::new(),
+            recv_buf: RecvBuf::default(),
         }
     }
 
