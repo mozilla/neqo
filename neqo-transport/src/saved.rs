@@ -47,10 +47,10 @@ impl SavedDatagrams {
         let store = self.store(epoch);
 
         if store.len() < MAX_SAVED_DATAGRAMS {
-            qdebug!("saving datagram of {} bytes", d.len());
+            qdebug!("saving {epoch:?} datagram of {} bytes", d.len());
             store.push(SavedDatagram { d, t });
         } else {
-            qinfo!("not saving datagram of {} bytes", d.len());
+            qinfo!("not saving {epoch:?} datagram of {} bytes", d.len());
         }
     }
 
