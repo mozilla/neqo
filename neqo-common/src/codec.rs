@@ -72,6 +72,18 @@ impl<'a> Decoder<'a> {
         self.skip_inner(len);
     }
 
+    /// Skip while the current byte is `predicate`. Returns the number of bytes
+    /// skipped.
+    pub fn skip_while(&mut self, predicate: u8) -> usize {
+        let until = self
+            .as_ref() // remaining bytes
+            .iter()
+            .position(|v| *v != predicate)
+            .unwrap_or_else(|| self.remaining());
+        self.skip(until);
+        until
+    }
+
     /// Provides the next byte without moving the read position.
     #[must_use]
     pub const fn peek_byte(&self) -> Option<u8> {
@@ -481,12 +493,6 @@ impl<B: Buffer> AsMut<[u8]> for Encoder<B> {
     }
 }
 
-impl<'a> From<Decoder<'a>> for Encoder {
-    fn from(dec: Decoder<'a>) -> Self {
-        Self::from(&dec.buf[dec.offset..])
-    }
-}
-
 impl From<&[u8]> for Encoder {
     fn from(buf: &[u8]) -> Self {
         Self {
@@ -834,6 +840,40 @@ mod tests {
         let enc = Encoder::from_hex("ff");
         let mut dec = enc.as_decoder();
         dec.skip_vvec();
+    }
+
+    #[test]
+    fn skip_while() {
+        let enc = Encoder::from_hex("000001020202");
+        let mut dec = enc.as_decoder();
+
+        // Skip all zeros
+        let skipped = dec.skip_while(0);
+        assert_eq!(skipped, 2);
+        assert_eq!(dec.offset(), 2);
+        assert_eq!(dec.remaining(), 4);
+        assert_eq!(dec.as_ref(), &[0x01, 0x02, 0x02, 0x02]);
+
+        // Skip until 0x02
+        let skipped = dec.skip_while(0x01);
+        assert_eq!(skipped, 1);
+        assert_eq!(dec.offset(), 3);
+        assert_eq!(dec.remaining(), 3);
+        assert_eq!(dec.as_ref(), &[0x02, 0x02, 0x02]);
+
+        // Don't skip on no match.
+        let skipped = dec.skip_while(0xFF);
+        assert_eq!(skipped, 0);
+        assert_eq!(dec.offset(), 3);
+        assert_eq!(dec.remaining(), 3);
+        assert_eq!(dec.as_ref(), &[0x02, 0x02, 0x02]);
+
+        // Skip till end.
+        let skipped = dec.skip_while(0x02);
+        assert_eq!(skipped, 3);
+        assert_eq!(dec.offset(), 6);
+        assert_eq!(dec.remaining(), 0);
+        assert_eq!(dec.as_ref(), &[0u8; 0]);
     }
 
     #[test]

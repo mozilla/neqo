@@ -77,13 +77,23 @@
           - linux-tools-common
           - "linux-generic-hwe-{{ ansible_facts['lsb']['release'] }}"
           - lld
-          - mold
           - ninja-build
           - python-is-python3
           - r-base-core
           - ripgrep
           - sccache
           - zlib1g-dev
+      register: apt_install
+
+    - name: Install required GCP dependencies
+      when: is_gcp
+      ansible.builtin.apt:
+        install_recommends: true
+        state: present
+        name:
+          - linux-image-6.11.0-1017-gcp
+          - linux-tools-6.11.0-1017-gcp
+          - linux-cloud-tools-6.11.0-1017-gcp
       register: apt_install
 
     - name: Set kernel.perf_event_paranoid
@@ -172,6 +182,16 @@
       args:
         creates: "/home/{{ bench_user }}/.cargo/bin/cargo"
 
+    - name: Modify GRUB configuration
+      block:
+        - name: Boot Linux 6.11.0
+          ansible.builtin.lineinfile:
+            path: "{{ '/etc/default/grub.d/50-cloudimg-settings.cfg' if is_gcp else '/etc/default/grub' }}"
+            regexp: '^GRUB_DEFAULT=.*'
+            line: GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux {{ '6.11.0-1017-gcp' if is_gcp else '6.11.0-28-generic' }}"
+        - name: Update GRUB
+          ansible.builtin.command: update-grub
+
     - name: Exit on GCP
       ansible.builtin.meta: end_play
       when: is_gcp
@@ -258,3 +278,6 @@
         chdir: "{{ bench_path }}"
         cmd: ./svc.sh start
       changed_when: true
+
+    - name: Reboot the machine
+      ansible.builtin.reboot:

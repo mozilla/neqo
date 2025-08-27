@@ -29,15 +29,6 @@ impl From<Option<u64>> for DatagramTracking {
     }
 }
 
-impl From<DatagramTracking> for Option<u64> {
-    fn from(v: DatagramTracking) -> Self {
-        match v {
-            DatagramTracking::Id(id) => Some(id),
-            DatagramTracking::None => None,
-        }
-    }
-}
-
 struct QuicDatagram {
     data: Vec<u8>,
     tracking: DatagramTracking,
@@ -137,7 +128,7 @@ impl QuicDatagrams {
         }
     }
 
-    /// Returns true if there was an unsent datagram that has been dismissed.
+    /// Add a datagram to the send queue.
     ///
     /// # Error
     ///
