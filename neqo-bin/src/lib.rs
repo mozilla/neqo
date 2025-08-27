@@ -5,7 +5,6 @@
 // except according to those terms.
 
 use std::{
-    fmt::{self, Display},
     net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     time::Duration,
@@ -16,6 +15,7 @@ use neqo_transport::{
     tparams::PreferredAddress, CongestionControlAlgorithm, ConnectionParameters, StreamType,
     Version, DEFAULT_INITIAL_RTT,
 };
+use thiserror::Error;
 
 pub mod client;
 mod send_data;
@@ -266,19 +266,11 @@ fn from_str(s: &str) -> Result<Version, Error> {
     Version::try_from(v).map_err(|_| Error::Argument("unknown version"))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("Error: {0}")]
     Argument(&'static str),
 }
-
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error: {self:?}")?;
-        Ok(())
-    }
-}
-
-impl std::error::Error for Error {}
 
 #[cfg(test)]
 mod tests {
