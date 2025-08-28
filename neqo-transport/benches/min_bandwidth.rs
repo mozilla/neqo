@@ -35,7 +35,7 @@ pub fn main() {
 
     const TRANSFER_AMOUNT: usize = GIB;
     const LINK_BANDWIDTH: usize = GBIT;
-    const LINK_RTT_MS: usize = 40;
+    const LINK_RTT_MS: u64 = 40;
     /// The amount of delay that the link buffer will add, when full.
     const BUFFER_LATENCY_MS: usize = 4;
     /// How much of the theoretical bandwidth we will expect to deliver.
@@ -44,7 +44,7 @@ pub fn main() {
     let gbit_link = || {
         let rate_byte = LINK_BANDWIDTH / 8;
         let capacity_byte = LINK_BANDWIDTH * BUFFER_LATENCY_MS / 1000;
-        let delay = Duration::from_millis(LINK_RTT_MS as u64) / 2;
+        let delay = Duration::from_millis(LINK_RTT_MS) / 2;
         TailDrop::new(rate_byte, capacity_byte, false, delay)
     };
 
