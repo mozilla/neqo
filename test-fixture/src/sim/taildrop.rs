@@ -17,6 +17,7 @@ use neqo_common::{qinfo, qtrace, Datagram, Dscp, Ecn, Tos};
 use neqo_transport::Output;
 
 use super::Node;
+use crate::sim::Rng;
 
 /// One second in nanoseconds.
 const ONE_SECOND_NS: u128 = 1_000_000_000;
@@ -73,9 +74,8 @@ pub struct TailDrop {
     rate: usize,
     /// The depth of the queue, in bytes.
     capacity: usize,
-    /// The depth of the queue where arriving packets get marked.
-    /// Set this to `capacity` or higher so that it has no effect.
-    mark_capacity: usize,
+    /// Whether to apply ECN markings.
+    ecn: bool,
 
     /// A counter for how many bytes are enqueued.
     used: usize,
@@ -90,25 +90,33 @@ pub struct TailDrop {
     on_link: VecDeque<(Instant, Datagram)>,
 
     stats: Stats,
+
+    // The random
+    rng: Option<Rng>,
 }
 
 impl TailDrop {
     /// Make a new taildrop node with the given rate, queue capacity, and link delay.
     #[must_use]
-    pub const fn new(rate: usize, capacity: usize, mark_capacity: usize, delay: Duration) -> Self {
+    pub const fn new(rate: usize, capacity: usize, ecn: bool, delay: Duration) -> Self {
         assert!(rate != 0, "zero rate gets you nowhere");
         assert!(rate <= 1_000_000_000, "rates over 1Gbps are not supported");
+        // We multiply this by 3000 below and need to avoid overflow.
+        assert!(capacity < usize::MAX / 3000, "too much capacity");
+        // We need to cube a value close to 1000x this and have it fit within a u128.
+        assert!(capacity < (1 << 32), "too much capacity");
         Self {
             overhead: 80,
             rate,
             capacity,
-            mark_capacity,
+            ecn,
             used: 0,
             queue: VecDeque::new(),
             next_deque: None,
             delay,
             on_link: VecDeque::new(),
             stats: Stats::new(),
+            rng: None,
         }
     }
 
@@ -116,13 +124,13 @@ impl TailDrop {
     /// with a fat 32k buffer (about 30ms), and the default forward delay of 50ms.
     #[must_use]
     pub const fn dsl_downlink() -> Self {
-        Self::new(1_000_000, 32_768, 32_768, Duration::from_millis(50))
+        Self::new(1_000_000, 32_768, false, Duration::from_millis(50))
     }
 
     /// Cut uplink to one fifth of the downlink (2Mbps), and reduce the buffer to 1/4.
     #[must_use]
     pub const fn dsl_uplink() -> Self {
-        Self::new(200_000, 8_192, 8_192, Duration::from_millis(50))
+        Self::new(200_000, 8_192, false, Duration::from_millis(50))
     }
 
     /// How "big" is this datagram, accounting for overheads.
@@ -193,20 +201,50 @@ impl TailDrop {
     }
 
     /// Apply ECN-CE markings to packets if they are ECT(0) marked.
-    /// This is classic, simple ECN; we don't know about L4S yet.
-    fn maybe_mark(&mut self, d: Datagram) -> Datagram {
-        if self.used <= self.mark_capacity || Ecn::from(d.tos()) != Ecn::Ect0 {
-            return d;
+    /// This is classic, simple ECN using RED; we don't know about L4S yet.
+    fn maybe_mark(&mut self, dgram: Datagram) -> Datagram {
+        if !self.ecn || Ecn::from(dgram.tos()) != Ecn::Ect0 {
+            return dgram;
         }
 
-        qtrace!("taildrop marking {} bytes", d.len());
-        self.stats.marked += 1;
-        let tos = Tos::from((Dscp::from(d.tos()), Ecn::Ce));
-        Datagram::new(d.source(), d.destination(), tos, d.to_vec())
+        // Apply RED which goes from 0 mark chance up to 30% of the capacity.
+        // From there, follow a cubic curve that reaches 1 at 80% capacity.
+        // But cap that at around 95% mark probability.
+        //
+        // let p = (2 * ((used / capacity) - 0.3));
+        // if rand(0, 1) < p.pow(3).clamp(0, 0.95) { mark(d) } else { d }
+        //
+        // This code scales that up by a factor of 1024 so we can use integers.
+        // Note that 1007 =~ 1024 * Math.pow(0.95, 1/3)
+
+        let Some(n) = (2048 * self.used).checked_sub(self.capacity * 3072 / 5) else {
+            return dgram; // (used / capacity) < 0.3
+        };
+        let p = u128::try_from(n.min(self.capacity * 1007)).unwrap();
+        let c = u128::try_from(self.capacity).unwrap();
+        let p = u64::try_from(p * p * p / c / c / c).unwrap();
+        let r = self
+            .rng
+            .as_ref()
+            .unwrap()
+            .borrow_mut()
+            .random_from(0..(1 << 30));
+        if r < p {
+            qtrace!("taildrop marking {} bytes", dgram.len());
+            self.stats.marked += 1;
+            let tos = Tos::from((Dscp::from(dgram.tos()), Ecn::Ce));
+            Datagram::new(dgram.source(), dgram.destination(), tos, dgram.to_vec())
+        } else {
+            dgram
+        }
     }
 }
 
 impl Node for TailDrop {
+    fn init(&mut self, rng: Rng, _now: Instant) {
+        self.rng = Some(rng);
+    }
+
     fn process(&mut self, d: Option<Datagram>, now: Instant) -> Output {
         if let Some(dgram) = d {
             self.maybe_enqueue(dgram, now);

@@ -186,9 +186,9 @@ simulate!(
     transfer_taildrop_ecn,
     [
         Node::default_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
-        TailDrop::new(1_000_000, 65_536, 32_768, Duration::from_millis(50)),
+        TailDrop::new(1_000_000, 65_536, true, Duration::from_millis(50)),
         Node::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
-        TailDrop::new(200_000, 16_384, 8_192, Duration::from_millis(50))
+        TailDrop::new(200_000, 16_384, true, Duration::from_millis(50))
     ],
 );
 

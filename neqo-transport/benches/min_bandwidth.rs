@@ -43,17 +43,14 @@ pub fn main() {
     const LINK_RTT_MS: usize = 40;
     /// The amount of delay that the link buffer will add, when full.
     const BUFFER_LATENCY_MS: usize = 4;
-    /// The proportion of the link buffer at which marking starts.
-    const ECN_THRESHOLD: f64 = 0.8;
     /// How much of the theoretical bandwidth we will expect to deliver.
     const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.7;
 
     let gbit_link = || {
         let rate_byte = LINK_BANDWIDTH / 8;
         let capacity_byte = LINK_BANDWIDTH * BUFFER_LATENCY_MS / 1000;
-        let mark_capacity = ((capacity_byte as f64) * ECN_THRESHOLD) as usize;
         let delay = Duration::from_millis(LINK_RTT_MS as u64) / 2;
-        TailDrop::new(rate_byte, capacity_byte, mark_capacity, delay)
+        TailDrop::new(rate_byte, capacity_byte, false, delay)
     };
 
     init_log(None);
