@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -793,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "clap",
  "clap-verbosity-flag",
@@ -817,7 +817,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-common"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "criterion",
  "enum-map",
@@ -829,12 +829,13 @@ dependencies = [
  "regex",
  "strum",
  "test-fixture",
+ "thiserror",
  "windows",
 ]
 
 [[package]]
 name = "neqo-crypto"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "bindgen",
  "enum-map",
@@ -851,7 +852,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-http3"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "criterion",
  "enumset",
@@ -871,7 +872,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-qpack"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "log",
  "neqo-common",
@@ -884,7 +885,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-transport"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "criterion",
  "enum-map",
@@ -905,7 +906,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-udp"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -1266,7 +1267,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "log",
  "neqo-common",
@@ -1274,6 +1275,26 @@ dependencies = [
  "neqo-http3",
  "neqo-transport",
  "qlog",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "567b8a2dae586314f7be2a752ec7474332959c6460e02bde30d702a66d488708"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f7cf42b4507d8ea322120659672cf1b9dbb93f8f2d4ecfd6e51350ff5b17a1d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
