@@ -14,12 +14,13 @@
 
 use std::time::Duration;
 
+use neqo_common::{log::init as log_init, qinfo};
 use neqo_transport::{ConnectionParameters, State};
 use test_fixture::{
     boxed,
     sim::{
         connection::{Node, ReachState, ReceiveData, SendData},
-        network::{Delay, Mtu, TailDrop},
+        network::{Mtu, TailDrop},
         Simulator,
     },
 };
@@ -35,14 +36,22 @@ pub fn main() {
     const TRANSFER_AMOUNT: usize = GIB;
     const LINK_BANDWIDTH: usize = GBIT;
     const LINK_RTT_MS: usize = 40;
-    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.85;
+    /// The amount of delay that the link buffer will add, when full.
+    const BUFFER_LATENCY_MS: usize = 4;
+    /// The proportion of the link buffer at which marking starts.
+    const ECN_THRESHOLD: f64 = 0.8;
+    /// How much of the theoretical bandwidth we will expect to deliver.
+    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.7;
 
     let gbit_link = || {
         let rate_byte = LINK_BANDWIDTH / 8;
-        // BDP here is 5MB = 1e9 * 0.04 / 8: buffer an entire BDP here.
-        let capacity_byte = LINK_BANDWIDTH * LINK_RTT_MS / 1000;
-        TailDrop::new(rate_byte, capacity_byte, capacity_byte, Duration::ZERO)
+        let capacity_byte = LINK_BANDWIDTH * BUFFER_LATENCY_MS / 1000;
+        let mark_capacity = ((capacity_byte as f64) * ECN_THRESHOLD) as usize;
+        let delay = Duration::from_millis(LINK_RTT_MS as u64) / 2;
+        TailDrop::new(rate_byte, capacity_byte, mark_capacity, delay)
     };
+
+    log_init(None);
 
     let simulated_time = Simulator::new(
         "gbit-bandwidth",
@@ -54,7 +63,6 @@ pub fn main() {
             ),
             Mtu::new(1500),
             gbit_link(),
-            Delay::new(Duration::from_millis(LINK_RTT_MS as u64 / 2)),
             Node::new_server(
                 ConnectionParameters::default(),
                 boxed![ReachState::new(State::Confirmed)],
@@ -62,13 +70,17 @@ pub fn main() {
             ),
             Mtu::new(1500),
             gbit_link(),
-            Delay::new(Duration::from_millis(LINK_RTT_MS as u64 / 2)),
         ],
     )
     .setup()
     .run();
 
     let achieved_bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
+    qinfo!(
+        "Achieved {} Mb/s bandwidth (link rate {})",
+        achieved_bandwidth / MBIT as f64,
+        LINK_BANDWIDTH / MBIT
+    );
 
     assert!(
         LINK_BANDWIDTH as f64 * MINIMUM_EXPECTED_UTILIZATION < achieved_bandwidth,

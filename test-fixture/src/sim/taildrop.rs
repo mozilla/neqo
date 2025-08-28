@@ -7,7 +7,7 @@
 #![expect(clippy::unwrap_used, reason = "This is test code.")]
 
 use std::{
-    cmp::max,
+    cmp::{max, min},
     collections::VecDeque,
     fmt::{self, Debug, Display},
     time::{Duration, Instant},
@@ -82,10 +82,8 @@ pub struct TailDrop {
     /// A queue of unsent bytes.
     queue: VecDeque<Datagram>,
     /// The time that the next datagram can enter the link.
-    next_deque: Option<Instant>,
+    next_deque: Option<(Instant, u32)>,
 
-    /// Any sub-ns delay from the last enqueue.
-    sub_ns_delay: u32,
     /// The time it takes a byte to exit the other end of the link.
     delay: Duration,
     /// The packets that are on the link and when they can be delivered.
@@ -98,15 +96,16 @@ impl TailDrop {
     /// Make a new taildrop node with the given rate, queue capacity, and link delay.
     #[must_use]
     pub const fn new(rate: usize, capacity: usize, mark_capacity: usize, delay: Duration) -> Self {
+        assert!(rate != 0, "zero rate gets you nowhere");
+        assert!(rate <= 1_000_000_000, "rates over 1Gbps are not supported");
         Self {
-            overhead: 64,
+            overhead: 80,
             rate,
             capacity,
             mark_capacity,
             used: 0,
             queue: VecDeque::new(),
             next_deque: None,
-            sub_ns_delay: 0,
             delay,
             on_link: VecDeque::new(),
             stats: Stats::new(),
@@ -134,7 +133,8 @@ impl TailDrop {
     }
 
     /// Start sending a datagram.
-    fn send(&mut self, d: Datagram, now: Instant) {
+    /// Send at the given time, with the given sub-nanosecond extra delay.
+    fn send(&mut self, d: Datagram, now: Instant, sub_ns: u32) {
         // How many bytes are we "transmitting"?
         let sz = u128::try_from(self.size(&d)).unwrap();
 
@@ -143,13 +143,13 @@ impl TailDrop {
         // This ensures that high rates and small packets don't result in rounding
         // down times too badly.
         // Duration consists of a u64 and a u32, so we have 32 high bits to spare.
-        let t = sz * (ONE_SECOND_NS << 32) / u128::try_from(self.rate).unwrap()
-            + u128::from(self.sub_ns_delay);
+        let t =
+            sz * (ONE_SECOND_NS << 32) / u128::try_from(self.rate).unwrap() + u128::from(sub_ns);
         let send_ns = u64::try_from(t >> 32).unwrap();
         assert_ne!(send_ns, 0, "sending a packet takes <1ns");
-        self.sub_ns_delay = u32::try_from(t & u128::from(u32::MAX)).unwrap();
         let deque_time = now + Duration::from_nanos(send_ns);
-        self.next_deque = Some(deque_time);
+        let sub_ns = u32::try_from(t & u128::from(u32::MAX)).unwrap();
+        self.next_deque = Some((deque_time, sub_ns));
 
         // Now work out when the packet is fully received at the other end of
         // the link. Setup to deliver the packet then.
@@ -158,12 +158,13 @@ impl TailDrop {
     }
 
     /// Enqueue for sending.  Maybe.  If this overflows the queue, drop it instead.
+    /// If the queue is too deep, CE mark it before saving.
     fn maybe_enqueue(&mut self, d: Datagram, now: Instant) {
         self.stats.received += 1;
         if self.next_deque.is_none() {
             // Nothing in the queue and nothing still sending.
             debug_assert!(self.queue.is_empty());
-            self.send(d, now);
+            self.send(d, now, 0);
         } else if self.used + self.size(&d) <= self.capacity {
             self.used += self.size(&d);
             self.stats.update_maxq(self.used);
@@ -178,21 +179,28 @@ impl TailDrop {
     /// If the last packet that was sending has been sent, start sending
     /// the next one.
     fn maybe_send(&mut self, now: Instant) {
-        if self.next_deque.as_ref().is_some_and(|t| *t <= now) {
+        if let Some((t, subns)) = &self.next_deque {
+            if now < *t {
+                return;
+            }
+
             if let Some(d) = self.queue.pop_front() {
                 self.used -= self.size(&d);
-                self.send(d, now);
+                self.send(d, *t, *subns);
             } else {
                 self.next_deque = None;
-                self.sub_ns_delay = 0;
             }
         }
     }
 
+    /// Apply ECN-CE markings to packets if they are ECT(0) marked.
+    /// This is classic, simple ECN; we don't know about L4S yet.
     fn maybe_mark(&mut self, d: Datagram) -> Datagram {
-        if self.used <= self.mark_capacity {
+        if self.used <= self.mark_capacity || Ecn::from(d.tos()) != Ecn::Ect0 {
             return d;
         }
+
+        qtrace!("taildrop marking {} bytes", d.len());
         self.stats.marked += 1;
         let tos = Tos::from((Dscp::from(d.tos()), Ecn::Ce));
         Datagram::new(d.source(), d.destination(), tos, d.to_vec())
@@ -213,7 +221,11 @@ impl Node for TailDrop {
                 self.stats.delivered += 1;
                 Output::Datagram(d)
             } else {
-                Output::Callback(*t - now)
+                let next = self
+                    .next_deque
+                    .as_ref()
+                    .map_or(*t, |(next, _)| min(*next, *t));
+                Output::Callback(next - now)
             }
         } else {
             Output::None
