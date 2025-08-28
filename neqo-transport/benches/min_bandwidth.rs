@@ -25,7 +25,12 @@ use test_fixture::{
     },
 };
 
-#[expect(clippy::cast_precision_loss, reason = "OK in a bench.")]
+#[expect(
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    reason = "OK in a bench."
+)]
 pub fn main() {
     const MIB: usize = 1_024 * 1_024;
     const GIB: usize = 1_024 * MIB;

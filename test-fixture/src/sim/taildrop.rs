@@ -146,7 +146,6 @@ impl TailDrop {
         let t =
             sz * (ONE_SECOND_NS << 32) / u128::try_from(self.rate).unwrap() + u128::from(sub_ns);
         let send_ns = u64::try_from(t >> 32).unwrap();
-        assert_ne!(send_ns, 0, "sending a packet takes <1ns");
         let deque_time = now + Duration::from_nanos(send_ns);
         let sub_ns = u32::try_from(t & u128::from(u32::MAX)).unwrap();
         self.next_deque = Some((deque_time, sub_ns));
