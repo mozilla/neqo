@@ -758,6 +758,7 @@ impl Http3Connection {
         output
     }
 
+    // TODO: Rename?
     fn create_fetch_headers<'b, 't, T>(request: &RequestDescription<'b, 't, T>) -> Res<Vec<Header>>
     where
         T: AsRequestTarget<'t> + ?Sized + Debug,
@@ -768,12 +769,23 @@ impl Http3Connection {
             .map_err(|_| Error::InvalidRequestTarget)?;
 
         // Transform pseudo-header fields
-        let mut final_headers = vec![
-            Header::new(":method", request.method),
-            Header::new(":scheme", target.scheme()),
-            Header::new(":authority", target.authority()),
-            Header::new(":path", target.path()),
-        ];
+        let is_classic_connect = request.connect_type.is_none() && request.method == "CONNECT";
+        let mut final_headers = if is_classic_connect {
+            // > The :scheme and :path pseudo-header fields are omitted
+            //
+            // <https://datatracker.ietf.org/doc/html/rfc9114#section-4.4>
+            vec![
+                Header::new(":method", request.method),
+                Header::new(":authority", target.authority()),
+            ]
+        } else {
+            vec![
+                Header::new(":method", request.method),
+                Header::new(":scheme", target.scheme()),
+                Header::new(":authority", target.authority()),
+                Header::new(":path", target.path()),
+            ]
+        };
         if let Some(conn_type) = request.connect_type {
             final_headers.push(Header::new(":protocol", conn_type.string()));
         }
@@ -835,6 +847,7 @@ impl Http3Connection {
     {
         let final_headers = Self::create_fetch_headers(request)?;
 
+        // TODO: Why is this here? WebTransport goes a different route, no?
         let stream_type = if request.connect_type.is_some() {
             Http3StreamType::ExtendedConnect
         } else {
