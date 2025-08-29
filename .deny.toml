@@ -22,10 +22,14 @@ allow = [
     "Zlib",
 ]
 
+# See https://github.com/rust-fuzz/libfuzzer/pull/124#issuecomment-2474810798
+# "The libfuzzer code is NCSA, everything else is MIT OR Apache as is standard for Rust."
+[[licenses.exceptions]]
+allow = ["NCSA"]
+name = "libfuzzer-sys"
+version = "0.4"
+
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
 required-git-spec = "rev"
-
-[advisories]
-ignore = ["RUSTSEC-2025-0023"] # FIXME: Remove this once Firefox moves to libc >= 0.2.168
