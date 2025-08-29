@@ -207,6 +207,17 @@ impl TailDrop {
             return dgram;
         }
 
+        if self.should_mark(self.used) {
+            qtrace!("taildrop marking {} bytes", dgram.len());
+            self.stats.marked += 1;
+            let tos = Tos::from((Dscp::from(dgram.tos()), Ecn::Ce));
+            Datagram::new(dgram.source(), dgram.destination(), tos, dgram.to_vec())
+        } else {
+            dgram
+        }
+    }
+
+    fn should_mark(&self, used: usize) -> bool {
         // Apply RED which goes from 0 mark chance up to 30% of the capacity.
         // From there, follow a cubic curve that reaches 1 at 80% capacity.
         // But cap that at around 95% mark probability.
@@ -217,8 +228,8 @@ impl TailDrop {
         // This code scales that up by a factor of 1024 so we can use integers.
         // Note that 1007 =~ 1024 * Math.pow(0.95, 1/3)
 
-        let Some(n) = (2048 * self.used).checked_sub(self.capacity * 3072 / 5) else {
-            return dgram; // (used / capacity) < 0.3
+        let Some(n) = (2048 * used).checked_sub(self.capacity * 3072 / 5) else {
+            return false; // (used / capacity) < 0.3
         };
         let p = u128::try_from(n.min(self.capacity * 1007)).unwrap();
         let c = u128::try_from(self.capacity).unwrap();
@@ -229,14 +240,7 @@ impl TailDrop {
             .unwrap()
             .borrow_mut()
             .random_from(0..(1 << 30));
-        if r < p {
-            qtrace!("taildrop marking {} bytes", dgram.len());
-            self.stats.marked += 1;
-            let tos = Tos::from((Dscp::from(dgram.tos()), Ecn::Ce));
-            Datagram::new(dgram.source(), dgram.destination(), tos, dgram.to_vec())
-        } else {
-            dgram
-        }
+        r < p
     }
 }
 
@@ -277,5 +281,54 @@ impl Node for TailDrop {
 impl Debug for TailDrop {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("taildrop")
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{
+        cell::RefCell,
+        rc::Rc,
+        time::{Duration, Instant},
+    };
+
+    use neqo_common::{qinfo, Encoder};
+
+    use crate::sim::{network::TailDrop, rng::Random, Node as _};
+
+    fn mark_rate(used: usize, capacity: usize, trials: usize) -> usize {
+        let mut enc = Encoder::new();
+        enc.encode_uint(8, u64::try_from(used).unwrap());
+        enc.encode_uint(8, u64::try_from(capacity).unwrap());
+        enc.encode_uint(8, u64::try_from(trials).unwrap());
+        enc.pad_to(32, 0);
+        let rng = Rc::new(RefCell::new(Random::new(
+            <&[u8; 32]>::try_from(enc.as_ref()).unwrap(),
+        )));
+        // We use only the capacity (1M) of these config parameters.
+        let mut td = TailDrop::new(1, capacity, true, Duration::from_secs(2));
+        td.init(rng, Instant::now());
+        let mut successes = 0;
+        for _ in 0..trials {
+            successes += usize::from(td.should_mark(used));
+        }
+        qinfo!("{successes} out of {trials} trails at {used}/{capacity}");
+        successes
+    }
+
+    #[test]
+    fn mark_distribution() {
+        // At 0.3, no marking at all.
+        assert_eq!(mark_rate(3, 10, 100), 0);
+        // At 0.5, we're at 0.2 over the base: (0.2*2)**3 gives an expectation of 0.064.
+        // This range is surprising large because we're at a low mark rate
+        // and the rate can spike well above the expectation.
+        assert!((580..=730).contains(&mark_rate(5, 10, 10_000)));
+        // At 0.7, we start to see regular marking: (0.4*2)**3 = 0.512
+        assert!((4940..=5300).contains(&mark_rate(7, 10, 10_000)));
+        // At 0.8, we hit the cap of 0.95.
+        assert!((9400..=9600).contains(&mark_rate(8, 10, 10_000)));
+        // At 0.99, we are still at the cap.
+        assert!((9400..=9600).contains(&mark_rate(99, 100, 10_000)));
     }
 }
