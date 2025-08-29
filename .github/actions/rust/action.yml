@@ -52,11 +52,6 @@ runs:
         {
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
-          if [[ "$RUNNER_OS" == "Linux" && "$TARGETS" == "" && "$(command -v mold)" ]]; then
-            echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold $RUSTFLAGS"
-          elif [[ "$RUNNER_OS" == "Windows" ]]; then
-            echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld $RUSTFLAGS"
-          fi
           echo "RUNNER_OS=$(uname -srm)"
         } >> "$GITHUB_ENV"
 
@@ -105,6 +100,9 @@ runs:
           if [ "$tool" == "samply" ]; then
             # TODO: Install released version once `--presymbolicate` (https://github.com/mstange/samply/pull/634) is released.
             cargo install --git https://github.com/mstange/samply --rev f6ff5dedc73ab84a8ef45231f41cd3e721fb5cd4 samply
+          elif [ "$OS" != "linux" ] && [ "$tool" == "cargo-careful" ]; then
+            # TODO: There is an issue with the binary releases of cargo-careful for non-Linux platforms.
+            cargo install cargo-careful
           else
             # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
             cargo install --locked --force "$tool"
