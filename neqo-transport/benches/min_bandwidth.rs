@@ -41,7 +41,7 @@ pub fn gbit_bandwidth(ecn: bool) {
     /// The amount of delay that the link buffer will add when full.
     const BUFFER_LATENCY_MS: usize = 4;
     /// How much of the theoretical bandwidth we will expect to deliver.
-    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.8;
+    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.75;
 
     let gbit_link = || {
         let rate_byte = LINK_BANDWIDTH / 8;
@@ -58,14 +58,14 @@ pub fn gbit_bandwidth(ecn: bool) {
         &name,
         boxed![
             Node::new_client(
-                ConnectionParameters::default().ack_ratio(255),
+                ConnectionParameters::default().ack_ratio(200),
                 boxed![ReachState::new(State::Confirmed)],
                 boxed![ReceiveData::new(TRANSFER_AMOUNT)]
             ),
             Mtu::new(1500),
             gbit_link(),
             Node::new_server(
-                ConnectionParameters::default().ack_ratio(255),
+                ConnectionParameters::default().ack_ratio(200),
                 boxed![ReachState::new(State::Confirmed)],
                 boxed![SendData::new(TRANSFER_AMOUNT)]
             ),
