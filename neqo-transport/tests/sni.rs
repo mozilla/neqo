@@ -5,7 +5,9 @@
 // except according to those terms.
 
 use neqo_transport::ConnectionParameters;
-use test_fixture::{default_client, default_server, new_client, now};
+use test_fixture::{
+    default_client, default_server, new_client, now, CountingConnectionIdGenerator,
+};
 
 #[test]
 fn sni_no_slicing_at_nonzero_offset() {
@@ -30,7 +32,8 @@ fn sni_no_slicing_at_nonzero_offset() {
 
 #[test]
 fn sni_no_slicing_at_nonzero_offset_no_mlkem() {
-    let mut client = new_client(ConnectionParameters::default().mlkem(false));
+    let mut client =
+        new_client::<CountingConnectionIdGenerator>(ConnectionParameters::default().mlkem(false));
     let mut now = now();
 
     // This packet will have two CRPYTO frames [x..end] and [0..x].

@@ -16,7 +16,7 @@ use std::{
 use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use log::{log_enabled, Level};
-use neqo_common::{qdebug, qinfo, qtrace, qwarn, Buffer, Ecn, MAX_VARINT};
+use neqo_common::{qdebug, qtrace, qwarn, Buffer, Ecn, MAX_VARINT};
 use neqo_crypto::Epoch;
 use smallvec::SmallVec;
 use strum::{Display, EnumIter};
@@ -136,7 +136,7 @@ impl PacketRange {
 
     /// Maybe merge a higher-numbered range into this.
     fn merge_larger(&mut self, other: &Self) {
-        qinfo!("[{self}] Merging {other}");
+        qdebug!("[{self}] Merging {other}");
         // This only works if they are immediately adjacent.
         assert_eq!(self.largest + 1, other.smallest);
 

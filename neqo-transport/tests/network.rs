@@ -182,6 +182,16 @@ simulate!(
     ],
 );
 
+simulate!(
+    transfer_taildrop_ecn,
+    [
+        Node::default_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
+        TailDrop::new(1_000_000, 65_536, true, Duration::from_millis(50)),
+        Node::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
+        TailDrop::new(200_000, 16_384, true, Duration::from_millis(50))
+    ],
+);
+
 /// This test is a nasty piece of work.  Delays are anything from 0 to 50ms and 1% of
 /// packets get dropped.
 #[test]

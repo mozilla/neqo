@@ -65,8 +65,9 @@ fn connect_single_version_both() {
     fn connect_one_version(version: Version) {
         let mut server =
             new_server(ConnectionParameters::default().versions(version, vec![version]));
-        let mut client =
-            new_client(ConnectionParameters::default().versions(version, vec![version]));
+        let mut client = new_client::<CountingConnectionIdGenerator>(
+            ConnectionParameters::default().versions(version, vec![version]),
+        );
         let server_conn = connect(&mut client, &mut server);
         assert_eq!(client.version(), version);
         assert_eq!(server_conn.borrow().version(), version);
@@ -83,8 +84,9 @@ fn connect_single_version_client() {
     fn connect_one_version(version: Version) {
         let mut server = default_server();
 
-        let mut client =
-            new_client(ConnectionParameters::default().versions(version, vec![version]));
+        let mut client = new_client::<CountingConnectionIdGenerator>(
+            ConnectionParameters::default().versions(version, vec![version]),
+        );
         let server_conn = connect(&mut client, &mut server);
         assert_eq!(client.version(), version);
         assert_eq!(server_conn.borrow().version(), version);
@@ -428,7 +430,8 @@ fn new_token_different_port() {
 #[test]
 fn bad_client_initial() {
     const PN_LEN: usize = 2;
-    let mut client = new_client(ConnectionParameters::default().mlkem(false));
+    let mut client =
+        new_client::<CountingConnectionIdGenerator>(ConnectionParameters::default().mlkem(false));
     // There's some precise size counting we do in this test, so disable randomization
     // of packet numbers.
     let mut server = new_server(ConnectionParameters::default().randomize_first_pn(false));
@@ -524,7 +527,7 @@ fn bad_client_initial() {
 #[test]
 fn bad_client_initial_connection_close() {
     // This test needs to decrypt the CI; turn off MLKEM and random client initial packet numbers.
-    let mut client = new_client(
+    let mut client = new_client::<CountingConnectionIdGenerator>(
         ConnectionParameters::default()
             .mlkem(false)
             .randomize_first_pn(false),
@@ -663,7 +666,7 @@ fn version_negotiation_and_compatible() {
     );
     // Note that the order of versions at the client only determines what it tries first.
     // The server will pick between VN_VERSION and COMPAT_VERSION.
-    let mut client = new_client(
+    let mut client = new_client::<CountingConnectionIdGenerator>(
         ConnectionParameters::default()
             .versions(ORIG_VERSION, vec![ORIG_VERSION, VN_VERSION, COMPAT_VERSION]),
     );
@@ -718,7 +721,7 @@ fn compatible_upgrade_resumption_and_vn() {
         ORIG_VERSION,
         vec![COMPAT_VERSION, ORIG_VERSION, RESUMPTION_VERSION],
     );
-    let mut client = new_client(client_params.clone());
+    let mut client = new_client::<CountingConnectionIdGenerator>(client_params.clone());
     assert_eq!(client.version(), ORIG_VERSION);
 
     let mut server = default_server();
@@ -732,7 +735,7 @@ fn compatible_upgrade_resumption_and_vn() {
     let ticket = find_ticket(&mut client);
 
     // This new server will reject the ticket, but it will also generate a VN packet.
-    let mut client = new_client(client_params);
+    let mut client = new_client::<CountingConnectionIdGenerator>(client_params);
     let mut server = new_server(
         ConnectionParameters::default().versions(RESUMPTION_VERSION, vec![RESUMPTION_VERSION]),
     );
