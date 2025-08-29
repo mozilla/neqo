@@ -126,6 +126,7 @@ pub struct TailDrop {
     /// A queue of unsent bytes.
     queue: VecDeque<Datagram>,
     /// The time that the next datagram can enter the link.
+    /// Includes any sub-ns remainder (which helps absorb rounding errors).
     next_deque: Option<(Instant, u32)>,
 
     /// The time it takes a byte to exit the other end of the link.
@@ -148,8 +149,8 @@ impl TailDrop {
     pub const fn new(rate: usize, capacity: usize, ecn: bool, delay: Duration) -> Self {
         assert!(rate != 0, "zero rate gets you nowhere");
         assert!(rate <= 1_000_000_000, "rates over 1Gbps are not supported");
-        // We multiply this by 3000 below and need to avoid overflow.
-        assert!(capacity < usize::MAX / 3000, "too much capacity");
+        // We multiply this by 3072 below and need to avoid overflow.
+        assert!(capacity < usize::MAX / 3072, "too much capacity");
         // We need to cube a value close to 1000x this and have it fit within a u128.
         #[cfg(target_pointer_width = "64")]
         assert!(capacity < (1 << 32), "too much capacity");
@@ -253,7 +254,7 @@ impl TailDrop {
     /// Apply ECN-CE markings to packets if they are ECT(0) marked.
     /// This is classic, simple ECN using RED; we don't know about L4S yet.
     fn maybe_mark(&mut self, dgram: Datagram) -> Datagram {
-        if self.ecn && Ecn::from(dgram.tos()) == Ecn::Ect0 && self.should_mark(self.used) {
+        if self.ecn && Ecn::from(dgram.tos()).is_ect() && self.should_mark(self.used) {
             qtrace!("taildrop marking {} bytes", dgram.len());
             self.stats.marked += 1;
             let tos = Tos::from((Dscp::from(dgram.tos()), Ecn::Ce));

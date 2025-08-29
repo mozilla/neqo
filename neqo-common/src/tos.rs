@@ -45,12 +45,16 @@ impl From<Tos> for Ecn {
 }
 
 impl Ecn {
+    /// Return `true` for any marking: ECT(0), ECT(1), or CE.
     #[must_use]
-    pub const fn is_ecn_marked(self) -> bool {
-        match self {
-            Self::Ect0 | Self::Ect1 | Self::Ce => true,
-            Self::NotEct => false,
-        }
+    pub const fn is_marked(self) -> bool {
+        matches!(self, Self::Ect0 | Self::Ect1 | Self::Ce)
+    }
+
+    /// Return `true` if the value is ECT(0) or ECT(1).
+    #[must_use]
+    pub const fn is_ect(self) -> bool {
+        matches!(self, Self::Ect0 | Self::Ect1)
     }
 }
 
@@ -227,7 +231,7 @@ impl Tos {
 
     #[must_use]
     pub fn is_ecn_marked(self) -> bool {
-        Ecn::from(self).is_ecn_marked()
+        Ecn::from(self).is_marked()
     }
 }
 
@@ -370,7 +374,7 @@ mod tests {
 
     #[test]
     fn ecn_is_ecn_marked() {
-        assert!(Ecn::Ce.is_ecn_marked());
-        assert!(!Ecn::NotEct.is_ecn_marked());
+        assert!(Ecn::Ce.is_marked());
+        assert!(!Ecn::NotEct.is_marked());
     }
 }
