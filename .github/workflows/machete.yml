@@ -24,10 +24,11 @@ jobs:
       - name: Install Rust
         uses: ./.github/actions/rust
         with:
-          tools: cargo-machete
+          tools: cargo-hack, cargo-machete
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check for unused dependencies
         run: |
           #  --with-metadata has false positives, see https://github.com/bnjbvr/cargo-machete/issues/127
-          cargo machete
+          cargo machete --with-metadata
+          cargo hack --workspace --no-manifest-path machete --with-metadata
