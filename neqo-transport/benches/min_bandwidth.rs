@@ -28,7 +28,7 @@ use test_fixture::{
 /// Run a trasfer of a gigabyte over a gigabit link.
 /// Check to see that the achieved transfer rate matches expectations.
 #[expect(clippy::cast_precision_loss, reason = "OK in a bench.")]
-pub fn gbit_bandwidth(ecn: bool) {
+fn gbit_bandwidth(ecn: bool) {
     const MIB: usize = 1_024 * 1_024;
     const GIB: usize = 1_024 * MIB;
 
