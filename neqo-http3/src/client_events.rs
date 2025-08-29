@@ -20,7 +20,10 @@ use crate::{
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum WebTransportEvent {
-    Negotiated(bool),
+    Negotiated(
+        /// Whether the negotiation succeeded.
+        bool,
+    ),
     NewSession {
         stream_id: StreamId,
         status: u16,
@@ -43,7 +46,10 @@ pub enum WebTransportEvent {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ConnectUdpEvent {
-    Negotiated(bool),
+    Negotiated(
+        /// Whether the negotiation succeeded.
+        bool,
+    ),
     NewSession {
         stream_id: StreamId,
         status: u16,
