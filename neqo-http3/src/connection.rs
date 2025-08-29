@@ -25,9 +25,8 @@ use crate::{
     control_stream_local::ControlStreamLocal,
     control_stream_remote::ControlStreamRemote,
     features::extended_connect::{
-        webtransport_session,
         webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
-        ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
+        ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType, Session,
     },
     frames::HFrame,
     push_controller::PushController,
@@ -55,7 +54,7 @@ where
 }
 
 #[derive(Display)]
-pub enum WebTransportSessionAcceptAction {
+pub enum SessionAcceptAction {
     Accept,
     Reject(Vec<Header>),
 }
@@ -97,6 +96,7 @@ impl Http3State {
     }
 }
 
+// TODO: Update for connect-udp
 /**
 # HTTP/3 core implementation
 
@@ -257,6 +257,7 @@ pub struct Http3Connection {
     send_streams: HashMap<StreamId, Box<dyn SendStream>>,
     recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
     webtransport: ExtendedConnectFeature,
+    connect_udp: ExtendedConnectFeature,
 }
 
 impl Display for Http3Connection {
@@ -282,6 +283,10 @@ impl Http3Connection {
                 ExtendedConnectType::WebTransport,
                 conn_params.get_webtransport(),
             ),
+            connect_udp: ExtendedConnectFeature::new(
+                ExtendedConnectType::ConnectUdp,
+                conn_params.get_connect(),
+            ),
             local_params: conn_params,
             settings_state: Http3RemoteSettingsState::NotReceived,
             streams_with_pending_data: HashSet::default(),
@@ -291,11 +296,15 @@ impl Http3Connection {
         }
     }
 
-    /// This function is called when a not default feature needs to be negotiated. This is currently
-    /// only used for the `WebTransport` feature. The negotiation is done via the `SETTINGS` frame
-    /// and when the peer's `SETTINGS` frame has been received the listener will be called.
+    /// This function is called when a not default feature needs to be
+    /// negotiated. This is currently only used for the
+    /// [`crate::features::extended_connect::webtransport_session`] and
+    /// [`crate::features::extended_connect::connect_udp_session`] feature. The
+    /// negotiation is done via the `SETTINGS` frame and when the peer's
+    /// `SETTINGS` frame has been received the listener will be called.
     pub(crate) fn set_features_listener(&mut self, feature_listener: Http3ClientEvents) {
-        self.webtransport.set_listener(feature_listener);
+        self.webtransport.set_listener(feature_listener.clone());
+        self.connect_udp.set_listener(feature_listener);
     }
 
     /// This function creates and initializes, i.e. send stream type, the control and qpack
@@ -606,13 +615,16 @@ impl Http3Connection {
 
     pub(crate) fn handle_datagram(&mut self, datagram: &[u8]) {
         let mut decoder = Decoder::new(datagram);
-        let session = decoder
+        let Some(stream) = decoder
             .decode_varint()
             .and_then(|id| self.recv_streams.get_mut(&StreamId::from(id * 4)))
-            .and_then(|stream| stream.webtransport());
-        if let Some(s) = session {
-            s.borrow_mut().datagram(decoder.decode_remainder().to_vec());
-        }
+            .and_then(|s| s.extended_connect_session())
+        else {
+            qdebug!("[{self}] handle_datagram for unknown extended connect session");
+            return;
+        };
+
+        stream.borrow_mut().datagram(decoder.as_ref());
     }
 
     fn check_stream_exists(&self, stream_type: Http3StreamType) -> Res<()> {
@@ -758,6 +770,7 @@ impl Http3Connection {
         output
     }
 
+    // TODO: Rename?
     fn create_fetch_headers<'b, 't, T>(request: &RequestDescription<'b, 't, T>) -> Res<Vec<Header>>
     where
         T: AsRequestTarget<'t> + ?Sized + Debug,
@@ -768,12 +781,24 @@ impl Http3Connection {
             .map_err(|_| Error::InvalidRequestTarget)?;
 
         // Transform pseudo-header fields
-        let mut final_headers = vec![
-            Header::new(":method", request.method),
-            Header::new(":scheme", target.scheme()),
-            Header::new(":authority", target.authority()),
-            Header::new(":path", target.path()),
-        ];
+        // TODO: Remove hack for classic CONNECT
+        let is_classic_connect = request.connect_type.is_none() && request.method == "CONNECT";
+        let mut final_headers = if is_classic_connect {
+            // > The :scheme and :path pseudo-header fields are omitted
+            //
+            // <https://datatracker.ietf.org/doc/html/rfc9114#section-4.4>
+            vec![
+                Header::new(":method", request.method),
+                Header::new(":authority", target.authority()),
+            ]
+        } else {
+            vec![
+                Header::new(":method", request.method),
+                Header::new(":scheme", target.scheme()),
+                Header::new(":authority", target.authority()),
+                Header::new(":path", target.path()),
+            ]
+        };
         if let Some(conn_type) = request.connect_type {
             final_headers.push(Header::new(":protocol", conn_type.string()));
         }
@@ -835,6 +860,7 @@ impl Http3Connection {
     {
         let final_headers = Self::create_fetch_headers(request)?;
 
+        // TODO: Why is this here? WebTransport goes a different route, no?
         let stream_type = if request.connect_type.is_some() {
             Http3StreamType::ExtendedConnect
         } else {
@@ -1054,15 +1080,58 @@ impl Http3Connection {
         if !self.webtransport_enabled() {
             return Err(Error::Unavailable);
         }
+        self.extended_connect_create_session(
+            conn,
+            events,
+            target,
+            headers,
+            ExtendedConnectType::WebTransport,
+        )
+    }
 
+    pub fn connect_udp_create_session<'x, 't: 'x, T>(
+        &mut self,
+        conn: &mut Connection,
+        events: Box<dyn ExtendedConnectEvents>,
+        target: &'t T,
+        headers: &'t [Header],
+    ) -> Res<StreamId>
+    where
+        T: AsRequestTarget<'x> + ?Sized + Debug,
+    {
+        qinfo!("[{self}] Create ConnectUdp");
+        if !self.connect_udp_enabled() {
+            return Err(Error::Unavailable);
+        }
+        self.extended_connect_create_session(
+            conn,
+            events,
+            target,
+            headers,
+            ExtendedConnectType::ConnectUdp,
+        )
+    }
+
+    pub fn extended_connect_create_session<'x, 't: 'x, T>(
+        &mut self,
+        conn: &mut Connection,
+        events: Box<dyn ExtendedConnectEvents>,
+        target: &'t T,
+        headers: &'t [Header],
+        connect_type: ExtendedConnectType,
+    ) -> Res<StreamId>
+    where
+        T: AsRequestTarget<'x> + ?Sized + Debug,
+    {
         let id = self.create_bidi_transport_stream(conn)?;
 
-        let extended_conn = Rc::new(RefCell::new(webtransport_session::Session::new(
+        let extended_conn = Rc::new(RefCell::new(Session::new(
             id,
             events,
             self.role,
             Rc::clone(&self.qpack_encoder),
             Rc::clone(&self.qpack_decoder),
+            connect_type,
         )));
         self.add_streams(
             id,
@@ -1074,7 +1143,7 @@ impl Http3Connection {
             method: "CONNECT",
             target,
             headers,
-            connect_type: Some(ExtendedConnectType::WebTransport),
+            connect_type: Some(connect_type),
             priority: Priority::default(),
         })?;
         extended_conn
@@ -1089,12 +1158,49 @@ impl Http3Connection {
         conn: &mut Connection,
         stream_id: StreamId,
         events: Box<dyn ExtendedConnectEvents>,
-        accept_res: &WebTransportSessionAcceptAction,
+        accept_res: &SessionAcceptAction,
     ) -> Res<()> {
         qtrace!("Respond to WebTransport session with accept={accept_res}");
         if !self.webtransport_enabled() {
             return Err(Error::Unavailable);
         }
+        self.extended_connect_session_accept(
+            conn,
+            stream_id,
+            events,
+            accept_res,
+            ExtendedConnectType::WebTransport,
+        )
+    }
+
+    pub(crate) fn connect_udp_session_accept(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        events: Box<dyn ExtendedConnectEvents>,
+        accept_res: &SessionAcceptAction,
+    ) -> Res<()> {
+        qtrace!("Respond to ConnectUdp session with accept={accept_res}");
+        if !self.connect_udp_enabled() {
+            return Err(Error::Unavailable);
+        }
+        self.extended_connect_session_accept(
+            conn,
+            stream_id,
+            events,
+            accept_res,
+            ExtendedConnectType::ConnectUdp,
+        )
+    }
+
+    fn extended_connect_session_accept(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        events: Box<dyn ExtendedConnectEvents>,
+        accept_res: &SessionAcceptAction,
+        connect_type: ExtendedConnectType,
+    ) -> Res<()> {
         let mut recv_stream = self.recv_streams.get_mut(&stream_id);
         if let Some(r) = &mut recv_stream {
             if !r
@@ -1116,7 +1222,7 @@ impl Http3Connection {
                 self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
                 Err(Error::InvalidStreamId)
             }
-            (Some(s), Some(_r), WebTransportSessionAcceptAction::Reject(headers)) => {
+            (Some(s), Some(_r), SessionAcceptAction::Reject(headers)) => {
                 if s.http_stream()
                     .ok_or(Error::InvalidStreamId)?
                     .send_headers(headers, conn)
@@ -1131,25 +1237,24 @@ impl Http3Connection {
                 }
                 Ok(())
             }
-            (Some(s), Some(_r), WebTransportSessionAcceptAction::Accept) => {
+            (Some(s), Some(_r), SessionAcceptAction::Accept) => {
                 if s.http_stream()
                     .ok_or(Error::InvalidStreamId)?
                     .send_headers(&[Header::new(":status", "200")], conn)
                     .is_ok()
                 {
-                    let extended_conn = Rc::new(RefCell::new(
-                        webtransport_session::Session::new_with_http_streams(
-                            stream_id,
-                            events,
-                            self.role,
-                            self.recv_streams
-                                .remove(&stream_id)
-                                .ok_or(Error::Internal)?,
-                            self.send_streams
-                                .remove(&stream_id)
-                                .ok_or(Error::Internal)?,
-                        )?,
-                    ));
+                    let extended_conn = Rc::new(RefCell::new(Session::new_with_http_streams(
+                        stream_id,
+                        events,
+                        self.role,
+                        self.recv_streams
+                            .remove(&stream_id)
+                            .ok_or(Error::Internal)?,
+                        self.send_streams
+                            .remove(&stream_id)
+                            .ok_or(Error::Internal)?,
+                        connect_type,
+                    )?));
                     self.add_streams(
                         stream_id,
                         Box::new(Rc::clone(&extended_conn)),
@@ -1173,6 +1278,28 @@ impl Http3Connection {
         message: &str,
     ) -> Res<()> {
         qtrace!("Close WebTransport session {session_id:?}");
+        self.extended_connect_close_session(conn, session_id, error, message)
+    }
+
+    pub(crate) fn connect_udp_close_session(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        error: u32,
+        message: &str,
+    ) -> Res<()> {
+        qtrace!("Close ConnectUdp session {session_id:?}");
+        self.extended_connect_close_session(conn, session_id, error, message)
+    }
+
+    fn extended_connect_close_session(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        error: u32,
+        message: &str,
+    ) -> Res<()> {
+        // TODO
         let send_stream = self
             .send_streams
             .get_mut(&session_id)
@@ -1204,7 +1331,7 @@ impl Http3Connection {
             .recv_streams
             .get(&session_id)
             .ok_or(Error::InvalidStreamId)?
-            .webtransport()
+            .extended_connect_session()
             .ok_or(Error::InvalidStreamId)?;
         if !wt.borrow().is_active() {
             return Err(Error::InvalidStreamId);
@@ -1240,7 +1367,7 @@ impl Http3Connection {
             .recv_streams
             .get(&session_id)
             .ok_or(Error::InvalidStreamId)?
-            .webtransport()
+            .extended_connect_session()
             .ok_or(Error::InvalidStreamId)?;
 
         self.webtransport_create_stream_internal(
@@ -1256,7 +1383,7 @@ impl Http3Connection {
 
     fn webtransport_create_stream_internal(
         &mut self,
-        webtransport_session: Rc<RefCell<webtransport_session::Session>>,
+        webtransport_session: Rc<RefCell<Session>>,
         stream_id: StreamId,
         session_id: StreamId,
         send_events: Box<dyn SendStreamEvents>,
@@ -1315,10 +1442,30 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
     ) -> Res<()> {
+        self.extended_connect_send_datagram(session_id, conn, buf, id)
+    }
+
+    pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
+        &mut self,
+        session_id: StreamId,
+        conn: &mut Connection,
+        buf: &[u8],
+        id: I,
+    ) -> Res<()> {
+        self.extended_connect_send_datagram(session_id, conn, buf, id)
+    }
+
+    fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
+        &mut self,
+        session_id: StreamId,
+        conn: &mut Connection,
+        buf: &[u8],
+        id: I,
+    ) -> Res<()> {
         self.recv_streams
             .get_mut(&session_id)
             .ok_or(Error::InvalidStreamId)?
-            .webtransport()
+            .extended_connect_session()
             .ok_or(Error::InvalidStreamId)?
             .borrow_mut()
             .send_datagram(conn, buf, id)
@@ -1364,11 +1511,13 @@ impl Http3Connection {
             Http3RemoteSettingsState::NotReceived => {
                 self.set_qpack_settings(&new_settings)?;
                 self.webtransport.handle_settings(&new_settings);
+                self.connect_udp.handle_settings(&new_settings);
                 self.settings_state = Http3RemoteSettingsState::Received(new_settings);
                 Ok(())
             }
             Http3RemoteSettingsState::ZeroRtt(settings) => {
                 self.webtransport.handle_settings(&new_settings);
+                self.connect_udp.handle_settings(&new_settings);
                 let mut qpack_changed = false;
                 for st in &[
                     HSettingType::MaxHeaderListSize,
@@ -1397,7 +1546,8 @@ impl Http3Connection {
                         HSettingType::BlockedStreams => qpack_changed = true,
                         HSettingType::MaxHeaderListSize
                         | HSettingType::EnableWebTransport
-                        | HSettingType::EnableH3Datagram => (),
+                        | HSettingType::EnableH3Datagram
+                        | HSettingType::EnableConnect => (),
                     }
                 }
                 if qpack_changed {
@@ -1495,11 +1645,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn remove_extended_connect(
-        &mut self,
-        wt: &Rc<RefCell<webtransport_session::Session>>,
-        conn: &mut Connection,
-    ) {
+    fn remove_extended_connect(&mut self, wt: &Rc<RefCell<Session>>, conn: &mut Connection) {
         let (recv, send) = wt.borrow_mut().take_sub_streams();
 
         #[expect(
@@ -1537,7 +1683,7 @@ impl Http3Connection {
         if let Some(s) = &stream {
             if s.stream_type() == Http3StreamType::ExtendedConnect {
                 self.send_streams.remove(&stream_id)?;
-                if let Some(wt) = s.webtransport() {
+                if let Some(wt) = s.extended_connect_session() {
                     self.remove_extended_connect(&wt, conn);
                 }
             }
@@ -1553,7 +1699,11 @@ impl Http3Connection {
         let stream = self.send_streams.remove(&stream_id);
         if let Some(s) = &stream {
             if s.stream_type() == Http3StreamType::ExtendedConnect {
-                if let Some(wt) = self.recv_streams.remove(&stream_id)?.webtransport() {
+                if let Some(wt) = self
+                    .recv_streams
+                    .remove(&stream_id)?
+                    .extended_connect_session()
+                {
                     self.remove_extended_connect(&wt, conn);
                 }
             }
@@ -1563,6 +1713,10 @@ impl Http3Connection {
 
     pub const fn webtransport_enabled(&self) -> bool {
         self.webtransport.enabled()
+    }
+
+    pub const fn connect_udp_enabled(&self) -> bool {
+        self.connect_udp.enabled()
     }
 
     #[must_use]
