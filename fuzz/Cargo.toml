@@ -55,3 +55,10 @@ path = "fuzz_targets/server_initial.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "find_sni"
+path = "fuzz_targets/find_sni.rs"
+test = false
+doc = false
+bench = false

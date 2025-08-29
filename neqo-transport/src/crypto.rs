@@ -1659,6 +1659,10 @@ impl CryptoStreams {
             return;
         };
         while let Some((offset, data)) = cs.tx.next_bytes() {
+            #[cfg(all(feature = "build-fuzzing-corpus", test))]
+            if offset == 0 {
+                neqo_common::write_item_to_fuzzing_corpus("find_sni", data);
+            }
             let written = if sni_slicing && offset == 0 {
                 if let Some(sni) = find_sni(data) {
                     // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
