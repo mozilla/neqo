@@ -25,8 +25,10 @@ use test_fixture::{
     },
 };
 
+/// Run a trasfer of a gigabyte over a gigabit link.
+/// Check to see that the achieved transfer rate matches expectations.
 #[expect(clippy::cast_precision_loss, reason = "OK in a bench.")]
-pub fn main() {
+pub fn gbit_bandwidth(ecn: bool) {
     const MIB: usize = 1_024 * 1_024;
     const GIB: usize = 1_024 * MIB;
 
@@ -36,22 +38,24 @@ pub fn main() {
     const TRANSFER_AMOUNT: usize = GIB;
     const LINK_BANDWIDTH: usize = GBIT;
     const LINK_RTT_MS: u64 = 40;
-    /// The amount of delay that the link buffer will add, when full.
+    /// The amount of delay that the link buffer will add when full.
     const BUFFER_LATENCY_MS: usize = 4;
     /// How much of the theoretical bandwidth we will expect to deliver.
-    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.7;
+    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.8;
 
     let gbit_link = || {
         let rate_byte = LINK_BANDWIDTH / 8;
-        let capacity_byte = LINK_BANDWIDTH * BUFFER_LATENCY_MS / 1000;
+        // Set capacity to double when ECN is enabled.
+        let capacity_byte = LINK_BANDWIDTH * BUFFER_LATENCY_MS * (1 + usize::from(ecn)) / 1000;
         let delay = Duration::from_millis(LINK_RTT_MS) / 2;
-        TailDrop::new(rate_byte, capacity_byte, false, delay)
+        TailDrop::new(rate_byte, capacity_byte, ecn, delay)
     };
 
     init_log(None);
 
+    let name = format!("gbit-bandwidth{}", if ecn { "-ecn" } else { "-noecn" });
     let simulated_time = Simulator::new(
-        "gbit-bandwidth",
+        &name,
         boxed![
             Node::new_client(
                 ConnectionParameters::default().ack_ratio(255),
@@ -74,15 +78,20 @@ pub fn main() {
 
     let achieved_bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
     qinfo!(
-        "Achieved {} Mb/s bandwidth (link rate {})",
-        achieved_bandwidth / MBIT as f64,
-        LINK_BANDWIDTH / MBIT
+        "{name} achieved {a} Mb/s bandwidth (link rate {t})",
+        a = achieved_bandwidth / MBIT as f64,
+        t = LINK_BANDWIDTH / MBIT
     );
 
     assert!(
         LINK_BANDWIDTH as f64 * MINIMUM_EXPECTED_UTILIZATION < achieved_bandwidth,
-        "expected to reach {MINIMUM_EXPECTED_UTILIZATION} of maximum bandwidth ({} Mbit/s) but got {} Mbit/s",
-        LINK_BANDWIDTH  / MBIT,
-        achieved_bandwidth / MBIT as f64,
+        "{name} expected to reach {MINIMUM_EXPECTED_UTILIZATION} of maximum bandwidth ({t} Mbit/s) but got {a} Mbit/s",
+        t = LINK_BANDWIDTH / MBIT,
+        a = achieved_bandwidth / MBIT as f64,
     );
+}
+
+fn main() {
+    gbit_bandwidth(false);
+    gbit_bandwidth(true);
 }

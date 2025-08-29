@@ -36,6 +36,18 @@ struct Stats {
     /// As packets leave the queue as soon as they start being used, this doesn't
     /// count them.
     maxq: usize,
+    /// The buffer capacity.
+    capacity: usize,
+
+    /// The start time.
+    start_time: Option<Instant>,
+    /// The start time.
+    last_update: Option<Instant>,
+    /// Accumulated queue usage multiplied by time.
+    /// This is in units of `bytes * nanoseconds`, which will get big.
+    /// For a test that transfers 1 gigabyte and takes a month,
+    /// that's still well within 64 bits.  Use `u128` to be safe.
+    cumulative_usage: u128,
 }
 
 impl Stats {
@@ -46,20 +58,52 @@ impl Stats {
             dropped: 0,
             delivered: 0,
             maxq: 0,
+            capacity: 0,
+            start_time: None,
+            last_update: None,
+            cumulative_usage: 0,
         }
     }
 
     fn update_maxq(&mut self, used: usize) {
         self.maxq = max(self.maxq, used);
     }
+
+    fn set_start(&mut self, now: Instant, capacity: usize) {
+        assert!(self.start_time.is_none());
+        self.start_time = Some(now);
+        self.last_update = Some(now);
+        self.capacity = capacity;
+    }
+
+    /// Given an updated time and current usage level,
+    /// compute the elapsed time and add that to the usage tally.
+    /// This should be called *before* changing the usage level.
+    /// Only do this when we have a `last_update` value set,
+    /// which is set once setup is complete.
+    fn accumulate_usage(&mut self, now: Instant, usage: usize) {
+        if let Some(last_update) = self.last_update {
+            let elapsed = now.duration_since(last_update).as_nanos();
+            self.cumulative_usage += elapsed * u128::try_from(usage).unwrap();
+            self.last_update = Some(now);
+        }
+    }
 }
 
 impl Display for Stats {
+    #[expect(clippy::cast_precision_loss, reason = "precision loss in an estimate")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let utilization =
+            if let (Some(last_update), Some(start_time)) = (self.last_update, self.start_time) {
+                let t = last_update.duration_since(start_time);
+                self.cumulative_usage as f64 / t.as_nanos() as f64 / self.capacity as f64
+            } else {
+                0.0
+            };
         write!(
             f,
-            "rx {} mark {} drop {} tx {} maxq {}",
-            self.received, self.marked, self.dropped, self.delivered, self.maxq
+            "rx {} mark {} drop {} tx {} maxq {} util {utilization}",
+            self.received, self.marked, self.dropped, self.delivered, self.maxq,
         )
     }
 }
@@ -96,7 +140,10 @@ pub struct TailDrop {
 }
 
 impl TailDrop {
-    /// Make a new taildrop node with the given rate, queue capacity, and link delay.
+    /// Make a new taildrop node with the given rate, ECN, queue capacity, and link delay.
+    /// When ECN is enabled, the stack will avoid filling the buffer and sit around 50%
+    /// capacity, so you might need to double the buffer size to get comparable throughput.
+    /// Of course, a smaller buffer will mean less latency.
     #[must_use]
     pub const fn new(rate: usize, capacity: usize, ecn: bool, delay: Duration) -> Self {
         assert!(rate != 0, "zero rate gets you nowhere");
@@ -173,6 +220,7 @@ impl TailDrop {
             debug_assert!(self.queue.is_empty());
             self.send(d, now, 0);
         } else if self.used + self.size(&d) <= self.capacity {
+            self.stats.accumulate_usage(now, self.used);
             self.used += self.size(&d);
             self.stats.update_maxq(self.used);
             let d = self.maybe_mark(d);
@@ -191,6 +239,7 @@ impl TailDrop {
                 return;
             }
 
+            self.stats.accumulate_usage(now, self.used);
             if let Some(d) = self.queue.pop_front() {
                 self.used -= self.size(&d);
                 self.send(d, *t, *subns);
@@ -203,11 +252,7 @@ impl TailDrop {
     /// Apply ECN-CE markings to packets if they are ECT(0) marked.
     /// This is classic, simple ECN using RED; we don't know about L4S yet.
     fn maybe_mark(&mut self, dgram: Datagram) -> Datagram {
-        if !self.ecn || Ecn::from(dgram.tos()) != Ecn::Ect0 {
-            return dgram;
-        }
-
-        if self.should_mark(self.used) {
+        if self.ecn && Ecn::from(dgram.tos()) == Ecn::Ect0 && self.should_mark(self.used) {
             qtrace!("taildrop marking {} bytes", dgram.len());
             self.stats.marked += 1;
             let tos = Tos::from((Dscp::from(dgram.tos()), Ecn::Ce));
@@ -218,9 +263,9 @@ impl TailDrop {
     }
 
     fn should_mark(&self, used: usize) -> bool {
-        // Apply RED which goes from 0 mark chance up to 30% of the capacity.
+        // Apply RED which starts at 0 mark chance at 30% of the capacity.
         // From there, follow a cubic curve that reaches 1 at 80% capacity.
-        // But cap that at around 95% mark probability.
+        // Cap at around 95% mark probability.
         //
         // let p = (2 * ((used / capacity) - 0.3));
         // if rand(0, 1) < p.pow(3).clamp(0, 0.95) { mark(d) } else { d }
@@ -247,6 +292,10 @@ impl TailDrop {
 impl Node for TailDrop {
     fn init(&mut self, rng: Rng, _now: Instant) {
         self.rng = Some(rng);
+    }
+
+    fn prepare(&mut self, now: Instant) {
+        self.stats.set_start(now, self.capacity);
     }
 
     fn process(&mut self, d: Option<Datagram>, now: Instant) -> Output {
