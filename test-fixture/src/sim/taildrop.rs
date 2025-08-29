@@ -135,7 +135,7 @@ pub struct TailDrop {
 
     stats: Stats,
 
-    // The random
+    // The random number generator we use for RED.
     rng: Option<Rng>,
 }
 
@@ -151,6 +151,7 @@ impl TailDrop {
         // We multiply this by 3000 below and need to avoid overflow.
         assert!(capacity < usize::MAX / 3000, "too much capacity");
         // We need to cube a value close to 1000x this and have it fit within a u128.
+        #[cfg(target_pointer_width = "64")]
         assert!(capacity < (1 << 32), "too much capacity");
         Self {
             overhead: 80,
@@ -354,7 +355,7 @@ mod test {
         let rng = Rc::new(RefCell::new(Random::new(
             <&[u8; 32]>::try_from(enc.as_ref()).unwrap(),
         )));
-        // We use only the capacity (1M) of these config parameters.
+        // We use only the capacity of these config parameters.
         let mut td = TailDrop::new(1, capacity, true, Duration::from_secs(2));
         td.init(rng, Instant::now());
         let mut successes = 0;
