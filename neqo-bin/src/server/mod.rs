@@ -53,15 +53,15 @@ pub mod http3;
 pub enum Error {
     #[error("invalid argument: {0}")]
     Argument(&'static str),
-    #[error("HTTP/3 error: {0}")]
+    #[error(transparent)]
     Http3(neqo_http3::Error),
-    #[error("I/O error: {0}")]
+    #[error(transparent)]
     Io(io::Error),
     #[error("qlog error")]
     Qlog,
-    #[error("transport error: {0}")]
+    #[error(transparent)]
     Transport(neqo_transport::Error),
-    #[error("crypto error: {0}")]
+    #[error(transparent)]
     Crypto(neqo_crypto::Error),
 }
 

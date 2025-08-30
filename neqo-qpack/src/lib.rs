@@ -75,12 +75,8 @@ pub enum Error {
     #[error("Encoder stream blocked")]
     EncoderStreamBlocked,
 
-    #[error("Transport error: {0}")]
-    Transport(
-        #[source]
-        #[from]
-        neqo_transport::Error,
-    ),
+    #[error(transparent)]
+    Transport(#[from] neqo_transport::Error),
     #[error("Qlog error")]
     Qlog,
 }

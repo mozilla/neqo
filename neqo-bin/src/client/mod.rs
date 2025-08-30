@@ -48,17 +48,17 @@ const BUFWRITER_BUFFER_SIZE: usize = 64 * 1024;
 pub enum Error {
     #[error("argument error: {0}")]
     Argument(&'static str),
-    #[error("HTTP/3 error: {0}")]
+    #[error(transparent)]
     Http3(neqo_http3::Error),
-    #[error("I/O error: {0}")]
+    #[error(transparent)]
     Io(io::Error),
-    #[error("qlog error: {0}")]
+    #[error(transparent)]
     Qlog(qlog::Error),
-    #[error("transport error: {0}")]
+    #[error(transparent)]
     Transport(neqo_transport::Error),
     #[error("application error: {0}")]
     Application(AppError),
-    #[error("crypto error: {0}")]
+    #[error(transparent)]
     Crypto(neqo_crypto::Error),
 }
 
