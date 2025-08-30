@@ -29,6 +29,7 @@ qlog = { workspace = true }
 rustc-hash = { workspace = true}
 sfv = { version = "0.14", default-features = false, features = ["parsed-types"] }
 strum = { workspace = true}
+thiserror = { workspace = true}
 url = { workspace = true }
 
 [dev-dependencies]
