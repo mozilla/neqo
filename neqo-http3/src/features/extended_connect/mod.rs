@@ -494,6 +494,7 @@ impl Session {
             dgram_data.encode(buf);
             conn.send_datagram(dgram_data.into(), id)?;
         } else {
+            qdebug!("[{self}]: cannot send datagram in {:?} state.", self.state);
             debug_assert!(false);
             return Err(Error::Unavailable);
         }
@@ -508,6 +509,8 @@ impl Session {
                 datagram.to_vec(),
                 self.protocol.connect_type(),
             );
+        } else {
+            qdebug!("[{self}]: received datagram on {:?} session.", self.state);
         }
     }
 
