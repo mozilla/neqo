@@ -117,7 +117,7 @@ impl Node {
         Self::new_client(
             Http3Parameters::default().connection_parameters(
                 // Simulator logic does not work with multi-packet MLKEM crypto flights.
-                ConnectionParameters::default().pmtud(true).mlkem(false),
+                ConnectionParameters::default().mlkem(false),
             ),
             boxed![ReachState::new(Http3State::Connected)],
             goals,
@@ -128,7 +128,7 @@ impl Node {
         Self::new_server(
             Http3Parameters::default().connection_parameters(
                 // Simulator logic does not work with multi-packet MLKEM crypto flights.
-                ConnectionParameters::default().pmtud(true).mlkem(false),
+                ConnectionParameters::default().mlkem(false),
             ),
             boxed![ReachState::new(Http3State::Connected)],
             goals,
