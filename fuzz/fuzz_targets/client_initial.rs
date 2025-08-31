@@ -24,16 +24,16 @@ fuzz_target!(|data: &[u8]| {
     let mut payload_enc = Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE);
     payload_enc.encode(data); // Add fuzzed data.
 
-    // Make a new header with a 1 byte packet number length.
+    // Make a new header with a 2 byte packet number length.
     let mut header_enc = Encoder::new();
     header_enc
-        .encode_byte(0xc0) // Initial with 1 byte packet number.
+        .encode_byte(0xc1) // Initial with 2 byte packet number.
         .encode_uint(4, Version::default().wire_version())
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
         .encode_varint(u64::try_from(payload_enc.len() + Aead::expansion() + 1).unwrap())
-        .encode_byte(u8::try_from(pn).unwrap());
+        .encode_uint(2, u16::try_from(pn).unwrap());
 
     let mut ciphertext = header_enc.as_ref().to_vec();
     ciphertext.resize(header_enc.len() + payload_enc.len() + Aead::expansion(), 0);
