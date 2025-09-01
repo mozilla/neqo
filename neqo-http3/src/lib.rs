@@ -184,7 +184,7 @@ pub use server_events::{
 };
 use stream_type_reader::NewStreamType;
 
-use crate::{features::extended_connect::Session, priority::PriorityHandler};
+use crate::priority::PriorityHandler;
 
 type Res<T> = Result<T, Error>;
 
@@ -444,7 +444,9 @@ trait RecvStream: Stream {
     }
 
     // TODO: Better import
-    fn extended_connect_session(&self) -> Option<Rc<RefCell<Session>>> {
+    fn extended_connect_session(
+        &self,
+    ) -> Option<Rc<RefCell<features::extended_connect::session::Session>>> {
         None
     }
 

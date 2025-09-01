@@ -20,7 +20,7 @@ use neqo_transport::{
 use crate::{
     connection::{Http3State, SessionAcceptAction},
     connection_server::Http3ServerHandler,
-    features::extended_connect::SessionCloseReason,
+    features::extended_connect,
     Error, Http3StreamInfo, Http3StreamType, Priority, Res,
 };
 
@@ -376,7 +376,6 @@ pub struct ConnectUdpRequest {
     stream_handler: StreamHandler,
 }
 
-
 impl Display for ConnectUdpRequest {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "ConnectUdp session {}", self.stream_handler)
@@ -503,7 +502,7 @@ pub enum WebTransportServerEvent {
     },
     SessionClosed {
         session: WebTransportRequest,
-        reason: SessionCloseReason,
+        reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     },
     NewStream(Http3OrWebTransportStream),
@@ -521,7 +520,7 @@ pub enum ConnectUdpServerEvent {
     },
     SessionClosed {
         session: ConnectUdpRequest,
-        reason: SessionCloseReason,
+        reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     },
     Datagram {
@@ -692,7 +691,7 @@ impl Http3ServerEvents {
     pub(crate) fn webtransport_session_closed(
         &self,
         session: WebTransportRequest,
-        reason: SessionCloseReason,
+        reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     ) {
         self.insert(Http3ServerEvent::WebTransport(
@@ -707,7 +706,7 @@ impl Http3ServerEvents {
     pub(crate) fn connect_udp_session_closed(
         &self,
         session: ConnectUdpRequest,
-        reason: SessionCloseReason,
+        reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     ) {
         self.insert(Http3ServerEvent::ConnectUdp(

@@ -15,7 +15,8 @@ use neqo_transport::{Connection, StreamId};
 
 use crate::{
     features::extended_connect::{
-        ExtendedConnectEvents, ExtendedConnectType, Protocol, SessionCloseReason, SessionState,
+        session::{SessionProtocol, State},
+        CloseReason, ExtendedConnectEvents, ExtendedConnectType,
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
     Error, Http3StreamInfo, RecvStream, Res,
@@ -49,7 +50,7 @@ impl Session {
     }
 }
 
-impl Protocol for Session {
+impl SessionProtocol for Session {
     fn connect_type(&self) -> ExtendedConnectType {
         ExtendedConnectType::WebTransport
     }
@@ -69,7 +70,7 @@ impl Protocol for Session {
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
         control_stream_recv: &mut Box<dyn RecvStream>,
-    ) -> Res<Option<SessionState>> {
+    ) -> Res<Option<State>> {
         let (f, fin) = self
             .frame_reader
             .receive::<WebTransportFrame>(&mut StreamReaderRecvStreamWrapper::new(
@@ -82,25 +83,25 @@ impl Protocol for Session {
             events.session_end(
                 ExtendedConnectType::WebTransport,
                 self.session_id,
-                SessionCloseReason::Clean { error, message },
+                CloseReason::Clean { error, message },
                 None,
             );
             if fin {
-                Ok(Some(SessionState::Done))
+                Ok(Some(State::Done))
             } else {
-                Ok(Some(SessionState::FinPending))
+                Ok(Some(State::FinPending))
             }
         } else if fin {
             events.session_end(
                 ExtendedConnectType::WebTransport,
                 self.session_id,
-                SessionCloseReason::Clean {
+                CloseReason::Clean {
                     error: 0,
                     message: String::new(),
                 },
                 None,
             );
-            Ok(Some(SessionState::Done))
+            Ok(Some(State::Done))
         } else {
             Ok(None)
         }

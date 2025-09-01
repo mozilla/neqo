@@ -277,7 +277,7 @@ fn connect_via_proxy() {
     let mut client_inner = default_http3_client();
     let mut server = default_http3_server();
 
-    let (mut client_outer, mut proxy, connect_udp_session_id, mut proxy_session) = new_session();
+    let (mut client_outer, mut proxy, connect_udp_session_id, proxy_session) = new_session();
 
     let mut needs_auth = false;
     // Establish inner connection on top of connect-udp session.
@@ -326,7 +326,7 @@ fn connect_via_proxy() {
             &mut proxy,
             &mut server,
             connect_udp_session_id,
-            & proxy_session,
+            &proxy_session,
         );
     }
 }

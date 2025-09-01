@@ -1,4 +1,9 @@
-// TODO: Rename to connect_udp_session.rs to be consistent with webtransport_session.rs?
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 use std::{
     collections::HashSet,
     fmt::{self, Display, Formatter},
@@ -9,7 +14,7 @@ use neqo_transport::{Connection, StreamId};
 
 use crate::{
     features::extended_connect::{
-        ExtendedConnectEvents, ExtendedConnectType, Protocol, SessionCloseReason, SessionState,
+        session::State, CloseReason, ExtendedConnectEvents, ExtendedConnectType, SessionProtocol,
     },
     frames::{ConnectUdpFrame, FrameReader, StreamReaderRecvStreamWrapper},
     Error, RecvStream, Res,
@@ -37,7 +42,7 @@ impl Display for Session {
     }
 }
 
-impl Protocol for Session {
+impl SessionProtocol for Session {
     fn connect_type(&self) -> ExtendedConnectType {
         ExtendedConnectType::ConnectUdp
     }
@@ -53,7 +58,7 @@ impl Protocol for Session {
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
         control_stream_recv: &mut Box<dyn RecvStream>,
-    ) -> Res<Option<SessionState>> {
+    ) -> Res<Option<State>> {
         let (f, fin) = self
             .frame_reader
             .receive::<ConnectUdpFrame>(&mut StreamReaderRecvStreamWrapper::new(
@@ -71,13 +76,13 @@ impl Protocol for Session {
             events.session_end(
                 ExtendedConnectType::ConnectUdp,
                 self.session_id,
-                SessionCloseReason::Clean {
+                CloseReason::Clean {
                     error: 0,
                     message: String::new(),
                 },
                 None,
             );
-            Ok(Some(SessionState::Done))
+            Ok(Some(State::Done))
         } else {
             Ok(None)
         }

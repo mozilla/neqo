@@ -19,7 +19,7 @@ use test_fixture::{
 };
 
 use crate::{
-    features::extended_connect::SessionCloseReason, Error, Header, Http3Client, Http3ClientEvent,
+    features::extended_connect::CloseReason, Error, Header, Http3Client, Http3ClientEvent,
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
     SessionAcceptAction, WebTransportEvent, WebTransportRequest, WebTransportServerEvent,
 };
@@ -223,7 +223,7 @@ impl WtTest {
     fn session_closed_client(
         e: &Http3ClientEvent,
         id: StreamId,
-        expected_reason: &SessionCloseReason,
+        expected_reason: &CloseReason,
         expected_headers: Option<&Vec<Header>>,
     ) -> bool {
         if let Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed {
@@ -241,7 +241,7 @@ impl WtTest {
     pub fn check_session_closed_event_client(
         &mut self,
         wt_session_id: StreamId,
-        expected_reason: &SessionCloseReason,
+        expected_reason: &CloseReason,
         expected_headers: Option<&Vec<Header>>,
     ) {
         let mut event_found = false;
@@ -268,7 +268,7 @@ impl WtTest {
     fn session_closed_server(
         e: &Http3ServerEvent,
         id: StreamId,
-        expected_reason: &SessionCloseReason,
+        expected_reason: &CloseReason,
     ) -> bool {
         if let Http3ServerEvent::WebTransport(WebTransportServerEvent::SessionClosed {
             session,
@@ -285,7 +285,7 @@ impl WtTest {
     pub fn check_session_closed_event_server(
         &self,
         wt_session: &WebTransportRequest,
-        expected_reeason: &SessionCloseReason,
+        expected_reeason: &CloseReason,
     ) {
         let event = self.server.next_event().unwrap();
         assert!(Self::session_closed_server(
@@ -407,7 +407,7 @@ impl WtTest {
         expected_stop_sending_ids: &[StreamId],
         expected_error_stream_stop_sending: Option<u64>,
         expected_local: bool,
-        expected_session_close: Option<&(StreamId, SessionCloseReason)>,
+        expected_session_close: Option<&(StreamId, CloseReason)>,
     ) {
         let mut reset_ids_count = 0;
         let mut stop_sending_ids_count = 0;
@@ -547,7 +547,7 @@ impl WtTest {
         expected_error_stream_reset: Option<u64>,
         expected_stop_sending_ids: &[StreamId],
         expected_error_stream_stop_sending: Option<u64>,
-        expected_session_close: Option<&(StreamId, SessionCloseReason)>,
+        expected_session_close: Option<&(StreamId, CloseReason)>,
     ) {
         let mut reset_ids_count = 0;
         let mut stop_sending_ids_count = 0;

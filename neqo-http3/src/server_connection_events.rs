@@ -11,7 +11,7 @@ use neqo_transport::{AppError, StreamId};
 
 use crate::{
     connection::Http3State,
-    features::extended_connect::{ExtendedConnectEvents, ExtendedConnectType, SessionCloseReason},
+    features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
     CloseType, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents, Res,
     SendStreamEvents,
 };
@@ -58,7 +58,7 @@ pub enum WebTransportEvent {
     },
     SessionClosed {
         stream_id: StreamId,
-        reason: SessionCloseReason,
+        reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     },
     NewStream(Http3StreamInfo),
@@ -76,7 +76,7 @@ pub enum ConnectUdpEvent {
     },
     SessionClosed {
         stream_id: StreamId,
-        reason: SessionCloseReason,
+        reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     },
     Datagram {
@@ -184,7 +184,7 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
         &self,
         connect_type: ExtendedConnectType,
         stream_id: StreamId,
-        reason: SessionCloseReason,
+        reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     ) {
         let event = match connect_type {

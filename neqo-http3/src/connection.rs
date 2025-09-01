@@ -25,8 +25,9 @@ use crate::{
     control_stream_local::ControlStreamLocal,
     control_stream_remote::ControlStreamRemote,
     features::extended_connect::{
+        self,
         webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
-        ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType, Session,
+        ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
     },
     frames::HFrame,
     push_controller::PushController,
@@ -1125,7 +1126,7 @@ impl Http3Connection {
     {
         let id = self.create_bidi_transport_stream(conn)?;
 
-        let extended_conn = Rc::new(RefCell::new(Session::new(
+        let extended_conn = Rc::new(RefCell::new(extended_connect::session::Session::new(
             id,
             events,
             self.role,
@@ -1243,18 +1244,20 @@ impl Http3Connection {
                     .send_headers(&[Header::new(":status", "200")], conn)
                     .is_ok()
                 {
-                    let extended_conn = Rc::new(RefCell::new(Session::new_with_http_streams(
-                        stream_id,
-                        events,
-                        self.role,
-                        self.recv_streams
-                            .remove(&stream_id)
-                            .ok_or(Error::Internal)?,
-                        self.send_streams
-                            .remove(&stream_id)
-                            .ok_or(Error::Internal)?,
-                        connect_type,
-                    )?));
+                    let extended_conn = Rc::new(RefCell::new(
+                        extended_connect::session::Session::new_with_http_streams(
+                            stream_id,
+                            events,
+                            self.role,
+                            self.recv_streams
+                                .remove(&stream_id)
+                                .ok_or(Error::Internal)?,
+                            self.send_streams
+                                .remove(&stream_id)
+                                .ok_or(Error::Internal)?,
+                            connect_type,
+                        )?,
+                    ));
                     self.add_streams(
                         stream_id,
                         Box::new(Rc::clone(&extended_conn)),
@@ -1383,7 +1386,7 @@ impl Http3Connection {
 
     fn webtransport_create_stream_internal(
         &mut self,
-        webtransport_session: Rc<RefCell<Session>>,
+        webtransport_session: Rc<RefCell<extended_connect::session::Session>>,
         stream_id: StreamId,
         session_id: StreamId,
         send_events: Box<dyn SendStreamEvents>,
@@ -1645,7 +1648,11 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn remove_extended_connect(&mut self, wt: &Rc<RefCell<Session>>, conn: &mut Connection) {
+    fn remove_extended_connect(
+        &mut self,
+        wt: &Rc<RefCell<extended_connect::session::Session>>,
+        conn: &mut Connection,
+    ) {
         let (recv, send) = wt.borrow_mut().take_sub_streams();
 
         #[expect(
