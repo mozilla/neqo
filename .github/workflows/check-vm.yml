@@ -70,7 +70,7 @@ jobs:
             rm -rf target # Don't sync this back to host
 
       - if: ${{ matrix.os == 'openbsd' }}
-        uses: vmactions/openbsd-vm@0d65352eee1508bab7cb12d130536d3a556be487 # v1.1.8
+        uses: vmactions/openbsd-vm@1e7cc4fa7727646d3cf5921289b1f5c9d1a88f3c # v1.2.0
         with:
           usesh: true
           envs: "CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG GITHUB_ACTIONS"
