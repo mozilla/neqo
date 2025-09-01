@@ -25,7 +25,7 @@ use test_fixture::{
     },
 };
 
-/// Run a trasfer of a gigabyte over a gigabit link.
+/// Run a transfer of a gigabyte over a gigabit link.
 /// Check to see that the achieved transfer rate matches expectations.
 #[expect(clippy::cast_precision_loss, reason = "OK in a bench.")]
 fn gbit_bandwidth(ecn: bool) {
@@ -41,12 +41,15 @@ fn gbit_bandwidth(ecn: bool) {
     /// The amount of delay that the link buffer will add when full.
     const BUFFER_LATENCY_MS: usize = 4;
     /// How much of the theoretical bandwidth we will expect to deliver.
-    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.75;
+    /// Because we're not transferring a whole lot relative to the bandwidth,
+    /// this ratio is relatively low.
+    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.3;
 
     let gbit_link = || {
         let rate_byte = LINK_BANDWIDTH / 8;
-        // Set capacity to double when ECN is enabled.
-        let capacity_byte = LINK_BANDWIDTH * BUFFER_LATENCY_MS * (1 + usize::from(ecn)) / 1000;
+        // Set capacity to double when ECN is enabled
+        // so that the overall throughput remains roughly consistent.
+        let capacity_byte = (1 + usize::from(ecn)) * rate_byte * BUFFER_LATENCY_MS / 1000;
         let delay = Duration::from_millis(LINK_RTT_MS) / 2;
         TailDrop::new(rate_byte, capacity_byte, ecn, delay)
     };

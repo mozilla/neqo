@@ -149,11 +149,11 @@ impl TailDrop {
     pub const fn new(rate: usize, capacity: usize, ecn: bool, delay: Duration) -> Self {
         assert!(rate != 0, "zero rate gets you nowhere");
         assert!(rate <= 1_000_000_000, "rates over 1Gbps are not supported");
-        // We multiply this by 3072 below and need to avoid overflow.
-        assert!(capacity < usize::MAX / 3072, "too much capacity");
-        // We need to cube a value close to 1000x this and have it fit within a u128.
+        // We multiply this by 4096 below and need to avoid overflow.
+        assert!(capacity < usize::MAX / 4096, "too much capacity");
+        // We need to square a value close to 1000x this and have it fit within a u128.
         #[cfg(target_pointer_width = "64")]
-        assert!(capacity < (1 << 32), "too much capacity");
+        assert!(capacity < (1 << 54), "too much capacity");
         Self {
             overhead: 80,
             rate,
@@ -255,6 +255,10 @@ impl TailDrop {
     /// This is classic, simple ECN using RED; we don't know about L4S yet.
     fn maybe_mark(&mut self, dgram: Datagram) -> Datagram {
         if self.ecn && Ecn::from(dgram.tos()).is_ect() && self.should_mark(self.used) {
+            assert!(
+                Ecn::from(dgram.tos()) != Ecn::Ect1,
+                "ECT(1)/L4S is not implemented"
+            );
             qtrace!("taildrop marking {} bytes", dgram.len());
             self.stats.marked += 1;
             let tos = Tos::from((Dscp::from(dgram.tos()), Ecn::Ce));
@@ -265,28 +269,29 @@ impl TailDrop {
     }
 
     fn should_mark(&self, used: usize) -> bool {
-        // Apply RED which starts at 0 mark chance at 30% of the capacity.
-        // From there, follow a cubic curve that reaches 1 at 80% capacity.
+        // Apply RED which starts at 0 mark chance at 40% of the capacity.
+        // From there, follow a quadratic that reaches 1 at 90% capacity.
         // Cap at around 95% mark probability.
         //
-        // let p = (2 * ((used / capacity) - 0.3));
-        // if rand(0, 1) < p.pow(3).clamp(0, 0.95) { mark(d) } else { d }
+        // let p = (2 * ((used / capacity) - 0.4));
+        // if rand(0, 1) < p.pow(2).clamp(0, 0.95) { mark(d) } else { d }
         //
         // This code scales that up by a factor of 1024 so we can use integers.
-        // Note that 1007 =~ 1024 * Math.pow(0.95, 1/3)
+        // This is mostly because our RNG can't sample from 0..1_f64.
 
-        let Some(n) = (2048 * used).checked_sub(self.capacity * 3072 / 5) else {
-            return false; // (used / capacity) < 0.3
+        let Some(n) = (2048 * used).checked_sub(self.capacity * 4096 / 5) else {
+            return false; // (used / capacity) < 0.4
         };
-        let p = u128::try_from(n.min(self.capacity * 1007)).unwrap();
+        // Cap pre-squaring: 998 =~ 1024 * Math.pow(0.95, 1/2)
+        let p = u128::try_from(n.min(self.capacity * 998)).unwrap();
         let c = u128::try_from(self.capacity).unwrap();
-        let p = u64::try_from(p * p * p / c / c / c).unwrap();
+        let p = u64::try_from(p * p / c / c).unwrap();
         let r = self
             .rng
             .as_ref()
             .unwrap()
             .borrow_mut()
-            .random_from(0..(1 << 30));
+            .random_from(0..(1 << 20));
         r < p
     }
 }
@@ -347,12 +352,12 @@ mod test {
 
     use crate::sim::{network::TailDrop, rng::Random, Node as _};
 
-    fn mark_rate(used: usize, capacity: usize, trials: usize) -> usize {
+    fn mark_rate(used: usize, capacity: usize, trials: usize, salt: u64) -> usize {
         let mut enc = Encoder::new();
         enc.encode_uint(8, u64::try_from(used).unwrap());
         enc.encode_uint(8, u64::try_from(capacity).unwrap());
         enc.encode_uint(8, u64::try_from(trials).unwrap());
-        enc.pad_to(32, 0);
+        enc.encode_uint(8, salt);
         let rng = Rc::new(RefCell::new(Random::new(
             <&[u8; 32]>::try_from(enc.as_ref()).unwrap(),
         )));
@@ -367,19 +372,26 @@ mod test {
         successes
     }
 
+    fn check_mark_rates(salt: u64) {
+        // At 0.4, no marking at all.
+        assert_eq!(mark_rate(4, 10, 100, salt), 0);
+        // At 0.6, we're at 0.2 over the base: (0.2*2)**2 gives an expectation of 0.16.
+        assert!((1450..=1750).contains(&mark_rate(6, 10, 10_000, salt)));
+        // At 0.8, marks are applied almost 2/3: (0.4*2)**2 = 0.64
+        assert!((6200..=6600).contains(&mark_rate(8, 10, 10_000, salt)));
+        // At 0.9, we hit the cap of 0.95.
+        assert!((9350..=9650).contains(&mark_rate(9, 10, 10_000, salt)));
+        // At 0.99, we are still at the cap.
+        assert!((9350..=9650).contains(&mark_rate(99, 100, 10_000, salt)));
+    }
+
+    /// Check that the mark rate is approximately correct.
     #[test]
     fn mark_distribution() {
-        // At 0.3, no marking at all.
-        assert_eq!(mark_rate(3, 10, 100), 0);
-        // At 0.5, we're at 0.2 over the base: (0.2*2)**3 gives an expectation of 0.064.
-        // This range is surprising large because we're at a low mark rate
-        // and the rate can spike well above the expectation.
-        assert!((580..=730).contains(&mark_rate(5, 10, 10_000)));
-        // At 0.7, we start to see regular marking: (0.4*2)**3 = 0.512
-        assert!((4940..=5300).contains(&mark_rate(7, 10, 10_000)));
-        // At 0.8, we hit the cap of 0.95.
-        assert!((9400..=9600).contains(&mark_rate(8, 10, 10_000)));
-        // At 0.99, we are still at the cap.
-        assert!((9400..=9600).contains(&mark_rate(99, 100, 10_000)));
+        /// This test tests with a range of values, even though the values are
+        /// 100% consistent run-to-run (because it uses the same seed).
+        /// Replacing this salt with a random number can be used to test sampling.
+        const SALT: u64 = 17;
+        check_mark_rates(SALT);
     }
 }
