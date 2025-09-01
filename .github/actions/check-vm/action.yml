@@ -23,7 +23,7 @@ runs:
       run: |
         cat <<EOF > prepare.sh
           # This executes as root
-          set -e
+          set -ex
           case "$PLATFORM" in
             freebsd)    pkg install -y curl llvm nss pkgconf
                         ;;
@@ -48,7 +48,7 @@ runs:
         cat <<EOF > run.sh
           # This executes as user
           cd "$WD"
-          set -e
+          set -ex
           case "$PLATFORM" in
             freebsd)    sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools -y
                         . "\$HOME/.cargo/env"
@@ -56,26 +56,35 @@ runs:
             openbsd)    export LIBCLANG_PATH=/usr/local/llvm19/lib
                         export LLVM_COV=/usr/local/llvm19/bin/llvm-cov
                         export LLVM_PROFDATA=/usr/local/llvm19/bin/llvm-profdata
+                        EXCLUDE="--exclude fuzz" # Fuzzing not supported on OpenBSD
                         ;;
             netbsd)     sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools -y
                         . "\$HOME/.cargo/env"
                         # FIXME: Why do we need to set this on NetBSD?
                         export LD_LIBRARY_PATH=/usr/pkg/lib/nss:/usr/pkg/lib/nspr
+                        EXCLUDE="--exclude fuzz" # Fuzzing not supported on NetBSD
                         ;;
-            solaris)    curl -s https://raw.githubusercontent.com/psumbera/solaris-rust/refs/heads/main/sh.rust-web-install -k rust.sh
-                        source rust.sh || true # This does not exit with zero on success
+            solaris)    curl --output rust.sh -s https://raw.githubusercontent.com/psumbera/solaris-rust/refs/heads/main/sh.rust-web-install
+                        chmod a+x rust.sh
+                        ls -lt
+                        ./rust.sh || true # This does not exit with zero on success
                         export LIBCLANG_PATH="/usr/lib/amd64"
+                        EXCLUDE="--exclude fuzz" # Fuzzing not supported on Solaris
+                        ;;
           esac
-          cargo check --locked --all-targets
+          cargo check --locked --all-targets --workspace \$EXCLUDE
           cargo clippy -- -D warnings
           case "$PLATFORM" in
-            freebsd)    cargo install cargo-llvm-cov --locked
+            freebsd)    echo "Test run w/coverage"
+                        cargo install cargo-llvm-cov --locked
                         cargo llvm-cov test --locked --no-fail-fast --lcov --output-path lcov.info
                         ;;
             *)          # FIXME: No profiler support on other platforms, error is: cannot find crate for profiler_builtins
+                        echo "Test run w/o coverage"
                         cargo test --locked --no-fail-fast # We do this instead for now
                         ;;
           esac
+          echo "Release test run w/o coverage"
           cargo test --locked --no-fail-fast --release
           rm -rf target # Do not sync this back to host
         EOF
