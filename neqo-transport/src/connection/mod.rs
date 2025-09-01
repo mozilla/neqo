@@ -2592,7 +2592,7 @@ impl Connection {
                     debug_assert_eq!(
                         mtu,
                         path.borrow().plpmtu(),
-                        "mtu does not change within batch"
+                        "MTU does not change within batch"
                     );
                     num_datagrams += 1;
                     let datagram_size = send_buffer.len() - send_buffer_len_before;
