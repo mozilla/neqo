@@ -8,13 +8,12 @@ use super::hframe::HFrameType;
 use crate::{frames::reader::FrameDecoder, Res};
 
 #[derive(PartialEq, Eq, Debug)]
-pub(crate) enum Frame {
+pub enum Frame {
     // TODO: Implement HTTP Datagram <https://github.com/mozilla/neqo/issues/2843>.
 }
 
 impl FrameDecoder<Self> for Frame {
     fn decode(_frame_type: HFrameType, _frame_len: u64, _data: Option<&[u8]>) -> Res<Option<Self>> {
-        // TODO: Correct?
         Ok(None)
     }
 

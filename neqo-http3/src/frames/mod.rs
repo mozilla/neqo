@@ -4,13 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// TODO: pub(crate)?
-pub(crate) mod connect_udp_frame;
+pub mod connect_udp_frame;
 pub mod hframe;
 pub mod reader;
 pub mod wtframe;
 
-pub(crate) use connect_udp_frame::Frame as ConnectUdpFrame;
+pub use connect_udp_frame::Frame as ConnectUdpFrame;
 #[allow(
     clippy::allow_attributes,
     unused_imports,
@@ -18,7 +17,6 @@ pub(crate) use connect_udp_frame::Frame as ConnectUdpFrame;
 )]
 pub use hframe::{HFrame, H3_FRAME_TYPE_HEADERS, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
 pub use reader::{FrameReader, StreamReaderConnectionWrapper, StreamReaderRecvStreamWrapper};
-// TODO: pub(crate)?
 pub use wtframe::WebTransportFrame;
 
 #[cfg(test)]
