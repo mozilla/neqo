@@ -46,6 +46,7 @@ jobs:
         with:
           version: nightly
           components: rust-src
+          tools: cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -82,6 +83,7 @@ jobs:
             export LSAN_OPTIONS="suppressions=$PWD/suppressions.txt"
           fi
           cargo test --locked -Z build-std --features ci --target "$TARGET"
+          cargo hack --workspace test --locked -Z build-std --target "$TARGET"
 
       - name: Save simulation seeds artifact
         if: ${{ env.DUMP_SIMULATION_SEEDS }}

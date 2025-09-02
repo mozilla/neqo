@@ -15,7 +15,8 @@ use std::{
 use neqo_common::{event::Provider as _, qdebug, qinfo, qtrace, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{
-    Connection, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
+    Connection, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator, Output, State,
+    StreamId, StreamType,
 };
 
 use crate::{
@@ -53,7 +54,7 @@ impl Node {
         goals: I1,
     ) -> Self {
         Self {
-            c: crate::new_client(params),
+            c: crate::new_client::<EmptyConnectionIdGenerator>(params.randomize_first_pn(false)),
             setup_goals: setup.into_iter().collect(),
             goals: goals.into_iter().collect(),
         }
@@ -68,7 +69,10 @@ impl Node {
         goals: I1,
     ) -> Self {
         Self {
-            c: crate::new_server(crate::DEFAULT_ALPN, params),
+            c: crate::new_server::<EmptyConnectionIdGenerator>(
+                crate::DEFAULT_ALPN,
+                params.randomize_first_pn(false),
+            ),
             setup_goals: setup.into_iter().collect(),
             goals: goals.into_iter().collect(),
         }
