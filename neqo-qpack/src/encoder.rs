@@ -539,7 +539,10 @@ fn map_stream_send_atomic_error(err: &TransportError) -> Error {
 #[cfg(test)]
 mod tests {
     use neqo_transport::{ConnectionParameters, StreamId, StreamType};
-    use test_fixture::{default_client, default_server, handshake, new_server, now, DEFAULT_ALPN};
+    use test_fixture::{
+        default_client, default_server, handshake, new_server, now, CountingConnectionIdGenerator,
+        DEFAULT_ALPN,
+    };
 
     use super::{Connection, Encoder, Error, Header, Res};
     use crate::Settings;
@@ -598,7 +601,7 @@ mod tests {
     fn connect_generic(huffman: bool, max_data: Option<u64>) -> TestEncoder {
         let mut conn = default_client();
         let mut peer_conn = max_data.map_or_else(default_server, |max| {
-            new_server(
+            new_server::<CountingConnectionIdGenerator>(
                 DEFAULT_ALPN,
                 ConnectionParameters::default()
                     .max_stream_data(StreamType::UniDi, true, max)
