@@ -43,7 +43,7 @@ jobs:
 
     steps:
       - name: Checkout mozilla/neqo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: mozilla/neqo
           path: neqo
@@ -55,7 +55,7 @@ jobs:
           git fetch --no-tags --depth=1 origin main
 
       - name: Checkout microsoft/msquic
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: microsoft/msquic
           ref: v2.5.3
@@ -65,7 +65,7 @@ jobs:
           clean: false
 
       - name: Checkout google/quiche
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: google/quiche
           ref: 1c35d630893fc2adacfffeb91bcb0561240cf5f1 # Google doesn't tag release, just update the hash occasionally
@@ -75,7 +75,7 @@ jobs:
           clean: false
 
       - name: Checkout cloudflare/quiche
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: cloudflare/quiche
           ref: 0.24.5
@@ -85,7 +85,7 @@ jobs:
           clean: false
 
       - name: Checkout aws/s2n-quic
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: aws/s2n-quic
           ref: v1.63.0
