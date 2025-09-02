@@ -7059,7 +7059,7 @@ mod tests {
     #[test]
     fn client_control_stream_create_failed() {
         let mut client = default_http3_client();
-        let mut server = TestServer::new_with_conn(new_server(
+        let mut server = TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator>(
             DEFAULT_ALPN_H3,
             ConnectionParameters::default().max_streams(StreamType::UniDi, 0),
         ));
@@ -7070,7 +7070,7 @@ mod tests {
     #[test]
     fn client_qpack_stream_create_failed() {
         let mut client = default_http3_client();
-        let mut server = TestServer::new_with_conn(new_server(
+        let mut server = TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator>(
             DEFAULT_ALPN_H3,
             ConnectionParameters::default().max_streams(StreamType::UniDi, 2),
         ));

@@ -794,8 +794,6 @@ checksum = "903970ae2f248d7275214cf8f387f8ba0c4ea7e3d87a320e85493db60ce28616"
 [[package]]
 name = "mtu"
 version = "0.2.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e3124fb16267c5a77ce8cd015bcb5bb3f8aab28ec32d89d65f6a31c5c1306a0"
 dependencies = [
  "bindgen",
  "cfg_aliases",
@@ -825,6 +823,7 @@ dependencies = [
  "quinn-udp",
  "regex",
  "rustc-hash 2.1.1",
+ "thiserror",
  "tokio",
  "url",
 ]
@@ -861,6 +860,7 @@ dependencies = [
  "serde_derive",
  "strum",
  "test-fixture",
+ "thiserror",
  "toml",
 ]
 
@@ -881,6 +881,7 @@ dependencies = [
  "sfv",
  "strum",
  "test-fixture",
+ "thiserror",
  "url",
 ]
 
@@ -895,6 +896,7 @@ dependencies = [
  "rustc-hash 2.1.1",
  "static_assertions",
  "test-fixture",
+ "thiserror",
 ]
 
 [[package]]
@@ -916,6 +918,7 @@ dependencies = [
  "static_assertions",
  "strum",
  "test-fixture",
+ "thiserror",
 ]
 
 [[package]]

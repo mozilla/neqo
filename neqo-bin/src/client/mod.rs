@@ -8,7 +8,7 @@
 
 use std::{
     collections::VecDeque,
-    fmt::{self, Display},
+    fmt::Display,
     fs::{create_dir_all, File, OpenOptions},
     io::{self, BufWriter, ErrorKind},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _},
@@ -33,6 +33,7 @@ use neqo_http3::Header;
 use neqo_transport::{AppError, CloseReason, ConnectionId, OutputBatch, Version};
 use neqo_udp::RecvBuf;
 use rustc_hash::FxHashMap as HashMap;
+use thiserror::Error;
 use tokio::time::Sleep;
 use url::{Host, Origin, Url};
 
@@ -44,14 +45,21 @@ mod proxied_http3;
 
 const BUFWRITER_BUFFER_SIZE: usize = 64 * 1024;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("argument error: {0}")]
     Argument(&'static str),
+    #[error(transparent)]
     Http3(neqo_http3::Error),
+    #[error(transparent)]
     Io(io::Error),
+    #[error(transparent)]
     Qlog(qlog::Error),
+    #[error(transparent)]
     Transport(neqo_transport::Error),
+    #[error("application error: {0}")]
     Application(AppError),
+    #[error(transparent)]
     Crypto(neqo_crypto::Error),
 }
 
@@ -94,24 +102,14 @@ impl From<CloseReason> for Error {
     }
 }
 
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error: {self:?}")?;
-        Ok(())
-    }
-}
-
-impl std::error::Error for Error {}
-
 type Res<T> = Result<T, Error>;
 
-#[derive(Debug, Parser)]
+#[derive(Clone, Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "Not a good use of that lint."
 )]
-#[derive(Clone)]
 pub struct Args {
     #[command(flatten)]
     shared: SharedArgs,

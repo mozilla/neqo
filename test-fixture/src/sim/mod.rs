@@ -10,6 +10,7 @@
 pub mod connection;
 mod delay;
 mod drop;
+pub mod http3_connection;
 mod mtu;
 pub mod rng;
 mod taildrop;
@@ -137,6 +138,17 @@ impl DerefMut for NodeHolder {
     }
 }
 
+/// The status of the processing of an event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GoalStatus {
+    /// The event didn't result in doing anything; the goal is waiting for something.
+    Waiting,
+    /// An action was taken as a result of the event.
+    Active,
+    /// The goal was accomplished.
+    Done,
+}
+
 pub struct Simulator {
     name: String,
     nodes: Vec<NodeHolder>,
@@ -207,7 +219,7 @@ impl Simulator {
         loop {
             for n in &mut self.nodes {
                 if dgram.is_none() && !n.ready(now) {
-                    qdebug!("[{}] kipping {:?}", self.name, n.node);
+                    qdebug!("[{}] skipping {:?}", self.name, n.node);
                     continue;
                 }
 

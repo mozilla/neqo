@@ -4,11 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    fmt::{self, Display, Formatter},
-    os::raw::c_char,
-    str::Utf8Error,
-};
+use std::{os::raw::c_char, str::Utf8Error};
 
 use crate::ssl::{SECStatus, SECSuccess};
 
@@ -19,6 +15,8 @@ mod codes {
     include!(concat!(env!("OUT_DIR"), "/nss_sslerr.rs"));
 }
 pub use codes::{SECErrorCodes as sec, SSLErrorCodes as ssl};
+use thiserror::Error;
+
 #[expect(dead_code, reason = "Code is bindgen-generated.")]
 pub mod nspr {
     include!(concat!(env!("OUT_DIR"), "/nspr_err.rs"));
@@ -54,54 +52,57 @@ pub mod mozpkix {
 
 pub type Res<T> = Result<T, Error>;
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Error)]
 pub enum Error {
-    Aead,
+    #[error("Certificate decoding error")]
     CertificateDecoding,
+    #[error("Certificate encoding error")]
     CertificateEncoding,
+    #[error("Certificate loading error")]
     CertificateLoading,
+    #[error("Cipher initialization error")]
     CipherInit,
+    #[error("Failed to create SSL socket")]
     CreateSslSocket,
+    #[error("ECH error, retry needed")]
     EchRetry(Vec<u8>),
+    #[error("HKDF error")]
     Hkdf,
+    #[error("Internal error")]
     Internal,
+    #[error("Integer overflow")]
     IntegerOverflow,
+    #[error("Invalid ALPN")]
     InvalidAlpn,
+    #[error("Invalid epoch")]
     InvalidEpoch,
+    #[error("Invalid certificate compression ID")]
     InvalidCertificateCompressionID,
+    #[error("Mixed handshake method")]
     MixedHandshakeMethod,
+    #[error("No data available")]
     NoDataAvailable,
+    #[error("NSS error: {name} ({code}): {desc}")]
     Nss {
         name: String,
         code: PRErrorCode,
         desc: String,
     },
-    Overrun,
+    #[error("Self encryption error")]
     SelfEncrypt,
+    #[error("String conversion error")]
     String,
+    #[error("Time travel detected")]
     TimeTravel,
+    #[error("Unsupported cipher")]
     UnsupportedCipher,
+    #[error("Unsupported version")]
     UnsupportedVersion,
 }
 
 impl Error {
     pub(crate) fn last_nss_error() -> Self {
         Self::from(unsafe { PR_GetError() })
-    }
-}
-
-impl std::error::Error for Error {
-    fn cause(&self) -> Option<&dyn std::error::Error> {
-        None
-    }
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Error: {self:?}")
     }
 }
 

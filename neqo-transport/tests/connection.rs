@@ -14,7 +14,7 @@ use neqo_transport::{
 use test_fixture::{
     default_client, default_server,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
-    new_client, new_server, now, split_datagram, DEFAULT_ALPN,
+    new_client, new_server, now, split_datagram, CountingConnectionIdGenerator, DEFAULT_ALPN,
 };
 
 #[test]
@@ -47,8 +47,12 @@ fn truncate_long_packet() {
     let now = now();
 
     // This test needs to alter the server handshake, so turn off MLKEM.
-    let mut client = new_client(ConnectionParameters::default().mlkem(false));
-    let mut server = new_server(DEFAULT_ALPN, ConnectionParameters::default().mlkem(false));
+    let mut client =
+        new_client::<CountingConnectionIdGenerator>(ConnectionParameters::default().mlkem(false));
+    let mut server = new_server::<CountingConnectionIdGenerator>(
+        DEFAULT_ALPN,
+        ConnectionParameters::default().mlkem(false),
+    );
 
     let out = client.process_output(now).dgram().unwrap();
     let out = server.process(Some(out), now);
@@ -87,7 +91,7 @@ fn reorder_server_initial() {
 
     // This test predicts the precise format of an ACK frame, so turn off MLKEM
     // and packet number randomization.
-    let mut client = new_client(
+    let mut client = new_client::<CountingConnectionIdGenerator>(
         ConnectionParameters::default()
             .versions(Version::Version1, vec![Version::Version1])
             .mlkem(false)
@@ -193,7 +197,7 @@ fn set_payload(server_packet: Option<&Datagram>, client_dcid: &[u8], payload: &[
 /// Test that the stack treats a packet without any frames as a protocol violation.
 #[test]
 fn packet_without_frames() {
-    let mut client = new_client(
+    let mut client = new_client::<CountingConnectionIdGenerator>(
         ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
     );
     let mut server = default_server();
@@ -215,7 +219,7 @@ fn packet_without_frames() {
 /// Test that the stack permits a packet containing only padding.
 #[test]
 fn packet_with_only_padding() {
-    let mut client = new_client(
+    let mut client = new_client::<CountingConnectionIdGenerator>(
         ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
     );
     let mut server = default_server();
@@ -235,7 +239,7 @@ fn packet_with_only_padding() {
 #[expect(clippy::similar_names, reason = "scid simiar to dcid.")]
 #[test]
 fn overflow_crypto() {
-    let mut client = new_client(
+    let mut client = new_client::<CountingConnectionIdGenerator>(
         ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
     );
     let mut server = default_server();
@@ -333,7 +337,7 @@ fn client_initial_packet_number() {
     // connection parameter is set, and that it is zero when not.
     for randomize in [true, false] {
         // This test needs to decrypt the CI, so turn off MLKEM.
-        let mut client = new_client(
+        let mut client = new_client::<CountingConnectionIdGenerator>(
             ConnectionParameters::default()
                 .versions(Version::Version1, vec![Version::Version1])
                 .mlkem(false)
@@ -358,12 +362,12 @@ fn server_initial_packet_number() {
     // connection parameter is set, and that it is zero when not.
     for randomize in [true, false] {
         // This test needs to decrypt the CI, so turn off MLKEM.
-        let mut client = new_client(
+        let mut client = new_client::<CountingConnectionIdGenerator>(
             ConnectionParameters::default()
                 .versions(Version::Version1, vec![Version::Version1])
                 .mlkem(false),
         );
-        let mut server = new_server(
+        let mut server = new_server::<CountingConnectionIdGenerator>(
             DEFAULT_ALPN,
             ConnectionParameters::default()
                 .versions(Version::Version1, vec![Version::Version1])
