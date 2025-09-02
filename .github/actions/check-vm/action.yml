@@ -75,13 +75,16 @@ runs:
           cargo check --locked --all-targets --workspace \$EXCLUDE
           cargo clippy -- -D warnings
           case "$PLATFORM" in
-            freebsd)    cargo install cargo-llvm-cov --locked
+            freebsd)    echo "Test run w/coverage"
+                        cargo install cargo-llvm-cov --locked
                         cargo llvm-cov test --locked --no-fail-fast --lcov --output-path lcov.info
                         ;;
             *)          # FIXME: No profiler support on other platforms, error is: cannot find crate for profiler_builtins
+                        echo "Test run w/o coverage"
                         cargo test --locked --no-fail-fast # We do this instead for now
                         ;;
           esac
+          echo "Release test run w/o coverage"
           cargo test --locked --no-fail-fast --release
           rm -rf target # Do not sync this back to host
         EOF
