@@ -43,7 +43,7 @@ disable-encryption = ["neqo-transport/disable-encryption", "neqo-crypto/disable-
 draft-29 = []
 
 [package.metadata.cargo-machete]
-ignored = ["log"]
+ignored = ["criterion", "log"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
