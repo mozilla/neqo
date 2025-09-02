@@ -60,14 +60,6 @@ impl Handler {
             read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
         }
     }
-
-    fn reinit(&mut self) {
-        for url in self.url_handler.handled_urls.drain(..) {
-            self.url_handler.url_queue.push_front(url);
-        }
-        self.url_handler.stream_handlers.clear();
-        self.url_handler.all_paths.clear();
-    }
 }
 
 pub fn create_client(
@@ -253,7 +245,7 @@ impl super::Handler for Handler {
                 Http3ClientEvent::ZeroRttRejected => {
                     qinfo!("{event:?}");
                     // All 0-RTT data was rejected. We need to retransmit it.
-                    self.reinit();
+                    self.url_handler.reinit();
                     self.url_handler.process_urls(client);
                 }
                 Http3ClientEvent::ResumptionToken(t) => self.token = Some(t),
@@ -446,5 +438,13 @@ impl UrlHandler {
     fn on_stream_fin(&mut self, client: &mut Http3Client, stream_id: StreamId) {
         self.stream_handlers.remove(&stream_id);
         self.process_urls(client);
+    }
+
+    fn reinit(&mut self) {
+        for url in self.handled_urls.drain(..).rev() {
+            self.url_queue.push_front(url);
+        }
+        self.stream_handlers.clear();
+        self.all_paths.clear();
     }
 }
