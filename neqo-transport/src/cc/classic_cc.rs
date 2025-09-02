@@ -104,17 +104,19 @@ pub trait WindowAdjustment: Display + Debug {
     /// Helper for CUBIC tests and overridden in [`cubic::Cubic`]
     #[cfg(test)]
     fn w_max(&self) -> f64 {
-        0.0
+        unreachable!()
     }
 
     /// Helper for CUBIC tests and overridden in [`cubic::Cubic`]
     #[cfg(test)]
-    fn set_w_max(&mut self, _w_max: f64) {}
+    fn set_w_max(&mut self, _w_max: f64) {
+        unreachable!()
+    }
 
     /// Helper for CUBIC tests and overridden in [`cubic::Cubic`]
     #[cfg(test)]
     fn alpha(&self) -> f64 {
-        0.0
+        unreachable!()
     }
 }
 
@@ -577,14 +579,14 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             return false;
         }
 
-        let (ssthresh, acked_bytes) = self.cc_algorithm.reduce_cwnd(
+        let (cwnd, acked_bytes) = self.cc_algorithm.reduce_cwnd(
             self.congestion_window,
             self.acked_bytes,
             self.max_datagram_size(),
         );
-        self.ssthresh = max(ssthresh, self.cwnd_min());
+        self.congestion_window = max(cwnd, self.cwnd_min());
         self.acked_bytes = acked_bytes;
-        self.congestion_window = self.ssthresh;
+        self.ssthresh = self.congestion_window;
         qinfo!(
             "[{self}] Cong event -> recovery; cwnd {}, ssthresh {}",
             self.congestion_window,

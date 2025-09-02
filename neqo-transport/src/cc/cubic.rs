@@ -41,7 +41,7 @@ pub const CUBIC_C: f64 = 0.4;
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
 ///
-/// This constant is used to set the default value of `neqo_transport::cc::cubic::Cubic::alpha`.
+/// This constant is used to set the default value of [`neqo_transport::cc::cubic::Cubic::alpha`].
 pub const CUBIC_ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7); // with CUBIC_BETA = 0.7
 
 /// > CUBIC multiplicative decrease factor
@@ -56,7 +56,7 @@ pub const CUBIC_ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7); // with CUBIC_BETA
 /// <https://datatracker.ietf.org/doc/html/rfc9438#name-principle-4-for-the-cubic-d>
 ///
 /// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing to
-/// construct `CUBIC_BETA = 0.7`
+/// construct `CUBIC_BETA = 0.7`.
 pub const CUBIC_BETA_USIZE_DIVIDEND: usize = 7;
 /// > CUBIC multiplicative decrease factor
 ///
@@ -216,11 +216,17 @@ impl Cubic {
         // `start_epoch()`, which is only possible after persistent congestion. It could also happen
         // if we never had a congestion event, so never called `reduce_cwnd()` thus `w_max` was
         // never set (so is still it's default `0.0` value). In any case we reset/initialize
-        // `w_max`, `cwnd_prior` and `k` here. We also set `alpha` to `1.0`, since
-        // `w_est >= cwnd_prior` is true here.
+        // `w_max`, `cwnd_prior` and `k` here. We also set `alpha` to `1.0` as per the below RFC
+        // section, since `w_est >= cwnd_prior` is true here.
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-11>
         self.k = if self.w_max < cwnd_epoch {
             self.cwnd_prior = cwnd_epoch;
             self.w_max = cwnd_epoch;
+            debug_assert!(
+                self.w_est >= self.cwnd_prior,
+                "w_est < cwnd_prior, so we are not allowed to set alpha = 1 (w_est: {}, cwnd_prior: {})", self.w_est, self.cwnd_prior
+            );
             self.alpha = 1.0;
             0.0
         } else {
@@ -311,7 +317,7 @@ impl WindowAdjustment for Cubic {
         //
         // While the RFC specifies that we should compare W_cubic(t) with w_est we are rather
         // comparing the previously calculated target here, since that is the value that would
-        // actually be used when deciding it's the cubic region.
+        // actually be used when deciding whether it's the cubic region.
         //
         // That is in line with what e.g. the Linux Kernel CUBIC implementation is doing.
         if target < self.w_est {
@@ -375,7 +381,7 @@ impl WindowAdjustment for Cubic {
     //
     // This function only returns the value for `cwnd * CUBIC_BETA` and sets some variables for the
     // start of a new congestion avoidance phase. Actually setting the congestion window happens in
-    // `ClassicCongestionControl::on_congestion_event` where this function is called.
+    // [`super::ClassicCongestionControl::on_congestion_event`] where this function is called.
     fn reduce_cwnd(
         &mut self,
         curr_cwnd: usize,
