@@ -154,14 +154,6 @@ pub struct Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-variables-of-interest>
     t_epoch: Option<Instant>,
-    /// Number of bytes acked since the last congestion window increase.
-    ///
-    /// > Implementations can use bytes to express window sizes, which would require factoring in
-    /// > the SMSS wherever necessary and replacing `segments_acked` (Figure 4) with the number of
-    /// > acknowledged bytes.
-    ///
-    /// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.1-1>
-    new_bytes_acked: f64,
 }
 
 impl Display for Cubic {
@@ -254,7 +246,6 @@ impl WindowAdjustment for Cubic {
     ) -> usize {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
         let max_datagram_size_f64 = convert_to_f64(max_datagram_size);
-        self.new_bytes_acked = convert_to_f64(new_acked_bytes);
 
         let t_epoch = self.t_epoch.unwrap_or_else(|| {
             // If we get here with `self.t_epoch == None` this is a new congestion evoidance state.
@@ -293,7 +284,8 @@ impl WindowAdjustment for Cubic {
         // Formula: w_est = w_est + alpha * (bytes_acked / cwnd) * SMSS
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-9>
-        self.w_est += self.alpha * (self.new_bytes_acked / curr_cwnd_f64) * max_datagram_size_f64;
+        self.w_est +=
+            self.alpha * (convert_to_f64(new_acked_bytes) / curr_cwnd_f64) * max_datagram_size_f64;
 
         // > Once w_est has grown to reach the cwnd at the time of most recently setting
         // > ssthresh -- that is, w_est >= cwnd_prior -- the sender SHOULD set CUBIC_ALPHA to
