@@ -1,0 +1,33 @@
+name: Check README.md
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ["main"]
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  readme:
+    name: Check README.md
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/rust
+        with:
+          tools: cargo-readme
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: |
+          cd mtu # Only works for this crate currently.
+          # TODO: cargo-readme doesn't support workspaces: https://github.com/webern/cargo-readme/issues/81
+          # Leaving this here so we remember to fix it later.
+          # cargo readme -o /tmp/README.md
+          # diff -u README.md /tmp/README.md

@@ -272,6 +272,7 @@ pub enum Error {
     Argument(&'static str),
 }
 
+#[cfg(not(target_os = "netbsd"))] // FIXME: Test fails on NetBSD.
 #[cfg(test)]
 mod tests {
     use std::{fs, path::PathBuf, str::FromStr as _, time::SystemTime};

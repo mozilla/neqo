@@ -1270,7 +1270,7 @@ impl Server {
                 return Err(Error::CertificateLoading);
             };
             secstatus_to_res(unsafe {
-                ssl::SSL_ConfigServerCert(agent.fd, *cert, *key, null(), 0)
+                ssl::SSL_ConfigServerCert(agent.fd, (*cert).cast(), (*key).cast(), null(), 0)
             })?;
         }
 

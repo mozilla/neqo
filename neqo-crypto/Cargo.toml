@@ -33,6 +33,9 @@ toml = { version = "0.5", default-features = false }
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
 
+[package.metadata.cargo-machete]
+ignored = ["bindgen", "semver", "serde", "serde_derive", "toml"]
+
 [features]
 bench = []
 disable-encryption = []
