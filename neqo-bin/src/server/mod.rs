@@ -14,7 +14,7 @@
 
 use std::{
     cell::RefCell,
-    fmt::{self, Display},
+    fmt::Display,
     fs,
     future::Future,
     io::{self},
@@ -39,6 +39,7 @@ use neqo_crypto::{
 };
 use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version};
 use neqo_udp::{DatagramIter, RecvBuf};
+use thiserror::Error;
 use tokio::time::Sleep;
 
 use crate::SharedArgs;
@@ -48,13 +49,19 @@ const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 pub mod http09;
 pub mod http3;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("invalid argument: {0}")]
     Argument(&'static str),
+    #[error(transparent)]
     Http3(neqo_http3::Error),
+    #[error(transparent)]
     Io(io::Error),
+    #[error("qlog error")]
     Qlog,
+    #[error(transparent)]
     Transport(neqo_transport::Error),
+    #[error(transparent)]
     Crypto(neqo_crypto::Error),
 }
 
@@ -87,15 +94,6 @@ impl From<neqo_transport::Error> for Error {
         Self::Transport(err)
     }
 }
-
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error: {self:?}")?;
-        Ok(())
-    }
-}
-
-impl std::error::Error for Error {}
 
 pub type Res<T> = Result<T, Error>;
 
