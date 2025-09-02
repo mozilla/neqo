@@ -21,19 +21,8 @@ use neqo_transport::{
 
 use crate::{
     boxed,
-    sim::{self, Rng},
+    sim::{self, GoalStatus, Rng},
 };
-
-/// The status of the processing of an event.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GoalStatus {
-    /// The event didn't result in doing anything; the goal is waiting for something.
-    Waiting,
-    /// An action was taken as a result of the event.
-    Active,
-    /// The goal was accomplished.
-    Done,
-}
 
 /// A goal for the connection.
 /// Goals can be accomplished in any order.

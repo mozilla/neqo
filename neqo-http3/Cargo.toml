@@ -32,7 +32,7 @@ strum = { workspace = true}
 url = { workspace = true }
 
 [dev-dependencies]
-# criterion = { version = "0.6", default-features = false, features = ["cargo_bench_support"] }
+criterion = { version = "0.6", default-features = false, features = ["cargo_bench_support"] }
 neqo-http3 = { path = ".", features = ["draft-29"] }
 neqo-transport = { path = "./../neqo-transport", features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
@@ -43,15 +43,13 @@ disable-encryption = ["neqo-transport/disable-encryption", "neqo-crypto/disable-
 draft-29 = []
 
 [package.metadata.cargo-machete]
-ignored = ["log"]
+ignored = ["criterion", "log"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
 
-# FIXME: These benches have a high rate of variability and are hence not very useful
-# in their current form. See https://github.com/mozilla/neqo/issues/2804
-# [[bench]]
-# name = "streams"
-# harness = false
-# required-features = ["bench"]
+[[bench]]
+name = "streams"
+harness = false
+required-features = ["bench"]
