@@ -10,10 +10,11 @@ fuzz_target!(|data: &[u8]| {
     use neqo_transport::{packet::MIN_INITIAL_PACKET_SIZE, ConnectionParameters, Version};
     use test_fixture::{
         header_protection::{self, decode_initial_header, initial_aead_and_hp},
-        new_client, new_server, now, DEFAULT_ALPN,
+        new_client, new_server, now, CountingConnectionIdGenerator, DEFAULT_ALPN,
     };
 
-    let mut client = new_client(ConnectionParameters::default().mlkem(false));
+    let mut client =
+        new_client::<CountingConnectionIdGenerator>(ConnectionParameters::default().mlkem(false));
     let ci = client.process_output(now()).dgram().expect("a datagram");
     let Some((header, d_cid, s_cid, payload)) = decode_initial_header(&ci, Role::Client) else {
         return;
@@ -56,7 +57,10 @@ fuzz_target!(|data: &[u8]| {
     );
     let fuzzed_ci = Datagram::new(ci.source(), ci.destination(), ci.tos(), ciphertext);
 
-    let mut server = new_server(DEFAULT_ALPN, ConnectionParameters::default().mlkem(false));
+    let mut server = new_server::<CountingConnectionIdGenerator>(
+        DEFAULT_ALPN,
+        ConnectionParameters::default().mlkem(false),
+    );
     let _response = server.process(Some(fuzzed_ci), now());
 });
 
