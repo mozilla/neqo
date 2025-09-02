@@ -95,7 +95,7 @@ pub enum Error {
     StreamLimit,
     #[error("stream state error")]
     StreamState,
-    #[error("final size error")]
+    #[error("stream final size error")]
     FinalSize,
     #[error("frame encoding error")]
     FrameEncoding,
@@ -131,7 +131,7 @@ pub enum Error {
     Decrypt,
     #[error("disabled version")]
     DisabledVersion,
-    #[error("idle timeout")]
+    #[error("no packets received for longer than the idle timeout")]
     IdleTimeout,
     #[error("integer overflow")]
     IntegerOverflow,
@@ -139,11 +139,11 @@ pub enum Error {
     InvalidInput,
     #[error("invalid migration")]
     InvalidMigration,
-    #[error("invalid packet")]
+    #[error("an invalid packet was dropped (internal use only)")]
     InvalidPacket,
     #[error("invalid resumption token")]
     InvalidResumptionToken,
-    #[error("invalid retry")]
+    #[error("invalid retry packet dropped (internal use only)")]
     InvalidRetry,
     #[error("invalid stream ID")]
     InvalidStreamId,
@@ -170,7 +170,7 @@ pub enum Error {
     NotConnected,
     #[error("packet number overlap")]
     PacketNumberOverlap,
-    #[error("peer application error: {0}")]
+    #[error("peer application error: 0x{0:x}")]
     PeerApplication(AppError),
     #[error("peer error: {0}")]
     Peer(TransportError),

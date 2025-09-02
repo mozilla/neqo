@@ -191,7 +191,7 @@ pub enum Error {
     HttpNone,
     #[error("HTTP general protocol error")]
     HttpGeneralProtocol,
-    // this is the same as the above but it should only close a stream not a
+    // This is the same as the above but it should only close a stream not a
     // connection.
     #[error("HTTP protocol error on stream")]
     HttpGeneralProtocolStream,

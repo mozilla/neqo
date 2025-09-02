@@ -16,6 +16,7 @@ mod codes {
 }
 pub use codes::{SECErrorCodes as sec, SSLErrorCodes as ssl};
 use thiserror::Error;
+
 #[expect(dead_code, reason = "Code is bindgen-generated.")]
 pub mod nspr {
     include!(concat!(env!("OUT_DIR"), "/nspr_err.rs"));
