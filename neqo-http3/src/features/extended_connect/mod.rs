@@ -20,7 +20,7 @@ use neqo_transport::StreamId;
 use crate::{
     client_events::Http3ClientEvents,
     features::{
-        extended_connect::session::{CloseReason, SessionProtocol},
+        extended_connect::session::{CloseReason, Protocol},
         NegotiationState,
     },
     settings::{HSettingType, HSettings},
@@ -75,11 +75,7 @@ impl ExtendedConnectType {
         }
     }
 
-    pub(crate) fn new_protocol(
-        &self,
-        session_id: StreamId,
-        role: Role,
-    ) -> Box<dyn SessionProtocol> {
+    pub(crate) fn new_protocol(&self, session_id: StreamId, role: Role) -> Box<dyn Protocol> {
         match self {
             Self::WebTransport => Box::new(webtransport_session::Session::new(session_id, role)),
             Self::ConnectUdp => Box::new(connect_udp_session::Session::new(session_id)),

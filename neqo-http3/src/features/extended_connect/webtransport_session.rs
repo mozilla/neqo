@@ -15,7 +15,7 @@ use neqo_transport::{Connection, StreamId};
 
 use crate::{
     features::extended_connect::{
-        session::{SessionProtocol, State},
+        session::{Protocol, State},
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
@@ -50,7 +50,7 @@ impl Session {
     }
 }
 
-impl SessionProtocol for Session {
+impl Protocol for Session {
     fn connect_type(&self) -> ExtendedConnectType {
         ExtendedConnectType::WebTransport
     }

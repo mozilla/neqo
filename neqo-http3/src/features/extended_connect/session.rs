@@ -55,7 +55,7 @@ pub(crate) struct Session {
     events: Box<dyn ExtendedConnectEvents>,
     /// Corresponds to the `:protocol` pseudo-header in the HTTP EXTENDED
     /// CONNECT request.
-    protocol: Box<dyn SessionProtocol>,
+    protocol: Box<dyn Protocol>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -502,7 +502,7 @@ impl SendStream for Rc<RefCell<Session>> {
 ///
 /// "Protocol" here corresponds to the `:protocol` pseudo header in the HTTP
 /// Extended CONNECT method.
-pub(crate) trait SessionProtocol: Debug + Display {
+pub(crate) trait Protocol: Debug + Display {
     fn connect_type(&self) -> ExtendedConnectType;
 
     fn close_frame(&self, error: u32, message: &str) -> Option<Vec<u8>>;
@@ -524,7 +524,9 @@ pub(crate) trait SessionProtocol: Debug + Display {
 
     fn remove_send_stream(&mut self, stream_id: StreamId);
 
-    fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>);
+    fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
+        (HashSet::default(), HashSet::default())
+    }
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);
 

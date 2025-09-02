@@ -4,17 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    collections::HashSet,
-    fmt::{self, Display, Formatter},
-};
+use std::fmt::{self, Display, Formatter};
 
 use neqo_common::{qdebug, Encoder};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
     features::extended_connect::{
-        session::State, CloseReason, ExtendedConnectEvents, ExtendedConnectType, SessionProtocol,
+        session::State, CloseReason, ExtendedConnectEvents, ExtendedConnectType, Protocol,
     },
     frames::{ConnectUdpFrame, FrameReader, StreamReaderRecvStreamWrapper},
     Error, RecvStream, Res,
@@ -42,7 +39,7 @@ impl Display for Session {
     }
 }
 
-impl SessionProtocol for Session {
+impl Protocol for Session {
     fn connect_type(&self) -> ExtendedConnectType {
         ExtendedConnectType::ConnectUdp
     }
@@ -52,7 +49,6 @@ impl SessionProtocol for Session {
         None
     }
 
-    // TODO: De-duplicate further with webtransport_session.rs?
     fn read_control_stream(
         &mut self,
         conn: &mut Connection,
@@ -112,11 +108,6 @@ impl SessionProtocol for Session {
         let msg = "ConnectUdp does not support removing send streams";
         qdebug!("{msg}");
         debug_assert!(false, "{msg}");
-    }
-
-    // TODO: Faking it to simplify implementation in connection.rs. Can we do better?
-    fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
-        (HashSet::default(), HashSet::default())
     }
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder) {
