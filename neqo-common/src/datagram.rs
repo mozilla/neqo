@@ -225,6 +225,11 @@ impl DatagramBatch {
         self.datagram_size
     }
 
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_const_for_fn,
+        reason = "False positive on 1.86, remove when MSRV is higher."
+    )]
     #[must_use]
     pub fn data(&self) -> &[u8] {
         &self.d

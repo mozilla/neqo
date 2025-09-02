@@ -43,7 +43,8 @@ runs:
     - shell: bash
       env:
         NDK_VERSION: ${{ inputs.ndk-version }}
-      run: sdkmanager --install "ndk;$NDK_VERSION"
+        WD: ${{ inputs.working-directory }}
+      run: cd "$WD" && sdkmanager --install "ndk;$NDK_VERSION"
 
     - uses: ./.github/actions/rust
       with:
@@ -53,6 +54,7 @@ runs:
         token: ${{ inputs.github-token }}
 
     - uses: ./.github/actions/nss
+      if: ${{ inputs.minimum-nss-version != '' }}
       with:
         minimum-version: ${{ inputs.minimum-nss-version }}
         target: ${{ inputs.target }}
@@ -61,7 +63,8 @@ runs:
       env:
         TARGET: ${{ startsWith(inputs.target, 'arm') && 'arm64-v8a' || inputs.target }}
         API_LEVEL: ${{ inputs.api-level }}
-      run: cargo ndk --platform "$API_LEVEL" --target "$TARGET" test --no-run
+        WD: ${{ inputs.working-directory }}
+      run: cd "$WD" && cargo ndk --platform "$API_LEVEL" --target "$TARGET" test --no-run
 
     - shell: bash
       env:
@@ -73,14 +76,14 @@ runs:
         sudo udevadm trigger --name-match=kvm
         cat <<'EOF' > /tmp/rust-android-run-tests-on-emulator.sh
         #!/bin/bash
-        set -e
+        set -ex
         adb wait-for-device
         while [ -z "$(adb shell getprop sys.boot_completed | tr -d '\r')" ]; do sleep 1; done
         any_failures=0
         TMP=/data/local/tmp
-        adb push "test-fixture/db" "$TMP/"
-        adb push "$LD_LIBRARY_PATH" "$TMP/"
-        for test in $(find target/$TARGET/debug/deps/ -type f -executable ! -name "*.so" -name "*-*"); do
+        [ -e "$WD/test-fixture/db" ] && adb push "test-fixture/db" "$TMP/"
+        [ "$LD_LIBRARY_PATH" ] && adb push "$LD_LIBRARY_PATH" "$TMP/"
+        for test in $(find $WD/target/$TARGET/debug/deps/ -type f -executable ! -name "*.so" -name "*-*"); do
           adb push "$test" "$TMP/"
           adb shell chmod +x "$TMP/$(basename "$test")"
           # See https://unix.stackexchange.com/a/451140/409256
