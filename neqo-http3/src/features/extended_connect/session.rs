@@ -402,16 +402,22 @@ impl Session {
     }
 
     pub fn datagram(&self, datagram: &[u8]) {
-        if self.state == State::Active {
-            let datagram = self.protocol.read_datagram_prefix(datagram);
-            self.events.new_datagram(
-                self.session_id,
-                datagram.to_vec(),
-                self.protocol.connect_type(),
-            );
-        } else {
+        if self.state != State::Active {
             qdebug!("[{self}]: received datagram on {:?} session.", self.state);
+            return;
         }
+        let datagram = match self.protocol.dgram_context_id(datagram) {
+            Ok(datagram) => datagram,
+            Err(e) => {
+                qdebug!("[{self}]: received datagram with invalid context identifier: {e}");
+                return;
+            }
+        };
+        self.events.new_datagram(
+            self.session_id,
+            datagram.to_vec(),
+            self.protocol.connect_type(),
+        );
     }
 
     fn has_data_to_send(&self) -> bool {
@@ -530,5 +536,16 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);
 
-    fn read_datagram_prefix<'a>(&self, datagram: &'a [u8]) -> &'a [u8];
+    fn dgram_context_id<'a>(
+        &self,
+        datagram: &'a [u8],
+    ) -> Result<&'a [u8], DgramContextIdError>;
+}
+
+#[derive(Debug, Error)]
+pub(crate) enum DgramContextIdError {
+    #[error("Missing context identifier")]
+    MissingIdentifier,
+    #[error("Unknown context identifier: {0}")]
+    UnknownIdentifier(u8),
 }

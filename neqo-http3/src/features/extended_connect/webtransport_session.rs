@@ -15,7 +15,7 @@ use neqo_transport::{Connection, StreamId};
 
 use crate::{
     features::extended_connect::{
-        session::{Protocol, State},
+        session::{Protocol, DgramContextIdError, State},
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
@@ -149,8 +149,8 @@ impl Protocol for Session {
         // WebTransport does not add prefix (i.e. context ID).
     }
 
-    fn read_datagram_prefix<'a>(&self, datagram: &'a [u8]) -> &'a [u8] {
+    fn dgram_context_id<'a>(&self, datagram: &'a [u8]) -> Result<&'a [u8], DgramContextIdError> {
         // WebTransport does not use a prefix (i.e. context ID).
-        datagram
+        Ok(datagram)
     }
 }

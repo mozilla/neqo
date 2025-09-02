@@ -11,7 +11,8 @@ use neqo_transport::{Connection, StreamId};
 
 use crate::{
     features::extended_connect::{
-        session::State, CloseReason, ExtendedConnectEvents, ExtendedConnectType, Protocol,
+        session::{DgramContextIdError, State},
+        CloseReason, ExtendedConnectEvents, ExtendedConnectType, Protocol,
     },
     frames::{ConnectUdpFrame, FrameReader, StreamReaderRecvStreamWrapper},
     Error, RecvStream, Res,
@@ -114,14 +115,21 @@ impl Protocol for Session {
         encoder.encode_varint(0u64);
     }
 
-    fn read_datagram_prefix<'a>(&self, datagram: &'a [u8]) -> &'a [u8] {
-        let Some((context_id, remainder)) = datagram.split_first() else {
-            // TODO: Return error instead? Is datagram without context ID allowed?
-            return datagram; // emtpy
-        };
-
-        debug_assert_eq!(*context_id, 0, "only supports context_id 0");
-
-        remainder
+    fn dgram_context_id<'a>(
+        &self,
+        datagram: &'a [u8],
+    ) -> Result<&'a [u8], DgramContextIdError> {
+        match datagram.split_first() {
+            Some((0, remainder)) => Ok(remainder),
+            Some((context_id, _)) => Err(DgramContextIdError::UnknownIdentifier(
+                *context_id,
+            )),
+            None => {
+                // > all HTTP Datagrams associated with UDP Proxying request streams start with a Context ID field;
+                //
+                // <https://datatracker.ietf.org/doc/html/rfc9298#name-context-identifiers>
+                Err(DgramContextIdError::MissingIdentifier)
+            }
+        }
     }
 }
