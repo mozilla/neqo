@@ -154,7 +154,7 @@ pub enum Error {
     #[error("keys exhausted")]
     KeysExhausted,
     /// Packet protection keys aren't available yet for the identified space.
-    #[error("keys pending for epoch {0:?}")]
+    #[error("keys pending for epoch {0:?} (internal use only)")]
     KeysPending(crypto::Epoch),
     /// An attempt to update keys can be blocked if a packet sent with the
     /// current keys hasn't been acknowledged.
@@ -188,7 +188,7 @@ pub enum Error {
     VersionNegotiation,
     #[error("wrong role")]
     WrongRole,
-    #[error("unknown transport parameter")]
+    #[error("unknown transport parameter (internal use only)")]
     UnknownTransportParameter,
 }
 

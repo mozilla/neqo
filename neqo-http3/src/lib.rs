@@ -267,7 +267,7 @@ pub enum Error {
     ),
     #[error("Transport stream does not exist")]
     TransportStreamDoesNotExist,
-    #[error("Unavailable")]
+    #[error("Operation unavailable")]
     Unavailable,
     #[error("Unexpected condition")]
     Unexpected,
