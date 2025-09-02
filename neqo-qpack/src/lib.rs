@@ -49,7 +49,7 @@ pub enum Error {
     Internal,
 
     // These are internal errors, they will be transformed into one of the above.
-
+    //
     /// Return when an input stream does not have more data that a decoder needs.
     /// It does not mean that a stream is closed.
     #[error("Need more data")]
