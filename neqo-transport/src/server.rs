@@ -473,11 +473,6 @@ impl Server {
             }
         }
 
-        assert!(
-            self.saved_datagrams.is_empty(),
-            "Otherwise, there would be more work to do."
-        );
-
         OutputBatch::None
     }
 
@@ -533,6 +528,7 @@ impl Server {
         now: Instant,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
+        // Process input datagrams from previous call.
         while let Some(SavedDatagram { d, t }) = self.saved_datagrams.pop_front() {
             if let OutputBatch::DatagramBatch(b) = self.process_input(std::iter::once(d), t) {
                 self.saved_datagrams
@@ -545,11 +541,13 @@ impl Server {
             }
         }
 
+        // Process input datagrams from this call.
         if let o @ OutputBatch::DatagramBatch(_) = self.process_input(dgrams, now) {
             // Return immediately. Do any maintenance on next call.
             return o;
         }
 
+        // Process output datagrams.
         let maybe_callback = match self.process_next_output(now, max_datagrams) {
             // Return immediately. Do any maintenance on next call.
             o @ OutputBatch::DatagramBatch(_) => return o,

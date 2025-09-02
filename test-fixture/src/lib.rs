@@ -57,6 +57,7 @@ pub const NSS_DB_PATH: &str = if let Some(dir) = option_env!("NSS_DB_PATH") {
 ///
 /// When the NSS initialization fails.
 pub fn fixture_init() {
+    neqo_common::log::init(None);
     if NSS_DB_PATH == "$ARGV0" {
         let mut current_exe = std::env::current_exe().unwrap();
         current_exe.pop();
@@ -170,15 +171,18 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 ///
 /// If this doesn't work.
 #[must_use]
-pub fn new_client(params: ConnectionParameters) -> Connection {
+pub fn new_client<G>(params: ConnectionParameters) -> Connection
+where
+    G: ConnectionIdGenerator + Default + 'static,
+{
     fixture_init();
     let mut client = Connection::new_client(
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(G::default())),
         DEFAULT_ADDR,
         DEFAULT_ADDR,
-        params.ack_ratio(255), // Tests work better with this set this way.
+        params,
         now(),
     )
     .expect("create a client");
@@ -205,19 +209,19 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
 /// Create a transport client with default configuration.
 #[must_use]
 pub fn default_client() -> Connection {
-    new_client(ConnectionParameters::default())
+    new_client::<CountingConnectionIdGenerator>(ConnectionParameters::default())
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server() -> Connection {
-    new_server(DEFAULT_ALPN, ConnectionParameters::default())
+    new_server::<CountingConnectionIdGenerator>(DEFAULT_ALPN, ConnectionParameters::default())
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server_h3() -> Connection {
-    new_server(
+    new_server::<CountingConnectionIdGenerator>(
         DEFAULT_ALPN_H3,
         ConnectionParameters::default().pacing(false),
     )
@@ -229,13 +233,16 @@ pub fn default_server_h3() -> Connection {
 ///
 /// If this doesn't work.
 #[must_use]
-pub fn new_server<A: AsRef<str>>(alpn: &[A], params: ConnectionParameters) -> Connection {
+pub fn new_server<G>(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection
+where
+    G: ConnectionIdGenerator + Default + 'static,
+{
     fixture_init();
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
         alpn,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        params.ack_ratio(255),
+        Rc::new(RefCell::new(G::default())),
+        params,
     )
     .expect("create a server");
     if let Ok(dir) = std::env::var("QLOGDIR") {
@@ -431,6 +438,24 @@ pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
         Datagram::new(d.source(), d.destination(), d.tos(), a.to_vec()),
         b.map(|b| Datagram::new(d.source(), d.destination(), d.tos(), b.to_vec())),
     )
+}
+
+/// Strip any padding off the packet.
+/// This uses a heuristic to detect padding packets.  Don't rely on that too much.
+#[must_use]
+pub fn strip_padding(dgram: Datagram) -> Datagram {
+    fn is_padding(dgram: &Datagram) -> bool {
+        // This is a pretty rough heuristic, but it works for now.
+        // Below the minimum packets size of 19 (1 type, 1 packet len, 1 content, 16 tag)
+        // OR all values the same (except the last, in anticipation of SCONE indications).
+        dgram.len() < 19 || dgram[1..dgram.len() - 1].iter().all(|&x| x == dgram[0])
+    }
+    let (first, second) = split_datagram(&dgram);
+    if second.as_ref().is_some_and(is_padding) {
+        first
+    } else {
+        dgram
+    }
 }
 
 #[derive(Clone, Default)]

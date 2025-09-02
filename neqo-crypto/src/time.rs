@@ -153,13 +153,6 @@ pub struct Interval {
     d: Duration,
 }
 
-impl Deref for Interval {
-    type Target = Duration;
-    fn deref(&self) -> &Self::Target {
-        &self.d
-    }
-}
-
 impl TryFrom<PRTime> for Interval {
     type Error = Error;
     fn try_from(prtime: PRTime) -> Res<Self> {

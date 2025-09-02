@@ -52,6 +52,10 @@ impl DirectionalSecrets {
         self.secrets[epoch] = key;
     }
 
+    pub fn has(&self, epoch: Epoch) -> bool {
+        !self.secrets[epoch].is_null()
+    }
+
     pub fn take(&mut self, epoch: Epoch) -> Option<SymKey> {
         if self.secrets[epoch].is_null() {
             None
@@ -114,6 +118,10 @@ impl SecretHolder {
     pub fn register(&mut self, fd: *mut PRFileDesc) -> Res<()> {
         let p = as_c_void(&mut self.secrets);
         unsafe { SSL_SecretCallback(fd, Some(Secrets::secret_available), p) }
+    }
+
+    pub fn has(&self, epoch: Epoch) -> bool {
+        self.secrets.r.has(epoch)
     }
 
     pub fn take_read(&mut self, epoch: Epoch) -> Option<SymKey> {

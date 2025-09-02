@@ -23,7 +23,7 @@ use neqo_transport::{
 use test_fixture::{
     assertions, damage_ech_config, datagram, default_client,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
-    now,
+    now, CountingConnectionIdGenerator,
 };
 
 #[test]
@@ -438,8 +438,11 @@ fn vn_after_retry() {
 // long enough connection ID.
 #[test]
 fn mitm_retry() {
-    // This test decrypts packets and hence does not work with MLKEM enabled.
-    let mut client = test_fixture::new_client(ConnectionParameters::default().mlkem(false));
+    // This test decrypts packets and hence does not work with MLKEM and packet number randomization
+    // enabled.
+    let mut client = test_fixture::new_client::<CountingConnectionIdGenerator>(
+        ConnectionParameters::default().mlkem(false),
+    );
     let mut retry_server = default_server();
     retry_server.set_validation(ValidateAddress::Always);
     let mut server = default_server();
@@ -464,7 +467,6 @@ fn mitm_retry() {
     let pn_len = header.len() - protected_header.len();
 
     // Decrypt.
-    assert_eq!(pn, 1);
     let mut plaintext_buf = vec![0; client_initial2.len()];
     let plaintext = aead
         .decrypt(pn, &header, &payload[pn_len..], &mut plaintext_buf)

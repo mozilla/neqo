@@ -585,7 +585,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         self.ssthresh = max(ssthresh, self.cwnd_min());
         self.acked_bytes = acked_bytes;
         self.congestion_window = self.ssthresh;
-        qdebug!(
+        qinfo!(
             "[{self}] Cong event -> recovery; cwnd {}, ssthresh {}",
             self.congestion_window,
             self.ssthresh
