@@ -103,7 +103,7 @@ impl From<CloseReason> for Error {
 
 type Res<T> = Result<T, Error>;
 
-#[derive(Debug, Parser)]
+#[derive(Clone, Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 #[expect(
     clippy::struct_excessive_bools,
@@ -635,7 +635,7 @@ pub async fn client(mut args: Args) -> Res<()> {
                 let client = http3::create_client(&args, real_local, remote_addr, &hostname, token)
                     .expect("failed to create client");
 
-                let handler = http3::Handler::new(to_request, &args);
+                let handler = http3::Handler::new(to_request, args.clone());
 
                 Runner::new(real_local, &mut socket, client, handler, &args)
                     .run()
