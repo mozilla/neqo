@@ -153,6 +153,8 @@ pub struct Cubic {
     /// > The time in seconds at which the current congestion avoidance stage started.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-variables-of-interest>
+    ///
+    /// This also is reset on being application limited
     t_epoch: Option<Instant>,
 }
 
@@ -213,11 +215,12 @@ impl Cubic {
         self.w_est = cwnd_epoch;
         // If `w_max < cwnd_epoch` we take the cubic root from a negative value in `calc_k()`. That
         // could only happen if somehow `cwnd` get's increased between calling `reduce_cwnd()` and
-        // `start_epoch()`, which is only possible after persistent congestion. It could also happen
-        // if we never had a congestion event, so never called `reduce_cwnd()` thus `w_max` was
-        // never set (so is still it's default `0.0` value). In any case we reset/initialize
-        // `w_max`, `cwnd_prior` and `k` here. We also set `alpha` to `1.0` as per the below RFC
-        // section, since `w_est >= cwnd_prior` is true here.
+        // `start_epoch()`, which is only possible after persistent congestion or an app limited
+        // period. It could also happen if we never had a congestion event, so never called
+        // `reduce_cwnd()` thus `w_max` was never set (so is still it's default `0.0`
+        // value). In any case we reset/initialize `w_max`, `cwnd_prior` and `k` here. We
+        // also set `alpha` to `1.0` as per the below RFC section, since `w_est >=
+        // cwnd_prior` is true here.
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-11>
         self.k = if self.w_max < cwnd_epoch {
@@ -254,9 +257,14 @@ impl WindowAdjustment for Cubic {
         let max_datagram_size_f64 = convert_to_f64(max_datagram_size);
 
         let t_epoch = self.t_epoch.unwrap_or_else(|| {
-            // If we get here with `self.t_epoch == None` this is a new congestion evoidance state.
-            // It's been either set to `None` in `cubic::reduce_cwnd()` or needs to be
-            // initialized after slow start.
+            // If we get here with `self.t_epoch == None` this is a new congestion avoidance stage.
+            // It's been set to `None` by [`super::ClassicCongestionControl::reduce_cwnd`] or
+            // needs to be initialized after slow start. It could also have been reset by
+            // [`super::ClassicCongestionControl::on_app_limited`] in which case we also start a new
+            // congestion avoidance stage for the purpose of resetting timing as per RFC 9438
+            // section 5.8.
+            //
+            // <https://datatracker.ietf.org/doc/html/rfc9438#app-limited>
             self.start_epoch(curr_cwnd_f64, max_datagram_size_f64, now);
             now
         });

@@ -98,7 +98,10 @@ pub trait WindowAdjustment: Display + Debug {
         acked_bytes: usize,
         max_datagram_size: usize,
     ) -> (usize, usize);
-    /// Cubic needs this signal to reset its epoch.
+    /// Cubic needs this signal to reset its timing after an app limited period as per RFC 9438
+    /// section 5.8
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#app-limited>
     fn on_app_limited(&mut self);
 
     /// Helper for CUBIC tests and overridden in [`cubic::Cubic`]
