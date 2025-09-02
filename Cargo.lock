@@ -866,6 +866,7 @@ dependencies = [
 name = "neqo-http3"
 version = "0.15.0"
 dependencies = [
+ "criterion",
  "enumset",
  "log",
  "neqo-common",
