@@ -74,8 +74,12 @@ impl State {
 
 impl Display for Session {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        // TODO: update
-        write!(f, "session={}", self.session_id)
+        write!(
+            f,
+            "{}-session={}",
+            self.protocol.connect_type(),
+            self.session_id
+        )
     }
 }
 
@@ -189,7 +193,6 @@ impl Session {
         Ok((ReceiveOutput::NoOutput, self.state == State::Done))
     }
 
-    // TODO: Move to webtransport?
     fn maybe_update_priority(&mut self, priority: Priority) -> Res<bool> {
         self.control_stream_recv
             .http_stream()
@@ -197,14 +200,12 @@ impl Session {
             .maybe_update_priority(priority)
     }
 
-    // TODO: Move to webtransport?
     fn priority_update_frame(&mut self) -> Option<HFrame> {
         self.control_stream_recv
             .http_stream()?
             .priority_update_frame()
     }
 
-    // TODO: Move to webtransport?
     fn priority_update_sent(&mut self) -> Res<()> {
         self.control_stream_recv
             .http_stream()
