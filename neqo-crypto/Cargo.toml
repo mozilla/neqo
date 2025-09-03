@@ -20,6 +20,7 @@ enum-map = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 strum = { workspace = true}
+thiserror = { workspace = true }
 
 [build-dependencies]
 bindgen = { version = "0.69", default-features = false, features = ["runtime"] }
@@ -31,6 +32,9 @@ toml = { version = "0.5", default-features = false }
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
+
+[package.metadata.cargo-machete]
+ignored = ["bindgen", "semver", "serde", "serde_derive", "toml"]
 
 [features]
 bench = []

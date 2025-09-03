@@ -1,0 +1,146 @@
+name: 'CI VM'
+description: 'Run main CI steps in VMs for VM-only platforms.'
+
+inputs:
+  working-directory:
+    description: 'Working directory.'
+    default: '.'
+  platform:
+    description: 'Platform to run the checks on.'
+    default: ''
+  codecov-token:
+    description: 'Codecov token, if Codecov upload is desired.'
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      id: prep
+      env:
+        WD: ${{ inputs.working-directory }}
+        PLATFORM: ${{ inputs.platform }}
+        WORKSPACE: ${{ inputs.working-directory == '.' && '--workspace' || '' }}
+      run: |
+        cat <<EOF > prepare.sh
+          # This executes as root
+          set -ex
+          pwd
+          case "$PLATFORM" in
+            freebsd)    pkg install -y curl llvm nss pkgconf
+                        ;;
+            openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
+                        pkg_add rust rust-clippy rust-rustfmt llvm-19.1.7p3 nss pkgconf # rustup does not support OpenBSD at all
+                        ;;
+            netbsd)     /usr/sbin/pkg_add pkgin && pkgin -y install curl clang nss pkgconf
+                        ;;
+            solaris)    pkg install clang-libs nss pkg-config
+                        ;;
+            *)          echo "Unsupported OS: $PLATFORM"
+                        exit 1
+                        ;;
+          esac
+        EOF
+        {
+          echo 'prepare<<EOF'
+          cat prepare.sh
+          echo EOF
+        } >> "$GITHUB_OUTPUT"
+
+        cat <<EOF > run.sh
+          # This executes as user
+          set -ex
+          cd "$WD"
+          pwd
+          case "$PLATFORM" in
+            freebsd)    sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
+                        . "\$HOME/.cargo/env"
+                        ;;
+            openbsd)    export LIBCLANG_PATH=/usr/local/llvm19/lib
+                        export LLVM_COV=/usr/local/llvm19/bin/llvm-cov
+                        export LLVM_PROFDATA=/usr/local/llvm19/bin/llvm-profdata
+                        [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on OpenBSD
+                        ;;
+            netbsd)     sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
+                        . "\$HOME/.cargo/env"
+                        # FIXME: Why do we need to set this on NetBSD?
+                        export LD_LIBRARY_PATH=/usr/pkg/lib/nss:/usr/pkg/lib/nspr
+                        [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on NetBSD
+                        ;;
+            solaris)    curl --output rust.sh -s https://raw.githubusercontent.com/psumbera/solaris-rust/refs/heads/main/sh.rust-web-install
+                        chmod a+x rust.sh
+                        ls -lt
+                        source ./rust.sh || true # This does not exit with zero on success
+                        export LIBCLANG_PATH="/usr/lib/amd64"
+                        [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on Solaris
+                        ;;
+          esac
+          cargo version
+          cargo check --locked --all-targets $WORKSPACE \$EXCLUDE
+          case "$PLATFORM" in
+            openbsd)    # clippy fails on OpenBSD, because libfuzzer-sys is not supported.
+                        ;;
+            *)          cargo clippy -- -D warnings
+                        ;;
+          esac
+          cargo fmt --all -- --check
+          case "$PLATFORM" in
+            freebsd)    cargo install cargo-llvm-cov --locked
+                        cargo llvm-cov test --locked --no-fail-fast --lcov --output-path lcov.info
+                        ;;
+            *)          # FIXME: No profiler support on other platforms, error is: cannot find crate for profiler_builtins
+                        cargo test --locked --no-fail-fast # We do this instead for now
+                        ;;
+          esac
+          cargo test --locked --no-fail-fast --release
+          rm -rf target # Do not sync this back to host
+        EOF
+        {
+          echo 'run<<EOF'
+          cat run.sh
+          echo EOF
+        } >> "$GITHUB_OUTPUT"
+
+        curl -o "$WD/rustup.sh" --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
+        echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG GITHUB_ACTIONS RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
+
+    - if: ${{ inputs.platform == 'freebsd' }}
+      uses: vmactions/freebsd-vm@966989c456d41351f095a421f60e71342d3bce41 # v1.2.1
+      with:
+        usesh: true
+        envs: ${{ steps.prep.outputs.envs }}
+        prepare: ${{ steps.prep.outputs.prepare }}
+        run: ${{ steps.prep.outputs.run }}
+
+    - if: ${{ inputs.platform == 'openbsd' }}
+      uses: vmactions/openbsd-vm@0d65352eee1508bab7cb12d130536d3a556be487 # v1.1.8
+      with:
+        usesh: true
+        envs: ${{ steps.prep.outputs.envs }}
+        prepare: ${{ steps.prep.outputs.prepare }}
+        run: ${{ steps.prep.outputs.run }}
+
+    - if: ${{ inputs.platform == 'netbsd' }}
+      uses: vmactions/netbsd-vm@d0228be27fbaba19418cc1b332609a895cf16561 # v1.1.9
+      with:
+        usesh: true
+        envs: ${{ steps.prep.outputs.envs }}
+        prepare: ${{ steps.prep.outputs.prepare }}
+        run: ${{ steps.prep.outputs.run }}
+
+    - if: ${{ inputs.platform == 'solaris' }}
+      uses: vmactions/solaris-vm@58cbd70c6e051860f9b8f65908cc582938fbbdba # v1.1.5
+      with:
+        release: "11.4-gcc"
+        usesh: true
+        envs: ${{ steps.prep.outputs.envs }}
+        prepare: ${{ steps.prep.outputs.prepare }}
+        run: ${{ steps.prep.outputs.run }}
+
+    - if: ${{ inputs.codecov-token != '' }}
+      uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0
+      with:
+        files: lcov.info
+        fail_ci_if_error: false
+        token: ${{ inputs.codecov-token }}
+        verbose: true

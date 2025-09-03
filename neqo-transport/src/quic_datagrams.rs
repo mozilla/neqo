@@ -8,7 +8,7 @@
 
 use std::{cmp::min, collections::VecDeque};
 
-use neqo_common::{Buffer, Encoder};
+use neqo_common::{qdebug, Buffer, Encoder};
 
 use crate::{
     events::OutgoingDatagramOutcome, frame::FrameType, packet, recovery, ConnectionEvents, Error,
@@ -117,6 +117,7 @@ impl QuicDatagrams {
                 // If the packet is empty, except packet headers, and the
                 // datagram cannot fit, drop it.
                 // Also continue trying to write the next QuicDatagram.
+                qdebug!("QUIC datagram ({}) does not fit MTU.", dgram.data.len());
                 self.conn_events
                     .datagram_outcome(dgram.tracking(), OutgoingDatagramOutcome::DroppedTooBig);
                 stats.datagram_tx.dropped_too_big += 1;
@@ -144,9 +145,15 @@ impl QuicDatagrams {
         stats: &mut Stats,
     ) -> Res<()> {
         if u64::try_from(data.len())? > self.remote_datagram_size {
+            qdebug!(
+                "QUIC datagram exceeds remote limit, dropping it, datagram size {}, remote datagram size limit {}.",
+                data.len(),
+                self.remote_datagram_size
+            );
             return Err(Error::TooMuchData);
         }
         if self.datagrams.len() == self.max_queued_outgoing_datagrams {
+            qdebug!("QUIC datagram queue full, dropping first datagram in queue.");
             self.conn_events.datagram_outcome(
                 self.datagrams
                     .pop_front()
