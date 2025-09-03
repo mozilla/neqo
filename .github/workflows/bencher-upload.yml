@@ -43,7 +43,7 @@ jobs:
           name: ${{ github.event.repository.name }}-${{ github.event.workflow_run.referenced_workflows[0].sha }}-bench-perf
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: bencherdev/bencher@e0bb2f0dcd5ae8446994d15536c902b289eeda17 # v0.5.4
+      - uses: bencherdev/bencher@v0.5.4 # zizmor: ignore[unpinned-uses]
 
       - name: Upload main-branch results to bencher.dev
         run: |
