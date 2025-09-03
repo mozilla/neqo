@@ -37,7 +37,7 @@ use thiserror::Error;
 use tokio::time::Sleep;
 use url::{Host, Origin, Url};
 
-use crate::SharedArgs;
+use crate::{udp, SharedArgs};
 
 mod http09;
 mod http3;
@@ -373,7 +373,7 @@ enum Ready {
 
 // Wait for the socket to be readable or the timeout to fire.
 async fn ready(
-    socket: &crate::udp::Socket,
+    socket: &udp::Socket,
     mut timeout: Option<&mut Pin<Box<Sleep>>>,
 ) -> Result<Ready, io::Error> {
     let socket_ready = Box::pin(socket.readable()).map_ok(|()| Ready::Socket);
@@ -418,7 +418,7 @@ trait Client {
 
 struct Runner<'a, H: Handler> {
     local_addr: SocketAddr,
-    socket: &'a mut crate::udp::Socket,
+    socket: &'a mut udp::Socket,
     client: H::Client,
     handler: H,
     timeout: Option<Pin<Box<Sleep>>>,
@@ -429,7 +429,7 @@ struct Runner<'a, H: Handler> {
 impl<'a, H: Handler> Runner<'a, H> {
     fn new(
         local_addr: SocketAddr,
-        socket: &'a mut crate::udp::Socket,
+        socket: &'a mut udp::Socket,
         client: H::Client,
         handler: H,
         args: &'a Args,
@@ -602,96 +602,49 @@ pub async fn client(mut args: Args) -> Res<()> {
 
     init()?;
 
-    if let Some(proxy_url) = &args.proxy {
-        // Create proxy connection.
-        let Origin::Tuple(_scheme, proxy_host, proxy_port) = proxy_url.origin() else {
-            panic!();
-        };
-        let proxy_hostname = { format!("{proxy_host}") };
-        let Some(proxy_addr) = format!("{proxy_host}:{proxy_port}")
-            .to_socket_addrs()?
-            .find(|addr| {
-                !matches!(
-                    (addr, args.ipv4_only, args.ipv6_only),
-                    (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
-                )
-            })
-        else {
-            qerror!("No compatible address found for: {proxy_host}");
-            exit(1);
-        };
-        let mut socket = crate::udp::Socket::bind(local_addr_for(&proxy_addr, 0))?;
-        let local_addr = socket.local_addr().unwrap();
-        qinfo!(
-            "{} Proxy connecting: {local_addr:?} -> {proxy_addr:?}",
-            args.shared.alpn
-        );
-        let proxy_conn = http3::create_client(&args, local_addr, proxy_addr, &proxy_hostname, None)
-            .expect("failed to create proxy connection");
-
-        // Create proxied connection.
-        let url = args.urls.pop().expect("at least one destination URL");
-        let hostname = {
-            let Origin::Tuple(_scheme, host, _port) = url.clone().origin() else {
-                panic!();
-            };
-            format!("{host}")
-        };
-        let mut client_args = args.clone();
-        client_args.headers = vec![]; // don't share proxy authorization with origin server
-        let unspecified_addr = if args.ipv4_only {
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
-        } else {
-            SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)
-        };
-        let client = http3::create_client(
-            &client_args,
-            unspecified_addr,
-            unspecified_addr,
-            &hostname,
-            None,
-        )
-        .expect("failed to create client");
-        let mut urls = VecDeque::new();
-        urls.push_back(url.clone());
-        let handler = http3::Handler::new(urls, args.clone());
-
-        // Combine proxy connection and proxied connection into `Proxy`.
-        let proxy = proxied_http3::ProxiedHttp3::new(
-            client,
-            handler,
-            proxy_conn,
-            proxy_url.clone(),
-            args.headers.clone(),
-        );
-        let proxy_handler = proxied_http3::Handler::new();
-        Runner::new(local_addr, &mut socket, proxy, proxy_handler, &args)
-            .run()
-            .await?;
-
-        return Ok(());
-    }
-
     for ((host, port), mut urls) in urls_by_origin(&args.urls) {
         if args.resume && urls.len() < 2 {
             qerror!("Resumption to {host} cannot work without at least 2 URLs");
             exit(127);
         }
 
-        let remote_addr = format!("{host}:{port}").to_socket_addrs()?.find(|addr| {
+        let Some(origin_addr) = format!("{host}:{port}").to_socket_addrs()?.find(|addr| {
             !matches!(
                 (addr, args.ipv4_only, args.ipv6_only),
                 (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
             )
-        });
-        let Some(remote_addr) = remote_addr else {
+        }) else {
             qerror!("No compatible address found for: {host}");
             exit(1);
         };
-        let mut socket = crate::udp::Socket::bind(local_addr_for(&remote_addr, 0))?;
+
+        let proxy_addr = args.proxy.as_ref().map(|proxy_url| {
+            let Origin::Tuple(_scheme, proxy_host, proxy_port) = proxy_url.origin() else {
+                panic!();
+            };
+            let Some(proxy_addr) = format!("{proxy_host}:{proxy_port}")
+                .to_socket_addrs()
+                .unwrap()
+                .find(|addr| {
+                    !matches!(
+                        (addr, args.ipv4_only, args.ipv6_only),
+                        (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
+                    )
+                })
+            else {
+                qerror!("No compatible address found for: {proxy_host}");
+                exit(1);
+            };
+            (proxy_host, proxy_addr)
+        });
+
+        let mut socket = udp::Socket::bind(local_addr_for(
+            &proxy_addr.as_ref().map(|p| p.1).unwrap_or(origin_addr),
+            0,
+        ))?;
         let real_local = socket.local_addr().unwrap();
         qinfo!(
-            "{} Client connecting: {real_local:?} -> {remote_addr:?}",
+            "{} Client connecting: {real_local:?} -> {origin_addr:?}",
             args.shared.alpn
         );
 
@@ -708,17 +661,54 @@ pub async fn client(mut args: Args) -> Res<()> {
             first = false;
 
             token = if args.shared.alpn == "h3" {
-                let client = http3::create_client(&args, real_local, remote_addr, &hostname, token)
-                    .expect("failed to create client");
+                let mut client_args = args.clone();
+                // Don't forward proxy authorization to origin.
+                client_args.headers = client_args
+                    .headers
+                    .into_iter()
+                    .filter(|h| {
+                        let name_lower = h.name().to_ascii_lowercase();
+                        name_lower != "authorization" && name_lower != "proxy-authorization"
+                    })
+                    .collect();
+                let client =
+                    http3::create_client(&client_args, real_local, origin_addr, &hostname, token)
+                        .expect("failed to create client");
+                let client_handler = http3::Handler::new(to_request, client_args.clone());
 
-                let handler = http3::Handler::new(to_request, args.clone());
-
-                Runner::new(real_local, &mut socket, client, handler, &args)
+                if let Some((proxy_host, proxy_addr)) = &proxy_addr {
+                    let proxy_conn = http3::create_client(
+                        &args,
+                        real_local,
+                        *proxy_addr,
+                        &format!("{proxy_host}"),
+                        None,
+                    )
+                    .expect("failed to create proxy connection");
+                    let proxy = proxied_http3::ProxiedHttp3::new(
+                        client,
+                        client_handler,
+                        proxy_conn,
+                        args.proxy.clone().unwrap(),
+                        args.headers.clone(),
+                    );
+                    Runner::new(
+                        real_local,
+                        &mut socket,
+                        proxy,
+                        proxied_http3::Handler::new(),
+                        &args,
+                    )
                     .run()
                     .await?
+                } else {
+                    Runner::new(real_local, &mut socket, client, client_handler, &args)
+                        .run()
+                        .await?
+                }
             } else {
                 let client =
-                    http09::create_client(&args, real_local, remote_addr, &hostname, token)
+                    http09::create_client(&args, real_local, origin_addr, &hostname, token)
                         .expect("failed to create client");
 
                 let handler = http09::Handler::new(to_request, &args);
