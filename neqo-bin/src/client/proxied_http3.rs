@@ -7,6 +7,9 @@
 #![expect(clippy::unwrap_used, reason = "This is example code.")]
 
 //! An HTTP/3 MASQUE connect-udp proxy client.
+//!
+//! Wraps an [`Http3Client`] and [`super::http3::Handler`] and proxies their UDP
+//! datagrams via an HTTP/3 MASQUE connect-udp proxy.
 
 use std::{cmp::min, fmt::Display, net::SocketAddr, num::NonZeroUsize, time::Instant};
 
@@ -184,7 +187,6 @@ impl Client for ProxiedHttp3 {
     }
 
     fn stats(&self) -> neqo_transport::Stats {
-        // TODO: This is the inner conn.
         self.proxied_conn.transport_stats()
     }
 
