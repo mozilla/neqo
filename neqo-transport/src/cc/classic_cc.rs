@@ -103,24 +103,6 @@ pub trait WindowAdjustment: Display + Debug {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#app-limited>
     fn on_app_limited(&mut self);
-
-    /// Helper for CUBIC tests and overridden in [`cubic::Cubic`]
-    #[cfg(test)]
-    fn w_max(&self) -> f64 {
-        unreachable!()
-    }
-
-    /// Helper for CUBIC tests and overridden in [`cubic::Cubic`]
-    #[cfg(test)]
-    fn set_w_max(&mut self, _w_max: f64) {
-        unreachable!()
-    }
-
-    /// Helper for CUBIC tests and overridden in [`cubic::Cubic`]
-    #[cfg(test)]
-    fn alpha(&self) -> f64 {
-        unreachable!()
-    }
 }
 
 #[derive(Debug)]
@@ -459,19 +441,18 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         self.ssthresh = v;
     }
 
+    /// Accessor for [`ClassicCongestionControl::cc_algorithm`]. Is used to call Cubic getters in
+    /// tests.
     #[cfg(test)]
-    pub fn w_max(&self) -> f64 {
-        self.cc_algorithm.w_max()
+    pub fn cc_algorithm(&self) -> &T {
+        &self.cc_algorithm
     }
 
+    /// Mutable Accessor for [`ClassicCongestionControl::cc_algorithm`]. Is used to call Cubic
+    /// setters in tests.
     #[cfg(test)]
-    pub fn set_w_max(&mut self, w_max: f64) {
-        self.cc_algorithm.set_w_max(w_max);
-    }
-
-    #[cfg(test)]
-    pub fn alpha(&self) -> f64 {
-        self.cc_algorithm.alpha()
+    pub fn cc_algorithm_mut(&mut self) -> &mut T {
+        &mut self.cc_algorithm
     }
 
     #[cfg(test)]

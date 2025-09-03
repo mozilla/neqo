@@ -237,6 +237,38 @@ impl Cubic {
         };
         qtrace!("[{self}] New epoch");
     }
+
+    #[cfg(test)]
+    pub const fn w_est(&self) -> f64 {
+        self.w_est
+    }
+
+    #[cfg(test)]
+    pub const fn cwnd_prior(&self) -> f64 {
+        self.cwnd_prior
+    }
+
+    #[cfg(test)]
+    pub const fn alpha(&self) -> f64 {
+        // In `neqo_transport::cc::tests::cubic::tcp_phase` `alpha` is used before ever ack'ing a
+        // packet or having a congestion event, thus it is uninitialized. In that case we return
+        // `1.0`, which is the value `alpha` will be initialized to after the first ack.
+        if self.alpha == 0.0 {
+            1.0
+        } else {
+            self.alpha
+        }
+    }
+
+    #[cfg(test)]
+    pub const fn w_max(&self) -> f64 {
+        self.w_max
+    }
+
+    #[cfg(test)]
+    pub fn set_w_max(&mut self, w_max: f64) {
+        self.w_max = w_max;
+    }
 }
 
 impl WindowAdjustment for Cubic {
@@ -430,24 +462,5 @@ impl WindowAdjustment for Cubic {
 
     fn on_app_limited(&mut self) {
         self.t_epoch = None;
-    }
-
-    #[cfg(test)]
-    fn w_max(&self) -> f64 {
-        self.w_max
-    }
-
-    #[cfg(test)]
-    fn set_w_max(&mut self, w_max: f64) {
-        self.w_max = w_max;
-    }
-
-    #[cfg(test)]
-    fn alpha(&self) -> f64 {
-        if self.alpha == 0.0 {
-            1.0
-        } else {
-            self.alpha
-        }
     }
 }
