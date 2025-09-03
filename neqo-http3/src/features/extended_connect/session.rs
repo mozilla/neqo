@@ -225,8 +225,7 @@ impl Session {
         if self.state.closing_state() {
             return;
         }
-        // TODO: update now that there are multiple extended connect types.
-        qtrace!("ExtendedConnect close the session");
+        qdebug!("[{self}]: close session type={close_type:?}");
         self.state = State::Done;
         if !close_type.locally_initiated() {
             self.events.session_end(
@@ -364,9 +363,6 @@ impl Session {
 
         self.control_stream_send.close(conn)?;
         self.state = if self.control_stream_send.done() {
-            // TODO: In this case, don't we have to call
-            // self.events.session_end? Or does the caller of close_session not
-            // expect an event, as they already know it is now closed?
             State::Done
         } else {
             State::FinPending
