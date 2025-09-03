@@ -13,7 +13,7 @@
 
 use std::{cmp::min, fmt::Display, net::SocketAddr, num::NonZeroUsize, time::Instant};
 
-use neqo_common::{event::Provider, qwarn, Datagram, Tos};
+use neqo_common::{event::Provider, Datagram, Tos};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{ConnectUdpEvent, Header, Http3Client, Http3ClientEvent, Http3State};
 use neqo_transport::{AppError, CloseReason, DatagramTracking, OutputBatch, StreamId};
@@ -26,6 +26,35 @@ pub struct Handler {}
 impl Handler {
     pub(crate) const fn new() -> Self {
         Self {}
+    }
+}
+
+impl super::Handler for Handler {
+    type Client = ProxiedHttp3;
+
+    fn handle(&mut self, client: &mut ProxiedHttp3) -> Res<bool> {
+        let done = client.handler.handle(&mut client.proxied_conn)?;
+
+        if matches!(client.proxied_conn.is_closed()?, CloseState::Closed) {
+            if let Some(stream_id) = client.session_id.take() {
+                client
+                    .proxy_conn
+                    .connect_udp_close_session(stream_id, 0, "kthxbye!")?;
+                client.proxy_conn.close(Instant::now(), 0, "kthxbye!");
+            }
+
+            return Ok(true);
+        }
+
+        if client.session_id.is_none() {
+            return Ok(false);
+        }
+
+        Ok(done)
+    }
+
+    fn take_token(&mut self) -> Option<ResumptionToken> {
+        None
     }
 }
 
@@ -67,9 +96,11 @@ impl Client for ProxiedHttp3 {
         now: Instant,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
+        // First, if the proxy session is established already, service the proxied connection first.
         let maybe_proxied_conn_callback = loop {
             let Some(stream_id) = self.session_id else {
-                // If we don't have a stream ID, we can't send anything.
+                // If we don't have a stream ID, the proxy session isn't
+                // established yet, and we can't send anything.
                 break None;
             };
             match self.proxied_conn.process_output(now) {
@@ -89,6 +120,7 @@ impl Client for ProxiedHttp3 {
             }
         };
 
+        // Second, service the proxy connection.
         let maybe_proxy_conn_callback =
             match self.proxy_conn.process_multiple_output(now, max_datagrams) {
                 OutputBatch::None => None,
@@ -96,6 +128,7 @@ impl Client for ProxiedHttp3 {
                 OutputBatch::Callback(duration) => Some(duration),
             };
 
+        // No datagram to send. Return the earlier callback, if any.
         match (maybe_proxied_conn_callback, maybe_proxy_conn_callback) {
             (None, None) => OutputBatch::None,
             (Some(duration), None) | (None, Some(duration)) => OutputBatch::Callback(duration),
@@ -108,25 +141,15 @@ impl Client for ProxiedHttp3 {
         dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
         now: Instant,
     ) {
+        // Process the input datagrams.
         self.proxy_conn.process_multiple_input(dgrams, now);
 
+        // See whether as a result we have any datagrams for the proxied connection.
         while let Some(event) = self.proxy_conn.next_event() {
             match event {
                 Http3ClientEvent::AuthenticationNeeded => {
                     self.proxy_conn
                         .authenticated(AuthenticationStatus::Ok, Instant::now());
-                }
-                Http3ClientEvent::HeaderReady { headers, .. } => {
-                    panic!("{headers:?}");
-                }
-                Http3ClientEvent::DataReadable { stream_id } => {
-                    panic!("{stream_id} is readable");
-                }
-                Http3ClientEvent::DataWritable { stream_id } => {
-                    panic!("{stream_id} is writable");
-                }
-                Http3ClientEvent::ZeroRttRejected => {
-                    panic!("Zero RTT rejected");
                 }
                 Http3ClientEvent::ConnectUdp(event) => match event {
                     ConnectUdpEvent::Negotiated(success) => {
@@ -159,7 +182,7 @@ impl Client for ProxiedHttp3 {
                 | Http3ClientEvent::StateChange(Http3State::Connected)
                 | Http3ClientEvent::ResumptionToken(_) => {}
                 _ => {
-                    qwarn!("Unhandled event {event:?}");
+                    panic!("Unhandled event {event:?}");
                 }
             }
         }
@@ -192,34 +215,5 @@ impl Client for ProxiedHttp3 {
 
     fn has_events(&self) -> bool {
         Provider::has_events(&self.proxied_conn)
-    }
-}
-
-impl super::Handler for Handler {
-    type Client = ProxiedHttp3;
-
-    fn handle(&mut self, client: &mut ProxiedHttp3) -> Res<bool> {
-        let done = client.handler.handle(&mut client.proxied_conn)?;
-
-        if matches!(client.proxied_conn.is_closed()?, CloseState::Closed) {
-            if let Some(stream_id) = client.session_id.take() {
-                client
-                    .proxy_conn
-                    .connect_udp_close_session(stream_id, 0, "kthxbye!")?;
-                client.proxy_conn.close(Instant::now(), 0, "kthxbye!");
-            }
-
-            return Ok(true);
-        }
-
-        if client.session_id.is_none() {
-            return Ok(false);
-        }
-
-        Ok(done)
-    }
-
-    fn take_token(&mut self) -> Option<ResumptionToken> {
-        None
     }
 }
