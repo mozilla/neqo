@@ -4,10 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::{self, Display, Formatter};
-
 use neqo_common::qwarn;
 use neqo_crypto::Error as CryptoError;
+use thiserror::Error;
 
 mod ackrate;
 mod addr_valid;
@@ -82,66 +81,114 @@ const ERROR_APPLICATION_CLOSE: TransportError = 12;
 const ERROR_CRYPTO_BUFFER_EXCEEDED: TransportError = 13;
 const ERROR_AEAD_LIMIT_REACHED: TransportError = 15;
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Error)]
 pub enum Error {
+    #[error("no error")]
     None,
-    // Each time this error is returned a different parameter is supplied.
-    // This will be used to distinguish each occurrence of this error.
+    #[error("internal error")]
     Internal,
+    #[error("connection refused")]
     ConnectionRefused,
+    #[error("flow control error")]
     FlowControl,
+    #[error("stream limit exceeded")]
     StreamLimit,
+    #[error("stream state error")]
     StreamState,
+    #[error("stream final size error")]
     FinalSize,
+    #[error("frame encoding error")]
     FrameEncoding,
+    #[error("transport parameter error")]
     TransportParameter,
+    #[error("protocol violation")]
     ProtocolViolation,
+    #[error("invalid token")]
     InvalidToken,
+    #[error("application error")]
     Application,
+    #[error("crypto buffer exceeded")]
     CryptoBufferExceeded,
-    Crypto(CryptoError),
+    #[error("crypto error: {0}")]
+    Crypto(#[source] CryptoError),
+    #[error("qlog error")]
     Qlog,
+    #[error("crypto alert: {0}")]
     CryptoAlert(u8),
+    #[error("ECH retry")]
     EchRetry(Vec<u8>),
 
     // All internal errors from here.  Please keep these sorted.
+    #[error("packet acknowledged but never sent")]
     AckedUnsentPacket,
+    #[error("connection ID limit exceeded")]
     ConnectionIdLimitExceeded,
+    #[error("connection IDs exhausted")]
     ConnectionIdsExhausted,
+    #[error("invalid connection state")]
     ConnectionState,
+    #[error("decryption error")]
     Decrypt,
+    #[error("disabled version")]
     DisabledVersion,
+    #[error("no packets received for longer than the idle timeout")]
     IdleTimeout,
+    #[error("integer overflow")]
     IntegerOverflow,
+    #[error("invalid input")]
     InvalidInput,
+    #[error("invalid migration")]
     InvalidMigration,
+    #[error("an invalid packet was dropped (internal use only)")]
     InvalidPacket,
+    #[error("invalid resumption token")]
     InvalidResumptionToken,
+    #[error("invalid retry packet dropped (internal use only)")]
     InvalidRetry,
+    #[error("invalid stream ID")]
     InvalidStreamId,
+    #[error("keys discarded for epoch {0:?}")]
     KeysDiscarded(crypto::Epoch),
-    /// Packet protection keys are exhausted.
-    /// Also used when too many key updates have happened.
+    /// Packet protection keys are exhausted.  Also used when too many key
+    /// updates have happened.
+    #[error("keys exhausted")]
     KeysExhausted,
     /// Packet protection keys aren't available yet for the identified space.
+    #[error("keys pending for epoch {0:?} (internal use only)")]
     KeysPending(crypto::Epoch),
-    /// An attempt to update keys can be blocked if
-    /// a packet sent with the current keys hasn't been acknowledged.
+    /// An attempt to update keys can be blocked if a packet sent with the
+    /// current keys hasn't been acknowledged.
+    #[error("key update blocked")]
     KeyUpdateBlocked,
+    #[error("no available path")]
     NoAvailablePath,
+    #[error("no more data")]
     NoMoreData,
+    #[error("not available")]
     NotAvailable,
+    #[error("not connected")]
     NotConnected,
+    #[error("packet number overlap")]
     PacketNumberOverlap,
+    #[error("peer application error: 0x{0:x}")]
     PeerApplication(AppError),
+    #[error("peer error: {0}")]
     Peer(TransportError),
+    #[error("stateless reset")]
     StatelessReset,
+    #[error("too much data")]
     TooMuchData,
+    #[error("unexpected message")]
     UnexpectedMessage,
+    #[error("unknown connection ID")]
     UnknownConnectionId,
+    #[error("unknown frame type")]
     UnknownFrameType,
+    #[error("version negotiation")]
     VersionNegotiation,
+    #[error("wrong role")]
     WrongRole,
+    #[error("unknown transport parameter (internal use only)")]
     UnknownTransportParameter,
 }
 
@@ -187,21 +234,6 @@ impl From<CryptoError> for Error {
 impl From<std::num::TryFromIntError> for Error {
     fn from(_: std::num::TryFromIntError) -> Self {
         Self::IntegerOverflow
-    }
-}
-
-impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Crypto(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Transport error: {self:?}")
     }
 }
 

@@ -823,6 +823,7 @@ dependencies = [
  "quinn-udp",
  "regex",
  "rustc-hash 2.1.1",
+ "thiserror",
  "tokio",
  "url",
 ]
@@ -859,6 +860,7 @@ dependencies = [
  "serde_derive",
  "strum",
  "test-fixture",
+ "thiserror",
  "toml",
 ]
 
@@ -879,6 +881,7 @@ dependencies = [
  "sfv",
  "strum",
  "test-fixture",
+ "thiserror",
  "url",
 ]
 
@@ -893,6 +896,7 @@ dependencies = [
  "rustc-hash 2.1.1",
  "static_assertions",
  "test-fixture",
+ "thiserror",
 ]
 
 [[package]]
@@ -914,6 +918,7 @@ dependencies = [
  "static_assertions",
  "strum",
  "test-fixture",
+ "thiserror",
 ]
 
 [[package]]
