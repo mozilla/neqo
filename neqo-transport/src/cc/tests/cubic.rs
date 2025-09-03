@@ -348,3 +348,69 @@ fn congestion_event_congestion_avoidance_no_overflow() {
     // Now ack packet that was send earlier.
     ack_packet(&mut cubic, 0, now().checked_sub(PTO).unwrap());
 }
+
+/// This tests the dynamic changing of the `alpha` value outlined in RFC 9438 section 4.3.
+///
+/// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-11>
+#[test]
+fn alpha_changes_for_high_w_est_values() {
+    const NORMAL_ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7);
+    const INCREASED_ALPHA: f64 = 1.0;
+    let mut cc = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
+    let mut next_pn_to_send = 0;
+    let mut last_sent_pn;
+    let mut first_sent_pn;
+
+    // Set ssthresh to something small to make sure that cc is in the congection avoidance phase.
+    cc.set_ssthresh(1);
+
+    // Send 1*cwnd worth of packets and ack all but the last one
+    next_pn_to_send = fill_cwnd(&mut cc, next_pn_to_send, now());
+    last_sent_pn = next_pn_to_send - 1;
+    for pn in 0..last_sent_pn {
+        ack_packet(&mut cc, pn, now());
+    }
+
+    // Since we never had a congestion event we started with the initial values for `w_est =
+    // cwnd_prior = current_cwnd`, thus `w_est >= cwnd_prior` should be `true` and `alpha` should be
+    // set to it's increased value.
+    assert!(cc.cc_algorithm().w_est() >= cc.cc_algorithm().cwnd_prior());
+    assert_within(cc.cc_algorithm().alpha(), INCREASED_ALPHA, f64::EPSILON);
+
+    // Trigger a congestion event, which eventually calls `reduce_cwnd`
+    packet_lost(&mut cc, last_sent_pn);
+
+    // Ack the lost packet to trigger another `on_packets_acked` and update `w_est` and `alpha`
+    // in `start_epoch`
+    ack_packet(&mut cc, last_sent_pn, now());
+
+    // Now `w_est` should be smaller than `cwnd_prior`, thus `alpha` should have it's normal value.
+    assert!(cc.cc_algorithm().w_est() < cc.cc_algorithm().cwnd_prior());
+    assert_within(cc.cc_algorithm().alpha(), NORMAL_ALPHA, f64::EPSILON);
+
+    // Send and ack packets until the congestion window grew so much that `w_est` is as big as
+    // `cwnd_prior`.
+    loop {
+        qdebug!(
+            "w_est: {} | cwnd_prior: {} | bytes_in_flight: {}",
+            cc.cc_algorithm().w_est(),
+            cc.cc_algorithm().cwnd_prior(),
+            cc.bytes_in_flight()
+        );
+        first_sent_pn = next_pn_to_send;
+        next_pn_to_send = fill_cwnd(&mut cc, next_pn_to_send, now());
+        last_sent_pn = next_pn_to_send - 1;
+        qdebug!("first: {first_sent_pn} | last: {last_sent_pn}");
+        for pn in first_sent_pn..=last_sent_pn {
+            ack_packet(&mut cc, pn, now());
+            qdebug!("packet acked: {pn}");
+        }
+        if cc.cc_algorithm().w_est() >= cc.cc_algorithm().cwnd_prior() {
+            break;
+        }
+    }
+
+    // Now `w_est` should be as big as `cwnd_prior`, thus `alpha` should have it's increased value.
+    assert!(cc.cc_algorithm().w_est() >= cc.cc_algorithm().cwnd_prior());
+    assert_within(cc.cc_algorithm().alpha(), INCREASED_ALPHA, f64::EPSILON);
+}
