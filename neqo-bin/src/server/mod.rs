@@ -257,9 +257,13 @@ pub trait HttpServer: Display {
     ) -> OutputBatch;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
-
-    // TODO: Needs pinning?
-    fn poll(self: &mut Self, _cx: &mut Context<'_>) -> Poll<()> {
+    /// Enables an [`HttpServer`] to drive asynchronous operations.
+    /// 
+    /// Needed in Firefox's HTTP/3 proxy test server implementation to drive TCP
+    /// and UDP sockets to the proxy target.
+    /// 
+    /// <https://github.com/mozilla-firefox/firefox/blob/main/netwerk/test/http3server/src/main.rs>
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<()> {
         Poll::Pending
     }
 }
@@ -272,7 +276,7 @@ pub struct Runner<S> {
     recv_buf: RecvBuf,
 }
 
-impl<S: HttpServer> Runner<S> {
+impl<S: HttpServer + Unpin> Runner<S> {
     #[must_use]
     pub fn new(
         server: S,
@@ -418,7 +422,7 @@ impl<S: HttpServer> Runner<S> {
             .map(|()| Ok(Ready::Timeout));
 
         let server_ready =
-            poll_fn(|cx| HttpServer::poll(&mut self.server, cx)).map(|()| Ok(Ready::Server));
+            poll_fn(|cx| Pin::new(&mut self.server).poll(cx)).map(|()| Ok(Ready::Server));
 
         select(
             select(sockets_ready, timeout_ready).map(|either| either.factor_first().0),
