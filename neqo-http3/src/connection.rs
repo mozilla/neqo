@@ -126,7 +126,7 @@ There are the following types of streams:
   `NewStreamHeadReader`.
 - `Http`: `SendMessage` and `RecvMessage` handlers are responsible for this type of streams.
 - `Push`: `RecvMessage` is responsible for this type of streams.
-- `ExtendedConnect`: `WebTransportSession` is responsible sender and receiver handler.
+- `ExtendedConnect`: `WebTransportSession` and `ConnectUdpSession` are responsible for sender and receiver handler.
 - `WebTransport(StreamId)`: `WebTransportSendStream` and `WebTransportRecvStream` are responsible
   sender and receiver handler.
 - `Unknown`: These are all other stream types that are not unknown to the current implementation

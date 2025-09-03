@@ -412,7 +412,6 @@ pub enum Http3StreamType {
     Push,
     ExtendedConnect,
     WebTransport(StreamId),
-    ConnectUdp(StreamId),
     Unknown,
 }
 

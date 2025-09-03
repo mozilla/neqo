@@ -522,13 +522,26 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn add_stream(
         &mut self,
-        stream_id: StreamId,
-        events: &mut Box<dyn ExtendedConnectEvents>,
-    ) -> Res<()>;
+        _stream_id: StreamId,
+        _events: &mut Box<dyn ExtendedConnectEvents>,
+    ) -> Res<()> {
+        let msg = "Protocol does not support adding streams";
+        qdebug!("{msg}");
+        debug_assert!(false, "{msg}");
+        Ok(())
+    }
 
-    fn remove_recv_stream(&mut self, stream_id: StreamId);
+    fn remove_recv_stream(&mut self, _stream_id: StreamId) {
+        let msg = "Protocol does not support removing recv streams";
+        qdebug!("{msg}");
+        debug_assert!(false, "{msg}");
+    }
 
-    fn remove_send_stream(&mut self, stream_id: StreamId);
+    fn remove_send_stream(&mut self, _stream_id: StreamId) {
+        let msg = "Protocol does not support removing send streams";
+        qdebug!("{msg}");
+        debug_assert!(false, "{msg}");
+    }
 
     fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
         (HashSet::default(), HashSet::default())
@@ -536,10 +549,7 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);
 
-    fn dgram_context_id<'a>(
-        &self,
-        datagram: &'a [u8],
-    ) -> Result<&'a [u8], DgramContextIdError>;
+    fn dgram_context_id<'a>(&self, datagram: &'a [u8]) -> Result<&'a [u8], DgramContextIdError>;
 }
 
 #[derive(Debug, Error)]

@@ -15,11 +15,9 @@ use neqo_transport::{Connection, StreamId};
 
 use crate::{
     features::extended_connect::{
-        session::{Protocol, DgramContextIdError, State},
+        session::{DgramContextIdError, Protocol, State},
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
-    },
-    frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
-    Error, Http3StreamInfo, RecvStream, Res,
+    }, frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame}, Error, Http3StreamInfo, Http3StreamType, RecvStream, Res
 };
 
 #[derive(Debug)]
@@ -124,7 +122,7 @@ impl Protocol for Session {
         if !stream_id.is_self_initiated(self.role) {
             events.extended_connect_new_stream(Http3StreamInfo::new(
                 stream_id,
-                ExtendedConnectType::WebTransport.get_stream_type(self.session_id),
+                Http3StreamType::WebTransport(self.session_id),
             ))?;
         }
         Ok(())

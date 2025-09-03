@@ -24,7 +24,7 @@ use crate::{
         NegotiationState,
     },
     settings::{HSettingType, HSettings},
-    Http3StreamInfo, Http3StreamType, HttpRecvStreamEvents, RecvStreamEvents, Res,
+    Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res,
     SendStreamEvents,
 };
 
@@ -64,14 +64,6 @@ impl ExtendedConnectType {
         match self {
             Self::WebTransport => "webtransport",
             Self::ConnectUdp => "connect-udp",
-        }
-    }
-
-    #[must_use]
-    pub const fn get_stream_type(self, session_id: StreamId) -> Http3StreamType {
-        match self {
-            Self::WebTransport => Http3StreamType::WebTransport(session_id),
-            Self::ConnectUdp => Http3StreamType::ConnectUdp(session_id),
         }
     }
 

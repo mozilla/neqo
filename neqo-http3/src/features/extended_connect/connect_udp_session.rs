@@ -6,7 +6,7 @@
 
 use std::fmt::{self, Display, Formatter};
 
-use neqo_common::{qdebug, Encoder};
+use neqo_common::Encoder;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -85,45 +85,14 @@ impl Protocol for Session {
         }
     }
 
-    fn add_stream(
-        &mut self,
-        _stream_id: StreamId,
-        _events: &mut Box<dyn ExtendedConnectEvents>,
-    ) -> Res<()> {
-        // ConnectUdp does not support adding streams.
-        let msg = "ConnectUdp does not support adding streams";
-        qdebug!("{msg}");
-        debug_assert!(false, "{msg}");
-        Ok(())
-    }
-
-    fn remove_recv_stream(&mut self, _stream_id: StreamId) {
-        // ConnectUdp does not support removing recv streams.
-        let msg = "ConnectUdp does not support removing recv streams";
-        qdebug!("{msg}");
-        debug_assert!(false, "{msg}");
-    }
-
-    fn remove_send_stream(&mut self, _stream_id: StreamId) {
-        // ConnectUdp does not support removing send streams.
-        let msg = "ConnectUdp does not support removing send streams";
-        qdebug!("{msg}");
-        debug_assert!(false, "{msg}");
-    }
-
     fn write_datagram_prefix(&self, encoder: &mut Encoder) {
         encoder.encode_varint(0u64);
     }
 
-    fn dgram_context_id<'a>(
-        &self,
-        datagram: &'a [u8],
-    ) -> Result<&'a [u8], DgramContextIdError> {
+    fn dgram_context_id<'a>(&self, datagram: &'a [u8]) -> Result<&'a [u8], DgramContextIdError> {
         match datagram.split_first() {
             Some((0, remainder)) => Ok(remainder),
-            Some((context_id, _)) => Err(DgramContextIdError::UnknownIdentifier(
-                *context_id,
-            )),
+            Some((context_id, _)) => Err(DgramContextIdError::UnknownIdentifier(*context_id)),
             None => {
                 // > all HTTP Datagrams associated with UDP Proxying request streams start with a Context ID field;
                 //

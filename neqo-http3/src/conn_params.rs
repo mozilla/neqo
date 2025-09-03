@@ -127,12 +127,12 @@ impl Http3Parameters {
         self.webtransport
     }
 
-    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn get_connect(&self) -> bool {
         self.connect
     }
 
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn http3_datagram(mut self, http3_datagram: bool) -> Self {
         self.http3_datagram = http3_datagram;
