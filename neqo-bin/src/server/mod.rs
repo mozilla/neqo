@@ -258,10 +258,10 @@ pub trait HttpServer: Display {
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
     /// Enables an [`HttpServer`] to drive asynchronous operations.
-    /// 
+    ///
     /// Needed in Firefox's HTTP/3 proxy test server implementation to drive TCP
     /// and UDP sockets to the proxy target.
-    /// 
+    ///
     /// <https://github.com/mozilla-firefox/firefox/blob/main/netwerk/test/http3server/src/main.rs>
     fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<()> {
         Poll::Pending

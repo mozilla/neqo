@@ -24,8 +24,7 @@ use crate::{
         NegotiationState,
     },
     settings::{HSettingType, HSettings},
-    Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res,
-    SendStreamEvents,
+    Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res, SendStreamEvents,
 };
 
 pub(crate) trait ExtendedConnectEvents: Debug {

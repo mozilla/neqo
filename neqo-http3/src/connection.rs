@@ -132,7 +132,7 @@ impl Http3State {
 /// - [`Http3StreamType::Http`]: [`SendMessage`] and [`RecvMessage`] handlers are responsible for
 ///   this type of streams.
 /// - [`Http3StreamType::Push`]: [`RecvMessage`] is responsible for this type of streams.
-/// - [`Http3StreamType::ExtendedConnect`]: [`webtransport_session::Session`] is responsible sender
+/// - [`Http3StreamType::ExtendedConnect`]: [`extended_connect::session::Session`] is responsible sender
 ///   and receiver handler.
 /// - [`Http3StreamType::WebTransport`]: [`WebTransportSendStream`] and [`WebTransportRecvStream`]
 ///   are responsible sender and receiver handler.
@@ -238,19 +238,26 @@ impl Http3State {
 /// For example for [`Http3StreamType::Http`] stream the listener will produce
 /// [`Http3ClientEvent::HeaderReady`] and [`Http3ClientEvent::DataReadable`] events.
 ///
-/// ### [`webtransport_session::Session`]
+/// ### [`extended_connect::session::Session`]
 ///
-/// A [`webtransport_session::Session`] is connected to a control stream that is in essence an HTTP
-/// transaction. Therefore, [`webtransport_session::Session`] will internally use a [`SendMessage`]
-/// and [`RecvMessage`] handler to handle parsing and sending of HTTP part of the control stream.
-/// When HTTP headers are exchanged, [`webtransport_session::Session`] will take over handling of
-/// stream data. [`webtransport_session::Session`] sets a [`HttpRecvStreamEvents`] listener as the
-/// [`RecvMessage`] event listener.
+/// An [`extended_connect::session::Session`] is connected to a control stream
+/// that is in essence an HTTP transaction. Therefore,
+/// [`extended_connect::session::Session`] will internally use a [`SendMessage`]
+/// and [`RecvMessage`] handler to handle parsing and sending of HTTP part of
+/// the control stream.  When HTTP headers are exchanged,
+/// [`extended_connect::session::Session`] will take over handling of stream
+/// data. [`extended_connect::session::Session`] sets a [`HttpRecvStreamEvents`]
+/// listener as the [`RecvMessage`] event listener.
 ///
-/// [`WebTransportSendStream`] and [`WebTransportRecvStream`] are associated with a
-/// [`webtransport_session::Session`] and they will be canceled if the session is closed. To be able
-/// to do this [`webtransport_session::Session`] holds a list of its active streams and clean up is
-/// done in `remove_extended_connect`.
+/// `neqo_http3` implements the WebTransport and MASQUE connect-udp HTTP
+/// Extended CONNECT protocol using [`extended_connect::session::Session`].
+///
+/// The WebTransport HTTP Extended CONNECT protocol supports streams.
+/// [`WebTransportSendStream`] and [`WebTransportRecvStream`] are associated
+/// with a [`extended_connect::session::Session`] and they will be canceled if
+/// the session is closed. To be able to do this
+/// [`extended_connect::session::Session`] holds a list of its active streams
+/// and clean up is done in `remove_extended_connect`.
 ///
 /// ###  [`WebTransportSendStream`] and [`WebTransportRecvStream`]
 ///

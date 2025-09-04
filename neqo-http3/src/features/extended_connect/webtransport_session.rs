@@ -17,7 +17,9 @@ use crate::{
     features::extended_connect::{
         session::{DgramContextIdError, Protocol, State},
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
-    }, frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame}, Error, Http3StreamInfo, Http3StreamType, RecvStream, Res
+    },
+    frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
+    Error, Http3StreamInfo, Http3StreamType, RecvStream, Res,
 };
 
 #[derive(Debug)]
