@@ -14,6 +14,7 @@ const QPACK_TABLE_SIZE_LIMIT: u64 = (1 << 30) - 1;
 const QPACK_MAX_BLOCKED_STREAMS_DEFAULT: u16 = 20;
 const MAX_PUSH_STREAM_DEFAULT: u64 = 0;
 const WEBTRANSPORT_DEFAULT: bool = false;
+/// Do not support HTTP Extended CONNECT by default.
 const CONNECT_DEFAULT: bool = false;
 const HTTP3_DATAGRAM_DEFAULT: bool = false;
 
@@ -23,6 +24,7 @@ pub struct Http3Parameters {
     qpack_settings: qpack::Settings,
     max_concurrent_push_streams: u64,
     webtransport: bool,
+    /// HTTP Extended CONNECT
     connect: bool,
     http3_datagram: bool,
 }
@@ -117,16 +119,18 @@ impl Http3Parameters {
     }
 
     #[must_use]
+    pub const fn get_webtransport(&self) -> bool {
+        self.webtransport
+    }
+
+    /// Setter for HTTP Extended CONNECT support.
+    #[must_use]
     pub const fn connect(mut self, connect: bool) -> Self {
         self.connect = connect;
         self
     }
 
-    #[must_use]
-    pub const fn get_webtransport(&self) -> bool {
-        self.webtransport
-    }
-
+    /// Getter for HTTP Extended CONNECT support.
     #[must_use]
     pub const fn get_connect(&self) -> bool {
         self.connect
