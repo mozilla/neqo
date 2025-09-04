@@ -54,6 +54,7 @@ where
     pub priority: Priority,
 }
 
+/// Possible actions on an HTTP Extended CONNECT session request.
 #[derive(Display)]
 pub enum SessionAcceptAction {
     Accept,
