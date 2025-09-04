@@ -677,21 +677,15 @@ pub async fn client(mut args: Args) -> Res<()> {
                 let client_handler = http3::Handler::new(to_request, client_args.clone());
 
                 if let Some((proxy_host, proxy_addr)) = &proxy_addr {
-                    let proxy_conn = http3::create_client(
-                        &args,
-                        real_local,
-                        *proxy_addr,
-                        &format!("{proxy_host}"),
-                        None,
-                    )
-                    .expect("failed to create proxy connection");
                     let proxy = proxied_http3::ProxiedHttp3::new(
                         client,
                         client_handler,
-                        proxy_conn,
                         args.proxy.clone().unwrap(),
                         args.headers.clone(),
-                    );
+                        &format!("{proxy_host}"),
+                        real_local,
+                        *proxy_addr,
+                    )?;
                     Runner::new(
                         real_local,
                         &mut socket,

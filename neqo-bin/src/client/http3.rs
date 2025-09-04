@@ -31,8 +31,8 @@ use neqo_transport::{
 use rustc_hash::FxHashMap as HashMap;
 use url::Url;
 
-use super::{qlog_new, Args, CloseState, Res};
-use crate::{client::get_output_file, send_data::SendData, STREAM_IO_BUFFER_SIZE};
+use super::{get_output_file, qlog_new, Args, CloseState, Res};
+use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};
 
 pub struct Handler {
     #[expect(clippy::struct_field_names, reason = "This name is more descriptive.")]
@@ -91,10 +91,7 @@ pub fn create_client(
         cid_generator,
         local_addr,
         remote_addr,
-        args.shared
-            .quic_parameters
-            .get(args.shared.alpn.as_str())
-            .datagram_size(1500),
+        args.shared.quic_parameters.get(args.shared.alpn.as_str()),
         Instant::now(),
     )?;
     let ciphers = args.get_ciphers();
@@ -107,9 +104,7 @@ pub fn create_client(
             .max_table_size_encoder(args.shared.max_table_size_encoder)
             .max_table_size_decoder(args.shared.max_table_size_decoder)
             .max_blocked_streams(args.shared.max_blocked_streams)
-            .max_concurrent_push_streams(args.max_concurrent_push_streams)
-            .connect(true)
-            .http3_datagram(true),
+            .max_concurrent_push_streams(args.max_concurrent_push_streams),
     );
 
     let qlog = qlog_new(args, hostname, client.connection_id())?;

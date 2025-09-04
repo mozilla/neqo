@@ -11,12 +11,20 @@
 //! Wraps an [`Http3Client`] and [`super::http3::Handler`] and proxies their UDP
 //! datagrams via an HTTP/3 MASQUE connect-udp proxy.
 
-use std::{cmp::min, fmt::Display, net::SocketAddr, num::NonZeroUsize, time::Instant};
+use std::{
+    cell::RefCell, cmp::min, fmt::Display, net::SocketAddr, num::NonZeroUsize, rc::Rc,
+    time::Instant,
+};
 
 use neqo_common::{event::Provider, Datagram, Tos};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
-use neqo_http3::{ConnectUdpEvent, Header, Http3Client, Http3ClientEvent, Http3State};
-use neqo_transport::{AppError, CloseReason, DatagramTracking, OutputBatch, StreamId};
+use neqo_http3::{
+    ConnectUdpEvent, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State,
+};
+use neqo_transport::{
+    AppError, CloseReason, ConnectionParameters, DatagramTracking, EmptyConnectionIdGenerator,
+    OutputBatch, StreamId,
+};
 use url::Url;
 
 use super::{Client, CloseState, Res};
@@ -69,24 +77,42 @@ pub struct ProxiedHttp3 {
     remote: Option<SocketAddr>,
     headers: Vec<Header>,
 }
+
 impl ProxiedHttp3 {
-    pub(crate) const fn new(
+    pub(crate) fn new(
         proxied_conn: Http3Client,
         handler: super::http3::Handler,
-        proxy: Http3Client,
         url: Url,
         headers: Vec<Header>,
-    ) -> Self {
-        Self {
+        hostname: &str,
+        local_addr: SocketAddr,
+        remote_addr: SocketAddr,
+    ) -> Res<Self> {
+        let proxy_conn = Http3Client::new(
+            hostname,
+            Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+            local_addr,
+            remote_addr,
+            Http3Parameters::default()
+                .connection_parameters(
+                    ConnectionParameters::default()
+                        .datagram_size(1500)
+                        .pmtud(true),
+                )
+                .connect(true)
+                .http3_datagram(true),
+            Instant::now(),
+        )?;
+        Ok(Self {
             proxied_conn,
             handler,
-            proxy_conn: proxy,
+            proxy_conn,
             url,
             session_id: None,
             local: None,
             remote: None,
             headers,
-        }
+        })
     }
 }
 
