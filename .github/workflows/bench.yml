@@ -42,11 +42,6 @@ jobs:
         shell: bash
 
     steps:
-      - env:
-          EVENT: ${{ toJson(github.event) }}
-        run: |
-          echo "$EVENT" | jq
-
       - name: Checkout mozilla/neqo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -170,7 +165,7 @@ jobs:
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          TESTBED: ${{ inputs.bencher }}
+          TESTBED: ${{ inputs.bencher == 'gcp' && 'GCP' || 'On-prem' }}
         run: |
           SHA=$(cd neqo && git log origin/main -1 --format=%H)
           echo "$SHA" > main-sha.txt
