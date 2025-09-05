@@ -29,6 +29,7 @@ use neqo_transport::{
 use crate::{
     client_events::{Http3ClientEvent, Http3ClientEvents},
     connection::{Http3Connection, Http3State, RequestDescription},
+    features::ConnectType,
     frames::HFrame,
     push_controller::{PushController, RecvPushEvents},
     recv_message::{RecvMessage, RecvMessageInfo},
@@ -494,7 +495,7 @@ impl Http3Client {
     where
         T: AsRequestTarget<'x> + ?Sized + Debug,
     {
-        let output = self.base_handler.fetch(
+        let output = self.base_handler.request(
             &mut self.conn,
             Box::new(self.events.clone()),
             Box::new(self.events.clone()),
@@ -502,6 +503,46 @@ impl Http3Client {
             &RequestDescription {
                 method,
                 connect_type: None,
+                target,
+                headers,
+                priority,
+            },
+        );
+        if let Err(e) = &output {
+            if e.connection_error() {
+                self.close(now, e.code(), "");
+            }
+        }
+        output
+    }
+
+    /// The function establishes a classic HTTP CONNECT tunnel using `target`
+    /// and `headers`. Data can be send into the tunnel via
+    /// [`Http3Client::send_data`] and received from the tunnel via
+    /// [`Http3Client::read_data`]. The tunnel can be closed via
+    /// [`Http3Client::stream_close_send`].
+    ///
+    /// # Errors
+    ///
+    /// If a new stream cannot be created an error will be return.
+    pub fn classic_connect<'x, 't: 'x, T>(
+        &mut self,
+        now: Instant,
+        target: &'t T,
+        headers: &'t [Header],
+        priority: Priority,
+    ) -> Res<StreamId>
+    where
+        T: AsRequestTarget<'x> + ?Sized + Debug,
+    {
+        let output = self.base_handler.request(
+            &mut self.conn,
+            Box::new(self.events.clone()),
+            Box::new(self.events.clone()),
+            Some(Rc::clone(&self.push_handler)),
+            &RequestDescription {
+                method: "CONNECT",
+                connect_type: Some(ConnectType::Classic),
                 target,
                 headers,
                 priority,
