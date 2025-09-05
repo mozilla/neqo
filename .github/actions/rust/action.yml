@@ -42,6 +42,13 @@ runs:
       if: ${{ env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted' }}
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
+    - name: Install dependencies (MacOS)
+      shell: bash
+      if: ${{ runner.os == 'MacOS' && runner.environment == 'github-hosted' && inputs.target == '' }}
+      run: |
+        [ "$BREW_UPDATED" ] || brew update && echo "BREW_UPDATED=1" >> "$GITHUB_ENV"
+        brew install lld
+
     # See https://corrode.dev/blog/tips-for-faster-ci-builds/
     - name: Set up build environment
       shell: bash
