@@ -508,7 +508,9 @@ impl SendStream for Rc<RefCell<Session>> {
 pub(crate) trait Protocol: Debug + Display {
     fn connect_type(&self) -> ExtendedConnectType;
 
-    fn close_frame(&self, error: u32, message: &str) -> Option<Vec<u8>>;
+    fn close_frame(&self, _error: u32, _message: &str) -> Option<Vec<u8>> {
+        None
+    }
 
     fn read_control_stream(
         &mut self,

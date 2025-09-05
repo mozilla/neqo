@@ -12,7 +12,7 @@ pub(crate) mod webtransport_streams;
 #[cfg(test)]
 mod tests;
 
-use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
+use std::{cell::RefCell, fmt::{self, Debug}, mem, rc::Rc};
 
 use neqo_common::{Header, Role};
 use neqo_transport::StreamId;
@@ -57,8 +57,8 @@ pub(crate) enum ExtendedConnectType {
     ConnectUdp,
 }
 
-impl std::fmt::Display for ExtendedConnectType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ExtendedConnectType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::WebTransport => write!(f, "webtransport"),
             Self::ConnectUdp => write!(f, "connect-udp"),

@@ -45,11 +45,6 @@ impl Protocol for Session {
         ExtendedConnectType::ConnectUdp
     }
 
-    fn close_frame(&self, _error: u32, _message: &str) -> Option<Vec<u8>> {
-        // ConnectUdp does not have a close frame.
-        None
-    }
-
     fn read_control_stream(
         &mut self,
         conn: &mut Connection,
