@@ -14,7 +14,7 @@ use neqo_transport::{
 use test_fixture::{
     default_client, default_server,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
-    new_client, new_server, now, split_datagram, DEFAULT_ALPN,
+    new_client, new_server, now, split_datagram, CountingConnectionIdGenerator, DEFAULT_ALPN,
 };
 
 #[test]
@@ -47,8 +47,12 @@ fn truncate_long_packet() {
     let now = now();
 
     // This test needs to alter the server handshake, so turn off MLKEM.
-    let mut client = new_client(ConnectionParameters::default().mlkem(false));
-    let mut server = new_server(DEFAULT_ALPN, ConnectionParameters::default().mlkem(false));
+    let mut client =
+        new_client::<CountingConnectionIdGenerator>(ConnectionParameters::default().mlkem(false));
+    let mut server = new_server::<CountingConnectionIdGenerator>(
+        DEFAULT_ALPN,
+        ConnectionParameters::default().mlkem(false),
+    );
 
     let out = client.process_output(now).dgram().unwrap();
     let out = server.process(Some(out), now);
@@ -85,11 +89,13 @@ fn reorder_server_initial() {
     // A simple ACK frame for a single packet with packet number 0.
     const ACK_FRAME: &[u8] = &[0x02, 0x00, 0x00, 0x00, 0x00];
 
-    // This test needs to decrypt the CI, so turn off MLKEM.
-    let mut client = new_client(
+    // This test predicts the precise format of an ACK frame, so turn off MLKEM
+    // and packet number randomization.
+    let mut client = new_client::<CountingConnectionIdGenerator>(
         ConnectionParameters::default()
             .versions(Version::Version1, vec![Version::Version1])
-            .mlkem(false),
+            .mlkem(false)
+            .randomize_first_pn(false),
     );
     let mut server = default_server();
 
@@ -191,7 +197,7 @@ fn set_payload(server_packet: Option<&Datagram>, client_dcid: &[u8], payload: &[
 /// Test that the stack treats a packet without any frames as a protocol violation.
 #[test]
 fn packet_without_frames() {
-    let mut client = new_client(
+    let mut client = new_client::<CountingConnectionIdGenerator>(
         ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
     );
     let mut server = default_server();
@@ -213,7 +219,7 @@ fn packet_without_frames() {
 /// Test that the stack permits a packet containing only padding.
 #[test]
 fn packet_with_only_padding() {
-    let mut client = new_client(
+    let mut client = new_client::<CountingConnectionIdGenerator>(
         ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
     );
     let mut server = default_server();
@@ -233,7 +239,7 @@ fn packet_with_only_padding() {
 #[expect(clippy::similar_names, reason = "scid simiar to dcid.")]
 #[test]
 fn overflow_crypto() {
-    let mut client = new_client(
+    let mut client = new_client::<CountingConnectionIdGenerator>(
         ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
     );
     let mut server = default_server();
@@ -323,4 +329,66 @@ fn handshake_mlkem768x25519() {
         server.tls_info().unwrap().key_exchange(),
         neqo_crypto::TLS_GRP_KEM_MLKEM768X25519
     );
+}
+
+#[test]
+fn client_initial_packet_number() {
+    // Check that the initial packet number is randomized (i.e, > 0) if the `randomize_first_pn`
+    // connection parameter is set, and that it is zero when not.
+    for randomize in [true, false] {
+        // This test needs to decrypt the CI, so turn off MLKEM.
+        let mut client = new_client::<CountingConnectionIdGenerator>(
+            ConnectionParameters::default()
+                .versions(Version::Version1, vec![Version::Version1])
+                .mlkem(false)
+                .randomize_first_pn(randomize),
+        );
+
+        let client_initial = client.process_output(now());
+        let (protected_header, client_dcid, _, payload) =
+            decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client).unwrap();
+        let (_, hp) = initial_aead_and_hp(client_dcid, Role::Client);
+        let (_, pn) = header_protection::remove(&hp, protected_header, payload);
+        assert!(
+            randomize && pn > 0 || !randomize && pn == 0,
+            "randomize {randomize} = {pn}"
+        );
+    }
+}
+
+#[test]
+fn server_initial_packet_number() {
+    // Check that the initial packet number is randomized (i.e, > 0) if the `randomize_first_pn`
+    // connection parameter is set, and that it is zero when not.
+    for randomize in [true, false] {
+        // This test needs to decrypt the CI, so turn off MLKEM.
+        let mut client = new_client::<CountingConnectionIdGenerator>(
+            ConnectionParameters::default()
+                .versions(Version::Version1, vec![Version::Version1])
+                .mlkem(false),
+        );
+        let mut server = new_server::<CountingConnectionIdGenerator>(
+            DEFAULT_ALPN,
+            ConnectionParameters::default()
+                .versions(Version::Version1, vec![Version::Version1])
+                .randomize_first_pn(randomize),
+        );
+
+        let client_initial = client.process_output(now()).dgram();
+        let (_protected_header, client_dcid, _scid, _payload) =
+            decode_initial_header(client_initial.as_ref().unwrap(), Role::Client).unwrap();
+
+        let (_, hp) = initial_aead_and_hp(client_dcid, Role::Server);
+
+        let server_initial = server.process(client_initial, now()).dgram();
+        let (protected_header, _dcid, _scid, payload) =
+            decode_initial_header(server_initial.as_ref().unwrap(), Role::Server).unwrap();
+
+        let (_, pn) = header_protection::remove(&hp, protected_header, payload);
+        println!();
+        assert!(
+            randomize && pn > 0 || !randomize && pn == 0,
+            "randomize {randomize} = {pn}"
+        );
+    }
 }

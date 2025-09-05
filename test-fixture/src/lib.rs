@@ -171,15 +171,18 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 ///
 /// If this doesn't work.
 #[must_use]
-pub fn new_client(params: ConnectionParameters) -> Connection {
+pub fn new_client<G>(params: ConnectionParameters) -> Connection
+where
+    G: ConnectionIdGenerator + Default + 'static,
+{
     fixture_init();
     let mut client = Connection::new_client(
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(G::default())),
         DEFAULT_ADDR,
         DEFAULT_ADDR,
-        params.ack_ratio(255), // Tests work better with this set this way.
+        params,
         now(),
     )
     .expect("create a client");
@@ -206,19 +209,19 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
 /// Create a transport client with default configuration.
 #[must_use]
 pub fn default_client() -> Connection {
-    new_client(ConnectionParameters::default())
+    new_client::<CountingConnectionIdGenerator>(ConnectionParameters::default())
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server() -> Connection {
-    new_server(DEFAULT_ALPN, ConnectionParameters::default())
+    new_server::<CountingConnectionIdGenerator>(DEFAULT_ALPN, ConnectionParameters::default())
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server_h3() -> Connection {
-    new_server(
+    new_server::<CountingConnectionIdGenerator>(
         DEFAULT_ALPN_H3,
         ConnectionParameters::default().pacing(false),
     )
@@ -230,13 +233,16 @@ pub fn default_server_h3() -> Connection {
 ///
 /// If this doesn't work.
 #[must_use]
-pub fn new_server<A: AsRef<str>>(alpn: &[A], params: ConnectionParameters) -> Connection {
+pub fn new_server<G>(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection
+where
+    G: ConnectionIdGenerator + Default + 'static,
+{
     fixture_init();
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
         alpn,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        params.ack_ratio(255),
+        Rc::new(RefCell::new(G::default())),
+        params,
     )
     .expect("create a server");
     if let Ok(dir) = std::env::var("QLOGDIR") {

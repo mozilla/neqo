@@ -370,6 +370,7 @@ impl Connection {
             c.conn_params.get_versions().compatible(),
             Role::Client,
             &dcid,
+            c.conn_params.randomize_first_pn_enabled(),
         )?;
         c.original_destination_cid = Some(dcid);
         let path = Path::temporary(
@@ -1316,6 +1317,7 @@ impl Connection {
             self.conn_params.get_versions().compatible(),
             self.role,
             &retry_scid,
+            false, // don't randomize on Retry
         )?;
         self.address_validation = AddressValidationInfo::Retry {
             token: packet.token().to_vec(),
@@ -1503,7 +1505,11 @@ impl Connection {
                 // Record the client's selected CID so that it can be accepted until
                 // the client starts using a real connection ID.
                 let dcid = ConnectionId::from(packet.dcid());
-                self.crypto.states_mut().init_server(version, &dcid)?;
+                self.crypto.states_mut().init_server(
+                    version,
+                    &dcid,
+                    self.conn_params.randomize_first_pn_enabled(),
+                )?;
                 self.original_destination_cid = Some(dcid);
                 self.set_state(State::WaitInitial, now);
 
@@ -2545,22 +2551,31 @@ impl Connection {
     ) -> Res<SendOptionBatch> {
         let packet_tos = path.borrow().tos();
         let mut send_buffer = Vec::new();
-
-        let mut datagram_size = None;
+        let mut max_datagram_size = None;
         let mut num_datagrams = 0;
+        let mtu = path.borrow().plpmtu();
 
         loop {
             if max_datagrams.get() <= num_datagrams {
                 break;
             }
-
-            // Check if we can fit another PMTUD sized datagram into the batch.
-            if datagram_size.is_some_and(|datagram_size| {
-                min(datagram_size, DatagramBatch::MAX - send_buffer.len()) < path.borrow().plpmtu()
-            }) {
+            if path.borrow().pmtud().needs_probe() && num_datagrams != 0 {
+                // Next datagram will be larger due to PMTUD probing.  GSO
+                // requires that all datagrams in a batch are of equal size.
+                // Only the last datagram can be smaller. Given that this would
+                // not be the first datagram, close the batch early to uphold
+                // the above GSO requirement.
                 break;
             }
 
+            let send_buffer_len_before = send_buffer.len();
+
+            // Check if we can fit another PMTUD sized datagram into the batch.
+            if max_datagram_size.is_some_and(|datagram_size| {
+                min(datagram_size, DatagramBatch::MAX - send_buffer.len()) < mtu
+            }) {
+                break;
+            }
             // Determine how we are sending packets (PTO, etc..).
             let profile = self.loss_recovery.send_profile(&path.borrow(), now);
             qdebug!("[{self}] output_path send_profile {profile:?}");
@@ -2574,12 +2589,20 @@ impl Connection {
                 packet_tos,
             )? {
                 SendOption::Yes => {
+                    debug_assert_eq!(
+                        mtu,
+                        path.borrow().plpmtu(),
+                        "MTU does not change within batch"
+                    );
                     num_datagrams += 1;
-                    let datagram_size = *datagram_size.get_or_insert(send_buffer.len());
-                    if ((send_buffer.len()) % datagram_size) > 0 {
-                        // GSO requires that all packets in a batch are of equal
-                        // size. Only the last packet can be smaller. This
-                        // packet was smaller. Make sure it was the last by
+                    let datagram_size = send_buffer.len() - send_buffer_len_before;
+                    let max_datagram_size = *max_datagram_size.get_or_insert(datagram_size);
+
+                    // GSO requires that all datagram in a batch are of equal
+                    // size. Only the last datagram can be smaller.
+                    debug_assert!(datagram_size <= max_datagram_size);
+                    if datagram_size < max_datagram_size {
+                        // This packet was smaller. Make sure it is the last by
                         // breaking the loop.
                         break;
                     }
@@ -2599,7 +2622,7 @@ impl Connection {
             send_buffer,
             packet_tos,
             num_datagrams,
-            datagram_size.expect("one or more datagrams"),
+            max_datagram_size.expect("one or more datagrams"),
             &mut self.stats.borrow_mut(),
         );
 
@@ -3052,7 +3075,8 @@ impl Connection {
                 .original_destination_cid
                 .as_ref()
                 .ok_or(Error::ProtocolViolation)?;
-            self.crypto.states_mut().init_server(version, dcid)?;
+            // No need to randomize the starting packet number; that's already taken care of.
+            self.crypto.states_mut().init_server(version, dcid, false)?;
             version
         };
 

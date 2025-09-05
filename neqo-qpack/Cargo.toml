@@ -22,6 +22,7 @@ neqo-transport = { path = "./../neqo-transport" }
 qlog = { workspace = true }
 rustc-hash = { workspace = true }
 static_assertions = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }

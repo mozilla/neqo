@@ -18,11 +18,11 @@ use enum_map::EnumMap;
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Buffer, Encoder, Role};
 pub use neqo_crypto::Epoch;
 use neqo_crypto::{
-    hkdf, hp, Aead, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState, PrivateKey,
-    PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker, TLS_AES_128_GCM_SHA256,
-    TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1,
-    TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519,
-    TLS_VERSION_1_3,
+    hkdf, hp, random, Aead, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState,
+    PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker,
+    TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE,
+    TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519,
+    TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
 };
 
 use crate::{
@@ -477,8 +477,9 @@ impl CryptoDxState {
         epoch: Epoch,
         secret: &SymKey,
         cipher: Cipher,
+        min_pn: packet::Number,
     ) -> Res<Self> {
-        qdebug!("Making {direction:?} {epoch:?} CryptoDxState, v={version:?} cipher={cipher}",);
+        qdebug!("Making {direction:?} {epoch:?} CryptoDxState, v={version:?} cipher={cipher} min_pn={min_pn}",);
         let hplabel = String::from(version.label_prefix()) + "hp";
         Ok(Self {
             version,
@@ -486,8 +487,8 @@ impl CryptoDxState {
             epoch: usize::from(epoch),
             aead: Aead::new(TLS_VERSION_1_3, cipher, secret, version.label_prefix())?,
             hpkey: hp::Key::extract(TLS_VERSION_1_3, cipher, secret, &hplabel)?,
-            used_pn: 0..0,
-            min_pn: 0,
+            used_pn: min_pn..min_pn,
+            min_pn,
             invocations: Self::limit(direction, cipher),
             largest_packet_len: INITIAL_LARGEST_PACKET_LEN,
         })
@@ -498,6 +499,7 @@ impl CryptoDxState {
         direction: CryptoDxDirection,
         label: &str,
         dcid: &[u8],
+        min_pn: packet::Number,
     ) -> Res<Self> {
         qtrace!("new_initial {version:?} {}", ConnectionIdRef::from(dcid));
         let salt = version.initial_salt();
@@ -511,7 +513,7 @@ impl CryptoDxState {
 
         let secret = hkdf::expand_label(TLS_VERSION_1_3, cipher, &initial_secret, &[], label)?;
 
-        Self::new(version, direction, Epoch::Initial, &secret, cipher)
+        Self::new(version, direction, Epoch::Initial, &secret, cipher, min_pn)
     }
 
     /// Determine the confidentiality and integrity limits for the cipher.
@@ -732,6 +734,7 @@ impl CryptoDxState {
             CryptoDxDirection::Write,
             "server in",
             CLIENT_CID,
+            0,
         )
         .unwrap()
     }
@@ -774,7 +777,7 @@ impl CryptoDxAppData {
         cipher: Cipher,
     ) -> Res<Self> {
         Ok(Self {
-            dx: CryptoDxState::new(version, dir, Epoch::ApplicationData, secret, cipher)?,
+            dx: CryptoDxState::new(version, dir, Epoch::ApplicationData, secret, cipher, 0)?,
             cipher,
             next_secret: Self::update_secret(cipher, secret)?,
         })
@@ -1002,7 +1005,13 @@ impl CryptoStates {
 
     /// Create the initial crypto state.
     /// Note that the version here can change and that's OK.
-    pub fn init<'v, V>(&mut self, versions: V, role: Role, dcid: &[u8]) -> Res<()>
+    pub fn init<'v, V>(
+        &mut self,
+        versions: V,
+        role: Role,
+        dcid: &[u8],
+        randomize_first_pn: bool,
+    ) -> Res<()>
     where
         V: IntoIterator<Item = &'v Version>,
     {
@@ -1014,6 +1023,20 @@ impl CryptoStates {
             Role::Server => (SERVER_INITIAL_LABEL, CLIENT_INITIAL_LABEL),
         };
 
+        let min_pn = if randomize_first_pn {
+            let r = random::<2>();
+            // A random starting packet number that is mostly less than 64,
+            // but can go as high as 1024, in three parts:
+            // - A value from 0..31.
+            // - A value from 0..1024 in steps of 32, but only one time in eight.
+            // - An extra 1, just to ensure that the result is always non-zero.
+            packet::Number::from(r[0] & 0x1f)
+                + (packet::Number::from(r[1].saturating_sub(224)) << 5)
+                + 1
+        } else {
+            0
+        };
+
         for v in versions {
             qdebug!(
                 "[{self}] Creating initial cipher state v={v:?}, role={role:?} dcid={}",
@@ -1021,8 +1044,8 @@ impl CryptoStates {
             );
 
             let mut initial = CryptoState {
-                tx: CryptoDxState::new_initial(*v, CryptoDxDirection::Write, write, dcid)?,
-                rx: CryptoDxState::new_initial(*v, CryptoDxDirection::Read, read, dcid)?,
+                tx: CryptoDxState::new_initial(*v, CryptoDxDirection::Write, write, dcid, min_pn)?,
+                rx: CryptoDxState::new_initial(*v, CryptoDxDirection::Read, read, dcid, 0)?,
             };
             if let Some(prev) = &self.initials[*v] {
                 qinfo!(
@@ -1043,9 +1066,14 @@ impl CryptoStates {
     /// This is maybe slightly inefficient in the first case, because we might
     /// not need the send keys if the packet is subsequently discarded, but
     /// the overall effort is small enough to write off.
-    pub fn init_server(&mut self, version: Version, dcid: &[u8]) -> Res<()> {
+    pub fn init_server(
+        &mut self,
+        version: Version,
+        dcid: &[u8],
+        randomize_first_pn: bool,
+    ) -> Res<()> {
         if self.initials[version].is_none() {
-            self.init(&[version], Role::Server, dcid)?;
+            self.init(&[version], Role::Server, dcid, randomize_first_pn)?;
         }
         Ok(())
     }
@@ -1082,6 +1110,7 @@ impl CryptoStates {
             Epoch::ZeroRtt,
             secret,
             cipher,
+            0,
         )?);
         Ok(())
     }
@@ -1123,6 +1152,7 @@ impl CryptoStates {
                 Epoch::Handshake,
                 write_secret,
                 cipher,
+                0,
             )?,
             rx: CryptoDxState::new(
                 version,
@@ -1130,6 +1160,7 @@ impl CryptoStates {
                 Epoch::Handshake,
                 read_secret,
                 cipher,
+                0,
             )?,
         });
         Ok(())
@@ -1628,6 +1659,10 @@ impl CryptoStreams {
             return;
         };
         while let Some((offset, data)) = cs.tx.next_bytes() {
+            #[cfg(all(feature = "build-fuzzing-corpus", test))]
+            if offset == 0 {
+                neqo_common::write_item_to_fuzzing_corpus("find_sni", data);
+            }
             let written = if sni_slicing && offset == 0 {
                 if let Some(sni) = find_sni(data) {
                     // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.

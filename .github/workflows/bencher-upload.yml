@@ -25,11 +25,16 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
+      - env:
+          EVENT: ${{ toJson(github.event) }}
+        run: |
+          echo "$EVENT" | jq
+
       - name: Download benchmark results
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           run-id: ${{ github.event.workflow_run.id }}
-          name: ${{ github.event.repository.name }}-${{ github.event.workflow_run.referenced_workflows[0].sha }}-bench-perf
+          name: ${{ github.event.repository.name }}-${{ github.event.workflow_run.referenced_workflows[0].sha != '' && github.event.workflow_run.referenced_workflows[0].sha || github.event.workflow_run.head_sha }}-bench-perf
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Export PR event data
@@ -43,7 +48,7 @@ jobs:
             core.exportVariable("PR_BASE_SHA", prEvent.pull_request.base.sha || '');
             core.exportVariable("PR_NUMBER", prEvent.number || '');
 
-      - uses: bencherdev/bencher@v0.5.3 # zizmor: ignore[unpinned-uses]
+      - uses: bencherdev/bencher@v0.5.4 # zizmor: ignore[unpinned-uses]
 
       - name: Upload main-branch results to bencher.dev
         run: |

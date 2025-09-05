@@ -43,7 +43,7 @@ jobs:
 
     steps:
       - name: Checkout mozilla/neqo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: mozilla/neqo
           path: neqo
@@ -55,40 +55,40 @@ jobs:
           git fetch --no-tags --depth=1 origin main
 
       - name: Checkout microsoft/msquic
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: microsoft/msquic
-          ref: v2.4.12
+          ref: v2.5.3
           path: msquic
           submodules: 'recursive'
           persist-credentials: false
           clean: false
 
       - name: Checkout google/quiche
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: google/quiche
-          ref: 520b4e9e361f3a1b52f1490e9a0f1a2f46e1df9f # Google doesn't tag release, just update the hash occasionally
+          ref: 1c35d630893fc2adacfffeb91bcb0561240cf5f1 # Google doesn't tag release, just update the hash occasionally
           path: google-quiche
           submodules: 'recursive'
           persist-credentials: false
           clean: false
 
       - name: Checkout cloudflare/quiche
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: cloudflare/quiche
-          ref: 0.24.4
+          ref: 0.24.5
           path: quiche
           submodules: 'recursive'
           persist-credentials: false
           clean: false
 
       - name: Checkout aws/s2n-quic
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: aws/s2n-quic
-          ref: v1.60.0
+          ref: v1.63.0
           path: s2n-quic
           submodules: 'recursive'
           persist-credentials: false
@@ -127,7 +127,7 @@ jobs:
       - name: Build neqo
         run: |
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
-          export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
+          export RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment -C force-frame-pointers=yes $RUSTFLAGS"
           echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
           mkdir -p binaries/neqo-main
           mkdir -p binaries/neqo
@@ -145,6 +145,7 @@ jobs:
         run: |
           mkdir -p msquic/build
           cd msquic/build
+          rm -f CMakeCache.txt # This seems to be needed now to avoid a spurious warning about "QUIC_TLS"...
           cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
           cmake --build .
 
@@ -454,7 +455,7 @@ jobs:
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          TESTBED: ${{ inputs.bencher }}
+          TESTBED: ${{ inputs.bencher == 'gcp' && 'GCP' || 'On-prem' }}
         run: |
           SHA=$(cd neqo && git log origin/main -1 --format=%H)
           echo "$SHA" > main-sha.txt
@@ -473,7 +474,7 @@ jobs:
         id: export_samply
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}-perfcompare-samply
+          name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-perfcompare-samply
           path: |
             *.samply.json.gz
             binaries
@@ -483,7 +484,7 @@ jobs:
         id: export_perf
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}-perfcompare-perf
+          name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-perfcompare-perf
           path: |
             *.svg
             *.txt
