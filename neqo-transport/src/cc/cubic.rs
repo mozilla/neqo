@@ -250,14 +250,7 @@ impl Cubic {
 
     #[cfg(test)]
     pub const fn alpha(&self) -> f64 {
-        // In `neqo_transport::cc::tests::cubic::tcp_phase` `alpha` is used before ever ack'ing a
-        // packet or having a congestion event, thus it is uninitialized. In that case we return
-        // `1.0`, which is the value `alpha` will be initialized to after the first ack.
-        if self.alpha == 0.0 {
-            1.0
-        } else {
-            self.alpha
-        }
+        self.alpha
     }
 
     #[cfg(test)]

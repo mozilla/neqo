@@ -112,18 +112,18 @@ fn tcp_phase() {
     // The phase will end when cwnd calculated with cubic equation is equal to TCP estimate:
     // CUBIC_C * (n * RTT / CUBIC_ALPHA)^3 * MAX_DATAGRAM_SIZE = n * MAX_DATAGRAM_SIZE
     // from this n = sqrt(CUBIC_ALPHA^3/ (CUBIC_C * RTT^3)).
-    let num_tcp_increases = (cubic.cc_algorithm().alpha().powi(3)
-        / (CUBIC_C * RTT.as_secs_f64().powi(3)))
-    .sqrt()
-    .floor() as u64;
+
+    // Because `cubic::Cubic::alpha` is uninialized here (it's initialized in
+    // `cubic::Cubic::start_epoch` and we never had an ack yet) we set it to `1.0` which would be
+    // the value it'd be initialized to after the first ack under this test's conditions.
+    let alpha: f64 = 1.0;
+    let num_tcp_increases = (alpha.powi(3) / (CUBIC_C * RTT.as_secs_f64().powi(3)))
+        .sqrt()
+        .floor() as u64;
     for _ in 0..num_tcp_increases {
         let cwnd_rtt_start = cubic.cwnd();
         // Expected acks during a period of RTT / CUBIC_ALPHA.
-        let acks = expected_tcp_acks(
-            cwnd_rtt_start,
-            cubic.max_datagram_size(),
-            cubic.cc_algorithm().alpha(),
-        );
+        let acks = expected_tcp_acks(cwnd_rtt_start, cubic.max_datagram_size(), alpha);
         // The time between acks if they are ideally paced over a RTT.
         let time_increase =
             RTT / u32::try_from(cwnd_rtt_start / cubic.max_datagram_size()).unwrap();

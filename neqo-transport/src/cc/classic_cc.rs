@@ -444,7 +444,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     /// Accessor for [`ClassicCongestionControl::cc_algorithm`]. Is used to call Cubic getters in
     /// tests.
     #[cfg(test)]
-    pub fn cc_algorithm(&self) -> &T {
+    pub const fn cc_algorithm(&self) -> &T {
         &self.cc_algorithm
     }
 
