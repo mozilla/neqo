@@ -6,7 +6,7 @@
 
 use std::fmt::{self, Debug, Formatter};
 
-use url::{ParseError, Position, Url};
+use url::{ParseError, Url};
 
 pub trait RequestTarget: Debug {
     fn scheme(&self) -> &str;
@@ -89,8 +89,7 @@ impl<'x> AsRequestTarget<'x> for Url {
         Ok(RefRequestTarget::new(
             self.scheme(),
             self.host_str().unwrap_or(""),
-            // TODO
-            &self[Position::BeforePath..],
+            self.path()
         ))
     }
 }
