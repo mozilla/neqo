@@ -22,6 +22,11 @@ pub enum Version {
 }
 
 impl Version {
+    /// The first SCONE packet version.
+    pub const SCONE1: u32 = 0x6f7d_c0fd;
+    /// The second SCONE packet version.
+    pub const SCONE2: u32 = 0xef7d_c0fd;
+
     #[must_use]
     pub const fn wire_version(self) -> Wire {
         self as u32
@@ -100,6 +105,7 @@ impl Version {
             )
     }
 
+    /// All supported real versions.
     #[must_use]
     pub fn all() -> Vec<Self> {
         vec![
