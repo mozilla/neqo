@@ -327,14 +327,9 @@ impl Http3Client {
     #[must_use]
     pub fn new_with_conn(c: Connection, http3_parameters: Http3Parameters) -> Self {
         let events = Http3ClientEvents::default();
-        let webtransport = http3_parameters.get_webtransport();
-        let connect = http3_parameters.get_connect();
         let push_streams = http3_parameters.get_max_concurrent_push_streams();
         let mut base_handler = Http3Connection::new(http3_parameters, Role::Client);
-        // TODO: Only set the listener in a specific case.
-        if webtransport | connect {
-            base_handler.set_features_listener(events.clone());
-        }
+        base_handler.set_features_listener(events.clone());
         Self {
             conn: c,
             events: events.clone(),

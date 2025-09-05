@@ -333,10 +333,10 @@ impl Http3Connection {
         }
     }
 
-    /// This function is called when a not default feature needs to be
-    /// negotiated. This is currently only used for the
+    /// Listener for non-default feature negotiation. No-op when feature is
+    /// disabled. This is currently only used for the
     /// [`crate::features::extended_connect::webtransport_session`] and
-    /// [`crate::features::extended_connect::connect_udp_session`] feature. The
+    /// [`crate::features::extended_connect::connect_udp_session`] feature.  The
     /// negotiation is done via the `SETTINGS` frame and when the peer's
     /// `SETTINGS` frame has been received the listener will be called.
     pub(crate) fn set_features_listener(&mut self, feature_listener: Http3ClientEvents) {
@@ -897,7 +897,6 @@ impl Http3Connection {
     {
         let final_headers = Self::create_fetch_headers(request)?;
 
-        // TODO: Why is this here? WebTransport goes a different route, no?
         let stream_type = if request.connect_type.is_some() {
             Http3StreamType::ExtendedConnect
         } else {
