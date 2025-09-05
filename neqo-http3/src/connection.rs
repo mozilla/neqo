@@ -132,8 +132,8 @@ impl Http3State {
 /// - [`Http3StreamType::Http`]: [`SendMessage`] and [`RecvMessage`] handlers are responsible for
 ///   this type of streams.
 /// - [`Http3StreamType::Push`]: [`RecvMessage`] is responsible for this type of streams.
-/// - [`Http3StreamType::ExtendedConnect`]: [`extended_connect::session::Session`] is responsible sender
-///   and receiver handler.
+/// - [`Http3StreamType::ExtendedConnect`]: [`extended_connect::session::Session`] is responsible
+///   sender and receiver handler.
 /// - [`Http3StreamType::WebTransport`]: [`WebTransportSendStream`] and [`WebTransportRecvStream`]
 ///   are responsible sender and receiver handler.
 /// - [`Http3StreamType::Unknown`]: These are all other stream types that are not unknown to the

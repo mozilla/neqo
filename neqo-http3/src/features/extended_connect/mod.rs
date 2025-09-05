@@ -12,7 +12,12 @@ pub(crate) mod webtransport_streams;
 #[cfg(test)]
 mod tests;
 
-use std::{cell::RefCell, fmt::{self, Debug}, mem, rc::Rc};
+use std::{
+    cell::RefCell,
+    fmt::{self, Debug},
+    mem,
+    rc::Rc,
+};
 
 use neqo_common::{Header, Role};
 use neqo_transport::StreamId;

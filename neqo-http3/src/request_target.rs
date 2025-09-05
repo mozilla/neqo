@@ -89,7 +89,7 @@ impl<'x> AsRequestTarget<'x> for Url {
         Ok(RefRequestTarget::new(
             self.scheme(),
             self.host_str().unwrap_or(""),
-            self.path()
+            self.path(),
         ))
     }
 }

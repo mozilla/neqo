@@ -6,7 +6,7 @@
 
 use std::ops::Deref;
 
-use neqo_common::{Buffer, Decoder, Encoder};
+use neqo_common::{qdebug, Buffer, Decoder, Encoder};
 use neqo_crypto::{ZeroRttCheckResult, ZeroRttChecker};
 
 use crate::{Error, Http3Parameters, Res};
@@ -195,12 +195,9 @@ impl HSettings {
                     self.settings
                         .push(HSetting::new(HSettingType::EnableConnect, value));
                 }
-                // other supported settings here
                 (Some(t), Some(v)) => {
-                    // TODO: proper log?
-                    println!("Ignoring unknown setting type {t} with value {v}");
-                    // ignore unknown setting, it is fine.
-                } // ignore unknown setting, it is fine.
+                    qdebug!("Ignoring unknown setting type {t} with value {v}");
+                }
                 _ => return Err(Error::NotEnoughData),
             }
         }
@@ -315,7 +312,6 @@ impl ZeroRttChecker for HttpZeroRttChecker {
                 let value = setting.value == 1;
                 self.settings.get_http3_datagram() || !value
             }
-            // TODO
             HSettingType::EnableConnect => {
                 if setting.value > 1 {
                     return false;
