@@ -34,7 +34,7 @@ jobs:
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           run-id: ${{ github.event.workflow_run.id }}
-          name: ${{ github.event.repository.name }}-${{ github.event.workflow_run.referenced_workflows[0].sha }}-bench-perf
+          name: ${{ github.event.repository.name }}-${{ github.event.workflow_run.referenced_workflows[0].sha != '' && github.event.workflow_run.referenced_workflows[0].sha || github.event.workflow_run.head_sha }}-bench-perf
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Export PR event data

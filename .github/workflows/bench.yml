@@ -42,6 +42,11 @@ jobs:
         shell: bash
 
     steps:
+      - env:
+          EVENT: ${{ toJson(github.event) }}
+        run: |
+          echo "$EVENT" | jq
+
       - name: Checkout mozilla/neqo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
