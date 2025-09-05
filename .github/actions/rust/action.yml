@@ -51,10 +51,6 @@ runs:
         {
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
-          if "$RUNNER_OS" == "Linux" && "$TARGETS" == "" ]]; then
-            echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=lld $RUSTFLAGS"
-          fi
-
         } >> "$GITHUB_ENV"
 
     - name: Enable sscache
