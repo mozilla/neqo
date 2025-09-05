@@ -42,6 +42,11 @@ jobs:
         shell: bash
 
     steps:
+      - env:
+          EVENT: ${{ toJson(github.event) }}
+        run: |
+          echo "$EVENT" | jq
+
       - name: Checkout mozilla/neqo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -191,7 +196,7 @@ jobs:
         id: export_samply
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}-bench-samply
+          name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-samply
           path: |
             *.samply.json.gz
             *.syms.json
@@ -202,7 +207,7 @@ jobs:
         id: export_perf
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}-bench-perf
+          name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-perf
           path: |
             *.svg
             *.txt
