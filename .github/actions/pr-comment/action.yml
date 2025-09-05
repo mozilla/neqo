@@ -7,7 +7,7 @@ inputs:
     required: true
   mode:
     description: 'Mode of operation (upsert/recreate/delete).'
-    default: 'upsert'
+    default: 'recreate'
   token:
     description: 'A Github PAT'
     required: true
