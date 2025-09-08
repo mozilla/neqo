@@ -74,12 +74,7 @@ impl State {
 
 impl Display for Session {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{}-session={}",
-            self.protocol.connect_type(),
-            self.id
-        )
+        write!(f, "{}-session={}", self.protocol.connect_type(), self.id)
     }
 }
 
@@ -415,11 +410,8 @@ impl Session {
                 return;
             }
         };
-        self.events.new_datagram(
-            self.id,
-            datagram.to_vec(),
-            self.protocol.connect_type(),
-        );
+        self.events
+            .new_datagram(self.id, datagram.to_vec(), self.protocol.connect_type());
     }
 
     fn has_data_to_send(&self) -> bool {
