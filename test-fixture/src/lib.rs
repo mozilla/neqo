@@ -4,7 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used, reason = "This is test code.")]
+#![expect(
+    clippy::unwrap_used,
+    clippy::missing_panics_doc,
+    reason = "This is test code."
+)]
 
 use std::{
     cell::{OnceCell, RefCell},
