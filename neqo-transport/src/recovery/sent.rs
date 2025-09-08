@@ -216,6 +216,60 @@ impl Packets {
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
         R::IntoIter: ExactSizeIterator,
     {
+        let acked_ranges: Vec<_> = acked_ranges.into_iter().collect();
+
+        if acked_ranges.is_empty() {
+            return Vec::new();
+        }
+
+        // Fast path for mostly in-order ACKs: try to remove packets directly without split_off
+        if acked_ranges.len() <= 2 {
+            return self.take_ranges_fast_path(&acked_ranges);
+        }
+
+        // Fall back to original implementation for complex ACK patterns
+        self.take_ranges_original(acked_ranges.into_iter())
+    }
+
+    /// Optimized path for simple ACK patterns (1-2 ranges)
+    fn take_ranges_fast_path(
+        &mut self,
+        acked_ranges: &[RangeInclusive<packet::Number>],
+    ) -> Vec<Packet> {
+        let mut result = Vec::new();
+
+        // Process ranges in order they appear (descending according to QUIC spec)
+        // but collect all packet numbers first to maintain correct final order
+        let mut all_packet_numbers = Vec::new();
+
+        for range in acked_ranges {
+            let start = *range.start();
+            let end = *range.end();
+
+            // Collect packet numbers in this range in descending order
+            let range_keys: Vec<_> = self.packets.range(start..=end).map(|(&pn, _)| pn).collect();
+
+            // Add to our list in reverse order (descending)
+            for &pn in range_keys.iter().rev() {
+                all_packet_numbers.push(pn);
+            }
+        }
+
+        // Now remove packets in the order we collected them
+        for pn in all_packet_numbers {
+            if let Some(packet) = self.packets.remove(&pn) {
+                result.push(packet);
+            }
+        }
+
+        result
+    }
+
+    /// Original implementation for complex ACK patterns
+    fn take_ranges_original<I>(&mut self, acked_ranges: I) -> Vec<Packet>
+    where
+        I: Iterator<Item = RangeInclusive<packet::Number>>,
+    {
         let mut result = Vec::new();
 
         // Start with all packets. We will add unacknowledged packets back.

@@ -311,6 +311,33 @@ impl Streams {
         }
     }
 
+    /// Batch ACK processing for better performance with mostly in-order ACKs
+    pub fn acked_batch<I>(&mut self, tokens: I)
+    where
+        I: IntoIterator<Item = StreamRecoveryToken>,
+    {
+        let mut stream_tokens = Vec::new();
+        let mut other_tokens = Vec::new();
+
+        // Separate stream tokens from other types
+        for token in tokens {
+            match token {
+                StreamRecoveryToken::Stream(st) => stream_tokens.push(st),
+                other => other_tokens.push(other),
+            }
+        }
+
+        // Batch process stream tokens
+        if !stream_tokens.is_empty() {
+            self.send.acked_batch(stream_tokens);
+        }
+
+        // Process other tokens individually
+        for token in other_tokens {
+            self.acked(&token);
+        }
+    }
+
     pub fn clear_streams(&mut self) {
         self.send.clear();
         self.recv.clear();

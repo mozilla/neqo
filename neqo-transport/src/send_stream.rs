@@ -1613,6 +1613,30 @@ impl SendStreams {
         }
     }
 
+    /// Optimized batch ACK processing - groups tokens by stream ID to reduce lookups
+    pub fn acked_batch<I>(&mut self, tokens: I)
+    where
+        I: IntoIterator<Item = RecoveryToken>,
+    {
+        use std::collections::BTreeMap;
+
+        // Group tokens by stream ID to minimize IndexMap lookups
+        let mut grouped: BTreeMap<StreamId, Vec<RecoveryToken>> = BTreeMap::new();
+
+        for token in tokens {
+            grouped.entry(token.id).or_default().push(token);
+        }
+
+        // Process each stream's tokens together
+        for (stream_id, stream_tokens) in grouped {
+            if let Some(ss) = self.map.get_mut(&stream_id) {
+                for token in stream_tokens {
+                    ss.mark_as_acked(token.offset, token.length, token.fin);
+                }
+            }
+        }
+    }
+
     pub fn reset_acked(&mut self, id: StreamId) {
         if let Some(ss) = self.map.get_mut(&id) {
             ss.reset_acked();

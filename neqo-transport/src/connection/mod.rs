@@ -3443,10 +3443,30 @@ impl Connection {
             now,
         );
         let largest_acknowledged = acked_packets.first().map(sent::Packet::pn);
+
+        // Collect all stream tokens for batch processing
+        let mut stream_tokens = Vec::new();
+
+        for acked in &acked_packets {
+            for token in acked.tokens() {
+                if let recovery::Token::Stream(stream_token) = token {
+                    stream_tokens.push(stream_token.clone());
+                }
+            }
+        }
+
+        // Process stream tokens in batch for better performance
+        if !stream_tokens.is_empty() {
+            self.streams.acked_batch(stream_tokens);
+        }
+
+        // Process non-stream tokens
         for acked in acked_packets {
             for token in acked.tokens() {
                 match token {
-                    recovery::Token::Stream(stream_token) => self.streams.acked(stream_token),
+                    recovery::Token::Stream(_) => {
+                        // Already handled in batch above
+                    }
                     recovery::Token::Ack(at) => self.acks.acked(at),
                     recovery::Token::Crypto(ct) => self.crypto.acked(ct),
                     recovery::Token::NewToken(seqno) => self.new_token.acked(*seqno),
