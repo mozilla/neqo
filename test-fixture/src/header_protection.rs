@@ -26,7 +26,7 @@ pub use crate::{default_client, now, CountingConnectionIdGenerator};
 #[expect(clippy::type_complexity, reason = "OK in test.")]
 pub fn decode_initial_header(dgram: &Datagram, role: Role) -> Option<(&[u8], &[u8], &[u8], &[u8])> {
     let mut dec = Decoder::new(&dgram[..]);
-    let type_and_ver = dec.decode(5).unwrap().to_vec();
+    let type_and_ver = dec.decode(5)?.to_vec();
     // The client sets the QUIC bit, the server might not.
     match role {
         Role::Client => {
@@ -40,18 +40,18 @@ pub fn decode_initial_header(dgram: &Datagram, role: Role) -> Option<(&[u8], &[u
             }
         }
     }
-    let dest_cid = dec.decode_vec(1).unwrap();
-    let src_cid = dec.decode_vec(1).unwrap();
+    let dest_cid = dec.decode_vec(1)?;
+    let src_cid = dec.decode_vec(1)?;
     dec.skip_vvec(); // Ignore any the token.
 
     // Need to read of the length separately so that we can find the packet number.
-    let payload_len = usize::try_from(dec.decode_varint().unwrap()).unwrap();
+    let payload_len = usize::try_from(dec.decode_varint()?).unwrap();
     let pn_offset = dgram.len() - dec.remaining();
     Some((
         &dgram[..pn_offset],
         dest_cid,
         src_cid,
-        dec.decode(payload_len).unwrap(),
+        dec.decode(payload_len)?,
     ))
 }
 
