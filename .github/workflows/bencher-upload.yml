@@ -69,8 +69,8 @@ jobs:
               --github-actions "$GITHUB_TOKEN" \
               --file results-main.txt
           else
-            ls -la hyperfine-main
-            for file in hyperfine-main/*.json; do
+            ls -la hyperfine-main/*neqo*.json
+            for file in hyperfine-main/*neqo*.json; do
               bencher run \
                 --branch main \
                 --hash "$(cat main-sha.txt)" \
@@ -104,7 +104,7 @@ jobs:
               --ci-number "$PR_NUMBER" \
               --file results.txt
           else
-            ls -la hyperfine
+            ls -la hyperfine/*neqo*.json
             for file in hyperfine/*neqo*.json; do
               bencher run \
                 --branch "$PR_HEAD" \
