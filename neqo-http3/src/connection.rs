@@ -1336,14 +1336,11 @@ impl Http3Connection {
         error: u32,
         message: &str,
     ) -> Res<()> {
-        // TODO
         let send_stream = self
             .send_streams
             .get_mut(&session_id)
+            .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
             .ok_or(Error::InvalidStreamId)?;
-        if send_stream.stream_type() != Http3StreamType::ExtendedConnect {
-            return Err(Error::InvalidStreamId);
-        }
 
         send_stream.close_with_message(conn, error, message)?;
         if send_stream.done() {

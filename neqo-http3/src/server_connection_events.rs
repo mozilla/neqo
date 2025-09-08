@@ -177,7 +177,6 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
         _status: u16,
         _headers: Vec<Header>,
     ) {
-        // TODO: Why is this unused?
     }
 
     fn session_end(
