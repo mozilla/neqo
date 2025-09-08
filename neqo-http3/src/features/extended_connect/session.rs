@@ -46,7 +46,7 @@ impl From<CloseType> for CloseReason {
 }
 
 #[derive(Debug)]
-pub(crate) struct Session {
+pub struct Session {
     control_stream_recv: Box<dyn RecvStream>,
     control_stream_send: Box<dyn SendStream>,
     stream_event_listener: Rc<RefCell<Listener>>,
@@ -59,7 +59,7 @@ pub(crate) struct Session {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum State {
+pub enum State {
     Negotiating,
     Active,
     FinPending,
@@ -505,7 +505,7 @@ impl SendStream for Rc<RefCell<Session>> {
 ///
 /// "Protocol" here corresponds to the `:protocol` pseudo header in the HTTP
 /// Extended CONNECT method.
-pub(crate) trait Protocol: Debug + Display {
+pub trait Protocol: Debug + Display {
     fn connect_type(&self) -> ExtendedConnectType;
 
     fn close_frame(&self, _error: u32, _message: &str) -> Option<Vec<u8>> {
@@ -552,7 +552,7 @@ pub(crate) trait Protocol: Debug + Display {
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum DgramContextIdError {
+pub enum DgramContextIdError {
     #[error("Missing context identifier")]
     MissingIdentifier,
     #[error("Unknown context identifier: {0}")]

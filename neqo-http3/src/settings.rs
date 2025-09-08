@@ -31,7 +31,7 @@ const SETTINGS_H3_DATAGRAM: SettingsType = 0x33;
 /// Advertises support for HTTP Extended CONNECT.
 ///
 /// See <https://www.rfc-editor.org/rfc/rfc9220#section-5>
-pub(crate) const SETTINGS_ENABLE_CONNECT_PROTOCOL: SettingsType = 0x08;
+pub const SETTINGS_ENABLE_CONNECT_PROTOCOL: SettingsType = 0x08;
 
 pub const H3_RESERVED_SETTINGS: &[SettingsType] = &[0x2, 0x3, 0x4, 0x5];
 

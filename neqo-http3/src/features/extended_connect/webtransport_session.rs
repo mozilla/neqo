@@ -23,9 +23,9 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub(crate) struct Session {
+pub struct Session {
     frame_reader: FrameReader,
-    session_id: StreamId,
+    id: StreamId,
     send_streams: HashSet<StreamId>,
     recv_streams: HashSet<StreamId>,
     role: Role,
@@ -41,7 +41,7 @@ impl Session {
     #[must_use]
     pub(crate) fn new(session_id: StreamId, role: Role) -> Self {
         Self {
-            session_id,
+            id: session_id,
             frame_reader: FrameReader::new(),
             send_streams: HashSet::default(),
             recv_streams: HashSet::default(),
@@ -82,7 +82,7 @@ impl Protocol for Session {
         if let Some(WebTransportFrame::CloseSession { error, message }) = f {
             events.session_end(
                 ExtendedConnectType::WebTransport,
-                self.session_id,
+                self.id,
                 CloseReason::Clean { error, message },
                 None,
             );
@@ -94,7 +94,7 @@ impl Protocol for Session {
         } else if fin {
             events.session_end(
                 ExtendedConnectType::WebTransport,
-                self.session_id,
+                self.id,
                 CloseReason::Clean {
                     error: 0,
                     message: String::new(),
@@ -124,7 +124,7 @@ impl Protocol for Session {
         if !stream_id.is_self_initiated(self.role) {
             events.extended_connect_new_stream(Http3StreamInfo::new(
                 stream_id,
-                Http3StreamType::WebTransport(self.session_id),
+                Http3StreamType::WebTransport(self.id),
             ))?;
         }
         Ok(())
