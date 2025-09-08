@@ -59,9 +59,9 @@ impl Protocol for Session {
             ))
             .map_err(|_| Error::HttpGeneralProtocolStream)?;
 
-        match f {
+        if let Some(f) = f {
             // TODO: Implement HTTP Datagram <https://github.com/mozilla/neqo/issues/2843>.
-            None => {}
+            match f {}
         }
 
         if fin {
