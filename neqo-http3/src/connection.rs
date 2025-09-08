@@ -807,8 +807,7 @@ impl Http3Connection {
         output
     }
 
-    // TODO: Rename?
-    fn create_fetch_headers<'b, 't, T>(request: &RequestDescription<'b, 't, T>) -> Res<Vec<Header>>
+    fn create_headers<'b, 't, T>(request: &RequestDescription<'b, 't, T>) -> Res<Vec<Header>>
     where
         T: AsRequestTarget<'t> + ?Sized + Debug,
     {
@@ -895,7 +894,7 @@ impl Http3Connection {
     where
         T: AsRequestTarget<'t> + ?Sized + Debug,
     {
-        let final_headers = Self::create_fetch_headers(request)?;
+        let final_headers = Self::create_headers(request)?;
 
         let stream_type = if request.connect_type.is_some() {
             Http3StreamType::ExtendedConnect
@@ -1175,7 +1174,7 @@ impl Http3Connection {
             Box::new(Rc::clone(&extended_conn)),
         );
 
-        let final_headers = Self::create_fetch_headers(&RequestDescription {
+        let final_headers = Self::create_headers(&RequestDescription {
             method: "CONNECT",
             target,
             headers,
