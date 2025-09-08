@@ -42,11 +42,6 @@ jobs:
         shell: bash
 
     steps:
-      - env:
-          EVENT: ${{ toJson(github.event) }}
-        run: |
-          echo "$EVENT" | jq
-
       - name: Checkout mozilla/neqo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -170,7 +165,7 @@ jobs:
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          TESTBED: ${{ inputs.bencher }}
+          TESTBED: ${{ inputs.bencher == 'gcp' && 'GCP' || 'On-prem' }}
         run: |
           SHA=$(cd neqo && git log origin/main -1 --format=%H)
           echo "$SHA" > main-sha.txt
@@ -181,6 +176,7 @@ jobs:
             echo
             sed -E -e 's/^                 //gi' \
                   -e '/cset:.*last message/d' \
+                  -e '/Criterion.rs ERROR: Error in Gnuplot:.*$/d' \
                   -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
               perl -p -0777 -e 's/(.*?)\n(.*?)(((No change|Change within|Performance has).*?)(\nFound .*?)?)?\n\n/<details><summary>$1: $4<\/summary><pre>\n$2$6<\/pre><\/details>\n/gs' |\
               sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \

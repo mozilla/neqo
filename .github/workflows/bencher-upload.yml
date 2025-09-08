@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   bencher_upload:
-    name: Upload to bencher.dev
+    name: Upload
     # The bench workflow fails when a regression is detected, but we want to upload results regardless.
     if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
     permissions:
@@ -23,6 +23,8 @@ jobs:
       BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
       GITHUB_EVENT_PATH: event.json
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SHA: ${{ github.event.workflow_run.referenced_workflows[0].sha != '' && github.event.workflow_run.referenced_workflows[0].sha || github.event.workflow_run.head_sha }}
+      DATA_TAG: ${{ github.event.workflow.name == 'cargo bench' && 'bench' || 'perfcompare' }}
 
     steps:
       - env:
@@ -34,11 +36,11 @@ jobs:
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           run-id: ${{ github.event.workflow_run.id }}
-          name: ${{ github.event.repository.name }}-${{ github.event.workflow_run.referenced_workflows[0].sha != '' && github.event.workflow_run.referenced_workflows[0].sha || github.event.workflow_run.head_sha }}-bench-perf
+          name: ${{ github.event.repository.name }}-${{ env.SHA }}-${{ env.DATA_TAG }}-perf
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Export PR event data
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             let fs = require('fs');
@@ -50,22 +52,10 @@ jobs:
 
       - uses: bencherdev/bencher@v0.5.4 # zizmor: ignore[unpinned-uses]
 
-      - name: Upload main-branch results to bencher.dev
+      - name: Upload main-branch results
         run: |
           ls -la
-          bencher run \
-            --branch main \
-            --hash "$(cat main-sha.txt)" \
-            --testbed "$(cat testbed.txt)" \
-            --threshold-measure latency \
-            --threshold-test t_test \
-            --threshold-upper-boundary 0.99 \
-            --thresholds-reset \
-            --err \
-            --adapter rust_criterion \
-            --github-actions "$GITHUB_TOKEN" \
-            --file results-main.txt
-          for file in hyperfine-main/*.json; do
+          if [ "$DATA_TAG" == "bench" ]; then
             bencher run \
               --branch main \
               --hash "$(cat main-sha.txt)" \
@@ -75,27 +65,32 @@ jobs:
               --threshold-upper-boundary 0.99 \
               --thresholds-reset \
               --err \
-              --adapter shell_hyperfine \
+              --adapter rust_criterion \
               --github-actions "$GITHUB_TOKEN" \
-              --file "$file"
-          done
+              --file results-main.txt
+          else
+            ls -la hyperfine-main
+            for file in hyperfine-main/*.json; do
+              bencher run \
+                --branch main \
+                --hash "$(cat main-sha.txt)" \
+                --testbed "$(cat testbed.txt)" \
+                --threshold-measure latency \
+                --threshold-test t_test \
+                --threshold-upper-boundary 0.99 \
+                --thresholds-reset \
+                --err \
+                --adapter shell_hyperfine \
+                --github-actions "$GITHUB_TOKEN" \
+                --file "$file"
+            done
+          fi
 
-      - name: Upload PR results to bencher.dev
+      - name: Upload PR results
         if: env.PR_HEAD != '' && env.PR_BASE != '' && env.PR_BASE_SHA != '' && env.PR_NUMBER != ''
         run: |
-          bencher run \
-            --branch "$PR_HEAD" \
-            --testbed "$(cat testbed.txt)" \
-            --start-point "$PR_BASE" \
-            --start-point-hash "$PR_BASE_SHA" \
-            --start-point-clone-thresholds \
-            --start-point-reset \
-            --err \
-            --adapter rust_criterion \
-            --github-actions "$GITHUB_TOKEN" \
-            --ci-number "$PR_NUMBER" \
-            --file results.txt
-          for file in hyperfine/*neqo*.json; do
+          ls -la
+          if [ "$DATA_TAG" == "bench" ]; then
             bencher run \
               --branch "$PR_HEAD" \
               --testbed "$(cat testbed.txt)" \
@@ -104,8 +99,24 @@ jobs:
               --start-point-clone-thresholds \
               --start-point-reset \
               --err \
-              --adapter shell_hyperfine \
+              --adapter rust_criterion \
               --github-actions "$GITHUB_TOKEN" \
               --ci-number "$PR_NUMBER" \
-              --file "$file"
-          done
+              --file results.txt
+          else
+            ls -la hyperfine
+            for file in hyperfine/*neqo*.json; do
+              bencher run \
+                --branch "$PR_HEAD" \
+                --testbed "$(cat testbed.txt)" \
+                --start-point "$PR_BASE" \
+                --start-point-hash "$PR_BASE_SHA" \
+                --start-point-clone-thresholds \
+                --start-point-reset \
+                --err \
+                --adapter shell_hyperfine \
+                --github-actions "$GITHUB_TOKEN" \
+                --ci-number "$PR_NUMBER" \
+                --file "$file"
+            done
+          fi
