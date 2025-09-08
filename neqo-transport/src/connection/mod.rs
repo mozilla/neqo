@@ -1266,7 +1266,7 @@ impl Connection {
         if self.test_frame_writer.is_none() {
             if let OutputBatch::DatagramBatch(batch) = &output {
                 for dgram in batch.iter() {
-                    neqo_common::write_item_to_fuzzing_corpus("packet", dgram);
+                    neqo_common::write_item_to_fuzzing_corpus("packet", &dgram);
                 }
             }
         }
