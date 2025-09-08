@@ -118,10 +118,6 @@ impl Session {
         }
     }
 
-    /// # Panics
-    ///
-    /// This function is only called with `RecvStream` and `SendStream` that also implement
-    /// the http specific functions and `http_stream()` will never return `None`.
     pub(crate) fn new_with_http_streams(
         session_id: StreamId,
         events: Box<dyn ExtendedConnectEvents>,
@@ -154,11 +150,6 @@ impl Session {
     /// # Errors
     ///
     /// The function can only fail if supplied headers are not valid http headers.
-    ///
-    /// # Panics
-    ///
-    /// `control_stream_send` implements the  http specific functions and `http_stream()`
-    /// will never return `None`.
     pub(crate) fn send_request(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()> {
         qdebug!("[{self}]: send_request {headers:?}");
         self.control_stream_send
@@ -232,9 +223,6 @@ impl Session {
         }
     }
 
-    /// # Panics
-    ///
-    /// This cannot panic because headers are checked before this function called.
     pub(crate) fn maybe_check_headers(&mut self) -> Res<()> {
         if State::Negotiating != self.state {
             return Ok(());
