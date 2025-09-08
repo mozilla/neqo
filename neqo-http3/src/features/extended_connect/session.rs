@@ -46,11 +46,11 @@ impl From<CloseType> for CloseReason {
 }
 
 #[derive(Debug)]
-pub struct Session {
+pub(crate) struct Session {
     control_stream_recv: Box<dyn RecvStream>,
     control_stream_send: Box<dyn SendStream>,
     stream_event_listener: Rc<RefCell<Listener>>,
-    session_id: StreamId,
+    id: StreamId,
     state: State,
     events: Box<dyn ExtendedConnectEvents>,
     /// Corresponds to the `:protocol` pseudo-header in the HTTP EXTENDED
@@ -59,7 +59,7 @@ pub struct Session {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum State {
+pub(crate) enum State {
     Negotiating,
     Active,
     FinPending,
@@ -78,14 +78,14 @@ impl Display for Session {
             f,
             "{}-session={}",
             self.protocol.connect_type(),
-            self.session_id
+            self.id
         )
     }
 }
 
 impl Session {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         session_id: StreamId,
         events: Box<dyn ExtendedConnectEvents>,
         role: Role,
@@ -116,7 +116,7 @@ impl Session {
                 Box::new(Rc::clone(&stream_event_listener)),
             )),
             stream_event_listener,
-            session_id,
+            id: session_id,
             state: State::Negotiating,
             events,
             protocol,
@@ -127,7 +127,7 @@ impl Session {
     ///
     /// This function is only called with `RecvStream` and `SendStream` that also implement
     /// the http specific functions and `http_stream()` will never return `None`.
-    pub fn new_with_http_streams(
+    pub(crate) fn new_with_http_streams(
         session_id: StreamId,
         events: Box<dyn ExtendedConnectEvents>,
         role: Role,
@@ -149,7 +149,7 @@ impl Session {
             control_stream_recv,
             control_stream_send,
             stream_event_listener,
-            session_id,
+            id: session_id,
             state: State::Active,
             events,
             protocol,
@@ -164,7 +164,7 @@ impl Session {
     ///
     /// `control_stream_send` implements the  http specific functions and `http_stream()`
     /// will never return `None`.
-    pub fn send_request(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()> {
+    pub(crate) fn send_request(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()> {
         qdebug!("[{self}]: send_request {headers:?}");
         self.control_stream_send
             .http_stream()
@@ -230,7 +230,7 @@ impl Session {
         if !close_type.locally_initiated() {
             self.events.session_end(
                 self.protocol.connect_type(),
-                self.session_id,
+                self.id,
                 CloseReason::from(close_type),
                 None,
             );
@@ -240,7 +240,7 @@ impl Session {
     /// # Panics
     ///
     /// This cannot panic because headers are checked before this function called.
-    pub fn maybe_check_headers(&mut self) -> Res<()> {
+    pub(crate) fn maybe_check_headers(&mut self) -> Res<()> {
         if State::Negotiating != self.state {
             return Ok(());
         }
@@ -253,7 +253,7 @@ impl Session {
                 if fin {
                     self.events.session_end(
                         self.protocol.connect_type(),
-                        self.session_id,
+                        self.id,
                         CloseReason::Clean {
                             error: 0,
                             message: String::new(),
@@ -278,7 +278,7 @@ impl Session {
                     if fin {
                         self.events.session_end(
                             self.protocol.connect_type(),
-                            self.session_id,
+                            self.id,
                             CloseReason::Clean {
                                 error: 0,
                                 message: String::new(),
@@ -289,7 +289,7 @@ impl Session {
                     } else {
                         self.events.session_start(
                             self.protocol.connect_type(),
-                            self.session_id,
+                            self.id,
                             status,
                             headers,
                         );
@@ -298,7 +298,7 @@ impl Session {
                 } else {
                     self.events.session_end(
                         self.protocol.connect_type(),
-                        self.session_id,
+                        self.id,
                         CloseReason::Status(status),
                         Some(headers),
                     );
@@ -309,34 +309,34 @@ impl Session {
         Ok(())
     }
 
-    pub fn add_stream(&mut self, stream_id: StreamId) -> Res<()> {
+    pub(crate) fn add_stream(&mut self, stream_id: StreamId) -> Res<()> {
         if self.state == State::Active {
             self.protocol.add_stream(stream_id, &mut self.events)?;
         }
         Ok(())
     }
 
-    pub fn remove_recv_stream(&mut self, stream_id: StreamId) {
+    pub(crate) fn remove_recv_stream(&mut self, stream_id: StreamId) {
         self.protocol.remove_recv_stream(stream_id);
     }
 
-    pub fn remove_send_stream(&mut self, stream_id: StreamId) {
+    pub(crate) fn remove_send_stream(&mut self, stream_id: StreamId) {
         self.protocol.remove_send_stream(stream_id);
     }
 
     #[must_use]
-    pub const fn is_active(&self) -> bool {
+    pub(crate) const fn is_active(&self) -> bool {
         matches!(self.state, State::Active)
     }
 
-    pub fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
+    pub(crate) fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
         self.protocol.take_sub_streams()
     }
 
     /// # Errors
     ///
     /// It may return an error if the frame is not correctly decoded.
-    pub fn read_control_stream(&mut self, conn: &mut Connection) -> Res<()> {
+    pub(crate) fn read_control_stream(&mut self, conn: &mut Connection) -> Res<()> {
         qdebug!("[{self}]: read_control_stream");
         if let Some(new_state) = self.protocol.read_control_stream(
             conn,
@@ -352,7 +352,12 @@ impl Session {
     ///
     /// Return an error if the stream was closed on the transport layer, but that information is not
     /// yet consumed on the http/3 layer.
-    pub fn close_session(&mut self, conn: &mut Connection, error: u32, message: &str) -> Res<()> {
+    pub(crate) fn close_session(
+        &mut self,
+        conn: &mut Connection,
+        error: u32,
+        message: &str,
+    ) -> Res<()> {
         qdebug!("[{self}]: close_session");
         self.state = State::Done;
 
@@ -377,7 +382,7 @@ impl Session {
     /// # Errors
     ///
     /// Returns an error if the datagram exceeds the remote datagram size limit.
-    pub fn send_datagram<I: Into<DatagramTracking>>(
+    pub(crate) fn send_datagram<I: Into<DatagramTracking>>(
         &self,
         conn: &mut Connection,
         buf: &[u8],
@@ -386,7 +391,7 @@ impl Session {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state == State::Active {
             let mut dgram_data = Encoder::default();
-            dgram_data.encode_varint(self.session_id.as_u64() / 4);
+            dgram_data.encode_varint(self.id.as_u64() / 4);
             self.protocol.write_datagram_prefix(&mut dgram_data);
             dgram_data.encode(buf);
             conn.send_datagram(dgram_data.into(), id)?;
@@ -398,7 +403,7 @@ impl Session {
         Ok(())
     }
 
-    pub fn datagram(&self, datagram: &[u8]) {
+    pub(crate) fn datagram(&self, datagram: &[u8]) {
         if self.state != State::Active {
             qdebug!("[{self}]: received datagram on {:?} session.", self.state);
             return;
@@ -411,7 +416,7 @@ impl Session {
             }
         };
         self.events.new_datagram(
-            self.session_id,
+            self.id,
             datagram.to_vec(),
             self.protocol.connect_type(),
         );
@@ -505,7 +510,7 @@ impl SendStream for Rc<RefCell<Session>> {
 ///
 /// "Protocol" here corresponds to the `:protocol` pseudo header in the HTTP
 /// Extended CONNECT method.
-pub trait Protocol: Debug + Display {
+pub(crate) trait Protocol: Debug + Display {
     fn connect_type(&self) -> ExtendedConnectType;
 
     fn close_frame(&self, _error: u32, _message: &str) -> Option<Vec<u8>> {
@@ -552,7 +557,7 @@ pub trait Protocol: Debug + Display {
 }
 
 #[derive(Debug, Error)]
-pub enum DgramContextIdError {
+pub(crate) enum DgramContextIdError {
     #[error("Missing context identifier")]
     MissingIdentifier,
     #[error("Unknown context identifier: {0}")]

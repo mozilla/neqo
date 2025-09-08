@@ -5,7 +5,7 @@
 // except according to those terms.
 
 pub(crate) mod connect_udp_session;
-pub(crate) mod session;
+pub mod session;
 pub(crate) mod webtransport_session;
 pub(crate) mod webtransport_streams;
 
