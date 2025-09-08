@@ -677,6 +677,10 @@ impl Http3Client {
         output
     }
 
+    /// # Errors
+    ///
+    /// If MASQUE connect-udp session cannot be created, e.g. the HTTP CONNECT
+    /// setting is not negotiated or the HTTP/3 connection is closed.
     pub fn connect_udp_create_session<'x, 't: 'x, T>(
         &mut self,
         now: Instant,
@@ -721,6 +725,14 @@ impl Http3Client {
     }
 
     /// Close `ConnectUdp` cleanly
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidStreamId`] if the stream does not exist,
+    /// [`Error::TransportStreamDoesNotExist`] if the transport stream does not
+    /// exist (this may happen if [`Http3Client::process_output`] has not been
+    /// called when needed, and HTTP3 layer has not picked up the info that the
+    /// stream has been closed.)
     pub fn connect_udp_close_session(
         &mut self,
         session_id: StreamId,
