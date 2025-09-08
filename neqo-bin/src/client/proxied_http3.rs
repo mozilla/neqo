@@ -29,13 +29,8 @@ use url::Url;
 
 use super::{Client, CloseState, Res};
 
+#[derive(Default)]
 pub struct Handler {}
-
-impl Handler {
-    pub(crate) const fn new() -> Self {
-        Self {}
-    }
-}
 
 impl super::Handler for Handler {
     type Client = ProxiedHttp3;

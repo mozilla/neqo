@@ -690,7 +690,7 @@ pub async fn client(mut args: Args) -> Res<()> {
                         real_local,
                         &mut socket,
                         proxy,
-                        proxied_http3::Handler::new(),
+                        proxied_http3::Handler::default(),
                         &args,
                     )
                     .run()
