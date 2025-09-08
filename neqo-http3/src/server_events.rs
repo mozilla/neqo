@@ -465,26 +465,6 @@ impl ConnectUdpRequest {
     pub fn remote_datagram_size(&self) -> u64 {
         self.stream_handler.conn.borrow().remote_datagram_size()
     }
-
-    /// Returns the current max size of a datagram that can fit into a packet.
-    /// The value will change over time depending on the encoded size of the
-    /// packet number, ack frames, etc.
-    ///
-    /// # Errors
-    ///
-    /// The function returns `NotAvailable` if datagrams are not enabled.
-    ///
-    /// # Panics
-    ///
-    /// This cannot panic. The max varint length is 8.
-    pub fn max_datagram_size(&self) -> Res<u64> {
-        let max_size = self.stream_handler.conn.borrow().max_datagram_size()?;
-        Ok(max_size
-            - u64::try_from(Encoder::varint_len(
-                self.stream_handler.stream_id().as_u64(),
-            ))
-            .map_err(|_| Error::Internal)?)
-    }
 }
 
 impl Deref for WebTransportRequest {
