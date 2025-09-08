@@ -181,6 +181,7 @@ pub struct Args {
           value_parser = clap::value_parser!(u8).range(..=20))]
     cid_len: u8,
 
+    /// Use a MASQUE connect-udp proxy server at the given URL.
     #[arg(name = "proxy", long)]
     proxy: Option<Url>,
 }
