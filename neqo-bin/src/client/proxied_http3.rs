@@ -62,8 +62,12 @@ impl super::Handler for Handler {
 }
 
 pub struct ProxiedHttp3 {
+    /// HTTP/3 connection to the origin, proxied through
+    /// [`ProxiedHttp3::proxy_conn`].
     proxied_conn: Http3Client,
     handler: super::http3::Handler,
+    /// HTTP/3 connection to the proxy server, providing a MASQUE connect-udp
+    /// session.
     proxy_conn: Http3Client,
     url: Url,
     /// The MASQUE connect-udp session ID, i.e. the HTTP EXTENDED CONNECT stream ID.
