@@ -285,13 +285,13 @@ impl WtTest {
     pub fn check_session_closed_event_server(
         &self,
         wt_session: &WebTransportRequest,
-        expected_reeason: &CloseReason,
+        expected_reason: &CloseReason,
     ) {
         let event = self.server.next_event().unwrap();
         assert!(Self::session_closed_server(
             &event,
             wt_session.stream_id(),
-            expected_reeason
+            expected_reason
         ));
     }
 
