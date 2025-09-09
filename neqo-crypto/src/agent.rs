@@ -560,11 +560,7 @@ impl SecretAgent {
         self.set_option(ssl::Opt::OcspStapling, true)?;
         self.set_option(
             ssl::Opt::Grease,
-            if cfg!(not(feature = "disable-random")) {
-                grease
-            } else {
-                false
-            },
+            cfg!(not(feature = "disable-random")) && grease,
         )?;
         self.set_option(
             ssl::Opt::EnableChExtensionPermutation,
