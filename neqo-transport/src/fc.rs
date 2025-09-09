@@ -658,6 +658,12 @@ impl IndexMut<StreamType> for LocalStreamLimits {
 
 #[cfg(test)]
 mod test {
+    #![allow(
+        clippy::allow_attributes,
+        clippy::unwrap_in_result,
+        reason = "OK in tests."
+    )]
+
     use std::{
         cmp::min,
         collections::VecDeque,
