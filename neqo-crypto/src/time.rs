@@ -213,7 +213,7 @@ mod test {
     #[test]
     fn convert_stable() {
         init();
-        let now = Time::from(Instant::now());
+        let now = Time::from(test_fixture::now());
         let pr: PRTime = now.try_into().expect("convert to PRTime with truncation");
         let t2 = Time::try_from(pr).expect("convert to Instant");
         let pr2: PRTime = t2.try_into().expect("convert to PRTime again");
