@@ -558,8 +558,18 @@ impl SecretAgent {
         self.set_option(ssl::Opt::Locking, false)?;
         self.set_option(ssl::Opt::Tickets, false)?;
         self.set_option(ssl::Opt::OcspStapling, true)?;
-        self.set_option(ssl::Opt::Grease, grease)?;
-        self.set_option(ssl::Opt::EnableChExtensionPermutation, true)?;
+        self.set_option(
+            ssl::Opt::Grease,
+            if cfg!(not(feature = "disable-random")) {
+                grease
+            } else {
+                false
+            },
+        )?;
+        self.set_option(
+            ssl::Opt::EnableChExtensionPermutation,
+            cfg!(not(feature = "disable-random")),
+        )?;
         Ok(())
     }
 
