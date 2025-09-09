@@ -111,6 +111,7 @@ jobs:
               --adapter rust_criterion \
               --github-actions "$GITHUB_TOKEN" \
               --ci-number "$PR_NUMBER" \
+              --ci-only-on-alert \
               --file results.txt
           else
             ls -la hyperfine
@@ -128,6 +129,7 @@ jobs:
                 --ci-id "$PR_HEAD-$TESTBED-hyperfine-$BENCH" \
                 --github-actions "$GITHUB_TOKEN" \
                 --ci-number "$PR_NUMBER" \
+                --ci-only-on-alert \
                 --file "$file"
             done
           fi
