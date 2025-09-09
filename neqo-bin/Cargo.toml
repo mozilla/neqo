@@ -45,7 +45,7 @@ tokio = { version = "1", default-features = false, features = ["net", "time", "m
 url = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "0.6", default-features = false, features = ["async_tokio", "cargo_bench_support"] }
+criterion = { version = "0.7", features = ["async_tokio"] }
 neqo-bin = { path = ".", features = ["draft-29"] }
 neqo-http3 = { path = "./../neqo-http3", features = ["draft-29"] }
 neqo-transport = { path = "./../neqo-transport", features = ["draft-29"] }

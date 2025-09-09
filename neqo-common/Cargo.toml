@@ -28,7 +28,7 @@ thiserror = { workspace = true }
 windows = { workspace = true , features = ["Win32_Media"] }
 
 [dev-dependencies]
-criterion = { version = "0.6", default-features = false, features = ["cargo_bench_support"] }
+criterion = { version = "0.7" }
 neqo-crypto = { path = "../neqo-crypto" }
 test-fixture = { path = "../test-fixture" }
 regex = { workspace = true }
