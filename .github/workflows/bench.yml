@@ -108,6 +108,7 @@ jobs:
       - name: Run cargo bench
         env:
           NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
+          RUST_BACKTRACE: "full"
         run: |
           sudo ip link set dev lo mtu "$MTU"
           cd neqo
