@@ -658,6 +658,12 @@ impl IndexMut<StreamType> for LocalStreamLimits {
 
 #[cfg(test)]
 mod test {
+    #![allow(
+        clippy::allow_attributes,
+        clippy::unwrap_in_result,
+        reason = "OK in tests."
+    )]
+
     use std::{
         cmp::min,
         collections::VecDeque,
@@ -1078,7 +1084,7 @@ mod test {
 
         // Huge idle time.
         now += Duration::from_secs(60 * 60); // 1h
-        let consumed = fc.set_consumed(fc.next_limit())?;
+        let consumed = fc.set_consumed(fc.next_limit()).unwrap();
         fc.add_retired(consumed);
 
         assert_eq!(write_frames(&mut fc, rtt, now), 1);
@@ -1144,7 +1150,7 @@ mod test {
                 u64::from(u16::from_be_bytes(random::<2>()) % 1_000 + 1) * 1_000 * 1_000;
             // Random delay between 1 ms and 256 ms.
             let rtt = Duration::from_millis(u64::from(random::<1>()[0]) + 1);
-            let bdp = bandwidth * u64::try_from(rtt.as_millis())? / 1_000 / 8;
+            let bdp = bandwidth * u64::try_from(rtt.as_millis()).unwrap() / 1_000 / 8;
 
             let mut now = Instant::now();
 

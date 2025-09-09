@@ -4,6 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(
+    clippy::allow_attributes,
+    clippy::unwrap_in_result,
+    reason = "OK in tests."
+)]
+
 use std::{
     cell::RefCell,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -705,11 +711,11 @@ fn migration_client_empty_cid() {
 fn fast_handshake(client: &mut Connection, server: &mut Connection) -> Option<Datagram> {
     let dgram = client.process_output(now()).dgram();
     let dgram2 = client.process_output(now()).dgram();
-    server.process_input(dgram?, now());
+    server.process_input(dgram.unwrap(), now());
     let dgram = server.process(dgram2, now()).dgram();
     let dgram = client.process(dgram, now()).dgram();
     let dgram = server.process(dgram, now()).dgram();
-    client.process_input(dgram?, now());
+    client.process_input(dgram.unwrap(), now());
     assert!(maybe_authenticate(client));
     let dgram = client.process_output(now()).dgram();
     server.process(dgram, now()).dgram()

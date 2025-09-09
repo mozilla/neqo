@@ -125,7 +125,7 @@ fn connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
 #[allow(
     clippy::allow_attributes,
     clippy::similar_names,
-    reason = "FIXME: Hits on MSRV <1.91."
+    reason = "FIXME: 'new and now are similar' hits on MSRV <1.91."
 )]
 pub fn connection_state_updated(qlog: &Qlog, new: &State, now: Instant) {
     qlog.add_event_data_with_instant(

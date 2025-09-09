@@ -258,6 +258,11 @@ impl<S: SocketRef> Socket<S> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::allow_attributes,
+        clippy::unwrap_in_result,
+        reason = "OK in tests."
+    )]
     use std::env;
 
     use neqo_common::{Dscp, Ecn};
@@ -278,9 +283,7 @@ mod tests {
         // <https://github.com/quinn-rs/quinn/pull/2123>.
         let sender = std::net::UdpSocket::bind("127.0.0.1:0")?;
         let receiver = socket()?;
-        let receiver_addr: SocketAddr = "127.0.0.1:0"
-            .parse()
-            .map_err(|_| io::ErrorKind::InvalidInput)?;
+        let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         sender.send_to(&[], receiver.inner.local_addr()?)?;
         let mut recv_buf = RecvBuf::default();
@@ -295,9 +298,7 @@ mod tests {
     fn datagram_tos() -> Result<(), io::Error> {
         let sender = socket()?;
         let receiver = socket()?;
-        let receiver_addr: SocketAddr = "127.0.0.1:0"
-            .parse()
-            .map_err(|_| io::ErrorKind::InvalidInput)?;
+        let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         let datagram: DatagramBatch = Datagram::new(
             sender.inner.local_addr()?,
@@ -310,7 +311,9 @@ mod tests {
         sender.send(&datagram)?;
 
         let mut recv_buf = RecvBuf::default();
-        let mut received_datagrams = receiver.recv(receiver_addr, &mut recv_buf)?;
+        let mut received_datagrams = receiver
+            .recv(receiver_addr, &mut recv_buf)
+            .expect("receive to succeed");
 
         // Assert that the ECN is correct.
         // On Android API level <= 25 the IPv4 `IP_TOS` control message is
@@ -348,9 +351,7 @@ mod tests {
 
         let sender = socket()?;
         let receiver = socket()?;
-        let receiver_addr: SocketAddr = "127.0.0.1:0"
-            .parse()
-            .map_err(|_| io::ErrorKind::InvalidInput)?;
+        let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         let max_gso_segments = sender.state.max_gso_segments();
         let msg = vec![0xAB; SEGMENT_SIZE * max_gso_segments];
@@ -368,14 +369,17 @@ mod tests {
         let mut num_received = 0;
         let mut recv_buf = RecvBuf::default();
         while num_received < max_gso_segments {
-            receiver.recv(receiver_addr, &mut recv_buf)?.for_each(|d| {
-                assert_eq!(
-                    SEGMENT_SIZE,
-                    d.len(),
-                    "Expect received datagrams to have same length as sent datagrams"
-                );
-                num_received += 1;
-            });
+            receiver
+                .recv(receiver_addr, &mut recv_buf)
+                .expect("receive to succeed")
+                .for_each(|d| {
+                    assert_eq!(
+                        SEGMENT_SIZE,
+                        d.len(),
+                        "Expect received datagrams to have same length as sent datagrams"
+                    );
+                    num_received += 1;
+                });
         }
 
         Ok(())
@@ -386,9 +390,7 @@ mod tests {
         let sender = socket()?;
         // Use non-blocking socket to test for `WouldBlock` error.
         let receiver = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
-        let receiver_addr: SocketAddr = "127.0.0.1:0"
-            .parse()
-            .map_err(|_| io::ErrorKind::InvalidInput)?;
+        let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         // Send oversized datagram and expect `EMSGSIZE` error to be ignored.
         let oversized_datagram = Datagram::new(
