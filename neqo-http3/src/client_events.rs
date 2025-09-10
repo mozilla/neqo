@@ -47,7 +47,7 @@ pub enum WebTransportEvent {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ConnectUdpEvent {
     Negotiated(
-        /// Whether the negotiation succeeded.
+        /// Whether CONNECT-UDP was negotiated.
         bool,
     ),
     NewSession {
