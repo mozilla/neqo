@@ -21,6 +21,9 @@ inputs:
     description: Newline-separated list of workspaces
     required: false
 
+env:
+  RUST_BACKTRACE: full
+
 runs:
   using: composite
   steps:
