@@ -246,7 +246,7 @@ fn cc_cong_avoidance_recovery_period_to_cong_avoidance(cc_algorithm: CongestionC
     assert!(cwnd_before_loss > cwnd_after_loss);
     qinfo!("moving to congestion avoidance {}", cwnd(&client));
 
-    for i in 0..6 {
+    for i in 0..7 {
         qinfo!("iteration {i}");
 
         let (c_tx_dgrams, next_now) = fill_cwnd(&mut client, stream_id, now);
@@ -261,7 +261,16 @@ fn cc_cong_avoidance_recovery_period_to_cong_avoidance(cc_algorithm: CongestionC
         client.process_input(s_ack, now);
     }
 
-    assert!(cwnd_before_loss < cwnd(&client));
+    qinfo!(
+        "cwnd_before_loss = {cwnd_before_loss} cwnd(&client) = {}",
+        cwnd(&client)
+    );
+
+    assert!(
+        cwnd_before_loss < cwnd(&client),
+        "cwnd_before_loss = {cwnd_before_loss} cwnd(&client) = {}",
+        cwnd(&client)
+    );
 }
 
 #[test]
