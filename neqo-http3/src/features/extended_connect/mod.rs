@@ -12,12 +12,7 @@ pub(crate) mod webtransport_streams;
 #[cfg(test)]
 mod tests;
 
-use std::{
-    cell::RefCell,
-    fmt::{self, Debug},
-    mem,
-    rc::Rc,
-};
+use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
 
 use neqo_common::{Header, Role};
 use neqo_transport::StreamId;
@@ -56,30 +51,15 @@ pub(crate) trait ExtendedConnectEvents: Debug {
     );
 }
 
-#[derive(Debug, PartialEq, Copy, Clone, Eq)]
+#[derive(Debug, PartialEq, Copy, Clone, Eq, strum::Display)]
 pub(crate) enum ExtendedConnectType {
+    #[strum(to_string = "webtransport")]
     WebTransport,
+    #[strum(to_string = "connect-udp")]
     ConnectUdp,
 }
 
-impl fmt::Display for ExtendedConnectType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::WebTransport => write!(f, "webtransport"),
-            Self::ConnectUdp => write!(f, "connect-udp"),
-        }
-    }
-}
-
 impl ExtendedConnectType {
-    #[must_use]
-    pub const fn string(self) -> &'static str {
-        match self {
-            Self::WebTransport => "webtransport",
-            Self::ConnectUdp => "connect-udp",
-        }
-    }
-
     pub(crate) fn new_protocol(self, session_id: StreamId, role: Role) -> Box<dyn Protocol> {
         match self {
             Self::WebTransport => Box::new(webtransport_session::Session::new(session_id, role)),

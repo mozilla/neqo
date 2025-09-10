@@ -836,7 +836,7 @@ impl Http3Connection {
             ]
         };
         if let Some(conn_type) = request.connect_type {
-            final_headers.push(Header::new(":protocol", conn_type.string()));
+            final_headers.push(Header::new(":protocol", conn_type.to_string()));
         }
 
         final_headers.extend_from_slice(request.headers);
