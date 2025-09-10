@@ -21,7 +21,7 @@ use crate::{
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum WebTransportEvent {
     Negotiated(
-        /// Whether the negotiation succeeded.
+        /// Whether WebTransport was negotiated.
         bool,
     ),
     NewSession {
