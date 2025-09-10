@@ -110,12 +110,10 @@ pub fn create_client(
     let qlog = qlog_new(args, hostname, client.connection_id())?;
     client.set_qlog(qlog);
     if let Some(ech) = &args.ech {
-        client.enable_ech(ech).expect("enable ECH");
+        client.enable_ech(ech)?;
     }
     if let Some(token) = resumption_token {
-        client
-            .enable_resumption(Instant::now(), token)
-            .expect("enable resumption");
+        client.enable_resumption(Instant::now(), token)?;
     }
 
     Ok(client)

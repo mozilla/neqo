@@ -120,7 +120,7 @@ jobs:
             cp "$BENCH" ../binaries/neqo-main/
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --save-baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results-main.txt
+              $BENCH -- --bench --save-baseline main --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results-main.txt
           done
           # Copy the main branch results to a separate directory for bencher.dev.
           cp -r target/criterion ../criterion-main
@@ -134,7 +134,7 @@ jobs:
             # shellcheck disable=SC2086
             # --baseline-lenient allows us to add new benchmarks in pull requests.
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --baseline-lenient main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
+              $BENCH -- --bench --baseline-lenient main --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
           done
           for BENCH in $BENCHES; do
             NAME=$(basename "$BENCH" | cut -d- -f1)

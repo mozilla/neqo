@@ -195,8 +195,6 @@ pub fn new_trace(role: Role) -> TraceSeq {
 
 #[cfg(test)]
 mod test {
-    use std::time::Instant;
-
     use qlog::events::Event;
     use regex::Regex;
     use test_fixture::EXPECTED_LOG_HEADER;
@@ -221,7 +219,7 @@ mod test {
     #[test]
     fn add_event_with_instant() {
         let (log, contents) = test_fixture::new_neqo_qlog();
-        log.add_event_with_instant(|| Some(Event::with_time(0.0, EV_DATA)), Instant::now());
+        log.add_event_with_instant(|| Some(Event::with_time(0.0, EV_DATA)), test_fixture::now());
         assert_eq!(
             Regex::new("\"time\":[0-9]+.[0-9]+,")
                 .unwrap()

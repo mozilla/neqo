@@ -145,6 +145,10 @@ impl TailDrop {
     /// When ECN is enabled, the stack will avoid filling the buffer and sit around 50%
     /// capacity, so you might need to double the buffer size to get comparable throughput.
     /// Of course, a smaller buffer will mean less latency.
+    ///
+    /// # Panics
+    ///
+    /// Panics if rate is zero or over 1Gbps, or if capacity is too large.
     #[must_use]
     pub const fn new(rate: usize, capacity: usize, ecn: bool, delay: Duration) -> Self {
         assert!(rate != 0, "zero rate gets you nowhere");
