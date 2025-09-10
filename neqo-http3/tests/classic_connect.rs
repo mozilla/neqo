@@ -25,7 +25,7 @@ fn classic_connect() {
 
     // Have client send a CONNECT request.
     let stream_id = client
-        .connect(now(), &("https", AUTHORITY, "/"), &[], Priority::default())
+        .connect(now(), AUTHORITY, &[], Priority::default())
         .unwrap();
     client.send_data(stream_id, b"ping").unwrap();
     exchange_packets(&mut client, &mut server, false, None);

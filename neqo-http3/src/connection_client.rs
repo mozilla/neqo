@@ -525,15 +525,15 @@ impl Http3Client {
     /// # Errors
     ///
     /// If a new stream cannot be created an error will be return.
-    pub fn connect<'x, 't: 'x, T>(
+    pub fn connect<A>(
         &mut self,
         now: Instant,
-        target: &'t T,
-        headers: &'t [Header],
+        authority: A,
+        headers: &[Header],
         priority: Priority,
     ) -> Res<StreamId>
     where
-        T: AsRequestTarget<'x> + ?Sized + Debug,
+        A: AsRef<str> + Debug,
     {
         let output = self.base_handler.request(
             &mut self.conn,
@@ -543,7 +543,8 @@ impl Http3Client {
             &RequestDescription {
                 method: "CONNECT",
                 connect_type: Some(ConnectType::Classic),
-                target,
+
+                target: &("", authority, ""),
                 headers,
                 priority,
             },
