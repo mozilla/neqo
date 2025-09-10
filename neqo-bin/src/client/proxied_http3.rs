@@ -68,7 +68,7 @@ pub struct ProxiedHttp3 {
     /// session.
     proxy_conn: Http3Client,
     url: Url,
-    /// The MASQUE connect-udp session ID, i.e. the HTTP EXTENDED CONNECT stream ID.
+    /// The MASQUE connect-udp session ID, i.e., the HTTP EXTENDED CONNECT stream ID.
     session_id: Option<StreamId>,
     local: Option<SocketAddr>,
     remote: Option<SocketAddr>,
