@@ -52,14 +52,20 @@ jobs:
 
       - uses: bencherdev/bencher@v0.5.4 # zizmor: ignore[unpinned-uses]
 
+      - name: Set env
+        run: |
+          {
+            echo "MAIN_SHA=$(cat main-sha.txt)"
+            echo "TESTBED=$(cat testbed.txt)"
+          } >> "$GITHUB_ENV"
+
       - name: Upload main-branch results
         run: |
-          ls -la
           if [ "$DATA_TAG" == "bench" ]; then
             bencher run \
               --branch main \
-              --hash "$(cat main-sha.txt)" \
-              --testbed "$(cat testbed.txt)" \
+              --hash "$MAIN_SHA" \
+              --testbed "$TESTBED" \
               --threshold-measure latency \
               --threshold-test t_test \
               --threshold-upper-boundary 0.99 \
@@ -69,18 +75,19 @@ jobs:
               --github-actions "$GITHUB_TOKEN" \
               --file results-main.txt
           else
-            ls -la hyperfine-main/*neqo*.json
             for file in hyperfine-main/*neqo*.json; do
+              BENCH="$(basename "$file")"
               bencher run \
                 --branch main \
-                --hash "$(cat main-sha.txt)" \
-                --testbed "$(cat testbed.txt)" \
+                --hash "$MAIN_SHA" \
+                --testbed "$TESTBED" \
                 --threshold-measure latency \
                 --threshold-test t_test \
                 --threshold-upper-boundary 0.99 \
                 --thresholds-reset \
                 --err \
                 --adapter shell_hyperfine \
+                --ci-id "main-$TESTBED-hyperfine-$BENCH" \
                 --github-actions "$GITHUB_TOKEN" \
                 --file "$file"
             done
@@ -89,11 +96,10 @@ jobs:
       - name: Upload PR results
         if: env.PR_HEAD != '' && env.PR_BASE != '' && env.PR_BASE_SHA != '' && env.PR_NUMBER != ''
         run: |
-          ls -la
           if [ "$DATA_TAG" == "bench" ]; then
             bencher run \
               --branch "$PR_HEAD" \
-              --testbed "$(cat testbed.txt)" \
+              --testbed "$TESTBED" \
               --start-point "$PR_BASE" \
               --start-point-hash "$PR_BASE_SHA" \
               --start-point-clone-thresholds \
@@ -102,21 +108,24 @@ jobs:
               --adapter rust_criterion \
               --github-actions "$GITHUB_TOKEN" \
               --ci-number "$PR_NUMBER" \
+              --ci-only-on-alert \
               --file results.txt
           else
-            ls -la hyperfine/*neqo*.json
             for file in hyperfine/*neqo*.json; do
+              BENCH="$(basename "$file")"
               bencher run \
                 --branch "$PR_HEAD" \
-                --testbed "$(cat testbed.txt)" \
+                --testbed "$TESTBED" \
                 --start-point "$PR_BASE" \
                 --start-point-hash "$PR_BASE_SHA" \
                 --start-point-clone-thresholds \
                 --start-point-reset \
                 --err \
                 --adapter shell_hyperfine \
+                --ci-id "$PR_HEAD-$TESTBED-hyperfine-$BENCH" \
                 --github-actions "$GITHUB_TOKEN" \
                 --ci-number "$PR_NUMBER" \
+                --ci-only-on-alert \
                 --file "$file"
             done
           fi

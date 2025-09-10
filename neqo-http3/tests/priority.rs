@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::time::Instant;
-
 use neqo_common::event::Provider as _;
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
@@ -57,7 +55,7 @@ fn priority_update() {
     let (mut client, mut server) = connect();
     let stream_id = client
         .fetch(
-            Instant::now(),
+            now(),
             "GET",
             &("https", "something.com", "/"),
             &[Header::new("priority", "u=4,i")],
@@ -114,7 +112,7 @@ fn priority_update_dont_send_for_cancelled_stream() {
     let (mut client, mut server) = connect();
     let stream_id = client
         .fetch(
-            Instant::now(),
+            now(),
             "GET",
             &("https", "something.com", "/"),
             &[Header::new("priority", "u=5")],

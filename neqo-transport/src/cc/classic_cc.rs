@@ -674,7 +674,7 @@ mod tests {
             cc.on_packet_sent(p, now());
         }
 
-        cc.on_packets_lost(Some(now()), None, PTO, lost_packets, Instant::now());
+        cc.on_packets_lost(Some(now()), None, PTO, lost_packets, now());
 
         let persistent = if cc.cwnd() == reduced_cwnd {
             false
@@ -876,7 +876,7 @@ mod tests {
         rtt_time: u32,
         lost: &[sent::Packet],
     ) -> bool {
-        let now = Instant::now();
+        let now = now();
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
 
         let last_ack = Some(by_pto(last_ack));
@@ -1025,7 +1025,7 @@ mod tests {
     fn persistent_congestion_no_prev_ack_newreno() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
-        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), Instant::now());
+        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), now());
         assert_eq!(cc.cwnd(), cc.cwnd_min());
     }
 
@@ -1033,7 +1033,7 @@ mod tests {
     fn persistent_congestion_no_prev_ack_cubic() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         let mut cc = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
-        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), Instant::now());
+        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), now());
         assert_eq!(cc.cwnd(), cc.cwnd_min());
     }
 
