@@ -516,16 +516,16 @@ impl Http3Client {
         output
     }
 
-    /// The function establishes a classic HTTP CONNECT tunnel using `target`
-    /// and `headers`. Data can be send into the tunnel via
-    /// [`Http3Client::send_data`] and received from the tunnel via
+    /// The function establishes a classic HTTP CONNECT tunnel on top of this
+    /// connection using `target` and `headers`. Data can be send into the
+    /// tunnel via [`Http3Client::send_data`] and received from the tunnel via
     /// [`Http3Client::read_data`]. The tunnel can be closed via
     /// [`Http3Client::stream_close_send`].
     ///
     /// # Errors
     ///
     /// If a new stream cannot be created an error will be return.
-    pub fn classic_connect<'x, 't: 'x, T>(
+    pub fn connect<'x, 't: 'x, T>(
         &mut self,
         now: Instant,
         target: &'t T,
