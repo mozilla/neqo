@@ -790,7 +790,9 @@ impl Http3Connection {
         output
     }
 
-    fn create_request_headers<'b, 't, T>(request: &RequestDescription<'b, 't, T>) -> Res<Vec<Header>>
+    fn create_request_headers<'b, 't, T>(
+        request: &RequestDescription<'b, 't, T>,
+    ) -> Res<Vec<Header>>
     where
         T: AsRequestTarget<'t> + ?Sized + Debug,
     {
@@ -802,7 +804,7 @@ impl Http3Connection {
         match request.connect_type {
             Some(_) if request.method != "CONNECT" => {
                 qwarn!("Method CONNECT without CONNECT type");
-                debug_assert!(false);
+                return Err(Error::InvalidInput);
             }
             None if request.method == "CONNECT" => {
                 qwarn!(
@@ -810,7 +812,7 @@ impl Http3Connection {
                     request.method,
                     request.connect_type
                 );
-                debug_assert!(false);
+                return Err(Error::InvalidInput);
             }
             _ => {}
         }

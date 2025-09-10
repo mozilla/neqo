@@ -15,7 +15,7 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::Qlog, qtrace,
+    event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::Qlog, qtrace, qwarn,
     Datagram, Decoder, Encoder, Header, MessageType, Role,
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
@@ -495,6 +495,10 @@ impl Http3Client {
     where
         T: AsRequestTarget<'x> + ?Sized + Debug,
     {
+        if method == "CONNECT" {
+            qwarn!("Invalid method CONNECT in fetch. Use Http3Client::connect instead.");
+            return Err(Error::InvalidInput);
+        }
         let output = self.base_handler.request(
             &mut self.conn,
             Box::new(self.events.clone()),

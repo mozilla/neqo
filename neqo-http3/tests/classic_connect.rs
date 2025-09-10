@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
-use neqo_http3::{Header, Http3ClientEvent, Http3ServerEvent, Priority};
+use neqo_http3::{Error, Header, Http3ClientEvent, Http3ServerEvent, Priority};
 use test_fixture::{default_http3_client, default_http3_server, exchange_packets, now};
 
 const AUTHORITY: &str = "something.com";
@@ -97,7 +97,6 @@ fn classic_connect() {
 }
 
 #[test]
-#[should_panic(expected = "assertion failed: false")]
 fn classic_connect_via_fetch_panics_in_debug() {
     let mut client = default_http3_client();
     let mut server = default_http3_server();
@@ -105,13 +104,12 @@ fn classic_connect_via_fetch_panics_in_debug() {
     let out = server.process(out, now()).dgram().unwrap();
     client.process_input(out, now());
 
-    client
-        .fetch(
-            now(),
-            "CONNECT",
-            &("https", AUTHORITY, "/"),
-            &[],
-            Priority::default(),
-        )
-        .unwrap();
+    let res = client.fetch(
+        now(),
+        "CONNECT",
+        &("https", AUTHORITY, "/"),
+        &[],
+        Priority::default(),
+    );
+    assert_eq!(res, Err(Error::InvalidInput));
 }
