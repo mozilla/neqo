@@ -801,11 +801,7 @@ impl Http3Connection {
 
         match request.connect_type {
             Some(_) if request.method != "CONNECT" => {
-                qwarn!(
-                    "Method {} with CONNECT type {:?}",
-                    request.method,
-                    request.connect_type
-                );
+                qwarn!("Method CONNECT without CONNECT type");
                 debug_assert!(false);
             }
             None if request.method == "CONNECT" => {
