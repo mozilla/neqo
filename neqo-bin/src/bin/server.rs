@@ -8,6 +8,11 @@ use clap::Parser as _;
 use neqo_bin::server::Res;
 
 #[tokio::main(flavor = "current_thread")]
+#[allow(
+    clippy::allow_attributes,
+    clippy::unwrap_in_result,
+    reason = "FIXME: False positive?"
+)]
 async fn main() -> Res<()> {
     let args = neqo_bin::server::Args::parse();
 
