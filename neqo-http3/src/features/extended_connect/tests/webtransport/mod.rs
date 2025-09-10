@@ -148,7 +148,7 @@ impl WtTest {
     ) -> (StreamId, Option<WebTransportRequest>) {
         let wt_session_id = self
             .client
-            .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
+            .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
             .unwrap();
         self.exchange_packets();
 
