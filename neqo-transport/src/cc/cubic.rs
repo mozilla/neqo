@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! CUBIC congestion control
+//! CUBIC congestion control (RFC 9438)
 
 use std::{
     fmt::{self, Display},
@@ -24,11 +24,22 @@ use crate::cc::classic_cc::WindowAdjustment;
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc8312#section-5.1>
 pub const CUBIC_C: f64 = 0.4;
-/// TCP-friendly region additive factor
+/// > CUBIC additive increase factor used in the Reno-friendly region \[to achieve approximately the
+/// > same average congestion window size as Reno\].
 ///
-/// <https://datatracker.ietf.org/doc/html/rfc8312#section-4.2>
-pub const CUBIC_ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7);
-
+/// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
+///
+/// > The model used to calculate CUBIC_ALPHA is not absolutely precise,
+/// > but analysis and simulation \[...\], as well as over a decade of experience with
+/// > CUBIC in the public Internet, show that this approach produces acceptable
+/// > levels of rate fairness between CUBIC and Reno flows.
+///
+/// Formula:
+///
+/// `CUBIC_ALPHA = 3.0 * (1.0 - CUBIC_BETA) / (1.0 + CUBIC_BETA)`
+///
+/// <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
+pub const CUBIC_ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7); // with CUBIC_BETA = 0.7
 /// `CUBIC_BETA` = 0.7;
 ///
 /// > Principle 4: To balance between the scalability and convergence speed,
@@ -79,16 +90,17 @@ pub struct Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc8312#section-4.6>
     last_max_cwnd: f64,
-    /// Estimate of Standard TCP congestion window for Cubic's TCP-friendly
-    /// Region.
+    /// > An estimate for the congestion window \[...\] in the Reno-friendly region -- that
+    /// > is, an estimate for the congestion window of Reno.
     ///
-    /// > Standard TCP performs well in certain types of networks, for example,
-    /// > under short RTT and small bandwidth (or small BDP) networks.  In
-    /// > these networks, we use the TCP-friendly region to ensure that CUBIC
-    /// > achieves at least the same throughput as Standard TCP.
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-variables-of-interest>
     ///
-    /// <https://datatracker.ietf.org/doc/html/rfc8312#section-4.2>
-    estimated_tcp_cwnd: f64,
+    /// > Reno performs well in certain types of networks -- for example, under short RTTs and
+    /// > small bandwidths (or small BDPs). In these networks, CUBIC remains in the Reno-friendly
+    /// > region to achieve at least the same throughput as Reno.
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
+    w_est: f64,
     /// > K is the time period that the above function takes to increase the
     /// > current window size to W_max if there are no further congestion events
     ///
@@ -104,8 +116,6 @@ pub struct Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc8312#section-4.1>
     ca_epoch_start: Option<Instant>,
-    /// Number of bytes acked since the last Standard TCP congestion window increase.
-    tcp_acked_bytes: f64,
 }
 
 impl Display for Cubic {
@@ -144,18 +154,23 @@ impl Cubic {
     fn w_cubic(&self, t: f64, max_datagram_size: usize) -> f64 {
         (CUBIC_C * (t - self.k).powi(3)).mul_add(convert_to_f64(max_datagram_size), self.w_max)
     }
-
-    fn start_epoch(
-        &mut self,
-        curr_cwnd_f64: f64,
-        new_acked_f64: f64,
-        max_datagram_size: usize,
-        now: Instant,
-    ) {
+    /// Resets all relevant parameters at the start of a new epoch (new congestion
+    /// avoidance stage) according to RFC 9438. The `w_max` variable is set in `reduce_cwnd()`. Also
+    /// initializes `k` and `w_max` if we start an epoch without having ever had a congestion
+    /// event, which can happen upon exiting slow start.
+    ///
+    /// > `w_est` is set equal to `cwnd_epoch` at the start of the congestion avoidance stage.
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-9>
+    fn start_epoch(&mut self, curr_cwnd_f64: f64, max_datagram_size: usize, now: Instant) {
         self.ca_epoch_start = Some(now);
-        // reset tcp_acked_bytes and estimated_tcp_cwnd;
-        self.tcp_acked_bytes = new_acked_f64;
-        self.estimated_tcp_cwnd = curr_cwnd_f64;
+        self.w_est = curr_cwnd_f64;
+        // If `w_max < cwnd_epoch` we take the cubic root from a negative value in `calc_k()`. That
+        // could only happen if somehow `cwnd` get's increased between calling `reduce_cwnd()` and
+        // `start_epoch()`, which is only possible after persistent congestion or an app limited
+        // period. It could also happen if we never had a congestion event, so never called
+        // `reduce_cwnd()` thus `w_max` was never set (so is still it's default `0.0`
+        // value). In any case we reset/initialize `w_max`, `cwnd_prior` and `k` here.
         if self.last_max_cwnd <= curr_cwnd_f64 {
             self.w_max = curr_cwnd_f64;
             self.k = 0.0;
@@ -164,6 +179,16 @@ impl Cubic {
             self.k = self.calc_k(curr_cwnd_f64, max_datagram_size);
         }
         qtrace!("[{self}] New epoch");
+    }
+
+    #[cfg(test)]
+    pub const fn last_max_cwnd(&self) -> f64 {
+        self.last_max_cwnd
+    }
+
+    #[cfg(test)]
+    pub fn set_last_max_cwnd(&mut self, last_max_cwnd: f64) {
+        self.last_max_cwnd = last_max_cwnd;
     }
 }
 
@@ -182,14 +207,11 @@ impl WindowAdjustment for Cubic {
         now: Instant,
     ) -> usize {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
-        let new_acked_f64 = convert_to_f64(new_acked_bytes);
+        let max_datagram_size_f64 = convert_to_f64(max_datagram_size);
         if self.ca_epoch_start.is_none() {
             // This is a start of a new congestion avoidance phase.
-            self.start_epoch(curr_cwnd_f64, new_acked_f64, max_datagram_size, now);
-        } else {
-            self.tcp_acked_bytes += new_acked_f64;
+            self.start_epoch(curr_cwnd_f64, max_datagram_size, now);
         }
-
         // Cubic concave or convex region
         //
         // <https://datatracker.ietf.org/doc/html/rfc8312#section-4.3>
@@ -208,16 +230,18 @@ impl WindowAdjustment for Cubic {
             .as_secs_f64();
         let target_cubic = self.w_cubic(time_ca, max_datagram_size);
 
-        // Cubic TCP-friendly region
+        // Calculate w_est for the Reno-friendly region with a slightly adjusted formula per the
+        // below:
         //
-        //  <https://datatracker.ietf.org/doc/html/rfc8312#section-4.2>
-        let max_datagram_size = convert_to_f64(max_datagram_size);
-        let tcp_cnt = self.estimated_tcp_cwnd / CUBIC_ALPHA;
-        let incr = (self.tcp_acked_bytes / tcp_cnt).floor();
-        if incr > 0.0 {
-            self.tcp_acked_bytes -= incr * tcp_cnt;
-            self.estimated_tcp_cwnd += incr * max_datagram_size;
-        }
+        // > Note that this equation uses segments_acked and cwnd is measured in segments. An
+        // > implementation that measures cwnd in bytes should adjust the equation accordingly
+        // > using the number of acknowledged bytes and the SMSS.
+        //
+        // Formula: w_est = w_est + alpha * (bytes_acked / cwnd) * SMSS
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-9>
+        self.w_est +=
+            CUBIC_ALPHA * (convert_to_f64(new_acked_bytes) / curr_cwnd_f64) * max_datagram_size_f64;
 
         // Take the larger cwnd of Cubic concave or convex and Cubic
         // TCP-friendly region.
@@ -228,7 +252,7 @@ impl WindowAdjustment for Cubic {
         // > cwnd SHOULD be set to W_est(t) at each reception of an ACK.
         //
         // <https://datatracker.ietf.org/doc/html/rfc8312#section-4.2>
-        let target_cwnd = target_cubic.max(self.estimated_tcp_cwnd);
+        let target_cwnd = target_cubic.max(self.w_est);
 
         // Calculate the number of bytes that would need to be acknowledged for an increase
         // of `max_datagram_size` to match the increase of `target - cwnd / cwnd` as defined
@@ -237,11 +261,12 @@ impl WindowAdjustment for Cubic {
         // If the target is not significantly higher than the congestion window, require a very
         // large amount of acknowledged data (effectively block increases).
         let mut acked_to_increase =
-            max_datagram_size * curr_cwnd_f64 / (target_cwnd - curr_cwnd_f64).max(1.0);
+            max_datagram_size_f64 * curr_cwnd_f64 / (target_cwnd - curr_cwnd_f64).max(1.0);
 
         // Limit increase to max 1 MSS per EXPONENTIAL_GROWTH_REDUCTION ack packets.
         // This effectively limits target_cwnd to (1 + 1 / EXPONENTIAL_GROWTH_REDUCTION) cwnd.
-        acked_to_increase = acked_to_increase.max(EXPONENTIAL_GROWTH_REDUCTION * max_datagram_size);
+        acked_to_increase =
+            acked_to_increase.max(EXPONENTIAL_GROWTH_REDUCTION * max_datagram_size_f64);
         acked_to_increase as usize
     }
 
@@ -277,15 +302,5 @@ impl WindowAdjustment for Cubic {
         // Reset ca_epoch_start. Let it start again when the congestion controller
         // exits the app-limited period.
         self.ca_epoch_start = None;
-    }
-
-    #[cfg(test)]
-    fn last_max_cwnd(&self) -> f64 {
-        self.last_max_cwnd
-    }
-
-    #[cfg(test)]
-    fn set_last_max_cwnd(&mut self, last_max_cwnd: f64) {
-        self.last_max_cwnd = last_max_cwnd;
     }
 }

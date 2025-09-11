@@ -100,10 +100,6 @@ pub trait WindowAdjustment: Display + Debug {
     ) -> (usize, usize);
     /// Cubic needs this signal to reset its epoch.
     fn on_app_limited(&mut self);
-    #[cfg(test)]
-    fn last_max_cwnd(&self) -> f64;
-    #[cfg(test)]
-    fn set_last_max_cwnd(&mut self, last_max_cwnd: f64);
 }
 
 #[derive(Debug)]
@@ -434,14 +430,18 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         self.ssthresh = v;
     }
 
+    /// Accessor for [`ClassicCongestionControl::cc_algorithm`]. Is used to call Cubic getters in
+    /// tests.
     #[cfg(test)]
-    pub fn last_max_cwnd(&self) -> f64 {
-        self.cc_algorithm.last_max_cwnd()
+    pub const fn cc_algorithm(&self) -> &T {
+        &self.cc_algorithm
     }
 
+    /// Mutable accessor for [`ClassicCongestionControl::cc_algorithm`]. Is used to call Cubic
+    /// setters in tests.
     #[cfg(test)]
-    pub fn set_last_max_cwnd(&mut self, last_max_cwnd: f64) {
-        self.cc_algorithm.set_last_max_cwnd(last_max_cwnd);
+    pub fn cc_algorithm_mut(&mut self) -> &mut T {
+        &mut self.cc_algorithm
     }
 
     #[cfg(test)]
