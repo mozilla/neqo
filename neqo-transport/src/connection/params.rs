@@ -115,7 +115,7 @@ impl Default for ConnectionParameters {
             ack_ratio: Self::DEFAULT_ACK_RATIO,
             idle_timeout: Self::DEFAULT_IDLE_TIMEOUT,
             preferred_address: PreferredAddressConfig::Default,
-            datagram_size: 0,
+            datagram_size: 1200,
             outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             incoming_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             initial_rtt: DEFAULT_INITIAL_RTT,
