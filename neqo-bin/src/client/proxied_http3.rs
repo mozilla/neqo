@@ -34,14 +34,14 @@ impl super::Handler for Handler {
     type Client = ProxiedHttp3;
 
     fn handle(&mut self, client: &mut ProxiedHttp3) -> Res<bool> {
-        let done = client.handler.handle(&mut client.proxied_conn)?;
+        let done = client.handler.handle(&mut client.inner_conn)?;
 
-        if matches!(client.proxied_conn.is_closed()?, CloseState::Closed) {
+        if matches!(client.inner_conn.is_closed()?, CloseState::Closed) {
             if let Some(stream_id) = client.session_id.take() {
                 client
-                    .proxy_conn
+                    .outer_conn
                     .connect_udp_close_session(stream_id, 0, "kthxbye!")?;
-                client.proxy_conn.close(Instant::now(), 0, "kthxbye!");
+                client.outer_conn.close(Instant::now(), 0, "kthxbye!");
             }
 
             return Ok(true);
@@ -62,11 +62,11 @@ impl super::Handler for Handler {
 pub struct ProxiedHttp3 {
     /// HTTP/3 connection to the origin, proxied through
     /// [`ProxiedHttp3::proxy_conn`].
-    proxied_conn: Http3Client,
+    inner_conn: Http3Client,
     handler: super::http3::Handler,
     /// HTTP/3 connection to the proxy server, providing a MASQUE connect-udp
     /// session.
-    proxy_conn: Http3Client,
+    outer_conn: Http3Client,
     url: Url,
     /// The MASQUE connect-udp session ID, i.e., the HTTP EXTENDED CONNECT stream ID.
     session_id: Option<StreamId>,
@@ -101,9 +101,9 @@ impl ProxiedHttp3 {
             Instant::now(),
         )?;
         Ok(Self {
-            proxied_conn,
+            inner_conn: proxied_conn,
             handler,
-            proxy_conn,
+            outer_conn: proxy_conn,
             url,
             session_id: None,
             local: None,
@@ -126,13 +126,13 @@ impl Client for ProxiedHttp3 {
                 // established yet, and we can't send anything.
                 break None;
             };
-            match self.proxied_conn.process_output(now) {
+            match self.inner_conn.process_output(now) {
                 neqo_http3::Output::None => break None,
                 neqo_http3::Output::Callback(duration) => break Some(duration),
                 neqo_http3::Output::Datagram(datagram) => {
                     self.local = Some(datagram.source());
                     self.remote = Some(datagram.destination());
-                    self.proxy_conn
+                    self.outer_conn
                         .connect_udp_send_datagram(
                             stream_id,
                             datagram.as_ref(),
@@ -145,7 +145,7 @@ impl Client for ProxiedHttp3 {
 
         // Second, service the proxy connection.
         let maybe_proxy_conn_callback =
-            match self.proxy_conn.process_multiple_output(now, max_datagrams) {
+            match self.outer_conn.process_multiple_output(now, max_datagrams) {
                 OutputBatch::None => None,
                 o @ OutputBatch::DatagramBatch(_) => return o,
                 OutputBatch::Callback(duration) => Some(duration),
@@ -165,20 +165,20 @@ impl Client for ProxiedHttp3 {
         now: Instant,
     ) {
         // Process the input datagrams.
-        self.proxy_conn.process_multiple_input(dgrams, now);
+        self.outer_conn.process_multiple_input(dgrams, now);
 
         // See whether as a result we have any datagrams for the proxied connection.
-        while let Some(event) = self.proxy_conn.next_event() {
+        while let Some(event) = self.outer_conn.next_event() {
             match event {
                 Http3ClientEvent::AuthenticationNeeded => {
-                    self.proxy_conn
+                    self.outer_conn
                         .authenticated(AuthenticationStatus::Ok, Instant::now());
                 }
                 Http3ClientEvent::ConnectUdp(event) => match event {
                     ConnectUdpEvent::Negotiated(success) => {
                         assert!(success);
-                        assert!(self.proxy_conn.state().active());
-                        self.proxy_conn
+                        assert!(self.outer_conn.state().active());
+                        self.outer_conn
                             .connect_udp_create_session(Instant::now(), &self.url, &self.headers)
                             .unwrap();
                     }
@@ -197,7 +197,7 @@ impl Client for ProxiedHttp3 {
                             tos,
                             datagram,
                         );
-                        self.proxied_conn.process_input(datagram, now);
+                        self.inner_conn.process_input(datagram, now);
                     }
                     ConnectUdpEvent::SessionClosed { .. } => {}
                 },
@@ -215,28 +215,28 @@ impl Client for ProxiedHttp3 {
     where
         S: AsRef<str> + Display,
     {
-        self.proxied_conn
+        self.inner_conn
             .close(now, app_error, msg.as_ref().to_string());
     }
 
     fn is_closed(&self) -> Result<CloseState, CloseReason> {
-        match self.proxied_conn.is_closed()? {
+        match self.inner_conn.is_closed()? {
             CloseState::NotClosing => return Ok(CloseState::NotClosing),
             CloseState::Closing => return Ok(CloseState::Closing),
             CloseState::Closed => {}
         }
 
-        match self.proxy_conn.is_closed()? {
+        match self.outer_conn.is_closed()? {
             CloseState::Closed => Ok(CloseState::Closed),
             CloseState::NotClosing | CloseState::Closing => Ok(CloseState::Closing),
         }
     }
 
     fn stats(&self) -> neqo_transport::Stats {
-        self.proxied_conn.transport_stats()
+        self.inner_conn.transport_stats()
     }
 
     fn has_events(&self) -> bool {
-        Provider::has_events(&self.proxied_conn)
+        Provider::has_events(&self.inner_conn)
     }
 }
