@@ -194,6 +194,7 @@ pub fn new_trace(role: Role) -> TraceSeq {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use qlog::events::Event;
     use regex::Regex;

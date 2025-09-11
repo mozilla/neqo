@@ -240,6 +240,7 @@ impl RecvStream for NewStreamHeadReader {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::{Encoder, Role};
     use neqo_qpack::{

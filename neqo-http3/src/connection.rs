@@ -1681,6 +1681,7 @@ impl Http3Connection {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use crate::{
         connection::{Http3Connection, RequestDescription},
