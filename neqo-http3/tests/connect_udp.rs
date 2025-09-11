@@ -182,8 +182,7 @@ fn exchange_packets_through_proxy(
     client_inner.process_multiple_input(client_inner_dgrams, now());
 }
 
-#[test]
-fn session_lifecycle() {
+fn session_lifecycle(client_closes: bool) {
     const PING: &[u8] = b"ping";
     const PONG: &[u8] = b"pong";
     fixture_init();
@@ -236,24 +235,53 @@ fn session_lifecycle() {
     assert_eq!(session_id, id);
     assert_eq!(datagram, PONG);
 
-    client
-        .connect_udp_close_session(session_id, 0, "kthxbye")
-        .unwrap();
+    if client_closes {
+        client
+            .connect_udp_close_session(session_id, 0, "kthxbye")
+            .unwrap();
 
-    exchange_packets(&mut client, &mut proxy, false, None);
+        exchange_packets(&mut client, &mut proxy, false, None);
 
-    proxy
-        .events()
-        .find(|event| {
-            matches!(
-                event,
-                Http3ServerEvent::ConnectUdp(ConnectUdpServerEvent::SessionClosed {
-                    session,
-                    ..
-                }) if session.stream_id() == session_id
-            )
-        })
-        .unwrap();
+        proxy
+            .events()
+            .find(|event| {
+                matches!(
+                    event,
+                    Http3ServerEvent::ConnectUdp(ConnectUdpServerEvent::SessionClosed {
+                        session,
+                        ..
+                    }) if session.stream_id() == session_id
+                )
+            })
+            .unwrap();
+    } else {
+        proxy_session.close_session(0, "kthxbye").unwrap();
+
+        exchange_packets(&mut client, &mut proxy, false, None);
+
+        client
+            .events()
+            .find(|event| {
+                matches!(
+                    event,
+                    Http3ClientEvent::ConnectUdp(ConnectUdpEvent::SessionClosed {
+                        stream_id,
+                        ..
+                    }) if *stream_id == session_id
+                )
+            })
+            .unwrap();
+    }
+}
+
+#[test]
+fn session_lifecycle_client_closes() {
+    session_lifecycle(true);
+}
+
+#[test]
+fn session_lifecycle_server_closes() {
+    session_lifecycle(false);
 }
 
 #[test]
