@@ -9,8 +9,9 @@
 use neqo_common::{event::Provider as _, header::HeadersExt as _, qinfo, Datagram, Tos};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
-    ConnectUdpEvent, ConnectUdpRequest, ConnectUdpServerEvent, Http3Client, Http3ClientEvent,
-    Http3Parameters, Http3Server, Http3ServerEvent, Http3State, SessionAcceptAction,
+    ConnectUdpEvent, ConnectUdpRequest, ConnectUdpServerEvent, Error, Http3Client,
+    Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
+    SessionAcceptAction,
 };
 use neqo_transport::ConnectionParameters;
 use test_fixture::{
@@ -19,12 +20,7 @@ use test_fixture::{
 };
 use url::Url;
 
-fn new_session() -> (
-    Http3Client,
-    Http3Server,
-    neqo_http3::StreamId,
-    ConnectUdpRequest,
-) {
+fn initiate_new_session() -> (Http3Client, Http3Server, neqo_http3::StreamId) {
     let conn_params = ConnectionParameters::default()
         .pmtud(true)
         .datagram_size(1500);
@@ -59,6 +55,16 @@ fn new_session() -> (
             &[],
         )
         .unwrap();
+    (client, proxy, connect_udp_session_id)
+}
+
+fn establish_new_session() -> (
+    Http3Client,
+    Http3Server,
+    neqo_http3::StreamId,
+    ConnectUdpRequest,
+) {
+    let (mut client, mut proxy, connect_udp_session_id) = initiate_new_session();
     exchange_packets(&mut client, &mut proxy, false, None);
     let proxy_session = proxy
         .events()
@@ -188,7 +194,7 @@ fn session_lifecycle(client_closes: bool) {
     fixture_init();
     neqo_common::log::init(None);
 
-    let (mut client, mut proxy, session_id, proxy_session) = new_session();
+    let (mut client, mut proxy, session_id, proxy_session) = establish_new_session();
 
     client
         .connect_udp_send_datagram(session_id, PING, None)
@@ -292,7 +298,8 @@ fn connect_via_proxy() {
     let mut client_inner = default_http3_client();
     let mut server = default_http3_server();
 
-    let (mut client_outer, mut proxy, connect_udp_session_id, proxy_session) = new_session();
+    let (mut client_outer, mut proxy, connect_udp_session_id, proxy_session) =
+        establish_new_session();
 
     let mut needs_auth = false;
     // Establish inner connection on top of connect-udp session.
@@ -344,4 +351,15 @@ fn connect_via_proxy() {
             &proxy_session,
         );
     }
+}
+
+#[test]
+#[cfg_attr(debug_assertions, should_panic(expected = "assertion failed: false"))]
+fn send_dgram_on_non_active_session() {
+    let (mut client, _proxy, connect_udp_session_id) = initiate_new_session();
+
+    assert_eq!(
+        client.connect_udp_send_datagram(connect_udp_session_id, &[], None),
+        Err(Error::Unavailable)
+    );
 }
