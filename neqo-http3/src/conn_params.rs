@@ -135,3 +135,20 @@ impl Http3Parameters {
         self.http3_datagram
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use neqo_transport::ConnectionParameters;
+
+    use crate::Http3Parameters;
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "assertion failed: false")]
+    fn get_http3_datagram_debug_panic_on_mismatch() {
+        let params = Http3Parameters::default()
+            .connection_parameters(ConnectionParameters::default().datagram_size(0))
+            .http3_datagram(true);
+        assert!(params.get_http3_datagram());
+    }
+}
