@@ -24,10 +24,13 @@ use crate::{
     client_events::Http3ClientEvents,
     control_stream_local::ControlStreamLocal,
     control_stream_remote::ControlStreamRemote,
-    features::extended_connect::{
-        webtransport_session,
-        webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
-        ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
+    features::{
+        extended_connect::{
+            webtransport_session,
+            webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
+            ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
+        },
+        ConnectType,
     },
     frames::HFrame,
     push_controller::PushController,
@@ -48,7 +51,7 @@ where
     T: AsRequestTarget<'t> + ?Sized + Debug,
 {
     pub method: &'b str,
-    pub connect_type: Option<ExtendedConnectType>,
+    pub connect_type: Option<ConnectType>,
     pub target: &'t T,
     pub headers: &'b [Header],
     pub priority: Priority,
@@ -787,7 +790,9 @@ impl Http3Connection {
         output
     }
 
-    fn create_fetch_headers<'b, 't, T>(request: &RequestDescription<'b, 't, T>) -> Res<Vec<Header>>
+    fn create_request_headers<'b, 't, T>(
+        request: &RequestDescription<'b, 't, T>,
+    ) -> Res<Vec<Header>>
     where
         T: AsRequestTarget<'t> + ?Sized + Debug,
     {
@@ -796,22 +801,56 @@ impl Http3Connection {
             .as_request_target()
             .map_err(|_| Error::InvalidRequestTarget)?;
 
-        // Transform pseudo-header fields
-        let mut final_headers = vec![
-            Header::new(":method", request.method),
-            Header::new(":scheme", target.scheme()),
-            Header::new(":authority", target.authority()),
-            Header::new(":path", target.path()),
-        ];
-        if let Some(conn_type) = request.connect_type {
-            final_headers.push(Header::new(":protocol", conn_type.string()));
+        match request.connect_type {
+            Some(_) if request.method != "CONNECT" => {
+                qwarn!("Method CONNECT without CONNECT type");
+                return Err(Error::InvalidInput);
+            }
+            None if request.method == "CONNECT" => {
+                qwarn!(
+                    "Method {} with CONNECT type {:?}",
+                    request.method,
+                    request.connect_type
+                );
+                return Err(Error::InvalidInput);
+            }
+            _ => {}
         }
 
-        final_headers.extend_from_slice(request.headers);
-        Ok(final_headers)
+        let mut headers = match request.connect_type {
+            None => {
+                vec![
+                    Header::new(":method", request.method),
+                    Header::new(":scheme", target.scheme()),
+                    Header::new(":authority", target.authority()),
+                    Header::new(":path", target.path()),
+                ]
+            }
+            Some(ConnectType::Classic) => {
+                // > The :scheme and :path pseudo-header fields are omitted
+                //
+                // <https://datatracker.ietf.org/doc/html/rfc9114#section-4.4>
+                vec![
+                    Header::new(":method", request.method),
+                    Header::new(":authority", target.authority()),
+                ]
+            }
+            Some(ConnectType::Extended(protocol)) => {
+                vec![
+                    Header::new(":method", request.method),
+                    Header::new(":scheme", target.scheme()),
+                    Header::new(":authority", target.authority()),
+                    Header::new(":path", target.path()),
+                    Header::new(":protocol", protocol.string()),
+                ]
+            }
+        };
+
+        headers.extend_from_slice(request.headers);
+        Ok(headers)
     }
 
-    pub fn fetch<'b, 't, T>(
+    pub fn request<'b, 't, T>(
         &mut self,
         conn: &mut Connection,
         send_events: Box<dyn SendStreamEvents>,
@@ -823,12 +862,12 @@ impl Http3Connection {
         T: AsRequestTarget<'t> + ?Sized + Debug,
     {
         qinfo!(
-            "[{self}] Fetch method={} target: {:?}",
+            "[{self}] Request method={} target: {:?}",
             request.method,
             request.target,
         );
         let id = self.create_bidi_transport_stream(conn)?;
-        self.fetch_with_stream(id, conn, send_events, recv_events, push_handler, request)?;
+        self.request_with_stream(id, conn, send_events, recv_events, push_handler, request)?;
         Ok(id)
     }
 
@@ -850,7 +889,7 @@ impl Http3Connection {
         Ok(id)
     }
 
-    fn fetch_with_stream<'b, 't, T>(
+    fn request_with_stream<'b, 't, T>(
         &mut self,
         stream_id: StreamId,
         conn: &mut Connection,
@@ -862,7 +901,7 @@ impl Http3Connection {
     where
         T: AsRequestTarget<'t> + ?Sized + Debug,
     {
-        let final_headers = Self::create_fetch_headers(request)?;
+        let final_headers = Self::create_request_headers(request)?;
 
         let stream_type = if request.connect_type.is_some() {
             Http3StreamType::ExtendedConnect
@@ -1099,11 +1138,11 @@ impl Http3Connection {
             Box::new(Rc::clone(&extended_conn)),
         );
 
-        let final_headers = Self::create_fetch_headers(&RequestDescription {
+        let final_headers = Self::create_request_headers(&RequestDescription {
             method: "CONNECT",
             target,
             headers,
-            connect_type: Some(ExtendedConnectType::WebTransport),
+            connect_type: Some(ConnectType::Extended(ExtendedConnectType::WebTransport)),
             priority: Priority::default(),
         })?;
         extended_conn
@@ -1636,5 +1675,44 @@ impl Http3Connection {
     #[must_use]
     pub fn recv_streams_mut(&mut self) -> &mut HashMap<StreamId, Box<dyn RecvStream>> {
         &mut self.recv_streams
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        connection::{Http3Connection, RequestDescription},
+        features::ConnectType,
+        Error, Priority,
+    };
+
+    #[test]
+    fn create_request_headers_connect_without_connect_type() {
+        let request = RequestDescription {
+            method: "CONNECT",
+            target: "https://example.com",
+            headers: &[],
+            connect_type: None,
+            priority: Priority::default(),
+        };
+        assert_eq!(
+            Http3Connection::create_request_headers(&request),
+            Err(Error::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn create_request_headers_connect_type_without_connect() {
+        let request = RequestDescription {
+            method: "GET",
+            target: "https://example.com",
+            headers: &[],
+            connect_type: Some(ConnectType::Classic),
+            priority: Priority::default(),
+        };
+        assert_eq!(
+            Http3Connection::create_request_headers(&request),
+            Err(Error::InvalidInput)
+        );
     }
 }
