@@ -225,11 +225,16 @@ fn receive_data_server(
 fn wt_keepalive() {
     let (mut client, mut server) = connect();
     let _wt_session = create_wt_session(&mut client, &mut server);
-    let idle_timeout = ConnectionParameters::default().get_idle_timeout();
     // Expect client and server to send PING after half of the idle timeout in order to keep
     // connection alive.
-    assert_eq!(client.process_output(now()).callback(), idle_timeout / 2);
-    assert_eq!(server.process_output(now()).callback(), idle_timeout / 2);
+    assert_eq!(
+        client.process_output(now()).callback(),
+        ConnectionParameters::DEFAULT_IDLE_TIMEOUT / 2
+    );
+    assert_eq!(
+        server.process_output(now()).callback(),
+        ConnectionParameters::DEFAULT_IDLE_TIMEOUT / 2
+    );
 }
 
 #[test]

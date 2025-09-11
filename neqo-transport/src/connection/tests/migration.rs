@@ -4,6 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(
+    clippy::allow_attributes,
+    clippy::unwrap_in_result,
+    reason = "OK in tests."
+)]
+
 use std::{
     cell::RefCell,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -158,7 +164,7 @@ fn rebind(
 
     // The client should process the ACK and go idle.
     let delay = client.process(Some(s4_reb), now).callback();
-    assert_eq!(delay, ConnectionParameters::default().get_idle_timeout());
+    assert_eq!(delay, ConnectionParameters::DEFAULT_IDLE_TIMEOUT);
 
     let client_uses_zero_len_cid = client
         .paths
@@ -174,7 +180,7 @@ fn rebind(
         match server.process_output(now) {
             Output::Callback(t) => {
                 total_delay += t;
-                if total_delay == ConnectionParameters::default().get_idle_timeout() {
+                if total_delay == ConnectionParameters::DEFAULT_IDLE_TIMEOUT {
                     // Server should only hit the idle timeout here when the client uses a zero-len
                     // CID.
                     assert!(client_uses_zero_len_cid);

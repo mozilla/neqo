@@ -27,8 +27,9 @@ neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
 qlog = { workspace = true }
 rustc-hash = { workspace = true}
-sfv = { version = "0.9", default-features = false }
+sfv = { version = "0.14", default-features = false, features = ["parsed-types"] }
 strum = { workspace = true}
+thiserror = { workspace = true}
 url = { workspace = true }
 
 [dev-dependencies]
@@ -43,15 +44,13 @@ disable-encryption = ["neqo-transport/disable-encryption", "neqo-crypto/disable-
 draft-29 = []
 
 [package.metadata.cargo-machete]
-ignored = ["log"]
+ignored = ["criterion", "log"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
 
-# FIXME: These benches have a high rate of variability and are hence not very useful
-# in their current form. See https://github.com/mozilla/neqo/issues/2804
-# [[bench]]
-# name = "streams"
-# harness = false
-# required-features = ["bench"]
+[[bench]]
+name = "streams"
+harness = false
+required-features = ["bench"]

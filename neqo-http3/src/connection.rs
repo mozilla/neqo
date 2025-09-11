@@ -24,10 +24,13 @@ use crate::{
     client_events::Http3ClientEvents,
     control_stream_local::ControlStreamLocal,
     control_stream_remote::ControlStreamRemote,
-    features::extended_connect::{
-        webtransport_session::WebTransportSession,
-        webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
-        ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
+    features::{
+        extended_connect::{
+            webtransport_session,
+            webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
+            ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
+        },
+        ConnectType,
     },
     frames::HFrame,
     push_controller::PushController,
@@ -48,7 +51,7 @@ where
     T: AsRequestTarget<'t> + ?Sized + Debug,
 {
     pub method: &'b str,
-    pub connect_type: Option<ExtendedConnectType>,
+    pub connect_type: Option<ConnectType>,
     pub target: &'t T,
     pub headers: &'b [Header],
     pub priority: Priority,
@@ -97,153 +100,182 @@ impl Http3State {
     }
 }
 
-/**
-# HTTP/3 core implementation
-
-This is the core implementation of HTTP/3 protocol. It implements most of the features of the
-protocol. `Http3Client` and `Http3ServerHandler` implement only client and server side behavior.
-
-## Streams
-
-Each `Http3Connection` holds a list of stream handlers. Each send and receive-handler is registered in
-`send_streams` and `recv_streams`. Unidirectional streams are registered only on one of the lists
-and bidirectional streams are registered in both lists and the 2 handlers are independent, e.g. one
-can be closed and removed and second may still be active.
-
-The only streams that are not registered are the local control stream, local QPACK decoder stream,
-and local QPACK encoder stream. These streams are send-streams and sending data on this stream is
-handled a bit differently. This is done in the `process_sending` function, i.e. the control data is
-sent first and QPACK data is sent after regular stream data is sent because this stream may have
-new data only after regular streams are handled (TODO we may improve this a bit to send QPACK
-commands before headers.)
-
-There are the following types of streams:
-- `Control`: there is only a receiver stream of this type and the handler is `ControlStreamRemote`.
-- `Decoder`: there is only a receiver stream of this type and the handler is `DecoderRecvStream`.
-- `Encoder`: there is only a receiver stream of this type and the handler is `EncoderRecvStream`.
-- `NewStream`: there is only a receiver stream of this type and the handler is
-  `NewStreamHeadReader`.
-- `Http`: `SendMessage` and `RecvMessage` handlers are responsible for this type of streams.
-- `Push`: `RecvMessage` is responsible for this type of streams.
-- `ExtendedConnect`: `WebTransportSession` is responsible sender and receiver handler.
-- `WebTransport(StreamId)`: `WebTransportSendStream` and `WebTransportRecvStream` are responsible
-  sender and receiver handler.
-- `Unknown`: These are all other stream types that are not unknown to the current implementation
-  and should be handled properly by the spec, e.g., in our implementation the streams are
-  reset.
-
-The streams are registered in `send_streams` and `recv_streams` in following ways depending if they
-are local or remote:
-- local streams:
-  - all local stream will be registered with the appropriate handler.
-- remote streams:
-  - all new incoming streams are registered with `NewStreamHeadReader`. This is triggered by
-    `ConnectionEvent::NewStream` and `add_new_stream` is called.
-  - reading from a `NewStreamHeadReader` stream, via the `receive` function, will decode a stream
-    type. `NewStreamHeadReader::receive` will return `ReceiveOutput::NewStream(_)` when a stream
-    type has been decoded.  After this point the stream:
-    - will be regegistered with the appropriate handler,
-    - will be canceled if is an unknown stream type or
-    - the connection will fail if it is unallowed stream type (receiving HTTP request on the
-      client-side).
-
-The output is handled in `handle_new_stream`, for control,  qpack streams and partially
-`WebTransport` streams, otherwise the output is handled by `Http3Client` and `Http3ServerHandler`.
-
-
-### Receiving data
-
-Reading from a stream is triggered by `ConnectionEvent::RecvStreamReadable` events for the stream.
-The receive handler is retrieved from `recv_streams` and its `RecvStream::receive` function is
-called.
-
-Receiving data on `Http` streams is also triggered by the `read_data` function.
-`ConnectionEvent::RecvStreamReadable` events will trigger reading `HEADERS` frame and frame headers
-for `DATA` frames which will produce `Http3ClientEvent` or `Http3ServerEvent` events. The content of
-`DATA` frames is read by the application using the `read_data` function. The `read_data` function
-may read frame headers for consecutive `DATA` frames.
-
-On a `WebTransport(_)` stream data will be read only by the `read_data` function. The
-`RecvStream::receive` function only produces an `Http3ClientEvent` or `Http3ServerEvent` event.
-
-The `receive` and `read_data` functions may detect that the stream is done, e.g. FIN received. In
-this case, the stream will be removed from the `recv_stream` register, see `remove_recv_stream`.
-
-### Sending data
-
-All sender stream handlers have buffers. Data is first written into a buffer before being supplied
-to the QUIC layer. All data except the `DATA` frame and `WebTransport(_)`’s payload are written
-into the buffer. This includes stream type byte, e.g. `WEBTRANSPORT_STREAM` as well. In the case of
-`Http` and `WebTransport(_)` applications can write directly to the QUIC layer using the
-`send_data` function to avoid copying data. Sending data via the `send_data` function is only
-possible if there is no buffered data.
-
-If a stream has buffered data it will be registered in the `streams_with_pending_data` queue and
-actual sending will be performed in the `process_sending` function call. (This is done in this way,
-i.e. data is buffered first and then sent, for 2 reasons: in this way, sending will happen in a
-single function,  therefore error handling and clean up is easier and the QUIC layer may not be
-able to accept all data and being able to buffer data is required in any case.)
-
-The `send` and `send_data` functions may detect that the stream is closed and all outstanding data
-has been transferred to the QUIC layer. In this case, the stream will be removed from the
-`send_stream` register.
-
-### `ControlStreamRemote`
-
-The `ControlStreamRemote` handler uses `FrameReader` to read and decode frames received on the
-control frame. The `receive` returns `ReceiveOutput::ControlFrames(_)` with a list of control
-frames read (the list may be empty). The control frames are handled by `Http3Connection` and/or by
-`Http3Client` and `Http3ServerHandler`.
-
-### `DecoderRecvStream` and `EncoderRecvStream`
-
-The `receive` functions of these handlers call corresponding `receive` functions of `decoder::QPack`
-and `decoder::QPack`.
-
-`DecoderRecvStream` returns `ReceiveOutput::UnblockedStreams(_)` that may contain a list of stream
-ids that are unblocked by receiving qpack decoder commands. `Http3Connection` will handle this
-output by calling `receive` for the listed stream ids.
-
-`EncoderRecvStream` only returns `ReceiveOutput::NoOutput`.
-
-Both handlers may return an error that will close the connection.
-
-### `NewStreamHeadReader`
-
-A new incoming receiver stream registers a `NewStreamHeadReader` handler. This handler reads the
-first bytes of a stream to detect a stream type. The `receive` function returns
-`ReceiveOutput::NoOutput` if a stream type is still not known by reading the available stream data
-or `ReceiveOutput::NewStream(_)`. The handling of the output is explained above.
-
-### `SendMessage` and `RecvMessage`
-
-`RecvMessage::receive` only returns `ReceiveOutput::NoOutput`. It also have an event listener of
-type `HttpRecvStreamEvents`. The listener is called when headers are ready, or data is ready, etc.
-
-For example for `Http`   stream the listener will produce  `HeaderReady` and `DataReadable` events.
-
-### `WebTransportSession`
-
-A `WebTransport` session is connected to a control stream that is in essence an HTTP transaction.
-Therefore, `WebTransportSession` will internally use a `SendMessage` and `RecvMessage` handler to
-handle parsing and sending of HTTP part of the control stream. When HTTP headers are exchanged,
-`WebTransportSession` will take over handling of stream data. `WebTransportSession` sets
-`WebTransportSessionListener` as the `RecvMessage` event listener.
-
-`WebTransportSendStream` and `WebTransportRecvStream` are associated with a `WebTransportSession`
-and they will be canceled if the session is closed. To be able to do this `WebTransportSession`
-holds a list of its active streams and clean up is done in `remove_extended_connect`.
-
-###  `WebTransportSendStream` and `WebTransportRecvStream`
-
-`WebTransport` streams are associated with a session. `WebTransportSendStream` and
-`WebTransportRecvStream` hold a reference to the session and are registered in the session upon
- creation by `Http3Connection`. The `WebTransportSendStream` and `WebTransportRecvStream`
- handlers will be unregistered from the session if they are closed, reset, or canceled.
-
-The call to function `receive` may produce `Http3ClientEvent::DataReadable`. Actual reading of
-data is done in the `read_data` function.
-*/
+/// # HTTP/3 core implementation
+///
+/// This is the core implementation of HTTP/3 protocol. It implements most of the
+/// features of the protocol. [`crate::Http3Client`] and
+/// [`crate::connection_server::Http3ServerHandler`] implement only client and
+/// server side behavior.
+///
+/// ## Streams
+///
+/// Each [`Http3Connection`] holds a list of stream handlers. Each send and receive-handler is
+/// registered in `send_streams` and `recv_streams`. Unidirectional streams are registered only on
+/// one of the lists and bidirectional streams are registered in both lists and the 2 handlers are
+/// independent, e.g. one can be closed and removed and second may still be active.
+///
+/// The only streams that are not registered are the local control stream, local
+/// QPACK decoder stream, and local QPACK encoder stream. These streams are
+/// send-streams and sending data on this stream is handled a bit differently. This
+/// is done in the [`Http3Connection::process_sending`] function, i.e. the control data
+/// is sent first and QPACK data is sent after regular stream data is sent because
+/// this stream may have new data only after regular streams are handled (TODO we
+/// may improve this a bit to send QPACK commands before headers.)
+///
+/// There are the following types of streams:
+/// - [`Http3StreamType::Control`]: there is only a receiver stream of this type and the handler is
+///   [`ControlStreamRemote`].
+/// - [`Http3StreamType::Decoder`]: there is only a receiver stream of this type and the handler is
+///   [`DecoderRecvStream`].
+/// - [`Http3StreamType::Encoder`]: there is only a receiver stream of this type and the handler is
+///   [`EncoderRecvStream`].
+/// - [`Http3StreamType::NewStream`]: there is only a receiver stream of this type and the handler
+///   is [`NewStreamHeadReader`].
+/// - [`Http3StreamType::Http`]: [`SendMessage`] and [`RecvMessage`] handlers are responsible for
+///   this type of streams.
+/// - [`Http3StreamType::Push`]: [`RecvMessage`] is responsible for this type of streams.
+/// - [`Http3StreamType::ExtendedConnect`]: [`webtransport_session::Session`] is responsible sender
+///   and receiver handler.
+/// - [`Http3StreamType::WebTransport`]: [`WebTransportSendStream`] and [`WebTransportRecvStream`]
+///   are responsible sender and receiver handler.
+/// - [`Http3StreamType::Unknown`]: These are all other stream types that are not unknown to the
+///   current implementation and should be handled properly by the spec, e.g., in our implementation
+///   the streams are reset.
+///
+/// The streams are registered in `send_streams` and `recv_streams` in following ways depending if
+/// they are local or remote:
+/// - local streams:
+///   - all local stream will be registered with the appropriate handler.
+/// - remote streams:
+///   - all new incoming streams are registered with [`NewStreamHeadReader`]. This is triggered by
+///     [`ConnectionEvent::NewStream`] and [`Http3Connection::add_new_stream`] is called.
+///   - reading from a [`NewStreamHeadReader`] stream, via the [`RecvStream::receive`] function,
+///     will decode a stream type. [`RecvStream::receive`] will return [`ReceiveOutput::NewStream`]
+///     when a stream type has been decoded.  After this point the stream:
+///     - will be regegistered with the appropriate handler,
+///     - will be canceled if is an unknown stream type or
+///     - the connection will fail if it is unallowed stream type (receiving HTTP request on the
+///       client-side).
+///
+/// The output is handled in [`Http3Connection::handle_new_stream`], for control, qpack streams and
+/// partially `WebTransport` streams, otherwise the output is handled by [`Http3Client`] and
+/// [`Http3ServerHandler`].
+///
+///
+/// ### Receiving data
+///
+/// Reading from a stream is triggered by [`ConnectionEvent::RecvStreamReadable`] events for the
+/// stream. The receive handler is retrieved from `recv_streams` and its [`RecvStream::receive`]
+/// function is called.
+///
+/// Receiving data on [`Http3StreamType::Http`] streams is also triggered by the
+/// [`Http3Connection::read_data`] function. [`ConnectionEvent::RecvStreamReadable`] events will
+/// trigger reading `HEADERS` frame and frame headers for `DATA` frames which will produce
+/// [`Http3ClientEvent`] or [`Http3ServerEvent`] events. The content of `DATA` frames is read by the
+/// application using the `read_data` function. The `read_data` function may read frame headers for
+/// consecutive `DATA` frames.
+///
+/// On a [`Http3StreamType::WebTransport`] stream data will be read only by the
+/// `Http3Connection::read_data` function. The [`RecvStream::receive`] function only produces an
+/// [`Http3ClientEvent`] or [`Http3ServerEvent`] event.
+///
+/// The [`RecvStream::receive`] and [`Http3Connection::read_data`] functions may detect that the
+/// stream is done, e.g. FIN received. In this case, the stream will be removed from the
+/// `recv_stream` register, see [`Http3Connection::remove_recv_stream`].
+///
+/// ### Sending data
+///
+/// All sender stream handlers have buffers. Data is first written into a buffer before being
+/// supplied to the QUIC layer. All data except the `DATA` frame and `WebTransport(_)`’s payload are
+/// written into the buffer. This includes stream type byte, e.g. `WEBTRANSPORT_STREAM` as well. In
+/// the case of `Http` and `WebTransport(_)` applications can write directly to the QUIC layer using
+/// the `send_data` function to avoid copying data. Sending data via the `send_data` function is
+/// only possible if there is no buffered data.
+///
+/// If a stream has buffered data it will be registered in the `streams_with_pending_data` queue and
+/// actual sending will be performed in the [`Http3Connection::process_sending`] function call.
+/// (This is done in this way, i.e. data is buffered first and then sent, for 2 reasons: in this
+/// way, sending will happen in a single function,  therefore error handling and clean up is easier
+/// and the QUIC layer may not be able to accept all data and being able to buffer data is required
+/// in any case.)
+///
+/// The `send` and `send_data` functions may detect that the stream is closed and all outstanding
+/// data has been transferred to the QUIC layer. In this case, the stream will be removed from the
+/// `send_stream` register.
+///
+/// ### [`ControlStreamRemote`]
+///
+/// The [`ControlStreamRemote`] handler uses [`FrameReader`] to read and decode frames received on
+/// the control frame. The [`RecvStream::receive`] implementation returns
+/// [`ReceiveOutput::ControlFrames`] with a list of control frames read (the list may be empty). The
+/// control frames are handled by [`Http3Connection`] and/or by [`Http3Client`] and
+/// [`Http3ServerHandler`].
+///
+/// ### [`DecoderRecvStream`] and [`EncoderRecvStream`]
+///
+/// The [`RecvStream::receive`] implementation of these handlers call corresponding
+/// [`RecvStream::receive`] functions of [`qpack::Encoder`] and [`qpack::Decoder`].
+///
+/// [`DecoderRecvStream`] returns [`ReceiveOutput::UnblockedStreams`] that may contain a list of
+/// stream ids that are unblocked by receiving qpack decoder commands. [`Http3Connection`] will
+/// handle this output by calling [`RecvStream::receive`] for the listed stream ids.
+///
+/// [`EncoderRecvStream`] only returns [`ReceiveOutput::NoOutput`].
+///
+/// Both handlers may return an error that will close the connection.
+///
+/// ### [`NewStreamHeadReader`]
+///
+/// A new incoming receiver stream registers a [`NewStreamHeadReader`] handler. This handler reads
+/// the first bytes of a stream to detect a stream type. The [`RecvStream::receive`] function
+/// returns [`ReceiveOutput::NoOutput`] if a stream type is still not known by reading the available
+/// stream data or [`ReceiveOutput::NewStream`]. The handling of the output is explained above.
+///
+/// ### [`SendMessage`] and [`RecvMessage`]
+///
+/// [`RecvMessage::receive`] only returns [`ReceiveOutput::NoOutput`]. It also have an event
+/// listener of type [`HttpRecvStreamEvents`]. The listener is called when headers are ready, or
+/// data is ready, etc.
+///
+/// For example for [`Http3StreamType::Http`] stream the listener will produce
+/// [`Http3ClientEvent::HeaderReady`] and [`Http3ClientEvent::DataReadable`] events.
+///
+/// ### [`webtransport_session::Session`]
+///
+/// A [`webtransport_session::Session`] is connected to a control stream that is in essence an HTTP
+/// transaction. Therefore, [`webtransport_session::Session`] will internally use a [`SendMessage`]
+/// and [`RecvMessage`] handler to handle parsing and sending of HTTP part of the control stream.
+/// When HTTP headers are exchanged, [`webtransport_session::Session`] will take over handling of
+/// stream data. [`webtransport_session::Session`] sets a [`HttpRecvStreamEvents`] listener as the
+/// [`RecvMessage`] event listener.
+///
+/// [`WebTransportSendStream`] and [`WebTransportRecvStream`] are associated with a
+/// [`webtransport_session::Session`] and they will be canceled if the session is closed. To be able
+/// to do this [`webtransport_session::Session`] holds a list of its active streams and clean up is
+/// done in `remove_extended_connect`.
+///
+/// ###  [`WebTransportSendStream`] and [`WebTransportRecvStream`]
+///
+/// WebTransport streams are associated with a session. [`WebTransportSendStream`] and
+/// [`WebTransportRecvStream`] hold a reference to the session and are registered in the session
+/// upon  creation by [`Http3Connection`]. The [`WebTransportSendStream`] and
+/// [`WebTransportRecvStream`]  handlers will be unregistered from the session if they are closed,
+/// reset, or canceled.
+///
+/// The call to function [`RecvStream::receive`] may produce [`Http3ClientEvent::DataReadable`].
+/// Actual reading of data is done in the `read_data` function.
+///
+/// [`Http3ServerEvent`]: crate::Http3ServerEvent
+/// [`Http3Server`]: crate::Http3Server
+/// [`FrameReader`]: crate::frames::FrameReader
+/// [`Http3ClientEvent`]: crate::Http3ClientEvent
+/// [`Http3ClientEvent::DataReadable`]: crate::Http3ClientEvent::DataReadable
+/// [`Http3ClientEvent::HeaderReady`]: crate::Http3ClientEvent::HeaderReady
+/// [`Http3Client`]: crate::connection_client::Http3Client
+/// [`Http3ServerEvent::DataReadable`]: crate::Http3ServerEvent
+/// [`Http3ServerHandler`]: crate::connection_server::Http3ServerHandler
+/// [`ConnectionEvent::RecvStreamReadable`]: neqo_transport::ConnectionEvent::RecvStreamReadable
+/// [`ConnectionEvent::NewStream`]: neqo_transport::ConnectionEvent::NewStream
 #[derive(Debug)]
 pub struct Http3Connection {
     role: Role,
@@ -760,7 +792,9 @@ impl Http3Connection {
         output
     }
 
-    fn create_fetch_headers<'b, 't, T>(request: &RequestDescription<'b, 't, T>) -> Res<Vec<Header>>
+    fn create_request_headers<'b, 't, T>(
+        request: &RequestDescription<'b, 't, T>,
+    ) -> Res<Vec<Header>>
     where
         T: AsRequestTarget<'t> + ?Sized + Debug,
     {
@@ -769,22 +803,56 @@ impl Http3Connection {
             .as_request_target()
             .map_err(|_| Error::InvalidRequestTarget)?;
 
-        // Transform pseudo-header fields
-        let mut final_headers = vec![
-            Header::new(":method", request.method),
-            Header::new(":scheme", target.scheme()),
-            Header::new(":authority", target.authority()),
-            Header::new(":path", target.path()),
-        ];
-        if let Some(conn_type) = request.connect_type {
-            final_headers.push(Header::new(":protocol", conn_type.string()));
+        match request.connect_type {
+            Some(_) if request.method != "CONNECT" => {
+                qwarn!("Method CONNECT without CONNECT type");
+                return Err(Error::InvalidInput);
+            }
+            None if request.method == "CONNECT" => {
+                qwarn!(
+                    "Method {} with CONNECT type {:?}",
+                    request.method,
+                    request.connect_type
+                );
+                return Err(Error::InvalidInput);
+            }
+            _ => {}
         }
 
-        final_headers.extend_from_slice(request.headers);
-        Ok(final_headers)
+        let mut headers = match request.connect_type {
+            None => {
+                vec![
+                    Header::new(":method", request.method),
+                    Header::new(":scheme", target.scheme()),
+                    Header::new(":authority", target.authority()),
+                    Header::new(":path", target.path()),
+                ]
+            }
+            Some(ConnectType::Classic) => {
+                // > The :scheme and :path pseudo-header fields are omitted
+                //
+                // <https://datatracker.ietf.org/doc/html/rfc9114#section-4.4>
+                vec![
+                    Header::new(":method", request.method),
+                    Header::new(":authority", target.authority()),
+                ]
+            }
+            Some(ConnectType::Extended(protocol)) => {
+                vec![
+                    Header::new(":method", request.method),
+                    Header::new(":scheme", target.scheme()),
+                    Header::new(":authority", target.authority()),
+                    Header::new(":path", target.path()),
+                    Header::new(":protocol", protocol.string()),
+                ]
+            }
+        };
+
+        headers.extend_from_slice(request.headers);
+        Ok(headers)
     }
 
-    pub fn fetch<'b, 't, T>(
+    pub fn request<'b, 't, T>(
         &mut self,
         conn: &mut Connection,
         send_events: Box<dyn SendStreamEvents>,
@@ -796,12 +864,12 @@ impl Http3Connection {
         T: AsRequestTarget<'t> + ?Sized + Debug,
     {
         qinfo!(
-            "[{self}] Fetch method={} target: {:?}",
+            "[{self}] Request method={} target: {:?}",
             request.method,
             request.target,
         );
         let id = self.create_bidi_transport_stream(conn)?;
-        self.fetch_with_stream(id, conn, send_events, recv_events, push_handler, request)?;
+        self.request_with_stream(id, conn, send_events, recv_events, push_handler, request)?;
         Ok(id)
     }
 
@@ -823,7 +891,7 @@ impl Http3Connection {
         Ok(id)
     }
 
-    fn fetch_with_stream<'b, 't, T>(
+    fn request_with_stream<'b, 't, T>(
         &mut self,
         stream_id: StreamId,
         conn: &mut Connection,
@@ -835,7 +903,7 @@ impl Http3Connection {
     where
         T: AsRequestTarget<'t> + ?Sized + Debug,
     {
-        let final_headers = Self::create_fetch_headers(request)?;
+        let final_headers = Self::create_request_headers(request)?;
 
         let stream_type = if request.connect_type.is_some() {
             Http3StreamType::ExtendedConnect
@@ -1059,7 +1127,7 @@ impl Http3Connection {
 
         let id = self.create_bidi_transport_stream(conn)?;
 
-        let extended_conn = Rc::new(RefCell::new(WebTransportSession::new(
+        let extended_conn = Rc::new(RefCell::new(webtransport_session::Session::new(
             id,
             events,
             self.role,
@@ -1072,11 +1140,11 @@ impl Http3Connection {
             Box::new(Rc::clone(&extended_conn)),
         );
 
-        let final_headers = Self::create_fetch_headers(&RequestDescription {
+        let final_headers = Self::create_request_headers(&RequestDescription {
             method: "CONNECT",
             target,
             headers,
-            connect_type: Some(ExtendedConnectType::WebTransport),
+            connect_type: Some(ConnectType::Extended(ExtendedConnectType::WebTransport)),
             priority: Priority::default(),
         })?;
         extended_conn
@@ -1139,8 +1207,8 @@ impl Http3Connection {
                     .send_headers(&[Header::new(":status", "200")], conn)
                     .is_ok()
                 {
-                    let extended_conn =
-                        Rc::new(RefCell::new(WebTransportSession::new_with_http_streams(
+                    let extended_conn = Rc::new(RefCell::new(
+                        webtransport_session::Session::new_with_http_streams(
                             stream_id,
                             events,
                             self.role,
@@ -1150,7 +1218,8 @@ impl Http3Connection {
                             self.send_streams
                                 .remove(&stream_id)
                                 .ok_or(Error::Internal)?,
-                        )?));
+                        )?,
+                    ));
                     self.add_streams(
                         stream_id,
                         Box::new(Rc::clone(&extended_conn)),
@@ -1257,7 +1326,7 @@ impl Http3Connection {
 
     fn webtransport_create_stream_internal(
         &mut self,
-        webtransport_session: Rc<RefCell<WebTransportSession>>,
+        webtransport_session: Rc<RefCell<webtransport_session::Session>>,
         stream_id: StreamId,
         session_id: StreamId,
         send_events: Box<dyn SendStreamEvents>,
@@ -1498,7 +1567,7 @@ impl Http3Connection {
 
     fn remove_extended_connect(
         &mut self,
-        wt: &Rc<RefCell<WebTransportSession>>,
+        wt: &Rc<RefCell<webtransport_session::Session>>,
         conn: &mut Connection,
     ) {
         let (recv, send) = wt.borrow_mut().take_sub_streams();
@@ -1608,5 +1677,44 @@ impl Http3Connection {
     #[must_use]
     pub fn recv_streams_mut(&mut self) -> &mut HashMap<StreamId, Box<dyn RecvStream>> {
         &mut self.recv_streams
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        connection::{Http3Connection, RequestDescription},
+        features::ConnectType,
+        Error, Priority,
+    };
+
+    #[test]
+    fn create_request_headers_connect_without_connect_type() {
+        let request = RequestDescription {
+            method: "CONNECT",
+            target: "https://example.com",
+            headers: &[],
+            connect_type: None,
+            priority: Priority::default(),
+        };
+        assert_eq!(
+            Http3Connection::create_request_headers(&request),
+            Err(Error::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn create_request_headers_connect_type_without_connect() {
+        let request = RequestDescription {
+            method: "GET",
+            target: "https://example.com",
+            headers: &[],
+            connect_type: Some(ConnectType::Classic),
+            priority: Priority::default(),
+        };
+        assert_eq!(
+            Http3Connection::create_request_headers(&request),
+            Err(Error::InvalidInput)
+        );
     }
 }

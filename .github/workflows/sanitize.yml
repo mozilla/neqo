@@ -38,7 +38,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
@@ -46,6 +46,7 @@ jobs:
         with:
           version: nightly
           components: rust-src
+          tools: cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -58,7 +59,7 @@ jobs:
       - name: Run tests with sanitizers
         env:
           RUST_LOG: trace
-          RUSTDOCFLAGS: "-Z sanitizer=${{ matrix.sanitizer }}"
+          RUSTDOCFLAGS: "-Z sanitizer=${{ matrix.sanitizer }} -Cunsafe-allow-abi-mismatch=sanitizer"
           ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
           RUST_BACKTRACE: 1
           OS: ${{ matrix.os }}
@@ -82,6 +83,7 @@ jobs:
             export LSAN_OPTIONS="suppressions=$PWD/suppressions.txt"
           fi
           cargo test --locked -Z build-std --features ci --target "$TARGET"
+          cargo hack --workspace test --locked -Z build-std --target "$TARGET"
 
       - name: Save simulation seeds artifact
         if: ${{ env.DUMP_SIMULATION_SEEDS }}

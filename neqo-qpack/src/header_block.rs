@@ -52,14 +52,6 @@ impl HeaderEncoder {
         }
     }
 
-    pub fn len(&self) -> usize {
-        self.buf.len()
-    }
-
-    pub fn read(&mut self, r: usize) {
-        self.buf.read(r);
-    }
-
     pub fn encode_indexed_static(&mut self, index: u64) {
         qtrace!("[{self}] encode static index {index}");
         self.buf

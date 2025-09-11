@@ -18,8 +18,9 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::Qlog, qtrace, qwarn, Buffer, Datagram, DatagramBatch, Decoder, Ecn, Encoder, Role, Tos,
+    event::Provider as EventProvider, hex, hex_snip_middle, hex_with_len, hrtime, qdebug, qerror,
+    qinfo, qlog::Qlog, qtrace, qwarn, Buffer, Datagram, DatagramBatch, Decoder, Ecn, Encoder, Role,
+    Tos,
 };
 use neqo_crypto::{
     agent::{CertificateCompressor, CertificateInfo},
@@ -74,17 +75,10 @@ pub mod test_internal;
 use idle::IdleTimeout;
 pub use params::ConnectionParameters;
 use params::PreferredAddressConfig;
-#[cfg(test)]
-pub use params::ACK_RATIO_SCALE;
 use state::StateSignaling;
 pub use state::{ClosingFrame, State};
 
 pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
-
-/// The number of Initial packets that the client will send in response
-/// to receiving an undecryptable packet during the early part of the
-/// handshake.  This is a hack, but a useful one.
-const EXTRA_INITIALS: usize = 4;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ZeroRttState {
@@ -150,17 +144,6 @@ impl OutputBatch {
             _ => None,
         }
     }
-
-    #[must_use]
-    pub fn or_else<F>(self, f: F) -> Self
-    where
-        F: FnOnce() -> Self,
-    {
-        match self {
-            x @ (Self::DatagramBatch(_) | Self::Callback(_)) => x,
-            Self::None => f(),
-        }
-    }
 }
 
 impl Output {
@@ -188,17 +171,6 @@ impl Output {
         match self {
             Self::Callback(t) => *t,
             _ => Duration::new(0, 0),
-        }
-    }
-
-    #[must_use]
-    pub fn or_else<F>(self, f: F) -> Self
-    where
-        F: FnOnce() -> Self,
-    {
-        match self {
-            x @ (Self::Datagram(_) | Self::Callback(_)) => x,
-            Self::None => f(),
         }
     }
 }
@@ -398,6 +370,7 @@ impl Connection {
             c.conn_params.get_versions().compatible(),
             Role::Client,
             &dcid,
+            c.conn_params.randomize_first_pn_enabled(),
         )?;
         c.original_destination_cid = Some(dcid);
         let path = Path::temporary(
@@ -515,6 +488,8 @@ impl Connection {
 
     /// # Errors
     /// When the operation fails.
+    //
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
         self.crypto.tls_mut().set_certificate_compression::<T>()?;
         Ok(())
@@ -626,7 +601,7 @@ impl Connection {
     /// higher preference.
     /// # Errors
     /// When the operation fails, which is usually due to bad inputs or bad connection state.
-    pub fn set_alpn<A: AsRef<str>>(&mut self, protocols: &[A]) -> Res<()> {
+    pub fn set_alpn<A: AsRef<[u8]>>(&mut self, protocols: &[A]) -> Res<()> {
         self.crypto.tls_mut().set_alpn(protocols)?;
         Ok(())
     }
@@ -1342,6 +1317,7 @@ impl Connection {
             self.conn_params.get_versions().compatible(),
             self.role,
             &retry_scid,
+            false, // don't randomize on Retry
         )?;
         self.address_validation = AddressValidationInfo::Retry {
             token: packet.token().to_vec(),
@@ -1529,7 +1505,11 @@ impl Connection {
                 // Record the client's selected CID so that it can be accepted until
                 // the client starts using a real connection ID.
                 let dcid = ConnectionId::from(packet.dcid());
-                self.crypto.states_mut().init_server(version, &dcid)?;
+                self.crypto.states_mut().init_server(
+                    version,
+                    &dcid,
+                    self.conn_params.randomize_first_pn_enabled(),
+                )?;
                 self.original_destination_cid = Some(dcid);
                 self.set_state(State::WaitInitial, now);
 
@@ -1576,8 +1556,9 @@ impl Connection {
                 // data as lost.
                 if dcid.is_none()
                     && self.cid_manager.is_valid(packet.dcid())
-                    && self.stats.borrow().saved_datagrams <= EXTRA_INITIALS
+                    && !self.saved_datagrams.is_either_full()
                 {
+                    qtrace!("Resending Initial in response to an undecryptable packet");
                     self.crypto.resend_unacked(PacketNumberSpace::Initial);
                     self.resend_0rtt(now);
                 }
@@ -2016,16 +1997,6 @@ impl Connection {
         }
     }
 
-    fn has_version(&self) -> bool {
-        if self.role == Role::Server {
-            // The server knows the final version if it has remote transport parameters.
-            self.tps.borrow().remote_handshake().is_some()
-        } else {
-            // The client knows the final version if it processed a CRYPTO frame.
-            self.stats.borrow().frame_rx.crypto > 0
-        }
-    }
-
     /// Migrate to the provided path.
     /// Either local or remote address (but not both) may be provided as `None` to have
     /// the address from the current primary path used.
@@ -2379,11 +2350,6 @@ impl Connection {
 
         self.streams
             .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats);
-
-        #[cfg(test)]
-        if let Some(w) = &mut self.test_frame_writer {
-            w.write_frames(builder);
-        }
     }
 
     // Maybe send a probe.  Return true if the packet was ack-eliciting.
@@ -2508,6 +2474,12 @@ impl Connection {
                     stats,
                 );
             }
+
+            #[cfg(test)]
+            if let Some(w) = &mut self.test_frame_writer {
+                assert!(!builder.is_full(), "test_frame_writer set on full packet");
+                w.write_frames(builder);
+            }
         }
 
         // Maybe send a probe now, either to probe for losses or to keep the connection live.
@@ -2566,10 +2538,6 @@ impl Connection {
     }
 
     /// Build batch of datagrams to be sent on the provided path.
-    #[expect(
-        clippy::unwrap_in_result,
-        reason = "expect() used on internal invariants"
-    )]
     fn output_dgram_batch_on_path(
         &mut self,
         path: &PathRef,
@@ -2579,22 +2547,31 @@ impl Connection {
     ) -> Res<SendOptionBatch> {
         let packet_tos = path.borrow().tos();
         let mut send_buffer = Vec::new();
-
-        let mut datagram_size = None;
+        let mut max_datagram_size = None;
         let mut num_datagrams = 0;
+        let mtu = path.borrow().plpmtu();
 
         loop {
             if max_datagrams.get() <= num_datagrams {
                 break;
             }
-
-            // Check if we can fit another PMTUD sized datagram into the batch.
-            if datagram_size.is_some_and(|datagram_size| {
-                min(datagram_size, DatagramBatch::MAX - send_buffer.len()) < path.borrow().plpmtu()
-            }) {
+            if path.borrow().pmtud().needs_probe() && num_datagrams != 0 {
+                // Next datagram will be larger due to PMTUD probing.  GSO
+                // requires that all datagrams in a batch are of equal size.
+                // Only the last datagram can be smaller. Given that this would
+                // not be the first datagram, close the batch early to uphold
+                // the above GSO requirement.
                 break;
             }
 
+            let send_buffer_len_before = send_buffer.len();
+
+            // Check if we can fit another PMTUD sized datagram into the batch.
+            if max_datagram_size.is_some_and(|datagram_size| {
+                min(datagram_size, DatagramBatch::MAX - send_buffer.len()) < mtu
+            }) {
+                break;
+            }
             // Determine how we are sending packets (PTO, etc..).
             let profile = self.loss_recovery.send_profile(&path.borrow(), now);
             qdebug!("[{self}] output_path send_profile {profile:?}");
@@ -2608,12 +2585,20 @@ impl Connection {
                 packet_tos,
             )? {
                 SendOption::Yes => {
+                    debug_assert_eq!(
+                        mtu,
+                        path.borrow().plpmtu(),
+                        "MTU does not change within batch"
+                    );
                     num_datagrams += 1;
-                    let datagram_size = *datagram_size.get_or_insert(send_buffer.len());
-                    if ((send_buffer.len()) % datagram_size) > 0 {
-                        // GSO requires that all packets in a batch are of equal
-                        // size. Only the last packet can be smaller. This
-                        // packet was smaller. Make sure it was the last by
+                    let datagram_size = send_buffer.len() - send_buffer_len_before;
+                    let max_datagram_size = *max_datagram_size.get_or_insert(datagram_size);
+
+                    // GSO requires that all datagram in a batch are of equal
+                    // size. Only the last datagram can be smaller.
+                    debug_assert!(datagram_size <= max_datagram_size);
+                    if datagram_size < max_datagram_size {
+                        // This packet was smaller. Make sure it is the last by
                         // breaking the loop.
                         break;
                     }
@@ -2633,7 +2618,7 @@ impl Connection {
             send_buffer,
             packet_tos,
             num_datagrams,
-            datagram_size.expect("one or more datagrams"),
+            max_datagram_size.ok_or(Error::Internal)?,
             &mut self.stats.borrow_mut(),
         );
 
@@ -3068,31 +3053,35 @@ impl Connection {
         }
     }
 
-    fn confirm_version(&mut self, v: Version) -> Res<()> {
-        if self.version != v {
-            qdebug!("[{self}] Compatible upgrade {:?} ==> {v:?}", self.version);
-        }
-        self.crypto.confirm_version(v)?;
-        self.version = v;
-        Ok(())
+    const fn has_version(&self) -> bool {
+        self.crypto.has_handshake_keys()
     }
 
+    /// Commit to a particular version.
     fn compatible_upgrade(&mut self, packet_version: Version) -> Res<()> {
         if !matches!(self.state, State::WaitInitial | State::WaitVersion) {
             return Ok(());
         }
 
-        if self.role == Role::Client {
-            self.confirm_version(packet_version)?;
-        } else if self.tps.borrow().remote_handshake().is_some() {
+        let v = if self.role == Role::Client {
+            packet_version
+        } else {
             let version = self.tps.borrow().version();
             let dcid = self
                 .original_destination_cid
                 .as_ref()
                 .ok_or(Error::ProtocolViolation)?;
-            self.crypto.states_mut().init_server(version, dcid)?;
-            self.confirm_version(version)?;
+            // No need to randomize the starting packet number; that's already taken care of.
+            self.crypto.states_mut().init_server(version, dcid, false)?;
+            version
+        };
+
+        // OK, it's all confirmed.
+        if self.version != v {
+            qdebug!("[{self}] Compatible upgrade {:?} ==> {v:?}", self.version);
+            self.version = v;
         }
+        self.crypto.confirm_version(v)?;
         Ok(())
     }
 
@@ -3103,7 +3092,10 @@ impl Connection {
         space: PacketNumberSpace,
         data: Option<&[u8]>,
     ) -> Res<()> {
-        qtrace!("[{self}] Handshake space={space} data={data:0x?}");
+        qtrace!(
+            "[{self}] Handshake space={space} data: {:?}",
+            data.as_ref().map(hex_with_len),
+        );
 
         let was_authentication_pending =
             *self.crypto.tls().state() == HandshakeState::AuthenticationPending;
@@ -3132,10 +3124,12 @@ impl Connection {
         // There is a chance that this could be called less often, but getting the
         // conditions right is a little tricky, so call whenever CRYPTO data is used.
         if try_update {
-            self.compatible_upgrade(packet_version)?;
             // We have transport parameters, it's go time.
             if self.tps.borrow().remote_handshake().is_some() {
                 self.set_initial_limits();
+            }
+            if self.crypto.tls().has_secret(Epoch::Handshake) {
+                self.compatible_upgrade(packet_version)?;
             }
             if self.crypto.install_keys(self.role)? {
                 self.saved_datagrams.make_available(Epoch::Handshake);
@@ -3212,17 +3206,28 @@ impl Connection {
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
-                    "[{self}] Crypto frame on space={space} offset={offset}, data={:0x?}",
-                    &data
+                    "[{self}] Crypto frame on space={space} offset={offset}: {d}",
+                    d = hex_snip_middle(data),
                 );
                 self.stats.borrow_mut().frame_rx.crypto += 1;
                 self.crypto
                     .streams_mut()
                     .inbound_frame(space, offset, data)?;
-                if self.crypto.streams().data_ready(space) {
-                    let mut buf = Vec::new();
-                    let read = self.crypto.streams_mut().read_to_end(space, &mut buf);
-                    qdebug!("Read {read:?} bytes");
+
+                if self.role == Role::Client
+                    && space == PacketNumberSpace::Initial
+                    && packet_version != self.version
+                {
+                    // If the server has switched versions, switch to that version.
+                    // This is an assumption, but very often a good one.
+                    // This function does nothing if we already have a version.
+                    self.compatible_upgrade(packet_version)?;
+                }
+
+                let mut buf = Vec::new();
+                if self.crypto.streams().data_ready(space)
+                    && self.crypto.streams_mut().read_to_end(space, &mut buf)? > 0
+                {
                     self.handshake(now, packet_version, space, Some(&buf))?;
                     self.create_resumption_token(now);
                 } else {

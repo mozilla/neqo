@@ -1,0 +1,51 @@
+name: CI MTU
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ["main"]
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check-android:
+    name: Check Android
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        target: ['x86_64-linux-android', 'i686-linux-android'] # 'aarch64-linux-android' not currently working
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/check-android
+        with:
+          target: ${{ matrix.target }}
+          working-directory: mtu
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+
+  check-vm:
+    name: Run checks for VM-only platforms
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ freebsd, openbsd, netbsd, solaris ]
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/check-vm
+        with:
+          working-directory: mtu
+          platform: ${{ matrix.os }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+

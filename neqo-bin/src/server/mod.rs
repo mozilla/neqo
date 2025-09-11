@@ -14,8 +14,9 @@
 
 use std::{
     cell::RefCell,
-    fmt::{self, Display},
+    fmt::Display,
     fs,
+    future::Future,
     io::{self},
     net::{SocketAddr, ToSocketAddrs as _},
     num::NonZeroUsize,
@@ -36,8 +37,9 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init_db, AntiReplay, Cipher,
 };
-use neqo_transport::{ConnectionIdGenerator, OutputBatch, RandomConnectionIdGenerator, Version};
+use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version};
 use neqo_udp::{DatagramIter, RecvBuf};
+use thiserror::Error;
 use tokio::time::Sleep;
 
 use crate::SharedArgs;
@@ -47,13 +49,19 @@ const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 pub mod http09;
 pub mod http3;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("invalid argument: {0}")]
     Argument(&'static str),
+    #[error(transparent)]
     Http3(neqo_http3::Error),
+    #[error(transparent)]
     Io(io::Error),
+    #[error("qlog error")]
     Qlog,
+    #[error(transparent)]
     Transport(neqo_transport::Error),
+    #[error(transparent)]
     Crypto(neqo_crypto::Error),
 }
 
@@ -86,15 +94,6 @@ impl From<neqo_transport::Error> for Error {
         Self::Transport(err)
     }
 }
-
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error: {self:?}")?;
-        Ok(())
-    }
-}
-
-impl std::error::Error for Error {}
 
 pub type Res<T> = Result<T, Error>;
 
@@ -249,11 +248,6 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
 
 #[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub trait HttpServer: Display {
-    fn new(
-        args: &Args,
-        anti_replay: AntiReplay,
-        cid_mgr: Rc<RefCell<dyn ConnectionIdGenerator>>,
-    ) -> Self;
     fn process_multiple<'a>(
         &mut self,
         dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
@@ -284,7 +278,7 @@ impl<S: HttpServer> Runner<S> {
             server,
             timeout: None,
             sockets,
-            recv_buf: RecvBuf::new(),
+            recv_buf: RecvBuf::default(),
         }
     }
 
@@ -445,13 +439,20 @@ enum Ready {
     Timeout,
 }
 
-pub fn server<S: HttpServer>(args: Args) -> Res<Runner<S>> {
+#[expect(clippy::type_complexity, reason = "pinned and boxed future")]
+pub fn run(
+    mut args: Args,
+) -> Res<(
+    Pin<Box<dyn Future<Output = Res<()>> + 'static>>,
+    Vec<SocketAddr>,
+)> {
     neqo_common::log::init(
         args.shared
             .verbose
             .as_ref()
             .map(clap_verbosity_flag::Verbosity::log_level_filter),
     );
+    args.update_for_tests();
     assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone())?;
@@ -475,13 +476,24 @@ pub fn server<S: HttpServer>(args: Args) -> Res<Runner<S>> {
         .collect::<Result<_, io::Error>>()?;
 
     // Note: this is the exception to the case where we use `Args::now`.
-    let anti_replay = AntiReplay::new(Instant::now(), ANTI_REPLAY_WINDOW, 7, 14)
-        .expect("unable to setup anti-replay");
+    let anti_replay = AntiReplay::new(Instant::now(), ANTI_REPLAY_WINDOW, 7, 14)?;
     let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
 
-    Ok(Runner::new(
-        S::new(&args, anti_replay, cid_mgr),
-        Box::new(move || args.now()),
-        sockets,
-    ))
+    if args.shared.alpn == "h3" {
+        let runner = Runner::new(
+            http3::HttpServer::new(&args, anti_replay, cid_mgr),
+            Box::new(move || args.now()),
+            sockets,
+        );
+        let local_addrs = runner.local_addresses();
+        Ok((Box::pin(runner.run()), local_addrs))
+    } else {
+        let runner = Runner::new(
+            http09::HttpServer::new(&args, anti_replay, cid_mgr)?,
+            Box::new(move || args.now()),
+            sockets,
+        );
+        let local_addrs = runner.local_addresses();
+        Ok((Box::pin(runner.run()), local_addrs))
+    }
 }

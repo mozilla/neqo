@@ -6,6 +6,7 @@
 
 use std::cmp::min;
 
+use neqo_common::qwarn;
 use neqo_qpack as qpack;
 use neqo_transport::ConnectionParameters;
 
@@ -14,7 +15,7 @@ const QPACK_TABLE_SIZE_LIMIT: u64 = (1 << 30) - 1;
 const QPACK_MAX_BLOCKED_STREAMS_DEFAULT: u16 = 20;
 const MAX_PUSH_STREAM_DEFAULT: u64 = 0;
 const WEBTRANSPORT_DEFAULT: bool = false;
-const HTTP3_DATAGRAM_DEFAULT: bool = false;
+const HTTP3_DATAGRAM_DEFAULT: bool = true;
 
 #[derive(Debug, Clone)]
 pub struct Http3Parameters {
@@ -62,11 +63,6 @@ impl Http3Parameters {
         max_table = min(max_table, QPACK_TABLE_SIZE_LIMIT);
         self.qpack_settings.max_table_size_encoder = max_table;
         self
-    }
-
-    #[must_use]
-    pub const fn get_max_table_size_encoder(&self) -> u64 {
-        self.qpack_settings.max_table_size_encoder
     }
 
     /// # Panics
@@ -123,6 +119,7 @@ impl Http3Parameters {
         self.webtransport
     }
 
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn http3_datagram(mut self, http3_datagram: bool) -> Self {
         self.http3_datagram = http3_datagram;
@@ -130,7 +127,28 @@ impl Http3Parameters {
     }
 
     #[must_use]
-    pub const fn get_http3_datagram(&self) -> bool {
+    pub fn get_http3_datagram(&self) -> bool {
+        if self.http3_datagram && self.conn_params.get_datagram_size() == 0 {
+            qwarn!("HTTP/3 setting SETTINGS_HTTP3_DATAGRAM is enabled but QUIC transport parameter max_datagram_frame_size is 0.");
+            debug_assert!(false);
+        }
         self.http3_datagram
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use neqo_transport::ConnectionParameters;
+
+    use crate::Http3Parameters;
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "assertion failed: false")]
+    fn get_http3_datagram_debug_panic_on_mismatch() {
+        let params = Http3Parameters::default()
+            .connection_parameters(ConnectionParameters::default().datagram_size(0))
+            .http3_datagram(true);
+        assert!(params.get_http3_datagram());
     }
 }

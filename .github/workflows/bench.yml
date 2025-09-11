@@ -43,7 +43,7 @@ jobs:
 
     steps:
       - name: Checkout mozilla/neqo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: mozilla/neqo
           path: neqo
@@ -85,7 +85,7 @@ jobs:
       - name: Build neqo
         run: |
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
-          export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
+          export RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment -C force-frame-pointers=yes $RUSTFLAGS"
           echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
           mkdir -p binaries/neqo-main
           mkdir -p binaries/neqo
@@ -120,7 +120,7 @@ jobs:
             cp "$BENCH" ../binaries/neqo-main/
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --save-baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results-main.txt
+              $BENCH -- --bench --save-baseline main --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results-main.txt
           done
           # Copy the main branch results to a separate directory for bencher.dev.
           cp -r target/criterion ../criterion-main
@@ -132,8 +132,9 @@ jobs:
           for BENCH in $BENCHES; do
             cp "$BENCH" ../binaries/neqo/
             # shellcheck disable=SC2086
+            # --baseline-lenient allows us to add new benchmarks in pull requests.
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --baseline main | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
+              $BENCH -- --bench --baseline-lenient main --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
           done
           for BENCH in $BENCHES; do
             NAME=$(basename "$BENCH" | cut -d- -f1)
@@ -164,7 +165,7 @@ jobs:
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          TESTBED: ${{ inputs.bencher }}
+          TESTBED: ${{ inputs.bencher == 'gcp' && 'GCP' || 'On-prem' }}
         run: |
           SHA=$(cd neqo && git log origin/main -1 --format=%H)
           echo "$SHA" > main-sha.txt
@@ -175,7 +176,9 @@ jobs:
             echo
             sed -E -e 's/^                 //gi' \
                   -e '/cset:.*last message/d' \
+                  -e '/Criterion.rs ERROR: Error in Gnuplot:.*$/d' \
                   -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
+              perl -p0e 's/(Change within noise threshold\.|No change in performance detected\.|Performance has regressed\.|Performance has improved\.)\n([a-zA-Z0-9][^F][^\s]*[\-\/])/$1\n\n$2/g' |\
               perl -p -0777 -e 's/(.*?)\n(.*?)(((No change|Change within|Performance has).*?)(\nFound .*?)?)?\n\n/<details><summary>$1: $4<\/summary><pre>\n$2$6<\/pre><\/details>\n/gs' |\
               sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
                     -e 's/(Performance has improved.)/:green_heart: <b>\1<\/b>/gi' \
@@ -190,7 +193,7 @@ jobs:
         id: export_samply
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}-bench-samply
+          name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-samply
           path: |
             *.samply.json.gz
             *.syms.json
@@ -201,7 +204,7 @@ jobs:
         id: export_perf
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}-bench-perf
+          name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-perf
           path: |
             *.svg
             *.txt

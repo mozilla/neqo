@@ -414,6 +414,7 @@ impl SecretAgentInfo {
     pub const fn alpn(&self) -> Option<&String> {
         self.alpn.as_ref()
     }
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn signature_scheme(&self) -> SignatureScheme {
         self.signature_scheme
@@ -557,8 +558,14 @@ impl SecretAgent {
         self.set_option(ssl::Opt::Locking, false)?;
         self.set_option(ssl::Opt::Tickets, false)?;
         self.set_option(ssl::Opt::OcspStapling, true)?;
-        self.set_option(ssl::Opt::Grease, grease)?;
-        self.set_option(ssl::Opt::EnableChExtensionPermutation, true)?;
+        self.set_option(
+            ssl::Opt::Grease,
+            cfg!(not(feature = "disable-random")) && grease,
+        )?;
+        self.set_option(
+            ssl::Opt::EnableChExtensionPermutation,
+            cfg!(not(feature = "disable-random")),
+        )?;
         Ok(())
     }
 
@@ -665,39 +672,35 @@ impl SecretAgent {
     ///
     /// # Errors
     ///
-    /// This should always panic rather than return an error.
-    ///
-    /// # Panics
-    ///
-    /// If any of the provided `protocols` are more than 255 bytes long.
+    /// If the list of protocols is empty, contains an empty value, or
+    /// contains a value longer than 255 bytes.
     ///
     /// [RFC7301]: https://datatracker.ietf.org/doc/html/rfc7301
-    pub fn set_alpn<A: AsRef<str>>(&mut self, protocols: &[A]) -> Res<()> {
-        // Validate and set length.
-        let mut encoded_len = protocols.len();
-        for v in protocols {
-            assert!(v.as_ref().len() < 256);
-            assert!(!v.as_ref().is_empty());
-            encoded_len += v.as_ref().len();
-        }
-
+    pub fn set_alpn<A: AsRef<[u8]>>(&mut self, protocols: &[A]) -> Res<()> {
         // Prepare to encode.
-        let mut encoded = Vec::with_capacity(encoded_len);
-        let mut add = |v: &str| {
-            if let Ok(s) = u8::try_from(v.len()) {
-                encoded.push(s);
-                encoded.extend_from_slice(v.as_bytes());
-            }
+        let len = protocols.len() + protocols.iter().map(|p| p.as_ref().len()).sum::<usize>();
+        let mut encoded = Vec::with_capacity(len);
+        let mut add = |v: &A| -> Res<()> {
+            let v = v.as_ref();
+            u8::try_from(v.len()).map_or(Err(Error::InvalidAlpn), |s| {
+                if s > 0 {
+                    encoded.push(s);
+                    encoded.extend_from_slice(v);
+                    Ok(())
+                } else {
+                    Err(Error::InvalidAlpn)
+                }
+            })
         };
 
         // NSS inherited an idiosyncratic API as a result of having implemented NPN
         // before ALPN.  For that reason, we need to put the "best" option last.
-        let (first, rest) = protocols.split_first().ok_or(Error::Internal)?;
+        let (first, rest) = protocols.split_first().ok_or(Error::InvalidAlpn)?;
         for v in rest {
-            add(v.as_ref());
+            add(v)?;
         }
-        add(first.as_ref());
-        assert_eq!(encoded_len, encoded.len());
+        add(first)?;
+        debug_assert_eq!(len, encoded.len());
 
         // Now give the result to NSS.
         secstatus_to_res(unsafe {
@@ -953,6 +956,12 @@ impl SecretAgent {
     #[must_use]
     pub const fn state(&self) -> &HandshakeState {
         &self.state
+    }
+
+    /// Check if the indicated secret is ready for installation.
+    #[must_use]
+    pub fn has_secret(&self, epoch: Epoch) -> bool {
+        self.secrets.has(epoch)
     }
 
     /// Take a read secret.  This will only return a non-`None` value once.
@@ -1267,7 +1276,7 @@ impl Server {
                 return Err(Error::CertificateLoading);
             };
             secstatus_to_res(unsafe {
-                ssl::SSL_ConfigServerCert(agent.fd, *cert, *key, null(), 0)
+                ssl::SSL_ConfigServerCert(agent.fd, (*cert).cast(), (*key).cast(), null(), 0)
             })?;
         }
 
@@ -1444,13 +1453,11 @@ impl From<Server> for Agent {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
     use crate::ResumptionToken;
 
     #[test]
     fn resumption_token_debug_impl() {
-        let now = Instant::now();
+        let now = test_fixture::now();
         let token = [
             2, 0, 6, 60, 37, 21, 238, 165, 182, 0, 6, 60, 77, 81, 157, 101, 182, 0, 6, 60, 37, 21,
             238, 165, 182, 0, 2, 163, 0, 0, 0, 0, 1, 72, 146, 254, 127, 255, 255, 255, 255, 0, 1,

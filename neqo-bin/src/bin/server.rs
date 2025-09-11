@@ -5,21 +5,16 @@
 // except according to those terms.
 
 use clap::Parser as _;
-use neqo_bin::server::{http09, http3, Res};
+use neqo_bin::server::Res;
 
 #[tokio::main(flavor = "current_thread")]
+#[allow(
+    clippy::allow_attributes,
+    clippy::unwrap_in_result,
+    reason = "FIXME: False positive?"
+)]
 async fn main() -> Res<()> {
-    let mut args = neqo_bin::server::Args::parse();
+    let args = neqo_bin::server::Args::parse();
 
-    args.update_for_tests();
-
-    if args.get_shared().get_alpn() == "h3" {
-        neqo_bin::server::server::<http3::HttpServer>(args)?
-            .run()
-            .await
-    } else {
-        neqo_bin::server::server::<http09::HttpServer>(args)?
-            .run()
-            .await
-    }
+    neqo_bin::server::run(args)?.0.await
 }
