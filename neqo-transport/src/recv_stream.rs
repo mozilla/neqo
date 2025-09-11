@@ -143,7 +143,7 @@ pub struct RxStreamOrderer {
     offset: u64, // Offset where `data` starts.
 
     // Out-of-order data with gaps
-    ooo: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
+    out_of_order: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
 
     retired: u64,  // Number of bytes the application has read.
     received: u64, // The number of bytes stored across all buffers.
