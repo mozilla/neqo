@@ -1138,7 +1138,7 @@ mod tests {
                     recovery::Tokens::new(),
                     ON_SENT_SIZE,
                 ),
-                Instant::now(),
+                now(),
             );
         }
     }
@@ -1289,7 +1289,7 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            Instant::now(),
+            now(),
         );
         lr.on_packet_sent(
             sent::Packet::new(
@@ -1300,7 +1300,7 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            Instant::now(),
+            now(),
         );
         let (_, lost) = lr.on_ack_received(
             PacketNumberSpace::ApplicationData,
@@ -1398,7 +1398,7 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            Instant::now(),
+            now(),
         );
         lr.on_packet_sent(
             sent::Packet::new(
@@ -1409,7 +1409,7 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            Instant::now(),
+            now(),
         );
         lr.on_packet_sent(
             sent::Packet::new(
@@ -1420,7 +1420,7 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            Instant::now(),
+            now(),
         );
 
         // Now put all spaces on the LR timer so we can see them.
@@ -1438,7 +1438,7 @@ mod tests {
                 ON_SENT_SIZE,
             );
             let pn_space = PacketNumberSpace::from(sent_pkt.packet_type());
-            lr.on_packet_sent(sent_pkt, Instant::now());
+            lr.on_packet_sent(sent_pkt, now());
             lr.on_ack_received(
                 pn_space,
                 vec![1..=1],
@@ -1473,7 +1473,7 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            Instant::now(),
+            now(),
         );
         assert_sent_times(&lr, None, None, Some(pn_time(2)));
     }
@@ -1490,7 +1490,7 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            Instant::now(),
+            now(),
         );
         // Set the RTT to the initial value so that discarding doesn't
         // alter the estimate.
@@ -1512,7 +1512,7 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            Instant::now(),
+            now(),
         );
         lr.on_packet_sent(
             sent::Packet::new(
@@ -1523,7 +1523,7 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            Instant::now(),
+            now(),
         );
 
         assert!(lr.pto_time(PacketNumberSpace::ApplicationData).is_some());

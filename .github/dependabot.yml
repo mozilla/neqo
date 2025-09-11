@@ -3,6 +3,8 @@
 
 version: 2
 updates:
+  # We don't really use Dependabot for Rust dependencies, since we are tracking Gecko,
+  # but we do want to be notified of security vulnerabilities.
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
@@ -14,11 +16,26 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 10
+      semver-major-days: 20
+      semver-minor-days: 10
+      semver-patch-days: 5
   - package-ecosystem: "docker"
     directory: "/qns"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 10
+      semver-major-days: 20
+      semver-minor-days: 10
+      semver-patch-days: 5
   - package-ecosystem: docker
     directory: /taskcluster/docker/linux
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 10
+      semver-major-days: 20
+      semver-minor-days: 10
+      semver-patch-days: 5

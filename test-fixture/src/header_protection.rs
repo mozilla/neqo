@@ -4,7 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::missing_panics_doc, reason = "This is test code.")]
+#![allow(
+    clippy::allow_attributes,
+    clippy::missing_panics_doc,
+    clippy::unwrap_in_result,
+    reason = "This is test code."
+)]
 
 use std::ops::Range;
 

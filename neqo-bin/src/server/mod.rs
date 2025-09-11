@@ -499,8 +499,7 @@ pub fn run(
         .collect::<Result<_, io::Error>>()?;
 
     // Note: this is the exception to the case where we use `Args::now`.
-    let anti_replay = AntiReplay::new(Instant::now(), ANTI_REPLAY_WINDOW, 7, 14)
-        .expect("unable to setup anti-replay");
+    let anti_replay = AntiReplay::new(Instant::now(), ANTI_REPLAY_WINDOW, 7, 14)?;
     let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
 
     if args.shared.alpn == "h3" {
@@ -513,7 +512,7 @@ pub fn run(
         Ok((Box::pin(runner.run()), local_addrs))
     } else {
         let runner = Runner::new(
-            http09::HttpServer::new(&args, anti_replay, cid_mgr).expect("We cannot make a server!"),
+            http09::HttpServer::new(&args, anti_replay, cid_mgr)?,
             Box::new(move || args.now()),
             sockets,
         );

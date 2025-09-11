@@ -18,7 +18,7 @@ fn basic() {
 #[test]
 fn args() {
     let num = 1;
-    let obj = std::time::Instant::now();
+    let obj = test_fixture::now();
     qerror!("error {num} {obj:?}");
     qwarn!("warn {num} {obj:?}");
     qinfo!("info {num} {obj:?}");
