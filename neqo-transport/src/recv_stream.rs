@@ -139,7 +139,7 @@ impl RecvStreams {
 #[derive(Debug, Default)]
 pub struct RxStreamOrderer {
     // Buffer for arriving in-order data.
-    data: VecDeque<u8>,
+    in_order: VecDeque<u8>,
     offset: u64, // Offset where `data` starts.
 
     // Out-of-order data with gaps
