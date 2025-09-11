@@ -138,7 +138,7 @@ impl RecvStreams {
 /// - `BTreeMap` for out-of-order chunks with gaps
 #[derive(Debug, Default)]
 pub struct RxStreamOrderer {
-    // Contiguous buffer for in-order data.
+    // Buffer for arriving in-order data.
     data: VecDeque<u8>,
     offset: u64, // Offset where `data` starts.
 
