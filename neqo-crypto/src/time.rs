@@ -204,6 +204,7 @@ impl Default for TimeHolder {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use std::time::{Duration, Instant};
 

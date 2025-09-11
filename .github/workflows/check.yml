@@ -214,7 +214,6 @@ jobs:
           target: ${{ matrix.target }}
           minimum-nss-version: ${{ steps.nss-version.outputs.minimum }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          codecov-token: ${{ secrets.CODECOV_TOKEN }}
 
   check-vm:
     name: Run checks for VM-only platforms
