@@ -10,7 +10,7 @@
 use std::{
     cell::RefCell,
     cmp::max,
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     fmt::Debug,
     mem,
     rc::{Rc, Weak},
@@ -139,7 +139,7 @@ impl RecvStreams {
 #[derive(Debug, Default)]
 pub struct RxStreamOrderer {
     // Primary contiguous buffer for sequential data
-    primary_buffer: Vec<u8>,
+    primary_buffer: VecDeque<u8>,
     primary_start: u64, // Offset where primary_buffer starts
 
     // Out-of-order chunks with gaps
@@ -147,12 +147,13 @@ pub struct RxStreamOrderer {
 
     retired: u64,  // Number of bytes the application has read
     received: u64, // The number of bytes stored across all buffers
-
-    // Optimization: track the expected next sequential offset
-    next_expected: u64,
 }
 
 impl RxStreamOrderer {
+    fn next_expected(&self) -> u64 {
+        self.primary_start + u64::try_from(self.primary_buffer.len()).expect("usize fits in u64")
+    }
+
     /// Process an incoming stream frame off the wire. This may result in data
     /// being available to upper layers if frame is not out of order (ooo) or
     /// if the frame fills a gap.
@@ -186,7 +187,7 @@ impl RxStreamOrderer {
         }
 
         // Only use fast path for truly sequential data when there are no gaps
-        if new_start == self.next_expected && self.data_ranges.is_empty() {
+        if new_start == self.next_expected() && self.data_ranges.is_empty() {
             self.append_to_primary_buffer(new_start, new_data);
             return;
         }
@@ -207,9 +208,8 @@ impl RxStreamOrderer {
             self.primary_start = new_start;
         }
 
-        self.primary_buffer.extend_from_slice(new_data);
+        self.primary_buffer.extend(new_data);
         self.received += u64::try_from(new_data.len()).expect("usize fits in u64");
-        self.next_expected = new_start + u64::try_from(new_data.len()).expect("usize fits in u64");
     }
 
     /// Handle out-of-order frames using a `BTreeMap`.
@@ -462,7 +462,8 @@ impl RxStreamOrderer {
                 let copy_bytes = available.min(space);
 
                 if copy_bytes > 0 {
-                    let copy_slc = &self.primary_buffer[copy_offset..copy_offset + copy_bytes];
+                    let copy_slc = &self.primary_buffer.make_contiguous()
+                        [copy_offset..copy_offset + copy_bytes];
                     buf[..copy_bytes].copy_from_slice(copy_slc);
                     copied = copy_bytes;
                     self.retired += u64::try_from(copy_bytes).expect("usize fits in u64");
