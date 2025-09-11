@@ -151,7 +151,7 @@ pub struct RxStreamOrderer {
 
 impl RxStreamOrderer {
     fn next_expected(&self) -> u64 {
-        self.offset + u64::try_from(self.data.len()).expect("usize fits in u64")
+        self.offset + u64::try_from(self.in_order.len()).expect("usize fits in u64")
     }
 
     /// Process an incoming stream frame off the wire. This may result in data
@@ -186,14 +186,16 @@ impl RxStreamOrderer {
             new_start = self.retired;
         }
 
-        // Only use fast path for truly in-order data when there are no gaps.
-        if new_start <= self.next_expected() && new_start + new_end > self.next_expected() && self.ooo.is_empty() {
+        if new_start <= self.next_expected()
+            && new_start + new_end > self.next_expected()
+            && self.out_of_order.is_empty()
+        {
+            // Only use fast path for truly in-order data when there are no gaps.
             self.store_in_order_data(new_start, new_data);
-            return;
+        } else {
+            // Handle out-of-order data.
+            self.store_out_of_order_data(new_start, new_data);
         }
-
-        // Handle out-of-order data.
-        self.store_out_of_order_data(new_start, new_data);
     }
 
     fn store_in_order_data(&mut self, new_start: u64, new_data: &[u8]) {
@@ -202,12 +204,12 @@ impl RxStreamOrderer {
             new_start + u64::try_from(new_data.len()).expect("usize fits in u64")
         );
 
-        if self.data.is_empty() {
+        if self.in_order.is_empty() {
             self.offset = new_start;
         }
 
-        let overlap = self.next_expected() - new_start;
-        self.data.extend(&new_data[overlap..]);
+        let overlap = usize::try_from(self.next_expected() - new_start).expect("u64 fits in usize");
+        self.in_order.extend(&new_data[overlap..]);
         self.received += u64::try_from(new_data.len() - overlap).expect("usize fits in u64");
     }
 
@@ -219,13 +221,13 @@ impl RxStreamOrderer {
         let new_end = new_start + u64::try_from(new_data.len()).expect("usize fits in u64");
 
         // First, check for overlap with in-order buffer.
-        let data_end = if self.data.is_empty() {
+        let data_end = if self.in_order.is_empty() {
             0
         } else {
-            self.offset + u64::try_from(self.data.len()).expect("usize fits in u64")
+            self.offset + u64::try_from(self.in_order.len()).expect("usize fits in u64")
         };
 
-        if !self.data.is_empty() {
+        if !self.in_order.is_empty() {
             // Check if new data is completely covered by in-order buffer.
             if new_start >= self.offset && new_end <= data_end {
                 qtrace!(
@@ -267,7 +269,7 @@ impl RxStreamOrderer {
 
         // Now handle with existing out-of-order ranges (original logic)
         let extend = if let Some((&prev_start, prev_vec)) =
-            self.ooo.range_mut(..=new_start).next_back()
+            self.out_of_order.range_mut(..=new_start).next_back()
         {
             let prev_end = prev_start + u64::try_from(prev_vec.len()).expect("usize fits in u64");
             if new_end > prev_end {
@@ -301,7 +303,11 @@ impl RxStreamOrderer {
         let new_end = new_start + u64::try_from(new_data.len()).expect("usize fits in u64");
 
         // Handle overlaps with subsequent ranges
-        if self.ooo.last_entry().is_some_and(|e| *e.key() >= new_start) {
+        if self
+            .out_of_order
+            .last_entry()
+            .is_some_and(|e| *e.key() >= new_start)
+        {
             // Is this at the end (common case)?  If so, nothing to do in this block
             // Common case:
             //  PPPPPP        -> PPPPPP
@@ -322,7 +328,7 @@ impl RxStreamOrderer {
 
             let mut to_remove = SmallVec::<[_; 8]>::new();
 
-            for (&next_start, next_data) in self.ooo.range_mut(new_start..) {
+            for (&next_start, next_data) in self.out_of_order.range_mut(new_start..) {
                 let next_end =
                     next_start + u64::try_from(next_data.len()).expect("usize fits in u64");
                 let overlap = new_end.saturating_sub(next_start);
@@ -346,18 +352,18 @@ impl RxStreamOrderer {
             }
 
             for start in to_remove {
-                self.ooo.remove(&start);
+                self.out_of_order.remove(&start);
             }
         }
 
         if !to_add.is_empty() {
             self.received += u64::try_from(to_add.len()).expect("usize fits in u64");
             if extend {
-                if let Some((_, buf)) = self.ooo.range_mut(..=new_start).next_back() {
+                if let Some((_, buf)) = self.out_of_order.range_mut(..=new_start).next_back() {
                     buf.extend_from_slice(to_add);
                 }
             } else {
-                self.ooo.insert(new_start, to_add.to_vec());
+                self.out_of_order.insert(new_start, to_add.to_vec());
             }
         }
     }
@@ -366,12 +372,12 @@ impl RxStreamOrderer {
     #[must_use]
     pub fn data_ready(&self) -> bool {
         // Check if in-order buffer has readable data.
-        if !self.data.is_empty() && self.offset <= self.retired {
+        if !self.in_order.is_empty() && self.offset <= self.retired {
             return true;
         }
 
         // Check if out-of-order ranges have readable data.
-        self.ooo
+        self.out_of_order
             .keys()
             .next()
             .is_some_and(|&start| start <= self.retired)
@@ -383,8 +389,9 @@ impl RxStreamOrderer {
         let mut prev_end = self.retired;
 
         // First check in-order buffer
-        if !self.data.is_empty() && self.offset <= prev_end {
-            let data_end = self.offset + u64::try_from(self.data.len()).expect("usize fits in u64");
+        if !self.in_order.is_empty() && self.offset <= prev_end {
+            let data_end =
+                self.offset + u64::try_from(self.in_order.len()).expect("usize fits in u64");
             if data_end > prev_end {
                 total += usize::try_from(data_end - prev_end).expect("usize fits in u64");
                 prev_end = data_end;
@@ -392,7 +399,7 @@ impl RxStreamOrderer {
         }
 
         // Then check out-of-order ranges
-        for (&start_offset, data) in &self.ooo {
+        for (&start_offset, data) in &self.out_of_order {
             if start_offset <= prev_end {
                 let data_len = u64::try_from(data.len()).expect("usize fits in u64")
                     - prev_end.saturating_sub(start_offset);
@@ -420,15 +427,15 @@ impl RxStreamOrderer {
     /// Data bytes buffered. Could be more than `bytes_readable` if there are
     /// ranges missing.
     fn buffered(&self) -> u64 {
-        let data_buffered = if self.data.is_empty() {
+        let data_buffered = if self.in_order.is_empty() {
             0
         } else {
-            u64::try_from(self.data.len()).expect("usize fits in u64")
+            u64::try_from(self.in_order.len()).expect("usize fits in u64")
                 - self.retired.saturating_sub(self.offset)
         };
 
         let ooo_buffered: u64 = self
-            .ooo
+            .out_of_order
             .iter()
             .map(|(&start, data)| {
                 u64::try_from(data.len()).expect("usize fits in u64")
@@ -445,17 +452,18 @@ impl RxStreamOrderer {
         let mut copied = 0;
 
         // First, try to read from in-order buffer
-        if !self.data.is_empty() && self.offset <= self.retired {
-            let data_end = self.offset + u64::try_from(self.data.len()).expect("usize fits in u64");
+        if !self.in_order.is_empty() && self.offset <= self.retired {
+            let data_end =
+                self.offset + u64::try_from(self.in_order.len()).expect("usize fits in u64");
             if data_end > self.retired {
                 let copy_offset =
                     usize::try_from(self.retired - self.offset).expect("u64 fits in usize");
-                let available = self.data.len() - copy_offset;
+                let available = self.in_order.len() - copy_offset;
                 let space = buf.len();
                 let copy_bytes = available.min(space);
 
                 if copy_bytes > 0 {
-                    let (front, back) = self.data.as_slices();
+                    let (front, back) = self.in_order.as_slices();
 
                     // Copy from the appropriate slice(s)
                     let mut bytes_copied = 0;
@@ -496,7 +504,7 @@ impl RxStreamOrderer {
 
                     // If we've consumed all of the in-order buffer, we can clear it
                     if self.retired >= data_end {
-                        self.data.clear();
+                        self.in_order.clear();
                         self.offset = 0;
                     }
                 }
@@ -522,7 +530,7 @@ impl RxStreamOrderer {
     fn read_from_ooo_ranges(&mut self, buf: &mut [u8]) -> usize {
         let mut copied = 0;
 
-        for (&range_start, range_data) in &mut self.ooo {
+        for (&range_start, range_data) in &mut self.out_of_order {
             let mut keep = false;
             if self.retired >= range_start {
                 // Frame data has new contiguous bytes.
@@ -557,13 +565,13 @@ impl RxStreamOrderer {
                 keep = true;
             }
             if keep {
-                let mut keep = self.ooo.split_off(&range_start);
-                mem::swap(&mut self.ooo, &mut keep);
+                let mut keep = self.out_of_order.split_off(&range_start);
+                mem::swap(&mut self.out_of_order, &mut keep);
                 return copied;
             }
         }
 
-        self.ooo.clear();
+        self.out_of_order.clear();
         copied
     }
 
@@ -1531,10 +1539,10 @@ mod tests {
 
     // Helper function to get data length at a specific offset (for compatibility with old tests)
     fn get_data_len_at_offset(s: &RxStreamOrderer, offset: u64) -> Option<usize> {
-        if !s.data.is_empty() && offset == s.offset {
-            Some(s.data.len())
+        if !s.in_order.is_empty() && offset == s.offset {
+            Some(s.in_order.len())
         } else {
-            s.ooo.get(&offset).map(Vec::len)
+            s.out_of_order.get(&offset).map(Vec::len)
         }
     }
 
@@ -1542,12 +1550,12 @@ mod tests {
         let mut actual_chunks = Vec::new();
 
         // Add in-order buffer if it exists
-        if !s.data.is_empty() {
-            actual_chunks.push((s.offset, s.data.len()));
+        if !s.in_order.is_empty() {
+            actual_chunks.push((s.offset, s.in_order.len()));
         }
 
         // Add out-of-order chunks
-        for (&start, buf) in &s.ooo {
+        for (&start, buf) in &s.out_of_order {
             actual_chunks.push((start, buf.len()));
         }
 
@@ -1677,7 +1685,7 @@ mod tests {
 
         // Wholly read pieces are dropped.
         assert_eq!(s.read(&mut buf[..]), 7);
-        assert!(s.ooo.is_empty());
+        assert!(s.out_of_order.is_empty());
 
         // New data that overlaps with retired data is trimmed.
         s.inbound_frame(0, &buf[..]);
