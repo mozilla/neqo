@@ -21,3 +21,24 @@ impl FrameDecoder<Self> for Frame {
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frames::reader::FrameDecoder;
+
+    const DATAGRAM: HFrameType = HFrameType(0x0);
+
+    #[test]
+    fn datagram_frame() {
+        let frame_len = 1280;
+        let data = vec![0u8; 1280];
+        let result = <Frame as FrameDecoder<Frame>>::decode(DATAGRAM, frame_len, Some(&data));
+        assert_eq!(result.unwrap(), None, "HTTP Datagram is not supported yet");
+    }
+
+    #[test]
+    fn is_known_type() {
+        assert!(!<Frame as FrameDecoder<Frame>>::is_known_type(DATAGRAM));
+    }
+}
