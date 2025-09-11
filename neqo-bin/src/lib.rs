@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used, reason = "This is example code.")]
-
 use std::{
     net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,

@@ -75,7 +75,7 @@ fn transfer(c: &mut Criterion) {
                     },
                     |(server_handle, client)| {
                         black_box(async move {
-                            Box::pin(client).await.unwrap();
+                            client.await.unwrap();
                             // Tell server to shut down.
                             server_handle.send(()).unwrap();
                         })
