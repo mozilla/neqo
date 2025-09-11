@@ -4,11 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(
-    clippy::unwrap_used,
-    clippy::missing_panics_doc,
-    reason = "This is test code."
-)]
+#![expect(clippy::unwrap_used, reason = "This is test code.")]
 
 use std::{
     cell::{OnceCell, RefCell},
@@ -405,6 +401,9 @@ pub fn exchange_packets(
     }
 }
 
+/// # Panics
+///
+/// When connection establishment fails.
 pub fn connect_peers(hconn_c: &mut Http3Client, hconn_s: &mut Http3Server) -> Option<Datagram> {
     assert_eq!(hconn_c.state(), Http3State::Initializing);
     let out = hconn_c.process_output(now()); // Initial
