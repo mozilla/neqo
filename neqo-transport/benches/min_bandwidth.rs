@@ -86,6 +86,12 @@ fn gbit_bandwidth(ecn: bool) {
         t = LINK_BANDWIDTH / MBIT
     );
 
+    qinfo!(
+        "achieved bandwidth: {} Mbit/s, that's {}% of the path capacity",
+        achieved_bandwidth / MBIT as f64,
+        achieved_bandwidth / LINK_BANDWIDTH as f64 * 100.0
+    );
+
     assert!(
         LINK_BANDWIDTH as f64 * MINIMUM_EXPECTED_UTILIZATION < achieved_bandwidth,
         "{name} expected to reach {MINIMUM_EXPECTED_UTILIZATION} of maximum bandwidth ({t} Mbit/s) but got {a} Mbit/s",
