@@ -206,8 +206,9 @@ impl RxStreamOrderer {
             self.offset = new_start;
         }
 
-        self.data.extend(new_data);
-        self.received += u64::try_from(new_data.len()).expect("usize fits in u64");
+        let overlap = self.next_expected() - new_start;
+        self.data.extend(&new_data[overlap..]);
+        self.received += u64::try_from(new_data.len() - overlap).expect("usize fits in u64");
     }
 
     fn store_out_of_order_data(&mut self, mut new_start: u64, mut new_data: &[u8]) {
