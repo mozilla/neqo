@@ -187,7 +187,7 @@ impl RxStreamOrderer {
         }
 
         // Only use fast path for truly in-order data when there are no gaps.
-        if new_start == self.next_expected() && self.ooo.is_empty() {
+        if new_start <= self.next_expected() && new_start + new_end > self.next_expected() && self.ooo.is_empty() {
             self.store_in_order_data(new_start, new_data);
             return;
         }
