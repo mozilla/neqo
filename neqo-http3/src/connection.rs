@@ -34,7 +34,7 @@ use crate::{
     qpack_decoder_receiver::DecoderRecvStream,
     qpack_encoder_receiver::EncoderRecvStream,
     recv_message::{RecvMessage, RecvMessageInfo},
-    request_target::{AsRequestTarget, RequestTarget as _},
+    request_target::RequestTarget,
     send_message::SendMessage,
     settings::{HSettingType, HSettings, HttpZeroRttChecker},
     stream_type_reader::NewStreamHeadReader,
@@ -43,13 +43,10 @@ use crate::{
     SendStreamEvents,
 };
 
-pub struct RequestDescription<'b, 't, T>
-where
-    T: AsRequestTarget<'t> + ?Sized + Debug,
-{
+pub struct RequestDescription<'b, T: RequestTarget> {
     pub method: &'b str,
     pub connect_type: Option<ExtendedConnectType>,
-    pub target: &'t T,
+    pub target: T,
     pub headers: &'b [Header],
     pub priority: Priority,
 }
@@ -787,40 +784,35 @@ impl Http3Connection {
         output
     }
 
-    fn create_fetch_headers<'b, 't, T>(request: &RequestDescription<'b, 't, T>) -> Res<Vec<Header>>
+    fn create_fetch_headers<T>(request: &RequestDescription<T>) -> Vec<Header>
     where
-        T: AsRequestTarget<'t> + ?Sized + Debug,
+        T: RequestTarget,
     {
-        let target = request
-            .target
-            .as_request_target()
-            .map_err(|_| Error::InvalidRequestTarget)?;
-
         // Transform pseudo-header fields
         let mut final_headers = vec![
             Header::new(":method", request.method),
-            Header::new(":scheme", target.scheme()),
-            Header::new(":authority", target.authority()),
-            Header::new(":path", target.path()),
+            Header::new(":scheme", request.target.scheme()),
+            Header::new(":authority", request.target.authority()),
+            Header::new(":path", request.target.path()),
         ];
         if let Some(conn_type) = request.connect_type {
             final_headers.push(Header::new(":protocol", conn_type.string()));
         }
 
         final_headers.extend_from_slice(request.headers);
-        Ok(final_headers)
+        final_headers
     }
 
-    pub fn fetch<'b, 't, T>(
+    pub fn fetch<T>(
         &mut self,
         conn: &mut Connection,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn HttpRecvStreamEvents>,
         push_handler: Option<Rc<RefCell<PushController>>>,
-        request: &RequestDescription<'b, 't, T>,
+        request: &RequestDescription<T>,
     ) -> Res<StreamId>
     where
-        T: AsRequestTarget<'t> + ?Sized + Debug,
+        T: RequestTarget,
     {
         qinfo!(
             "[{self}] Fetch method={} target: {:?}",
@@ -850,19 +842,19 @@ impl Http3Connection {
         Ok(id)
     }
 
-    fn fetch_with_stream<'b, 't, T>(
+    fn fetch_with_stream<T>(
         &mut self,
         stream_id: StreamId,
         conn: &mut Connection,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn HttpRecvStreamEvents>,
         push_handler: Option<Rc<RefCell<PushController>>>,
-        request: &RequestDescription<'b, 't, T>,
+        request: &RequestDescription<T>,
     ) -> Res<()>
     where
-        T: AsRequestTarget<'t> + ?Sized + Debug,
+        T: RequestTarget,
     {
-        let final_headers = Self::create_fetch_headers(request)?;
+        let final_headers = Self::create_fetch_headers(request);
 
         let stream_type = if request.connect_type.is_some() {
             Http3StreamType::ExtendedConnect
@@ -1069,15 +1061,15 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub fn webtransport_create_session<'x, 't: 'x, T>(
+    pub fn webtransport_create_session<T>(
         &mut self,
         conn: &mut Connection,
         events: Box<dyn ExtendedConnectEvents>,
-        target: &'t T,
-        headers: &'t [Header],
+        target: T,
+        headers: &[Header],
     ) -> Res<StreamId>
     where
-        T: AsRequestTarget<'x> + ?Sized + Debug,
+        T: RequestTarget,
     {
         qinfo!("[{self}] Create WebTransport");
         if !self.webtransport_enabled() {
@@ -1105,7 +1097,7 @@ impl Http3Connection {
             headers,
             connect_type: Some(ExtendedConnectType::WebTransport),
             priority: Priority::default(),
-        })?;
+        });
         extended_conn
             .borrow_mut()
             .send_request(&final_headers, conn)?;

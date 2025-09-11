@@ -4,9 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::{self, Debug, Formatter};
+use std::fmt::Debug;
 
-use url::{ParseError, Url};
+use url::Url;
 
 pub trait RequestTarget: Debug {
     fn scheme(&self) -> &str;
@@ -14,115 +14,30 @@ pub trait RequestTarget: Debug {
     fn path(&self) -> &str;
 }
 
-pub struct RefRequestTarget<'s, 'a, 'p> {
-    scheme: &'s str,
-    authority: &'a str,
-    path: &'p str,
-}
-
-impl RequestTarget for RefRequestTarget<'_, '_, '_> {
+impl RequestTarget for &Url {
     fn scheme(&self) -> &str {
-        self.scheme
+        Url::scheme(self)
     }
 
     fn authority(&self) -> &str {
-        self.authority
+        self.host_str().unwrap_or("")
     }
 
     fn path(&self) -> &str {
-        self.path
+        Url::path(self)
     }
 }
 
-impl<'s, 'a, 'p> RefRequestTarget<'s, 'a, 'p> {
-    #[must_use]
-    pub const fn new(scheme: &'s str, authority: &'a str, path: &'p str) -> Self {
-        Self {
-            scheme,
-            authority,
-            path,
-        }
-    }
-}
-
-impl Debug for RefRequestTarget<'_, '_, '_> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}://{}{}", self.scheme, self.authority, self.path)
-    }
-}
-
-/// `AsRequestTarget` is a trait that produces a `RequestTarget` that
-/// refers to the identified object.
-pub trait AsRequestTarget<'x> {
-    type Target: RequestTarget;
-    type Error;
-    /// Produce a `RequestTarget` that refers to `self`.
-    ///
-    /// # Errors
-    ///
-    /// This method can generate an error of type `Self::Error`
-    /// if the conversion is unsuccessful.
-    fn as_request_target(&'x self) -> Result<Self::Target, Self::Error>;
-}
-
-impl<'x, S, A, P> AsRequestTarget<'x> for (S, A, P)
-where
-    S: AsRef<str> + 'x,
-    A: AsRef<str> + 'x,
-    P: AsRef<str> + 'x,
-{
-    type Target = RefRequestTarget<'x, 'x, 'x>;
-    type Error = ();
-    fn as_request_target(&'x self) -> Result<Self::Target, Self::Error> {
-        Ok(RefRequestTarget::new(
-            self.0.as_ref(),
-            self.1.as_ref(),
-            self.2.as_ref(),
-        ))
-    }
-}
-
-impl<'x> AsRequestTarget<'x> for Url {
-    type Target = RefRequestTarget<'x, 'x, 'x>;
-    type Error = ();
-    fn as_request_target(&'x self) -> Result<Self::Target, Self::Error> {
-        Ok(RefRequestTarget::new(
-            self.scheme(),
-            self.host_str().unwrap_or(""),
-            self.path(),
-        ))
-    }
-}
-
-pub struct UrlRequestTarget {
-    url: Url,
-}
-
-impl RequestTarget for UrlRequestTarget {
-    fn scheme(&self) -> &str {
-        self.url.scheme()
+impl<'s, 'a, 'p> RequestTarget for (&'s str, &'a str, &'p str) {
+    fn scheme(&self) -> &'s str {
+        self.0
     }
 
-    fn authority(&self) -> &str {
-        self.url.host_str().unwrap_or("")
+    fn authority(&self) -> &'a str {
+        self.1
     }
 
-    fn path(&self) -> &str {
-        self.url.path()
-    }
-}
-
-impl Debug for UrlRequestTarget {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        self.url.fmt(f)
-    }
-}
-
-impl<'x> AsRequestTarget<'x> for str {
-    type Target = UrlRequestTarget;
-    type Error = ParseError;
-    fn as_request_target(&'x self) -> Result<Self::Target, Self::Error> {
-        let url = Url::parse(self)?;
-        Ok(UrlRequestTarget { url })
+    fn path(&self) -> &'p str {
+        self.2
     }
 }
