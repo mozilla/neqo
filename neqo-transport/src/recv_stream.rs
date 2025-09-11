@@ -244,9 +244,9 @@ impl RxStreamOrderer {
                     // New data starts within in-order buffer.
                     if new_end > data_end {
                         // Extends beyond in-order buffer.
-                        let overlap = data_end - new_start;
-                        let overlap_usize = usize::try_from(overlap).expect("u64 fits in usize");
-                        new_data = &new_data[overlap_usize..];
+                        let overlap =
+                            usize::try_from(data_end - new_start).expect("u64 fits in usize");
+                        new_data = &new_data[overlap..];
                         new_start = data_end;
 
                         if !new_data.is_empty() {
@@ -427,14 +427,14 @@ impl RxStreamOrderer {
     /// Data bytes buffered. Could be more than `bytes_readable` if there are
     /// ranges missing.
     fn buffered(&self) -> u64 {
-        let data_buffered = if self.in_order.is_empty() {
+        let buffered_in_order = if self.in_order.is_empty() {
             0
         } else {
             u64::try_from(self.in_order.len()).expect("usize fits in u64")
                 - self.retired.saturating_sub(self.offset)
         };
 
-        let ooo_buffered: u64 = self
+        let buffered_out_of_order: u64 = self
             .out_of_order
             .iter()
             .map(|(&start, data)| {
@@ -443,11 +443,30 @@ impl RxStreamOrderer {
             })
             .sum();
 
-        data_buffered + ooo_buffered
+        buffered_in_order + buffered_out_of_order
     }
 
-    /// Copy received data (if any) into the buffer. Returns bytes copied.
     fn read(&mut self, buf: &mut [u8]) -> usize {
+        /// Copy received data (if any) into the buffer. Returns bytes copied.
+        /// Helper function to copy data from a slice to buffer with bounds checking.
+        /// Returns the number of bytes copied and updates the remaining count.
+        fn copy_from_slice(
+            slice: &[u8],
+            offset: usize,
+            buf: &mut [u8],
+            buf_start: usize,
+            remaining: &mut usize,
+        ) -> usize {
+            if offset < slice.len() && *remaining > 0 {
+                let len = (*remaining).min(slice.len() - offset);
+                buf[buf_start..buf_start + len].copy_from_slice(&slice[offset..offset + len]);
+                *remaining -= len;
+                len
+            } else {
+                0
+            }
+        }
+
         qtrace!("Reading {} bytes, {} available", buf.len(), self.buffered());
         let mut copied = 0;
 
@@ -456,51 +475,28 @@ impl RxStreamOrderer {
             let data_end =
                 self.offset + u64::try_from(self.in_order.len()).expect("usize fits in u64");
             if data_end > self.retired {
-                let copy_offset =
+                let mut offset =
                     usize::try_from(self.retired - self.offset).expect("u64 fits in usize");
-                let available = self.in_order.len() - copy_offset;
-                let space = buf.len();
-                let copy_bytes = available.min(space);
+                let available = self.in_order.len() - offset;
+                let mut remaining = available.min(buf.len());
 
-                if copy_bytes > 0 {
+                if remaining > 0 {
                     let (front, back) = self.in_order.as_slices();
 
-                    // Copy from the appropriate slice(s)
-                    let mut bytes_copied = 0;
-                    let mut remaining_offset = copy_offset;
-                    let mut remaining_bytes = copy_bytes;
-
                     // First, try to copy from front slice
-                    if remaining_offset < front.len() && remaining_bytes > 0 {
-                        let copy_start = remaining_offset;
-                        let available_in_front = front.len() - copy_start;
-                        let to_copy_from_front = remaining_bytes.min(available_in_front);
+                    let front_copied = copy_from_slice(front, offset, buf, copied, &mut remaining);
+                    copied += front_copied;
 
-                        buf[bytes_copied..bytes_copied + to_copy_from_front]
-                            .copy_from_slice(&front[copy_start..copy_start + to_copy_from_front]);
-
-                        bytes_copied += to_copy_from_front;
-                        remaining_bytes -= to_copy_from_front;
-                        remaining_offset = 0; // For back slice, we start from beginning
+                    // Adjust offset for back slice
+                    offset = if front_copied > 0 {
+                        0 // We copied from front, start from beginning of back
                     } else {
-                        // Offset is beyond front slice, adjust for back slice
-                        remaining_offset = remaining_offset.saturating_sub(front.len());
-                    }
+                        offset.saturating_sub(front.len()) // Offset is beyond front slice
+                    };
 
                     // Then, copy from back slice if needed
-                    if remaining_bytes > 0 && remaining_offset < back.len() {
-                        let copy_start = remaining_offset;
-                        let available_in_back = back.len() - copy_start;
-                        let to_copy_from_back = remaining_bytes.min(available_in_back);
-
-                        buf[bytes_copied..bytes_copied + to_copy_from_back]
-                            .copy_from_slice(&back[copy_start..copy_start + to_copy_from_back]);
-
-                        bytes_copied += to_copy_from_back;
-                    }
-
-                    copied = bytes_copied;
-                    self.retired += u64::try_from(bytes_copied).expect("usize fits in u64");
+                    copied += copy_from_slice(back, offset, buf, copied, &mut remaining);
+                    self.retired += u64::try_from(copied).expect("usize fits in u64");
 
                     // If we've consumed all of the in-order buffer, we can clear it
                     if self.retired >= data_end {
@@ -519,8 +515,7 @@ impl RxStreamOrderer {
         // Then, read from out-of-order ranges if there's remaining space
         if copied < buf.len() {
             let remaining_buf = &mut buf[copied..];
-            let ooo_copied = self.read_from_ooo_ranges(remaining_buf);
-            copied += ooo_copied;
+            copied += self.read_from_ooo_ranges(remaining_buf);
         }
 
         copied
