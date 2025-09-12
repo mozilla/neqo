@@ -9,7 +9,7 @@ use std::{cell::RefCell, rc::Rc};
 use neqo_common::Encoder;
 use neqo_transport::{recv_stream, send_stream, Connection, StreamId};
 
-use super::webtransport_session;
+use super::session::Session;
 use crate::{
     CloseType, Http3StreamInfo, Http3StreamType, ReceiveOutput, RecvStream, RecvStreamEvents, Res,
     SendStream, SendStreamEvents, Stream,
@@ -23,7 +23,7 @@ pub struct WebTransportRecvStream {
     stream_id: StreamId,
     stream_info: Http3StreamInfo,
     events: Box<dyn RecvStreamEvents>,
-    session: Rc<RefCell<webtransport_session::Session>>,
+    session: Rc<RefCell<Session>>,
     session_id: StreamId,
     fin: bool,
 }
@@ -33,7 +33,7 @@ impl WebTransportRecvStream {
         stream_id: StreamId,
         session_id: StreamId,
         events: Box<dyn RecvStreamEvents>,
-        session: Rc<RefCell<webtransport_session::Session>>,
+        session: Rc<RefCell<Session>>,
     ) -> Self {
         Self {
             stream_id,
@@ -120,7 +120,7 @@ pub struct WebTransportSendStream {
     stream_info: Http3StreamInfo,
     state: WebTransportSenderStreamState,
     events: Box<dyn SendStreamEvents>,
-    session: Rc<RefCell<webtransport_session::Session>>,
+    session: Rc<RefCell<Session>>,
     session_id: StreamId,
 }
 
@@ -129,7 +129,7 @@ impl WebTransportSendStream {
         stream_id: StreamId,
         session_id: StreamId,
         events: Box<dyn SendStreamEvents>,
-        session: Rc<RefCell<webtransport_session::Session>>,
+        session: Rc<RefCell<Session>>,
         local: bool,
     ) -> Self {
         Self {
