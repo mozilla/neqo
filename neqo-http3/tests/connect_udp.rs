@@ -376,7 +376,7 @@ fn server_datagram_before_accept() {
             .find_map(|event| {
                 if let Http3ServerEvent::ConnectUdp(ConnectUdpServerEvent::NewSession {
                     session,
-                    headers,
+                    ..
                 }) = event
                 {
                     Some(session)
@@ -424,4 +424,13 @@ fn server_datagram_before_accept() {
             assert_eq!(client.events().next(), None,);
         }
     }
+}
+
+#[test]
+fn create_session_without_connect_setting() {
+    let mut client = http3_client_with_params(Http3Parameters::default().connect(false));
+    assert_eq!(
+        client.connect_udp_create_session(now(), "example.com", &[]),
+        Err(Error::Unavailable)
+    );
 }
