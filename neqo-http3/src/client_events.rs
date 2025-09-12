@@ -261,13 +261,22 @@ impl ExtendedConnectEvents for Http3ClientEvents {
         self.insert(event);
     }
 
-    fn extended_connect_new_stream(&self, stream_info: Http3StreamInfo) -> Res<()> {
+    fn extended_connect_new_stream(
+        &self,
+        stream_info: Http3StreamInfo,
+        emit_readable: bool,
+    ) -> Res<()> {
         self.insert(Http3ClientEvent::WebTransport(
             WebTransportEvent::NewStream {
                 stream_id: stream_info.stream_id(),
                 session_id: stream_info.session_id().ok_or(Error::Internal)?,
             },
         ));
+        if emit_readable {
+            self.insert(Http3ClientEvent::DataReadable {
+                stream_id: stream_info.stream_id(),
+            });
+        }
         Ok(())
     }
 

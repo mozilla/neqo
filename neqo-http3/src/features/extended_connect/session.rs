@@ -58,7 +58,7 @@ pub(crate) struct Session {
     protocol: Box<dyn Protocol>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub(crate) enum State {
     Negotiating,
     Active,
@@ -67,7 +67,7 @@ pub(crate) enum State {
 }
 
 impl State {
-    pub(crate) const fn closing_state(&self) -> bool {
+    pub(crate) const fn closing_state(self) -> bool {
         matches!(self, Self::FinPending | Self::Done)
     }
 }
@@ -224,7 +224,7 @@ impl Session {
     }
 
     pub(crate) fn maybe_check_headers(&mut self) -> Res<()> {
-        if State::Negotiating != self.state {
+        if self.state != State::Negotiating {
             return Ok(());
         }
 
@@ -276,6 +276,7 @@ impl Session {
                             status,
                             headers,
                         );
+                        self.protocol.session_start(&mut self.events)?;
                         State::Active
                     }
                 } else {
@@ -293,10 +294,8 @@ impl Session {
     }
 
     pub(crate) fn add_stream(&mut self, stream_id: StreamId) -> Res<()> {
-        if self.state == State::Active {
-            self.protocol.add_stream(stream_id, &mut self.events)?;
-        }
-        Ok(())
+        self.protocol
+            .add_stream(stream_id, &mut self.events, self.state)
     }
 
     pub(crate) fn remove_recv_stream(&mut self, stream_id: StreamId) {
@@ -493,6 +492,10 @@ impl SendStream for Rc<RefCell<Session>> {
 pub(crate) trait Protocol: Debug + Display {
     fn connect_type(&self) -> ExtendedConnectType;
 
+    fn session_start(&mut self, _events: &mut Box<dyn ExtendedConnectEvents>) -> Res<()> {
+        Ok(())
+    }
+
     fn close_frame(&self, _error: u32, _message: &str) -> Option<Vec<u8>> {
         None
     }
@@ -508,6 +511,7 @@ pub(crate) trait Protocol: Debug + Display {
         &mut self,
         _stream_id: StreamId,
         _events: &mut Box<dyn ExtendedConnectEvents>,
+        _state: State,
     ) -> Res<()> {
         let msg = "Protocol does not support adding streams";
         qdebug!("{msg}");

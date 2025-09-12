@@ -461,8 +461,9 @@ impl Http3Connection {
         }
     }
 
-    /// This is called when a `ConnectionEvent::NewStream` event is received. This register the
-    /// stream with a `NewStreamHeadReader` handler.
+    /// This is called when a [`neqo_transport::ConnectionEvent::NewStream`]
+    /// event is received.  This registers the stream with a
+    /// [`NewStreamHeadReader`] handler.
     pub(crate) fn add_new_stream(&mut self, stream_id: StreamId) {
         qtrace!("[{self}] A new stream: {stream_id}");
         self.recv_streams.insert(
@@ -471,8 +472,9 @@ impl Http3Connection {
         );
     }
 
-    /// The function calls `receive` for a stream. It also deals with the outcome of a read by
-    /// calling `handle_stream_manipulation_output`.
+    /// The function calls [`RecvStream::receive`] for a stream. It also deals
+    /// with the outcome of a read by calling
+    /// [`Http3Connection::handle_stream_manipulation_output`].
     fn stream_receive(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<ReceiveOutput> {
         qtrace!("[{self}] Readable stream {stream_id}");
 
@@ -505,7 +507,7 @@ impl Http3Connection {
     }
 
     /// This function handles reading from all streams, i.e. control, qpack, request/response
-    /// stream and unidi stream that are still do not have a type.
+    /// stream and unidi stream that still do not have a type.
     /// The function cannot handle:
     /// 1) a `Push(_)`, `Http` or `WebTransportStream(_)` stream
     /// 2) frames `MaxPushId`, `PriorityUpdateRequest`, `PriorityUpdateRequestPush` or `Goaway` must
