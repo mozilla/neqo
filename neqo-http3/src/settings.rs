@@ -295,3 +295,60 @@ impl ZeroRttChecker for HttpZeroRttChecker {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use neqo_common::Encoder;
+
+    use super::*;
+
+    #[test]
+    fn unknown_setting_type_ignored() {
+        let mut enc = Encoder::new();
+
+        // Add a known setting.
+        enc.encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY);
+        enc.encode_varint(1024u64);
+
+        // Add an unknown setting type.
+        let unknown_setting_type = u64::from(u32::MAX);
+        enc.encode_varint(unknown_setting_type);
+        enc.encode_varint(42u64);
+
+        // Add another known setting.
+        enc.encode_varint(SETTINGS_QPACK_BLOCKED_STREAMS);
+        enc.encode_varint(100u64);
+
+        let mut dec = enc.as_decoder();
+
+        let mut settings = HSettings::new(&[]);
+        settings
+            .decode_frame_contents(&mut dec)
+            .expect("succeeds despite unknown setting");
+
+        // Should only contain the known settings.
+        assert_eq!(settings.len(), 2);
+        assert_eq!(settings.get(HSettingType::MaxTableCapacity), 1024);
+        assert_eq!(settings.get(HSettingType::BlockedStreams), 100);
+    }
+
+    #[test]
+    fn not_enough_data_error() {
+        let mut enc = Encoder::new();
+
+        // Add a complete setting.
+        enc.encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY);
+        enc.encode_varint(1024u64);
+
+        // Add an incomplete setting.
+        enc.encode_varint(SETTINGS_QPACK_BLOCKED_STREAMS);
+
+        let mut dec = enc.as_decoder();
+
+        let mut settings = HSettings::new(&[]);
+        assert_eq!(
+            settings.decode_frame_contents(&mut dec),
+            Err(Error::NotEnoughData)
+        );
+    }
+}
