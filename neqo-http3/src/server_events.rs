@@ -441,7 +441,7 @@ impl ConnectUdpRequest {
         self.stream_handler.stream_id()
     }
 
-    /// Send `WebTransport` datagram.
+    /// Send connect-udp datagram.
     ///
     /// # Errors
     ///
@@ -464,6 +464,19 @@ impl ConnectUdpRequest {
     #[must_use]
     pub fn remote_datagram_size(&self) -> u64 {
         self.stream_handler.conn.borrow().remote_datagram_size()
+    }
+
+    /// Used for testing only.
+    ///
+    /// # Errors
+    ///
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    pub fn reset_send(&self) -> Res<()> {
+        self.stream_handler.handler.borrow_mut().stream_reset_send(
+            self.stream_id(),
+            0,
+            &mut self.stream_handler.conn.borrow_mut(),
+        )
     }
 }
 

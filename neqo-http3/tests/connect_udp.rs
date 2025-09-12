@@ -434,3 +434,35 @@ fn create_session_without_connect_setting() {
         Err(Error::Unavailable)
     );
 }
+
+#[test]
+fn server_stream_reset_results_in_client_session_close() {
+    let (mut client, mut proxy, _connect_udp_session_id) = initiate_new_session();
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    while client.next_event().is_some() {}
+
+    let proxy_session = proxy
+        .events()
+        .find_map(|event| {
+            if let Http3ServerEvent::ConnectUdp(ConnectUdpServerEvent::NewSession {
+                session, ..
+            }) = event
+            {
+                Some(session)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+
+    proxy_session.reset_send().unwrap();
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    assert!(matches!(
+        client.next_event(),
+        Some(Http3ClientEvent::ConnectUdp(
+            ConnectUdpEvent::SessionClosed { .. }
+        ))
+    ));
+}
