@@ -363,3 +363,65 @@ fn send_dgram_on_non_active_session() {
         Err(Error::Unavailable)
     );
 }
+
+/// A server datagram, arriving before the server accepted the session, is dropped.
+#[test]
+fn server_datagram_before_accept() {
+    for in_order in [true, false] {
+        let (mut client, mut proxy, _connect_udp_session_id) = initiate_new_session();
+        exchange_packets(&mut client, &mut proxy, false, None);
+
+        let proxy_session = proxy
+            .events()
+            .find_map(|event| {
+                if let Http3ServerEvent::ConnectUdp(ConnectUdpServerEvent::NewSession {
+                    session,
+                    headers,
+                }) = event
+                {
+                    Some(session)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        proxy_session
+            .response(&SessionAcceptAction::Accept)
+            .unwrap();
+        let proxy_accept = proxy.process_output(now()).dgram().unwrap();
+        assert!(proxy.process_output(now()).dgram().is_none());
+
+        proxy_session.send_datagram(b"ping", None).unwrap();
+        let proxy_dgram = proxy.process_output(now()).dgram().unwrap();
+
+        while client.next_event().is_some() {}
+
+        if in_order {
+            client.process_input(proxy_accept, now());
+            assert!(matches!(
+                client.events().next(),
+                Some(Http3ClientEvent::ConnectUdp(
+                    ConnectUdpEvent::NewSession { .. }
+                ))
+            ));
+            client.process_input(proxy_dgram, now());
+            assert!(matches!(
+                client.events().next(),
+                Some(Http3ClientEvent::ConnectUdp(
+                    ConnectUdpEvent::Datagram { .. }
+                ))
+            ));
+        } else {
+            client.process_input(proxy_dgram, now());
+            assert_eq!(client.events().next(), None,);
+            client.process_input(proxy_accept, now());
+            assert!(matches!(
+                client.events().next(),
+                Some(Http3ClientEvent::ConnectUdp(
+                    ConnectUdpEvent::NewSession { .. }
+                ))
+            ));
+            assert_eq!(client.events().next(), None,);
+        }
+    }
+}
