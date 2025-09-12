@@ -10,7 +10,7 @@ use neqo_common::{event::Provider as _, header::HeadersExt as _, qinfo, Datagram
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     ConnectUdpEvent, ConnectUdpRequest, ConnectUdpServerEvent, Error, Http3Client,
-    Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
+    Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent, Http3State, Priority,
     SessionAcceptAction,
 };
 use neqo_transport::ConnectionParameters;
@@ -19,6 +19,9 @@ use test_fixture::{
     http3_client_with_params, http3_server_with_params, now, DEFAULT_ADDR,
 };
 use url::Url;
+
+const PING: &[u8] = b"ping";
+const PONG: &[u8] = b"pong";
 
 fn initiate_new_session() -> (Http3Client, Http3Server, neqo_http3::StreamId) {
     let conn_params = ConnectionParameters::default()
@@ -189,8 +192,6 @@ fn exchange_packets_through_proxy(
 }
 
 fn session_lifecycle(client_closes: bool) {
-    const PING: &[u8] = b"ping";
-    const PONG: &[u8] = b"pong";
     fixture_init();
     neqo_common::log::init(None);
 
@@ -465,4 +466,28 @@ fn server_stream_reset_results_in_client_session_close() {
             ConnectUdpEvent::SessionClosed { .. }
         ))
     ));
+}
+
+#[test]
+fn connect_udp_operation_on_fetch_stream() {
+    let (mut client, _proxy, _session_id, _proxy_session) = establish_new_session();
+    let fetch_stream = client
+        .fetch(
+            now(),
+            "GET",
+            &("https", "something.com", "/"),
+            &[],
+            Priority::default(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        client.connect_udp_send_datagram(fetch_stream, PING, None),
+        Err(Error::InvalidStreamId)
+    );
+
+    assert_eq!(
+        client.connect_udp_close_session(fetch_stream, 0, "kthxbye"),
+        Err(Error::InvalidStreamId)
+    );
 }
