@@ -138,6 +138,7 @@ impl Http3Server {
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
         qtrace!("[{self}] Process");
+        self.process_http3(now);
         let out = self.server.process_multiple(dgrams, now, max_datagrams);
         self.process_http3(now);
         // If we do not that a dgram already try again after process_http3.
