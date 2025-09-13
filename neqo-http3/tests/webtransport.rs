@@ -427,3 +427,68 @@ fn wt_race_condition_server_stream_before_confirmation() {
         assert_eq!(events.next(), None);
     }
 }
+
+#[test]
+fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
+    fixture_init();
+    let now = now();
+
+    let (mut client, mut server) = connect();
+
+    // Client creates a WebTransport session.
+    client
+        .webtransport_create_session(now, ("https", "something.com", "/"), &[])
+        .unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+    assert_eq!(server.process_output(now).dgram(), None);
+    while client.next_event().is_some() {}
+
+    // Server accepts the session, and sends a WebTransport datagram, all in the same UDP datagram.
+    let wt_server_session = server
+        .events()
+        .find_map(|event| {
+            if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
+                session,
+                ..
+            }) = event
+            {
+                Some(session)
+            } else {
+                None
+            }
+        })
+        .expect("Should receive WebTransport session request");
+    wt_server_session
+        .response(&SessionAcceptAction::Accept)
+        .unwrap();
+    wt_server_session.send_datagram(b"PING", None).unwrap();
+    let accept_and_wt_datagram = server
+        .process_output(now)
+        .dgram()
+        .expect("Expected server to produce session acceptance datagram");
+    assert_eq!(server.process_output(now).dgram(), None);
+
+    // Client processes the server's UDP datagram, first the session acceptance,
+    // then the WebTransport datagram.
+    client.process_input(accept_and_wt_datagram, now);
+    assert!(
+        matches!(
+            client.events().next(),
+            Some(Http3ClientEvent::WebTransport(
+                WebTransportEvent::NewSession { .. }
+            ))
+        ),
+        "Should receive session acceptance event"
+    );
+    assert!(
+        matches!(
+            client.events().next(),
+            Some(Http3ClientEvent::WebTransport(
+                WebTransportEvent::Datagram{ session_id, datagram }
+            )) if session_id == wt_server_session.stream_id() && datagram == b"PING",
+        ),
+        "Should receive datagram"
+    );
+
+    assert_eq!(client.events().next(), None);
+}
