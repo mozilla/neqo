@@ -1266,7 +1266,7 @@ impl Connection {
         if self.test_frame_writer.is_none() {
             if let OutputBatch::DatagramBatch(batch) = &output {
                 for dgram in batch.iter() {
-                    neqo_common::write_item_to_fuzzing_corpus("packet", dgram);
+                    neqo_common::write_item_to_fuzzing_corpus("packet", &dgram);
                 }
             }
         }
@@ -2538,10 +2538,6 @@ impl Connection {
     }
 
     /// Build batch of datagrams to be sent on the provided path.
-    #[expect(
-        clippy::unwrap_in_result,
-        reason = "expect() used on internal invariants"
-    )]
     fn output_dgram_batch_on_path(
         &mut self,
         path: &PathRef,
@@ -2622,7 +2618,7 @@ impl Connection {
             send_buffer,
             packet_tos,
             num_datagrams,
-            max_datagram_size.expect("one or more datagrams"),
+            max_datagram_size.ok_or(Error::Internal)?,
             &mut self.stats.borrow_mut(),
         );
 

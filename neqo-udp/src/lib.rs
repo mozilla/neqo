@@ -258,6 +258,11 @@ impl<S: SocketRef> Socket<S> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::allow_attributes,
+        clippy::unwrap_in_result,
+        reason = "OK in tests."
+    )]
     use std::env;
 
     use neqo_common::{Dscp, Ecn};

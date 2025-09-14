@@ -59,7 +59,7 @@ jobs:
       - name: Run tests with sanitizers
         env:
           RUST_LOG: trace
-          RUSTDOCFLAGS: "-Z sanitizer=${{ matrix.sanitizer }}"
+          RUSTDOCFLAGS: "-Z sanitizer=${{ matrix.sanitizer }} -Cunsafe-allow-abi-mismatch=sanitizer"
           ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
           RUST_BACKTRACE: 1
           OS: ${{ matrix.os }}
