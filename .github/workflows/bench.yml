@@ -178,6 +178,7 @@ jobs:
                   -e '/cset:.*last message/d' \
                   -e '/Criterion.rs ERROR: Error in Gnuplot:.*$/d' \
                   -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
+              perl -p0e 's/(Change within noise threshold\.|No change in performance detected\.|Performance has regressed\.|Performance has improved\.)\n([a-zA-Z0-9][^F][^\s]*[\-\/])/$1\n\n$2/g' |\
               perl -p -0777 -e 's/(.*?)\n(.*?)(((No change|Change within|Performance has).*?)(\nFound .*?)?)?\n\n/<details><summary>$1: $4<\/summary><pre>\n$2$6<\/pre><\/details>\n/gs' |\
               sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
                     -e 's/(Performance has improved.)/:green_heart: <b>\1<\/b>/gi' \

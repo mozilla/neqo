@@ -240,9 +240,22 @@ impl DatagramBatch {
         self.d.len().div_ceil(self.datagram_size)
     }
 
-    #[cfg(feature = "build-fuzzing-corpus")]
-    pub fn iter(&self) -> impl Iterator<Item = &[u8]> {
-        self.d.chunks(self.datagram_size)
+    pub fn iter(&self) -> impl Iterator<Item = Datagram<&[u8]>> {
+        self.d.chunks(self.datagram_size).map(|d| Datagram {
+            src: self.src,
+            dst: self.dst,
+            tos: self.tos,
+            d,
+        })
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = Datagram<&mut [u8]>> {
+        self.d.chunks_mut(self.datagram_size).map(|d| Datagram {
+            src: self.src,
+            dst: self.dst,
+            tos: self.tos,
+            d,
+        })
     }
 }
 
@@ -304,5 +317,45 @@ mod tests {
         );
         batch.set_tos(Ecn::Ce.into());
         assert_eq!(batch.tos(), Ecn::Ce.into());
+    }
+
+    #[test]
+    fn batch_iter() {
+        let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
+        let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
+        let tos = Tos::default();
+        let batch = DatagramBatch::new(src, dst, tos, 4, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        let datagrams: Vec<_> = batch.iter().collect();
+        assert_eq!(datagrams.len(), 3);
+        assert_eq!(datagrams[0].d, &[1, 2, 3, 4]);
+        assert_eq!(datagrams[1].d, &[5, 6, 7, 8]);
+        assert_eq!(datagrams[2].d, &[9]);
+
+        for d in datagrams {
+            assert_eq!(d.source(), src);
+            assert_eq!(d.destination(), dst);
+            assert_eq!(d.tos(), tos);
+        }
+    }
+
+    #[test]
+    fn batch_iter_mut() {
+        let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
+        let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
+        let tos = Tos::default();
+        let mut batch = DatagramBatch::new(src, dst, tos, 3, vec![10, 20, 30, 40, 50, 60, 70]);
+        for datagram in batch.iter_mut() {
+            assert_eq!(datagram.source(), src);
+            assert_eq!(datagram.destination(), dst);
+            assert_eq!(datagram.tos(), tos);
+            for b in datagram.d {
+                *b += 1;
+            }
+        }
+        let datagrams: Vec<_> = batch.iter().collect();
+        assert_eq!(datagrams.len(), 3);
+        assert_eq!(datagrams[0].d, &[11, 21, 31]);
+        assert_eq!(datagrams[1].d, &[41, 51, 61]);
+        assert_eq!(datagrams[2].d, &[71]);
     }
 }
