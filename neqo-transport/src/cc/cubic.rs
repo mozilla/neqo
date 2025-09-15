@@ -165,6 +165,16 @@ impl Cubic {
         }
         qtrace!("[{self}] New epoch");
     }
+
+    #[cfg(test)]
+    pub const fn last_max_cwnd(&self) -> f64 {
+        self.last_max_cwnd
+    }
+
+    #[cfg(test)]
+    pub fn set_last_max_cwnd(&mut self, last_max_cwnd: f64) {
+        self.last_max_cwnd = last_max_cwnd;
+    }
 }
 
 impl WindowAdjustment for Cubic {
@@ -277,15 +287,5 @@ impl WindowAdjustment for Cubic {
         // Reset ca_epoch_start. Let it start again when the congestion controller
         // exits the app-limited period.
         self.ca_epoch_start = None;
-    }
-
-    #[cfg(test)]
-    fn last_max_cwnd(&self) -> f64 {
-        self.last_max_cwnd
-    }
-
-    #[cfg(test)]
-    fn set_last_max_cwnd(&mut self, last_max_cwnd: f64) {
-        self.last_max_cwnd = last_max_cwnd;
     }
 }
