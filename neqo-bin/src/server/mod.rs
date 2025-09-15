@@ -16,7 +16,7 @@ use std::{
     cell::RefCell,
     fmt::Display,
     fs,
-    future::Future,
+    future::{poll_fn, Future},
     io::{self},
     net::{SocketAddr, ToSocketAddrs as _},
     num::NonZeroUsize,
@@ -24,6 +24,7 @@ use std::{
     pin::Pin,
     process::exit,
     rc::Rc,
+    task::{Context, Poll},
     time::{Duration, Instant},
 };
 
@@ -256,6 +257,15 @@ pub trait HttpServer: Display {
     ) -> OutputBatch;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
+    /// Enables an [`HttpServer`] to drive asynchronous operations.
+    ///
+    /// Needed in Firefox's HTTP/3 proxy test server implementation to drive TCP
+    /// and UDP sockets to the proxy target.
+    ///
+    /// <https://github.com/mozilla-firefox/firefox/blob/main/netwerk/test/http3server/src/main.rs>
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<()> {
+        Poll::Pending
+    }
 }
 
 pub struct Runner<S> {
@@ -266,7 +276,7 @@ pub struct Runner<S> {
     recv_buf: RecvBuf,
 }
 
-impl<S: HttpServer> Runner<S> {
+impl<S: HttpServer + Unpin> Runner<S> {
     #[must_use]
     pub fn new(
         server: S,
@@ -404,12 +414,22 @@ impl<S: HttpServer> Runner<S> {
             Ok(()) => Ok(Ready::Socket(inx)),
             Err(e) => Err(e),
         });
+
         let timeout_ready = self
             .timeout
             .as_mut()
             .map_or_else(|| Either::Right(futures::future::pending()), Either::Left)
             .map(|()| Ok(Ready::Timeout));
-        select(sockets_ready, timeout_ready).await.factor_first().0
+
+        let server_ready =
+            poll_fn(|cx| Pin::new(&mut self.server).poll(cx)).map(|()| Ok(Ready::Server));
+
+        select(
+            select(sockets_ready, timeout_ready).map(|either| either.factor_first().0),
+            server_ready,
+        )
+        .map(|either| either.factor_first().0)
+        .await
     }
 
     pub async fn run(mut self) -> Res<()> {
@@ -429,6 +449,9 @@ impl<S: HttpServer> Runner<S> {
                     self.timeout = None;
                     self.process().await?;
                 }
+                Ready::Server => {
+                    // Processing server at top of the loop.
+                }
             }
         }
     }
@@ -437,6 +460,7 @@ impl<S: HttpServer> Runner<S> {
 enum Ready {
     Socket(usize),
     Timeout,
+    Server,
 }
 
 #[expect(clippy::type_complexity, reason = "pinned and boxed future")]
