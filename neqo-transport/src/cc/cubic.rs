@@ -81,6 +81,17 @@ pub fn convert_to_f64(v: usize) -> f64 {
 
 #[derive(Debug, Default)]
 pub struct Cubic {
+    /// > CUBIC additive increase factor used in the Reno-friendly region \[to achieve
+    /// > approximately the same average congestion window size as Reno\].
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
+    alpha: f64,
+    /// > Size of cwnd in \[bytes\] at the time of setting `ssthresh` most recently, either upon
+    /// > exiting the first slow start or just before `cwnd` was reduced in the last congestion
+    /// > event.
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.1.2-2.4>
+    cwnd_prior: f64,
     /// Maximum Window size two congestion events ago.
     ///
     /// > With fast convergence, when a congestion event occurs, before the
@@ -163,6 +174,7 @@ impl Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-9>
     fn start_epoch(&mut self, curr_cwnd_f64: f64, max_datagram_size: usize, now: Instant) {
+        self.alpha = CUBIC_ALPHA;
         self.ca_epoch_start = Some(now);
         self.w_est = curr_cwnd_f64;
         // If `w_max < cwnd_epoch` we take the cubic root from a negative value in `calc_k()`. That
@@ -170,15 +182,40 @@ impl Cubic {
         // `start_epoch()`, which is only possible after persistent congestion or an app limited
         // period. It could also happen if we never had a congestion event, so never called
         // `reduce_cwnd()` thus `w_max` was never set (so is still it's default `0.0`
-        // value). In any case we reset/initialize `w_max`, `cwnd_prior` and `k` here.
+        // value). In any case we reset/initialize `w_max`, `cwnd_prior` and `k` here. We
+        // also set `alpha` to `1.0` as per the below RFC section, since `w_est >=
+        // cwnd_prior` is true here.
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-11>
         if self.last_max_cwnd <= curr_cwnd_f64 {
+            self.cwnd_prior = curr_cwnd_f64;
             self.w_max = curr_cwnd_f64;
+            debug_assert!(
+                self.w_est >= self.cwnd_prior,
+                "w_est < cwnd_prior, so we are not allowed to set alpha = 1 (w_est: {}, cwnd_prior: {})", self.w_est, self.cwnd_prior
+            );
+            self.alpha = 1.0;
             self.k = 0.0;
         } else {
             self.w_max = self.last_max_cwnd;
             self.k = self.calc_k(curr_cwnd_f64, max_datagram_size);
         }
         qtrace!("[{self}] New epoch");
+    }
+
+    #[cfg(test)]
+    pub const fn w_est(&self) -> f64 {
+        self.w_est
+    }
+
+    #[cfg(test)]
+    pub const fn cwnd_prior(&self) -> f64 {
+        self.cwnd_prior
+    }
+
+    #[cfg(test)]
+    pub const fn alpha(&self) -> f64 {
+        self.alpha
     }
 
     #[cfg(test)]
@@ -241,7 +278,17 @@ impl WindowAdjustment for Cubic {
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-9>
         self.w_est +=
-            CUBIC_ALPHA * (convert_to_f64(new_acked_bytes) / curr_cwnd_f64) * max_datagram_size_f64;
+            self.alpha * (convert_to_f64(new_acked_bytes) / curr_cwnd_f64) * max_datagram_size_f64;
+
+        // > Once w_est has grown to reach the cwnd at the time of most recently setting
+        // > ssthresh -- that is, w_est >= cwnd_prior -- the sender SHOULD set CUBIC_ALPHA to
+        // > 1 to ensure that it can achieve the same congestion window increment rate
+        // > as Reno, which uses AIMD(1, 0.5).
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-11>
+        if self.w_est >= self.cwnd_prior {
+            self.alpha = 1.0;
+        }
 
         // Take the larger cwnd of Cubic concave or convex and Cubic
         // TCP-friendly region.
@@ -277,6 +324,7 @@ impl WindowAdjustment for Cubic {
         max_datagram_size: usize,
     ) -> (usize, usize) {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
+        self.cwnd_prior = curr_cwnd_f64;
         // Fast Convergence
         //
         // If congestion event occurs before the maximum congestion window before the last
