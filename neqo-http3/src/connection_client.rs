@@ -6,7 +6,7 @@
 
 use std::{
     cell::RefCell,
-    fmt::{self, Debug, Display, Formatter},
+    fmt::{self, Display, Formatter},
     iter,
     net::SocketAddr,
     num::NonZeroUsize,
@@ -33,7 +33,7 @@ use crate::{
     frames::HFrame,
     push_controller::{PushController, RecvPushEvents},
     recv_message::{RecvMessage, RecvMessageInfo},
-    request_target::AsRequestTarget,
+    request_target::RequestTarget,
     settings::HSettings,
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, PushId,
     ReceiveOutput, Res,
@@ -484,16 +484,16 @@ impl Http3Client {
     /// # Panics
     ///
     /// `SendMessage` implements `http_stream` so it will not panic.
-    pub fn fetch<'x, 't: 'x, T>(
+    pub fn fetch<'t, T>(
         &mut self,
         now: Instant,
         method: &'t str,
-        target: &'t T,
+        target: T,
         headers: &'t [Header],
         priority: Priority,
     ) -> Res<StreamId>
     where
-        T: AsRequestTarget<'x> + ?Sized + Debug,
+        T: RequestTarget,
     {
         if method == "CONNECT" {
             qwarn!("Invalid method CONNECT in fetch. Use Http3Client::connect instead.");
@@ -537,7 +537,7 @@ impl Http3Client {
         priority: Priority,
     ) -> Res<StreamId>
     where
-        A: AsRef<str> + Debug,
+        A: AsRef<str>,
     {
         let output = self.base_handler.request(
             &mut self.conn,
@@ -548,7 +548,7 @@ impl Http3Client {
                 method: "CONNECT",
                 connect_type: Some(ConnectType::Classic),
 
-                target: &("", authority, ""),
+                target: ("", authority.as_ref(), ""),
                 headers,
                 priority,
             },
@@ -702,14 +702,14 @@ impl Http3Client {
     ///
     /// If `WebTransport` cannot be created, e.g. the `WebTransport` support is
     /// not negotiated or the HTTP/3 connection is closed.
-    pub fn webtransport_create_session<'x, 't: 'x, T>(
+    pub fn webtransport_create_session<T>(
         &mut self,
         now: Instant,
-        target: &'t T,
-        headers: &'t [Header],
+        target: T,
+        headers: &[Header],
     ) -> Res<StreamId>
     where
-        T: AsRequestTarget<'x> + ?Sized + Debug,
+        T: RequestTarget,
     {
         let output = self.base_handler.webtransport_create_session(
             &mut self.conn,
@@ -1311,6 +1311,7 @@ mod tests {
         CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
         DEFAULT_SERVER_NAME,
     };
+    use url::Url;
 
     use super::{
         AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
@@ -1756,7 +1757,7 @@ mod tests {
             .fetch(
                 now(),
                 "GET",
-                "https://something.com/",
+                &Url::parse("https://something.com/").unwrap(),
                 headers,
                 Priority::default(),
             )
@@ -3465,7 +3466,7 @@ mod tests {
             client.fetch(
                 now(),
                 "GET",
-                &("https", "something.com", "/"),
+                ("https", "something.com", "/"),
                 &[],
                 Priority::default()
             ),
@@ -4278,7 +4279,7 @@ mod tests {
             .fetch(
                 now(),
                 "GET",
-                &("https", "something.com", "/"),
+                ("https", "something.com", "/"),
                 &[],
                 Priority::default()
             )

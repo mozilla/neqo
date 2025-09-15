@@ -79,7 +79,7 @@ fn connect() -> (Http3Client, Http3Server) {
 
 fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebTransportRequest {
     let wt_session_id = client
-        .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
+        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
         .unwrap();
     exchange_packets(client, server, false, None);
 
@@ -336,7 +336,7 @@ fn wt_race_condition_server_stream_before_confirmation() {
 
         // Client creates a WebTransport session.
         client
-            .webtransport_create_session(now, &("https", "something.com", "/"), &[])
+            .webtransport_create_session(now, ("https", "something.com", "/"), &[])
             .unwrap();
         exchange_packets(&mut client, &mut server, false, None);
         assert_eq!(server.process_output(now).dgram(), None);
