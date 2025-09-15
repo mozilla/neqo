@@ -92,6 +92,17 @@ pub fn convert_to_f64(v: usize) -> f64 {
 
 #[derive(Debug, Default)]
 pub struct Cubic {
+    /// > CUBIC additive increase factor used in the Reno-friendly region \[to achieve
+    /// > approximately the same average congestion window size as Reno\].
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
+    alpha: f64,
+    /// > Size of cwnd in \[bytes\] at the time of setting `ssthresh` most recently, either upon
+    /// > exiting the first slow start or just before `cwnd` was reduced in the last congestion
+    /// > event.
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.1.2-2.4>
+    cwnd_prior: f64,
     /// > An estimate for the congestion window \[...\] in the Reno-friendly region -- that
     /// > is, an estimate for the congestion window of Reno.
     ///
@@ -205,6 +216,7 @@ impl Cubic {
         max_datagram_size: f64,
         now: Instant,
     ) {
+        self.alpha = CUBIC_ALPHA;
         self.t_epoch = Some(now);
         self.reno_acked_bytes = new_acked_bytes;
         self.w_est = curr_cwnd;
@@ -212,15 +224,40 @@ impl Cubic {
         // could only happen if somehow `cwnd` get's increased between calling `reduce_cwnd()` and
         // `start_epoch()`. This could happen if we exit slow start without packet loss, thus never
         // had a congestion event and called `reduce_cwnd()` which means `w_max` was never set and
-        // is still it's default `0.0` value. For those cases we reset/initialize `w_max` here and
-        // appropiately set `k` to `0.0` (`k` is the time for `cwnd` to reach `w_max`).
+        // is still it's default `0.0` value. For those cases we reset/initialize `w_max` and
+        // `cwnd_prior` here and appropiately set `k` to `0.0` (`k` is the time for `cwnd`
+        // to reach `w_max`). We also set `alpha` to `1.0` as per the below RFC section,
+        // since `w_est >= cwnd_prior` is true here.
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-11>
         self.k = if self.w_max <= curr_cwnd {
+            self.cwnd_prior = curr_cwnd;
             self.w_max = curr_cwnd;
+            debug_assert!(
+            self.w_est >= self.cwnd_prior,
+            "w_est < cwnd_prior, so we are not allowed to set alpha = 1 (w_est: {}, cwnd_prior: {})", self.w_est, self.cwnd_prior
+        );
+            self.alpha = 1.0;
             0.0
         } else {
             self.calc_k(curr_cwnd, max_datagram_size)
         };
         qtrace!("[{self}] New epoch");
+    }
+
+    #[cfg(test)]
+    pub const fn w_est(&self) -> f64 {
+        self.w_est
+    }
+
+    #[cfg(test)]
+    pub const fn cwnd_prior(&self) -> f64 {
+        self.cwnd_prior
+    }
+
+    #[cfg(test)]
+    pub const fn alpha(&self) -> f64 {
+        self.alpha
     }
 
     #[cfg(test)]
@@ -301,15 +338,24 @@ impl WindowAdjustment for Cubic {
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-9>
 
         // We first calculate the increase in segments and floor it to only include whole segments.
-        let increase = (CUBIC_ALPHA * self.reno_acked_bytes / curr_cwnd).floor();
-
+        let increase = (self.alpha * self.reno_acked_bytes / curr_cwnd).floor();
         // Only apply the increase if it is at least by one segment.
         if increase > 0.0 {
             self.w_est += increase * max_datagram_size;
             // Because we floored the increase to whole segments we cannot just zero
             // `reno_acked_bytes` but have to calculate the actual bytes used.
-            let acked_bytes_used = increase * curr_cwnd / CUBIC_ALPHA;
+            let acked_bytes_used = increase * curr_cwnd / self.alpha;
             self.reno_acked_bytes -= acked_bytes_used;
+
+            // > Once w_est has grown to reach the cwnd at the time of most recently setting
+            // > ssthresh -- that is, w_est >= cwnd_prior -- the sender SHOULD set CUBIC_ALPHA to
+            // > 1 to ensure that it can achieve the same congestion window increment rate
+            // > as Reno, which uses AIMD(1, 0.5).
+            //
+            // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-11>
+            if self.w_est >= self.cwnd_prior {
+                self.alpha = 1.0;
+            }
         }
 
         // > When receiving a new ACK in congestion avoidance (where cwnd could be greater than
@@ -381,6 +427,7 @@ impl WindowAdjustment for Cubic {
         max_datagram_size: usize,
     ) -> (usize, usize) {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
+        self.cwnd_prior = curr_cwnd_f64;
         // Fast Convergence
         //
         // > During a congestion event, if the current cwnd is less than w_max, this indicates
