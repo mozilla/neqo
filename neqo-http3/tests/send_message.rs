@@ -127,7 +127,6 @@ fn process_client_events_no_data(conn: &mut Http3Client) {
 }
 
 fn connect() -> (Http3Client, Http3Server) {
-
     let mut hconn_c = default_http3_client();
     let mut hconn_s = default_http3_server();
 
@@ -138,10 +137,12 @@ fn connect() -> (Http3Client, Http3Server) {
     exchange_packets(&mut hconn_c, &mut hconn_s, false, None);
 
     (hconn_c, hconn_s)
-
 }
 
-fn send_and_receive_request(hconn_c: &mut Http3Client, hconn_s: &mut Http3Server) -> Http3OrWebTransportStream {
+fn send_and_receive_request(
+    hconn_c: &mut Http3Client,
+    hconn_s: &mut Http3Server,
+) -> Http3OrWebTransportStream {
     let req = hconn_c
         .fetch(
             now(),
@@ -340,7 +341,7 @@ fn server_send_single_udp_datagram() {
 
     // Request 1 has no pending data. This call goes straight to the QUIC layer.
     request_1.stream_close_send().unwrap();
-    // This adds pending data to request 1 on the HTTP/3 layer.
+    // This adds pending data to request 2 on the HTTP/3 layer.
     send_headers(&request_2).unwrap();
 
     // Expect server to pack request 1 close frame and request 2 data frame into
