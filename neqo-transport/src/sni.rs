@@ -70,6 +70,7 @@ pub fn find_sni(buf: &[u8]) -> Option<Range<usize>> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     const BUF_WITH_SNI: &[u8] = &[
         0x01, // msg_type == 1 (ClientHello)

@@ -29,7 +29,6 @@ jobs:
           target: ${{ matrix.target }}
           working-directory: mtu
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          codecov-token: ${{ secrets.CODECOV_TOKEN }}
 
   check-vm:
     name: Run checks for VM-only platforms

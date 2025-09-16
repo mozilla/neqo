@@ -396,6 +396,7 @@ pub fn random<const N: usize>() -> [u8; N] {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use test_fixture::fixture_init;
 

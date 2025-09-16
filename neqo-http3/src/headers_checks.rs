@@ -169,6 +169,7 @@ pub fn trailers_valid(headers: &[Header]) -> Res<()> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::Header;
 

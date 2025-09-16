@@ -276,6 +276,7 @@ fn map_error(err: &Error) -> Error {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::Header;
     use neqo_transport::{StreamId, StreamType};

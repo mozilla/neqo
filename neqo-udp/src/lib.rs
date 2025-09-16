@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(
     clippy::missing_errors_doc,
     reason = "Functions simply delegate to tokio and quinn-udp."
@@ -257,6 +258,7 @@ impl<S: SocketRef> Socket<S> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     #![allow(
         clippy::allow_attributes,

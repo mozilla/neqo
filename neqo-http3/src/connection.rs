@@ -1671,6 +1671,7 @@ impl Http3Connection {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use url::Url;
 

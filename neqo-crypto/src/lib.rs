@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 mod aead;
 #[cfg(feature = "disable-encryption")]
 pub mod aead_null;
