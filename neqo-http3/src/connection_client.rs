@@ -1084,7 +1084,7 @@ impl Http3Client {
                     }
                 }
                 ConnectionEvent::Datagram(dgram) => {
-                    self.base_handler.handle_datagram(&dgram);
+                    self.base_handler.handle_datagram(dgram);
                 }
                 ConnectionEvent::SendStreamComplete { .. }
                 | ConnectionEvent::OutgoingDatagramOutcome { .. }

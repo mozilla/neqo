@@ -6,6 +6,7 @@
 
 use std::{
     cell::RefCell,
+    collections::VecDeque,
     fmt::{self, Display, Formatter},
     mem,
     rc::Rc,
@@ -477,7 +478,7 @@ impl Session {
         Ok(())
     }
 
-    pub fn datagram(&self, datagram: Vec<u8>) {
+    pub fn datagram(&self, datagram: VecDeque<u8>) {
         if self.state == State::Active {
             self.events.new_datagram(self.id, datagram);
         }

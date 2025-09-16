@@ -7,7 +7,7 @@
 pub(crate) mod webtransport_session;
 pub(crate) mod webtransport_streams;
 
-use std::fmt::Debug;
+use std::{collections::VecDeque, fmt::Debug};
 
 use neqo_common::Header;
 use neqo_transport::{AppError, StreamId};
@@ -60,7 +60,7 @@ pub(crate) trait ExtendedConnectEvents: Debug {
         stream_info: Http3StreamInfo,
         emit_readable: bool,
     ) -> Res<()>;
-    fn new_datagram(&self, session_id: StreamId, datagram: Vec<u8>);
+    fn new_datagram(&self, session_id: StreamId, datagram: VecDeque<u8>);
 }
 
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]

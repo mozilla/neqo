@@ -6,6 +6,7 @@
 
 use std::{
     cell::RefCell,
+    collections::VecDeque,
     fmt::{self, Debug, Display, Formatter},
     mem,
     rc::Rc,
@@ -635,14 +636,27 @@ impl Http3Connection {
         }
     }
 
-    pub(crate) fn handle_datagram(&mut self, datagram: &[u8]) {
-        let mut decoder = Decoder::new(datagram);
-        let session = decoder
-            .decode_varint()
-            .and_then(|id| self.recv_streams.get_mut(&StreamId::from(id * 4)))
+    pub(crate) fn handle_datagram(&mut self, datagram: Vec<u8>) {
+        let mut decoder = Decoder::new(&datagram);
+        let session_id = match decoder.decode_varint() {
+            Some(id) => StreamId::from(id * 4),
+            None => return,
+        };
+        let varint_len = decoder.offset();
+
+        let session = self
+            .recv_streams
+            .get_mut(&session_id)
             .and_then(|stream| stream.webtransport());
+
         if let Some(s) = session {
-            s.borrow_mut().datagram(decoder.decode_remainder().to_vec());
+            // Convert Vec to VecDeque (O(1) operation)
+            let mut datagram_deque = VecDeque::from(datagram);
+            // Remove the varint-encoded session ID from the front
+            for _ in 0..varint_len {
+                datagram_deque.pop_front();
+            }
+            s.borrow_mut().datagram(datagram_deque);
         }
     }
 
