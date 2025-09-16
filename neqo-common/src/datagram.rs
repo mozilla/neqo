@@ -58,10 +58,12 @@ impl<D> Datagram<D> {
 }
 
 impl<D: AsRef<[u8]>> Datagram<D> {
+    #[must_use]
     pub fn len(&self) -> usize {
         self.d.as_ref().len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -84,6 +86,7 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> AsMut<[u8]> for Datagram<D> {
 }
 
 impl Datagram<Vec<u8>> {
+    #[must_use]
     pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: Tos, d: V) -> Self {
         Self {
             src,
