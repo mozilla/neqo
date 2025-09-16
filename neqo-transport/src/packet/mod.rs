@@ -955,6 +955,11 @@ impl From<(&Public<'_>, Error)> for DecryptionError {
 
 impl DecryptionError {
     #[must_use]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::len_without_is_empty,
+        reason = "OK here."
+    )]
     pub fn len(&self) -> usize {
         self.data.len()
     }
