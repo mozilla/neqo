@@ -770,11 +770,6 @@ impl<'a> Public<'a> {
         self.data.len()
     }
 
-    #[must_use]
-    pub fn data(&self) -> &[u8] {
-        self.data
-    }
-
     const fn decode_pn(expected: Number, pn: u64, w: usize) -> Number {
         let window = 1_u64 << (w * 8);
         let candidate = (expected & !(window - 1)) | pn;
@@ -846,11 +841,14 @@ impl<'a> Public<'a> {
     ///
     /// This will return an error if the packet cannot be decrypted.
     pub fn decrypt(
-        &mut self,
+        mut self,
         crypto: &mut CryptoStates,
         release_at: Instant,
-    ) -> Res<Decrypted<'_>> {
-        let epoch: Epoch = self.packet_type.try_into()?;
+    ) -> Result<Decrypted, DecryptionError> {
+        let epoch: Epoch = self
+            .packet_type
+            .try_into()
+            .map_err(|e| DecryptionError::from((&self, e)))?;
         // When we don't have a version, the crypto code doesn't need a version
         // for lookup, so use the default, but fix it up if decryption succeeds.
         let version = self.version().unwrap_or_default();
@@ -861,29 +859,44 @@ impl<'a> Public<'a> {
             // This is OK in this case because we the only reason this can
             // fail is if the cryptographic module is bad or the packet is
             // too small (which is public information).
-            let (key_phase, pn, header) = self.decrypt_header(rx)?;
+            let (key_phase, pn, header) = self
+                .decrypt_header(rx)
+                .map_err(|e| DecryptionError::from((&self, e)))?;
             let Some(rx) = crypto.rx(version, epoch, key_phase) else {
-                return Err(Error::Decrypt);
+                return Err(DecryptionError::from((&self, Error::Decrypt)));
             };
             let version = rx.version(); // Version fixup; see above.
-            let d = rx.decrypt(pn, header, self.data)?;
+            let packet_len = self.data.len();
+            let d = match rx.decrypt(pn, header, self.data) {
+                Ok(data) => data,
+                Err(e) => {
+                    return Err(DecryptionError::from((&self, e)));
+                }
+            };
             // If this is the first packet ever successfully decrypted
             // using `rx`, make sure to initiate a key update.
             if rx.needs_update() {
-                crypto.key_update_received(release_at)?;
+                if let Err(e) = crypto.key_update_received(release_at) {
+                    return Err(DecryptionError::from((&self, e)));
+                }
             }
-            crypto.check_pn_overlap()?;
+            if let Err(e) = crypto.check_pn_overlap() {
+                return Err(DecryptionError::from((&self, e)));
+            }
             Ok(Decrypted {
                 version,
                 pt: self.packet_type,
                 pn,
-                data: d,
+                dcid: self.dcid,
+                scid: self.scid,
+                packet_len,
+                data: d.to_vec(),
             })
         } else if crypto.rx_pending(epoch) {
-            Err(Error::KeysPending(epoch))
+            Err(DecryptionError::from((&self, Error::KeysPending(epoch))))
         } else {
             qtrace!("keys for {epoch:?} already discarded");
-            Err(Error::KeysDiscarded(epoch))
+            Err(DecryptionError::from((&self, Error::KeysDiscarded(epoch))))
         }
     }
 
@@ -917,14 +930,54 @@ impl fmt::Debug for Public<'_> {
     }
 }
 
-pub struct Decrypted<'a> {
+/// Error information from a failed decryption attempt.
+/// Contains minimal packet information needed for error handling.
+#[derive(Debug)]
+pub struct DecryptionError {
+    /// The error that occurred
+    pub error: Error,
+    /// The original packet data (unchanged since decryption failed)
+    pub data: Vec<u8>,
+    /// The destination connection ID
+    pub dcid: ConnectionId,
+    /// The packet type
+    pub packet_type: Type,
+}
+
+impl From<(&Public<'_>, Error)> for DecryptionError {
+    fn from((packet, error): (&Public, Error)) -> Self {
+        Self {
+            error,
+            data: packet.data.to_vec(),
+            dcid: packet.dcid.clone(),
+            packet_type: packet.packet_type,
+        }
+    }
+}
+
+impl DecryptionError {
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    #[must_use]
+    pub const fn packet_type(&self) -> Type {
+        self.packet_type
+    }
+}
+
+pub struct Decrypted {
     version: Version,
     pt: Type,
     pn: Number,
-    data: &'a [u8],
+    data: Vec<u8>,
+    dcid: ConnectionId,
+    scid: Option<ConnectionId>,
+    packet_len: usize,
 }
 
-impl Decrypted<'_> {
+impl Decrypted {
     #[must_use]
     pub const fn version(&self) -> Version {
         self.version
@@ -939,13 +992,34 @@ impl Decrypted<'_> {
     pub const fn pn(&self) -> Number {
         self.pn
     }
+
+    #[must_use]
+    pub fn dcid(&self) -> ConnectionIdRef<'_> {
+        self.dcid.as_cid_ref()
+    }
+
+    /// # Panics
+    ///
+    /// This will panic if called for a short header packet.
+    #[must_use]
+    pub fn scid(&self) -> ConnectionIdRef<'_> {
+        self.scid
+            .as_ref()
+            .expect("should only be called for long header packets")
+            .as_cid_ref()
+    }
+
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.packet_len
+    }
 }
 
-impl Deref for Decrypted<'_> {
+impl Deref for Decrypted {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
-        self.data
+        &self.data
     }
 }
 
@@ -1030,7 +1104,7 @@ mod tests {
         fixture_init();
         let mut padded = SAMPLE_INITIAL.to_vec();
         padded.extend_from_slice(EXTRA);
-        let (mut packet, remainder) = Public::decode(&mut padded, &cid_mgr()).unwrap();
+        let (packet, remainder) = Public::decode(&mut padded, &cid_mgr()).unwrap();
         assert_eq!(packet.packet_type(), Type::Initial);
         assert_eq!(&packet.dcid()[..], &[] as &[u8]);
         assert_eq!(&packet.scid()[..], SERVER_CID);
@@ -1120,7 +1194,7 @@ mod tests {
     fn decode_short() {
         fixture_init();
         let mut sample_short = SAMPLE_SHORT.to_vec();
-        let (mut packet, remainder) = Public::decode(&mut sample_short, &cid_mgr()).unwrap();
+        let (packet, remainder) = Public::decode(&mut sample_short, &cid_mgr()).unwrap();
         assert_eq!(packet.packet_type(), Type::Short);
         assert!(remainder.is_empty());
         let decrypted = packet
@@ -1135,7 +1209,7 @@ mod tests {
     fn decode_short_bad_cid() {
         fixture_init();
         let mut sample_short = SAMPLE_SHORT.to_vec();
-        let (mut packet, remainder) = Public::decode(
+        let (packet, remainder) = Public::decode(
             &mut sample_short,
             &RandomConnectionIdGenerator::new(SERVER_CID.len() - 1),
         )
@@ -1516,7 +1590,7 @@ mod tests {
         ];
         fixture_init();
         let mut packet = PACKET.to_vec();
-        let (mut packet, slice) =
+        let (packet, slice) =
             Public::decode(&mut packet, &EmptyConnectionIdGenerator::default()).unwrap();
         assert!(slice.is_empty());
         let decrypted = packet
