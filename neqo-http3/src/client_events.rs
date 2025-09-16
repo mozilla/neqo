@@ -240,11 +240,11 @@ impl ExtendedConnectEvents for Http3ClientEvents {
         Ok(())
     }
 
-    fn new_datagram(&self, session_id: StreamId, datagram: Vec<u8>) {
+    fn new_datagram(&self, session_id: StreamId, datagram: VecDeque<u8>) {
         self.insert(Http3ClientEvent::WebTransport(
             WebTransportEvent::Datagram {
                 session_id,
-                datagram,
+                datagram: datagram.into(),
             },
         ));
     }

@@ -163,10 +163,10 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
         Ok(())
     }
 
-    fn new_datagram(&self, session_id: StreamId, datagram: Vec<u8>) {
+    fn new_datagram(&self, session_id: StreamId, datagram: VecDeque<u8>) {
         self.insert(Http3ServerConnEvent::ExtendedConnectDatagram {
             session_id,
-            datagram,
+            datagram: datagram.into(),
         });
     }
 }
