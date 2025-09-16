@@ -866,7 +866,6 @@ impl<'a> Public<'a> {
                 return Err(DecryptionError::from((&self, Error::Decrypt)));
             };
             let version = rx.version(); // Version fixup; see above.
-            let packet_len = self.data.len();
             let d = match rx.decrypt(pn, header, self.data) {
                 Ok(data) => data,
                 Err(e) => {
@@ -889,7 +888,6 @@ impl<'a> Public<'a> {
                 pn,
                 dcid: self.dcid,
                 scid: self.scid,
-                packet_len,
                 data: d.to_vec(),
             })
         } else if crypto.rx_pending(epoch) {
@@ -974,7 +972,6 @@ pub struct Decrypted {
     data: Vec<u8>,
     dcid: ConnectionId,
     scid: Option<ConnectionId>,
-    packet_len: usize,
 }
 
 impl Decrypted {
@@ -1007,11 +1004,6 @@ impl Decrypted {
             .as_ref()
             .expect("should only be called for long header packets")
             .as_cid_ref()
-    }
-
-    #[must_use]
-    pub const fn len(&self) -> usize {
-        self.packet_len
     }
 }
 
