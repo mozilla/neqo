@@ -280,7 +280,7 @@ impl Requests {
             let stream_id = match c.fetch(
                 now(),
                 "POST",
-                &("https", "something.com", "/"),
+                ("https", "something.com", "/"),
                 &[],
                 Priority::default(),
             ) {

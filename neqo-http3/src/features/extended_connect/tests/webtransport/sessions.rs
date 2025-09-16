@@ -113,7 +113,7 @@ fn wt_session_response_with_1xx() {
 
     let wt_session_id = wt
         .client
-        .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
+        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
         .unwrap();
     wt.exchange_packets();
 
@@ -178,7 +178,7 @@ fn wt_session_respone_200_with_fin() {
 
     let wt_session_id = wt
         .client
-        .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
+        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
         .unwrap();
     wt.exchange_packets();
     let mut wt_server_session = None;
@@ -372,7 +372,7 @@ fn wt_close_session_cannot_be_sent_at_once() {
         .fetch(
             now(),
             "GET",
-            &("https", "something.com", "/"),
+            ("https", "something.com", "/"),
             &[],
             Priority::default(),
         )

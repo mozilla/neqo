@@ -140,7 +140,7 @@ fn connect_send_and_receive_request() -> (Http3Client, Http3Server, Http3OrWebTr
         .fetch(
             now(),
             "GET",
-            &("https", "something.com", "/"),
+            ("https", "something.com", "/"),
             &[],
             Priority::default(),
         )

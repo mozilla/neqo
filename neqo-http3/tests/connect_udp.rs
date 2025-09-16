@@ -431,7 +431,7 @@ fn server_datagram_before_accept() {
 fn create_session_without_connect_setting() {
     let mut client = http3_client_with_params(Http3Parameters::default().connect(false));
     assert_eq!(
-        client.connect_udp_create_session(now(), "example.com", &[]),
+        client.connect_udp_create_session(now(), &Url::parse("https://example.com/").unwrap(), &[]),
         Err(Error::Unavailable)
     );
 }
@@ -475,7 +475,7 @@ fn connect_udp_operation_on_fetch_stream() {
         .fetch(
             now(),
             "GET",
-            &("https", "something.com", "/"),
+            ("https", "something.com", "/"),
             &[],
             Priority::default(),
         )

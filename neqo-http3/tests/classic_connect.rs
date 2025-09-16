@@ -107,7 +107,7 @@ fn classic_connect_via_fetch_panics_in_debug() {
     let res = client.fetch(
         now(),
         "CONNECT",
-        &("https", AUTHORITY, "/"),
+        ("https", AUTHORITY, "/"),
         &[],
         Priority::default(),
     );
