@@ -310,7 +310,7 @@ fn congestion_event_congestion_avoidance() {
 }
 
 #[test]
-fn congestion_event_congestion_avoidance_2() {
+fn congestion_event_congestion_avoidance_fast_convergence() {
     let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
 
     // Set ssthresh to something small to make sure that cc is in the congection avoidance phase.
