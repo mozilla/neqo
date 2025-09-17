@@ -134,7 +134,7 @@ pub struct Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-variables-of-interest>
     ///
-    /// This also is reset on being application limited
+    /// This also is reset on being application limited.
     t_epoch: Option<Instant>,
     /// Number of bytes acked since the last Standard TCP congestion window increase.
     tcp_acked_bytes: f64,
@@ -177,14 +177,16 @@ impl Cubic {
         (CUBIC_C * (t - self.k).powi(3)).mul_add(max_datagram_size, self.w_max)
     }
 
-    /// Resets all relevant parameters at the start of a new epoch (new congestion
-    /// avoidance stage) according to RFC 9438. The `w_max` variable is set in `reduce_cwnd()`. Also
-    /// initializes `k` and `w_max` if we start an epoch without having ever had a congestion
-    /// event, which can happen upon exiting slow start.
+    /// Sets `estimated_tcp_cwnd`, `k`, `t_epoch` and `tcp_acked_bytes` at the start of a new
+    /// epoch (new congestion avoidance stage) according to RFC 9438. The `w_max` variable has
+    /// been set in `reduce_cwnd()` prior to this call.
     ///
     /// > `w_est` is set equal to `cwnd_epoch` at the start of the congestion avoidance stage.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-9>
+    ///
+    /// Also initializes `k`, `cwnd_prior` and `w_max` if we start an epoch without having ever had
+    /// a congestion event, which can happen upon exiting slow start.
     fn start_epoch(
         &mut self,
         curr_cwnd: f64,
@@ -197,10 +199,11 @@ impl Cubic {
         self.estimated_tcp_cwnd = curr_cwnd;
         // If `w_max < cwnd_epoch` we take the cubic root from a negative value in `calc_k()`. That
         // could only happen if somehow `cwnd` get's increased between calling `reduce_cwnd()` and
-        // `start_epoch()`, which is only possible after persistent congestion or an app limited
-        // period. It could also happen if we never had a congestion event, so never called
-        // `reduce_cwnd()` thus `w_max` was never set (so is still it's default `0.0`
-        // value). In any case we reset/initialize `w_max`, `cwnd_prior` and `k` here.
+        // `start_epoch()`. This could happen if we exit slow start without packet loss, thus never
+        // had a congestion event and called `reduce_cwnd()` which means `w_max` was never set and
+        // is still it's default `0.0` value. For those cases we reset/initialize `w_max` and
+        // `cwnd_prior` here and appropiately set `k` to `0.0` (`k` is the time for `cwnd` to reach
+        // `w_max`).
         self.k = if self.w_max <= curr_cwnd {
             self.cwnd_prior = curr_cwnd;
             self.w_max = curr_cwnd;
