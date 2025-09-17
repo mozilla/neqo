@@ -74,7 +74,7 @@ jobs:
               --err \
               --adapter rust_criterion \
               --github-actions "$GITHUB_TOKEN" \
-              --file results-main.txt
+              --file results-main.txt || true # bencher exits with error if it detects an alert
           else
             ls -la hyperfine-main
             FILES=""
@@ -93,7 +93,7 @@ jobs:
               --err \
               --adapter shell_hyperfine \
               --github-actions "$GITHUB_TOKEN" \
-              $FILES
+              $FILES || true # bencher exits with error if it detects
           fi
 
       - name: Upload PR results
@@ -113,7 +113,7 @@ jobs:
               --github-actions "$GITHUB_TOKEN" \
               --ci-number "$PR_NUMBER" \
               --ci-only-on-alert \
-              --file results.txt
+              --file results.txt || true # bencher exits with error if it detects
           else
             ls -la hyperfine
             FILES=""
@@ -133,5 +133,5 @@ jobs:
               --github-actions "$GITHUB_TOKEN" \
               --ci-number "$PR_NUMBER" \
               --ci-only-on-alert \
-              $FILES
+              $FILES || true # bencher exits with error if it detects
           fi
