@@ -4,41 +4,28 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+pub(crate) mod connect_udp_session;
+pub mod session;
 pub(crate) mod webtransport_session;
 pub(crate) mod webtransport_streams;
 
-use std::fmt::Debug;
+#[cfg(test)]
+mod tests;
 
-use neqo_common::Header;
-use neqo_transport::{AppError, StreamId};
+use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
+
+use neqo_common::{Header, Role};
+use neqo_transport::StreamId;
 
 use crate::{
     client_events::Http3ClientEvents,
-    features::NegotiationState,
+    features::{
+        extended_connect::session::{CloseReason, Protocol},
+        NegotiationState,
+    },
     settings::{HSettingType, HSettings},
-    CloseType, Http3StreamInfo, Http3StreamType, Res,
+    Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res, SendStreamEvents,
 };
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum SessionCloseReason {
-    Error(AppError),
-    Status(u16),
-    Clean { error: u32, message: String },
-}
-
-impl From<CloseType> for SessionCloseReason {
-    fn from(close_type: CloseType) -> Self {
-        match close_type {
-            CloseType::ResetApp(e) | CloseType::ResetRemote(e) | CloseType::LocalError(e) => {
-                Self::Error(e)
-            }
-            CloseType::Done => Self::Clean {
-                error: 0,
-                message: String::new(),
-            },
-        }
-    }
-}
 
 pub(crate) trait ExtendedConnectEvents: Debug {
     fn session_start(
@@ -52,42 +39,45 @@ pub(crate) trait ExtendedConnectEvents: Debug {
         &self,
         connect_type: ExtendedConnectType,
         stream_id: StreamId,
-        reason: SessionCloseReason,
+        reason: CloseReason,
         headers: Option<Vec<Header>>,
     );
-    fn extended_connect_new_stream(&self, stream_info: Http3StreamInfo) -> Res<()>;
-    fn new_datagram(&self, session_id: StreamId, datagram: Vec<u8>);
+    fn extended_connect_new_stream(
+        &self,
+        stream_info: Http3StreamInfo,
+        emit_readable: bool,
+    ) -> Res<()>;
+    fn new_datagram(
+        &self,
+        session_id: StreamId,
+        datagram: Vec<u8>,
+        connect_type: ExtendedConnectType,
+    );
 }
 
-#[derive(Debug, PartialEq, Copy, Clone, Eq)]
+#[derive(Debug, PartialEq, Copy, Clone, Eq, strum::Display)]
 pub(crate) enum ExtendedConnectType {
+    #[strum(to_string = "webtransport")]
     WebTransport,
+    #[strum(to_string = "connect-udp")]
+    ConnectUdp,
 }
 
 impl ExtendedConnectType {
-    #[must_use]
-    #[expect(
-        clippy::unused_self,
-        reason = "This will change when we have more features using ExtendedConnectType."
-    )]
-    pub const fn string(self) -> &'static str {
-        "webtransport"
-    }
-
-    #[expect(
-        clippy::unused_self,
-        reason = "This will change when we have more features using ExtendedConnectType."
-    )]
-    #[must_use]
-    pub const fn get_stream_type(self, session_id: StreamId) -> Http3StreamType {
-        Http3StreamType::WebTransport(session_id)
+    pub(crate) fn new_protocol(self, session_id: StreamId, role: Role) -> Box<dyn Protocol> {
+        match self {
+            Self::WebTransport => Box::new(webtransport_session::Session::new(session_id, role)),
+            Self::ConnectUdp => Box::new(connect_udp_session::Session::new(session_id)),
+        }
     }
 }
 
 impl From<ExtendedConnectType> for HSettingType {
-    fn from(_type: ExtendedConnectType) -> Self {
-        // This will change when we have more features using ExtendedConnectType.
-        Self::EnableWebTransport
+    fn from(from: ExtendedConnectType) -> Self {
+        match from {
+            ExtendedConnectType::WebTransport => Self::EnableWebTransport,
+            ExtendedConnectType::ConnectUdp => Self::EnableConnect,
+        }
     }
 }
 
@@ -117,5 +107,36 @@ impl ExtendedConnectFeature {
         self.feature_negotiation.enabled()
     }
 }
-#[cfg(test)]
-mod tests;
+
+#[derive(Debug, Default)]
+struct Listener {
+    headers: Option<(Vec<Header>, bool, bool)>,
+}
+
+impl Listener {
+    fn set_headers(&mut self, headers: Vec<Header>, interim: bool, fin: bool) {
+        self.headers = Some((headers, interim, fin));
+    }
+
+    pub fn get_headers(&mut self) -> Option<(Vec<Header>, bool, bool)> {
+        mem::take(&mut self.headers)
+    }
+}
+
+impl RecvStreamEvents for Rc<RefCell<Listener>> {}
+
+impl HttpRecvStreamEvents for Rc<RefCell<Listener>> {
+    fn header_ready(
+        &self,
+        _stream_info: &Http3StreamInfo,
+        headers: Vec<Header>,
+        interim: bool,
+        fin: bool,
+    ) {
+        if !interim || fin {
+            self.borrow_mut().set_headers(headers, interim, fin);
+        }
+    }
+}
+
+impl SendStreamEvents for Rc<RefCell<Listener>> {}

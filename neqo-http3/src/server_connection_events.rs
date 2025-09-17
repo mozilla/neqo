@@ -6,16 +6,17 @@
 
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-use neqo_common::Header;
+use neqo_common::{header::HeadersExt as _, Header};
 use neqo_transport::{AppError, StreamId};
 
 use crate::{
     connection::Http3State,
-    features::extended_connect::{ExtendedConnectEvents, ExtendedConnectType, SessionCloseReason},
+    features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
     CloseType, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents, Res,
     SendStreamEvents,
 };
 
+/// Server events for a single connection.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Http3ServerConnEvent {
     /// Headers are ready.
@@ -45,18 +46,40 @@ pub enum Http3ServerConnEvent {
     },
     /// Connection state change.
     StateChange(Http3State),
-    ExtendedConnect {
+    WebTransport(WebTransportEvent),
+    ConnectUdp(ConnectUdpEvent),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum WebTransportEvent {
+    Session {
         stream_id: StreamId,
         headers: Vec<Header>,
     },
-    ExtendedConnectClosed {
-        connect_type: ExtendedConnectType,
+    SessionClosed {
         stream_id: StreamId,
-        reason: SessionCloseReason,
+        reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     },
-    ExtendedConnectNewStream(Http3StreamInfo),
-    ExtendedConnectDatagram {
+    NewStream(Http3StreamInfo),
+    Datagram {
+        session_id: StreamId,
+        datagram: Vec<u8>,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum ConnectUdpEvent {
+    Session {
+        stream_id: StreamId,
+        headers: Vec<Header>,
+    },
+    SessionClosed {
+        stream_id: StreamId,
+        reason: extended_connect::session::CloseReason,
+        headers: Option<Vec<Header>>,
+    },
+    Datagram {
         session_id: StreamId,
         datagram: Vec<u8>,
     },
@@ -124,7 +147,25 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
     }
 
     fn extended_connect_new_session(&self, stream_id: StreamId, headers: Vec<Header>) {
-        self.insert(Http3ServerConnEvent::ExtendedConnect { stream_id, headers });
+        match headers.find_header(":protocol").map(Header::value) {
+            Some("webtransport") => {
+                self.insert(Http3ServerConnEvent::WebTransport(
+                    WebTransportEvent::Session { stream_id, headers },
+                ));
+            }
+            Some("connect-udp") => {
+                self.insert(Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::Session {
+                    stream_id,
+                    headers,
+                }));
+            }
+            Some(_) => {
+                unimplemented!("Extended connect other than webtransport or connect-udp")
+            }
+            None => {
+                unimplemented!("connect without :protocol header");
+            }
+        }
     }
 }
 
@@ -142,27 +183,61 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
         &self,
         connect_type: ExtendedConnectType,
         stream_id: StreamId,
-        reason: SessionCloseReason,
+        reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     ) {
-        self.insert(Http3ServerConnEvent::ExtendedConnectClosed {
-            connect_type,
-            stream_id,
-            reason,
-            headers,
-        });
+        let event = match connect_type {
+            ExtendedConnectType::WebTransport => {
+                Http3ServerConnEvent::WebTransport(WebTransportEvent::SessionClosed {
+                    stream_id,
+                    reason,
+                    headers,
+                })
+            }
+            ExtendedConnectType::ConnectUdp => {
+                Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::SessionClosed {
+                    stream_id,
+                    reason,
+                    headers,
+                })
+            }
+        };
+        self.insert(event);
     }
 
-    fn extended_connect_new_stream(&self, stream_info: Http3StreamInfo) -> Res<()> {
-        self.insert(Http3ServerConnEvent::ExtendedConnectNewStream(stream_info));
+    fn extended_connect_new_stream(
+        &self,
+        stream_info: Http3StreamInfo,
+        emit_readable: bool,
+    ) -> Res<()> {
+        debug_assert!(!emit_readable, "only set by client");
+        self.insert(Http3ServerConnEvent::WebTransport(
+            WebTransportEvent::NewStream(stream_info),
+        ));
         Ok(())
     }
 
-    fn new_datagram(&self, session_id: StreamId, datagram: Vec<u8>) {
-        self.insert(Http3ServerConnEvent::ExtendedConnectDatagram {
-            session_id,
-            datagram,
-        });
+    fn new_datagram(
+        &self,
+        session_id: StreamId,
+        datagram: Vec<u8>,
+        connect_type: ExtendedConnectType,
+    ) {
+        let event = match connect_type {
+            ExtendedConnectType::WebTransport => {
+                Http3ServerConnEvent::WebTransport(WebTransportEvent::Datagram {
+                    session_id,
+                    datagram,
+                })
+            }
+            ExtendedConnectType::ConnectUdp => {
+                Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::Datagram {
+                    session_id,
+                    datagram,
+                })
+            }
+        };
+        self.insert(event);
     }
 }
 

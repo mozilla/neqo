@@ -126,7 +126,7 @@ fn process_client_events_no_data(conn: &mut Http3Client) {
     assert!(fin_received);
 }
 
-fn connect_send_and_receive_request() -> (Http3Client, Http3Server, Http3OrWebTransportStream) {
+fn connect() -> (Http3Client, Http3Server) {
     let mut hconn_c = default_http3_client();
     let mut hconn_s = default_http3_server();
 
@@ -136,21 +136,31 @@ fn connect_send_and_receive_request() -> (Http3Client, Http3Server, Http3OrWebTr
     hconn_c.authenticated(AuthenticationStatus::Ok, now());
     exchange_packets(&mut hconn_c, &mut hconn_s, false, None);
 
+    (hconn_c, hconn_s)
+}
+
+fn send_and_receive_request(
+    hconn_c: &mut Http3Client,
+    hconn_s: &mut Http3Server,
+) -> Http3OrWebTransportStream {
     let req = hconn_c
         .fetch(
             now(),
             "GET",
-            &("https", "something.com", "/"),
+            ("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
         .unwrap();
-    assert_eq!(req, 0);
     hconn_c.stream_close_send(req).unwrap();
-    exchange_packets(&mut hconn_c, &mut hconn_s, false, None);
+    exchange_packets(hconn_c, hconn_s, false, None);
 
-    let request = receive_request(&hconn_s).unwrap();
+    receive_request(hconn_s).unwrap()
+}
 
+fn connect_send_and_receive_request() -> (Http3Client, Http3Server, Http3OrWebTransportStream) {
+    let (mut hconn_c, mut hconn_s) = connect();
+    let request = send_and_receive_request(&mut hconn_c, &mut hconn_s);
     (hconn_c, hconn_s, request)
 }
 
@@ -318,4 +328,24 @@ fn data_before_headers() {
     request.stream_close_send().unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s, false, None);
     process_client_events(&mut hconn_c);
+}
+
+#[test]
+fn server_send_single_udp_datagram() {
+    let (mut hconn_c, mut hconn_s, request_1) = connect_send_and_receive_request();
+
+    send_headers(&request_1).unwrap();
+    request_1.send_data(RESPONSE_DATA).unwrap();
+
+    let request_2 = send_and_receive_request(&mut hconn_c, &mut hconn_s);
+
+    // Request 1 has no pending data. This call goes straight to the QUIC layer.
+    request_1.stream_close_send().unwrap();
+    // This adds pending data to request 2 on the HTTP/3 layer.
+    send_headers(&request_2).unwrap();
+
+    // Expect server to pack request 1 close frame and request 2 data frame into
+    // single UDP datagram.
+    hconn_s.process_output(now()).dgram().unwrap();
+    assert_eq!(hconn_s.process_output(now()).dgram(), None);
 }

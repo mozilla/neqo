@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use neqo_common::Encoder;
-use neqo_transport::Error as TransportError;
+use neqo_transport::{ConnectionParameters, Error as TransportError};
 
 use crate::{
     features::extended_connect::tests::webtransport::{
@@ -19,8 +19,14 @@ const DGRAM: &[u8] = &[0, 100];
 #[test]
 fn no_datagrams() {
     let mut wt = WtTest::new_with_params(
-        Http3Parameters::default().webtransport(true),
-        Http3Parameters::default().webtransport(true),
+        Http3Parameters::default()
+            .connection_parameters(ConnectionParameters::default().datagram_size(0))
+            .http3_datagram(false)
+            .webtransport(true),
+        Http3Parameters::default()
+            .connection_parameters(ConnectionParameters::default().datagram_size(0))
+            .http3_datagram(false)
+            .webtransport(true),
     );
     let wt_session = wt.create_wt_session();
 
@@ -77,7 +83,10 @@ fn datagrams() {
 #[test]
 fn datagrams_server_only() {
     let mut wt = WtTest::new_with_params(
-        Http3Parameters::default().webtransport(true),
+        Http3Parameters::default()
+            .connection_parameters(ConnectionParameters::default().datagram_size(0))
+            .http3_datagram(false)
+            .webtransport(true),
         wt_default_parameters(),
     );
     let wt_session = wt.create_wt_session();
@@ -107,7 +116,10 @@ fn datagrams_server_only() {
 fn datagrams_client_only() {
     let mut wt = WtTest::new_with_params(
         wt_default_parameters(),
-        Http3Parameters::default().webtransport(true),
+        Http3Parameters::default()
+            .connection_parameters(ConnectionParameters::default().datagram_size(0))
+            .http3_datagram(false)
+            .webtransport(true),
     );
     let wt_session = wt.create_wt_session();
 

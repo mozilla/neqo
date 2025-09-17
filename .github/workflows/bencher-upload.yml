@@ -50,7 +50,7 @@ jobs:
             core.exportVariable("PR_BASE_SHA", prEvent.pull_request.base.sha || '');
             core.exportVariable("PR_NUMBER", prEvent.number || '');
 
-      - uses: bencherdev/bencher@v0.5.4 # zizmor: ignore[unpinned-uses]
+      - uses: bencherdev/bencher@v0.5.5 # zizmor: ignore[unpinned-uses]
 
       - name: Set env
         run: |
@@ -73,24 +73,25 @@ jobs:
               --err \
               --adapter rust_criterion \
               --github-actions "$GITHUB_TOKEN" \
-              --file results-main.txt
+              --file results-main.txt || true # bencher exits with error if it detects an alert
           else
+            FILES=""
             for file in hyperfine-main/*neqo*.json; do
-              BENCH="$(basename "$file")"
-              bencher run \
-                --branch main \
-                --hash "$MAIN_SHA" \
-                --testbed "$TESTBED" \
-                --threshold-measure latency \
-                --threshold-test t_test \
-                --threshold-upper-boundary 0.99 \
-                --thresholds-reset \
-                --err \
-                --adapter shell_hyperfine \
-                --ci-id "main-$TESTBED-hyperfine-$BENCH" \
-                --github-actions "$GITHUB_TOKEN" \
-                --file "$file"
+              FILES="$FILES --file $file"
             done
+            # shellcheck disable=SC2086
+            bencher run \
+              --branch main \
+              --hash "$MAIN_SHA" \
+              --testbed "$TESTBED" \
+              --threshold-measure latency \
+              --threshold-test t_test \
+              --threshold-upper-boundary 0.99 \
+              --thresholds-reset \
+              --err \
+              --adapter shell_hyperfine \
+              --github-actions "$GITHUB_TOKEN" \
+              $FILES || true # bencher exits with error if it detects
           fi
 
       - name: Upload PR results
@@ -109,23 +110,24 @@ jobs:
               --github-actions "$GITHUB_TOKEN" \
               --ci-number "$PR_NUMBER" \
               --ci-only-on-alert \
-              --file results.txt
+              --file results.txt || true # bencher exits with error if it detects
           else
+            FILES=""
             for file in hyperfine/*neqo*.json; do
-              BENCH="$(basename "$file")"
-              bencher run \
-                --branch "$PR_HEAD" \
-                --testbed "$TESTBED" \
-                --start-point "$PR_BASE" \
-                --start-point-hash "$PR_BASE_SHA" \
-                --start-point-clone-thresholds \
-                --start-point-reset \
-                --err \
-                --adapter shell_hyperfine \
-                --ci-id "$PR_HEAD-$TESTBED-hyperfine-$BENCH" \
-                --github-actions "$GITHUB_TOKEN" \
-                --ci-number "$PR_NUMBER" \
-                --ci-only-on-alert \
-                --file "$file"
+              FILES="$FILES --file $file"
             done
+            # shellcheck disable=SC2086
+            bencher run \
+              --branch "$PR_HEAD" \
+              --testbed "$TESTBED" \
+              --start-point "$PR_BASE" \
+              --start-point-hash "$PR_BASE_SHA" \
+              --start-point-clone-thresholds \
+              --start-point-reset \
+              --err \
+              --adapter shell_hyperfine \
+              --github-actions "$GITHUB_TOKEN" \
+              --ci-number "$PR_NUMBER" \
+              --ci-only-on-alert \
+              $FILES || true # bencher exits with error if it detects
           fi

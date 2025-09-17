@@ -161,11 +161,10 @@ mod stream_type_reader;
 use std::{cell::RefCell, fmt::Debug, rc::Rc};
 
 use buffered_send_stream::BufferedStream;
-pub use client_events::{Http3ClientEvent, WebTransportEvent};
+pub use client_events::{ConnectUdpEvent, Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
-pub use connection::{Http3State, WebTransportSessionAcceptAction};
+pub use connection::{Http3State, SessionAcceptAction};
 pub use connection_client::Http3Client;
-use features::extended_connect::webtransport_session;
 use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;
@@ -176,12 +175,13 @@ pub use priority::Priority;
 pub use push_id::PushId;
 pub use server::Http3Server;
 pub use server_events::{
-    Http3OrWebTransportStream, Http3ServerEvent, WebTransportRequest, WebTransportServerEvent,
+    ConnectUdpRequest, ConnectUdpServerEvent, Http3OrWebTransportStream, Http3ServerEvent,
+    WebTransportRequest, WebTransportServerEvent,
 };
 use stream_type_reader::NewStreamType;
 use thiserror::Error;
 
-use crate::priority::PriorityHandler;
+use crate::{features::extended_connect, priority::PriorityHandler};
 
 type Res<T> = Result<T, Error>;
 
@@ -459,7 +459,7 @@ trait RecvStream: Stream {
         None
     }
 
-    fn webtransport(&self) -> Option<Rc<RefCell<webtransport_session::Session>>> {
+    fn extended_connect_session(&self) -> Option<Rc<RefCell<extended_connect::session::Session>>> {
         None
     }
 
