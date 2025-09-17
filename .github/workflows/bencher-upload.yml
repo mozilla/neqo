@@ -61,7 +61,6 @@ jobs:
 
       - name: Upload main-branch results
         run: |
-          ls -la
           if [ "$DATA_TAG" == "bench" ]; then
             bencher run \
               --branch main \
@@ -76,9 +75,8 @@ jobs:
               --github-actions "$GITHUB_TOKEN" \
               --file results-main.txt || true # bencher exits with error if it detects an alert
           else
-            ls -la hyperfine-main
             FILES=""
-            for file in hyperfine-main/*.json; do
+            for file in hyperfine-main/*neqo*.json; do
               FILES="$FILES --file $file"
             done
             # shellcheck disable=SC2086
@@ -99,7 +97,6 @@ jobs:
       - name: Upload PR results
         if: env.PR_HEAD != '' && env.PR_BASE != '' && env.PR_BASE_SHA != '' && env.PR_NUMBER != ''
         run: |
-          ls -la
           if [ "$DATA_TAG" == "bench" ]; then
             bencher run \
               --branch "$PR_HEAD" \
@@ -115,7 +112,6 @@ jobs:
               --ci-only-on-alert \
               --file results.txt || true # bencher exits with error if it detects
           else
-            ls -la hyperfine
             FILES=""
             for file in hyperfine/*neqo*.json; do
               FILES="$FILES --file $file"
