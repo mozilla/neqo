@@ -173,10 +173,10 @@ impl RecvMessage {
             return Err(Error::HttpGeneralProtocolStream);
         }
 
-        let is_web_transport = self.message_type == MessageType::Request
+        let is_extended_connect = self.message_type == MessageType::Request
             && headers.contains_header(":method", "CONNECT")
-            && headers.contains_header(":protocol", "webtransport");
-        if is_web_transport {
+            && headers.find_header(":protocol").is_some();
+        if is_extended_connect {
             self.conn_events
                 .extended_connect_new_session(self.stream_id, headers);
         } else {
@@ -187,7 +187,7 @@ impl RecvMessage {
         if fin {
             self.set_closed();
         } else {
-            self.state = if is_web_transport {
+            self.state = if is_extended_connect {
                 self.stream_type = Http3StreamType::ExtendedConnect;
                 RecvMessageState::ExtendedConnect
             } else if interim {
