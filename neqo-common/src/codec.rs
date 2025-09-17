@@ -272,13 +272,14 @@ impl<B: Buffer> Encoder<B> {
     /// # Panics
     ///
     /// When `n` is outside the range `1..=8`.
+    #[inline]
     pub fn encode_uint<T: Into<u64>>(&mut self, n: usize, v: T) -> &mut Self {
         let v = v.into();
         assert!(n > 0 && n <= 8);
-        for i in 0..n {
-            self.encode_byte(((v >> (8 * (n - i - 1))) & 0xff) as u8);
-        }
-        self
+        // Using to_be_bytes() generates better assembly, especially for odd sizes
+        // where it uses rev + strh instead of multiple strb instructions
+        let bytes = v.to_be_bytes();
+        self.encode(&bytes[8 - n..])
     }
 
     /// Encode a QUIC varint.
@@ -291,16 +292,12 @@ impl<B: Buffer> Encoder<B> {
         let v = v.into();
         // Using to_be_bytes() generates better assembly with rev instructions
         // instead of multiple shifts and ors
-        if v < (1 << 6) {
-            self.encode_byte(v as u8)
-        } else if v < (1 << 14) {
-            self.encode(&((v | (1 << 14)) as u16).to_be_bytes())
-        } else if v < (1 << 30) {
-            self.encode(&((v | (2u64 << 30)) as u32).to_be_bytes())
-        } else if v < (1 << 62) {
-            self.encode(&(v | (3u64 << 62)).to_be_bytes())
-        } else {
-            panic!("Varint value too large")
+        match () {
+            () if v < (1 << 6) => self.encode_byte(v as u8),
+            () if v < (1 << 14) => self.encode(&((v | (1u64 << 14)) as u16).to_be_bytes()),
+            () if v < (1 << 30) => self.encode(&((v | (2u64 << 30)) as u32).to_be_bytes()),
+            () if v < (1 << 62) => self.encode(&(v | (3u64 << 62)).to_be_bytes()),
+            () => panic!("Varint value too large"),
         }
     }
 
