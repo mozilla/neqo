@@ -110,39 +110,15 @@ impl<'a> Decoder<'a> {
         if self.remaining() < n {
             return None;
         }
-        let data = &self.buf[self.offset..self.offset + n];
-        self.offset += n;
-
-        Some(match n {
-            1 => u64::from(data[0]),
-            2 => u64::from(u16::from_be_bytes(
-                data.try_into().expect("slice is exactly 2 bytes"),
-            )),
-            3 => {
-                let mut buf = [0; 4];
-                buf[1..].copy_from_slice(data);
-                u64::from(u32::from_be_bytes(buf))
-            }
-            4 => u64::from(u32::from_be_bytes(
-                data.try_into().expect("slice is exactly 4 bytes"),
-            )),
-            5 => {
-                let mut buf = [0; 8];
-                buf[3..].copy_from_slice(data);
-                u64::from_be_bytes(buf)
-            }
-            6 => {
-                let mut buf = [0; 8];
-                buf[2..].copy_from_slice(data);
-                u64::from_be_bytes(buf)
-            }
-            7 => {
-                let mut buf = [0; 8];
-                buf[1..].copy_from_slice(data);
-                u64::from_be_bytes(buf)
-            }
-            8 => u64::from_be_bytes(data.try_into().expect("slice is exactly 8 bytes")),
-            _ => unreachable!(),
+        Some(if n == 1 {
+            let v = u64::from(self.buf[self.offset]);
+            self.offset += 1;
+            v
+        } else {
+            let mut buf = [0; 8];
+            buf[8 - n..].copy_from_slice(&self.buf[self.offset..self.offset + n]);
+            self.offset += n;
+            u64::from_be_bytes(buf)
         })
     }
 
@@ -158,34 +134,15 @@ impl<'a> Decoder<'a> {
     }
 
     /// Decodes a QUIC varint.
-    #[inline]
     pub fn decode_varint(&mut self) -> Option<u64> {
-        if self.remaining() < 1 {
-            return None;
-        }
-
-        let b1 = self.buf[self.offset];
-        self.offset += 1;
-
-        let prefix = b1 >> 6;
-        if prefix == 0 {
-            return Some(u64::from(b1));
-        }
-
-        let (len, shift) = match prefix {
-            1 => (1, 8),
-            2 => (3, 24),
-            3 => (7, 56),
+        let b1 = self.decode_n(1)?;
+        match b1 >> 6 {
+            0 => Some(b1),
+            1 => Some(((b1 & 0x3f) << 8) | self.decode_n(1)?),
+            2 => Some(((b1 & 0x3f) << 24) | self.decode_n(3)?),
+            3 => Some(((b1 & 0x3f) << 56) | self.decode_n(7)?),
             _ => unreachable!(),
-        };
-
-        if self.remaining() < len {
-            self.offset -= 1; // Rewind on failure
-            return None;
         }
-
-        let val = self.decode_n(len)?;
-        Some(((u64::from(b1) & 0x3f) << shift) | val)
     }
 
     /// Decodes the rest of the buffer.  Infallible.
@@ -315,37 +272,13 @@ impl<B: Buffer> Encoder<B> {
     /// # Panics
     ///
     /// When `n` is outside the range `1..=8`.
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "Truncation is intentional for encoding specific byte counts"
-    )]
     pub fn encode_uint<T: Into<u64>>(&mut self, n: usize, v: T) -> &mut Self {
         let v = v.into();
         assert!(n > 0 && n <= 8);
-
-        match n {
-            1 => self.encode(&[v as u8]),
-            2 => self.encode(&(v as u16).to_be_bytes()),
-            3 => {
-                let bytes = (v as u32).to_be_bytes();
-                self.encode(&bytes[1..])
-            }
-            4 => self.encode(&(v as u32).to_be_bytes()),
-            5 => {
-                let bytes = v.to_be_bytes();
-                self.encode(&bytes[3..])
-            }
-            6 => {
-                let bytes = v.to_be_bytes();
-                self.encode(&bytes[2..])
-            }
-            7 => {
-                let bytes = v.to_be_bytes();
-                self.encode(&bytes[1..])
-            }
-            8 => self.encode(&v.to_be_bytes()),
-            _ => unreachable!(),
+        for i in 0..n {
+            self.encode_byte(((v >> (8 * (n - i - 1))) & 0xff) as u8);
         }
+        self
     }
 
     /// Encode a QUIC varint.
@@ -354,20 +287,18 @@ impl<B: Buffer> Encoder<B> {
     ///
     /// When `v >= 1<<62`.
     #[inline]
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "Truncation is intentional for varint encoding"
-    )]
     pub fn encode_varint<T: Into<u64>>(&mut self, v: T) -> &mut Self {
         let v = v.into();
+        // Using to_be_bytes() generates better assembly with rev instructions
+        // instead of multiple shifts and ors
         if v < (1 << 6) {
-            self.encode(&[v as u8])
+            self.encode_byte(v as u8)
         } else if v < (1 << 14) {
             self.encode(&((v | (1 << 14)) as u16).to_be_bytes())
         } else if v < (1 << 30) {
-            self.encode(&((v | (2 << 30)) as u32).to_be_bytes())
+            self.encode(&((v | (2u64 << 30)) as u32).to_be_bytes())
         } else if v < (1 << 62) {
-            self.encode(&(v | (3 << 62)).to_be_bytes())
+            self.encode(&(v | (3u64 << 62)).to_be_bytes())
         } else {
             panic!("Varint value too large")
         }
