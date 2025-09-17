@@ -133,35 +133,35 @@ impl Cubic {
     /// K = cubic_root((W_max - W_cubic) / C / MSS);
     ///
     /// <https://www.rfc-editor.org/rfc/rfc8312#section-4.1>
-    fn calc_k(&self, curr_cwnd_f64: f64, max_datagram_size_f64: f64) -> f64 {
-        ((self.w_max - curr_cwnd_f64) / CUBIC_C / max_datagram_size_f64).cbrt()
+    fn calc_k(&self, curr_cwnd: f64, max_datagram_size: f64) -> f64 {
+        ((self.w_max - curr_cwnd) / CUBIC_C / max_datagram_size).cbrt()
     }
 
     /// W_cubic(t) = C*(t-K)^3 + W_max (Eq. 1)
     /// t is relative to the start of the congestion avoidance phase and it is in seconds.
     ///
     /// <https://www.rfc-editor.org/rfc/rfc8312#section-4.1>
-    fn w_cubic(&self, t: f64, max_datagram_size_f64: f64) -> f64 {
-        (CUBIC_C * (t - self.k).powi(3)).mul_add(max_datagram_size_f64, self.w_max)
+    fn w_cubic(&self, t: f64, max_datagram_size: f64) -> f64 {
+        (CUBIC_C * (t - self.k).powi(3)).mul_add(max_datagram_size, self.w_max)
     }
 
     fn start_epoch(
         &mut self,
-        curr_cwnd_f64: f64,
-        new_acked_f64: f64,
-        max_datagram_size_f64: f64,
+        curr_cwnd: f64,
+        new_acked: f64,
+        max_datagram_size: f64,
         now: Instant,
     ) {
         self.ca_epoch_start = Some(now);
         // reset tcp_acked_bytes and estimated_tcp_cwnd;
-        self.tcp_acked_bytes = new_acked_f64;
-        self.estimated_tcp_cwnd = curr_cwnd_f64;
-        if self.last_max_cwnd <= curr_cwnd_f64 {
-            self.w_max = curr_cwnd_f64;
+        self.tcp_acked_bytes = new_acked;
+        self.estimated_tcp_cwnd = curr_cwnd;
+        if self.last_max_cwnd <= curr_cwnd {
+            self.w_max = curr_cwnd;
             self.k = 0.0;
         } else {
             self.w_max = self.last_max_cwnd;
-            self.k = self.calc_k(curr_cwnd_f64, max_datagram_size_f64);
+            self.k = self.calc_k(curr_cwnd, max_datagram_size);
         }
         qtrace!("[{self}] New epoch");
     }
