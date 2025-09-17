@@ -103,7 +103,7 @@ pub struct Cubic {
     /// > avoidance
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc8312#section-4.1>
-    ca_epoch_start: Option<Instant>,
+    t_epoch: Option<Instant>,
     /// Number of bytes acked since the last Standard TCP congestion window increase.
     tcp_acked_bytes: f64,
 }
@@ -112,8 +112,8 @@ impl Display for Cubic {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "Cubic [last_max_cwnd: {}, k: {}, w_max: {}, ca_epoch_start: {:?}]",
-            self.last_max_cwnd, self.k, self.w_max, self.ca_epoch_start
+            "Cubic [last_max_cwnd: {}, k: {}, w_max: {}, t_epoch: {:?}]",
+            self.last_max_cwnd, self.k, self.w_max, self.t_epoch
         )?;
         Ok(())
     }
@@ -152,7 +152,7 @@ impl Cubic {
         max_datagram_size: f64,
         now: Instant,
     ) {
-        self.ca_epoch_start = Some(now);
+        self.t_epoch = Some(now);
         // reset tcp_acked_bytes and estimated_tcp_cwnd;
         self.tcp_acked_bytes = new_acked;
         self.estimated_tcp_cwnd = curr_cwnd;
@@ -194,30 +194,30 @@ impl WindowAdjustment for Cubic {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
         let new_acked_f64 = convert_to_f64(new_acked_bytes);
         let max_datagram_size_f64 = convert_to_f64(max_datagram_size);
-        if self.ca_epoch_start.is_none() {
-            // This is a start of a new congestion avoidance phase.
-            self.start_epoch(curr_cwnd_f64, new_acked_f64, max_datagram_size_f64, now);
-        } else {
+
+        let t_epoch = if let Some(t) = self.t_epoch {
             self.tcp_acked_bytes += new_acked_f64;
-        }
+            t
+        } else {
+            // If we get here with `self.t_epoch == None` this is a new congestion
+            // avoidance stage. It's been set to `None` by
+            // [`super::ClassicCongestionControl::reduce_cwnd`] or needs to be
+            // initialized after slow start. It could also have been reset by
+            // [`super::ClassicCongestionControl::on_app_limited`] in which case we also start a
+            // new congestion avoidance stage for the purpose of resetting
+            // timing as per RFC 9438 section 5.8.
+            //
+            // <https://datatracker.ietf.org/doc/html/rfc9438#app-limited>
+            self.start_epoch(curr_cwnd_f64, new_acked_f64, max_datagram_size_f64, now);
+            now
+        };
 
         // Cubic concave or convex region
         //
         // <https://datatracker.ietf.org/doc/html/rfc8312#section-4.3>
         // <https://datatracker.ietf.org/doc/html/rfc8312#section-4.4>
-        let time_ca = self
-            .ca_epoch_start
-            .map_or(min_rtt, |t| {
-                if now + min_rtt < t {
-                    // This only happens when processing old packets
-                    // that were saved and replayed with old timestamps.
-                    min_rtt
-                } else {
-                    now + min_rtt - t
-                }
-            })
-            .as_secs_f64();
-        let target_cubic = self.w_cubic(time_ca, max_datagram_size_f64);
+        let t = now.saturating_duration_since(t_epoch);
+        let target_cubic = self.w_cubic((t + min_rtt).as_secs_f64(), max_datagram_size_f64);
 
         // Cubic TCP-friendly region
         //
@@ -277,7 +277,7 @@ impl WindowAdjustment for Cubic {
             } else {
                 curr_cwnd_f64
             };
-        self.ca_epoch_start = None;
+        self.t_epoch = None;
         (
             curr_cwnd * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
             acked_bytes * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
@@ -285,8 +285,8 @@ impl WindowAdjustment for Cubic {
     }
 
     fn on_app_limited(&mut self) {
-        // Reset ca_epoch_start. Let it start again when the congestion controller
+        // Reset t_epoch. Let it start again when the congestion controller
         // exits the app-limited period.
-        self.ca_epoch_start = None;
+        self.t_epoch = None;
     }
 }
