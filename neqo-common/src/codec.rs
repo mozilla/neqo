@@ -104,7 +104,6 @@ impl<'a> Decoder<'a> {
         Some(res)
     }
 
-    #[inline]
     pub(crate) fn decode_n(&mut self, n: usize) -> Option<u64> {
         debug_assert!(n > 0 && n <= 8);
         if self.remaining() < n {
@@ -272,7 +271,6 @@ impl<B: Buffer> Encoder<B> {
     /// # Panics
     ///
     /// When `n` is outside the range `1..=8`.
-    #[inline]
     pub fn encode_uint<T: Into<u64>>(&mut self, n: usize, v: T) -> &mut Self {
         let v = v.into();
         assert!(n > 0 && n <= 8);
@@ -287,16 +285,16 @@ impl<B: Buffer> Encoder<B> {
     /// # Panics
     ///
     /// When `v >= 1<<62`.
-    #[inline]
     pub fn encode_varint<T: Into<u64>>(&mut self, v: T) -> &mut Self {
         let v = v.into();
         // Using to_be_bytes() generates better assembly with rev instructions
         // instead of multiple shifts and ors
+        #[expect(clippy::cast_possible_truncation, reason = "This is intentional.")]
         match () {
             () if v < (1 << 6) => self.encode_byte(v as u8),
-            () if v < (1 << 14) => self.encode(&((v | (1u64 << 14)) as u16).to_be_bytes()),
-            () if v < (1 << 30) => self.encode(&((v | (2u64 << 30)) as u32).to_be_bytes()),
-            () if v < (1 << 62) => self.encode(&(v | (3u64 << 62)).to_be_bytes()),
+            () if v < (1 << 14) => self.encode(&((v as u16 | (1 << 14)).to_be_bytes())),
+            () if v < (1 << 30) => self.encode(&((v as u32 | (2 << 30)).to_be_bytes())),
+            () if v < (1 << 62) => self.encode(&(v | (3 << 62)).to_be_bytes()),
             () => panic!("Varint value too large"),
         }
     }
