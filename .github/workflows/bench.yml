@@ -225,7 +225,7 @@ jobs:
 
       - name: Fail on regression
         # Don't check for regressions when running on main.
-        if: github.ref != 'refs/heads/main'
+        if: github.ref != 'refs/heads/main' && github.event.merge_group.base_ref != 'refs/heads/main'
         run: |
           if grep -q "Performance has regressed." results.txt; then
             echo "Performance regression detected."
