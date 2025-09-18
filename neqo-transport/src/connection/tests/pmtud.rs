@@ -10,9 +10,7 @@ use test_fixture::{fixture_init, now, DEFAULT_ADDR_V4};
 
 use super::Connection;
 use crate::{
-    connection::tests::{
-        connect, default_server, fill_stream, CountingConnectionIdGenerator,
-    },
+    connection::tests::{connect, default_server, fill_stream, CountingConnectionIdGenerator},
     ConnectionParameters, StreamType,
 };
 
