@@ -227,6 +227,7 @@ runs:
       env:
         TARGET_PLATFORM: ${{ inputs.target }}
         RUNNER_OS: ${{ runner.os }}
+        ARCH: ${{ startsWith(runner.arch, 'ARM') && '-t arm64' || '' }}
       run: |
         if [ "$NSS_TARGET" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
@@ -270,5 +271,5 @@ runs:
           cp -vaL "$LIB_DIR"/* "dist/$NSS_TARGET/lib"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-          $NSS_DIR/build.sh -v -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 $OPT --static || cat $NSS_DIR/out/$NSS_TARGET/nspr_config
+          $NSS_DIR/build.sh -v $ARCH -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 $OPT --static
         fi
