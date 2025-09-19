@@ -247,7 +247,6 @@ runs:
       env:
         TARGET_PLATFORM: ${{ inputs.target }}
         RUNNER_OS: ${{ runner.os }}
-        ARCH: ${{ startsWith(runner.arch, 'ARM') && '-t arm64' || '' }}
       run: |
         # We want to do an optimized build for accurate CPU profiling, but
         # we also want debug symbols and frame pointers for that, which the normal optimized NSS
@@ -292,7 +291,9 @@ runs:
           cp -vaL "$LIB_DIR"/* "dist/Release/lib"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-          $NSS_DIR/build.sh -v $ARCH -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static
+          uname -a
+          python3 coreconf/detect_host_arch.py
+          $NSS_DIR/build.sh -v -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static
         fi
 
     - name: Save NSS cache
