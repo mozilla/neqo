@@ -56,10 +56,16 @@ jobs:
           - os: ubuntu-24.04
             rust-toolchain: stable
             type: release
+          - os: ubuntu-24.04-arm
+            rust-toolchain: stable
+            type: release
           - os: macos-15
             rust-toolchain: stable
             type: release
           - os: windows-2025
+            rust-toolchain: stable
+            type: release
+          - os: windows-11-arm
             rust-toolchain: stable
             type: release
           # TODO: Remove once Neqo's MSRV is increased to 1.82.0. NSS build
