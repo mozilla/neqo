@@ -1556,6 +1556,7 @@ mod tests {
         );
 
         // Assert that the first header is encoded as an index to the dynamic table (a post form).
+        assert!(buf1.len() > 3);
         assert_eq!(buf1[2], 0x10);
         // Assert that the second header is encoded as a literal with a name literal
         assert_eq!(buf1[3] & 0xf0, 0x20);
@@ -1590,6 +1591,7 @@ mod tests {
             StreamId::new(3),
         );
         // Assert that the first header is encoded as an index to the dynamic table (a post form).
+        assert!(buf3.len() > 3);
         assert_eq!(buf3[2], 0x10);
         // Assert that the second header is encoded as a literal with a name literal
         assert_eq!(buf3[3] & 0xf0, 0x20);
