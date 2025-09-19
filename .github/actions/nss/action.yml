@@ -291,7 +291,7 @@ runs:
           cp -vaL "$LIB_DIR"/* "dist/Release/lib"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-          $NSS_DIR/build.sh -v -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static || (ls -l "nspr" && cat "nspr/$NSS_TARGET/config.log")
+          $NSS_DIR/build.sh -v -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static || cat $NSS_DIR/out/$NSS_TARGET/nspr_config
         fi
 
     - name: Save NSS cache
