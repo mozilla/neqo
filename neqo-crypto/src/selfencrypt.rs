@@ -126,8 +126,13 @@ impl SelfEncrypt {
     ///
     /// Returns an error when the self-encrypted object is invalid;
     /// when the keys have been rotated; or when NSS fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `ciphertext` is too short to be valid.
     #[expect(clippy::similar_names, reason = "aad is similar to aead.")]
     pub fn open(&self, aad: &[u8], ciphertext: &[u8]) -> Res<Vec<u8>> {
+        assert!(ciphertext.len() > 1);
         if ciphertext[0] != Self::VERSION {
             return Err(Error::SelfEncrypt);
         }
