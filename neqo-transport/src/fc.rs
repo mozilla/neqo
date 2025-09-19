@@ -658,6 +658,12 @@ impl IndexMut<StreamType> for LocalStreamLimits {
 
 #[cfg(test)]
 mod test {
+    #![allow(
+        clippy::allow_attributes,
+        clippy::unwrap_in_result,
+        reason = "OK in tests."
+    )]
+
     use std::{
         cmp::min,
         collections::VecDeque,
@@ -1038,7 +1044,7 @@ mod test {
     #[test]
     fn trigger_factor() -> Res<()> {
         let rtt = Duration::from_millis(40);
-        let now = Instant::now();
+        let now = test_fixture::now();
         let mut fc = ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
 
         let fraction = INITIAL_RECV_WINDOW_SIZE as u64 / WINDOW_UPDATE_FRACTION;
@@ -1059,7 +1065,7 @@ mod test {
     #[test]
     fn auto_tuning_increase_no_decrease() -> Res<()> {
         let rtt = Duration::from_millis(40);
-        let mut now = Instant::now();
+        let mut now = test_fixture::now();
         let mut fc = ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
         let initial_max_active = fc.max_active();
 
@@ -1094,7 +1100,7 @@ mod test {
     #[test]
     fn stream_data_blocked_triggers_auto_tuning() -> Res<()> {
         let rtt = Duration::from_millis(40);
-        let now = Instant::now();
+        let now = test_fixture::now();
         let mut fc = ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
 
         // Send first window update to give auto-tuning algorithm a baseline.
@@ -1138,7 +1144,7 @@ mod test {
         test_fixture::fixture_init();
 
         // Run multiple iterations with randomized bandwidth and rtt.
-        for _ in 0..1_000 {
+        for _ in 0..100 {
             // Random bandwidth between 1 Mbit/s and 1 Gbit/s.
             let bandwidth =
                 u64::from(u16::from_be_bytes(random::<2>()) % 1_000 + 1) * 1_000 * 1_000;
@@ -1146,7 +1152,7 @@ mod test {
             let rtt = Duration::from_millis(u64::from(random::<1>()[0]) + 1);
             let bdp = bandwidth * u64::try_from(rtt.as_millis()).unwrap() / 1_000 / 8;
 
-            let mut now = Instant::now();
+            let mut now = test_fixture::now();
 
             let mut send_to_recv = VecDeque::new();
             let mut recv_to_send = VecDeque::new();

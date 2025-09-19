@@ -158,18 +158,13 @@ mod server_events;
 mod settings;
 mod stream_type_reader;
 
-use std::{
-    cell::RefCell,
-    fmt::{self, Debug, Display, Formatter},
-    rc::Rc,
-};
+use std::{cell::RefCell, fmt::Debug, rc::Rc};
 
 use buffered_send_stream::BufferedStream;
-pub use client_events::{Http3ClientEvent, WebTransportEvent};
+pub use client_events::{ConnectUdpEvent, Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
-pub use connection::{Http3State, WebTransportSessionAcceptAction};
+pub use connection::{Http3State, SessionAcceptAction};
 pub use connection_client::Http3Client;
-use features::extended_connect::webtransport_session;
 use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;
@@ -180,57 +175,101 @@ pub use priority::Priority;
 pub use push_id::PushId;
 pub use server::Http3Server;
 pub use server_events::{
-    Http3OrWebTransportStream, Http3ServerEvent, WebTransportRequest, WebTransportServerEvent,
+    ConnectUdpRequest, ConnectUdpServerEvent, Http3OrWebTransportStream, Http3ServerEvent,
+    WebTransportRequest, WebTransportServerEvent,
 };
 use stream_type_reader::NewStreamType;
+use thiserror::Error;
 
-use crate::priority::PriorityHandler;
+use crate::{features::extended_connect, priority::PriorityHandler};
 
 type Res<T> = Result<T, Error>;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum Error {
+    #[error("HTTP no error")]
     HttpNone,
+    #[error("HTTP general protocol error")]
     HttpGeneralProtocol,
-    HttpGeneralProtocolStream, /* this is the same as the above but it should only close a
-                                * stream not a connection. */
+    // This is the same as the above but it should only close a stream not a
+    // connection.
+    #[error("HTTP protocol error on stream")]
+    HttpGeneralProtocolStream,
     // When using this error, you need to provide a value that is unique, which
     // will allow the specific error to be identified.  This will be validated in CI.
+    #[error("HTTP internal error: {0}")]
     HttpInternal(u16),
+    #[error("HTTP stream creation error")]
     HttpStreamCreation,
+    #[error("HTTP closed critical stream")]
     HttpClosedCriticalStream,
+    #[error("HTTP unexpected frame")]
     HttpFrameUnexpected,
+    #[error("HTTP frame error")]
     HttpFrame,
+    #[error("HTTP excessive load")]
     HttpExcessiveLoad,
+    #[error("HTTP ID error")]
     HttpId,
+    #[error("HTTP settings error")]
     HttpSettings,
+    #[error("HTTP missing settings")]
     HttpMissingSettings,
+    #[error("HTTP request rejected")]
     HttpRequestRejected,
+    #[error("HTTP request cancelled")]
     HttpRequestCancelled,
+    #[error("HTTP request incomplete")]
     HttpRequestIncomplete,
+    #[error("HTTP connect error")]
     HttpConnect,
+    #[error("HTTP version fallback")]
     HttpVersionFallback,
+    #[error("HTTP message error")]
     HttpMessage,
-    Qpack(neqo_qpack::Error),
+    #[error("QPACK error: {0}")]
+    Qpack(#[source] neqo_qpack::Error),
 
     // Internal errors from here.
+    #[error("Already closed")]
     AlreadyClosed,
+    #[error("Already initialized")]
     AlreadyInitialized,
+    #[error("Fatal error")]
     Fatal,
+    #[error("HTTP GOAWAY received")]
     HttpGoaway,
+    #[error("Internal error")]
     Internal,
+    #[error("Invalid header")]
     InvalidHeader,
+    #[error("Invalid input")]
     InvalidInput,
+    #[error("Invalid request target")]
     InvalidRequestTarget,
+    #[error("Invalid resumption token")]
     InvalidResumptionToken,
+    #[error("Invalid state")]
     InvalidState,
+    #[error("Invalid stream ID")]
     InvalidStreamId,
+    #[error("No more data")]
     NoMoreData,
+    #[error("Not enough data")]
     NotEnoughData,
+    #[error("Stream limit reached")]
     StreamLimit,
-    Transport(TransportError),
+    #[error("Transport error: {0}")]
+    Transport(
+        #[from]
+        #[source]
+        TransportError,
+    ),
+    #[error("Transport stream does not exist")]
     TransportStreamDoesNotExist,
+    #[error("Operation unavailable")]
     Unavailable,
+    #[error("Unexpected condition")]
     Unexpected,
 }
 
@@ -354,34 +393,12 @@ impl Error {
     }
 }
 
-impl From<TransportError> for Error {
-    fn from(err: TransportError) -> Self {
-        Self::Transport(err)
-    }
-}
-
 impl From<QpackError> for Error {
     fn from(err: QpackError) -> Self {
         match err {
             QpackError::ClosedCriticalStream => Self::HttpClosedCriticalStream,
             e => Self::Qpack(e),
         }
-    }
-}
-
-impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
-        match self {
-            Self::Transport(e) => Some(e),
-            Self::Qpack(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "HTTP/3 error: {self:?}")
     }
 }
 
@@ -442,7 +459,7 @@ trait RecvStream: Stream {
         None
     }
 
-    fn webtransport(&self) -> Option<Rc<RefCell<webtransport_session::Session>>> {
+    fn extended_connect_session(&self) -> Option<Rc<RefCell<extended_connect::session::Session>>> {
         None
     }
 

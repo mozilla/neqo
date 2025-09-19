@@ -20,9 +20,8 @@ mod static_table;
 mod stats;
 mod table;
 
-use std::fmt::{self, Display, Formatter};
-
 pub use stats::Stats;
+use thiserror::Error;
 
 pub use crate::{decoder::Decoder, encoder::Encoder};
 
@@ -36,29 +35,49 @@ pub struct Settings {
     pub max_blocked_streams: u16,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum Error {
+    #[error("Decompression error")]
     Decompression,
+    #[error("Encoder stream error")]
     EncoderStream,
+    #[error("Decoder stream error")]
     DecoderStream,
+    #[error("Critical stream closed")]
     ClosedCriticalStream,
+    #[error("Internal error")]
     Internal,
 
     // These are internal errors, they will be transformed into one of the above.
-    NeedMoreData, /* Return when an input stream does not have more data that a decoder
-                   * needs.(It does not mean that a stream is closed.) */
+    ///
+    /// Return when an input stream does not have more data that a decoder needs.
+    /// It does not mean that a stream is closed.
+    #[error("Need more data")]
+    NeedMoreData,
+    #[error("Header lookup failed")]
     HeaderLookup,
+    #[error("Huffman decompression error")]
     HuffmanDecompression,
+    #[error("Bad UTF-8 encoding")]
     BadUtf8,
+    #[error("Change capacity error")]
     ChangeCapacity,
+    #[error("Dynamic table full")]
     DynamicTableFull,
+    #[error("Incremented ack is larger than inserts")]
     IncrementAck,
+    #[error("Integer overflow")]
     IntegerOverflow,
+    #[error("Wrong stream count")]
     WrongStreamCount,
+    #[error("Decoding error")]
     Decoding, // Decoding internal error that is not one of the above.
+    #[error("Encoder stream blocked")]
     EncoderStreamBlocked,
 
-    Transport(neqo_transport::Error),
+    #[error(transparent)]
+    Transport(#[from] neqo_transport::Error),
+    #[error("Qlog error")]
     Qlog,
 }
 
@@ -86,26 +105,5 @@ impl Error {
                 err
             }
         })
-    }
-}
-
-impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
-        match self {
-            Self::Transport(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "QPACK error: {self:?}")
-    }
-}
-
-impl From<neqo_transport::Error> for Error {
-    fn from(err: neqo_transport::Error) -> Self {
-        Self::Transport(err)
     }
 }

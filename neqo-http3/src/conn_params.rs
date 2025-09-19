@@ -6,6 +6,7 @@
 
 use std::cmp::min;
 
+use neqo_common::qwarn;
 use neqo_qpack as qpack;
 use neqo_transport::ConnectionParameters;
 
@@ -14,7 +15,9 @@ const QPACK_TABLE_SIZE_LIMIT: u64 = (1 << 30) - 1;
 const QPACK_MAX_BLOCKED_STREAMS_DEFAULT: u16 = 20;
 const MAX_PUSH_STREAM_DEFAULT: u64 = 0;
 const WEBTRANSPORT_DEFAULT: bool = false;
-const HTTP3_DATAGRAM_DEFAULT: bool = false;
+/// Do not support HTTP Extended CONNECT by default.
+const CONNECT_DEFAULT: bool = false;
+const HTTP3_DATAGRAM_DEFAULT: bool = true;
 
 #[derive(Debug, Clone)]
 pub struct Http3Parameters {
@@ -22,6 +25,8 @@ pub struct Http3Parameters {
     qpack_settings: qpack::Settings,
     max_concurrent_push_streams: u64,
     webtransport: bool,
+    /// HTTP Extended CONNECT
+    connect: bool,
     http3_datagram: bool,
 }
 
@@ -36,6 +41,7 @@ impl Default for Http3Parameters {
             },
             max_concurrent_push_streams: MAX_PUSH_STREAM_DEFAULT,
             webtransport: WEBTRANSPORT_DEFAULT,
+            connect: CONNECT_DEFAULT,
             http3_datagram: HTTP3_DATAGRAM_DEFAULT,
         }
     }
@@ -118,6 +124,19 @@ impl Http3Parameters {
         self.webtransport
     }
 
+    /// Setter for HTTP Extended CONNECT support.
+    #[must_use]
+    pub const fn connect(mut self, connect: bool) -> Self {
+        self.connect = connect;
+        self
+    }
+
+    /// Getter for HTTP Extended CONNECT support.
+    #[must_use]
+    pub const fn get_connect(&self) -> bool {
+        self.connect
+    }
+
     // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn http3_datagram(mut self, http3_datagram: bool) -> Self {
@@ -126,7 +145,28 @@ impl Http3Parameters {
     }
 
     #[must_use]
-    pub const fn get_http3_datagram(&self) -> bool {
+    pub fn get_http3_datagram(&self) -> bool {
+        if self.http3_datagram && self.conn_params.get_datagram_size() == 0 {
+            qwarn!("HTTP/3 setting SETTINGS_HTTP3_DATAGRAM is enabled but QUIC transport parameter max_datagram_frame_size is 0.");
+            debug_assert!(false);
+        }
         self.http3_datagram
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use neqo_transport::ConnectionParameters;
+
+    use crate::Http3Parameters;
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "assertion failed: false")]
+    fn get_http3_datagram_debug_panic_on_mismatch() {
+        let params = Http3Parameters::default()
+            .connection_parameters(ConnectionParameters::default().datagram_size(0))
+            .http3_datagram(true);
+        assert!(params.get_http3_datagram());
     }
 }

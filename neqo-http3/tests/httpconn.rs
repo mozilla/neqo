@@ -91,31 +91,6 @@ fn process_client_events(conn: &mut Http3Client) {
     assert!(response_data_found);
 }
 
-fn connect_peers(hconn_c: &mut Http3Client, hconn_s: &mut Http3Server) -> Option<Datagram> {
-    assert_eq!(hconn_c.state(), Http3State::Initializing);
-    let out = hconn_c.process_output(now()); // Initial
-    let out2 = hconn_c.process_output(now()); // Initial
-    _ = hconn_s.process(out.dgram(), now()); // ACK
-    let out = hconn_s.process(out2.dgram(), now()); // Initial + Handshake
-    let out = hconn_c.process(out.dgram(), now());
-    let out = hconn_s.process(out.dgram(), now());
-    let out = hconn_c.process(out.dgram(), now());
-    drop(hconn_s.process(out.dgram(), now())); // consume ACK
-    let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
-    assert!(hconn_c.events().any(authentication_needed));
-    hconn_c.authenticated(AuthenticationStatus::Ok, now());
-    let out = hconn_c.process_output(now()); // Handshake
-    assert_eq!(hconn_c.state(), Http3State::Connected);
-    let out = hconn_s.process(out.dgram(), now()); // Handshake
-    let out = hconn_c.process(out.dgram(), now());
-    let out = hconn_s.process(out.dgram(), now());
-    // assert!(hconn_s.settings_received);
-    let out = hconn_c.process(out.dgram(), now());
-    // assert!(hconn_c.settings_received);
-
-    out.dgram()
-}
-
 fn connect_peers_with_network_propagation_delay(
     hconn_c: &mut Http3Client,
     hconn_s: &mut Http3Server,
@@ -178,7 +153,7 @@ fn fetch() {
         .fetch(
             now(),
             "GET",
-            &("https", "something.com", "/"),
+            ("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -207,7 +182,7 @@ fn response_103() {
         .fetch(
             now(),
             "GET",
-            &("https", "something.com", "/"),
+            ("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -261,7 +236,7 @@ fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>
     let stream_id = hconn_c.fetch(
         now(),
         "GET",
-        &("https", "something.com", "/"),
+        ("https", "something.com", "/"),
         &[],
         Priority::default(),
     )?;
@@ -336,7 +311,7 @@ fn data_writable_events() {
         .fetch(
             now(),
             "GET",
-            &("https", "something.com", "/"),
+            ("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -440,7 +415,7 @@ fn zerortt() {
         .fetch(
             now(),
             "GET",
-            &("https", "something.com", "/"),
+            ("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -510,7 +485,7 @@ fn fetch_noresponse_will_idletimeout() {
         .fetch(
             now,
             "GET",
-            &("https", "something.com", "/"),
+            ("https", "something.com", "/"),
             &[],
             Priority::default(),
         )

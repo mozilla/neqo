@@ -32,7 +32,7 @@ jobs:
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: Cargo.toml
           persist-credentials: false
@@ -71,6 +71,17 @@ jobs:
           - os: windows-2025
             rust-toolchain: 1.82.0
             type: debug
+          # Also do some debug builds on the oldest OS versions.
+          # FIXME: NSS compile fails?
+          # - os: ubuntu-22.04
+          #   rust-toolchain: stable
+          #   type: debug
+          - os: macos-13
+            rust-toolchain: stable
+            type: debug
+          - os: windows-2022
+            rust-toolchain: stable
+            type: debug
         exclude:
           # TODO: Remove once Neqo's MSRV is increased to 1.82.0. NSS build
           # fails on Windows with Rust 1.81.0. Firefox does not use Rust 1.81.0
@@ -86,7 +97,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
@@ -151,7 +162,7 @@ jobs:
           mkdir -p C:/msys64/home/runneradmin/
           touch C:/msys64/home/runneradmin/.gitconfig
 
-      - uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0
+      - uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
         with:
           files: codecov.json
           fail_ci_if_error: false
@@ -173,99 +184,52 @@ jobs:
     name: Ensure `Cargo.lock` contains all required dependencies
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-      - run: cargo update -w --locked
-
-  check-android:
-    name: Check Android
-    runs-on: ubuntu-24.04
-    env:
-      # https://searchfox.org/mozilla-central/search?q=NDK_VERSION =&path=python/mozboot/mozboot/android.py
-      NDK_VERSION: 27.2.12479018 # r27c
-      # https://searchfox.org/mozilla-central/search?q=\bapi_level=&path=taskcluster/scripts/misc/build-llvm-common.sh&regexp=true
-      # However, NSS requires an API >= 23 for a few symbols.
-      API_LEVEL: 23
-
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-linux-android
-            emulator-arch: x86_64
-            # Note that x86_64 image is only available for API 21+. See
-            # https://github.com/ReactiveCircus/android-emulator-runner?tab=readme-ov-file#configurations.
-          - target: i686-linux-android
-            emulator-arch: x86
-          # FIXME: https://github.com/ReactiveCircus/android-emulator-runner/issues/404
-          # - target: armv7-linux-androideabi
-          #   emulator-arch: arm64-v8
-
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
-        with:
-          distribution: zulu
-          java-version: 23
-
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
-      - run: sdkmanager --install "ndk;$NDK_VERSION"
-
       - uses: ./.github/actions/rust
         with:
           version: stable
-          targets: ${{ matrix.target }}
-          tools: cargo-ndk@^4
+          tools: cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          cargo update -w --locked
+          cargo hack update -w --locked
 
+  check-android:
+    name: Check Android
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        target: ['x86_64-linux-android', 'i686-linux-android'] # 'aarch64-linux-android' not currently working
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
       - id: nss-version
         run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
-
-      - uses: ./.github/actions/nss
+      - uses: ./.github/actions/check-android
         with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
           target: ${{ matrix.target }}
+          minimum-nss-version: ${{ steps.nss-version.outputs.minimum }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
 
-      - env:
-          MATRIX_TARGET: ${{ matrix.target }}
-        run: cargo ndk --platform "$API_LEVEL" --target "$MATRIX_TARGET" test --no-run
-
-      - env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          cat <<'EOF' > /tmp/rust-android-run-tests-on-emulator.sh
-          #!/bin/bash
-          set -e
-          adb wait-for-device
-          while [ -z "$(adb shell getprop sys.boot_completed | tr -d '\r')" ]; do sleep 1; done
-          any_failures=0
-          TMP=/data/local/tmp
-          adb push "test-fixture/db" "$TMP/"
-          adb push "$LD_LIBRARY_PATH" "$TMP/"
-          for test in $(find target/$TARGET/debug/deps/ -type f -executable ! -name "*.so" -name "*-*"); do
-            adb push "$test" "$TMP/"
-            adb shell chmod +x "$TMP/$(basename "$test")"
-            # See https://unix.stackexchange.com/a/451140/409256
-            adb shell "CARGO_TERM_COLOR=always RUST_BACKTRACE=1 LD_LIBRARY_PATH=$TMP/lib NSS_DB_PATH=$TMP/db API_LEVEL=$API_LEVEL $TMP/$(basename "$test") || echo _FAIL_" 2>&1 | tee output
-            grep _FAIL_ output > /dev/null && any_failures=1
-          done
-          exit $any_failures
-          EOF
-          chmod a+x /tmp/rust-android-run-tests-on-emulator.sh
-
-      - uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
+  check-vm:
+    name: Run checks for VM-only platforms
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ freebsd, openbsd, netbsd ] # NSS package on 'solaris' is too old.
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          api-level: ${{ env.API_LEVEL }}
-          arch: ${{ matrix.emulator-arch == 'arm64-v8' && 'arm64-v8a' || matrix.emulator-arch }}
-          ndk: ${{ env.NDK_VERSION }}
-          emulator-boot-timeout: 120
-          disk-size: 2G
-          script: /tmp/rust-android-run-tests-on-emulator.sh
-        env:
-          TARGET: ${{ matrix.target }}
+          persist-credentials: false
+      - uses: ./.github/actions/check-vm
+        with:
+          platform: ${{ matrix.os }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+

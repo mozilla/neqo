@@ -6,7 +6,7 @@
 
 use std::ops::Deref;
 
-use neqo_common::{Buffer, Decoder, Encoder};
+use neqo_common::{qdebug, Buffer, Decoder, Encoder};
 use neqo_crypto::{ZeroRttCheckResult, ZeroRttChecker};
 
 use crate::{Error, Http3Parameters, Res};
@@ -28,6 +28,11 @@ const SETTINGS_H3_DATAGRAM_DRAFT04: SettingsType = 0x00ff_d277;
 
 const SETTINGS_H3_DATAGRAM: SettingsType = 0x33;
 
+/// Advertises support for HTTP Extended CONNECT.
+///
+/// See <https://www.rfc-editor.org/rfc/rfc9220#section-5>
+pub const SETTINGS_ENABLE_CONNECT_PROTOCOL: SettingsType = 0x08;
+
 pub const H3_RESERVED_SETTINGS: &[SettingsType] = &[0x2, 0x3, 0x4, 0x5];
 
 #[derive(Clone, PartialEq, Eq, Debug, Copy)]
@@ -37,6 +42,7 @@ pub enum HSettingType {
     BlockedStreams,
     EnableWebTransport,
     EnableH3Datagram,
+    EnableConnect,
 }
 
 const fn hsetting_default(setting_type: HSettingType) -> u64 {
@@ -45,7 +51,8 @@ const fn hsetting_default(setting_type: HSettingType) -> u64 {
         HSettingType::MaxTableCapacity
         | HSettingType::BlockedStreams
         | HSettingType::EnableWebTransport
-        | HSettingType::EnableH3Datagram => 0,
+        | HSettingType::EnableH3Datagram
+        | HSettingType::EnableConnect => 0,
     }
 }
 
@@ -114,6 +121,12 @@ impl HSettings {
                             enc_inner.encode_varint(iter.value);
                         }
                     }
+                    HSettingType::EnableConnect => {
+                        if iter.value == 1 {
+                            enc_inner.encode_varint(SETTINGS_ENABLE_CONNECT_PROTOCOL);
+                            enc_inner.encode_varint(iter.value);
+                        }
+                    }
                 }
             }
         });
@@ -175,8 +188,16 @@ impl HSettings {
                             .push(HSetting::new(HSettingType::EnableH3Datagram, value));
                     }
                 }
-                // other supported settings here
-                (Some(_), Some(_)) => {} // ignore unknown setting, it is fine.
+                (Some(SETTINGS_ENABLE_CONNECT_PROTOCOL), Some(value)) => {
+                    if value > 1 {
+                        return Err(Error::HttpSettings);
+                    }
+                    self.settings
+                        .push(HSetting::new(HSettingType::EnableConnect, value));
+                }
+                (Some(t), Some(v)) => {
+                    qdebug!("Ignoring unknown setting type {t} with value {v}");
+                }
                 _ => return Err(Error::NotEnoughData),
             }
         }
@@ -210,6 +231,10 @@ impl From<&Http3Parameters> for HSettings {
                 HSetting {
                     setting_type: HSettingType::EnableH3Datagram,
                     value: u64::from(conn_param.get_http3_datagram()),
+                },
+                HSetting {
+                    setting_type: HSettingType::EnableConnect,
+                    value: u64::from(conn_param.get_connect()),
                 },
             ],
         }
@@ -287,11 +312,75 @@ impl ZeroRttChecker for HttpZeroRttChecker {
                 let value = setting.value == 1;
                 self.settings.get_http3_datagram() || !value
             }
+            HSettingType::EnableConnect => {
+                if setting.value > 1 {
+                    return false;
+                }
+                let value = setting.value == 1;
+                self.settings.get_connect() || !value
+            }
             HSettingType::MaxHeaderListSize => true,
         }) {
             ZeroRttCheckResult::Accept
         } else {
             ZeroRttCheckResult::Reject
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use neqo_common::Encoder;
+
+    use super::*;
+
+    #[test]
+    fn unknown_setting_type_ignored() {
+        let mut enc = Encoder::new();
+
+        // Add a known setting.
+        enc.encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY);
+        enc.encode_varint(1024u64);
+
+        // Add an unknown setting type.
+        let unknown_setting_type = u64::from(u32::MAX);
+        enc.encode_varint(unknown_setting_type);
+        enc.encode_varint(42u64);
+
+        // Add another known setting.
+        enc.encode_varint(SETTINGS_QPACK_BLOCKED_STREAMS);
+        enc.encode_varint(100u64);
+
+        let mut dec = enc.as_decoder();
+
+        let mut settings = HSettings::new(&[]);
+        settings
+            .decode_frame_contents(&mut dec)
+            .expect("succeeds despite unknown setting");
+
+        // Should only contain the known settings.
+        assert_eq!(settings.len(), 2);
+        assert_eq!(settings.get(HSettingType::MaxTableCapacity), 1024);
+        assert_eq!(settings.get(HSettingType::BlockedStreams), 100);
+    }
+
+    #[test]
+    fn not_enough_data_error() {
+        let mut enc = Encoder::new();
+
+        // Add a complete setting.
+        enc.encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY);
+        enc.encode_varint(1024u64);
+
+        // Add an incomplete setting.
+        enc.encode_varint(SETTINGS_QPACK_BLOCKED_STREAMS);
+
+        let mut dec = enc.as_decoder();
+
+        let mut settings = HSettings::new(&[]);
+        assert_eq!(
+            settings.decode_frame_contents(&mut dec),
+            Err(Error::NotEnoughData)
+        );
     }
 }
