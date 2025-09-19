@@ -271,6 +271,6 @@ runs:
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
           uname -a
-          python3 coreconf/detect_host_arch.py
+          python3 $NSS_DIR/coreconf/detect_host_arch.py
           $NSS_DIR/build.sh -v -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 $OPT --static
         fi
