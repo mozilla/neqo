@@ -165,13 +165,23 @@ runs:
           echo C:/msys64/usr/bin
           echo C:/msys64/mingw64/bin
         } >> "$GITHUB_PATH"
-        /c/msys64/usr/bin/pacman -S --noconfirm python3-pip nsinstall
+        mkdir -p "$HOME/bin"
+        curl -o "$HOME/bin/nsinstall.py" -sSf https://raw.githubusercontent.com/mozilla/gecko-dev/refs/heads/master/config/nsinstall.py
+        echo "#! /usr/bin/env python3" | cat - "$HOME/bin/nsinstall.py" > "$HOME/bin/nsinstall"
+        chmod +x "$HOME/bin/nsinstall"
+        mkdir -p "$HOME/bin/mozfile"
+        for file in __init__.py mozfile.py; do
+          curl -o "$HOME/bin/mozfile/$file" -sSf "https://raw.githubusercontent.com/mozilla/gecko-dev/refs/heads/master/testing/mozbase/mozfile/mozfile/$file"
+        done
+        echo "$HOME/bin" >> "$GITHUB_PATH"
         echo "gyp-next>=0.18.1" > req.txt
         python3 -m pip install -r req.txt
 
     - name: Set up MSVC (Windows)
       if: ${{ runner.os == 'Windows' && steps.check_build.outputs.build_nss }}
       uses: ilammy/msvc-dev-cmd@v1 # zizmor: ignore[unpinned-uses]
+      with:
+        arch: ${{ startsWith(runner.arch, 'ARM') && 'arm64' || 'amd64' }}
       # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
       # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
@@ -207,6 +217,9 @@ runs:
         } >> "$GITHUB_ENV"
         if [ "$RUNNER_OS" == "Windows" ]; then
           echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
+          # Make the NSPR configure script architecture agnostic.
+          sed -i'' -E -e 's/ -arch:IA32//g' -e 's/CPU_ARCH=x86(_64)?/echo $CPU_ARCH/g' nspr/configure
+          cat nspr/configure
         fi
 
     - name: Build
@@ -258,5 +271,7 @@ runs:
           cp -vaL "$LIB_DIR"/* "dist/$NSS_TARGET/lib"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-          $NSS_DIR/build.sh -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 $OPT --static
+          uname -a
+          python3 $NSS_DIR/coreconf/detect_host_arch.py
+          $NSS_DIR/build.sh -v -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 $OPT --static
         fi
