@@ -15,7 +15,9 @@ use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType, Role};
 use neqo_transport::{AppError, Connection, DatagramTracking, StreamId};
 
 use crate::{
-    features::extended_connect::{ExtendedConnectEvents, ExtendedConnectType, Listener},
+    features::extended_connect::{
+        ExtendedConnectEvents, ExtendedConnectType, HeaderInfo, Listener,
+    },
     frames::HFrame,
     priority::PriorityHandler,
     recv_message::{RecvMessage, RecvMessageInfo},
@@ -228,7 +230,8 @@ impl Session {
             return Ok(());
         }
 
-        if let Some((headers, interim, fin)) = self.stream_event_listener.borrow_mut().get_headers()
+        if let Some((headers, HeaderInfo { interim, fin })) =
+            self.stream_event_listener.borrow_mut().get_headers()
         {
             qtrace!("ExtendedConnect response headers {headers:?}, fin={fin}");
 

@@ -109,16 +109,22 @@ impl ExtendedConnectFeature {
 }
 
 #[derive(Debug, Default)]
+struct HeaderInfo {
+    interim: bool,
+    fin: bool,
+}
+
+#[derive(Debug, Default)]
 struct Listener {
-    headers: Option<(Vec<Header>, bool, bool)>,
+    headers: Option<(Vec<Header>, HeaderInfo)>,
 }
 
 impl Listener {
     fn set_headers(&mut self, headers: Vec<Header>, interim: bool, fin: bool) {
-        self.headers = Some((headers, interim, fin));
+        self.headers = Some((headers, HeaderInfo { interim, fin }));
     }
 
-    pub fn get_headers(&mut self) -> Option<(Vec<Header>, bool, bool)> {
+    pub fn get_headers(&mut self) -> Option<(Vec<Header>, HeaderInfo)> {
         mem::take(&mut self.headers)
     }
 }
