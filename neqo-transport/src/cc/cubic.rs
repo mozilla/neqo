@@ -88,12 +88,6 @@ pub fn convert_to_f64(v: usize) -> f64 {
 
 #[derive(Debug, Default)]
 pub struct Cubic {
-    /// > Size of cwnd in \[bytes\] at the time of setting `ssthresh` most recently, either upon
-    /// > exiting the first slow start or just before `cwnd` was reduced in the last congestion
-    /// > event.
-    ///
-    /// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.1.2-2.4>
-    cwnd_prior: f64,
     /// Estimate of Standard TCP congestion window for Cubic's TCP-friendly
     /// Region.
     ///
@@ -144,8 +138,8 @@ impl Display for Cubic {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "Cubic [w_max: {}, k: {}, cwnd_prior: {}, t_epoch: {:?}]",
-            self.w_max, self.k, self.cwnd_prior, self.t_epoch
+            "Cubic [w_max: {}, k: {}, t_epoch: {:?}]",
+            self.w_max, self.k, self.t_epoch
         )?;
         Ok(())
     }
@@ -185,7 +179,7 @@ impl Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-9>
     ///
-    /// Also initializes `k`, `cwnd_prior` and `w_max` if we start an epoch without having ever had
+    /// Also initializes `k` and `w_max` if we start an epoch without having ever had
     /// a congestion event, which can happen upon exiting slow start.
     fn start_epoch(
         &mut self,
@@ -201,11 +195,9 @@ impl Cubic {
         // could only happen if somehow `cwnd` get's increased between calling `reduce_cwnd()` and
         // `start_epoch()`. This could happen if we exit slow start without packet loss, thus never
         // had a congestion event and called `reduce_cwnd()` which means `w_max` was never set and
-        // is still it's default `0.0` value. For those cases we reset/initialize `w_max` and
-        // `cwnd_prior` here and appropiately set `k` to `0.0` (`k` is the time for `cwnd` to reach
-        // `w_max`).
+        // is still it's default `0.0` value. For those cases we reset/initialize `w_max` here and
+        // appropiately set `k` to `0.0` (`k` is the time for `cwnd` to reach `w_max`).
         self.k = if self.w_max <= curr_cwnd {
-            self.cwnd_prior = curr_cwnd;
             self.w_max = curr_cwnd;
             0.0
         } else {
@@ -327,7 +319,6 @@ impl WindowAdjustment for Cubic {
         max_datagram_size: usize,
     ) -> (usize, usize) {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
-        self.cwnd_prior = curr_cwnd_f64;
         // Fast Convergence
         //
         // > During a congestion event, if the current cwnd is less than w_max, this indicates
