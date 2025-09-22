@@ -16,7 +16,9 @@ use std::{
 use enum_map::EnumMap;
 use neqo_common::{event::Provider as _, qdebug, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
-use test_fixture::{fixture_init, new_neqo_qlog, now, DEFAULT_ADDR};
+#[cfg(feature = "qlog")]
+use test_fixture::new_neqo_qlog;
+use test_fixture::{fixture_init, now, DEFAULT_ADDR};
 
 use super::{test_internal, CloseReason, Connection, ConnectionId, Output, State};
 use crate::{
@@ -103,7 +105,10 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 // These are a direct copy of those functions.
 pub fn new_client(params: ConnectionParameters) -> Connection {
     fixture_init();
-    let (log, _contents) = new_neqo_qlog();
+    #[cfg_attr(
+        not(feature = "qlog"),
+        expect(unused_mut, reason = "only without qlog")
+    )]
     let mut client = Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
@@ -114,7 +119,11 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
         now(),
     )
     .expect("create a default client");
-    client.set_qlog(log);
+    #[cfg(feature = "qlog")]
+    {
+        let (log, _contents) = new_neqo_qlog();
+        client.set_qlog(log);
+    }
     client
 }
 
@@ -137,7 +146,6 @@ fn zero_len_cid_client(local_addr: SocketAddr, remote_addr: SocketAddr) -> Conne
 
 pub fn new_server(params: ConnectionParameters) -> Connection {
     fixture_init();
-    let (log, _contents) = new_neqo_qlog();
     let mut c = Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
@@ -145,7 +153,11 @@ pub fn new_server(params: ConnectionParameters) -> Connection {
         params,
     )
     .expect("create a default server");
-    c.set_qlog(log);
+    #[cfg(feature = "qlog")]
+    {
+        let (log, _contents) = new_neqo_qlog();
+        c.set_qlog(log);
+    }
     c.server_enable_0rtt(&test_fixture::anti_replay(), AllowZeroRtt {})
         .expect("enable 0-RTT");
     c

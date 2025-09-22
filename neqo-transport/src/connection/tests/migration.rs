@@ -18,9 +18,11 @@ use std::{
 };
 
 use neqo_common::{qdebug, Datagram, Decoder};
+#[cfg(feature = "qlog")]
+use test_fixture::new_neqo_qlog;
 use test_fixture::{
     assertions::{assert_v4_path, assert_v6_path},
-    fixture_init, new_neqo_qlog, now, DEFAULT_ADDR, DEFAULT_ADDR_V4,
+    fixture_init, now, DEFAULT_ADDR, DEFAULT_ADDR_V4,
 };
 
 use super::{
@@ -754,9 +756,12 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
     };
 
     fixture_init();
-    let (log, _contents) = new_neqo_qlog();
     let mut client = zero_len_cid_client(hs_client, hs_server);
-    client.set_qlog(log);
+    #[cfg(feature = "qlog")]
+    {
+        let (log, _contents) = new_neqo_qlog();
+        client.set_qlog(log);
+    }
     let spa = match preferred {
         SocketAddr::V6(v6) => PreferredAddress::new(None, Some(v6)),
         SocketAddr::V4(v4) => PreferredAddress::new(Some(v4), None),

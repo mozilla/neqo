@@ -63,7 +63,12 @@ fn wt_session_close_server_close_send() {
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
 
-    wt_session.stream_close_send().unwrap();
+    wt_session
+        .stream_close_send(
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
     wt.exchange_packets();
     wt.check_session_closed_event_client(
         wt_session.stream_id(),
@@ -136,7 +141,11 @@ fn wt_session_response_with_1xx() {
         .send_headers(&[Header::new(":status", "111")])
         .unwrap();
     wt_server_session
-        .response(&SessionAcceptAction::Accept)
+        .response(
+            &SessionAcceptAction::Accept,
+            #[cfg(feature = "qlog")]
+            now(),
+        )
         .unwrap();
 
     wt.exchange_packets();
@@ -195,9 +204,18 @@ fn wt_session_respone_200_with_fin() {
 
     let wt_server_session = wt_server_session.unwrap();
     wt_server_session
-        .response(&SessionAcceptAction::Accept)
+        .response(
+            &SessionAcceptAction::Accept,
+            #[cfg(feature = "qlog")]
+            now(),
+        )
         .unwrap();
-    wt_server_session.stream_close_send().unwrap();
+    wt_server_session
+        .stream_close_send(
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
 
     wt.exchange_packets();
 
@@ -275,7 +293,14 @@ fn wt_unknown_session_frame_client() {
     enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
     let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
-    wt.client.send_data(wt_session.stream_id(), &buf).unwrap();
+    wt.client
+        .send_data(
+            wt_session.stream_id(),
+            &buf,
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
     wt.exchange_packets();
 
     // The session is still active
@@ -325,7 +350,14 @@ fn wt_close_session_frame_broken_client() {
     let mut buf: Vec<_> = enc.into();
     // Corrupt the string.
     buf[9] = 0xff;
-    wt.client.send_data(wt_session.stream_id(), &buf).unwrap();
+    wt.client
+        .send_data(
+            wt_session.stream_id(),
+            &buf,
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
     wt.exchange_packets();
 
     // check that the webtransport session is closed.
@@ -385,13 +417,22 @@ fn wt_close_session_cannot_be_sent_at_once() {
         Header::new("content-length", BUF.len().to_string()),
     ])
     .unwrap();
-    req.send_data(BUF).unwrap();
+    req.send_data(
+        BUF,
+        #[cfg(feature = "qlog")]
+        now(),
+    )
+    .unwrap();
 
     // Now close the session.
     WtTest::session_close_frame_server(&wt_session, ERROR_NUM, ERROR_MESSAGE);
     // server cannot create new streams.
     assert_eq!(
-        wt_session.create_stream(StreamType::UniDi),
+        wt_session.create_stream(
+            StreamType::UniDi,
+            #[cfg(feature = "qlog")]
+            now()
+        ),
         Err(Error::InvalidStreamId)
     );
 

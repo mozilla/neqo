@@ -20,7 +20,7 @@ enum-map = { workspace = true }
 env_logger = { version = "0.10", default-features = false }
 hex = { workspace = true, optional = true }
 log = { workspace = true }
-qlog = { workspace = true }
+qlog = { workspace = true, optional = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
 
@@ -34,6 +34,8 @@ test-fixture = { path = "../test-fixture" }
 regex = { workspace = true }
 
 [features]
+default = []
+qlog = ["dep:qlog", "test-fixture/qlog"]
 bench = ["neqo-crypto/bench", "test-fixture/bench"]
 build-fuzzing-corpus = ["hex/alloc"]
 ci = []

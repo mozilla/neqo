@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#[cfg(feature = "qlog")]
+use std::time::Instant;
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
@@ -394,7 +396,11 @@ impl Http3Connection {
     /// has data to send it will be added to the `streams_with_pending_data` list.
     ///
     /// Control and QPACK streams are handled differently and are never added to the list.
-    fn send_non_control_streams(&mut self, conn: &mut Connection) -> Res<()> {
+    fn send_non_control_streams(
+        &mut self,
+        conn: &mut Connection,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<()> {
         let to_send = mem::take(&mut self.streams_with_pending_data);
         #[expect(
             clippy::iter_over_hash_type,
@@ -402,7 +408,11 @@ impl Http3Connection {
         )]
         for stream_id in to_send {
             let done = if let Some(s) = &mut self.send_streams.get_mut(&stream_id) {
-                s.send(conn)?;
+                s.send(
+                    conn,
+                    #[cfg(feature = "qlog")]
+                    now,
+                )?;
                 if s.has_data_to_send() {
                     self.streams_with_pending_data.insert(stream_id);
                 }
@@ -419,12 +429,24 @@ impl Http3Connection {
 
     /// Call `send` for all streams that need to send data. See explanation for the main structure
     /// for more details.
-    pub(crate) fn process_sending(&mut self, conn: &mut Connection) -> Res<()> {
+    pub(crate) fn process_sending(
+        &mut self,
+        conn: &mut Connection,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<()> {
         // check if control stream has data to send.
-        self.control_stream_local
-            .send(conn, &mut self.recv_streams)?;
+        self.control_stream_local.send(
+            conn,
+            &mut self.recv_streams,
+            #[cfg(feature = "qlog")]
+            now,
+        )?;
 
-        self.send_non_control_streams(conn)?;
+        self.send_non_control_streams(
+            conn,
+            #[cfg(feature = "qlog")]
+            now,
+        )?;
 
         self.qpack_decoder.borrow_mut().send(conn)?;
         match self.qpack_encoder.borrow_mut().send_encoder_updates(conn) {
@@ -472,11 +494,20 @@ impl Http3Connection {
     /// The function calls [`RecvStream::receive`] for a stream. It also deals
     /// with the outcome of a read by calling
     /// [`Http3Connection::handle_stream_manipulation_output`].
-    fn stream_receive(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<ReceiveOutput> {
+    fn stream_receive(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<ReceiveOutput> {
         qtrace!("[{self}] Readable stream {stream_id}");
 
         if let Some(recv_stream) = self.recv_streams.get_mut(&stream_id) {
-            let res = recv_stream.receive(conn);
+            let res = recv_stream.receive(
+                conn,
+                #[cfg(feature = "qlog")]
+                now,
+            );
             return self
                 .handle_stream_manipulation_output(res, stream_id, conn)
                 .map(|(output, _)| output);
@@ -488,6 +519,7 @@ impl Http3Connection {
         &mut self,
         unblocked_streams: Vec<StreamId>,
         conn: &mut Connection,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<()> {
         for stream_id in unblocked_streams {
             qdebug!("[{self}] Stream {stream_id} is unblocked");
@@ -495,7 +527,11 @@ impl Http3Connection {
                 let res = r
                     .http_stream()
                     .ok_or(Error::HttpInternal(10))?
-                    .header_unblocked(conn);
+                    .header_unblocked(
+                        conn,
+                        #[cfg(feature = "qlog")]
+                        now,
+                    );
                 let res = self.handle_stream_manipulation_output(res, stream_id, conn)?;
                 debug_assert!(matches!(res, (ReceiveOutput::NoOutput, _)));
             }
@@ -515,16 +551,33 @@ impl Http3Connection {
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<ReceiveOutput> {
-        let mut output = self.stream_receive(conn, stream_id)?;
+        let mut output = self.stream_receive(
+            conn,
+            stream_id,
+            #[cfg(feature = "qlog")]
+            now,
+        )?;
 
         if let ReceiveOutput::NewStream(stream_type) = output {
-            output = self.handle_new_stream(conn, stream_type, stream_id)?;
+            output = self.handle_new_stream(
+                conn,
+                stream_type,
+                stream_id,
+                #[cfg(feature = "qlog")]
+                now,
+            )?;
         }
 
         match output {
             ReceiveOutput::UnblockedStreams(unblocked_streams) => {
-                self.handle_unblocked_streams(unblocked_streams, conn)?;
+                self.handle_unblocked_streams(
+                    unblocked_streams,
+                    conn,
+                    #[cfg(feature = "qlog")]
+                    now,
+                )?;
                 Ok(ReceiveOutput::NoOutput)
             }
             ReceiveOutput::ControlFrames(control_frames) => {
@@ -688,6 +741,7 @@ impl Http3Connection {
         conn: &mut Connection,
         stream_type: NewStreamType,
         stream_id: StreamId,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<ReceiveOutput> {
         match stream_type {
             NewStreamType::Control => {
@@ -747,9 +801,13 @@ impl Http3Connection {
         }
 
         match stream_type {
-            NewStreamType::Control | NewStreamType::Decoder | NewStreamType::Encoder => {
-                self.stream_receive(conn, stream_id)
-            }
+            NewStreamType::Control | NewStreamType::Decoder | NewStreamType::Encoder => self
+                .stream_receive(
+                    conn,
+                    stream_id,
+                    #[cfg(feature = "qlog")]
+                    now,
+                ),
             NewStreamType::Push(_)
             | NewStreamType::Http(_)
             | NewStreamType::WebTransportStream(_) => Ok(ReceiveOutput::NewStream(stream_type)),
@@ -869,6 +927,7 @@ impl Http3Connection {
         recv_events: Box<dyn HttpRecvStreamEvents>,
         push_handler: Option<Rc<RefCell<PushController>>>,
         request: &RequestDescription<T>,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<StreamId>
     where
         T: RequestTarget,
@@ -879,7 +938,16 @@ impl Http3Connection {
             request.target,
         );
         let id = self.create_bidi_transport_stream(conn)?;
-        self.request_with_stream(id, conn, send_events, recv_events, push_handler, request)?;
+        self.request_with_stream(
+            id,
+            conn,
+            send_events,
+            recv_events,
+            push_handler,
+            request,
+            #[cfg(feature = "qlog")]
+            now,
+        )?;
         Ok(id)
     }
 
@@ -901,6 +969,10 @@ impl Http3Connection {
         Ok(id)
     }
 
+    #[cfg_attr(
+        feature = "qlog",
+        expect(clippy::too_many_arguments, reason = "We need them all.")
+    )]
     fn request_with_stream<T>(
         &mut self,
         stream_id: StreamId,
@@ -909,6 +981,7 @@ impl Http3Connection {
         recv_events: Box<dyn HttpRecvStreamEvents>,
         push_handler: Option<Rc<RefCell<PushController>>>,
         request: &RequestDescription<T>,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<()>
     where
         T: RequestTarget,
@@ -957,7 +1030,11 @@ impl Http3Connection {
         self.send_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
-            .send(conn)?;
+            .send(
+                conn,
+                #[cfg(feature = "qlog")]
+                now,
+            )?;
         Ok(())
     }
 
@@ -973,13 +1050,19 @@ impl Http3Connection {
         conn: &mut Connection,
         stream_id: StreamId,
         buf: &mut [u8],
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<(usize, bool)> {
         qdebug!("[{self}] read_data from stream {stream_id}");
         let res = self
             .recv_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
-            .read_data(conn, buf);
+            .read_data(
+                conn,
+                buf,
+                #[cfg(feature = "qlog")]
+                now,
+            );
         self.handle_stream_manipulation_output(res, stream_id, conn)
     }
 
@@ -1102,7 +1185,12 @@ impl Http3Connection {
     }
 
     /// This is called when an application wants to close the sending side of a stream.
-    pub fn stream_close_send(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
+    pub fn stream_close_send(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<()> {
         qdebug!("[{self}] Close the sending side for stream {stream_id}");
         debug_assert!(self.state.active());
         let send_stream = self
@@ -1111,7 +1199,11 @@ impl Http3Connection {
             .ok_or(Error::InvalidStreamId)?;
         // The following function may return InvalidStreamId from the transport layer if the stream
         // has been closed already. It is ok to ignore it here.
-        drop(send_stream.close(conn));
+        drop(send_stream.close(
+            conn,
+            #[cfg(feature = "qlog")]
+            now,
+        ));
         if send_stream.done() {
             self.remove_send_stream(stream_id, conn);
         } else if send_stream.has_data_to_send() {
@@ -1213,6 +1305,7 @@ impl Http3Connection {
         stream_id: StreamId,
         events: Box<dyn ExtendedConnectEvents>,
         accept_res: &SessionAcceptAction,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<()> {
         qtrace!("Respond to WebTransport session with accept={accept_res}");
         if !self.webtransport_enabled() {
@@ -1224,6 +1317,8 @@ impl Http3Connection {
             events,
             accept_res,
             ExtendedConnectType::WebTransport,
+            #[cfg(feature = "qlog")]
+            now,
         )
     }
 
@@ -1233,6 +1328,7 @@ impl Http3Connection {
         stream_id: StreamId,
         events: Box<dyn ExtendedConnectEvents>,
         accept_res: &SessionAcceptAction,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<()> {
         qtrace!("Respond to ConnectUdp session with accept={accept_res}");
         if !self.connect_udp_enabled() {
@@ -1244,6 +1340,8 @@ impl Http3Connection {
             events,
             accept_res,
             ExtendedConnectType::ConnectUdp,
+            #[cfg(feature = "qlog")]
+            now,
         )
     }
 
@@ -1254,6 +1352,7 @@ impl Http3Connection {
         events: Box<dyn ExtendedConnectEvents>,
         accept_res: &SessionAcceptAction,
         connect_type: ExtendedConnectType,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<()> {
         let mut recv_stream = self.recv_streams.get_mut(&stream_id);
         if let Some(r) = &mut recv_stream {
@@ -1282,7 +1381,12 @@ impl Http3Connection {
                     .send_headers(headers, conn)
                     .is_ok()
                 {
-                    drop(self.stream_close_send(conn, stream_id));
+                    drop(self.stream_close_send(
+                        conn,
+                        stream_id,
+                        #[cfg(feature = "qlog")]
+                        now,
+                    ));
                     // TODO issue 1294: add a timer to clean up the recv_stream if the peer does not
                     // do that in a short time.
                     self.streams_with_pending_data.insert(stream_id);
@@ -1332,9 +1436,17 @@ impl Http3Connection {
         session_id: StreamId,
         error: u32,
         message: &str,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<()> {
         qtrace!("Close WebTransport session {session_id:?}");
-        self.extended_connect_close_session(conn, session_id, error, message)
+        self.extended_connect_close_session(
+            conn,
+            session_id,
+            error,
+            message,
+            #[cfg(feature = "qlog")]
+            now,
+        )
     }
 
     pub(crate) fn connect_udp_close_session(
@@ -1343,9 +1455,17 @@ impl Http3Connection {
         session_id: StreamId,
         error: u32,
         message: &str,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<()> {
         qtrace!("Close ConnectUdp session {session_id:?}");
-        self.extended_connect_close_session(conn, session_id, error, message)
+        self.extended_connect_close_session(
+            conn,
+            session_id,
+            error,
+            message,
+            #[cfg(feature = "qlog")]
+            now,
+        )
     }
 
     fn extended_connect_close_session(
@@ -1354,6 +1474,7 @@ impl Http3Connection {
         session_id: StreamId,
         error: u32,
         message: &str,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<()> {
         let send_stream = self
             .send_streams
@@ -1361,7 +1482,13 @@ impl Http3Connection {
             .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
             .ok_or(Error::InvalidStreamId)?;
 
-        send_stream.close_with_message(conn, error, message)?;
+        send_stream.close_with_message(
+            conn,
+            error,
+            message,
+            #[cfg(feature = "qlog")]
+            now,
+        )?;
         if send_stream.done() {
             self.remove_send_stream(session_id, conn);
         } else if send_stream.has_data_to_send() {
@@ -1377,6 +1504,7 @@ impl Http3Connection {
         stream_type: StreamType,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<StreamId> {
         qtrace!("Create new WebTransport stream session={session_id} type={stream_type:?}");
 
@@ -1403,6 +1531,8 @@ impl Http3Connection {
             send_events,
             recv_events,
             true,
+            #[cfg(feature = "qlog")]
+            now,
         )?;
         Ok(stream_id)
     }
@@ -1413,6 +1543,7 @@ impl Http3Connection {
         stream_id: StreamId,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<()> {
         qtrace!("Create new WebTransport stream session={session_id} stream_id={stream_id}");
 
@@ -1430,10 +1561,16 @@ impl Http3Connection {
             send_events,
             recv_events,
             false,
+            #[cfg(feature = "qlog")]
+            now,
         )?;
         Ok(())
     }
 
+    #[cfg_attr(
+        feature = "qlog",
+        expect(clippy::too_many_arguments, reason = "We need them all.")
+    )]
     fn webtransport_create_stream_internal(
         &mut self,
         webtransport_session: Rc<RefCell<extended_connect::session::Session>>,
@@ -1442,8 +1579,13 @@ impl Http3Connection {
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
         local: bool,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<()> {
-        webtransport_session.borrow_mut().add_stream(stream_id)?;
+        webtransport_session.borrow_mut().add_stream(
+            stream_id,
+            #[cfg(feature = "qlog")]
+            now,
+        )?;
         if stream_id.stream_type() == StreamType::UniDi {
             if local {
                 self.send_streams.insert(

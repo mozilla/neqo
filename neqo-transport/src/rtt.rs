@@ -11,13 +11,15 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qlog::Qlog, qtrace, Buffer};
+#[cfg(feature = "qlog")]
+use neqo_common::qlog::Qlog;
+use neqo_common::{qtrace, Buffer};
 
+#[cfg(feature = "qlog")]
+use crate::qlog;
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
-    packet,
-    qlog::{self, QlogMetric},
-    recovery,
+    packet, recovery,
     stats::FrameStats,
 };
 
@@ -99,7 +101,7 @@ impl RttEstimate {
 
     pub fn update(
         &mut self,
-        qlog: &Qlog,
+        #[cfg(feature = "qlog")] qlog: &Qlog,
         mut rtt_sample: Duration,
         ack_delay: Duration,
         source: RttSource,
@@ -140,13 +142,14 @@ impl RttEstimate {
             self.smoothed_rtt,
             self.rttvar
         );
+        #[cfg(feature = "qlog")]
         qlog::metrics_updated(
             qlog,
             &[
-                QlogMetric::LatestRtt(self.latest_rtt),
-                QlogMetric::MinRtt(self.min_rtt),
-                QlogMetric::SmoothedRtt(self.smoothed_rtt),
-                QlogMetric::RttVariance(self.rttvar),
+                qlog::Metric::LatestRtt(self.latest_rtt),
+                qlog::Metric::MinRtt(self.min_rtt),
+                qlog::Metric::SmoothedRtt(self.smoothed_rtt),
+                qlog::Metric::RttVariance(self.rttvar),
             ],
             now,
         );

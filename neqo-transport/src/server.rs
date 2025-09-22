@@ -18,10 +18,9 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{
-    event::Provider as _, hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn, Datagram, Role,
-    Tos,
-};
+use neqo_common::{event::Provider as _, hex, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Tos};
+#[cfg(feature = "qlog")]
+use neqo_common::{qlog::Qlog, Role};
 use neqo_crypto::{
     encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
     ZeroRttChecker,
@@ -29,9 +28,11 @@ use neqo_crypto::{
 use rustc_hash::FxHashSet as HashSet;
 
 pub use crate::addr_valid::ValidateAddress;
+#[cfg(feature = "qlog")]
+use crate::ConnectionIdRef;
 use crate::{
     addr_valid::{AddressValidation, AddressValidationResult},
-    cid::{ConnectionId, ConnectionIdGenerator, ConnectionIdRef},
+    cid::{ConnectionId, ConnectionIdGenerator},
     connection::{Connection, Output, State},
     packet::{self, Public, MIN_INITIAL_PACKET_SIZE},
     saved::SavedDatagram,
@@ -120,7 +121,10 @@ pub struct Server {
     /// Address validation logic, which determines whether we send a Retry.
     address_validation: Rc<RefCell<AddressValidation>>,
     /// Directory to create qlog traces in
+    #[cfg(feature = "qlog")]
     qlog_dir: Option<PathBuf>,
+    #[cfg(not(feature = "qlog"))]
+    _qlog_dir: (),
     /// Encrypted client hello (ECH) configuration.
     ech_config: Option<EchConfig>,
     /// Remaining datagrams of a batch of datagrams provided via
@@ -164,15 +168,31 @@ impl Server {
             conn_params,
             connections: Vec::new(),
             address_validation: Rc::new(RefCell::new(validation)),
+            #[cfg(feature = "qlog")]
             qlog_dir: None,
+            #[cfg(not(feature = "qlog"))]
+            _qlog_dir: (),
             ech_config: None,
             saved_datagrams: VecDeque::new(),
         })
     }
 
     /// Set or clear directory to create logs of connection events in QLOG format.
+    #[cfg_attr(
+        not(feature = "qlog"),
+        expect(
+            unused_variables,
+            clippy::unused_self,
+            clippy::needless_pass_by_ref_mut,
+            clippy::needless_pass_by_value,
+            reason = "dir and self only used with qlog"
+        )
+    )]
     pub fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
-        self.qlog_dir = dir;
+        #[cfg(feature = "qlog")]
+        {
+            self.qlog_dir = dir;
+        }
     }
 
     /// Set the policy for address validation.
@@ -272,6 +292,7 @@ impl Server {
         }
     }
 
+    #[cfg(feature = "qlog")]
     fn create_qlog_trace(&self, odcid: ConnectionIdRef<'_>) -> Qlog {
         self.qlog_dir
             .as_ref()
@@ -290,6 +311,10 @@ impl Server {
             })
     }
 
+    #[cfg_attr(
+        not(feature = "qlog"),
+        expect(clippy::needless_pass_by_value, reason = "only without qlog")
+    )]
     fn setup_connection(
         &self,
         c: &mut Connection,
@@ -305,6 +330,7 @@ impl Server {
             c.set_retry_cids(odcid, initial.src_cid, &initial.dst_cid);
         }
         c.set_validation(&self.address_validation);
+        #[cfg(feature = "qlog")]
         c.set_qlog(self.create_qlog_trace(orig_dcid.unwrap_or(initial.dst_cid).as_cid_ref()));
         if let Some(cfg) = &self.ech_config {
             if c.server_enable_ech(cfg.config, &cfg.public_name, &cfg.sk, &cfg.pk)
@@ -348,6 +374,7 @@ impl Server {
             Err(e) => {
                 qwarn!("[{self}] Unable to create connection");
                 if e == crate::Error::VersionNegotiation {
+                    #[cfg(feature = "qlog")]
                     crate::qlog::server_version_information_failed(
                         &self.create_qlog_trace(orig_dcid.unwrap_or(initial.dst_cid).as_cid_ref()),
                         self.conn_params.get_versions().all(),
@@ -456,6 +483,7 @@ impl Server {
                     vn.len(),
                 );
 
+                #[cfg(feature = "qlog")]
                 crate::qlog::server_version_information_failed(
                     &self.create_qlog_trace(packet.dcid()),
                     self.conn_params.get_versions().all(),

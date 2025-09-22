@@ -24,7 +24,9 @@ use futures::{
     future::{select, Either},
     FutureExt as _, TryFutureExt as _,
 };
-use neqo_common::{qdebug, qerror, qinfo, qlog::Qlog, qwarn, Datagram, Role};
+use neqo_common::{qdebug, qerror, qinfo, qwarn, Datagram};
+#[cfg(feature = "qlog")]
+use neqo_common::{qlog::Qlog, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, Cipher, ResumptionToken,
@@ -52,6 +54,7 @@ pub enum Error {
     Http3(neqo_http3::Error),
     #[error(transparent)]
     Io(io::Error),
+    #[cfg(feature = "qlog")]
     #[error(transparent)]
     Qlog(qlog::Error),
     #[error(transparent)]
@@ -80,6 +83,7 @@ impl From<neqo_http3::Error> for Error {
     }
 }
 
+#[cfg(feature = "qlog")]
 impl From<qlog::Error> for Error {
     fn from(err: qlog::Error) -> Self {
         Self::Qlog(err)
@@ -528,6 +532,7 @@ impl<'a, H: Handler> Runner<'a, H> {
     }
 }
 
+#[cfg(feature = "qlog")]
 fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<Qlog> {
     let Some(qlog_dir) = args.shared.qlog_dir.clone() else {
         return Ok(Qlog::disabled());
@@ -549,6 +554,11 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<Qlog> {
         format!("client-{hostname}-{cid}"),
     )
     .map_err(Error::Qlog)
+}
+
+#[cfg(not(feature = "qlog"))]
+const fn qlog_new(_args: &Args, _hostname: &str, _cid: &ConnectionId) -> Res<()> {
+    Err(Error::Argument("qlog feature not enabled"))
 }
 
 const fn local_addr_for(remote_addr: &SocketAddr, local_port: u16) -> SocketAddr {

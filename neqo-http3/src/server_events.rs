@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#[cfg(feature = "qlog")]
+use std::time::Instant;
 use std::{
     cell::RefCell,
     collections::VecDeque,
@@ -74,10 +76,14 @@ impl StreamHandler {
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn send_data(&self, buf: &[u8]) -> Res<usize> {
-        self.handler
-            .borrow_mut()
-            .send_data(self.stream_id(), buf, &mut self.conn.borrow_mut())
+    pub fn send_data(&self, buf: &[u8], #[cfg(feature = "qlog")] now: Instant) -> Res<usize> {
+        self.handler.borrow_mut().send_data(
+            self.stream_id(),
+            buf,
+            &mut self.conn.borrow_mut(),
+            #[cfg(feature = "qlog")]
+            now,
+        )
     }
 
     /// Bytes sendable on stream at the QUIC layer.
@@ -98,10 +104,13 @@ impl StreamHandler {
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn stream_close_send(&self) -> Res<()> {
-        self.handler
-            .borrow_mut()
-            .stream_close_send(self.stream_id(), &mut self.conn.borrow_mut())
+    pub fn stream_close_send(&self, #[cfg(feature = "qlog")] now: Instant) -> Res<()> {
+        self.handler.borrow_mut().stream_close_send(
+            self.stream_id(),
+            &mut self.conn.borrow_mut(),
+            #[cfg(feature = "qlog")]
+            now,
+        )
     }
 
     /// Request a peer to stop sending a stream.
@@ -193,9 +202,13 @@ impl Http3OrWebTransportStream {
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn send_data(&self, data: &[u8]) -> Res<usize> {
+    pub fn send_data(&self, data: &[u8], #[cfg(feature = "qlog")] now: Instant) -> Res<usize> {
         qdebug!("[{self}] Set new response");
-        self.stream_handler.send_data(data)
+        self.stream_handler.send_data(
+            data,
+            #[cfg(feature = "qlog")]
+            now,
+        )
     }
 
     /// Close sending side.
@@ -203,9 +216,12 @@ impl Http3OrWebTransportStream {
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn stream_close_send(&self) -> Res<()> {
+    pub fn stream_close_send(&self, #[cfg(feature = "qlog")] now: Instant) -> Res<()> {
         qdebug!("[{self}] Set new response");
-        self.stream_handler.stream_close_send()
+        self.stream_handler.stream_close_send(
+            #[cfg(feature = "qlog")]
+            now,
+        )
     }
 }
 
@@ -266,7 +282,11 @@ impl WebTransportRequest {
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn response(&self, accept: &SessionAcceptAction) -> Res<()> {
+    pub fn response(
+        &self,
+        accept: &SessionAcceptAction,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<()> {
         qdebug!("[{self}] Set a response for a WebTransport session");
         self.stream_handler
             .handler
@@ -275,6 +295,8 @@ impl WebTransportRequest {
                 &mut self.stream_handler.conn.borrow_mut(),
                 self.stream_handler.stream_info.stream_id(),
                 accept,
+                #[cfg(feature = "qlog")]
+                now,
             )
     }
 
@@ -283,7 +305,12 @@ impl WebTransportRequest {
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// Also return an error if the stream was closed on the transport layer,
     /// but that information is not yet consumed on the  http/3 layer.
-    pub fn close_session(&self, error: u32, message: &str) -> Res<()> {
+    pub fn close_session(
+        &self,
+        error: u32,
+        message: &str,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<()> {
         self.stream_handler
             .handler
             .borrow_mut()
@@ -292,6 +319,8 @@ impl WebTransportRequest {
                 self.stream_handler.stream_info.stream_id(),
                 error,
                 message,
+                #[cfg(feature = "qlog")]
+                now,
             )
     }
 
@@ -305,7 +334,11 @@ impl WebTransportRequest {
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn create_stream(&self, stream_type: StreamType) -> Res<Http3OrWebTransportStream> {
+    pub fn create_stream(
+        &self,
+        stream_type: StreamType,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<Http3OrWebTransportStream> {
         let session_id = self.stream_handler.stream_id();
         let id = self
             .stream_handler
@@ -315,6 +348,8 @@ impl WebTransportRequest {
                 &mut self.stream_handler.conn.borrow_mut(),
                 session_id,
                 stream_type,
+                #[cfg(feature = "qlog")]
+                now,
             )?;
 
         Ok(Http3OrWebTransportStream::new(
@@ -407,7 +442,11 @@ impl ConnectUdpRequest {
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn response(&self, accept: &SessionAcceptAction) -> Res<()> {
+    pub fn response(
+        &self,
+        accept: &SessionAcceptAction,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<()> {
         qdebug!("[{self}] Set a response for a ConnectUdp session");
         self.stream_handler
             .handler
@@ -416,6 +455,8 @@ impl ConnectUdpRequest {
                 &mut self.stream_handler.conn.borrow_mut(),
                 self.stream_handler.stream_info.stream_id(),
                 accept,
+                #[cfg(feature = "qlog")]
+                now,
             )
     }
 
@@ -424,7 +465,12 @@ impl ConnectUdpRequest {
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// Also return an error if the stream was closed on the transport layer,
     /// but that information is not yet consumed on the  http/3 layer.
-    pub fn close_session(&self, error: u32, message: &str) -> Res<()> {
+    pub fn close_session(
+        &self,
+        error: u32,
+        message: &str,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<()> {
         self.stream_handler
             .handler
             .borrow_mut()
@@ -433,6 +479,8 @@ impl ConnectUdpRequest {
                 self.stream_handler.stream_info.stream_id(),
                 error,
                 message,
+                #[cfg(feature = "qlog")]
+                now,
             )
     }
 

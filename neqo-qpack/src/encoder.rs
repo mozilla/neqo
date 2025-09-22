@@ -4,21 +4,27 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#[cfg(feature = "qlog")]
+use std::time::Instant;
 use std::{
     cmp::min,
     collections::VecDeque,
     fmt::{self, Display, Formatter},
 };
 
+#[cfg(feature = "qlog")]
 use neqo_common::{qdebug, qerror, qlog::Qlog, qtrace, Header};
+#[cfg(not(feature = "qlog"))]
+use neqo_common::{qdebug, qerror, qtrace, Header};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
+#[cfg(feature = "qlog")]
+use crate::qlog;
 use crate::{
     decoder_instructions::{DecoderInstruction, DecoderInstructionReader},
     encoder_instructions::EncoderInstruction,
     header_block::HeaderEncoder,
-    qlog,
     qpack_send_buf::Data,
     reader::ReceiverConnWrapper,
     stats::Stats,
@@ -126,17 +132,38 @@ impl Encoder {
     ///
     /// May return: `ClosedCriticalStream` if stream has been closed or `DecoderStream`
     /// in case of any other transport error.
-    pub fn receive(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
-        self.read_instructions(conn, stream_id)
-            .map_err(|e| map_error(&e))
+    pub fn receive(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<()> {
+        self.read_instructions(
+            conn,
+            stream_id,
+            #[cfg(feature = "qlog")]
+            now,
+        )
+        .map_err(|e| map_error(&e))
     }
 
-    fn read_instructions(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
+    fn read_instructions(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<()> {
         qdebug!("[{self}] read a new instruction");
         loop {
             let mut recv = ReceiverConnWrapper::new(conn, stream_id);
             match self.instruction_reader.read_instructions(&mut recv) {
-                Ok(instruction) => self.call_instruction(instruction, conn.qlog_mut())?,
+                Ok(instruction) => self.call_instruction(
+                    instruction,
+                    #[cfg(feature = "qlog")]
+                    conn.qlog_mut(),
+                    #[cfg(feature = "qlog")]
+                    now,
+                )?,
                 Err(Error::NeedMoreData) => break Ok(()),
                 Err(e) => break Err(e),
             }
@@ -216,14 +243,21 @@ impl Encoder {
         }
     }
 
-    fn call_instruction(&mut self, instruction: DecoderInstruction, qlog: &Qlog) -> Res<()> {
+    fn call_instruction(
+        &mut self,
+        instruction: DecoderInstruction,
+        #[cfg(feature = "qlog")] qlog: &Qlog,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<()> {
         qdebug!("[{self}] call instruction {instruction:?}");
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
+                #[cfg(feature = "qlog")]
                 qlog::qpack_read_insert_count_increment_instruction(
                     qlog,
                     increment,
                     &increment.to_be_bytes(),
+                    now,
                 );
 
                 self.insert_count_instruction(increment)
@@ -652,7 +686,12 @@ mod tests {
         drop(encoder.conn.process(out.dgram(), now()));
         assert!(encoder
             .encoder
-            .read_instructions(&mut encoder.conn, encoder.recv_stream_id)
+            .read_instructions(
+                &mut encoder.conn,
+                encoder.recv_stream_id,
+                #[cfg(feature = "qlog")]
+                now()
+            )
             .is_ok());
     }
 

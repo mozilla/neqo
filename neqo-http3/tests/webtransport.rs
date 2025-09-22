@@ -94,7 +94,13 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
                     headers.contains_header(":method", "CONNECT")
                         && headers.contains_header(":protocol", "webtransport")
                 );
-                session.response(&SessionAcceptAction::Accept).unwrap();
+                session
+                    .response(
+                        &SessionAcceptAction::Accept,
+                        #[cfg(feature = "qlog")]
+                        now(),
+                    )
+                    .unwrap();
                 wt_server_session = Some(session);
             }
             Http3ServerEvent::Data { .. } => {
@@ -133,7 +139,17 @@ fn send_data_client(
     wt_stream_id: StreamId,
     data: &[u8],
 ) {
-    assert_eq!(client.send_data(wt_stream_id, data).unwrap(), data.len());
+    assert_eq!(
+        client
+            .send_data(
+                wt_stream_id,
+                data,
+                #[cfg(feature = "qlog")]
+                now()
+            )
+            .unwrap(),
+        data.len()
+    );
     exchange_packets(client, server, false, None);
 }
 
@@ -143,7 +159,16 @@ fn send_data_server(
     wt_stream: &Http3OrWebTransportStream,
     data: &[u8],
 ) {
-    assert_eq!(wt_stream.send_data(data).unwrap(), data.len());
+    assert_eq!(
+        wt_stream
+            .send_data(
+                data,
+                #[cfg(feature = "qlog")]
+                now()
+            )
+            .unwrap(),
+        data.len()
+    );
     exchange_packets(client, server, false, None);
 }
 
@@ -242,7 +267,12 @@ fn wt_client_stream_uni() {
     let (mut client, mut server) = connect();
     let wt_session = create_wt_session(&mut client, &mut server);
     let wt_stream = client
-        .webtransport_create_stream(wt_session.stream_id(), StreamType::UniDi)
+        .webtransport_create_stream(
+            wt_session.stream_id(),
+            StreamType::UniDi,
+            #[cfg(feature = "qlog")]
+            now(),
+        )
         .unwrap();
     send_data_client(&mut client, &mut server, wt_stream, BUF_CLIENT);
     exchange_packets(&mut client, &mut server, false, None);
@@ -257,7 +287,12 @@ fn wt_client_stream_bidi() {
     let (mut client, mut server) = connect();
     let wt_session = create_wt_session(&mut client, &mut server);
     let wt_client_stream = client
-        .webtransport_create_stream(wt_session.stream_id(), StreamType::BiDi)
+        .webtransport_create_stream(
+            wt_session.stream_id(),
+            StreamType::BiDi,
+            #[cfg(feature = "qlog")]
+            now(),
+        )
         .unwrap();
     send_data_client(&mut client, &mut server, wt_client_stream, BUF_CLIENT);
     let wt_server_stream = receive_data_server(
@@ -278,7 +313,13 @@ fn wt_server_stream_uni() {
 
     let (mut client, mut server) = connect();
     let wt_session = create_wt_session(&mut client, &mut server);
-    let wt_server_stream = wt_session.create_stream(StreamType::UniDi).unwrap();
+    let wt_server_stream = wt_session
+        .create_stream(
+            StreamType::UniDi,
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
     send_data_server(&mut client, &mut server, &wt_server_stream, BUF_SERVER);
     receive_data_client(
         &mut client,
@@ -296,7 +337,13 @@ fn wt_server_stream_bidi() {
 
     let (mut client, mut server) = connect();
     let wt_session = create_wt_session(&mut client, &mut server);
-    let wt_server_stream = wt_session.create_stream(StreamType::BiDi).unwrap();
+    let wt_server_stream = wt_session
+        .create_stream(
+            StreamType::BiDi,
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
     send_data_server(&mut client, &mut server, &wt_server_stream, BUF_SERVER);
     receive_data_client(
         &mut client,
@@ -326,6 +373,7 @@ fn wt_server_stream_bidi() {
 }
 
 #[test]
+#[expect(clippy::too_many_lines, reason = "This is a test.")]
 fn wt_race_condition_server_stream_before_confirmation() {
     let now = now();
 
@@ -356,7 +404,11 @@ fn wt_race_condition_server_stream_before_confirmation() {
             })
             .expect("Should receive WebTransport session request");
         wt_server_session
-            .response(&SessionAcceptAction::Accept)
+            .response(
+                &SessionAcceptAction::Accept,
+                #[cfg(feature = "qlog")]
+                now,
+            )
             .unwrap();
         let server_accept_dgram = server
             .process_output(now)
@@ -365,8 +417,23 @@ fn wt_race_condition_server_stream_before_confirmation() {
         assert_eq!(server.process_output(now).dgram(), None);
 
         // Server creates a stream, but hold back the UDP datagram.
-        let wt_server_stream = wt_server_session.create_stream(StreamType::UniDi).unwrap();
-        assert_eq!(wt_server_stream.send_data(&[42]).unwrap(), 1);
+        let wt_server_stream = wt_server_session
+            .create_stream(
+                StreamType::UniDi,
+                #[cfg(feature = "qlog")]
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            wt_server_stream
+                .send_data(
+                    &[42],
+                    #[cfg(feature = "qlog")]
+                    now
+                )
+                .unwrap(),
+            1
+        );
         let server_stream_dgram = server
             .process_output(now)
             .dgram()
@@ -459,7 +526,11 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
         })
         .expect("Should receive WebTransport session request");
     wt_server_session
-        .response(&SessionAcceptAction::Accept)
+        .response(
+            &SessionAcceptAction::Accept,
+            #[cfg(feature = "qlog")]
+            now,
+        )
         .unwrap();
     wt_server_session.send_datagram(b"PING", None).unwrap();
     let accept_and_wt_datagram = server

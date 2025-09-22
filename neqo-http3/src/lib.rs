@@ -146,7 +146,8 @@ mod headers_checks;
 mod priority;
 mod push_controller;
 mod push_id;
-mod qlog;
+#[cfg(feature = "qlog")]
+pub mod qlog;
 mod qpack_decoder_receiver;
 mod qpack_encoder_receiver;
 mod recv_message;
@@ -158,6 +159,8 @@ mod server_events;
 mod settings;
 mod stream_type_reader;
 
+#[cfg(feature = "qlog")]
+use std::time::Instant;
 use std::{cell::RefCell, fmt::Debug, rc::Rc};
 
 use buffered_send_stream::BufferedStream;
@@ -437,7 +440,11 @@ trait RecvStream: Stream {
     /// # Errors
     ///
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
-    fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)>;
+    fn receive(
+        &mut self,
+        conn: &mut Connection,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<(ReceiveOutput, bool)>;
 
     /// # Errors
     ///
@@ -451,7 +458,12 @@ trait RecvStream: Stream {
     /// # Errors
     ///
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
-    fn read_data(&mut self, _conn: &mut Connection, _buf: &mut [u8]) -> Res<(usize, bool)> {
+    fn read_data(
+        &mut self,
+        _conn: &mut Connection,
+        _buf: &mut [u8],
+        #[cfg(feature = "qlog")] _now: Instant,
+    ) -> Res<(usize, bool)> {
         Err(Error::InvalidStreamId)
     }
 
@@ -477,7 +489,11 @@ trait HttpRecvStream: RecvStream {
     /// # Errors
     ///
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
-    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)>;
+    fn header_unblocked(
+        &mut self,
+        conn: &mut Connection,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<(ReceiveOutput, bool)>;
 
     fn maybe_update_priority(&mut self, priority: Priority) -> Res<bool>;
     fn priority_update_frame(&mut self) -> Option<HFrame>;
@@ -544,7 +560,7 @@ trait SendStream: Stream {
     /// # Errors
     ///
     /// Error may occur during sending data, e.g. protocol error, etc.
-    fn send(&mut self, conn: &mut Connection) -> Res<()>;
+    fn send(&mut self, conn: &mut Connection, #[cfg(feature = "qlog")] now: Instant) -> Res<()>;
     fn has_data_to_send(&self) -> bool;
     fn stream_writable(&self);
     fn done(&self) -> bool;
@@ -552,12 +568,17 @@ trait SendStream: Stream {
     /// # Errors
     ///
     /// Error may occur during sending data, e.g. protocol error, etc.
-    fn send_data(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<usize>;
+    fn send_data(
+        &mut self,
+        _conn: &mut Connection,
+        _buf: &[u8],
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<usize>;
 
     /// # Errors
     ///
     /// It may happen that the transport stream is already closed. This is unlikely.
-    fn close(&mut self, conn: &mut Connection) -> Res<()>;
+    fn close(&mut self, conn: &mut Connection, #[cfg(feature = "qlog")] now: Instant) -> Res<()>;
 
     /// # Errors
     ///
@@ -567,6 +588,7 @@ trait SendStream: Stream {
         _conn: &mut Connection,
         _error: u32,
         _message: &str,
+        #[cfg(feature = "qlog")] _now: Instant,
     ) -> Res<()> {
         Err(Error::InvalidStreamId)
     }
@@ -581,7 +603,12 @@ trait SendStream: Stream {
     /// # Errors
     ///
     /// It may happen that the transport stream is already closed. This is unlikely.
-    fn send_data_atomic(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<()> {
+    fn send_data_atomic(
+        &mut self,
+        _conn: &mut Connection,
+        _buf: &[u8],
+        #[cfg(feature = "qlog")] _now: Instant,
+    ) -> Res<()> {
         Err(Error::InvalidStreamId)
     }
 

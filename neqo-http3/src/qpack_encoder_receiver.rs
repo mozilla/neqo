@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#[cfg(feature = "qlog")]
+use std::time::Instant;
 use std::{cell::RefCell, rc::Rc};
 
 use neqo_qpack as qpack;
@@ -34,8 +36,17 @@ impl RecvStream for EncoderRecvStream {
         Err(Error::HttpClosedCriticalStream)
     }
 
-    fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
-        self.encoder.borrow_mut().receive(conn, self.stream_id)?;
+    fn receive(
+        &mut self,
+        conn: &mut Connection,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<(ReceiveOutput, bool)> {
+        self.encoder.borrow_mut().receive(
+            conn,
+            self.stream_id,
+            #[cfg(feature = "qlog")]
+            now,
+        )?;
         Ok((ReceiveOutput::NoOutput, false))
     }
 }

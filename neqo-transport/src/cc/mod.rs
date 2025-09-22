@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "qlog")]
 use neqo_common::qlog::Qlog;
 
 use crate::{recovery::sent, rtt::RttEstimate, Error, Pmtud};
@@ -27,6 +28,7 @@ pub use cubic::Cubic;
 pub use new_reno::NewReno;
 
 pub trait CongestionControl: Display + Debug {
+    #[cfg(feature = "qlog")]
     fn set_qlog(&mut self, qlog: Qlog);
 
     #[must_use]
@@ -65,20 +67,24 @@ pub trait CongestionControl: Display + Debug {
         prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
         lost_packets: &[sent::Packet],
-        now: Instant,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> bool;
 
     /// Returns true if the congestion window was reduced.
-    fn on_ecn_ce_received(&mut self, largest_acked_pkt: &sent::Packet, now: Instant) -> bool;
+    fn on_ecn_ce_received(
+        &mut self,
+        largest_acked_pkt: &sent::Packet,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> bool;
 
     #[must_use]
     fn recovery_packet(&self) -> bool;
 
-    fn discard(&mut self, pkt: &sent::Packet, now: Instant);
+    fn discard(&mut self, pkt: &sent::Packet, #[cfg(feature = "qlog")] now: Instant);
 
-    fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant);
+    fn on_packet_sent(&mut self, pkt: &sent::Packet, #[cfg(feature = "qlog")] now: Instant);
 
-    fn discard_in_flight(&mut self, now: Instant);
+    fn discard_in_flight(&mut self, #[cfg(feature = "qlog")] now: Instant);
 }
 
 #[derive(Debug, Copy, Clone, Default)]

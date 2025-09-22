@@ -13,6 +13,7 @@ pub mod header;
 pub mod hrtime;
 mod incrdecoder;
 pub mod log;
+#[cfg(feature = "qlog")]
 pub mod qlog;
 pub mod tos;
 

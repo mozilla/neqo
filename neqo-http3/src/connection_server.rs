@@ -67,13 +67,19 @@ impl Http3ServerHandler {
         stream_id: StreamId,
         data: &[u8],
         conn: &mut Connection,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<usize> {
         let n = self
             .base_handler
             .send_streams_mut()
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
-            .send_data(conn, data)?;
+            .send_data(
+                conn,
+                data,
+                #[cfg(feature = "qlog")]
+                now,
+            )?;
         if n > 0 {
             self.base_handler.stream_has_pending_data(stream_id);
         }
@@ -105,9 +111,19 @@ impl Http3ServerHandler {
     /// # Errors
     ///
     /// An error will be returned if stream does not exist.
-    pub fn stream_close_send(&mut self, stream_id: StreamId, conn: &mut Connection) -> Res<()> {
+    pub fn stream_close_send(
+        &mut self,
+        stream_id: StreamId,
+        conn: &mut Connection,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<()> {
         qdebug!("[{self}] Close sending side stream={stream_id}");
-        self.base_handler.stream_close_send(conn, stream_id)?;
+        self.base_handler.stream_close_send(
+            conn,
+            stream_id,
+            #[cfg(feature = "qlog")]
+            now,
+        )?;
         self.needs_processing = true;
         Ok(())
     }
@@ -158,6 +174,7 @@ impl Http3ServerHandler {
         conn: &mut Connection,
         stream_id: StreamId,
         accept: &SessionAcceptAction,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler.webtransport_session_accept(
@@ -165,6 +182,8 @@ impl Http3ServerHandler {
             stream_id,
             Box::new(self.events.clone()),
             accept,
+            #[cfg(feature = "qlog")]
+            now,
         )
     }
 
@@ -174,6 +193,7 @@ impl Http3ServerHandler {
         conn: &mut Connection,
         stream_id: StreamId,
         accept: &SessionAcceptAction,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler.connect_udp_session_accept(
@@ -181,6 +201,8 @@ impl Http3ServerHandler {
             stream_id,
             Box::new(self.events.clone()),
             accept,
+            #[cfg(feature = "qlog")]
+            now,
         )
     }
 
@@ -199,10 +221,17 @@ impl Http3ServerHandler {
         session_id: StreamId,
         error: u32,
         message: &str,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<()> {
         self.needs_processing = true;
-        self.base_handler
-            .webtransport_close_session(conn, session_id, error, message)
+        self.base_handler.webtransport_close_session(
+            conn,
+            session_id,
+            error,
+            message,
+            #[cfg(feature = "qlog")]
+            now,
+        )
     }
 
     /// Close `ConnectUdp` cleanly
@@ -220,10 +249,17 @@ impl Http3ServerHandler {
         session_id: StreamId,
         error: u32,
         message: &str,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<()> {
         self.needs_processing = true;
-        self.base_handler
-            .connect_udp_close_session(conn, session_id, error, message)
+        self.base_handler.connect_udp_close_session(
+            conn,
+            session_id,
+            error,
+            message,
+            #[cfg(feature = "qlog")]
+            now,
+        )
     }
 
     pub fn webtransport_create_stream(
@@ -231,6 +267,7 @@ impl Http3ServerHandler {
         conn: &mut Connection,
         session_id: StreamId,
         stream_type: StreamType,
+        #[cfg(feature = "qlog")] now: Instant,
     ) -> Res<StreamId> {
         self.needs_processing = true;
         self.base_handler.webtransport_create_stream_local(
@@ -239,6 +276,8 @@ impl Http3ServerHandler {
             stream_type,
             Box::new(self.events.clone()),
             Box::new(self.events.clone()),
+            #[cfg(feature = "qlog")]
+            now,
         )
     }
 
@@ -275,7 +314,11 @@ impl Http3ServerHandler {
 
         let res = self.check_connection_events(conn, now);
         if !self.check_result(conn, now, &res) && self.base_handler.state().active() {
-            let res = self.base_handler.process_sending(conn);
+            let res = self.base_handler.process_sending(
+                conn,
+                #[cfg(feature = "qlog")]
+                now,
+            );
             self.check_result(conn, now, &res);
         }
     }
@@ -324,7 +367,12 @@ impl Http3ServerHandler {
                     self.base_handler.add_new_stream(stream_id);
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    self.handle_stream_readable(conn, stream_id)?;
+                    self.handle_stream_readable(
+                        conn,
+                        stream_id,
+                        #[cfg(feature = "qlog")]
+                        now,
+                    )?;
                 }
                 ConnectionEvent::RecvStreamReset {
                     stream_id,
@@ -368,8 +416,18 @@ impl Http3ServerHandler {
         Ok(())
     }
 
-    fn handle_stream_readable(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
-        match self.base_handler.handle_stream_readable(conn, stream_id)? {
+    fn handle_stream_readable(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        #[cfg(feature = "qlog")] now: Instant,
+    ) -> Res<()> {
+        match self.base_handler.handle_stream_readable(
+            conn,
+            stream_id,
+            #[cfg(feature = "qlog")]
+            now,
+        )? {
             ReceiveOutput::NewStream(NewStreamType::Push(_)) => Err(Error::HttpStreamCreation),
             ReceiveOutput::NewStream(NewStreamType::Http(first_frame_type)) => {
                 self.base_handler.add_streams(
@@ -394,7 +452,12 @@ impl Http3ServerHandler {
                         PriorityHandler::new(false, Priority::default()),
                     )),
                 );
-                let res = self.base_handler.handle_stream_readable(conn, stream_id)?;
+                let res = self.base_handler.handle_stream_readable(
+                    conn,
+                    stream_id,
+                    #[cfg(feature = "qlog")]
+                    now,
+                )?;
                 assert_eq!(ReceiveOutput::NoOutput, res);
                 Ok(())
             }
@@ -404,8 +467,15 @@ impl Http3ServerHandler {
                     stream_id,
                     Box::new(self.events.clone()),
                     Box::new(self.events.clone()),
+                    #[cfg(feature = "qlog")]
+                    now,
                 )?;
-                let res = self.base_handler.handle_stream_readable(conn, stream_id)?;
+                let res = self.base_handler.handle_stream_readable(
+                    conn,
+                    stream_id,
+                    #[cfg(feature = "qlog")]
+                    now,
+                )?;
                 assert_eq!(ReceiveOutput::NoOutput, res);
                 Ok(())
             }
@@ -465,7 +535,13 @@ impl Http3ServerHandler {
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
         qdebug!("[{self}] read_data from stream {stream_id}");
-        let res = self.base_handler.read_data(conn, stream_id, buf);
+        let res = self.base_handler.read_data(
+            conn,
+            stream_id,
+            buf,
+            #[cfg(feature = "qlog")]
+            now,
+        );
         if let Err(e) = &res {
             if e.connection_error() {
                 self.close(conn, now, e);

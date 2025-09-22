@@ -13,7 +13,8 @@ pub mod huffman;
 mod huffman_decode_helper;
 pub mod huffman_table;
 mod prefix;
-mod qlog;
+#[cfg(feature = "qlog")]
+pub mod qlog;
 mod qpack_send_buf;
 pub mod reader;
 mod static_table;

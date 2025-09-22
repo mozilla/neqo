@@ -24,7 +24,7 @@ log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
 mtu = { path = "../mtu" }
-qlog = { workspace = true }
+qlog = { workspace = true, optional = true }
 rustc-hash = { workspace = true }
 smallvec = { version = "1.13", default-features = false, features = ["union", "const_generics"] }
 static_assertions = { workspace = true }
@@ -37,6 +37,8 @@ neqo-transport = { path = ".", features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]
+default = []
+qlog = ["dep:qlog", "neqo-common/qlog", "test-fixture/qlog"]
 bench = ["neqo-common/bench", "neqo-crypto/bench"]
 build-fuzzing-corpus = [
         "neqo-common/build-fuzzing-corpus",

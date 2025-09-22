@@ -51,8 +51,19 @@ fn set_response(request: &Http3OrWebTransportStream) {
             Header::new("content-length", "3"),
         ])
         .unwrap();
-    request.send_data(RESPONSE_DATA).unwrap();
-    request.stream_close_send().unwrap();
+    request
+        .send_data(
+            RESPONSE_DATA,
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
+    request
+        .stream_close_send(
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
 }
 
 fn process_server_events(server: &Http3Server) {
@@ -159,7 +170,13 @@ fn fetch() {
         )
         .unwrap();
     assert_eq!(req, 0);
-    hconn_c.stream_close_send(req).unwrap();
+    hconn_c
+        .stream_close_send(
+            req,
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
     let out = hconn_c.process(dgram, now());
     qtrace!("-----server");
     let out = hconn_s.process(out.dgram(), now());
@@ -188,7 +205,13 @@ fn response_103() {
         )
         .unwrap();
     assert_eq!(req, 0);
-    hconn_c.stream_close_send(req).unwrap();
+    hconn_c
+        .stream_close_send(
+            req,
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
     let out = hconn_c.process(dgram, now());
 
     let out = hconn_s.process(out.dgram(), now());
@@ -240,7 +263,11 @@ fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>
         &[],
         Priority::default(),
     )?;
-    hconn_c.stream_close_send(stream_id)?;
+    hconn_c.stream_close_send(
+        stream_id,
+        #[cfg(feature = "qlog")]
+        now(),
+    )?;
     exchange_packets(&mut hconn_c, &mut hconn_s, false, None);
 
     // Server receives GET and responds with headers.
@@ -263,7 +290,11 @@ fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>
     // Have server fill entire send buffer minus 1 byte.
     let all_but_one = request.available()? - DATA_FRAME_HEADER_SIZE - 1;
     let buf = vec![1; all_but_one];
-    let sent = request.send_data(&buf)?;
+    let sent = request.send_data(
+        &buf,
+        #[cfg(feature = "qlog")]
+        now(),
+    )?;
     assert_eq!(sent, all_but_one);
     assert_eq!(request.available()?, 1);
 
@@ -275,7 +306,14 @@ fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>
     // Sending more fails, given that each data frame needs to be preceded by a
     // header, i.e. needs more than 1 byte of send space to send 1 byte payload.
     assert_eq!(request.available()?, 1);
-    assert_eq!(request.send_data(&buf)?, 0);
+    assert_eq!(
+        request.send_data(
+            &buf,
+            #[cfg(feature = "qlog")]
+            now()
+        )?,
+        0
+    );
 
     // Have the client read all the pending data.
     let mut recv_buf = vec![0_u8; all_but_one];
@@ -316,7 +354,13 @@ fn data_writable_events() {
             Priority::default(),
         )
         .unwrap();
-    hconn_c.stream_close_send(req).unwrap();
+    hconn_c
+        .stream_close_send(
+            req,
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s, false, None);
 
     let request = receive_request(&hconn_s).unwrap();
@@ -330,7 +374,13 @@ fn data_writable_events() {
 
     // Send a lot of data
     let buf = &[1; DATA_AMOUNT];
-    let mut sent = request.send_data(buf).unwrap();
+    let mut sent = request
+        .send_data(
+            buf,
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
     assert!(sent < DATA_AMOUNT);
 
     // Exchange packets and read the data on the client side.
@@ -352,7 +402,13 @@ fn data_writable_events() {
     // Make sure we have a DataWritable event.
     assert!(hconn_s.events().any(data_writable));
     // Data can be sent again.
-    let s = request.send_data(&buf[sent..]).unwrap();
+    let s = request
+        .send_data(
+            &buf[sent..],
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
     assert!(s > 0);
     sent += s;
 
@@ -368,7 +424,13 @@ fn data_writable_events() {
     // One more DataWritable event.
     assert!(hconn_s.events().any(data_writable));
     // Send more data.
-    let s = request.send_data(&buf[sent..]).unwrap();
+    let s = request
+        .send_data(
+            &buf[sent..],
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
     assert!(s > 0);
     sent += s;
     assert_eq!(sent, DATA_AMOUNT);
@@ -420,7 +482,13 @@ fn zerortt() {
             Priority::default(),
         )
         .unwrap();
-    hconn_c.stream_close_send(req).unwrap();
+    hconn_c
+        .stream_close_send(
+            req,
+            #[cfg(feature = "qlog")]
+            now(),
+        )
+        .unwrap();
 
     let out = hconn_c.process(dgram, now());
     let out2 = hconn_c.process_output(now());
@@ -491,7 +559,13 @@ fn fetch_noresponse_will_idletimeout() {
         )
         .unwrap();
     assert_eq!(req, 0);
-    hconn_c.stream_close_send(req).unwrap();
+    hconn_c
+        .stream_close_send(
+            req,
+            #[cfg(feature = "qlog")]
+            now,
+        )
+        .unwrap();
     let _out = hconn_c.process(dgram, now);
     qtrace!("-----server");
 
