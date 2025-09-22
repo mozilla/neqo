@@ -15,7 +15,9 @@ use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType, Role};
 use neqo_transport::{AppError, Connection, DatagramTracking, StreamId};
 
 use crate::{
-    features::extended_connect::{ExtendedConnectEvents, ExtendedConnectType, Listener},
+    features::extended_connect::{
+        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
+    },
     frames::HFrame,
     priority::PriorityHandler,
     recv_message::{RecvMessage, RecvMessageInfo},
@@ -49,7 +51,7 @@ impl From<CloseType> for CloseReason {
 pub(crate) struct Session {
     control_stream_recv: Box<dyn RecvStream>,
     control_stream_send: Box<dyn SendStream>,
-    stream_event_listener: Rc<RefCell<Listener>>,
+    stream_event_listener: Rc<RefCell<HeaderListener>>,
     id: StreamId,
     state: State,
     events: Box<dyn ExtendedConnectEvents>,
@@ -88,7 +90,7 @@ impl Session {
         qpack_decoder: Rc<RefCell<neqo_qpack::Decoder>>,
         connect_type: ExtendedConnectType,
     ) -> Self {
-        let stream_event_listener = Rc::new(RefCell::new(Listener::default()));
+        let stream_event_listener = Rc::new(RefCell::new(HeaderListener::default()));
         let protocol = connect_type.new_protocol(session_id, role);
         Self {
             control_stream_recv: Box::new(RecvMessage::new(
@@ -126,7 +128,7 @@ impl Session {
         mut control_stream_send: Box<dyn SendStream>,
         connect_type: ExtendedConnectType,
     ) -> Res<Self> {
-        let stream_event_listener = Rc::new(RefCell::new(Listener::default()));
+        let stream_event_listener = Rc::new(RefCell::new(HeaderListener::default()));
         let protocol = connect_type.new_protocol(session_id, role);
         control_stream_recv
             .http_stream()
@@ -228,7 +230,11 @@ impl Session {
             return Ok(());
         }
 
-        if let Some((headers, interim, fin)) = self.stream_event_listener.borrow_mut().get_headers()
+        if let Some(Headers {
+            headers,
+            interim,
+            fin,
+        }) = self.stream_event_listener.borrow_mut().get_headers()
         {
             qtrace!("ExtendedConnect response headers {headers:?}, fin={fin}");
 
