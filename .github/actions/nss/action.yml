@@ -181,7 +181,7 @@ runs:
       if: ${{ runner.os == 'Windows' && steps.check_build.outputs.build_nss }}
       uses: ilammy/msvc-dev-cmd@v1 # zizmor: ignore[unpinned-uses]
       with:
-        arch: ${{ startsWith(runner.arch, 'ARM') && 'arm64' || 'amd64' }}
+        arch: ${{ startsWith(runner.arch, 'ARM') && 'amd64_arm64' || 'amd64' }}
       # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
       # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
