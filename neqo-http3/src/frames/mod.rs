@@ -4,10 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+pub mod connect_udp_frame;
 pub mod hframe;
 pub mod reader;
 pub mod wtframe;
 
+pub use connect_udp_frame::Frame as ConnectUdpFrame;
 #[allow(
     clippy::allow_attributes,
     unused_imports,
