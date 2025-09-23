@@ -10,6 +10,7 @@ pub(crate) mod webtransport_session;
 pub(crate) mod webtransport_streams;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;
 
 use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
@@ -107,10 +108,6 @@ impl ExtendedConnectFeature {
         self.feature_negotiation.enabled()
     }
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests;
 
 #[expect(
     clippy::struct_field_names,
