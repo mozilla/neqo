@@ -118,7 +118,7 @@ jobs:
       - name: Check
         run: |
           # shellcheck disable=SC2086
-          cargo check $BUILD_TYPE --locked --all-targets --features ci
+          cargo check $BUILD_TYPE --locked --all-targets --features ci,qlog
 
       - name: Run tests and determine coverage
         env:
@@ -133,9 +133,9 @@ jobs:
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "$TOOLCHAIN" == "stable" ]; then
-            cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
+            cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci,qlog --codecov --output-path codecov.json
           else
-            cargo test $BUILD_TYPE --locked --features ci
+            cargo test $BUILD_TYPE --locked --features ci,qlog
           fi
 
       - name: Run client/server transfer

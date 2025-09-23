@@ -82,8 +82,8 @@ jobs:
             PWD=$(pwd)
             export LSAN_OPTIONS="suppressions=$PWD/suppressions.txt"
           fi
-          cargo test --locked -Z build-std --features ci --target "$TARGET"
-          cargo hack --workspace test --locked -Z build-std --target "$TARGET"
+          cargo test --locked -Z build-std --features ci,qlog --target "$TARGET"
+          cargo hack --workspace test --locked -Z build-std --features ci,qlog --target "$TARGET"
 
       - name: Save simulation seeds artifact
         if: ${{ env.DUMP_SIMULATION_SEEDS }}
