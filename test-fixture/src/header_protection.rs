@@ -104,6 +104,7 @@ pub fn remove(hp: &hp::Key, header: &[u8], payload: &[u8]) -> (Vec<u8>, u64) {
     let mut fixed_header = header.to_vec();
     let pn_offset = header.len();
     // Save 4 extra in case the packet number is that long.
+    assert!(payload.len() > 19);
     fixed_header.extend_from_slice(&payload[..4]);
 
     // Sample for masking and apply the mask.

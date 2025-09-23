@@ -128,10 +128,10 @@ impl SelfEncrypt {
     /// when the keys have been rotated; or when NSS fails.
     #[expect(clippy::similar_names, reason = "aad is similar to aead.")]
     pub fn open(&self, aad: &[u8], ciphertext: &[u8]) -> Res<Vec<u8>> {
-        if ciphertext[0] != Self::VERSION {
+        if *ciphertext.first().ok_or(Error::SelfEncrypt)? != Self::VERSION {
             return Err(Error::SelfEncrypt);
         }
-        let Some(key) = self.select_key(ciphertext[1]) else {
+        let Some(key) = self.select_key(*ciphertext.get(1).ok_or(Error::SelfEncrypt)?) else {
             return Err(Error::SelfEncrypt);
         };
         let offset = 2 + Self::SALT_LENGTH;
