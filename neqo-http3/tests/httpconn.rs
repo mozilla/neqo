@@ -153,7 +153,7 @@ fn fetch() {
         .fetch(
             now(),
             "GET",
-            &("https", "something.com", "/"),
+            ("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -182,7 +182,7 @@ fn response_103() {
         .fetch(
             now(),
             "GET",
-            &("https", "something.com", "/"),
+            ("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -236,7 +236,7 @@ fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>
     let stream_id = hconn_c.fetch(
         now(),
         "GET",
-        &("https", "something.com", "/"),
+        ("https", "something.com", "/"),
         &[],
         Priority::default(),
     )?;
@@ -311,7 +311,7 @@ fn data_writable_events() {
         .fetch(
             now(),
             "GET",
-            &("https", "something.com", "/"),
+            ("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -415,7 +415,7 @@ fn zerortt() {
         .fetch(
             now(),
             "GET",
-            &("https", "something.com", "/"),
+            ("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -485,7 +485,7 @@ fn fetch_noresponse_will_idletimeout() {
         .fetch(
             now,
             "GET",
-            &("https", "something.com", "/"),
+            ("https", "something.com", "/"),
             &[],
             Priority::default(),
         )

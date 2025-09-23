@@ -58,10 +58,12 @@ impl<D> Datagram<D> {
 }
 
 impl<D: AsRef<[u8]>> Datagram<D> {
+    #[must_use]
     pub fn len(&self) -> usize {
         self.d.as_ref().len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -84,6 +86,7 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> AsMut<[u8]> for Datagram<D> {
 }
 
 impl Datagram<Vec<u8>> {
+    #[must_use]
     pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: Tos, d: V) -> Self {
         Self {
             src,
@@ -173,17 +176,6 @@ impl From<Datagram<Vec<u8>>> for DatagramBatch {
 }
 
 impl DatagramBatch {
-    /// Maximum [`DatagramBatch`] size in bytes.
-    ///
-    /// This value is set conservatively to ensure compatibility with batch IO
-    /// system calls across all supported platforms.
-    ///
-    /// See for example Linux limit in
-    /// <https://github.com/torvalds/linux/blob/fb4d33ab452ea254e2c319bac5703d1b56d895bf/include/linux/netdevice.h#L2402>.
-    pub const MAX: usize = 65535 // maximum UDP datagram size
-        - 40 // IPv6 header
-        - 8; // UDP header
-
     #[must_use]
     pub const fn new(
         src: SocketAddr,

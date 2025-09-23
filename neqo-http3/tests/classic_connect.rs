@@ -16,8 +16,7 @@ fn classic_connect() {
     let mut client = default_http3_client();
     let mut server = default_http3_server();
     let out = test_fixture::connect_peers(&mut client, &mut server);
-    let out = server.process(out, now()).dgram().unwrap();
-    client.process_input(out, now());
+    assert_eq!(server.process(out, now()).dgram(), None);
 
     // Ignore all events so far.
     drop(server.events());
@@ -101,13 +100,12 @@ fn classic_connect_via_fetch_panics_in_debug() {
     let mut client = default_http3_client();
     let mut server = default_http3_server();
     let out = test_fixture::connect_peers(&mut client, &mut server);
-    let out = server.process(out, now()).dgram().unwrap();
-    client.process_input(out, now());
+    assert_eq!(server.process(out, now()).dgram(), None);
 
     let res = client.fetch(
         now(),
         "CONNECT",
-        &("https", AUTHORITY, "/"),
+        ("https", AUTHORITY, "/"),
         &[],
         Priority::default(),
     );

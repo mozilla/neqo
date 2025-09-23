@@ -24,9 +24,10 @@ use rustc_hash::FxHashMap as HashMap;
 use crate::{
     connection::Http3State,
     connection_server::Http3ServerHandler,
-    server_connection_events::Http3ServerConnEvent,
+    server_connection_events::{ConnectUdpEvent, Http3ServerConnEvent, WebTransportEvent},
     server_events::{
-        Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents, WebTransportRequest,
+        ConnectUdpRequest, Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents,
+        WebTransportRequest,
     },
     settings::HttpZeroRttChecker,
     Http3Parameters, Http3StreamInfo, Res,
@@ -138,7 +139,7 @@ impl Http3Server {
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
         qtrace!("[{self}] Process");
-        let out = self.server.process_multiple(dgrams, now, max_datagrams);
+        let out = self.server.process_multiple_input(dgrams, now);
         self.process_http3(now);
         // If we do not that a dgram already try again after process_http3.
         match out {
@@ -251,36 +252,71 @@ impl Http3Server {
                     } => {
                         self.events.priority_update(stream_id, priority);
                     }
-                    Http3ServerConnEvent::ExtendedConnect { stream_id, headers } => {
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::Session {
+                        stream_id,
+                        headers,
+                    }) => {
                         self.events.webtransport_new_session(
                             WebTransportRequest::new(conn.clone(), Rc::clone(handler), stream_id),
                             headers,
                         );
                     }
-                    Http3ServerConnEvent::ExtendedConnectClosed {
+                    Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::Session {
+                        stream_id,
+                        headers,
+                    }) => {
+                        self.events.connect_udp_new_session(
+                            ConnectUdpRequest::new(conn.clone(), Rc::clone(handler), stream_id),
+                            headers,
+                        );
+                    }
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::SessionClosed {
                         stream_id,
                         reason,
                         headers,
                         ..
-                    } => self.events.webtransport_session_closed(
+                    }) => self.events.webtransport_session_closed(
                         WebTransportRequest::new(conn.clone(), Rc::clone(handler), stream_id),
                         reason,
                         headers,
                     ),
-                    Http3ServerConnEvent::ExtendedConnectNewStream(stream_info) => self
+                    Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::SessionClosed {
+                        stream_id,
+                        reason,
+                        headers,
+                        ..
+                    }) => self.events.connect_udp_session_closed(
+                        ConnectUdpRequest::new(conn.clone(), Rc::clone(handler), stream_id),
+                        reason,
+                        headers,
+                    ),
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::NewStream(
+                        stream_info,
+                    )) => self
                         .events
                         .webtransport_new_stream(Http3OrWebTransportStream::new(
                             conn.clone(),
                             Rc::clone(handler),
                             stream_info,
                         )),
-                    Http3ServerConnEvent::ExtendedConnectDatagram {
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::Datagram {
                         session_id,
                         datagram,
-                    } => self.events.webtransport_datagram(
-                        WebTransportRequest::new(conn.clone(), Rc::clone(handler), session_id),
+                    }) => {
+                        self.events.webtransport_datagram(
+                            WebTransportRequest::new(conn.clone(), Rc::clone(handler), session_id),
+                            datagram,
+                        );
+                    }
+                    Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::Datagram {
+                        session_id,
                         datagram,
-                    ),
+                    }) => {
+                        self.events.connect_udp_datagram(
+                            ConnectUdpRequest::new(conn.clone(), Rc::clone(handler), session_id),
+                            datagram,
+                        );
+                    }
                 }
             }
         }
@@ -352,7 +388,7 @@ mod tests {
     };
 
     use neqo_common::{event::Provider as _, Encoder};
-    use neqo_crypto::{AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker};
+    use neqo_crypto::{AuthenticationStatus, ResumptionToken, ZeroRttCheckResult, ZeroRttChecker};
     use neqo_qpack as qpack;
     use neqo_transport::{
         CloseReason, Connection, ConnectionEvent, State, StreamId, StreamType, ZeroRttState,
@@ -462,18 +498,22 @@ mod tests {
         };
         assert!(client.state().connected());
         let s4 = server.process(c3.dgram(), now());
+        assert_eq!(server.process_output(now()).dgram(), None);
         assert_connected(server);
-        _ = client.process(s4.dgram(), now());
+        assert_eq!(client.process(s4.dgram(), now()).dgram(), None);
     }
 
     // Start a client/server and check setting frame.
-    fn connect_and_receive_settings_with_server(server: &mut Http3Server) -> Connection {
-        const CONTROL_STREAM_DATA: &[u8] = &[0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64];
+    fn connect_and_receive_settings_with_server(
+        server: &mut Http3Server,
+    ) -> (Connection, ResumptionToken) {
+        const CONTROL_STREAM_DATA: &[u8] = &[0x0, 0x4, 0x12, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64];
 
         let mut client = default_client();
         connect_transport(server, &mut client, false);
 
         let mut connected = false;
+        let mut token = None;
         while let Some(e) = client.next_event() {
             match e {
                 ConnectionEvent::NewStream { stream_id } => {
@@ -490,10 +530,9 @@ mod tests {
                     {
                         // the control stream
                         let mut buf = [0_u8; 100];
-                        let (amount, fin) = client.stream_recv(stream_id, &mut buf).unwrap();
+                        let (_, fin) = client.stream_recv(stream_id, &mut buf).unwrap();
                         assert!(!fin);
-                        assert_eq!(amount, CONTROL_STREAM_DATA.len());
-                        assert_eq!(&buf[..9], CONTROL_STREAM_DATA);
+                        assert_eq!(&buf[..CONTROL_STREAM_DATA.len()], CONTROL_STREAM_DATA);
                     } else if stream_id == CLIENT_SIDE_ENCODER_STREAM_ID
                         || stream_id == SERVER_SIDE_ENCODER_STREAM_ID
                     {
@@ -522,15 +561,16 @@ mod tests {
                     );
                 }
                 ConnectionEvent::StateChange(State::Connected) => connected = true,
+                ConnectionEvent::ResumptionToken(t) => token = Some(t),
                 ConnectionEvent::StateChange(_) | ConnectionEvent::SendStreamCreatable { .. } => (),
-                _ => panic!("unexpected event"),
+                e => panic!("unexpected event: {e:?}"),
             }
         }
         assert!(connected);
-        client
+        (client, token.unwrap())
     }
 
-    fn connect_and_receive_settings() -> (Http3Server, Connection) {
+    fn connect_and_receive_settings() -> (Http3Server, Connection, ResumptionToken) {
         // Create a server and connect it to a client.
         // We will have a http3 server on one side and a neqo_transport
         // connection on the other side so that we can check what the http3
@@ -538,8 +578,8 @@ mod tests {
         // client.
 
         let mut server = default_server();
-        let client = connect_and_receive_settings_with_server(&mut server);
-        (server, client)
+        let (client, token) = connect_and_receive_settings_with_server(&mut server);
+        (server, client, token)
     }
 
     // Test http3 connection initialization.
@@ -576,8 +616,8 @@ mod tests {
     }
 
     // Connect transport, send and receive settings.
-    fn connect_to(server: &mut Http3Server) -> PeerConnection {
-        let mut neqo_trans_conn = connect_and_receive_settings_with_server(server);
+    fn connect_to(server: &mut Http3Server) -> (PeerConnection, ResumptionToken) {
+        let (mut neqo_trans_conn, token) = connect_and_receive_settings_with_server(server);
         let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         let mut sent = neqo_trans_conn.stream_send(
             control_stream,
@@ -604,16 +644,24 @@ mod tests {
         // assert no error occurred.
         assert_not_closed(server);
 
-        PeerConnection {
-            conn: neqo_trans_conn,
-            control_stream_id: control_stream,
-        }
+        (
+            PeerConnection {
+                conn: neqo_trans_conn,
+                control_stream_id: control_stream,
+            },
+            token,
+        )
     }
 
     fn connect() -> (Http3Server, PeerConnection) {
-        let mut server = default_server();
-        let client = connect_to(&mut server);
+        let (server, client, _token) = connect_with_token();
         (server, client)
+    }
+
+    fn connect_with_token() -> (Http3Server, PeerConnection, ResumptionToken) {
+        let mut server = default_server();
+        let (client, token) = connect_to(&mut server);
+        (server, client, token)
     }
 
     // Server: Test receiving a new control stream and a SETTINGS frame.
@@ -638,7 +686,7 @@ mod tests {
     // (the first frame sent is a MAX_PUSH_ID frame).
     #[test]
     fn server_missing_settings() {
-        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_settings();
+        let (mut hconn, mut neqo_trans_conn, _token) = connect_and_receive_settings();
         // Create client control stream.
         let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         // Send a MAX_PUSH_ID frame instead.
@@ -788,7 +836,7 @@ mod tests {
     /// Test reading of a slowly streamed frame. bytes are received one by one
     #[test]
     fn server_frame_reading() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_settings();
+        let (mut hconn, mut peer_conn, _token) = connect_and_receive_settings();
 
         // create a control stream.
         let control_stream = peer_conn.stream_create(StreamType::UniDi).unwrap();
@@ -874,7 +922,7 @@ mod tests {
 
     // Test reading of a slowly streamed frame. bytes are received one by one
     fn test_incomplete_frame(res: &[u8]) {
-        let (mut hconn, mut peer_conn) = connect_and_receive_settings();
+        let (mut hconn, mut peer_conn, _token) = connect_and_receive_settings();
 
         // send an incomplete request.
         let stream_id = peer_conn.stream_create(StreamType::BiDi).unwrap();
@@ -963,7 +1011,8 @@ mod tests {
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
-                | Http3ServerEvent::WebTransport(_) => {}
+                | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }
         assert_eq!(headers_frames, 1);
@@ -1012,7 +1061,8 @@ mod tests {
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
-                | Http3ServerEvent::WebTransport(_) => {}
+                | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }
         let out = hconn.process_output(now());
@@ -1039,7 +1089,8 @@ mod tests {
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
-                | Http3ServerEvent::WebTransport(_) => {}
+                | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }
         assert_eq!(headers_frames, 1);
@@ -1083,7 +1134,8 @@ mod tests {
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
-                | Http3ServerEvent::WebTransport(_) => {}
+                | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }
         let out = hconn.process_output(now());
@@ -1194,19 +1246,11 @@ mod tests {
     /// Perform a handshake, then another with the token from the first.
     /// The second should always resume, but it might not always accept early data.
     fn zero_rtt_with_settings(conn_params: Http3Parameters, zero_rtt: ZeroRttState) {
-        let (_, mut client) = connect();
-        let token = client.events().find_map(|e| {
-            if let ConnectionEvent::ResumptionToken(token) = e {
-                Some(token)
-            } else {
-                None
-            }
-        });
-        assert!(token.is_some());
+        let (_, _, token) = connect_with_token();
 
         let mut server = create_server(conn_params);
         let mut client = default_client();
-        client.enable_resumption(now(), token.unwrap()).unwrap();
+        client.enable_resumption(now(), token).unwrap();
 
         connect_transport(&mut server, &mut client, true);
         assert!(client.tls_info().unwrap().resumed());
@@ -1312,7 +1356,8 @@ mod tests {
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
-                | Http3ServerEvent::WebTransport(_) => {}
+                | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }
         assert_eq!(requests.len(), 2);
@@ -1339,18 +1384,10 @@ mod tests {
             Some(Box::<RejectZeroRtt>::default()),
         )
         .expect("create a server");
-        let mut client = connect_to(&mut server);
-        let token = client.events().find_map(|e| {
-            if let ConnectionEvent::ResumptionToken(token) = e {
-                Some(token)
-            } else {
-                None
-            }
-        });
-        assert!(token.is_some());
+        let (_, token) = connect_to(&mut server);
 
         let mut client = default_client();
-        client.enable_resumption(now(), token.unwrap()).unwrap();
+        client.enable_resumption(now(), token).unwrap();
 
         connect_transport(&mut server, &mut client, true);
         assert!(client.tls_info().unwrap().resumed());
