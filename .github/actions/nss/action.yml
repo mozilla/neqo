@@ -222,9 +222,9 @@ runs:
             echo "MINGW_PACKAGE_PREFIX=clangarm64"
             echo "MINGW_CHOST=aarch64-w64-mingw32"
             echo "MSYSTEM_CARCH=aarch64"
-            echo "MSYSTEM_CHOST=aarch64-w64-mingw32echo "
+            echo "MSYSTEM_CHOST=aarch64-w64-mingw32"
             echo "PKG_CONFIG_PATH=/clangarm64/lib/pkgconfig:/clangarm64/share/pkgconfig"
-            echo "ACLOCAL_PATH="/clangarm64/share/aclocal:/usr/share/aclocal"
+            echo "ACLOCAL_PATH=/clangarm64/share/aclocal:/usr/share/aclocal"
             echo "CMAKE_PREFIX_PATH=/clangarm64:$CMAKE_PREFIX_PATH"
           fi
         } >> "$GITHUB_ENV"
