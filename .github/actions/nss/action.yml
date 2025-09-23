@@ -209,16 +209,27 @@ runs:
         WORKSPACE: ${{ github.workspace }}
       run: | # zizmor: ignore[github-env] We need to write to GITHUB_PATH on Windows.
         NSS_OUT="$WORKSPACE/dist/$NSS_TARGET"
+        ls -lat /
         {
           echo "LD_LIBRARY_PATH=$NSS_OUT/lib"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib"
           echo "NSS_TARGET=$NSS_TARGET"
           echo "NSS_DIR=$NSS_DIR"
           echo "NSS_PREBUILT=1"
+          if [ "$RUNNER_ARCH" == "ARM64" ]; then
+            echo "MSYSTEM=CLANGARM64"
+            echo "MINGW_PREFIX=/clangarm64"
+            echo "MINGW_PACKAGE_PREFIX=clangarm64"
+            echo "MINGW_CHOST=aarch64-w64-mingw32"
+            echo "MSYSTEM_CARCH=aarch64"
+            echo "MSYSTEM_CHOST=aarch64-w64-mingw32echo "
+            echo "PKG_CONFIG_PATH=/clangarm64/lib/pkgconfig:/clangarm64/share/pkgconfig"
+            echo "ACLOCAL_PATH="/clangarm64/share/aclocal:/usr/share/aclocal"
+            echo "CMAKE_PREFIX_PATH=/clangarm64:$CMAKE_PREFIX_PATH"
+          fi
         } >> "$GITHUB_ENV"
         if [ "$RUNNER_OS" == "Windows" ]; then
           echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
-          [ "$RUNNER_ARCH" == "ARM64" ] && echo "MSYSTEM=CLANGARM64" >> "$GITHUB_ENV"
         fi
 
     - name: Build
