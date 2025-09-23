@@ -1057,7 +1057,6 @@ impl Connection {
         if let Some(path) = self.paths.primary() {
             let lost = self.loss_recovery.timeout(&path, now);
             self.handle_lost_packets(&lost);
-
             qlog::packets_lost(&self.qlog, &lost, now);
         }
 
@@ -1442,7 +1441,6 @@ impl Connection {
                 .get_versions_mut()
                 .set_initial(self.conn_params.get_versions().initial());
             mem::swap(self, &mut c);
-
             qlog::client_version_information_negotiated(
                 &self.qlog,
                 self.conn_params.get_versions().all(),
@@ -1820,7 +1818,6 @@ impl Connection {
                     // the rest of the datagram on the floor, but don't generate an error.
                     self.check_stateless_reset(path, packet.data(), dcid.is_none(), now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
-
                     qlog::packet_dropped(&self.qlog, &packet, now);
                 }
             }
@@ -2854,13 +2851,11 @@ impl Connection {
         if let Some(path) = self.paths.primary() {
             qlog::client_connection_started(&self.qlog, &path, now);
         }
-
         qlog::client_version_information_initiated(
             &self.qlog,
             self.conn_params.get_versions(),
             now,
         );
-
         self.handshake(now, self.version, PacketNumberSpace::Initial, None)?;
         self.set_state(State::WaitInitial, now);
         self.zero_rtt_state = if self.crypto.enable_0rtt(self.version, self.role)? {
@@ -2956,7 +2951,6 @@ impl Connection {
             self.cid_manager.set_limit(max_active_cids);
         }
         self.set_initial_limits();
-
         qlog::connection_tparams_set(&self.qlog, &self.tps.borrow(), now);
         Ok(())
     }
@@ -3481,7 +3475,6 @@ impl Connection {
             }
         }
         self.handle_lost_packets(&lost_packets);
-
         qlog::packets_lost(&self.qlog, &lost_packets, now);
         let stats = &mut self.stats.borrow_mut().frame_rx;
         stats.ack += 1;
@@ -3531,7 +3524,6 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_valid(now);
             // Generate a qlog event that the server connection started.
-
             qlog::server_connection_started(&self.qlog, &path, now);
         } else {
             self.zero_rtt_state = if self
@@ -3574,7 +3566,6 @@ impl Connection {
                 self.streams.clear_streams();
             }
             self.events.connection_state_change(state);
-
             qlog::connection_state_updated(&self.qlog, &self.state, now);
         } else if mem::discriminant(&state) != mem::discriminant(&self.state) {
             // Only tolerate a regression in state if the new state is closing
@@ -3902,7 +3893,6 @@ impl Connection {
             }
             qdebug!("[{self}] {meta}{s}");
         }
-
         qlog::packet_io(&self.qlog, meta, now);
     }
 }

@@ -17,14 +17,12 @@ use neqo_common::{header::HeadersExt as _, qdebug, qinfo, qtrace, Header};
 use neqo_qpack as qpack;
 use neqo_transport::{Connection, StreamId};
 
-#[cfg(feature = "qlog")]
-use crate::qlog;
 use crate::{
     frames::{hframe::HFrameType, FrameReader, HFrame, StreamReaderConnectionWrapper},
     headers_checks::{headers_valid, is_interim},
     priority::PriorityHandler,
     push_controller::PushController,
-    CloseType, Error, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
+    qlog, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
     MessageType, Priority, PushId, ReceiveOutput, RecvStream, Res, Stream,
 };
 
@@ -418,7 +416,6 @@ impl RecvStream for RecvMessage {
                     let (amount, fin) = conn
                         .stream_recv(self.stream_id, &mut buf[written..written + to_read])
                         .map_err(|e| Error::map_stream_recv_errors(&Error::from(e)))?;
-                    #[cfg(feature = "qlog")]
                     qlog::h3_data_moved_up(conn.qlog_mut(), self.stream_id, amount, now);
 
                     debug_assert!(amount <= to_read);

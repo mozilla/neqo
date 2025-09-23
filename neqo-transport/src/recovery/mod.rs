@@ -808,7 +808,6 @@ impl Loss {
 
         if let Some(st) = &mut self.pto_state {
             st.count_pto(&mut self.stats.borrow_mut());
-
             qlog::metrics_updated(&self.qlog, &[qlog::Metric::PtoCount(st.count())], now);
         }
     }

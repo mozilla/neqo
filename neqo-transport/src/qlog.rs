@@ -395,6 +395,7 @@ pub fn packets_lost(qlog: &Qlog, pkts: &[sent::Packet], now: Instant) {
     });
 }
 
+#[expect(dead_code, reason = "TODO: Construct all variants.")]
 pub enum Metric {
     MinRtt(Duration),
     SmoothedRtt(Duration),

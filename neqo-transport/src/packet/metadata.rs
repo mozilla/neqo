@@ -76,6 +76,7 @@ impl MetaData<'_> {
         self.direction
     }
 
+    #[cfg(feature = "qlog")]
     #[must_use]
     pub const fn length(&self) -> usize {
         self.len

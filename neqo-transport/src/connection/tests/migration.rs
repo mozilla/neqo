@@ -758,10 +758,7 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
     fixture_init();
     let mut client = zero_len_cid_client(hs_client, hs_server);
     #[cfg(feature = "qlog")]
-    {
-        let (log, _contents) = new_neqo_qlog();
-        client.set_qlog(log);
-    }
+    client.set_qlog(new_neqo_qlog().0);
     let spa = match preferred {
         SocketAddr::V6(v6) => PreferredAddress::new(None, Some(v6)),
         SocketAddr::V4(v4) => PreferredAddress::new(Some(v4), None),

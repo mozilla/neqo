@@ -154,10 +154,7 @@ pub fn new_server(params: ConnectionParameters) -> Connection {
     )
     .expect("create a default server");
     #[cfg(feature = "qlog")]
-    {
-        let (log, _contents) = new_neqo_qlog();
-        c.set_qlog(log);
-    }
+    c.set_qlog(new_neqo_qlog().0);
     c.server_enable_0rtt(&test_fixture::anti_replay(), AllowZeroRtt {})
         .expect("enable 0-RTT");
     c

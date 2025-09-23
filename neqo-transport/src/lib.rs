@@ -28,7 +28,7 @@ pub mod packet;
 mod packet;
 mod path;
 mod pmtud;
-pub mod qlog;
+mod qlog;
 mod quic_datagrams;
 #[cfg(feature = "bench")]
 pub mod recovery;

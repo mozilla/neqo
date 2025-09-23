@@ -207,8 +207,7 @@ where
             .unwrap(),
         );
     } else {
-        let (log, _contents) = new_neqo_qlog();
-        client.set_qlog(log);
+        client.set_qlog(new_neqo_qlog().0);
     }
     client
 }
@@ -265,8 +264,7 @@ where
             .unwrap(),
         );
     } else {
-        let (log, _contents) = new_neqo_qlog();
-        c.set_qlog(log);
+        c.set_qlog(new_neqo_qlog().0);
     }
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
         .expect("enable 0-RTT");

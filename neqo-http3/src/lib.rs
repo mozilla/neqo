@@ -146,7 +146,7 @@ mod headers_checks;
 mod priority;
 mod push_controller;
 mod push_id;
-pub mod qlog;
+mod qlog;
 mod qpack_decoder_receiver;
 mod qpack_encoder_receiver;
 mod recv_message;

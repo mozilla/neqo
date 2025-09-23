@@ -13,7 +13,7 @@ pub mod huffman;
 mod huffman_decode_helper;
 pub mod huffman_table;
 mod prefix;
-pub mod qlog;
+mod qlog;
 mod qpack_send_buf;
 pub mod reader;
 mod static_table;

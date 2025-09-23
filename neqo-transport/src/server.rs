@@ -18,9 +18,11 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider as _, hex, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Tos};
 #[cfg(feature = "qlog")]
-use neqo_common::{qlog::Qlog, Role};
+use neqo_common::Role;
+use neqo_common::{
+    event::Provider as _, hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn, Datagram, Tos,
+};
 use neqo_crypto::{
     encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
     ZeroRttChecker,
@@ -28,15 +30,13 @@ use neqo_crypto::{
 use rustc_hash::FxHashSet as HashSet;
 
 pub use crate::addr_valid::ValidateAddress;
-#[cfg(feature = "qlog")]
-use crate::ConnectionIdRef;
 use crate::{
     addr_valid::{AddressValidation, AddressValidationResult},
     cid::{ConnectionId, ConnectionIdGenerator},
     connection::{Connection, Output, State},
     packet::{self, Public, MIN_INITIAL_PACKET_SIZE},
     saved::SavedDatagram,
-    ConnectionParameters, OutputBatch, Res, Version,
+    ConnectionIdRef, ConnectionParameters, OutputBatch, Res, Version,
 };
 
 /// A `ServerZeroRttChecker` is a simple wrapper around a single checker.
@@ -121,10 +121,7 @@ pub struct Server {
     /// Address validation logic, which determines whether we send a Retry.
     address_validation: Rc<RefCell<AddressValidation>>,
     /// Directory to create qlog traces in
-    #[cfg(feature = "qlog")]
     qlog_dir: Option<PathBuf>,
-    #[cfg(not(feature = "qlog"))]
-    _qlog_dir: (),
     /// Encrypted client hello (ECH) configuration.
     ech_config: Option<EchConfig>,
     /// Remaining datagrams of a batch of datagrams provided via
@@ -168,31 +165,15 @@ impl Server {
             conn_params,
             connections: Vec::new(),
             address_validation: Rc::new(RefCell::new(validation)),
-            #[cfg(feature = "qlog")]
             qlog_dir: None,
-            #[cfg(not(feature = "qlog"))]
-            _qlog_dir: (),
             ech_config: None,
             saved_datagrams: VecDeque::new(),
         })
     }
 
     /// Set or clear directory to create logs of connection events in QLOG format.
-    #[cfg_attr(
-        not(feature = "qlog"),
-        expect(
-            unused_variables,
-            clippy::unused_self,
-            clippy::needless_pass_by_ref_mut,
-            clippy::needless_pass_by_value,
-            reason = "dir and self only used with qlog"
-        )
-    )]
     pub fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
-        #[cfg(feature = "qlog")]
-        {
-            self.qlog_dir = dir;
-        }
+        self.qlog_dir = dir;
     }
 
     /// Set the policy for address validation.
@@ -292,8 +273,14 @@ impl Server {
         }
     }
 
-    #[cfg(feature = "qlog")]
+    #[cfg_attr(
+        not(feature = "qlog"),
+        expect(unused_variables, clippy::unused_self, reason = "Only used with qlog.")
+    )]
     fn create_qlog_trace(&self, odcid: ConnectionIdRef<'_>) -> Qlog {
+        #[cfg(not(feature = "qlog"))]
+        return Qlog::disabled();
+        #[cfg(feature = "qlog")]
         self.qlog_dir
             .as_ref()
             .map_or_else(Qlog::disabled, |qlog_dir| {
@@ -374,7 +361,6 @@ impl Server {
             Err(e) => {
                 qwarn!("[{self}] Unable to create connection");
                 if e == crate::Error::VersionNegotiation {
-                    #[cfg(feature = "qlog")]
                     crate::qlog::server_version_information_failed(
                         &self.create_qlog_trace(orig_dcid.unwrap_or(initial.dst_cid).as_cid_ref()),
                         self.conn_params.get_versions().all(),
@@ -483,7 +469,6 @@ impl Server {
                     vn.len(),
                 );
 
-                #[cfg(feature = "qlog")]
                 crate::qlog::server_version_information_failed(
                     &self.create_qlog_trace(packet.dcid()),
                     self.conn_params.get_versions().all(),
