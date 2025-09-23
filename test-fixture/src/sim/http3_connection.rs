@@ -303,14 +303,7 @@ impl Requests {
         loop {
             let remaining = self.remaining.get_mut(&stream_id).unwrap();
             let end = min(*remaining, DATA.len());
-            let sent = c
-                .send_data(
-                    stream_id,
-                    &DATA[..end],
-                    #[cfg(feature = "qlog")]
-                    now(),
-                )
-                .unwrap();
+            let sent = c.send_data(stream_id, &DATA[..end], now()).unwrap();
             if sent == 0 {
                 return status;
             }
@@ -318,12 +311,7 @@ impl Requests {
             *remaining -= sent;
             qtrace!("sent {sent} remaining {}", remaining);
             if *remaining == 0 {
-                c.stream_close_send(
-                    stream_id,
-                    #[cfg(feature = "qlog")]
-                    now(),
-                )
-                .unwrap();
+                c.stream_close_send(stream_id, now()).unwrap();
                 self.remaining.remove(&stream_id);
                 return status;
             }
@@ -429,12 +417,7 @@ impl Goal for Responses {
                     stream
                         .send_headers(&[Header::new(":status", "200")])
                         .unwrap();
-                    stream
-                        .stream_close_send(
-                            #[cfg(feature = "qlog")]
-                            now(),
-                        )
-                        .unwrap();
+                    stream.stream_close_send(now()).unwrap();
                     self.remaining.remove(&stream_id);
                 }
 

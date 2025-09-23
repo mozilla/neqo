@@ -12,9 +12,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(feature = "qlog")]
-use neqo_common::qlog::Qlog;
-use neqo_common::{hex, qdebug, qinfo, qtrace, qwarn, Buffer, DatagramBatch, Encoder, Tos};
+use neqo_common::{
+    hex, qdebug, qinfo, qlog::Qlog, qtrace, qwarn, Buffer, DatagramBatch, Encoder, Tos,
+};
 use neqo_crypto::random;
 
 use crate::{
@@ -64,10 +64,7 @@ pub struct Paths {
     to_retire: Vec<u64>,
 
     /// `QLog` handler.
-    #[cfg(feature = "qlog")]
     qlog: Qlog,
-    #[cfg(not(feature = "qlog"))]
-    _qlog: (),
 }
 
 impl Paths {
@@ -85,17 +82,8 @@ impl Paths {
             .iter()
             .find_map(|p| p.borrow().received_on(local, remote).then(|| Rc::clone(p)))
             .unwrap_or_else(|| {
-                let mut p = Path::temporary(
-                    local,
-                    remote,
-                    conn_params,
-                    #[cfg(feature = "qlog")]
-                    self.qlog.clone(),
-                    #[cfg(not(feature = "qlog"))]
-                    (),
-                    now,
-                    stats,
-                );
+                let mut p =
+                    Path::temporary(local, remote, conn_params, self.qlog.clone(), now, stats);
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
                 }
@@ -132,7 +120,7 @@ impl Paths {
         path: &PathRef,
         local_cid: Option<ConnectionId>,
         remote_cid: RemoteConnectionIdEntry,
-        #[cfg(feature = "qlog")] now: Instant,
+        now: Instant,
     ) {
         debug_assert!(self.is_temporary(path));
 
@@ -160,13 +148,7 @@ impl Paths {
         path.borrow_mut().make_permanent(local_cid, remote_cid);
         self.paths.push(Rc::clone(path));
         if self.primary.is_none() {
-            assert!(self
-                .select_primary(
-                    path,
-                    #[cfg(feature = "qlog")]
-                    now
-                )
-                .is_none());
+            assert!(self.select_primary(path, now).is_none());
         }
     }
 
@@ -174,18 +156,10 @@ impl Paths {
     /// Using the old path is only necessary if this change in path is a reaction
     /// to a migration from a peer, in which case the old path needs to be probed.
     #[must_use]
-    fn select_primary(
-        &mut self,
-        path: &PathRef,
-        #[cfg(feature = "qlog")] now: Instant,
-    ) -> Option<PathRef> {
+    fn select_primary(&mut self, path: &PathRef, now: Instant) -> Option<PathRef> {
         qdebug!("[{}] set as primary path", path.borrow());
         let old_path = self.primary.replace(Rc::clone(path)).inspect(|old| {
-            old.borrow_mut().set_primary(
-                false,
-                #[cfg(feature = "qlog")]
-                now,
-            );
+            old.borrow_mut().set_primary(false, now);
         });
 
         // Swap the primary path into slot 0, so that it is protected from eviction.
@@ -196,11 +170,7 @@ impl Paths {
             .find_map(|(i, p)| Rc::ptr_eq(p, path).then_some(i))?;
         self.paths.swap(0, idx);
 
-        path.borrow_mut().set_primary(
-            true,
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        path.borrow_mut().set_primary(true, now);
         old_path
     }
 
@@ -225,11 +195,7 @@ impl Paths {
         path.borrow_mut().start_ecn(stats);
         if force || path.borrow().is_valid() {
             path.borrow_mut().set_valid(now);
-            drop(self.select_primary(
-                path,
-                #[cfg(feature = "qlog")]
-                now,
-            ));
+            drop(self.select_primary(path, now));
             self.migration_target = None;
         } else {
             self.migration_target = Some(Rc::clone(path));
@@ -275,11 +241,7 @@ impl Paths {
                 // Need a clone as `fallback` is borrowed from `self`.
                 let path = Rc::clone(fallback);
                 qinfo!("[{}] Failing over after primary path failed", path.borrow());
-                drop(self.select_primary(
-                    &path,
-                    #[cfg(feature = "qlog")]
-                    now,
-                ));
+                drop(self.select_primary(&path, now));
                 true
             } else {
                 false
@@ -324,11 +286,7 @@ impl Paths {
             return;
         }
 
-        if let Some(old_path) = self.select_primary(
-            path,
-            #[cfg(feature = "qlog")]
-            now,
-        ) {
+        if let Some(old_path) = self.select_primary(path, now) {
             // Need to probe the old path if the peer migrates.
             old_path.borrow_mut().probe(stats);
             // TODO(mt) - suppress probing if the path was valid within 3PTO.
@@ -358,11 +316,7 @@ impl Paths {
                     .migration_target
                     .take_if(|target| Rc::ptr_eq(target, p))
                 {
-                    drop(self.select_primary(
-                        &primary,
-                        #[cfg(feature = "qlog")]
-                        now,
-                    ));
+                    drop(self.select_primary(&primary, now));
                     return true;
                 }
                 break;
@@ -488,7 +442,6 @@ impl Paths {
         )
     }
 
-    #[cfg(feature = "qlog")]
     pub fn set_qlog(&mut self, qlog: Qlog) {
         for p in &mut self.paths {
             p.borrow_mut().set_qlog(qlog.clone());
@@ -571,10 +524,7 @@ pub struct Path {
     /// The ECN-related state for this path (see RFC9000, Section 13.4 and Appendix A.4)
     ecn_info: ecn::Info,
     /// For logging of events.
-    #[cfg(feature = "qlog")]
     qlog: Qlog,
-    #[cfg(not(feature = "qlog"))]
-    _qlog: (),
 }
 
 impl Path {
@@ -584,8 +534,7 @@ impl Path {
         local: SocketAddr,
         remote: SocketAddr,
         conn_params: &ConnectionParameters,
-        #[cfg(feature = "qlog")] qlog: Qlog,
-        #[cfg(not(feature = "qlog"))] _qlog: (),
+        qlog: Qlog,
         now: Instant,
         stats: &mut Stats,
     ) -> Self {
@@ -610,12 +559,7 @@ impl Path {
         } else {
             None
         };
-        #[cfg_attr(
-            not(feature = "qlog"),
-            expect(unused_mut, reason = "only without qlog")
-        )]
         let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip(), iface_mtu), now);
-        #[cfg(feature = "qlog")]
         sender.set_qlog(qlog.clone());
         Self {
             local,
@@ -631,10 +575,7 @@ impl Path {
             received_bytes: 0,
             sent_bytes: 0,
             ecn_info: ecn::Info::default(),
-            #[cfg(feature = "qlog")]
             qlog,
-            #[cfg(not(feature = "qlog"))]
-            _qlog: (),
         }
     }
 
@@ -683,15 +624,12 @@ impl Path {
     }
 
     /// Set whether this path is primary.
-    pub(crate) fn set_primary(&mut self, primary: bool, #[cfg(feature = "qlog")] now: Instant) {
+    pub(crate) fn set_primary(&mut self, primary: bool, now: Instant) {
         qtrace!("[{self}] Make primary {primary}");
         debug_assert!(self.remote_cid.is_some());
         self.primary = primary;
         if !primary {
-            self.sender.discard_in_flight(
-                #[cfg(feature = "qlog")]
-                now,
-            );
+            self.sender.discard_in_flight(now);
         }
     }
 
@@ -1020,16 +958,11 @@ impl Path {
     }
 
     /// Record a packet as having been sent on this path.
-    pub fn packet_sent(&mut self, sent: &mut sent::Packet, #[cfg(feature = "qlog")] now: Instant) {
+    pub fn packet_sent(&mut self, sent: &mut sent::Packet, now: Instant) {
         if !self.is_primary() {
             sent.clear_primary_path();
         }
-        self.sender.on_packet_sent(
-            sent,
-            self.rtt.estimate(),
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        self.sender.on_packet_sent(sent, self.rtt.estimate(), now);
     }
 
     /// Discard a packet that previously might have been in-flight.
@@ -1046,7 +979,6 @@ impl Path {
             );
             stats.rtt_init_guess = true;
             self.rtt.update(
-                #[cfg(feature = "qlog")]
                 &self.qlog,
                 now - sent.time_sent(),
                 Duration::new(0, 0),
@@ -1055,11 +987,7 @@ impl Path {
             );
         }
 
-        self.sender.discard(
-            sent,
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        self.sender.discard(sent, now);
     }
 
     /// Record packets as acknowledged with the sender.
@@ -1074,11 +1002,9 @@ impl Path {
 
         let ecn_ce_received = self.ecn_info.on_packets_acked(acked_pkts, ack_ecn, stats);
         if ecn_ce_received {
-            let cwnd_reduced = self.sender.on_ecn_ce_received(
-                acked_pkts.first().expect("must be there"),
-                #[cfg(feature = "qlog")]
-                now,
-            );
+            let cwnd_reduced = self
+                .sender
+                .on_ecn_ce_received(acked_pkts.first().expect("must be there"), now);
             if cwnd_reduced {
                 self.rtt.update_ack_delay(self.sender.cwnd(), self.plpmtu());
             }
@@ -1143,7 +1069,6 @@ impl Path {
     }
 
     /// Update the `QLog` instance.
-    #[cfg(feature = "qlog")]
     pub fn set_qlog(&mut self, qlog: Qlog) {
         self.sender.set_qlog(qlog);
     }

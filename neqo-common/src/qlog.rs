@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::time::Instant;
+#[cfg(feature = "qlog")]
 use std::{
     cell::RefCell,
     fmt::{self, Display},
@@ -11,21 +13,41 @@ use std::{
     io::BufWriter,
     path::PathBuf,
     rc::Rc,
-    time::{Instant, SystemTime},
+    time::SystemTime,
 };
 
-use qlog::{
-    streamer::QlogStreamer, CommonFields, Configuration, TraceSeq, VantagePoint, VantagePointType,
-};
+use qlog::streamer::QlogStreamer;
+#[cfg(feature = "qlog")]
+use qlog::{CommonFields, Configuration, TraceSeq, VantagePoint, VantagePointType};
 
+#[cfg(feature = "qlog")]
 use crate::Role;
+
+#[cfg(not(feature = "qlog"))]
+#[expect(
+    clippy::module_inception,
+    clippy::module_name_repetitions,
+    reason = "This is for stubbing out qlog."
+)]
+mod qlog {
+    pub struct Error();
+    pub mod streamer {
+        pub struct QlogStreamer();
+    }
+    pub mod events {
+        pub struct Event();
+        pub struct EventData();
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct Qlog {
+    #[cfg(feature = "qlog")]
     inner: Rc<RefCell<Option<SharedStreamer>>>,
 }
 
-pub struct SharedStreamer {
+#[cfg(feature = "qlog")]
+struct SharedStreamer {
     qlog_path: PathBuf,
     streamer: QlogStreamer,
 }
@@ -36,6 +58,7 @@ impl Qlog {
     /// # Errors
     ///
     /// Will return `qlog::Error` if it cannot write to the new file.
+    #[cfg(feature = "qlog")]
     pub fn enabled_with_file<D: Display>(
         mut qlog_path: PathBuf,
         role: Role,
@@ -71,10 +94,12 @@ impl Qlog {
     /// # Errors
     ///
     /// Will return `qlog::Error` if it cannot write to the new log.
+    #[cfg(feature = "qlog")]
     pub fn enabled(mut streamer: QlogStreamer, qlog_path: PathBuf) -> Result<Self, qlog::Error> {
         streamer.start_log()?;
 
         Ok(Self {
+            #[cfg(feature = "qlog")]
             inner: Rc::new(RefCell::new(Some(SharedStreamer {
                 qlog_path,
                 streamer,
@@ -89,10 +114,15 @@ impl Qlog {
     }
 
     /// If logging enabled, closure may generate an event to be logged.
+    #[cfg_attr(
+        not(feature = "qlog"),
+        expect(unused_variables, clippy::unused_self, reason = "Only used with qlog.")
+    )]
     pub fn add_event_with_instant<F>(&self, f: F, now: Instant)
     where
         F: FnOnce() -> Option<qlog::events::Event>,
     {
+        #[cfg(feature = "qlog")]
         self.add_event_with_stream(|s| {
             if let Some(evt) = f() {
                 s.add_event_with_instant(evt, now)?;
@@ -102,10 +132,15 @@ impl Qlog {
     }
 
     /// If logging enabled, closure may generate an event to be logged.
+    #[cfg_attr(
+        not(feature = "qlog"),
+        expect(unused_variables, clippy::unused_self, reason = "Only used with qlog.")
+    )]
     pub fn add_event_data_with_instant<F>(&self, f: F, now: Instant)
     where
         F: FnOnce() -> Option<qlog::events::EventData>,
     {
+        #[cfg(feature = "qlog")]
         self.add_event_with_stream(|s| {
             if let Some(ev_data) = f() {
                 s.add_event_data_with_instant(ev_data, now)?;
@@ -116,10 +151,15 @@ impl Qlog {
 
     /// If logging enabled, closure is given the Qlog stream to write events and
     /// frames to.
+    #[cfg_attr(
+        not(feature = "qlog"),
+        expect(unused_variables, clippy::unused_self, reason = "Only used with qlog.")
+    )]
     pub fn add_event_with_stream<F>(&self, f: F)
     where
         F: FnOnce(&mut QlogStreamer) -> Result<(), qlog::Error>,
     {
+        #[cfg(feature = "qlog")]
         if let Some(inner) = self.inner.borrow_mut().as_mut() {
             if let Err(e) = f(&mut inner.streamer) {
                 log::error!("Qlog event generation failed with error {e}; closing qlog.");
@@ -129,12 +169,14 @@ impl Qlog {
     }
 }
 
+#[cfg(feature = "qlog")]
 impl fmt::Debug for SharedStreamer {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Qlog writing to {}", self.qlog_path.display())
     }
 }
 
+#[cfg(feature = "qlog")]
 impl Drop for SharedStreamer {
     fn drop(&mut self) {
         if let Err(e) = self.streamer.finish_log() {
@@ -144,6 +186,7 @@ impl Drop for SharedStreamer {
 }
 
 #[must_use]
+#[cfg(feature = "qlog")]
 pub fn new_trace(role: Role) -> TraceSeq {
     TraceSeq {
         vantage_point: VantagePoint {

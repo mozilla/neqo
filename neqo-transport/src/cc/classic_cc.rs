@@ -14,15 +14,10 @@ use std::{
 
 #[cfg(feature = "qlog")]
 use ::qlog::events::{quic::CongestionStateUpdated, EventData};
-#[cfg(feature = "qlog")]
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::Qlog, qtrace};
-#[cfg(not(feature = "qlog"))]
-use neqo_common::{const_max, const_min, qdebug, qinfo, qtrace};
 
 use super::CongestionControl;
-#[cfg(feature = "qlog")]
-use crate::qlog;
-use crate::{packet, recovery::sent, rtt::RttEstimate, sender::PACING_BURST_SIZE, Pmtud};
+use crate::{packet, qlog, recovery::sent, rtt::RttEstimate, sender::PACING_BURST_SIZE, Pmtud};
 
 pub const CWND_INITIAL_PKTS: usize = 10;
 const PERSISTENT_CONG_THRESH: u32 = 3;
@@ -120,7 +115,6 @@ pub struct ClassicCongestionControl<T> {
     /// [1]: https://datatracker.ietf.org/doc/html/rfc9002#section-7.8
     first_app_limited: packet::Number,
     pmtud: Pmtud,
-    #[cfg(feature = "qlog")]
     qlog: Qlog,
 }
 
@@ -142,7 +136,6 @@ impl<T: WindowAdjustment> Display for ClassicCongestionControl<T> {
 }
 
 impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
-    #[cfg(feature = "qlog")]
     fn set_qlog(&mut self, qlog: Qlog) {
         self.qlog = qlog;
     }
@@ -211,12 +204,8 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             }
 
             if self.state.in_recovery() {
-                self.set_state(
-                    State::CongestionAvoidance,
-                    #[cfg(feature = "qlog")]
-                    now,
-                );
-                #[cfg(feature = "qlog")]
+                self.set_state(State::CongestionAvoidance, now);
+
                 qlog::metrics_updated(&self.qlog, &[qlog::Metric::InRecovery(false)], now);
             }
 
@@ -239,11 +228,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             if self.congestion_window == self.ssthresh {
                 // This doesn't look like it is necessary, but it can happen
                 // after persistent congestion.
-                self.set_state(
-                    State::CongestionAvoidance,
-                    #[cfg(feature = "qlog")]
-                    now,
-                );
+                self.set_state(State::CongestionAvoidance, now);
             }
         }
         // Congestion avoidance, above the slow start threshold.
@@ -274,7 +259,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             // acknowledged bytes after increasing the congestion window twice.
             self.acked_bytes = min(bytes_for_increase, self.acked_bytes);
         }
-        #[cfg(feature = "qlog")]
+
         qlog::metrics_updated(
             &self.qlog,
             &[
@@ -293,7 +278,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
         lost_packets: &[sent::Packet],
-        #[cfg(feature = "qlog")] now: Instant,
+        now: Instant,
     ) -> bool {
         if lost_packets.is_empty() {
             return false;
@@ -309,7 +294,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             // event, we may still declare packets lost that were sent before the rebinding.
             self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
         }
-        #[cfg(feature = "qlog")]
+
         qlog::metrics_updated(
             &self.qlog,
             &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
@@ -328,17 +313,12 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             return false;
         };
 
-        let congestion = self.on_congestion_event(
-            last_lost_packet,
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        let congestion = self.on_congestion_event(last_lost_packet, now);
         let persistent_congestion = self.detect_persistent_congestion(
             first_rtt_sample_time,
             prev_largest_acked_sent,
             pto,
             lost_packets.rev(),
-            #[cfg(feature = "qlog")]
             now,
         );
         qdebug!(
@@ -354,23 +334,15 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     /// congestion event.
     ///
     /// See <https://datatracker.ietf.org/doc/html/rfc9002#section-b.7>.
-    fn on_ecn_ce_received(
-        &mut self,
-        largest_acked_pkt: &sent::Packet,
-        #[cfg(feature = "qlog")] now: Instant,
-    ) -> bool {
-        self.on_congestion_event(
-            largest_acked_pkt,
-            #[cfg(feature = "qlog")]
-            now,
-        )
+    fn on_ecn_ce_received(&mut self, largest_acked_pkt: &sent::Packet, now: Instant) -> bool {
+        self.on_congestion_event(largest_acked_pkt, now)
     }
 
-    fn discard(&mut self, pkt: &sent::Packet, #[cfg(feature = "qlog")] now: Instant) {
+    fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
         if pkt.cc_outstanding() {
             assert!(self.bytes_in_flight >= pkt.len());
             self.bytes_in_flight -= pkt.len();
-            #[cfg(feature = "qlog")]
+
             qlog::metrics_updated(
                 &self.qlog,
                 &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
@@ -380,9 +352,9 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         }
     }
 
-    fn discard_in_flight(&mut self, #[cfg(feature = "qlog")] now: Instant) {
+    fn discard_in_flight(&mut self, now: Instant) {
         self.bytes_in_flight = 0;
-        #[cfg(feature = "qlog")]
+
         qlog::metrics_updated(
             &self.qlog,
             &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
@@ -390,7 +362,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         );
     }
 
-    fn on_packet_sent(&mut self, pkt: &sent::Packet, #[cfg(feature = "qlog")] now: Instant) {
+    fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant) {
         // Record the recovery time and exit any transient state.
         if self.state.transient() {
             self.recovery_start = Some(pkt.pn());
@@ -414,7 +386,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             pkt.pn(),
             pkt.len()
         );
-        #[cfg(feature = "qlog")]
+
         qlog::metrics_updated(
             &self.qlog,
             &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
@@ -433,13 +405,6 @@ const fn cwnd_initial(mtu: usize) -> usize {
 }
 
 impl<T: WindowAdjustment> ClassicCongestionControl<T> {
-    #[cfg_attr(
-        not(feature = "qlog"),
-        expect(
-            clippy::missing_const_for_fn,
-            reason = "Can't be const with qlog enabled"
-        )
-    )]
     pub fn new(cc_algorithm: T, pmtud: Pmtud) -> Self {
         Self {
             cc_algorithm,
@@ -449,7 +414,6 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             acked_bytes: 0,
             ssthresh: usize::MAX,
             recovery_start: None,
-            #[cfg(feature = "qlog")]
             qlog: Qlog::disabled(),
             first_app_limited: 0,
             pmtud,
@@ -486,7 +450,11 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         self.acked_bytes
     }
 
-    fn set_state(&mut self, state: State, #[cfg(feature = "qlog")] now: Instant) {
+    #[cfg_attr(
+        not(feature = "qlog"),
+        expect(unused_variables, reason = "Only used with qlog.")
+    )]
+    fn set_state(&mut self, state: State, now: Instant) {
         if self.state != state {
             qdebug!("[{self}] state -> {state:?}");
             #[cfg(feature = "qlog")]
@@ -518,7 +486,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
         lost_packets: impl IntoIterator<Item = &'a sent::Packet>,
-        #[cfg(feature = "qlog")] now: Instant,
+        now: Instant,
     ) -> bool {
         if first_rtt_sample_time.is_none() {
             return false;
@@ -556,11 +524,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                     qinfo!("[{self}] persistent congestion");
                     self.congestion_window = self.cwnd_min();
                     self.acked_bytes = 0;
-                    self.set_state(
-                        State::PersistentCongestion,
-                        #[cfg(feature = "qlog")]
-                        now,
-                    );
+                    self.set_state(State::PersistentCongestion, now);
                     #[cfg(feature = "qlog")]
                     qlog::metrics_updated(
                         &self.qlog,
@@ -589,11 +553,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
     /// Handle a congestion event.
     /// Returns true if this was a true congestion event.
-    fn on_congestion_event(
-        &mut self,
-        last_packet: &sent::Packet,
-        #[cfg(feature = "qlog")] now: Instant,
-    ) -> bool {
+    fn on_congestion_event(&mut self, last_packet: &sent::Packet, now: Instant) -> bool {
         // Start a new congestion event if lost or ECN CE marked packet was sent
         // after the start of the previous congestion recovery period.
         if !self.after_recovery_start(last_packet) {
@@ -623,11 +583,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             ],
             now,
         );
-        self.set_state(
-            State::RecoveryStart,
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        self.set_state(State::RecoveryStart, now);
         true
     }
 
@@ -724,21 +680,10 @@ mod tests {
         persistent_expected: bool,
     ) {
         for p in lost_packets {
-            cc.on_packet_sent(
-                p,
-                #[cfg(feature = "qlog")]
-                now(),
-            );
+            cc.on_packet_sent(p, now());
         }
 
-        cc.on_packets_lost(
-            Some(now()),
-            None,
-            PTO,
-            lost_packets,
-            #[cfg(feature = "qlog")]
-            now(),
-        );
+        cc.on_packets_lost(Some(now()), None, PTO, lost_packets, now());
 
         let persistent = if cc.cwnd() == reduced_cwnd {
             false
@@ -940,7 +885,6 @@ mod tests {
         rtt_time: u32,
         lost: &[sent::Packet],
     ) -> bool {
-        #[cfg(feature = "qlog")]
         let now = now();
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
 
@@ -948,33 +892,12 @@ mod tests {
         let rtt_time = Some(by_pto(rtt_time));
 
         // Persistent congestion is never declared if the RTT time is `None`.
-        cc.detect_persistent_congestion(
-            None,
-            None,
-            PTO,
-            lost.iter(),
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        cc.detect_persistent_congestion(None, None, PTO, lost.iter(), now);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
-        cc.detect_persistent_congestion(
-            None,
-            last_ack,
-            PTO,
-            lost.iter(),
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        cc.detect_persistent_congestion(None, last_ack, PTO, lost.iter(), now);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
 
-        cc.detect_persistent_congestion(
-            rtt_time,
-            last_ack,
-            PTO,
-            lost.iter(),
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        cc.detect_persistent_congestion(rtt_time, last_ack, PTO, lost.iter(), now);
         cc.cwnd() == cc.cwnd_min()
     }
 
@@ -1111,14 +1034,7 @@ mod tests {
     fn persistent_congestion_no_prev_ack_newreno() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
-        cc.detect_persistent_congestion(
-            Some(by_pto(0)),
-            None,
-            PTO,
-            lost.iter(),
-            #[cfg(feature = "qlog")]
-            now(),
-        );
+        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), now());
         assert_eq!(cc.cwnd(), cc.cwnd_min());
     }
 
@@ -1126,14 +1042,7 @@ mod tests {
     fn persistent_congestion_no_prev_ack_cubic() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         let mut cc = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
-        cc.detect_persistent_congestion(
-            Some(by_pto(0)),
-            None,
-            PTO,
-            lost.iter(),
-            #[cfg(feature = "qlog")]
-            now(),
-        );
+        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), now());
         assert_eq!(cc.cwnd(), cc.cwnd_min());
     }
 
@@ -1186,11 +1095,7 @@ mod tests {
                     cc.max_datagram_size(),
                 );
                 next_pn += 1;
-                cc.on_packet_sent(
-                    &p,
-                    #[cfg(feature = "qlog")]
-                    now,
-                );
+                cc.on_packet_sent(&p, now);
                 pkts.push(p);
             }
             assert_eq!(
@@ -1217,11 +1122,7 @@ mod tests {
                 cc.max_datagram_size(),
             );
             next_pn += 1;
-            cc.on_packet_sent(
-                &p,
-                #[cfg(feature = "qlog")]
-                now,
-            );
+            cc.on_packet_sent(&p, now);
             pkts.push(p);
         }
         assert_eq!(
@@ -1252,7 +1153,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::too_many_lines, reason = "It is what it is.")]
     fn app_limited_congestion_avoidance() {
         const CWND_PKTS_CA: usize = CWND_INITIAL_PKTS / 2;
         const BELOW_APP_LIMIT_PKTS: usize = CWND_PKTS_CA - 2;
@@ -1271,21 +1171,10 @@ mod tests {
             recovery::Tokens::new(),
             cc.max_datagram_size(),
         );
-        cc.on_packet_sent(
-            &p_lost,
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        cc.on_packet_sent(&p_lost, now);
         cwnd_is_default(&cc);
         now += PTO;
-        cc.on_packets_lost(
-            Some(now),
-            None,
-            PTO,
-            &[p_lost],
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        cc.on_packets_lost(Some(now), None, PTO, &[p_lost], now);
         cwnd_is_halved(&cc);
         let p_not_lost = sent::Packet::new(
             packet::Type::Short,
@@ -1295,11 +1184,7 @@ mod tests {
             recovery::Tokens::new(),
             cc.max_datagram_size(),
         );
-        cc.on_packet_sent(
-            &p_not_lost,
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        cc.on_packet_sent(&p_not_lost, now);
         now += RTT;
         cc.on_packets_acked(
             &[p_not_lost],
@@ -1327,11 +1212,7 @@ mod tests {
                     cc.max_datagram_size(),
                 );
                 next_pn += 1;
-                cc.on_packet_sent(
-                    &p,
-                    #[cfg(feature = "qlog")]
-                    now,
-                );
+                cc.on_packet_sent(&p, now);
                 pkts.push(p);
             }
             assert_eq!(
@@ -1364,11 +1245,7 @@ mod tests {
                 cc.max_datagram_size(),
             );
             next_pn += 1;
-            cc.on_packet_sent(
-                &p,
-                #[cfg(feature = "qlog")]
-                now,
-            );
+            cc.on_packet_sent(&p, now);
             pkts.push(p);
         }
         assert_eq!(
@@ -1406,20 +1283,12 @@ mod tests {
             recovery::Tokens::new(),
             cc.max_datagram_size(),
         );
-        cc.on_packet_sent(
-            &p_ce,
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        cc.on_packet_sent(&p_ce, now);
         cwnd_is_default(&cc);
         assert_eq!(cc.state, State::SlowStart);
 
         // Signal congestion (ECN CE) and thus change state to recovery start.
-        cc.on_ecn_ce_received(
-            &p_ce,
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        cc.on_ecn_ce_received(&p_ce, now);
         cwnd_is_halved(&cc);
         assert_eq!(cc.state, State::RecoveryStart);
     }

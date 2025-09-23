@@ -159,13 +159,7 @@ impl WtTest {
                     headers,
                 }) => {
                     assert_wt(&headers);
-                    session
-                        .response(
-                            accept,
-                            #[cfg(feature = "qlog")]
-                            now(),
-                        )
-                        .unwrap();
+                    session.response(accept, now()).unwrap();
                     wt_server_session = Some(session);
                 }
                 Http3ServerEvent::Data { .. } => {
@@ -307,25 +301,13 @@ impl WtTest {
         stream_type: StreamType,
     ) -> StreamId {
         self.client
-            .webtransport_create_stream(
-                wt_session_id,
-                stream_type,
-                #[cfg(feature = "qlog")]
-                now(),
-            )
+            .webtransport_create_stream(wt_session_id, stream_type, now())
             .unwrap()
     }
 
     fn send_data_client(&mut self, wt_stream_id: StreamId, data: &[u8]) {
         assert_eq!(
-            self.client
-                .send_data(
-                    wt_stream_id,
-                    data,
-                    #[cfg(feature = "qlog")]
-                    now()
-                )
-                .unwrap(),
+            self.client.send_data(wt_stream_id, data, now()).unwrap(),
             data.len()
         );
         self.exchange_packets();
@@ -373,13 +355,7 @@ impl WtTest {
     }
 
     fn close_stream_sending_client(&mut self, wt_stream_id: StreamId) {
-        self.client
-            .stream_close_send(
-                wt_stream_id,
-                #[cfg(feature = "qlog")]
-                now(),
-            )
-            .unwrap();
+        self.client.stream_close_send(wt_stream_id, now()).unwrap();
         self.exchange_packets();
     }
 
@@ -475,26 +451,11 @@ impl WtTest {
         wt_server_session: &WebTransportRequest,
         stream_type: StreamType,
     ) -> Http3OrWebTransportStream {
-        wt_server_session
-            .create_stream(
-                stream_type,
-                #[cfg(feature = "qlog")]
-                now(),
-            )
-            .unwrap()
+        wt_server_session.create_stream(stream_type, now()).unwrap()
     }
 
     fn send_data_server(&mut self, wt_stream: &Http3OrWebTransportStream, data: &[u8]) {
-        assert_eq!(
-            wt_stream
-                .send_data(
-                    data,
-                    #[cfg(feature = "qlog")]
-                    now()
-                )
-                .unwrap(),
-            data.len()
-        );
+        assert_eq!(wt_stream.send_data(data, now()).unwrap(), data.len());
         self.exchange_packets();
     }
 
@@ -538,12 +499,7 @@ impl WtTest {
     }
 
     fn close_stream_sending_server(&mut self, wt_stream: &Http3OrWebTransportStream) {
-        wt_stream
-            .stream_close_send(
-                #[cfg(feature = "qlog")]
-                now(),
-            )
-            .unwrap();
+        wt_stream.stream_close_send(now()).unwrap();
         self.exchange_packets();
     }
 
@@ -631,25 +587,12 @@ impl WtTest {
 
     pub fn session_close_frame_client(&mut self, session_id: StreamId, error: u32, message: &str) {
         self.client
-            .webtransport_close_session(
-                session_id,
-                error,
-                message,
-                #[cfg(feature = "qlog")]
-                now(),
-            )
+            .webtransport_close_session(session_id, error, message, now())
             .unwrap();
     }
 
     pub fn session_close_frame_server(wt_session: &WebTransportRequest, error: u32, message: &str) {
-        wt_session
-            .close_session(
-                error,
-                message,
-                #[cfg(feature = "qlog")]
-                now(),
-            )
-            .unwrap();
+        wt_session.close_session(error, message, now()).unwrap();
     }
 
     fn max_datagram_size(&self, stream_id: StreamId) -> Result<u64, Error> {

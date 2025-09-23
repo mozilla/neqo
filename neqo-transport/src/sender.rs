@@ -8,9 +8,6 @@
 
 use std::time::{Duration, Instant};
 
-#[cfg(not(feature = "qlog"))]
-use neqo_common::qdebug;
-#[cfg(feature = "qlog")]
 use neqo_common::{qdebug, qlog::Qlog};
 
 use crate::{
@@ -53,7 +50,6 @@ impl PacketSender {
         }
     }
 
-    #[cfg(feature = "qlog")]
     pub fn set_qlog(&mut self, qlog: Qlog) {
         self.cc.set_qlog(qlog);
     }
@@ -120,7 +116,6 @@ impl PacketSender {
             prev_largest_acked_sent,
             pto,
             lost_packets,
-            #[cfg(feature = "qlog")]
             now,
         );
         // Call below may change the size of MTU probes, so it needs to happen after the CC
@@ -131,48 +126,24 @@ impl PacketSender {
     }
 
     /// Called when ECN CE mark received.  Returns true if the congestion window was reduced.
-    pub fn on_ecn_ce_received(
-        &mut self,
-        largest_acked_pkt: &sent::Packet,
-        #[cfg(feature = "qlog")] now: Instant,
-    ) -> bool {
-        self.cc.on_ecn_ce_received(
-            largest_acked_pkt,
-            #[cfg(feature = "qlog")]
-            now,
-        )
+    pub fn on_ecn_ce_received(&mut self, largest_acked_pkt: &sent::Packet, now: Instant) -> bool {
+        self.cc.on_ecn_ce_received(largest_acked_pkt, now)
     }
 
-    pub fn discard(&mut self, pkt: &sent::Packet, #[cfg(feature = "qlog")] now: Instant) {
-        self.cc.discard(
-            pkt,
-            #[cfg(feature = "qlog")]
-            now,
-        );
+    pub fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
+        self.cc.discard(pkt, now);
     }
 
     /// When we migrate, the congestion controller for the previously active path drops
     /// all bytes in flight.
-    pub fn discard_in_flight(&mut self, #[cfg(feature = "qlog")] now: Instant) {
-        self.cc.discard_in_flight(
-            #[cfg(feature = "qlog")]
-            now,
-        );
+    pub fn discard_in_flight(&mut self, now: Instant) {
+        self.cc.discard_in_flight(now);
     }
 
-    pub fn on_packet_sent(
-        &mut self,
-        pkt: &sent::Packet,
-        rtt: Duration,
-        #[cfg(feature = "qlog")] now: Instant,
-    ) {
+    pub fn on_packet_sent(&mut self, pkt: &sent::Packet, rtt: Duration, now: Instant) {
         self.pacer
             .spend(pkt.time_sent(), rtt, self.cc.cwnd(), pkt.len());
-        self.cc.on_packet_sent(
-            pkt,
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        self.cc.on_packet_sent(pkt, now);
     }
 
     #[must_use]

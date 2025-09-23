@@ -310,7 +310,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "qlog")]
     async fn write_qlog_file() {
         neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap()).unwrap();
 

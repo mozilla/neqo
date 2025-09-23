@@ -4,9 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(feature = "qlog")]
-use std::time::Instant;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::Instant};
 
 use neqo_common::Encoder;
 use neqo_transport::{recv_stream, send_stream, Connection, StreamId};
@@ -55,11 +53,7 @@ impl Stream for WebTransportRecvStream {
 }
 
 impl RecvStream for WebTransportRecvStream {
-    fn receive(
-        &mut self,
-        _conn: &mut Connection,
-        #[cfg(feature = "qlog")] _now: Instant,
-    ) -> Res<(ReceiveOutput, bool)> {
+    fn receive(&mut self, _conn: &mut Connection, _now: Instant) -> Res<(ReceiveOutput, bool)> {
         if self.session.as_ref().borrow().is_active() {
             self.events.data_readable(&self.stream_info);
         }
@@ -78,7 +72,7 @@ impl RecvStream for WebTransportRecvStream {
         &mut self,
         conn: &mut Connection,
         buf: &mut [u8],
-        #[cfg(feature = "qlog")] _now: Instant,
+        _now: Instant,
     ) -> Res<(usize, bool)> {
         let (amount, fin) = conn.stream_recv(self.stream_id, buf)?;
         self.fin = fin;
@@ -181,7 +175,7 @@ impl Stream for WebTransportSendStream {
 }
 
 impl SendStream for WebTransportSendStream {
-    fn send(&mut self, conn: &mut Connection, #[cfg(feature = "qlog")] _now: Instant) -> Res<()> {
+    fn send(&mut self, conn: &mut Connection, _now: Instant) -> Res<()> {
         if let WebTransportSenderStreamState::SendingInit { ref mut buf, fin } = self.state {
             let sent = conn.stream_send(self.stream_id, &buf[..])?;
             if sent == buf.len() {
@@ -214,17 +208,8 @@ impl SendStream for WebTransportSendStream {
         self.state == WebTransportSenderStreamState::Done
     }
 
-    fn send_data(
-        &mut self,
-        conn: &mut Connection,
-        buf: &[u8],
-        #[cfg(feature = "qlog")] now: Instant,
-    ) -> Res<usize> {
-        self.send(
-            conn,
-            #[cfg(feature = "qlog")]
-            now,
-        )?;
+    fn send_data(&mut self, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<usize> {
+        self.send(conn, now)?;
         if self.state == WebTransportSenderStreamState::SendingData {
             let sent = conn.stream_send(self.stream_id, buf)?;
             Ok(sent)
@@ -237,7 +222,7 @@ impl SendStream for WebTransportSendStream {
         self.set_done(close_type);
     }
 
-    fn close(&mut self, conn: &mut Connection, #[cfg(feature = "qlog")] _now: Instant) -> Res<()> {
+    fn close(&mut self, conn: &mut Connection, _now: Instant) -> Res<()> {
         if let WebTransportSenderStreamState::SendingInit { ref mut fin, .. } = self.state {
             *fin = true;
         } else {

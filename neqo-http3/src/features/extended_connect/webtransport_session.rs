@@ -4,12 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(feature = "qlog")]
-use std::time::Instant;
 use std::{
     collections::HashSet,
     fmt::{self, Display, Formatter},
     mem,
+    time::Instant,
 };
 
 use neqo_common::{qtrace, Encoder, Role};
@@ -97,13 +96,12 @@ impl Protocol for Session {
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
         control_stream_recv: &mut Box<dyn RecvStream>,
-        #[cfg(feature = "qlog")] now: Instant,
+        now: Instant,
     ) -> Res<Option<State>> {
         let (f, fin) = self
             .frame_reader
             .receive::<WebTransportFrame>(
                 &mut StreamReaderRecvStreamWrapper::new(conn, control_stream_recv),
-                #[cfg(feature = "qlog")]
                 now,
             )
             .map_err(|_| Error::HttpGeneralProtocolStream)?;
@@ -141,7 +139,7 @@ impl Protocol for Session {
         stream_id: StreamId,
         events: &mut Box<dyn ExtendedConnectEvents>,
         state: State,
-        #[cfg(feature = "qlog")] _now: Instant,
+        _now: Instant,
     ) -> Res<()> {
         match state {
             State::Negotiating | State::Active => {}

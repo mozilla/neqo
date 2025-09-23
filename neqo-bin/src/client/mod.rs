@@ -24,9 +24,9 @@ use futures::{
     future::{select, Either},
     FutureExt as _, TryFutureExt as _,
 };
-use neqo_common::{qdebug, qerror, qinfo, qwarn, Datagram};
 #[cfg(feature = "qlog")]
-use neqo_common::{qlog::Qlog, Role};
+use neqo_common::Role;
+use neqo_common::{qdebug, qerror, qinfo, qlog::Qlog, qwarn, Datagram};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, Cipher, ResumptionToken,
@@ -532,20 +532,29 @@ impl<'a, H: Handler> Runner<'a, H> {
     }
 }
 
-#[cfg(feature = "qlog")]
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(unused_variables, reason = "Only used with qlog.")
+)]
 fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<Qlog> {
     let Some(qlog_dir) = args.shared.qlog_dir.clone() else {
         return Ok(Qlog::disabled());
     };
 
+    #[cfg(not(feature = "qlog"))]
+    return Err(Error::Argument(
+        "qlog feature not enabled, cannot use --qlog-dir",
+    ));
+
     // hostname might be an IPv6 address, e.g. `[::1]`. `:` is an invalid
     // Windows file name character.
-    #[cfg(windows)]
+    #[cfg(all(feature = "qlog", windows))]
     let hostname: String = hostname
         .chars()
         .map(|c| if c == ':' { '_' } else { c })
         .collect();
 
+    #[cfg(feature = "qlog")]
     Qlog::enabled_with_file(
         qlog_dir,
         Role::Client,
@@ -554,11 +563,6 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<Qlog> {
         format!("client-{hostname}-{cid}"),
     )
     .map_err(Error::Qlog)
-}
-
-#[cfg(not(feature = "qlog"))]
-const fn qlog_new(_args: &Args, _hostname: &str, _cid: &ConnectionId) -> Res<()> {
-    Err(Error::Argument("qlog feature not enabled"))
 }
 
 const fn local_addr_for(remote_addr: &SocketAddr, local_port: u16) -> SocketAddr {

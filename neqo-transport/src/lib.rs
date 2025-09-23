@@ -28,7 +28,6 @@ pub mod packet;
 mod packet;
 mod path;
 mod pmtud;
-#[cfg(feature = "qlog")]
 pub mod qlog;
 mod quic_datagrams;
 #[cfg(feature = "bench")]

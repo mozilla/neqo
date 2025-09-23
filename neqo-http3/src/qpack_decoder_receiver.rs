@@ -4,9 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(feature = "qlog")]
-use std::time::Instant;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::Instant};
 
 use neqo_qpack as qpack;
 use neqo_transport::{Connection, StreamId};
@@ -36,11 +34,7 @@ impl RecvStream for DecoderRecvStream {
         Err(Error::HttpClosedCriticalStream)
     }
 
-    fn receive(
-        &mut self,
-        conn: &mut Connection,
-        #[cfg(feature = "qlog")] _now: Instant,
-    ) -> Res<(ReceiveOutput, bool)> {
+    fn receive(&mut self, conn: &mut Connection, _now: Instant) -> Res<(ReceiveOutput, bool)> {
         Ok((
             ReceiveOutput::UnblockedStreams(
                 self.decoder.borrow_mut().receive(conn, self.stream_id)?,

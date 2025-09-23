@@ -99,18 +99,7 @@ pub fn create_client(
             .max_concurrent_push_streams(args.max_concurrent_push_streams),
     );
 
-    #[cfg_attr(
-        not(feature = "qlog"),
-        expect(
-            unused_variables,
-            clippy::let_unit_value,
-            unit_bindings,
-            reason = "Yes, it's unused."
-        )
-    )]
-    let qlog = qlog_new(args, hostname, client.connection_id())?;
-    #[cfg(feature = "qlog")]
-    client.set_qlog(qlog);
+    client.set_qlog(qlog_new(args, hostname, client.connection_id())?);
 
     if let Some(ech) = &args.ech {
         client.enable_ech(ech)?;
@@ -354,24 +343,11 @@ impl StreamHandler for UploadStreamHandler {
     }
 
     fn process_data_writable(&mut self, client: &mut Http3Client, stream_id: StreamId) {
-        let done = self.data.send(|chunk| {
-            client
-                .send_data(
-                    stream_id,
-                    chunk,
-                    #[cfg(feature = "qlog")]
-                    Instant::now(),
-                )
-                .unwrap()
-        });
+        let done = self
+            .data
+            .send(|chunk| client.send_data(stream_id, chunk, Instant::now()).unwrap());
         if done {
-            client
-                .stream_close_send(
-                    stream_id,
-                    #[cfg(feature = "qlog")]
-                    Instant::now(),
-                )
-                .unwrap();
+            client.stream_close_send(stream_id, Instant::now()).unwrap();
         }
     }
 }
@@ -426,11 +402,7 @@ impl UrlHandler {
                             &mut self.all_paths,
                         );
                         client
-                            .stream_close_send(
-                                client_stream_id,
-                                #[cfg(feature = "qlog")]
-                                Instant::now(),
-                            )
+                            .stream_close_send(client_stream_id, Instant::now())
                             .unwrap();
                         Box::new(DownloadStreamHandler { out_file })
                     }

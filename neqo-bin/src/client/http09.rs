@@ -164,18 +164,11 @@ pub fn create_client(
         client.set_ciphers(&ciphers)?;
     }
 
-    #[cfg_attr(
-        not(feature = "qlog"),
-        expect(
-            unused_variables,
-            clippy::let_unit_value,
-            unit_bindings,
-            reason = "Yes, it's unused."
-        )
-    )]
-    let qlog = qlog_new(args, hostname, client.odcid().ok_or(Error::Internal)?)?;
-    #[cfg(feature = "qlog")]
-    client.set_qlog(qlog);
+    client.set_qlog(qlog_new(
+        args,
+        hostname,
+        client.odcid().ok_or(Error::Internal)?,
+    )?);
 
     Ok(client)
 }

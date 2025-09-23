@@ -21,17 +21,14 @@ use std::{
 
 use enum_map::EnumMap;
 use enumset::enum_set;
-#[cfg(feature = "qlog")]
-use neqo_common::qlog::Qlog;
-use neqo_common::{qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{qdebug, qinfo, qlog::Qlog, qtrace, qwarn};
 use strum::IntoEnumIterator as _;
 pub use token::{StreamRecoveryToken, Token, Tokens};
 
-#[cfg(feature = "qlog")]
-use crate::qlog;
 use crate::{
     ecn, packet,
     path::{Path, PathRef},
+    qlog,
     rtt::{RttEstimate, RttSource},
     stats::{Stats, StatsCell},
     tracking::{PacketNumberSpace, PacketNumberSpaceSet},
@@ -445,7 +442,6 @@ impl PtoState {
         self.probe |= probe;
     }
 
-    #[cfg(feature = "qlog")]
     pub const fn count(&self) -> usize {
         self.count
     }
@@ -481,10 +477,7 @@ pub struct Loss {
     confirmed_time: Option<Instant>,
     pto_state: Option<PtoState>,
     spaces: LossRecoverySpaces,
-    #[cfg(feature = "qlog")]
     qlog: Qlog,
-    #[cfg(not(feature = "qlog"))]
-    _qlog: (),
     stats: StatsCell,
     /// The factor by which the PTO period is reduced.
     /// This enables faster probing at a cost in additional lost packets.
@@ -498,10 +491,7 @@ impl Loss {
             confirmed_time: None,
             pto_state: None,
             spaces: LossRecoverySpaces::default(),
-            #[cfg(feature = "qlog")]
             qlog: Qlog::default(),
-            #[cfg(not(feature = "qlog"))]
-            _qlog: (),
             stats,
             fast_pto,
         }
@@ -512,7 +502,6 @@ impl Loss {
         self.spaces.get(pn_space)?.largest_acked
     }
 
-    #[cfg(feature = "qlog")]
     pub fn set_qlog(&mut self, qlog: Qlog) {
         self.qlog = qlog;
     }
@@ -534,23 +523,14 @@ impl Loss {
         dropped
     }
 
-    pub fn on_packet_sent(
-        &mut self,
-        path: &PathRef,
-        mut sent_packet: sent::Packet,
-        #[cfg(feature = "qlog")] now: Instant,
-    ) {
+    pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: sent::Packet, now: Instant) {
         let pn_space = PacketNumberSpace::from(sent_packet.packet_type());
         qtrace!("[{self}] packet {pn_space}-{} sent", sent_packet.pn());
         if let Some(pto) = self.pto_state.as_mut() {
             pto.pto_sent(pn_space);
         }
         if let Some(space) = self.spaces.get_mut(pn_space) {
-            path.borrow_mut().packet_sent(
-                &mut sent_packet,
-                #[cfg(feature = "qlog")]
-                now,
-            );
+            path.borrow_mut().packet_sent(&mut sent_packet, now);
             space.on_packet_sent(sent_packet);
         } else {
             qinfo!(
@@ -582,14 +562,7 @@ impl Loss {
             RttSource::Ack
         };
         if let Some(sample) = now.checked_duration_since(send_time) {
-            rtt.update(
-                #[cfg(feature = "qlog")]
-                &self.qlog,
-                sample,
-                ack_delay,
-                source,
-                now,
-            );
+            rtt.update(&self.qlog, sample, ack_delay, source, now);
         }
     }
 
@@ -710,12 +683,7 @@ impl Loss {
         if let Some(pto) = self.pto_time(rtt, PacketNumberSpace::ApplicationData) {
             if pto < now {
                 let probes = enum_set!(PacketNumberSpace::ApplicationData);
-                self.fire_pto(
-                    PacketNumberSpace::ApplicationData,
-                    probes,
-                    #[cfg(feature = "qlog")]
-                    now,
-                );
+                self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
             }
         }
     }
@@ -830,7 +798,7 @@ impl Loss {
         &mut self,
         pn_space: PacketNumberSpace,
         allow_probes: PacketNumberSpaceSet,
-        #[cfg(feature = "qlog")] now: Instant,
+        now: Instant,
     ) {
         if let Some(st) = &mut self.pto_state {
             st.pto(pn_space, allow_probes);
@@ -840,7 +808,7 @@ impl Loss {
 
         if let Some(st) = &mut self.pto_state {
             st.count_pto(&mut self.stats.borrow_mut());
-            #[cfg(feature = "qlog")]
+
             qlog::metrics_updated(&self.qlog, &[qlog::Metric::PtoCount(st.count())], now);
         }
     }
@@ -895,12 +863,7 @@ impl Loss {
         // pto_time to increase which might cause PTO for later packet number spaces to not fire.
         if let Some(pn_space) = pto_space {
             qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
-            self.fire_pto(
-                pn_space,
-                allow_probes,
-                #[cfg(feature = "qlog")]
-                now,
-            );
+            self.fire_pto(pn_space, allow_probes, now);
         }
     }
 
@@ -992,7 +955,6 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    #[cfg(feature = "qlog")]
     use neqo_common::qlog::Qlog;
     use test_fixture::{now, DEFAULT_ADDR};
 
@@ -1036,17 +998,8 @@ mod tests {
                 .on_ack_received(&self.path, pn_space, acked_ranges, ack_ecn, ack_delay, now)
         }
 
-        pub fn on_packet_sent(
-            &mut self,
-            sent_packet: sent::Packet,
-            #[cfg(feature = "qlog")] now: Instant,
-        ) {
-            self.lr.on_packet_sent(
-                &self.path,
-                sent_packet,
-                #[cfg(feature = "qlog")]
-                now,
-            );
+        pub fn on_packet_sent(&mut self, sent_packet: sent::Packet, now: Instant) {
+            self.lr.on_packet_sent(&self.path, sent_packet, now);
         }
 
         pub fn timeout(&mut self, now: Instant) -> Vec<sent::Packet> {
@@ -1077,10 +1030,7 @@ mod tests {
                 DEFAULT_ADDR,
                 DEFAULT_ADDR,
                 &ConnectionParameters::default(),
-                #[cfg(feature = "qlog")]
                 Qlog::default(),
-                #[cfg(not(feature = "qlog"))]
-                (),
                 now(),
                 &mut stats.borrow_mut(),
             );
@@ -1088,11 +1038,7 @@ mod tests {
                 None,
                 ConnectionIdEntry::new(0, ConnectionId::from(&[1, 2, 3]), [0; 16]),
             );
-            path.set_primary(
-                true,
-                #[cfg(feature = "qlog")]
-                now(),
-            );
+            path.set_primary(true, now());
             path.rtt_mut().set_initial(TEST_RTT);
             Self {
                 lr: recovery::Loss::new(stats, FAST_PTO_SCALE),
@@ -1193,7 +1139,6 @@ mod tests {
                     recovery::Tokens::new(),
                     ON_SENT_SIZE,
                 ),
-                #[cfg(feature = "qlog")]
                 now(),
             );
         }
@@ -1345,7 +1290,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now(),
         );
         lr.on_packet_sent(
@@ -1357,7 +1301,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now(),
         );
         let (_, lost) = lr.on_ack_received(
@@ -1456,7 +1399,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now(),
         );
         lr.on_packet_sent(
@@ -1468,7 +1410,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now(),
         );
         lr.on_packet_sent(
@@ -1480,7 +1421,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now(),
         );
 
@@ -1499,11 +1439,7 @@ mod tests {
                 ON_SENT_SIZE,
             );
             let pn_space = PacketNumberSpace::from(sent_pkt.packet_type());
-            lr.on_packet_sent(
-                sent_pkt,
-                #[cfg(feature = "qlog")]
-                now(),
-            );
+            lr.on_packet_sent(sent_pkt, now());
             lr.on_ack_received(
                 pn_space,
                 vec![1..=1],
@@ -1538,7 +1474,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now(),
         );
         assert_sent_times(&lr, None, None, Some(pn_time(2)));
@@ -1556,7 +1491,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now(),
         );
         // Set the RTT to the initial value so that discarding doesn't
@@ -1579,7 +1513,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now(),
         );
         lr.on_packet_sent(
@@ -1591,7 +1524,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now(),
         );
 
@@ -1632,7 +1564,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now(),
         );
 
@@ -1661,7 +1592,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now,
         );
         lr.on_packet_sent(
@@ -1673,7 +1603,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now,
         );
 
@@ -1714,7 +1643,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now,
         );
         let profile = lr.send_profile(now);
@@ -1743,7 +1671,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now,
         );
 
@@ -1770,7 +1697,6 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             ),
-            #[cfg(feature = "qlog")]
             now,
         );
 

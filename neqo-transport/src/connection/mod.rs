@@ -17,11 +17,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(feature = "qlog")]
-use neqo_common::qlog::Qlog;
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_snip_middle, hex_with_len, hrtime, qdebug, qerror,
-    qinfo, qtrace, qwarn, Buffer, Datagram, DatagramBatch, Decoder, Ecn, Encoder, Role, Tos,
+    qinfo, qlog::Qlog, qtrace, qwarn, Buffer, Datagram, DatagramBatch, Decoder, Ecn, Encoder, Role,
+    Tos,
 };
 use neqo_crypto::{
     agent::{CertificateCompressor, CertificateInfo},
@@ -31,8 +30,6 @@ use neqo_crypto::{
 use smallvec::SmallVec;
 use strum::IntoEnumIterator as _;
 
-#[cfg(feature = "qlog")]
-use crate::qlog;
 use crate::{
     addr_valid::{AddressValidation, NewTokenState},
     cid::{
@@ -45,6 +42,7 @@ use crate::{
     frame::{CloseError, Frame, FrameType},
     packet::{self},
     path::{Path, PathRef, Paths},
+    qlog,
     quic_datagrams::{DatagramTracking, QuicDatagrams},
     recovery::{self, sent, SendProfile},
     recv_stream,
@@ -317,7 +315,6 @@ pub struct Connection {
     events: ConnectionEvents,
     new_token: NewTokenState,
     stats: StatsCell,
-    #[cfg(feature = "qlog")]
     qlog: Qlog,
     /// A session ticket was received without `NEW_TOKEN`,
     /// this is when that turns into an event without `NEW_TOKEN`.
@@ -380,10 +377,7 @@ impl Connection {
             local_addr,
             remote_addr,
             &c.conn_params,
-            #[cfg(feature = "qlog")]
             Qlog::default(),
-            #[cfg(not(feature = "qlog"))]
-            (),
             now,
             &mut c.stats.borrow_mut(),
         );
@@ -469,7 +463,6 @@ impl Connection {
             events,
             new_token: NewTokenState::new(role),
             stats,
-            #[cfg(feature = "qlog")]
             qlog: Qlog::disabled(),
             release_resumption_token_timer: None,
             conn_params,
@@ -527,7 +520,6 @@ impl Connection {
     }
 
     /// Set or clear the qlog for this connection.
-    #[cfg(feature = "qlog")]
     pub fn set_qlog(&mut self, qlog: Qlog) {
         self.loss_recovery.set_qlog(qlog.clone());
         self.paths.set_qlog(qlog.clone());
@@ -535,7 +527,6 @@ impl Connection {
     }
 
     /// Get the qlog (if any) for this connection.
-    #[cfg(feature = "qlog")]
     pub fn qlog_mut(&mut self) -> &mut Qlog {
         &mut self.qlog
     }
@@ -982,11 +973,7 @@ impl Connection {
                 State::Init => {
                     // We have not even sent anything just close the connection without sending any
                     // error. This may happen when client_start fails.
-                    self.set_state(
-                        State::Closed(error),
-                        #[cfg(feature = "qlog")]
-                        now,
-                    );
+                    self.set_state(State::Closed(error), now);
                 }
                 State::WaitInitial | State::WaitVersion => {
                     // We don't have any state yet, so don't bother with
@@ -995,38 +982,25 @@ impl Connection {
                         self.state_signaling
                             .close(path, error.clone(), frame_type, msg);
                     }
-                    self.set_state(
-                        State::Closed(error),
-                        #[cfg(feature = "qlog")]
-                        now,
-                    );
+                    self.set_state(State::Closed(error), now);
                 }
                 _ => {
                     if let Some(path) = path.or_else(|| self.paths.primary()) {
                         self.state_signaling
                             .close(path, error.clone(), frame_type, msg);
                         if matches!(v, Error::KeysExhausted) {
-                            self.set_state(
-                                State::Closed(error),
-                                #[cfg(feature = "qlog")]
-                                now,
-                            );
+                            self.set_state(State::Closed(error), now);
                         } else {
                             self.set_state(
                                 State::Closing {
                                     error,
                                     timeout: self.get_closing_period_time(now),
                                 },
-                                #[cfg(feature = "qlog")]
                                 now,
                             );
                         }
                     } else {
-                        self.set_state(
-                            State::Closed(error),
-                            #[cfg(feature = "qlog")]
-                            now,
-                        );
+                        self.set_state(State::Closed(error), now);
                     }
                 }
             }
@@ -1048,11 +1022,7 @@ impl Connection {
             State::Closing { error, timeout } | State::Draining { error, timeout } => {
                 if *timeout <= now {
                     let st = State::Closed(error.clone());
-                    self.set_state(
-                        st,
-                        #[cfg(feature = "qlog")]
-                        now,
-                    );
+                    self.set_state(st, now);
                     qinfo!("Closing timer expired");
                     return;
                 }
@@ -1069,7 +1039,6 @@ impl Connection {
             qinfo!("[{self}] idle timeout expired");
             self.set_state(
                 State::Closed(CloseReason::Transport(Error::IdleTimeout)),
-                #[cfg(feature = "qlog")]
                 now,
             );
             return;
@@ -1088,7 +1057,7 @@ impl Connection {
         if let Some(path) = self.paths.primary() {
             let lost = self.loss_recovery.timeout(&path, now);
             self.handle_lost_packets(&lost);
-            #[cfg(feature = "qlog")]
+
             qlog::packets_lost(&self.qlog, &lost, now);
         }
 
@@ -1395,7 +1364,6 @@ impl Connection {
                     error: CloseReason::Transport(Error::StatelessReset),
                     timeout: self.get_closing_period_time(now),
                 },
-                #[cfg(feature = "qlog")]
                 now,
             );
             Err(Error::StatelessReset)
@@ -1474,7 +1442,7 @@ impl Connection {
                 .get_versions_mut()
                 .set_initial(self.conn_params.get_versions().initial());
             mem::swap(self, &mut c);
-            #[cfg(feature = "qlog")]
+
             qlog::client_version_information_negotiated(
                 &self.qlog,
                 self.conn_params.get_versions().all(),
@@ -1488,7 +1456,6 @@ impl Connection {
             // This error goes straight to closed.
             self.set_state(
                 State::Closed(CloseReason::Transport(Error::VersionNegotiation)),
-                #[cfg(feature = "qlog")]
                 now,
             );
             Err(Error::VersionNegotiation)
@@ -1546,11 +1513,7 @@ impl Connection {
                     self.conn_params.randomize_first_pn_enabled(),
                 )?;
                 self.original_destination_cid = Some(dcid);
-                self.set_state(
-                    State::WaitInitial,
-                    #[cfg(feature = "qlog")]
-                    now,
-                );
+                self.set_state(State::WaitInitial, now);
 
                 // We need to make sure that we set this transport parameter.
                 // This has to happen prior to processing the packet so that
@@ -1704,11 +1667,7 @@ impl Connection {
             } else {
                 State::WaitVersion
             };
-            self.set_state(
-                new_state,
-                #[cfg(feature = "qlog")]
-                now,
-            );
+            self.set_state(new_state, now);
             if self.role == Role::Server && self.state == State::Handshaking {
                 self.zero_rtt_state =
                     if self.crypto.enable_0rtt(self.version, self.role) == Ok(true) {
@@ -1796,7 +1755,6 @@ impl Connection {
                     self.idle_timeout.on_packet_received(now);
                     self.log_packet(
                         packet::MetaData::new_in(path, tos, packet_len, &payload),
-                        #[cfg(feature = "qlog")]
                         now,
                     );
 
@@ -1862,7 +1820,7 @@ impl Connection {
                     // the rest of the datagram on the floor, but don't generate an error.
                     self.check_stateless_reset(path, packet.data(), dcid.is_none(), now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
-                    #[cfg(feature = "qlog")]
+
                     qlog::packet_dropped(&self.qlog, &packet, now);
                 }
             }
@@ -1967,7 +1925,6 @@ impl Connection {
                     .expect("have either remote_initial_source_cid or original_destination_cid")
                     .clone(),
             ),
-            #[cfg(feature = "qlog")]
             now,
         );
         if self.role == Role::Client {
@@ -1976,23 +1933,13 @@ impl Connection {
     }
 
     /// If the path isn't permanent, assign it a connection ID to make it so.
-    fn ensure_permanent(
-        &mut self,
-        path: &PathRef,
-        #[cfg(feature = "qlog")] now: Instant,
-    ) -> Res<()> {
+    fn ensure_permanent(&mut self, path: &PathRef, now: Instant) -> Res<()> {
         if self.paths.is_temporary(path) {
             // If there isn't a connection ID to use for this path, the packet
             // will be processed, but it won't be attributed to a path.  That means
             // no path probes or PATH_RESPONSE.  But it's not fatal.
             if let Some(cid) = self.cids.next() {
-                self.paths.make_permanent(
-                    path,
-                    None,
-                    cid,
-                    #[cfg(feature = "qlog")]
-                    now,
-                );
+                self.paths.make_permanent(path, None, cid, now);
                 Ok(())
             } else if let Some(primary) = self.paths.primary() {
                 if primary
@@ -2000,13 +1947,8 @@ impl Connection {
                     .remote_cid()
                     .map_or(true, |id| id.is_empty())
                 {
-                    self.paths.make_permanent(
-                        path,
-                        None,
-                        ConnectionIdEntry::empty_remote(),
-                        #[cfg(feature = "qlog")]
-                        now,
-                    );
+                    self.paths
+                        .make_permanent(path, None, ConnectionIdEntry::empty_remote(), now);
                     Ok(())
                 } else {
                     qtrace!("[{self}] Unable to make path permanent: {}", path.borrow());
@@ -2033,11 +1975,7 @@ impl Connection {
                 self.setup_handshake_path(path, now);
             } else {
                 // Otherwise try to get a usable connection ID.
-                drop(self.ensure_permanent(
-                    path,
-                    #[cfg(feature = "qlog")]
-                    now,
-                ));
+                drop(self.ensure_permanent(path, now));
             }
         }
     }
@@ -2121,11 +2059,7 @@ impl Connection {
             now,
             &mut self.stats.borrow_mut(),
         );
-        self.ensure_permanent(
-            &path,
-            #[cfg(feature = "qlog")]
-            now,
-        )?;
+        self.ensure_permanent(&path, now)?;
         qinfo!(
             "[{self}] Migrate to {} probe {}",
             path.borrow(),
@@ -2203,14 +2137,7 @@ impl Connection {
             return;
         }
 
-        if self
-            .ensure_permanent(
-                path,
-                #[cfg(feature = "qlog")]
-                now,
-            )
-            .is_ok()
-        {
+        if self.ensure_permanent(path, now).is_ok() {
             self.paths
                 .handle_migration(path, remote, now, &mut self.stats.borrow_mut());
         } else {
@@ -2809,7 +2736,6 @@ impl Connection {
                     &builder.as_ref()[payload_start..],
                     packet_tos,
                 ),
-                #[cfg(feature = "qlog")]
                 now,
             );
 
@@ -2840,12 +2766,7 @@ impl Connection {
             );
             if padded {
                 needs_padding = false;
-                self.loss_recovery.on_packet_sent(
-                    path,
-                    sent,
-                    #[cfg(feature = "qlog")]
-                    now,
-                );
+                self.loss_recovery.on_packet_sent(path, sent, now);
             } else if pt == packet::Type::Initial && (self.role == Role::Client || ack_eliciting) {
                 // Packets containing Initial packets might need padding, and we want to
                 // track that padding along with the Initial packet.  So defer tracking.
@@ -2855,12 +2776,7 @@ impl Connection {
                 if pt == packet::Type::Handshake && self.role == Role::Client {
                     needs_padding = false;
                 }
-                self.loss_recovery.on_packet_sent(
-                    path,
-                    sent,
-                    #[cfg(feature = "qlog")]
-                    now,
-                );
+                self.loss_recovery.on_packet_sent(path, sent, now);
             }
 
             if space == PacketNumberSpace::Handshake {
@@ -2904,12 +2820,7 @@ impl Connection {
                     // packet, which is why we don't increase `frame_tx.padding` count here.
                     encoder.pad_to(profile.limit(), 0);
                 }
-                self.loss_recovery.on_packet_sent(
-                    path,
-                    initial,
-                    #[cfg(feature = "qlog")]
-                    now,
-                );
+                self.loss_recovery.on_packet_sent(path, initial, now);
             }
             path.borrow_mut().add_sent(encoder.len());
             Ok(SendOption::Yes)
@@ -2939,11 +2850,11 @@ impl Connection {
     fn client_start(&mut self, now: Instant) -> Res<()> {
         qdebug!("[{self}] client_start");
         debug_assert_eq!(self.role, Role::Client);
-        #[cfg(feature = "qlog")]
+
         if let Some(path) = self.paths.primary() {
             qlog::client_connection_started(&self.qlog, &path, now);
         }
-        #[cfg(feature = "qlog")]
+
         qlog::client_version_information_initiated(
             &self.qlog,
             self.conn_params.get_versions(),
@@ -2951,11 +2862,7 @@ impl Connection {
         );
 
         self.handshake(now, self.version, PacketNumberSpace::Initial, None)?;
-        self.set_state(
-            State::WaitInitial,
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        self.set_state(State::WaitInitial, now);
         self.zero_rtt_state = if self.crypto.enable_0rtt(self.version, self.role)? {
             qdebug!("[{self}] Enabled 0-RTT");
             ZeroRttState::Sending
@@ -2977,17 +2884,9 @@ impl Connection {
         if let Some(path) = self.paths.primary() {
             self.state_signaling
                 .close(path, error.clone(), FrameType::Padding, msg);
-            self.set_state(
-                State::Closing { error, timeout },
-                #[cfg(feature = "qlog")]
-                now,
-            );
+            self.set_state(State::Closing { error, timeout }, now);
         } else {
-            self.set_state(
-                State::Closed(error),
-                #[cfg(feature = "qlog")]
-                now,
-            );
+            self.set_state(State::Closed(error), now);
         }
     }
 
@@ -3013,7 +2912,7 @@ impl Connection {
     }
 
     /// Process the final set of transport parameters.
-    fn process_tps(&mut self, #[cfg(feature = "qlog")] now: Instant) -> Res<()> {
+    fn process_tps(&mut self, now: Instant) -> Res<()> {
         self.validate_cids()?;
         self.validate_versions()?;
         {
@@ -3057,7 +2956,7 @@ impl Connection {
             self.cid_manager.set_limit(max_active_cids);
         }
         self.set_initial_limits();
-        #[cfg(feature = "qlog")]
+
         qlog::connection_tparams_set(&self.qlog, &self.tps.borrow(), now);
         Ok(())
     }
@@ -3260,11 +3159,7 @@ impl Connection {
     }
 
     fn set_confirmed(&mut self, now: Instant) -> Res<()> {
-        self.set_state(
-            State::Confirmed,
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        self.set_state(State::Confirmed, now);
         if self.conn_params.pmtud_enabled() {
             self.paths
                 .primary()
@@ -3403,11 +3298,7 @@ impl Connection {
                 self.stats.borrow_mut().frame_rx.path_challenge += 1;
                 // If we were challenged, try to make the path permanent.
                 // Report an error if we don't have enough connection IDs.
-                self.ensure_permanent(
-                    path,
-                    #[cfg(feature = "qlog")]
-                    now,
-                )?;
+                self.ensure_permanent(path, now)?;
                 path.borrow_mut().challenged(data);
             }
             Frame::PathResponse { data } => {
@@ -3450,7 +3341,6 @@ impl Connection {
                         error,
                         timeout: self.get_closing_period_time(now),
                     },
-                    #[cfg(feature = "qlog")]
                     now,
                 );
             }
@@ -3591,7 +3481,7 @@ impl Connection {
             }
         }
         self.handle_lost_packets(&lost_packets);
-        #[cfg(feature = "qlog")]
+
         qlog::packets_lost(&self.qlog, &lost_packets, now);
         let stats = &mut self.stats.borrow_mut().frame_rx;
         stats.ack += 1;
@@ -3641,7 +3531,7 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_valid(now);
             // Generate a qlog event that the server connection started.
-            #[cfg(feature = "qlog")]
+
             qlog::server_connection_started(&self.qlog, &path, now);
         } else {
             self.zero_rtt_state = if self
@@ -3662,15 +3552,8 @@ impl Connection {
         let pto = self.pto();
         self.crypto
             .install_application_keys(self.version, now + pto)?;
-        self.process_tps(
-            #[cfg(feature = "qlog")]
-            now,
-        )?;
-        self.set_state(
-            State::Connected,
-            #[cfg(feature = "qlog")]
-            now,
-        );
+        self.process_tps(now)?;
+        self.set_state(State::Connected, now);
         self.create_resumption_token(now);
         self.saved_datagrams.make_available(Epoch::ApplicationData);
         self.stats.borrow_mut().resumed =
@@ -3683,7 +3566,7 @@ impl Connection {
         Ok(())
     }
 
-    fn set_state(&mut self, state: State, #[cfg(feature = "qlog")] now: Instant) {
+    fn set_state(&mut self, state: State, now: Instant) {
         if state > self.state {
             qdebug!("[{self}] State change from {:?} -> {state:?}", self.state);
             self.state = state.clone();
@@ -3691,7 +3574,7 @@ impl Connection {
                 self.streams.clear_streams();
             }
             self.events.connection_state_change(state);
-            #[cfg(feature = "qlog")]
+
             qlog::connection_state_updated(&self.qlog, &self.state, now);
         } else if mem::discriminant(&state) != mem::discriminant(&self.state) {
             // Only tolerate a regression in state if the new state is closing
@@ -4003,11 +3886,7 @@ impl Connection {
         self.paths.primary().unwrap().borrow().plpmtu()
     }
 
-    #[cfg_attr(
-        not(feature = "qlog"),
-        expect(clippy::needless_pass_by_value, reason = "only without qlog")
-    )]
-    fn log_packet(&self, meta: packet::MetaData, #[cfg(feature = "qlog")] now: Instant) {
+    fn log_packet(&self, meta: packet::MetaData, now: Instant) {
         if log::log_enabled!(log::Level::Debug) {
             let mut s = String::new();
             let mut d = Decoder::from(meta.payload());
@@ -4024,7 +3903,6 @@ impl Connection {
             qdebug!("[{self}] {meta}{s}");
         }
 
-        #[cfg(feature = "qlog")]
         qlog::packet_io(&self.qlog, meta, now);
     }
 }

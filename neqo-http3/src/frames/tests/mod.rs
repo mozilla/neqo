@@ -46,7 +46,6 @@ pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T
     let (frame, fin) = fr
         .receive::<T>(
             &mut StreamReaderConnectionWrapper::new(&mut conn_c, stream_id),
-            #[cfg(feature = "qlog")]
             now(),
         )
         .unwrap();

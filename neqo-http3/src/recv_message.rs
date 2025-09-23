@@ -4,14 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(feature = "qlog")]
-use std::time::Instant;
 use std::{
     cell::RefCell,
     cmp::min,
     collections::VecDeque,
     fmt::{self, Debug, Display, Formatter},
     rc::Rc,
+    time::Instant,
 };
 
 use neqo_common::{header::HeadersExt as _, qdebug, qinfo, qtrace, Header};
@@ -267,7 +266,7 @@ impl RecvMessage {
         &mut self,
         conn: &mut Connection,
         post_readable_event: bool,
-        #[cfg(feature = "qlog")] now: Instant,
+        now: Instant,
     ) -> Res<()> {
         loop {
             qdebug!("[{self}] state={:?}", self.state);
@@ -278,7 +277,6 @@ impl RecvMessage {
                 | RecvMessageState::WaitingForFinAfterTrailers { frame_reader } => {
                     match frame_reader.receive(
                         &mut StreamReaderConnectionWrapper::new(conn, self.stream_id),
-                        #[cfg(feature = "qlog")]
                         now,
                     )? {
                         (None, true) => {
@@ -385,17 +383,8 @@ impl Stream for RecvMessage {
 }
 
 impl RecvStream for RecvMessage {
-    fn receive(
-        &mut self,
-        conn: &mut Connection,
-        #[cfg(feature = "qlog")] now: Instant,
-    ) -> Res<(ReceiveOutput, bool)> {
-        self.receive_internal(
-            conn,
-            true,
-            #[cfg(feature = "qlog")]
-            now,
-        )?;
+    fn receive(&mut self, conn: &mut Connection, now: Instant) -> Res<(ReceiveOutput, bool)> {
+        self.receive_internal(conn, true, now)?;
         Ok((
             ReceiveOutput::NoOutput,
             matches!(self.state, RecvMessageState::Closed),
@@ -417,7 +406,7 @@ impl RecvStream for RecvMessage {
         &mut self,
         conn: &mut Connection,
         buf: &mut [u8],
-        #[cfg(feature = "qlog")] now: Instant,
+        now: Instant,
     ) -> Res<(usize, bool)> {
         let mut written = 0;
         loop {
@@ -446,12 +435,7 @@ impl RecvStream for RecvMessage {
                         self.state = RecvMessageState::WaitingForData {
                             frame_reader: FrameReader::new(),
                         };
-                        self.receive_internal(
-                            conn,
-                            false,
-                            #[cfg(feature = "qlog")]
-                            now,
-                        )?;
+                        self.receive_internal(conn, false, now)?;
                     } else {
                         break Ok((written, false));
                     }
@@ -474,7 +458,7 @@ impl HttpRecvStream for RecvMessage {
     fn header_unblocked(
         &mut self,
         conn: &mut Connection,
-        #[cfg(feature = "qlog")] now: Instant,
+        now: Instant,
     ) -> Res<(ReceiveOutput, bool)> {
         while let Some(p) = self.blocked_push_promise.front() {
             if let Some(headers) = self
@@ -493,11 +477,7 @@ impl HttpRecvStream for RecvMessage {
             }
         }
 
-        self.receive(
-            conn,
-            #[cfg(feature = "qlog")]
-            now,
-        )
+        self.receive(conn, now)
     }
 
     fn maybe_update_priority(&mut self, priority: Priority) -> Res<bool> {

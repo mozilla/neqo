@@ -26,8 +26,9 @@ is suited to a live deployment.
 To build Neqo:
 
 ```shell
-cargo build
+cargo build --features qlog
 ```
+You can leave out `--features qlog` if you do not need QLOG support.
 
 This will use a system-installed [NSS][NSS] library if it is new enough. (See "Build with Separate NSS/NSPR" below if NSS is not installed or it is deemed too old.)
 
@@ -65,7 +66,7 @@ Note: If you did not already compile NSS separately, you need to have
 
 ### QUIC logging
 
-Enable generation of [QLOG][QLOG] logs with:
+When compiled with `--features qlog`, enable generation of [QLOG][QLOG] logs with:
 
 ```shell
 target/debug/neqo-server '[::]:12345' --qlog-dir .

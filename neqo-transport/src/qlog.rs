@@ -6,12 +6,14 @@
 
 // Functions that handle capturing QLOG traces.
 
-use std::{
-    ops::{Deref as _, RangeInclusive},
-    time::{Duration, Instant},
-};
+#[cfg(feature = "qlog")]
+use std::ops::{Deref as _, RangeInclusive};
+use std::time::{Duration, Instant};
 
-use neqo_common::{hex, qinfo, qlog::Qlog, Decoder, Ecn};
+use neqo_common::qlog::Qlog;
+#[cfg(feature = "qlog")]
+use neqo_common::{hex, qinfo, Decoder, Ecn};
+#[cfg(feature = "qlog")]
 use qlog::events::{
     connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated},
     quic::{
@@ -20,28 +22,40 @@ use qlog::events::{
     },
     EventData, RawInfo,
 };
+#[cfg(feature = "qlog")]
 use smallvec::SmallVec;
 
 use crate::{
     connection::State,
-    frame::{CloseError, Frame},
-    packet::{self, metadata::Direction},
+    packet,
     path::PathRef,
     recovery::sent,
-    stream_id::StreamType as NeqoStreamType,
-    tparams::{
-        TransportParameterId::{
-            self, AckDelayExponent, ActiveConnectionIdLimit, DisableMigration, InitialMaxData,
-            InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni,
-            InitialMaxStreamsBidi, InitialMaxStreamsUni, MaxAckDelay, MaxUdpPayloadSize,
-            OriginalDestinationConnectionId, StatelessResetToken,
-        },
-        TransportParametersHandler,
-    },
+    tparams::TransportParametersHandler,
     version::{self, Version},
 };
+#[cfg(feature = "qlog")]
+use crate::{
+    frame::{CloseError, Frame},
+    packet::metadata::Direction,
+    stream_id::StreamType as NeqoStreamType,
+    tparams::TransportParameterId::{
+        self, AckDelayExponent, ActiveConnectionIdLimit, DisableMigration, InitialMaxData,
+        InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni,
+        InitialMaxStreamsBidi, InitialMaxStreamsUni, MaxAckDelay, MaxUdpPayloadSize,
+        OriginalDestinationConnectionId, StatelessResetToken,
+    },
+};
 
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(
+        unused_variables,
+        clippy::missing_const_for_fn,
+        reason = "Only used with qlog."
+    )
+)]
 pub fn connection_tparams_set(qlog: &Qlog, tph: &TransportParametersHandler, now: Instant) {
+    #[cfg(feature = "qlog")]
     qlog.add_event_data_with_instant(
         || {
             let remote = tph.remote();
@@ -89,15 +103,35 @@ pub fn connection_tparams_set(qlog: &Qlog, tph: &TransportParametersHandler, now
     );
 }
 
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(
+        unused_variables,
+        clippy::missing_const_for_fn,
+        reason = "Only used with qlog."
+    )
+)]
 pub fn server_connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
+    #[cfg(feature = "qlog")]
     connection_started(qlog, path, now);
 }
 
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(
+        unused_variables,
+        clippy::missing_const_for_fn,
+        reason = "Only used with qlog."
+    )
+)]
 pub fn client_connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
+    #[cfg(feature = "qlog")]
     connection_started(qlog, path, now);
 }
 
+#[cfg(feature = "qlog")]
 fn connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
+    #[cfg(feature = "qlog")]
     qlog.add_event_data_with_instant(
         || {
             let p = path.deref().borrow();
@@ -127,7 +161,16 @@ fn connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
     clippy::similar_names,
     reason = "FIXME: 'new and now are similar' hits on MSRV <1.91."
 )]
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(
+        unused_variables,
+        clippy::missing_const_for_fn,
+        reason = "Only used with qlog."
+    )
+)]
 pub fn connection_state_updated(qlog: &Qlog, new: &State, now: Instant) {
+    #[cfg(feature = "qlog")]
     qlog.add_event_data_with_instant(
         || {
             let ev_data = EventData::ConnectionStateUpdated(ConnectionStateUpdated {
@@ -149,11 +192,20 @@ pub fn connection_state_updated(qlog: &Qlog, new: &State, now: Instant) {
     );
 }
 
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(
+        unused_variables,
+        clippy::missing_const_for_fn,
+        reason = "Only used with qlog."
+    )
+)]
 pub fn client_version_information_initiated(
     qlog: &Qlog,
     version_config: &version::Config,
     now: Instant,
 ) {
+    #[cfg(feature = "qlog")]
     qlog.add_event_data_with_instant(
         || {
             Some(EventData::VersionInformation(VersionInformation {
@@ -172,6 +224,14 @@ pub fn client_version_information_initiated(
     );
 }
 
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(
+        unused_variables,
+        clippy::missing_const_for_fn,
+        reason = "Only used with qlog."
+    )
+)]
 pub fn client_version_information_negotiated(
     qlog: &Qlog,
     client: &[Version],
@@ -179,6 +239,7 @@ pub fn client_version_information_negotiated(
     chosen: Version,
     now: Instant,
 ) {
+    #[cfg(feature = "qlog")]
     qlog.add_event_data_with_instant(
         || {
             Some(EventData::VersionInformation(VersionInformation {
@@ -196,12 +257,21 @@ pub fn client_version_information_negotiated(
     );
 }
 
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(
+        unused_variables,
+        clippy::missing_const_for_fn,
+        reason = "Only used with qlog."
+    )
+)]
 pub fn server_version_information_failed(
     qlog: &Qlog,
     server: &[Version],
     client: version::Wire,
     now: Instant,
 ) {
+    #[cfg(feature = "qlog")]
     qlog.add_event_data_with_instant(
         || {
             Some(EventData::VersionInformation(VersionInformation {
@@ -219,7 +289,17 @@ pub fn server_version_information_failed(
     );
 }
 
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(
+        unused_variables,
+        clippy::missing_const_for_fn,
+        clippy::needless_pass_by_value,
+        reason = "Only used with qlog."
+    )
+)]
 pub fn packet_io(qlog: &Qlog, meta: packet::MetaData, now: Instant) {
+    #[cfg(feature = "qlog")]
     qlog.add_event_data_with_instant(
         || {
             let mut d = Decoder::from(meta.payload());
@@ -258,7 +338,16 @@ pub fn packet_io(qlog: &Qlog, meta: packet::MetaData, now: Instant) {
     );
 }
 
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(
+        unused_variables,
+        clippy::missing_const_for_fn,
+        reason = "Only used with qlog."
+    )
+)]
 pub fn packet_dropped(qlog: &Qlog, public_packet: &packet::Public, now: Instant) {
+    #[cfg(feature = "qlog")]
     qlog.add_event_data_with_instant(
         || {
             let header =
@@ -280,7 +369,16 @@ pub fn packet_dropped(qlog: &Qlog, public_packet: &packet::Public, now: Instant)
     );
 }
 
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(
+        unused_variables,
+        clippy::missing_const_for_fn,
+        reason = "Only used with qlog."
+    )
+)]
 pub fn packets_lost(qlog: &Qlog, pkts: &[sent::Packet], now: Instant) {
+    #[cfg(feature = "qlog")]
     qlog.add_event_with_stream(|stream| {
         for pkt in pkts {
             let header =
@@ -315,9 +413,14 @@ pub enum Metric {
 /// # Panics
 ///
 /// If values don't fit in QLOG types.
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(unused_variables, reason = "Only used with qlog.")
+)]
 pub fn metrics_updated(qlog: &Qlog, updated_metrics: &[Metric], now: Instant) {
     debug_assert!(!updated_metrics.is_empty());
 
+    #[cfg(feature = "qlog")]
     qlog.add_event_data_with_instant(
         || {
             let mut min_rtt: Option<f32> = None;
@@ -382,6 +485,7 @@ pub fn metrics_updated(qlog: &Qlog, updated_metrics: &[Metric], now: Instant) {
     clippy::cast_possible_truncation,
     reason = "We need to truncate here."
 )]
+#[cfg(feature = "qlog")]
 impl From<Frame<'_>> for QuicFrame {
     fn from(frame: Frame) -> Self {
         match frame {
@@ -557,6 +661,7 @@ impl From<Frame<'_>> for QuicFrame {
     }
 }
 
+#[cfg(feature = "qlog")]
 impl From<packet::Type> for qlog::events::quic::PacketType {
     fn from(value: packet::Type) -> Self {
         match value {

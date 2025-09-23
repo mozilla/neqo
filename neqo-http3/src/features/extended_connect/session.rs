@@ -4,13 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(feature = "qlog")]
-use std::time::Instant;
 use std::{
     cell::RefCell,
     collections::HashSet,
     fmt::{self, Debug, Display, Formatter},
     rc::Rc,
+    time::Instant,
 };
 
 use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType, Role};
@@ -160,48 +159,28 @@ impl Session {
             .send_headers(headers, conn)
     }
 
-    fn receive(
-        &mut self,
-        conn: &mut Connection,
-        #[cfg(feature = "qlog")] now: Instant,
-    ) -> Res<(ReceiveOutput, bool)> {
+    fn receive(&mut self, conn: &mut Connection, now: Instant) -> Res<(ReceiveOutput, bool)> {
         qtrace!("[{self}] receive control data");
-        let (out, _) = self.control_stream_recv.receive(
-            conn,
-            #[cfg(feature = "qlog")]
-            now,
-        )?;
+        let (out, _) = self.control_stream_recv.receive(conn, now)?;
         debug_assert!(out == ReceiveOutput::NoOutput);
         self.maybe_check_headers()?;
-        self.read_control_stream(
-            conn,
-            #[cfg(feature = "qlog")]
-            now,
-        )?;
+        self.read_control_stream(conn, now)?;
         Ok((ReceiveOutput::NoOutput, self.state == State::Done))
     }
 
     fn header_unblocked(
         &mut self,
         conn: &mut Connection,
-        #[cfg(feature = "qlog")] now: Instant,
+        now: Instant,
     ) -> Res<(ReceiveOutput, bool)> {
         let (out, _) = self
             .control_stream_recv
             .http_stream()
             .ok_or(Error::Internal)?
-            .header_unblocked(
-                conn,
-                #[cfg(feature = "qlog")]
-                now,
-            )?;
+            .header_unblocked(conn, now)?;
         debug_assert!(out == ReceiveOutput::NoOutput);
         self.maybe_check_headers()?;
-        self.read_control_stream(
-            conn,
-            #[cfg(feature = "qlog")]
-            now,
-        )?;
+        self.read_control_stream(conn, now)?;
         Ok((ReceiveOutput::NoOutput, self.state == State::Done))
     }
 
@@ -225,12 +204,8 @@ impl Session {
             .priority_update_sent()
     }
 
-    fn send(&mut self, conn: &mut Connection, #[cfg(feature = "qlog")] now: Instant) -> Res<()> {
-        self.control_stream_send.send(
-            conn,
-            #[cfg(feature = "qlog")]
-            now,
-        )?;
+    fn send(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+        self.control_stream_send.send(conn, now)?;
         if self.control_stream_send.done() {
             self.state = State::Done;
         }
@@ -323,18 +298,9 @@ impl Session {
         Ok(())
     }
 
-    pub(crate) fn add_stream(
-        &mut self,
-        stream_id: StreamId,
-        #[cfg(feature = "qlog")] now: Instant,
-    ) -> Res<()> {
-        self.protocol.add_stream(
-            stream_id,
-            &mut self.events,
-            self.state,
-            #[cfg(feature = "qlog")]
-            now,
-        )
+    pub(crate) fn add_stream(&mut self, stream_id: StreamId, now: Instant) -> Res<()> {
+        self.protocol
+            .add_stream(stream_id, &mut self.events, self.state, now)
     }
 
     pub(crate) fn remove_recv_stream(&mut self, stream_id: StreamId) {
@@ -357,17 +323,12 @@ impl Session {
     /// # Errors
     ///
     /// It may return an error if the frame is not correctly decoded.
-    pub(crate) fn read_control_stream(
-        &mut self,
-        conn: &mut Connection,
-        #[cfg(feature = "qlog")] now: Instant,
-    ) -> Res<()> {
+    pub(crate) fn read_control_stream(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
         qdebug!("[{self}]: read_control_stream");
         if let Some(new_state) = self.protocol.read_control_stream(
             conn,
             &mut self.events,
             &mut self.control_stream_recv,
-            #[cfg(feature = "qlog")]
             now,
         )? {
             self.state = new_state;
@@ -384,25 +345,17 @@ impl Session {
         conn: &mut Connection,
         error: u32,
         message: &str,
-        #[cfg(feature = "qlog")] now: Instant,
+        now: Instant,
     ) -> Res<()> {
         qdebug!("[{self}]: close_session");
         self.state = State::Done;
 
         if let Some(close_frame) = self.protocol.close_frame(error, message) {
-            self.control_stream_send.send_data_atomic(
-                conn,
-                close_frame.as_ref(),
-                #[cfg(feature = "qlog")]
-                now,
-            )?;
+            self.control_stream_send
+                .send_data_atomic(conn, close_frame.as_ref(), now)?;
         }
 
-        self.control_stream_send.close(
-            conn,
-            #[cfg(feature = "qlog")]
-            now,
-        )?;
+        self.control_stream_send.close(conn, now)?;
         self.state = if self.control_stream_send.done() {
             State::Done
         } else {
@@ -411,18 +364,8 @@ impl Session {
         Ok(())
     }
 
-    fn send_data(
-        &mut self,
-        conn: &mut Connection,
-        buf: &[u8],
-        #[cfg(feature = "qlog")] now: Instant,
-    ) -> Res<usize> {
-        self.control_stream_send.send_data(
-            conn,
-            buf,
-            #[cfg(feature = "qlog")]
-            now,
-        )
+    fn send_data(&mut self, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<usize> {
+        self.control_stream_send.send_data(conn, buf, now)
     }
 
     /// # Errors
@@ -481,16 +424,8 @@ impl Stream for Rc<RefCell<Session>> {
 }
 
 impl RecvStream for Rc<RefCell<Session>> {
-    fn receive(
-        &mut self,
-        conn: &mut Connection,
-        #[cfg(feature = "qlog")] now: Instant,
-    ) -> Res<(ReceiveOutput, bool)> {
-        self.borrow_mut().receive(
-            conn,
-            #[cfg(feature = "qlog")]
-            now,
-        )
+    fn receive(&mut self, conn: &mut Connection, now: Instant) -> Res<(ReceiveOutput, bool)> {
+        self.borrow_mut().receive(conn, now)
     }
 
     fn reset(&mut self, close_type: CloseType) -> Res<()> {
@@ -511,13 +446,9 @@ impl HttpRecvStream for Rc<RefCell<Session>> {
     fn header_unblocked(
         &mut self,
         conn: &mut Connection,
-        #[cfg(feature = "qlog")] now: Instant,
+        now: Instant,
     ) -> Res<(ReceiveOutput, bool)> {
-        self.borrow_mut().header_unblocked(
-            conn,
-            #[cfg(feature = "qlog")]
-            now,
-        )
+        self.borrow_mut().header_unblocked(conn, now)
     }
 
     fn maybe_update_priority(&mut self, priority: Priority) -> Res<bool> {
@@ -534,26 +465,12 @@ impl HttpRecvStream for Rc<RefCell<Session>> {
 }
 
 impl SendStream for Rc<RefCell<Session>> {
-    fn send(&mut self, conn: &mut Connection, #[cfg(feature = "qlog")] now: Instant) -> Res<()> {
-        self.borrow_mut().send(
-            conn,
-            #[cfg(feature = "qlog")]
-            now,
-        )
+    fn send(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+        self.borrow_mut().send(conn, now)
     }
 
-    fn send_data(
-        &mut self,
-        conn: &mut Connection,
-        buf: &[u8],
-        #[cfg(feature = "qlog")] now: Instant,
-    ) -> Res<usize> {
-        self.borrow_mut().send_data(
-            conn,
-            buf,
-            #[cfg(feature = "qlog")]
-            now,
-        )
+    fn send_data(&mut self, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<usize> {
+        self.borrow_mut().send_data(conn, buf, now)
     }
 
     fn has_data_to_send(&self) -> bool {
@@ -566,14 +483,8 @@ impl SendStream for Rc<RefCell<Session>> {
         self.borrow_mut().done()
     }
 
-    fn close(&mut self, conn: &mut Connection, #[cfg(feature = "qlog")] now: Instant) -> Res<()> {
-        self.borrow_mut().close_session(
-            conn,
-            0,
-            "",
-            #[cfg(feature = "qlog")]
-            now,
-        )
+    fn close(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+        self.borrow_mut().close_session(conn, 0, "", now)
     }
 
     fn close_with_message(
@@ -581,15 +492,9 @@ impl SendStream for Rc<RefCell<Session>> {
         conn: &mut Connection,
         error: u32,
         message: &str,
-        #[cfg(feature = "qlog")] now: Instant,
+        now: Instant,
     ) -> Res<()> {
-        self.borrow_mut().close_session(
-            conn,
-            error,
-            message,
-            #[cfg(feature = "qlog")]
-            now,
-        )
+        self.borrow_mut().close_session(conn, error, message, now)
     }
 
     fn handle_stop_sending(&mut self, close_type: CloseType) {
@@ -617,7 +522,7 @@ pub(crate) trait Protocol: Debug + Display {
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
         control_stream_recv: &mut Box<dyn RecvStream>,
-        #[cfg(feature = "qlog")] now: Instant,
+        now: Instant,
     ) -> Res<Option<State>>;
 
     fn add_stream(
@@ -625,7 +530,7 @@ pub(crate) trait Protocol: Debug + Display {
         _stream_id: StreamId,
         _events: &mut Box<dyn ExtendedConnectEvents>,
         _state: State,
-        #[cfg(feature = "qlog")] _now: Instant,
+        _now: Instant,
     ) -> Res<()> {
         let msg = "Protocol does not support adding streams";
         qdebug!("{msg}");
