@@ -108,24 +108,44 @@ impl ExtendedConnectFeature {
     }
 }
 
+#[expect(
+    clippy::struct_field_names,
+    reason = "wrapper type, providing additional info"
+)]
 #[derive(Debug, Default)]
-struct Listener {
-    headers: Option<(Vec<Header>, bool, bool)>,
+struct Headers {
+    headers: Vec<Header>,
+    interim: bool,
+    fin: bool,
 }
 
-impl Listener {
+/// Implementation of [`HttpRecvStreamEvents`]. Registered with the underlying
+/// [`RecvMessage`] stream. Listening for [`RecvMessage`] to read
+/// incoming headers.
+///
+/// [`RecvMessage`]: crate::recv_message::RecvMessage
+#[derive(Debug, Default)]
+struct HeaderListener {
+    headers: Option<Headers>,
+}
+
+impl HeaderListener {
     fn set_headers(&mut self, headers: Vec<Header>, interim: bool, fin: bool) {
-        self.headers = Some((headers, interim, fin));
+        self.headers = Some(Headers {
+            headers,
+            interim,
+            fin,
+        });
     }
 
-    pub fn get_headers(&mut self) -> Option<(Vec<Header>, bool, bool)> {
+    pub fn get_headers(&mut self) -> Option<Headers> {
         mem::take(&mut self.headers)
     }
 }
 
-impl RecvStreamEvents for Rc<RefCell<Listener>> {}
+impl RecvStreamEvents for Rc<RefCell<HeaderListener>> {}
 
-impl HttpRecvStreamEvents for Rc<RefCell<Listener>> {
+impl HttpRecvStreamEvents for Rc<RefCell<HeaderListener>> {
     fn header_ready(
         &self,
         _stream_info: &Http3StreamInfo,
@@ -139,4 +159,4 @@ impl HttpRecvStreamEvents for Rc<RefCell<Listener>> {
     }
 }
 
-impl SendStreamEvents for Rc<RefCell<Listener>> {}
+impl SendStreamEvents for Rc<RefCell<HeaderListener>> {}

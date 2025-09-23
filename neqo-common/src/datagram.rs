@@ -176,17 +176,6 @@ impl From<Datagram<Vec<u8>>> for DatagramBatch {
 }
 
 impl DatagramBatch {
-    /// Maximum [`DatagramBatch`] size in bytes.
-    ///
-    /// This value is set conservatively to ensure compatibility with batch IO
-    /// system calls across all supported platforms.
-    ///
-    /// See for example Linux limit in
-    /// <https://github.com/torvalds/linux/blob/fb4d33ab452ea254e2c319bac5703d1b56d895bf/include/linux/netdevice.h#L2402>.
-    pub const MAX: usize = 65535 // maximum UDP datagram size
-        - 40 // IPv6 header
-        - 8; // UDP header
-
     #[must_use]
     pub const fn new(
         src: SocketAddr,

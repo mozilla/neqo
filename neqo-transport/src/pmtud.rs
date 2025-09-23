@@ -144,6 +144,14 @@ impl Pmtud {
         move |p: &sent::Packet| -> bool { probe_state == Probe::Sent && p.len() == probe_size }
     }
 
+    /// Returns the maximum Packetization Layer Path MTU for the configured
+    /// address family. Note that this ignores the interface MTU.
+    #[expect(clippy::missing_panics_doc, reason = "search table is never empty")]
+    #[must_use]
+    pub fn address_family_max_mtu(&self) -> usize {
+        *self.search_table.last().expect("search table is empty")
+    }
+
     /// Returns true if the packet is a PMTUD probe.
     fn is_probe(&self, p: &sent::Packet) -> bool {
         self.is_probe_filter()(p)
