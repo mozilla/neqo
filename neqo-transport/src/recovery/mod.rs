@@ -534,7 +534,7 @@ impl Loss {
             space.on_packet_sent(sent_packet);
         } else {
             qinfo!(
-                "[{self}] ignoring {pn_space}-{} from dropped space",
+                "[{self}] ignoring packet {} from dropped space {pn_space}",
                 sent_packet.pn()
             );
         }
