@@ -2847,7 +2847,6 @@ impl Connection {
     fn client_start(&mut self, now: Instant) -> Res<()> {
         qdebug!("[{self}] client_start");
         debug_assert_eq!(self.role, Role::Client);
-
         if let Some(path) = self.paths.primary() {
             qlog::client_connection_started(&self.qlog, &path, now);
         }
@@ -2856,6 +2855,7 @@ impl Connection {
             self.conn_params.get_versions(),
             now,
         );
+
         self.handshake(now, self.version, PacketNumberSpace::Initial, None)?;
         self.set_state(State::WaitInitial, now);
         self.zero_rtt_state = if self.crypto.enable_0rtt(self.version, self.role)? {
@@ -3893,6 +3893,7 @@ impl Connection {
             }
             qdebug!("[{self}] {meta}{s}");
         }
+
         qlog::packet_io(&self.qlog, meta, now);
     }
 }
