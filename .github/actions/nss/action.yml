@@ -203,10 +203,10 @@ runs:
     - name: Set up MSVC (Windows)
       if: ${{ runner.os == 'Windows' && steps.check_build.outputs.build_nss }}
       uses: ilammy/msvc-dev-cmd@v1 # zizmor: ignore[unpinned-uses]
-      with:
-        arch: ${{ startsWith(runner.arch, 'ARM') && 'amd64_arm64' || 'amd64' }}
       # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
       # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+      with:
+        arch: ${{ runner.arch == 'ARM64' && 'amd64_arm64' || 'amd64' }}
 
     - name: Set up build environment (Windows)
       shell: bash
@@ -229,7 +229,7 @@ runs:
         RUNNER_ARCH: ${{ runner.arch }}
         WORKSPACE: ${{ github.workspace }}
       run: | # zizmor: ignore[github-env] We need to write to GITHUB_PATH on Windows.
-        NSS_OUT="$WORKSPACE/dist/$NSS_TARGET"
+        NSS_OUT="$WORKSPACE/dist/Release"
         {
           echo "LD_LIBRARY_PATH=$NSS_OUT/lib"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib"
@@ -306,7 +306,14 @@ runs:
           cp -vaL "$LIB_DIR"/* "dist/Release/lib"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-          $NSS_DIR/build.sh -v -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            # The NSPR Makefile tries to compile a resource file (nspr.rc) via rc.exe, which fails
+            # because rc.exe's preprocessor cannot parse ARM64-specific constructs in NSPR's headers.
+            # Since we build statically (--static), the resource file is not needed and we can safely
+            # skip it by clearing the RES variable in the Makefile template.
+            sed -i'' 's/^RES=.*/RES=/' nspr/pr/src/Makefile.in
+          fi
+          $NSS_DIR/build.sh -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static
         fi
 
     - name: Save NSS cache
