@@ -23,7 +23,7 @@ libc = { workspace = true }
 static_assertions = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = ">=0.58,<0.60", features = [
+windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_NetworkManagement_IpHelper",
   "Win32_NetworkManagement_Ndis",
