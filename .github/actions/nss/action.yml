@@ -225,6 +225,7 @@ runs:
             echo "PKG_CONFIG_PATH=/clangarm64/lib/pkgconfig:/clangarm64/share/pkgconfig"
             echo "ACLOCAL_PATH=/clangarm64/share/aclocal:/usr/share/aclocal"
             echo "CMAKE_PREFIX_PATH=/clangarm64:$CMAKE_PREFIX_PATH"
+            echo "CONFIG_SITE=/etc/config.site"
           fi
         } >> "$GITHUB_ENV"
         if [ "$RUNNER_OS" == "Windows" ]; then
