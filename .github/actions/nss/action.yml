@@ -228,6 +228,10 @@ runs:
             echo "CONFIG_SITE=/etc/config.site"
           fi
         } >> "$GITHUB_ENV"
+        if [ "$RUNNER_ARCH" == "ARM64" ]; then
+          find /clangarm64 -ls
+          ls -l /etc
+        fi
         if [ "$RUNNER_OS" == "Windows" ]; then
           echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         fi
