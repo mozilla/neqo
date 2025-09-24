@@ -28,7 +28,7 @@ pub use token::{StreamRecoveryToken, Token, Tokens};
 use crate::{
     ecn, packet,
     path::{Path, PathRef},
-    qlog::{self, QlogMetric},
+    qlog,
     rtt::{RttEstimate, RttSource},
     stats::{Stats, StatsCell},
     tracking::{PacketNumberSpace, PacketNumberSpaceSet},
@@ -808,7 +808,7 @@ impl Loss {
 
         if let Some(st) = &mut self.pto_state {
             st.count_pto(&mut self.stats.borrow_mut());
-            qlog::metrics_updated(&self.qlog, &[QlogMetric::PtoCount(st.count())], now);
+            qlog::metrics_updated(&self.qlog, &[qlog::Metric::PtoCount(st.count())], now);
         }
     }
 

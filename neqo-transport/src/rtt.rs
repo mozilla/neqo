@@ -15,9 +15,7 @@ use neqo_common::{qlog::Qlog, qtrace, Buffer};
 
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
-    packet,
-    qlog::{self, QlogMetric},
-    recovery,
+    packet, qlog, recovery,
     stats::FrameStats,
 };
 
@@ -143,10 +141,10 @@ impl RttEstimate {
         qlog::metrics_updated(
             qlog,
             &[
-                QlogMetric::LatestRtt(self.latest_rtt),
-                QlogMetric::MinRtt(self.min_rtt),
-                QlogMetric::SmoothedRtt(self.smoothed_rtt),
-                QlogMetric::RttVariance(self.rttvar),
+                qlog::Metric::LatestRtt(self.latest_rtt),
+                qlog::Metric::MinRtt(self.min_rtt),
+                qlog::Metric::SmoothedRtt(self.smoothed_rtt),
+                qlog::Metric::RttVariance(self.rttvar),
             ],
             now,
         );
