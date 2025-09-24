@@ -619,6 +619,7 @@ impl Default for AckTracker {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::HashSet;
 

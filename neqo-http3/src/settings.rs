@@ -329,6 +329,7 @@ impl ZeroRttChecker for HttpZeroRttChecker {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::Encoder;
 

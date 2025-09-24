@@ -70,6 +70,7 @@ mod idle;
 pub mod params;
 mod state;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub mod test_internal;
 
 use idle::IdleTimeout;
@@ -2550,6 +2551,7 @@ impl Connection {
         let mut max_datagram_size = None;
         let mut num_datagrams = 0;
         let mtu = path.borrow().plpmtu();
+        let address_family_max_mtu = path.borrow().pmtud().address_family_max_mtu();
 
         loop {
             if max_datagrams.get() <= num_datagrams {
@@ -2568,10 +2570,22 @@ impl Connection {
 
             // Check if we can fit another PMTUD sized datagram into the batch.
             if max_datagram_size.is_some_and(|datagram_size| {
-                min(datagram_size, DatagramBatch::MAX - send_buffer.len()) < mtu
+                // GSO requires that all datagrams in a batch are of equal size.
+                // The last datagram can be smaller. The datagrams already in
+                // the batch are each `datagram_size` large. The next datagram
+                // can be up to `mtu` large. Break in case the next could be
+                // larger than the ones already in the batch.
+                datagram_size < mtu
+                // GSO allows total datagram batch size up to the address family
+                // max MTU. If the next datagram could exceed that limit, break.
+                //
+                // See for example Linux kernel:
+                // https://github.com/torvalds/linux/blob/fb4d33ab452ea254e2c319bac5703d1b56d895bf/include/linux/netdevice.h#L2402
+                || address_family_max_mtu - send_buffer.len() < mtu
             }) {
                 break;
             }
+
             // Determine how we are sending packets (PTO, etc..).
             let profile = self.loss_recovery.send_profile(&path.borrow(), now);
             qdebug!("[{self}] output_path send_profile {profile:?}");
@@ -2594,7 +2608,7 @@ impl Connection {
                     let datagram_size = send_buffer.len() - send_buffer_len_before;
                     let max_datagram_size = *max_datagram_size.get_or_insert(datagram_size);
 
-                    // GSO requires that all datagram in a batch are of equal
+                    // GSO requires that all datagrams in a batch are of equal
                     // size. Only the last datagram can be smaller.
                     debug_assert!(datagram_size <= max_datagram_size);
                     if datagram_size < max_datagram_size {
@@ -3913,4 +3927,5 @@ impl Display for Connection {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

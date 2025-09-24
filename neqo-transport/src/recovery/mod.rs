@@ -534,7 +534,7 @@ impl Loss {
             space.on_packet_sent(sent_packet);
         } else {
             qinfo!(
-                "[{self}] ignoring {pn_space}-{} from dropped space",
+                "[{self}] ignoring packet {} from dropped space {pn_space}",
                 sent_packet.pn()
             );
         }
@@ -946,6 +946,7 @@ impl Display for Loss {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::{
         cell::RefCell,
