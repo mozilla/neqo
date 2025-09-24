@@ -36,7 +36,7 @@ neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-transport = { path = "./../neqo-transport" }
 neqo-udp = { path = "./../neqo-udp" }
-qlog = { workspace = true }
+qlog = { workspace = true, optional = true }
 quinn-udp = { workspace = true }
 regex = { workspace = true, features = ["unicode-perl"] }
 rustc-hash = { workspace = true }
@@ -52,6 +52,8 @@ neqo-transport = { path = "./../neqo-transport", features = ["draft-29"] }
 tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [features]
+default = []
+qlog = ["dep:qlog", "neqo-common/qlog", "neqo-transport/qlog", "neqo-http3/qlog"]
 bench = ["neqo-bin/bench", "neqo-http3/bench", "neqo-transport/bench"]
 fast-apple-datapath = ["quinn-udp/fast-apple-datapath"]
 draft-29 = []

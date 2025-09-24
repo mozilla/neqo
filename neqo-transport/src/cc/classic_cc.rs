@@ -12,18 +12,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "qlog")]
 use ::qlog::events::{quic::CongestionStateUpdated, EventData};
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::Qlog, qtrace};
 
 use super::CongestionControl;
-use crate::{
-    packet,
-    qlog::{self, QlogMetric},
-    recovery::sent,
-    rtt::RttEstimate,
-    sender::PACING_BURST_SIZE,
-    Pmtud,
-};
+use crate::{packet, qlog, recovery::sent, rtt::RttEstimate, sender::PACING_BURST_SIZE, Pmtud};
 
 pub const CWND_INITIAL_PKTS: usize = 10;
 const PERSISTENT_CONG_THRESH: u32 = 3;
@@ -67,6 +61,7 @@ impl State {
         };
     }
 
+    #[cfg(feature = "qlog")]
     pub const fn to_qlog(self) -> &'static str {
         match self {
             Self::SlowStart | Self::PersistentCongestion => "slow_start",
@@ -210,7 +205,8 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
             if self.state.in_recovery() {
                 self.set_state(State::CongestionAvoidance, now);
-                qlog::metrics_updated(&self.qlog, &[QlogMetric::InRecovery(false)], now);
+
+                qlog::metrics_updated(&self.qlog, &[qlog::Metric::InRecovery(false)], now);
             }
 
             new_acked += pkt.len();
@@ -263,11 +259,12 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             // acknowledged bytes after increasing the congestion window twice.
             self.acked_bytes = min(bytes_for_increase, self.acked_bytes);
         }
+
         qlog::metrics_updated(
             &self.qlog,
             &[
-                QlogMetric::CongestionWindow(self.congestion_window),
-                QlogMetric::BytesInFlight(self.bytes_in_flight),
+                qlog::Metric::CongestionWindow(self.congestion_window),
+                qlog::Metric::BytesInFlight(self.bytes_in_flight),
             ],
             now,
         );
@@ -297,9 +294,10 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             // event, we may still declare packets lost that were sent before the rebinding.
             self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
         }
+
         qlog::metrics_updated(
             &self.qlog,
-            &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
+            &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
 
@@ -344,9 +342,10 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         if pkt.cc_outstanding() {
             assert!(self.bytes_in_flight >= pkt.len());
             self.bytes_in_flight -= pkt.len();
+
             qlog::metrics_updated(
                 &self.qlog,
-                &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
+                &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
                 now,
             );
             qtrace!("[{self}] Ignore pkt with size {}", pkt.len());
@@ -355,9 +354,10 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
     fn discard_in_flight(&mut self, now: Instant) {
         self.bytes_in_flight = 0;
+
         qlog::metrics_updated(
             &self.qlog,
-            &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
+            &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
     }
@@ -386,9 +386,10 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             pkt.pn(),
             pkt.len()
         );
+
         qlog::metrics_updated(
             &self.qlog,
-            &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
+            &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
     }
@@ -449,10 +450,16 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         self.acked_bytes
     }
 
+    #[cfg_attr(
+        not(feature = "qlog"),
+        expect(unused_variables, reason = "Only used with qlog.")
+    )]
     fn set_state(&mut self, state: State, now: Instant) {
         if self.state != state {
             qdebug!("[{self}] state -> {state:?}");
+            #[cfg(feature = "qlog")]
             let old_state = self.state;
+            #[cfg(feature = "qlog")]
             self.qlog.add_event_data_with_instant(
                 || {
                     // No need to tell qlog about exit from transient states.
@@ -518,9 +525,10 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                     self.congestion_window = self.cwnd_min();
                     self.acked_bytes = 0;
                     self.set_state(State::PersistentCongestion, now);
+                    #[cfg(feature = "qlog")]
                     qlog::metrics_updated(
                         &self.qlog,
-                        &[QlogMetric::CongestionWindow(self.congestion_window)],
+                        &[qlog::Metric::CongestionWindow(self.congestion_window)],
                         now,
                     );
                     return true;
@@ -565,12 +573,13 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             self.congestion_window,
             self.ssthresh
         );
+        #[cfg(feature = "qlog")]
         qlog::metrics_updated(
             &self.qlog,
             &[
-                QlogMetric::CongestionWindow(self.congestion_window),
-                QlogMetric::SsThresh(self.ssthresh),
-                QlogMetric::InRecovery(true),
+                qlog::Metric::CongestionWindow(self.congestion_window),
+                qlog::Metric::SsThresh(self.ssthresh),
+                qlog::Metric::InRecovery(true),
             ],
             now,
         );

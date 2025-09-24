@@ -99,8 +99,8 @@ pub fn create_client(
             .max_concurrent_push_streams(args.max_concurrent_push_streams),
     );
 
-    let qlog = qlog_new(args, hostname, client.connection_id())?;
-    client.set_qlog(qlog);
+    client.set_qlog(qlog_new(args, hostname, client.connection_id())?);
+
     if let Some(ech) = &args.ech {
         client.enable_ech(ech)?;
     }
@@ -345,9 +345,9 @@ impl StreamHandler for UploadStreamHandler {
     fn process_data_writable(&mut self, client: &mut Http3Client, stream_id: StreamId) {
         let done = self
             .data
-            .send(|chunk| client.send_data(stream_id, chunk).unwrap());
+            .send(|chunk| client.send_data(stream_id, chunk, Instant::now()).unwrap());
         if done {
-            client.stream_close_send(stream_id).unwrap();
+            client.stream_close_send(stream_id, Instant::now()).unwrap();
         }
     }
 }
@@ -401,7 +401,9 @@ impl UrlHandler {
                             self.args.output_dir.as_ref(),
                             &mut self.all_paths,
                         );
-                        client.stream_close_send(client_stream_id).unwrap();
+                        client
+                            .stream_close_send(client_stream_id, Instant::now())
+                            .unwrap();
                         Box::new(DownloadStreamHandler { out_file })
                     }
                     "POST" => Box::new(UploadStreamHandler {

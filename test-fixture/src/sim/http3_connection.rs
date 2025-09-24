@@ -303,7 +303,7 @@ impl Requests {
         loop {
             let remaining = self.remaining.get_mut(&stream_id).unwrap();
             let end = min(*remaining, DATA.len());
-            let sent = c.send_data(stream_id, &DATA[..end]).unwrap();
+            let sent = c.send_data(stream_id, &DATA[..end], now()).unwrap();
             if sent == 0 {
                 return status;
             }
@@ -311,7 +311,7 @@ impl Requests {
             *remaining -= sent;
             qtrace!("sent {sent} remaining {}", remaining);
             if *remaining == 0 {
-                c.stream_close_send(stream_id).unwrap();
+                c.stream_close_send(stream_id, now()).unwrap();
                 self.remaining.remove(&stream_id);
                 return status;
             }
@@ -417,7 +417,7 @@ impl Goal for Responses {
                     stream
                         .send_headers(&[Header::new(":status", "200")])
                         .unwrap();
-                    stream.stream_close_send().unwrap();
+                    stream.stream_close_send(now()).unwrap();
                     self.remaining.remove(&stream_id);
                 }
 

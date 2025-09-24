@@ -8,6 +8,7 @@ use std::{
     cmp::min,
     collections::VecDeque,
     fmt::{self, Display, Formatter},
+    time::Instant,
 };
 
 use neqo_common::{qdebug, qerror, qlog::Qlog, qtrace, Header};
@@ -126,17 +127,22 @@ impl Encoder {
     ///
     /// May return: `ClosedCriticalStream` if stream has been closed or `DecoderStream`
     /// in case of any other transport error.
-    pub fn receive(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
-        self.read_instructions(conn, stream_id)
+    pub fn receive(&mut self, conn: &mut Connection, stream_id: StreamId, now: Instant) -> Res<()> {
+        self.read_instructions(conn, stream_id, now)
             .map_err(|e| map_error(&e))
     }
 
-    fn read_instructions(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
+    fn read_instructions(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        now: Instant,
+    ) -> Res<()> {
         qdebug!("[{self}] read a new instruction");
         loop {
             let mut recv = ReceiverConnWrapper::new(conn, stream_id);
             match self.instruction_reader.read_instructions(&mut recv) {
-                Ok(instruction) => self.call_instruction(instruction, conn.qlog_mut())?,
+                Ok(instruction) => self.call_instruction(instruction, conn.qlog_mut(), now)?,
                 Err(Error::NeedMoreData) => break Ok(()),
                 Err(e) => break Err(e),
             }
@@ -216,7 +222,12 @@ impl Encoder {
         }
     }
 
-    fn call_instruction(&mut self, instruction: DecoderInstruction, qlog: &Qlog) -> Res<()> {
+    fn call_instruction(
+        &mut self,
+        instruction: DecoderInstruction,
+        qlog: &Qlog,
+        now: Instant,
+    ) -> Res<()> {
         qdebug!("[{self}] call instruction {instruction:?}");
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
@@ -224,6 +235,7 @@ impl Encoder {
                     qlog,
                     increment,
                     &increment.to_be_bytes(),
+                    now,
                 );
 
                 self.insert_count_instruction(increment)
@@ -652,7 +664,7 @@ mod tests {
         drop(encoder.conn.process(out.dgram(), now()));
         assert!(encoder
             .encoder
-            .read_instructions(&mut encoder.conn, encoder.recv_stream_id)
+            .read_instructions(&mut encoder.conn, encoder.recv_stream_id, now())
             .is_ok());
     }
 

@@ -21,9 +21,11 @@ neqo-common = { path = "../neqo-common", features = ["test-fixture"] }
 neqo-crypto = { path = "../neqo-crypto" }
 neqo-http3 = { path = "../neqo-http3", features = ["draft-29"] }
 neqo-transport = { path = "../neqo-transport", features = ["draft-29"] }
-qlog = { workspace = true }
+qlog = { workspace = true, optional = true }
 
 [features]
+default = []
+qlog = ["dep:qlog", "neqo-common/qlog", "neqo-transport/qlog", "neqo-http3/qlog"]
 bench = ["neqo-common/bench", "neqo-crypto/bench", "neqo-http3/bench", "neqo-transport/bench"]
 disable-random = []
 
