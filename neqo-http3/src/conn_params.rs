@@ -155,6 +155,7 @@ impl Http3Parameters {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_transport::ConnectionParameters;
 

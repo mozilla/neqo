@@ -433,6 +433,7 @@ impl Goal for Responses {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use crate::{
         boxed,

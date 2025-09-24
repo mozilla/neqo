@@ -70,6 +70,7 @@ mod idle;
 pub mod params;
 mod state;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub mod test_internal;
 
 use idle::IdleTimeout;
@@ -3926,4 +3927,5 @@ impl Display for Connection {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

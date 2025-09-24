@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(clippy::unwrap_used, reason = "This is test code.")]
 
 use std::{

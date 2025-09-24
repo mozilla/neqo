@@ -537,6 +537,7 @@ fn map_stream_send_atomic_error(err: &TransportError) -> Error {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_transport::{ConnectionParameters, StreamId, StreamType};
     use test_fixture::{

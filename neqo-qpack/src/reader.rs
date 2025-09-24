@@ -335,6 +335,7 @@ pub fn parse_utf8(v: &[u8]) -> Res<&str> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod test_receiver {
 
     use std::collections::VecDeque;
@@ -376,6 +377,7 @@ pub(crate) mod test_receiver {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     use test_receiver::TestReceiver;

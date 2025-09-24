@@ -86,7 +86,7 @@ runs:
           cargo fmt --all -- --check
           case "$PLATFORM" in
             freebsd)    cargo install cargo-llvm-cov --locked
-                        cargo llvm-cov test --locked --no-fail-fast --lcov --output-path lcov.info
+                        cargo llvm-cov test --locked --no-fail-fast --codecov --output-path codecov.json
                         ;;
             *)          # FIXME: No profiler support on other platforms, error is: cannot find crate for profiler_builtins
                         cargo test --locked --no-fail-fast # We do this instead for now
@@ -140,7 +140,7 @@ runs:
     - if: ${{ inputs.codecov-token != '' }}
       uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0
       with:
-        files: lcov.info
+        files: codecov.json
         fail_ci_if_error: false
         token: ${{ inputs.codecov-token }}
         verbose: true

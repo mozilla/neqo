@@ -954,6 +954,7 @@ pub const PACKET_LIMIT: usize = 2048;
 
 #[cfg(all(test, not(feature = "disable-encryption")))]
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::Encoder;
     use test_fixture::{fixture_init, now};
