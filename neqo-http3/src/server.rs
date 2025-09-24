@@ -1003,7 +1003,7 @@ mod tests {
                             Header::new("content-length", "3"),
                         ])
                         .unwrap();
-                    stream.send_data(RESPONSE_BODY).unwrap();
+                    stream.send_data(RESPONSE_BODY, now()).unwrap();
                     data_received += 1;
                 }
                 Http3ServerEvent::DataWritable { .. }
@@ -1051,7 +1051,7 @@ mod tests {
                             Header::new("content-length", "3"),
                         ])
                         .unwrap();
-                    stream.send_data(RESPONSE_BODY).unwrap();
+                    stream.send_data(RESPONSE_BODY, now()).unwrap();
                 }
                 Http3ServerEvent::Data { .. } => {
                     panic!("We should not have a Data event");
