@@ -421,6 +421,7 @@ mod tests {
     #[test]
     fn read_prefixed_int_slow_writer() {
         let (buf, prefix_len, value) = &TEST_CASES_NUMBERS[4];
+        assert!(buf.len() > 1);
         let mut reader = IntReader::new(buf[0], *prefix_len);
         let mut test_receiver: TestReceiver = TestReceiver::default();
 
