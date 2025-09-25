@@ -391,20 +391,28 @@ impl Session {
         Ok(())
     }
 
-    pub(crate) fn datagram(&self, datagram: &[u8]) {
+    pub(crate) fn datagram_owned(&self, datagram: Vec<u8>, payload_offset: usize) {
         if self.state != State::Active {
             qdebug!("[{self}]: received datagram on {:?} session.", self.state);
             return;
         }
-        let datagram = match self.protocol.dgram_context_id(datagram) {
-            Ok(datagram) => datagram,
+
+        // Validate the payload portion based on protocol requirements
+        match self.protocol.dgram_context_id(&datagram[payload_offset..]) {
+            Ok(slice) => {
+                // Calculate total offset: session_id varint + context_id (if any)
+                let context_offset = usize::from(slice.len() != datagram[payload_offset..].len());
+
+                let total_offset = payload_offset + context_offset;
+                let payload = crate::DatagramPayload::new(datagram, total_offset);
+
+                self.events
+                    .new_datagram(self.id, payload, self.protocol.connect_type());
+            }
             Err(e) => {
                 qdebug!("[{self}]: received datagram with invalid context identifier: {e}");
-                return;
             }
-        };
-        self.events
-            .new_datagram(self.id, datagram.to_vec(), self.protocol.connect_type());
+        }
     }
 
     fn has_data_to_send(&self) -> bool {

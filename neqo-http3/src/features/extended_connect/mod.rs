@@ -51,7 +51,7 @@ pub(crate) trait ExtendedConnectEvents: Debug {
     fn new_datagram(
         &self,
         session_id: StreamId,
-        datagram: Vec<u8>,
+        datagram: crate::DatagramPayload,
         connect_type: ExtendedConnectType,
     );
 }

@@ -14,8 +14,8 @@ use crate::{
     connection::Http3State,
     features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
     settings::HSettingType,
-    CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, PushId, RecvStreamEvents, Res,
-    SendStreamEvents,
+    CloseType, DatagramPayload, Error, Http3StreamInfo, HttpRecvStreamEvents, PushId,
+    RecvStreamEvents, Res, SendStreamEvents,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -40,7 +40,7 @@ pub enum WebTransportEvent {
     },
     Datagram {
         session_id: StreamId,
-        datagram: Vec<u8>,
+        datagram: DatagramPayload,
     },
 }
 
@@ -62,7 +62,7 @@ pub enum ConnectUdpEvent {
     },
     Datagram {
         session_id: StreamId,
-        datagram: Vec<u8>,
+        datagram: DatagramPayload,
     },
 }
 
@@ -283,7 +283,7 @@ impl ExtendedConnectEvents for Http3ClientEvents {
     fn new_datagram(
         &self,
         session_id: StreamId,
-        datagram: Vec<u8>,
+        datagram: DatagramPayload,
         connect_type: ExtendedConnectType,
     ) {
         let event = match connect_type {

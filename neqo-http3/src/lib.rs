@@ -184,6 +184,101 @@ use thiserror::Error;
 
 use crate::{features::extended_connect, priority::PriorityHandler};
 
+/// Zero-copy datagram payload that avoids memory allocation and copying
+#[derive(Debug, Clone)]
+pub struct DatagramPayload {
+    data: Vec<u8>,
+    payload_offset: usize,
+}
+
+impl DatagramPayload {
+    #[must_use]
+    pub const fn new(data: Vec<u8>, payload_offset: usize) -> Self {
+        Self {
+            data,
+            payload_offset,
+        }
+    }
+
+    #[must_use]
+    pub fn payload(&self) -> &[u8] {
+        &self.data[self.payload_offset..]
+    }
+
+    #[must_use]
+    pub fn into_vec(self) -> Vec<u8> {
+        if self.payload_offset == 0 {
+            self.data
+        } else {
+            self.data[self.payload_offset..].to_vec()
+        }
+    }
+}
+
+impl AsRef<[u8]> for DatagramPayload {
+    fn as_ref(&self) -> &[u8] {
+        self.payload()
+    }
+}
+
+impl From<DatagramPayload> for Vec<u8> {
+    fn from(payload: DatagramPayload) -> Self {
+        payload.into_vec()
+    }
+}
+
+// Implement PartialEq for DatagramPayload == DatagramPayload
+impl PartialEq for DatagramPayload {
+    fn eq(&self, other: &Self) -> bool {
+        self.payload() == other.payload()
+    }
+}
+
+impl Eq for DatagramPayload {}
+
+impl std::hash::Hash for DatagramPayload {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.payload().hash(state);
+    }
+}
+
+impl PartialOrd for DatagramPayload {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DatagramPayload {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.payload().cmp(other.payload())
+    }
+}
+
+// Implement PartialEq for comparing with byte arrays and slices
+impl<const N: usize> PartialEq<[u8; N]> for DatagramPayload {
+    fn eq(&self, other: &[u8; N]) -> bool {
+        self.payload() == other.as_slice()
+    }
+}
+
+impl<const N: usize> PartialEq<&[u8; N]> for DatagramPayload {
+    fn eq(&self, other: &&[u8; N]) -> bool {
+        self.payload() == other.as_slice()
+    }
+}
+
+impl PartialEq<[u8]> for DatagramPayload {
+    fn eq(&self, other: &[u8]) -> bool {
+        self.payload() == other
+    }
+}
+
+impl PartialEq<&[u8]> for DatagramPayload {
+    fn eq(&self, other: &&[u8]) -> bool {
+        self.payload() == *other
+    }
+}
+
 type Res<T> = Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
