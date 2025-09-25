@@ -42,6 +42,7 @@ impl Qlog {
         title: Option<String>,
         description: Option<String>,
         file_prefix: D,
+        now: Instant,
     ) -> Result<Self, qlog::Error> {
         qlog_path.push(format!("{file_prefix}.sqlog"));
 
@@ -58,7 +59,7 @@ impl Qlog {
             title,
             description,
             None,
-            Instant::now(),
+            now,
             new_trace(role),
             qlog::events::EventImportance::Base,
             Box::new(BufWriter::new(file)),

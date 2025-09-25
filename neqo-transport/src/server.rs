@@ -272,7 +272,7 @@ impl Server {
         }
     }
 
-    fn create_qlog_trace(&self, odcid: ConnectionIdRef<'_>) -> Qlog {
+    fn create_qlog_trace(&self, odcid: ConnectionIdRef<'_>, now: Instant) -> Qlog {
         self.qlog_dir
             .as_ref()
             .map_or_else(Qlog::disabled, |qlog_dir| {
@@ -282,6 +282,7 @@ impl Server {
                     Some("Neqo server qlog".to_string()),
                     Some("Neqo server qlog".to_string()),
                     format!("server-{odcid}"),
+                    now,
                 )
                 .unwrap_or_else(|e| {
                     qerror!("failed to create Qlog: {e}");
@@ -295,6 +296,7 @@ impl Server {
         c: &mut Connection,
         initial: InitialDetails,
         orig_dcid: Option<ConnectionId>,
+        now: Instant,
     ) {
         let zcheck = self.zero_rtt_checker.clone();
         if c.server_enable_0rtt(&self.anti_replay, zcheck).is_err() {
@@ -305,7 +307,7 @@ impl Server {
             c.set_retry_cids(odcid, initial.src_cid, &initial.dst_cid);
         }
         c.set_validation(&self.address_validation);
-        c.set_qlog(self.create_qlog_trace(orig_dcid.unwrap_or(initial.dst_cid).as_cid_ref()));
+        c.set_qlog(self.create_qlog_trace(orig_dcid.unwrap_or(initial.dst_cid).as_cid_ref(), now));
         if let Some(cfg) = &self.ech_config {
             if c.server_enable_ech(cfg.config, &cfg.public_name, &cfg.sk, &cfg.pk)
                 .is_err()
@@ -340,7 +342,7 @@ impl Server {
 
         match sconn {
             Ok(mut c) => {
-                self.setup_connection(&mut c, initial, orig_dcid);
+                self.setup_connection(&mut c, initial, orig_dcid, now);
                 let out = c.process(Some(dgram), now);
                 self.connections.push(Rc::new(RefCell::new(c)));
                 out
@@ -349,7 +351,10 @@ impl Server {
                 qwarn!("[{self}] Unable to create connection");
                 if e == crate::Error::VersionNegotiation {
                     crate::qlog::server_version_information_failed(
-                        &self.create_qlog_trace(orig_dcid.unwrap_or(initial.dst_cid).as_cid_ref()),
+                        &self.create_qlog_trace(
+                            orig_dcid.unwrap_or(initial.dst_cid).as_cid_ref(),
+                            now,
+                        ),
                         self.conn_params.get_versions().all(),
                         initial.version.wire_version(),
                         now,
@@ -457,7 +462,7 @@ impl Server {
                 );
 
                 crate::qlog::server_version_information_failed(
-                    &self.create_qlog_trace(packet.dcid()),
+                    &self.create_qlog_trace(packet.dcid(), now),
                     self.conn_params.get_versions().all(),
                     packet.wire_version(),
                     now,
