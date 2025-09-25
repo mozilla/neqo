@@ -13,7 +13,7 @@ use std::{
 
 use crate::{
     constants::{Cipher, Version},
-    err::Res,
+    err::{sec::SEC_ERROR_BAD_DATA, Error, Res},
     experimental_api,
     p11::{PK11SymKey, SymKey},
     scoped_ptr,
@@ -187,6 +187,10 @@ impl Aead for RealAead {
         aad: &[u8],
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
+        if data.len() < Self::expansion() {
+            return Err(Error::from(SEC_ERROR_BAD_DATA));
+        }
+
         let mut l: c_uint = 0;
         unsafe {
             SSL_AeadEncrypt(
@@ -195,7 +199,7 @@ impl Aead for RealAead {
                 aad.as_ptr(),
                 c_uint::try_from(aad.len())?,
                 data.as_ptr(),
-                c_uint::try_from(data.len())? - c_uint::try_from(Self::expansion())?,
+                c_uint::try_from(data.len() - Self::expansion())?,
                 data.as_mut_ptr(),
                 &mut l,
                 c_uint::try_from(data.len())?,
