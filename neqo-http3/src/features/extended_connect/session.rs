@@ -402,7 +402,6 @@ impl Session {
             Ok(slice) => {
                 // Calculate total offset: session_id varint + context_id (if any)
                 let context_offset = usize::from(slice.len() != datagram[payload_offset..].len());
-
                 let total_offset = payload_offset + context_offset;
                 let payload = crate::DatagramPayload::new(datagram, total_offset);
 

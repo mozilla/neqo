@@ -654,7 +654,7 @@ impl Http3Connection {
 
     pub(crate) fn handle_datagram(&mut self, datagram: Vec<u8>) {
         let mut decoder = Decoder::new(&datagram);
-        let Some(session_id) = decoder.decode_varint() else {
+        let Some(id) = decoder.decode_varint() else {
             qdebug!("[{self}] handle_datagram: failed to decode session ID");
             return;
         };
@@ -662,14 +662,13 @@ impl Http3Connection {
 
         let Some(stream) = self
             .recv_streams
-            .get_mut(&StreamId::from(session_id * 4))
+            .get_mut(&StreamId::from(id * 4))
             .and_then(|s| s.extended_connect_session())
         else {
             qdebug!("[{self}] handle_datagram for unknown extended connect session");
             return;
         };
 
-        // Pass the original Vec with offset information - no copying!
         stream.borrow_mut().datagram_owned(datagram, varint_len);
     }
 
