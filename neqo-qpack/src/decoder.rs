@@ -179,10 +179,8 @@ impl Decoder {
                 .map_err(|_| Error::DecoderStream)?;
             qdebug!("[{self}] {r} bytes sent");
             if r < self.send_buf.len() {
-                // Extract the underlying Vec, split it efficiently, and create a new Encoder
-                let mut buf_vec: Vec<u8> = std::mem::take(&mut self.send_buf).into();
-                let remaining = buf_vec.split_off(r);
-                self.send_buf = Encoder::new_with_vec(remaining);
+                // Efficiently drain the sent bytes from the buffer
+                self.send_buf.drain(r).for_each(drop);
             } else {
                 self.send_buf = Encoder::default();
             }

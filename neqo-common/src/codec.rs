@@ -410,11 +410,29 @@ impl Encoder<Vec<u8>> {
     }
 
     /// Create a new [`Encoder`] that takes ownership of the provided [`Vec<u8>`].
-    /// The start position is set to the current length of the vector.
+    ///
+    /// The encoder will treat any existing data in the vector as "pre-existing"
+    /// and will append new encoded data after it. The start position is set to
+    /// the current length of the vector, so only newly encoded data will be
+    /// considered part of the encoder's content.
+    ///
+    /// This is useful when you want to preserve existing buffer contents while
+    /// continuing to encode additional data.
     #[must_use]
     pub fn new_with_vec(buf: Vec<u8>) -> Self {
         let start = buf.len();
         Self { buf, start }
+    }
+
+    /// Drain the first `n` bytes from the encoder buffer, returning an iterator
+    /// over the drained elements. This follows standard Rust drain semantics.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `n` is greater than the current length of the encoder.
+    pub fn drain(&mut self, n: usize) -> std::vec::Drain<'_, u8> {
+        assert!(n <= self.len(), "Cannot drain beyond buffer length");
+        self.buf.drain(self.start..self.start + n)
     }
 
     /// Static helper function for previewing the results of encoding without doing it.
