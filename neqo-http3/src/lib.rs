@@ -191,8 +191,12 @@ pub struct DatagramPayload {
 }
 
 impl DatagramPayload {
+    /// # Panics
+    ///
+    /// If the payload offset lies outside the data.
     #[must_use]
-    pub const fn new(data: Vec<u8>, payload_offset: usize) -> Self {
+    pub fn new(data: Vec<u8>, payload_offset: usize) -> Self {
+        assert!(payload_offset <= data.len());
         Self {
             data,
             payload_offset,
