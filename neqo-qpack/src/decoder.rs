@@ -6,14 +6,13 @@
 
 use std::fmt::{self, Display, Formatter};
 
-use neqo_common::{qdebug, Header};
+use neqo_common::{qdebug, Encoder, Header};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
     decoder_instructions::DecoderInstruction,
     encoder_instructions::{DecodedEncoderInstruction, EncoderInstructionReader},
     header_block::{HeaderDecoder, HeaderDecoderResult},
-    qpack_send_buf::Data,
     reader::ReceiverConnWrapper,
     stats::Stats,
     table::HeaderTable,
@@ -28,7 +27,7 @@ pub struct Decoder {
     table: HeaderTable,
     acked_inserts: u64,
     max_entries: u64,
-    send_buf: Data,
+    send_buf: Encoder,
     local_stream_id: Option<StreamId>,
     max_table_size: u64,
     max_blocked_streams: usize,
@@ -43,7 +42,7 @@ impl Decoder {
     #[must_use]
     pub fn new(qpack_settings: &Settings) -> Self {
         qdebug!("Decoder: creating a new qpack decoder");
-        let mut send_buf = Data::default();
+        let mut send_buf = Encoder::default();
         send_buf.encode_varint(QPACK_UNI_STREAM_TYPE_DECODER);
         let max_blocked_streams = usize::from(qpack_settings.max_blocked_streams);
         Self {
@@ -175,11 +174,18 @@ impl Decoder {
             let r = conn
                 .stream_send(
                     self.local_stream_id.ok_or(Error::Internal)?,
-                    &self.send_buf[..],
+                    self.send_buf.as_ref(),
                 )
                 .map_err(|_| Error::DecoderStream)?;
             qdebug!("[{self}] {r} bytes sent");
-            self.send_buf.read(r);
+            if r < self.send_buf.len() {
+                // Extract the underlying Vec, split it efficiently, and create a new Encoder
+                let mut buf_vec: Vec<u8> = std::mem::take(&mut self.send_buf).into();
+                let remaining = buf_vec.split_off(r);
+                self.send_buf = Encoder::new_with_vec(remaining);
+            } else {
+                self.send_buf = Encoder::default();
+            }
         }
         Ok(())
     }

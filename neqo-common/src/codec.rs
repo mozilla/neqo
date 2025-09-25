@@ -409,6 +409,14 @@ impl Encoder<Vec<u8>> {
         Self::default()
     }
 
+    /// Create a new [`Encoder`] that takes ownership of the provided [`Vec<u8>`].
+    /// The start position is set to the current length of the vector.
+    #[must_use]
+    pub fn new_with_vec(buf: Vec<u8>) -> Self {
+        let start = buf.len();
+        Self { buf, start }
+    }
+
     /// Static helper function for previewing the results of encoding without doing it.
     ///
     /// # Panics
