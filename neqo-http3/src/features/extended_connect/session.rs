@@ -401,7 +401,8 @@ impl Session {
         match self.protocol.dgram_context_id(&datagram[payload_offset..]) {
             Ok(slice) => {
                 // Calculate total offset: session_id varint + context_id (if any)
-                let context_offset = usize::from(slice.len() != datagram[payload_offset..].len());
+                // If the returned slice is shorter than the input, a context identifier is present.
+                let context_offset = if slice.len() != datagram[payload_offset..].len() { 1 } else { 0 };
                 let total_offset = payload_offset + context_offset;
                 let payload = crate::DatagramPayload::new(datagram, total_offset);
 
