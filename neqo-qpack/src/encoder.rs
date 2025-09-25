@@ -10,7 +10,7 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use neqo_common::{qdebug, qerror, qlog::Qlog, qtrace, Header};
+use neqo_common::{qdebug, qerror, qtrace, Header};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
@@ -18,7 +18,6 @@ use crate::{
     decoder_instructions::{DecoderInstruction, DecoderInstructionReader},
     encoder_instructions::EncoderInstruction,
     header_block::HeaderEncoder,
-    qlog,
     qpack_send_buf::Data,
     reader::ReceiverConnWrapper,
     stats::Stats,
@@ -136,7 +135,7 @@ impl Encoder {
         loop {
             let mut recv = ReceiverConnWrapper::new(conn, stream_id);
             match self.instruction_reader.read_instructions(&mut recv) {
-                Ok(instruction) => self.call_instruction(instruction, conn.qlog_mut())?,
+                Ok(instruction) => self.call_instruction(instruction)?,
                 Err(Error::NeedMoreData) => break Ok(()),
                 Err(e) => break Err(e),
             }
@@ -216,16 +215,10 @@ impl Encoder {
         }
     }
 
-    fn call_instruction(&mut self, instruction: DecoderInstruction, qlog: &Qlog) -> Res<()> {
+    fn call_instruction(&mut self, instruction: DecoderInstruction) -> Res<()> {
         qdebug!("[{self}] call instruction {instruction:?}");
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
-                qlog::qpack_read_insert_count_increment_instruction(
-                    qlog,
-                    increment,
-                    &increment.to_be_bytes(),
-                );
-
                 self.insert_count_instruction(increment)
             }
             DecoderInstruction::HeaderAck { stream_id } => {
