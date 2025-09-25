@@ -197,7 +197,7 @@ where
                 Some("Neqo client qlog".to_string()),
                 Some("Neqo client qlog".to_string()),
                 format!("client-{cid}"),
-                now()
+                now(),
             )
             .unwrap(),
         );
@@ -255,7 +255,7 @@ where
                 Some("Neqo server qlog".to_string()),
                 Some("Neqo server qlog".to_string()),
                 "server".to_string(),
-                now()
+                now(),
             )
             .unwrap(),
         );
