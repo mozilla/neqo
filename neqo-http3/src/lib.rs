@@ -201,7 +201,11 @@ impl DatagramPayload {
 
     #[must_use]
     pub fn payload(&self) -> &[u8] {
-        &self.data[self.payload_offset..]
+        if self.payload_offset > self.data.len() {
+            &[]
+        } else {
+            &self.data[self.payload_offset..]
+        }
     }
 }
 
