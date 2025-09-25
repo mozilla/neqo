@@ -9,7 +9,7 @@
 
 use neqo_crypto::{
     constants::{Cipher, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-    hkdf, Aead,
+    hkdf, Aead, AeadTrait as _,
 };
 use test_fixture::fixture_init;
 

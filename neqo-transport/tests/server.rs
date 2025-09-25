@@ -11,7 +11,8 @@ use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
 use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
 use neqo_common::{qtrace, Datagram, Decoder, Encoder, Role};
 use neqo_crypto::{
-    generate_ech_keys, Aead, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
+    generate_ech_keys, Aead, AeadTrait as _, AllowZeroRtt, AuthenticationStatus,
+    ZeroRttCheckResult, ZeroRttChecker,
 };
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},

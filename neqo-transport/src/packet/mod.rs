@@ -15,7 +15,7 @@ use std::{
 
 use enum_map::Enum;
 use neqo_common::{hex, hex_with_len, qtrace, qwarn, Buffer, Decoder, Encoder};
-use neqo_crypto::{random, Aead};
+use neqo_crypto::{random, Aead, AeadTrait as _};
 use strum::{EnumIter, FromRepr};
 
 use crate::{

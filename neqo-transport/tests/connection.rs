@@ -7,7 +7,7 @@
 mod common;
 use common::assert_dscp;
 use neqo_common::{Datagram, Decoder, Encoder, Role};
-use neqo_crypto::Aead;
+use neqo_crypto::{Aead, AeadTrait as _};
 use neqo_transport::{
     CloseReason, ConnectionParameters, Error, State, StreamType, Version, MIN_INITIAL_PACKET_SIZE,
 };

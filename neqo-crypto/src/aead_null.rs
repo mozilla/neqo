@@ -4,11 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::missing_errors_doc, reason = "OK here.")]
-
 use std::fmt;
 
 use crate::{
+    aead::Aead,
     constants::{Cipher, Version},
     err::{sec::SEC_ERROR_BAD_DATA, Error, Res},
     p11::SymKey,
@@ -19,63 +18,12 @@ pub const AEAD_NULL_TAG: &[u8] = &[0x0a; 16];
 pub struct AeadNull {}
 
 impl AeadNull {
-    #[expect(
-        clippy::unnecessary_wraps,
-        reason = "Need to replicate the API of aead::RealAead."
-    )]
-    pub const fn new(
-        _version: Version,
-        _cipher: Cipher,
-        _secret: &SymKey,
-        _prefix: &str,
-    ) -> Res<Self> {
-        Ok(Self {})
-    }
-
     #[must_use]
     pub const fn expansion() -> usize {
         AEAD_NULL_TAG.len()
     }
 
-    #[expect(
-        clippy::unnecessary_wraps,
-        clippy::unused_self,
-        reason = "Need to replicate the API of aead::RealAead."
-    )]
-    pub fn encrypt<'a>(
-        &self,
-        _count: u64,
-        _aad: &[u8],
-        input: &[u8],
-        output: &'a mut [u8],
-    ) -> Res<&'a [u8]> {
-        let l = input.len();
-        output[..l].copy_from_slice(input);
-        output[l..l + Self::expansion()].copy_from_slice(AEAD_NULL_TAG);
-        Ok(&output[..l + Self::expansion()])
-    }
-
-    #[expect(
-        clippy::unnecessary_wraps,
-        clippy::unused_self,
-        reason = "Need to replicate the API of aead::RealAead."
-    )]
-    pub fn encrypt_in_place<'a>(
-        &self,
-        _count: u64,
-        _aad: &[u8],
-        data: &'a mut [u8],
-    ) -> Res<&'a mut [u8]> {
-        let pos = data.len() - Self::expansion();
-        data[pos..].copy_from_slice(AEAD_NULL_TAG);
-        Ok(data)
-    }
-
-    #[expect(
-        clippy::unused_self,
-        reason = "Need to replicate the API of aead::RealAead."
-    )]
-    fn decrypt_check(&self, _count: u64, _aad: &[u8], input: &[u8]) -> Res<usize> {
+    fn decrypt_check(_count: u64, _aad: &[u8], input: &[u8]) -> Res<usize> {
         if input.len() < Self::expansion() {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
@@ -96,28 +44,61 @@ impl AeadNull {
             Err(Error::from(SEC_ERROR_BAD_DATA))
         }
     }
+}
 
-    pub fn decrypt<'a>(
+impl Aead for AeadNull {
+    fn new(_version: Version, _cipher: Cipher, _secret: &SymKey, _prefix: &str) -> Res<Self> {
+        Ok(Self {})
+    }
+
+    fn expansion() -> usize {
+        Self::expansion()
+    }
+
+    fn encrypt<'a>(
+        &self,
+        _count: u64,
+        _aad: &[u8],
+        input: &[u8],
+        output: &'a mut [u8],
+    ) -> Res<&'a [u8]> {
+        let l = input.len();
+        output[..l].copy_from_slice(input);
+        output[l..l + Self::expansion()].copy_from_slice(AEAD_NULL_TAG);
+        Ok(&output[..l + Self::expansion()])
+    }
+
+    fn encrypt_in_place<'a>(
+        &self,
+        _count: u64,
+        _aad: &[u8],
+        data: &'a mut [u8],
+    ) -> Res<&'a mut [u8]> {
+        let pos = data.len() - Self::expansion();
+        data[pos..].copy_from_slice(AEAD_NULL_TAG);
+        Ok(data)
+    }
+
+    fn decrypt<'a>(
         &self,
         count: u64,
         aad: &[u8],
         input: &[u8],
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
-        self.decrypt_check(count, aad, input).map(|len| {
+        Self::decrypt_check(count, aad, input).map(|len| {
             output[..len].copy_from_slice(&input[..len]);
             &output[..len]
         })
     }
 
-    pub fn decrypt_in_place<'a>(
+    fn decrypt_in_place<'a>(
         &self,
         count: u64,
         aad: &[u8],
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
-        self.decrypt_check(count, aad, data)
-            .map(move |len| &mut data[..len])
+        Self::decrypt_check(count, aad, data).map(move |len| &mut data[..len])
     }
 }
 

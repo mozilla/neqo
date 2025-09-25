@@ -9,6 +9,7 @@ use std::mem;
 use neqo_common::{hex, qinfo, qtrace, Encoder};
 
 use crate::{
+    aead::Aead as _,
     constants::{Cipher, Version},
     err::{Error, Res},
     hkdf,
