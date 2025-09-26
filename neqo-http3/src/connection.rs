@@ -7,6 +7,7 @@
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
+    mem,
     rc::Rc,
 };
 
@@ -396,30 +397,36 @@ impl Http3Connection {
 
     /// Check for blocked streams that may have become unblocked due to flow control updates.
     /// This should be called after processing incoming frames that might update flow control.
-    pub(crate) fn check_blocked_streams(&mut self, conn: &mut Connection) {
-        // Use retain to remove unblocked streams in-place and move them to pending data
-        // TODO: Switch to drain_filter() when MSRV allows for even better performance
-        self.blocked_streams.retain(|&stream_id| {
+    pub(crate) fn check_blocked_streams(&mut self, conn: &Connection) {
+        let mut unblocked = Vec::new();
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over streams in an undefined order."
+        )]
+        for &stream_id in &self.blocked_streams {
             match conn.stream_avail_send_space(stream_id) {
                 Ok(0) => {
-                    // Still blocked, keep in blocked_streams
-                    true
+                    // Still blocked, do nothing.
                 }
                 Ok(_) => {
-                    // Unblocked, move to pending data if stream has data to send
-                    if let Some(stream) = self.send_streams.get(&stream_id) {
-                        if stream.has_data_to_send() {
-                            self.streams_with_pending_data.insert(stream_id);
-                        }
-                    }
-                    false // Remove from blocked_streams
+                    // Unblocked, collect for removal and move to pending data if needed.
+                    unblocked.push(stream_id);
                 }
                 Err(_) => {
-                    // Stream no longer exists, remove from blocked_streams
-                    false
+                    // Stream no longer exists, collect for removal.
+                    unblocked.push(stream_id);
                 }
             }
-        });
+        }
+        // Remove all unblocked streams from blocked_streams.
+        for stream_id in unblocked {
+            self.blocked_streams.remove(&stream_id);
+            if let Some(stream) = self.send_streams.get(&stream_id) {
+                if stream.has_data_to_send() {
+                    self.streams_with_pending_data.insert(stream_id);
+                }
+            }
+        }
     }
 
     /// This function calls the `send` function for all streams that have data to send. If a stream
@@ -427,10 +434,12 @@ impl Http3Connection {
     ///
     /// Control and QPACK streams are handled differently and are never added to the list.
     fn send_non_control_streams(&mut self, conn: &mut Connection) -> Res<()> {
-        // Process streams one at a time instead of taking the entire set to handle re-additions
-        while let Some(stream_id) = self.streams_with_pending_data.iter().next().copied() {
-            self.streams_with_pending_data.remove(&stream_id);
-
+        let to_send = mem::take(&mut self.streams_with_pending_data);
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over active streams in an undefined order."
+        )]
+        for stream_id in to_send {
             let done = if let Some(s) = &mut self.send_streams.get_mut(&stream_id) {
                 s.send(conn)?;
                 if s.has_data_to_send() {
