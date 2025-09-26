@@ -7,7 +7,6 @@
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
-    mem,
     rc::Rc,
 };
 
@@ -291,6 +290,7 @@ pub struct Http3Connection {
     qpack_decoder: Rc<RefCell<qpack::Decoder>>,
     settings_state: Http3RemoteSettingsState,
     streams_with_pending_data: HashSet<StreamId>,
+    blocked_streams: HashSet<StreamId>,
     send_streams: HashMap<StreamId, Box<dyn SendStream>>,
     recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
     webtransport: ExtendedConnectFeature,
@@ -327,6 +327,7 @@ impl Http3Connection {
             local_params: conn_params,
             settings_state: Http3RemoteSettingsState::NotReceived,
             streams_with_pending_data: HashSet::default(),
+            blocked_streams: HashSet::default(),
             send_streams: HashMap::default(),
             recv_streams: HashMap::default(),
             role,
@@ -382,7 +383,10 @@ impl Http3Connection {
     /// Inform an [`Http3Connection`] that a stream has data to send and that
     /// [`SendStream::send`] should be called for the stream.
     pub(crate) fn stream_has_pending_data(&mut self, stream_id: StreamId) {
-        self.streams_with_pending_data.insert(stream_id);
+        // Only add to pending data if the stream is not blocked
+        if !self.blocked_streams.contains(&stream_id) {
+            self.streams_with_pending_data.insert(stream_id);
+        }
     }
 
     /// Return true if there is a stream that needs to send data.
@@ -390,21 +394,60 @@ impl Http3Connection {
         !self.streams_with_pending_data.is_empty()
     }
 
+    /// Check for blocked streams that may have become unblocked due to flow control updates.
+    /// This should be called after processing incoming frames that might update flow control.
+    pub(crate) fn check_blocked_streams(&mut self, conn: &mut Connection) {
+        // Use retain to remove unblocked streams in-place and move them to pending data
+        // TODO: Switch to drain_filter() when MSRV allows for even better performance
+        self.blocked_streams.retain(|&stream_id| {
+            match conn.stream_avail_send_space(stream_id) {
+                Ok(0) => {
+                    // Still blocked, keep in blocked_streams
+                    true
+                }
+                Ok(_) => {
+                    // Unblocked, move to pending data if stream has data to send
+                    if let Some(stream) = self.send_streams.get(&stream_id) {
+                        if stream.has_data_to_send() {
+                            self.streams_with_pending_data.insert(stream_id);
+                        }
+                    }
+                    false // Remove from blocked_streams
+                }
+                Err(_) => {
+                    // Stream no longer exists, remove from blocked_streams
+                    false
+                }
+            }
+        });
+    }
+
     /// This function calls the `send` function for all streams that have data to send. If a stream
     /// has data to send it will be added to the `streams_with_pending_data` list.
     ///
     /// Control and QPACK streams are handled differently and are never added to the list.
     fn send_non_control_streams(&mut self, conn: &mut Connection) -> Res<()> {
-        let to_send = mem::take(&mut self.streams_with_pending_data);
-        #[expect(
-            clippy::iter_over_hash_type,
-            reason = "OK to loop over active streams in an undefined order."
-        )]
-        for stream_id in to_send {
+        // Process streams one at a time instead of taking the entire set to handle re-additions
+        while let Some(stream_id) = self.streams_with_pending_data.iter().next().copied() {
+            self.streams_with_pending_data.remove(&stream_id);
+
             let done = if let Some(s) = &mut self.send_streams.get_mut(&stream_id) {
                 s.send(conn)?;
                 if s.has_data_to_send() {
-                    self.streams_with_pending_data.insert(stream_id);
+                    // Check if the stream might be blocked by examining available send space
+                    match conn.stream_avail_send_space(stream_id) {
+                        Ok(0) => {
+                            // No space available, stream is likely blocked
+                            self.blocked_streams.insert(stream_id);
+                        }
+                        Ok(_) => {
+                            // Space available, stream can continue sending
+                            self.streams_with_pending_data.insert(stream_id);
+                        }
+                        Err(_) => {
+                            // Stream error, don't re-add
+                        }
+                    }
                 }
                 s.done()
             } else {
@@ -420,6 +463,9 @@ impl Http3Connection {
     /// Call `send` for all streams that need to send data. See explanation for the main structure
     /// for more details.
     pub(crate) fn process_sending(&mut self, conn: &mut Connection) -> Res<()> {
+        // Check for streams that may have become unblocked
+        self.check_blocked_streams(conn);
+
         // check if control stream has data to send.
         self.control_stream_local
             .send(conn, &mut self.recv_streams)?;
@@ -642,6 +688,7 @@ impl Http3Connection {
             )));
             self.settings_state = Http3RemoteSettingsState::NotReceived;
             self.streams_with_pending_data.clear();
+            self.blocked_streams.clear();
             // TODO: investigate whether this code can automatically retry failed transactions.
             self.send_streams.clear();
             self.recv_streams.clear();
@@ -1115,7 +1162,7 @@ impl Http3Connection {
         if send_stream.done() {
             self.remove_send_stream(stream_id, conn);
         } else if send_stream.has_data_to_send() {
-            self.streams_with_pending_data.insert(stream_id);
+            self.stream_has_pending_data(stream_id);
         }
         Ok(())
     }
@@ -1203,7 +1250,7 @@ impl Http3Connection {
         extended_conn
             .borrow_mut()
             .send_request(&final_headers, conn)?;
-        self.streams_with_pending_data.insert(id);
+        self.stream_has_pending_data(id);
         Ok(id)
     }
 
@@ -1285,7 +1332,7 @@ impl Http3Connection {
                     drop(self.stream_close_send(conn, stream_id));
                     // TODO issue 1294: add a timer to clean up the recv_stream if the peer does not
                     // do that in a short time.
-                    self.streams_with_pending_data.insert(stream_id);
+                    self.stream_has_pending_data(stream_id);
                 } else {
                     self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
                 }
@@ -1316,7 +1363,7 @@ impl Http3Connection {
                         Box::new(Rc::clone(&extended_conn)),
                         Box::new(extended_conn),
                     );
-                    self.streams_with_pending_data.insert(stream_id);
+                    self.stream_has_pending_data(stream_id);
                 } else {
                     self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
                     return Err(Error::InvalidStreamId);
@@ -1622,7 +1669,7 @@ impl Http3Connection {
         recv_stream: Box<dyn RecvStream>,
     ) {
         if send_stream.has_data_to_send() {
-            self.streams_with_pending_data.insert(stream_id);
+            self.stream_has_pending_data(stream_id);
         }
         self.send_streams.insert(stream_id, send_stream);
         self.recv_streams.insert(stream_id, recv_stream);
@@ -1753,6 +1800,8 @@ impl Http3Connection {
         stream_id: StreamId,
         conn: &mut Connection,
     ) -> Option<Box<dyn SendStream>> {
+        self.streams_with_pending_data.remove(&stream_id);
+        self.blocked_streams.remove(&stream_id);
         let stream = self.send_streams.remove(&stream_id);
         if let Some(s) = &stream {
             if s.stream_type() == Http3StreamType::ExtendedConnect {
