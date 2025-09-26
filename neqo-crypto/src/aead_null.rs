@@ -18,11 +18,6 @@ pub const AEAD_NULL_TAG: &[u8] = &[0x0a; 16];
 pub struct AeadNull {}
 
 impl AeadNull {
-    #[must_use]
-    pub const fn expansion() -> usize {
-        AEAD_NULL_TAG.len()
-    }
-
     fn decrypt_check(_count: u64, _aad: &[u8], input: &[u8]) -> Res<usize> {
         if input.len() < Self::expansion() {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
@@ -52,7 +47,7 @@ impl Aead for AeadNull {
     }
 
     fn expansion() -> usize {
-        Self::expansion()
+        AEAD_NULL_TAG.len()
     }
 
     fn encrypt<'a>(

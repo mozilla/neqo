@@ -120,11 +120,6 @@ pub struct RealAead {
 }
 
 impl RealAead {
-    #[must_use]
-    pub const fn expansion() -> usize {
-        16
-    }
-
     unsafe fn from_raw(
         version: Version,
         cipher: Cipher,
@@ -154,7 +149,7 @@ impl Aead for RealAead {
     }
 
     fn expansion() -> usize {
-        Self::expansion()
+        16
     }
 
     fn encrypt<'a>(

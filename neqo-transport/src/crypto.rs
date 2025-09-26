@@ -701,7 +701,7 @@ impl CryptoDxState {
     }
 
     #[must_use]
-    pub const fn expansion() -> usize {
+    pub fn expansion() -> usize {
         Aead::expansion()
     }
 
@@ -742,7 +742,7 @@ impl CryptoDxState {
     /// Get the amount of extra padding packets protected with this profile need.
     /// This is the difference between the size of the header protection sample
     /// and the AEAD expansion.
-    pub const fn extra_padding() -> usize {
+    pub fn extra_padding() -> usize {
         hp::Key::SAMPLE_SIZE.saturating_sub(Aead::expansion())
     }
 }
