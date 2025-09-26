@@ -18,14 +18,14 @@ pub const AEAD_NULL_TAG: &[u8] = &[0x0a; 16];
 pub struct AeadNull {}
 
 impl AeadNull {
-    fn decrypt_check(_count: u64, _aad: &[u8], input: &[u8]) -> Res<usize> {
-        if input.len() < Self::expansion() {
+    fn decrypt_check(&self, _count: u64, _aad: &[u8], input: &[u8]) -> Res<usize> {
+        if input.len() < self.expansion() {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
 
         let len_encrypted = input
             .len()
-            .checked_sub(Self::expansion())
+            .checked_sub(self.expansion())
             .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
         // Check that:
         // 1) expansion is all zeros and
@@ -46,7 +46,7 @@ impl Aead for AeadNull {
         Ok(Self {})
     }
 
-    fn expansion() -> usize {
+    fn expansion(&self) -> usize {
         AEAD_NULL_TAG.len()
     }
 
@@ -59,8 +59,8 @@ impl Aead for AeadNull {
     ) -> Res<&'a [u8]> {
         let l = input.len();
         output[..l].copy_from_slice(input);
-        output[l..l + Self::expansion()].copy_from_slice(AEAD_NULL_TAG);
-        Ok(&output[..l + Self::expansion()])
+        output[l..l + self.expansion()].copy_from_slice(AEAD_NULL_TAG);
+        Ok(&output[..l + self.expansion()])
     }
 
     fn encrypt_in_place<'a>(
@@ -69,7 +69,7 @@ impl Aead for AeadNull {
         _aad: &[u8],
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
-        let pos = data.len() - Self::expansion();
+        let pos = data.len() - self.expansion();
         data[pos..].copy_from_slice(AEAD_NULL_TAG);
         Ok(data)
     }
@@ -81,7 +81,7 @@ impl Aead for AeadNull {
         input: &[u8],
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
-        Self::decrypt_check(count, aad, input).map(|len| {
+        self.decrypt_check(count, aad, input).map(|len| {
             output[..len].copy_from_slice(&input[..len]);
             &output[..len]
         })
@@ -93,7 +93,8 @@ impl Aead for AeadNull {
         aad: &[u8],
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
-        Self::decrypt_check(count, aad, data).map(move |len| &mut data[..len])
+        self.decrypt_check(count, aad, data)
+            .map(move |len| &mut data[..len])
     }
 }
 

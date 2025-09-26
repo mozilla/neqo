@@ -2664,7 +2664,7 @@ impl Connection {
             else {
                 continue;
             };
-            let aead_expansion = CryptoDxState::expansion();
+            let aead_expansion = tx.expansion();
 
             let header_start = encoder.len();
 
@@ -3846,7 +3846,7 @@ impl Connection {
         );
 
         let data_len_possible =
-            u64::try_from(mtu.saturating_sub(CryptoDxState::expansion() + builder.len() + 1))?;
+            u64::try_from(mtu.saturating_sub(tx.expansion() + builder.len() + 1))?;
         Ok(min(data_len_possible, max_dgram_size))
     }
 

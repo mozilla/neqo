@@ -35,7 +35,7 @@ pub trait Aead {
         Self: Sized;
 
     /// Get the expansion size (authentication tag length) for this AEAD.
-    fn expansion() -> usize
+    fn expansion(&self) -> usize
     where
         Self: Sized;
 
@@ -148,7 +148,7 @@ impl Aead for RealAead {
         unsafe { Self::from_raw(version, cipher, s, prefix) }
     }
 
-    fn expansion() -> usize {
+    fn expansion(&self) -> usize {
         16
     }
 
@@ -182,7 +182,7 @@ impl Aead for RealAead {
         aad: &[u8],
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
-        if data.len() < Self::expansion() {
+        if data.len() < self.expansion() {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
 
@@ -194,7 +194,7 @@ impl Aead for RealAead {
                 aad.as_ptr(),
                 c_uint::try_from(aad.len())?,
                 data.as_ptr(),
-                c_uint::try_from(data.len() - Self::expansion())?,
+                c_uint::try_from(data.len() - self.expansion())?,
                 data.as_mut_ptr(),
                 &mut l,
                 c_uint::try_from(data.len())?,
@@ -254,7 +254,7 @@ impl Aead for RealAead {
                 c_uint::try_from(data.len())?,
             )
         }?;
-        debug_assert_eq!(usize::try_from(l)?, data.len() - Self::expansion());
+        debug_assert_eq!(usize::try_from(l)?, data.len() - self.expansion());
         Ok(&mut data[..l.try_into()?])
     }
 }

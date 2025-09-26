@@ -679,7 +679,7 @@ impl CryptoDxState {
 
         // The numbers in `Self::limit` assume a maximum packet size of `LIMIT`.
         // Adjust them as we encounter larger packets.
-        let body_len = data.len() - hdr.len() - Aead::expansion();
+        let body_len = data.len() - hdr.len() - self.aead.expansion();
         debug_assert!(body_len <= u16::MAX.into());
         if body_len > self.largest_packet_len {
             let new_bits = usize::leading_zeros(self.largest_packet_len - 1)
@@ -701,8 +701,8 @@ impl CryptoDxState {
     }
 
     #[must_use]
-    pub fn expansion() -> usize {
-        Aead::expansion()
+    pub fn expansion(&self) -> usize {
+        self.aead.expansion()
     }
 
     pub fn decrypt<'a>(
@@ -742,8 +742,8 @@ impl CryptoDxState {
     /// Get the amount of extra padding packets protected with this profile need.
     /// This is the difference between the size of the header protection sample
     /// and the AEAD expansion.
-    pub fn extra_padding() -> usize {
-        hp::Key::SAMPLE_SIZE.saturating_sub(Aead::expansion())
+    pub fn extra_padding(&self) -> usize {
+        hp::Key::SAMPLE_SIZE.saturating_sub(self.expansion())
     }
 }
 
