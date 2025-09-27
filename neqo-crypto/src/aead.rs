@@ -35,9 +35,7 @@ pub trait Aead {
         Self: Sized;
 
     /// Get the expansion size (authentication tag length) for this AEAD.
-    fn expansion(&self) -> usize
-    where
-        Self: Sized;
+    fn expansion(&self) -> usize;
 
     /// Encrypt plaintext with associated data.
     ///
