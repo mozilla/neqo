@@ -64,7 +64,7 @@ pub enum WebTransportEvent {
     NewStream(Http3StreamInfo),
     Datagram {
         session_id: StreamId,
-        datagram: Vec<u8>,
+        datagram: crate::DatagramPayload,
     },
 }
 
@@ -81,7 +81,7 @@ pub enum ConnectUdpEvent {
     },
     Datagram {
         session_id: StreamId,
-        datagram: Vec<u8>,
+        datagram: crate::DatagramPayload,
     },
 }
 
@@ -220,7 +220,7 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
     fn new_datagram(
         &self,
         session_id: StreamId,
-        datagram: Vec<u8>,
+        datagram: crate::DatagramPayload,
         connect_type: ExtendedConnectType,
     ) {
         let event = match connect_type {

@@ -501,7 +501,7 @@ pub enum WebTransportServerEvent {
     NewStream(Http3OrWebTransportStream),
     Datagram {
         session: WebTransportRequest,
-        datagram: Vec<u8>,
+        datagram: crate::DatagramPayload,
     },
 }
 
@@ -518,7 +518,7 @@ pub enum ConnectUdpServerEvent {
     },
     Datagram {
         session: ConnectUdpRequest,
-        datagram: Vec<u8>,
+        datagram: crate::DatagramPayload,
     },
 }
 
@@ -717,12 +717,20 @@ impl Http3ServerEvents {
         ));
     }
 
-    pub(crate) fn webtransport_datagram(&self, session: WebTransportRequest, datagram: Vec<u8>) {
+    pub(crate) fn webtransport_datagram(
+        &self,
+        session: WebTransportRequest,
+        datagram: crate::DatagramPayload,
+    ) {
         self.insert(Http3ServerEvent::WebTransport(
             WebTransportServerEvent::Datagram { session, datagram },
         ));
     }
-    pub(crate) fn connect_udp_datagram(&self, session: ConnectUdpRequest, datagram: Vec<u8>) {
+    pub(crate) fn connect_udp_datagram(
+        &self,
+        session: ConnectUdpRequest,
+        datagram: crate::DatagramPayload,
+    ) {
         self.insert(Http3ServerEvent::ConnectUdp(
             ConnectUdpServerEvent::Datagram { session, datagram },
         ));

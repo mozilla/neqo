@@ -184,6 +184,59 @@ use thiserror::Error;
 
 use crate::{features::extended_connect, priority::PriorityHandler};
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DatagramPayload {
+    data: Vec<u8>,
+    payload_offset: usize,
+}
+
+impl DatagramPayload {
+    /// # Panics
+    ///
+    /// If the payload offset lies outside the data.
+    #[must_use]
+    pub fn new(data: Vec<u8>, payload_offset: usize) -> Self {
+        assert!(payload_offset <= data.len());
+        Self {
+            data,
+            payload_offset,
+        }
+    }
+
+    #[must_use]
+    pub fn payload(&self) -> &[u8] {
+        &self.data[self.payload_offset..]
+    }
+}
+
+impl AsRef<[u8]> for DatagramPayload {
+    fn as_ref(&self) -> &[u8] {
+        self.payload()
+    }
+}
+
+impl From<DatagramPayload> for Vec<u8> {
+    fn from(payload: DatagramPayload) -> Self {
+        if payload.payload_offset == 0 {
+            payload.data
+        } else {
+            payload.data[payload.payload_offset..].to_vec()
+        }
+    }
+}
+
+impl<const N: usize> PartialEq<&[u8; N]> for DatagramPayload {
+    fn eq(&self, other: &&[u8; N]) -> bool {
+        self.payload() == other.as_slice()
+    }
+}
+
+impl PartialEq<&[u8]> for DatagramPayload {
+    fn eq(&self, other: &&[u8]) -> bool {
+        self.payload() == *other
+    }
+}
+
 type Res<T> = Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
