@@ -120,3 +120,14 @@ fn aead_encrypt_decrypt() {
     let res = aead.decrypt(1, &scratch[..], ciphertext, plaintext_buf);
     assert!(res.is_err());
 }
+
+#[test]
+fn aead_encrypt_in_place_too_small_buffer() {
+    let aead = make_aead(TLS_AES_128_GCM_SHA256);
+
+    // Create a buffer that's smaller than the expansion size
+    let mut small_buffer = vec![0u8; aead.expansion() - 1];
+
+    let result = aead.encrypt_in_place(1, AAD, &mut small_buffer);
+    assert!(result.is_err());
+}
