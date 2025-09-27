@@ -7,7 +7,7 @@
 use neqo_common::Encoder;
 use neqo_transport::{Connection, StreamId};
 
-use crate::{qlog, Res};
+use crate::Res;
 
 #[derive(Debug, PartialEq, Eq, Default)]
 pub enum BufferedStream {
@@ -77,7 +77,6 @@ impl BufferedStream {
             let b = buf.split_off(sent);
             *buf = b;
         }
-        qlog::h3_data_moved_down(conn.qlog_mut(), *stream_id, sent);
         Ok(sent)
     }
 
@@ -94,9 +93,6 @@ impl BufferedStream {
             return Ok(false);
         }
         let res = conn.stream_send_atomic(*stream_id, to_send)?;
-        if res {
-            qlog::h3_data_moved_down(conn.qlog_mut(), *stream_id, to_send.len());
-        }
         Ok(res)
     }
 

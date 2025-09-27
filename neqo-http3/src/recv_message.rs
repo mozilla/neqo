@@ -21,7 +21,7 @@ use crate::{
     headers_checks::{headers_valid, is_interim},
     priority::PriorityHandler,
     push_controller::PushController,
-    qlog, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
+    CloseType, Error, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
     MessageType, Priority, PushId, ReceiveOutput, RecvStream, Res, Stream,
 };
 
@@ -405,7 +405,6 @@ impl RecvStream for RecvMessage {
                     let (amount, fin) = conn
                         .stream_recv(self.stream_id, &mut buf[written..written + to_read])
                         .map_err(|e| Error::map_stream_recv_errors(&Error::from(e)))?;
-                    qlog::h3_data_moved_up(conn.qlog_mut(), self.stream_id, amount);
 
                     debug_assert!(amount <= to_read);
                     *remaining_data_len -= amount;
