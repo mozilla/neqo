@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::Instant};
 
 use neqo_qpack as qpack;
 use neqo_transport::{Connection, StreamId};
@@ -34,8 +34,10 @@ impl RecvStream for EncoderRecvStream {
         Err(Error::HttpClosedCriticalStream)
     }
 
-    fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
-        self.encoder.borrow_mut().receive(conn, self.stream_id)?;
+    fn receive(&mut self, conn: &mut Connection, now: Instant) -> Res<(ReceiveOutput, bool)> {
+        self.encoder
+            .borrow_mut()
+            .receive(conn, self.stream_id, now)?;
         Ok((ReceiveOutput::NoOutput, false))
     }
 }

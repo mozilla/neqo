@@ -26,7 +26,7 @@ fn classic_connect() {
     let stream_id = client
         .connect(now(), AUTHORITY, &[], Priority::default())
         .unwrap();
-    client.send_data(stream_id, b"ping").unwrap();
+    client.send_data(stream_id, b"ping", now()).unwrap();
     exchange_packets(&mut client, &mut server, false, None);
 
     let Some(Http3ServerEvent::Headers { headers, .. }) = server.next_event() else {
@@ -56,7 +56,7 @@ fn classic_connect() {
     stream
         .send_headers(&[Header::new(":status", "200")])
         .unwrap();
-    stream.send_data(b"pong").unwrap();
+    stream.send_data(b"pong", now()).unwrap();
     exchange_packets(&mut client, &mut server, false, None);
 
     // Ignore some client events.
