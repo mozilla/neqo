@@ -97,3 +97,26 @@ impl Protocol for Session {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use neqo_transport::StreamId;
+
+    use super::Session;
+    use crate::features::extended_connect::session::Protocol as _;
+
+    #[test]
+    fn varint_0_context_id() {
+        let session = Session::new(StreamId::new(42));
+        // Varint [0x00] is 0, i.e. a supported connect-udp context ID.
+        assert_eq!(
+            session.dgram_context_id(&[0x00, 0x00, 0x00]).unwrap(),
+            &[0x00, 0x00]
+        );
+        // Varint [0x40 0x00] is 0 as well, thus a supported connect-udp context ID, too.
+        assert_eq!(
+            session.dgram_context_id(&[0x40, 0x00, 0x00, 0x00]).unwrap(),
+            &[0x00, 0x00]
+        );
+    }
+}
