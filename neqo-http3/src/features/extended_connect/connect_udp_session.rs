@@ -6,7 +6,7 @@
 
 use std::fmt::{self, Display, Formatter};
 
-use neqo_common::Encoder;
+use neqo_common::{Decoder, Encoder};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -85,9 +85,10 @@ impl Protocol for Session {
     }
 
     fn dgram_context_id<'a>(&self, datagram: &'a [u8]) -> Result<&'a [u8], DgramContextIdError> {
-        match datagram.split_first() {
-            Some((0, remainder)) => Ok(remainder),
-            Some((context_id, _)) => Err(DgramContextIdError::UnknownIdentifier(*context_id)),
+        let mut decoder = Decoder::new(datagram);
+        match decoder.decode_varint() {
+            Some(0) => Ok(decoder.decode_remainder()),
+            Some(context_id) => Err(DgramContextIdError::UnknownIdentifier(context_id)),
             None => {
                 // > all HTTP Datagrams associated with UDP Proxying request streams start with a Context ID field;
                 //
