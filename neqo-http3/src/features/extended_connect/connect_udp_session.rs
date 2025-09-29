@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::{self, Display, Formatter};
+use std::{
+    fmt::{self, Display, Formatter},
+    time::Instant,
+};
 
 use neqo_common::{Decoder, Encoder};
 use neqo_transport::{Connection, StreamId};
@@ -50,13 +53,14 @@ impl Protocol for Session {
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
         control_stream_recv: &mut Box<dyn RecvStream>,
+        now: Instant,
     ) -> Res<Option<State>> {
         let (f, fin) = self
             .frame_reader
-            .receive::<ConnectUdpFrame>(&mut StreamReaderRecvStreamWrapper::new(
-                conn,
-                control_stream_recv,
-            ))
+            .receive::<ConnectUdpFrame>(
+                &mut StreamReaderRecvStreamWrapper::new(conn, control_stream_recv),
+                now,
+            )
             .map_err(|_| Error::HttpGeneralProtocolStream)?;
 
         if let Some(f) = f {
