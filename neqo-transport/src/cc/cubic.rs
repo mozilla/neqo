@@ -243,12 +243,12 @@ impl WindowAdjustment for Cubic {
         max_datagram_size: usize,
         now: Instant,
     ) -> usize {
-        let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
-        let new_acked_bytes_f64 = convert_to_f64(new_acked_bytes);
-        let max_datagram_size_f64 = convert_to_f64(max_datagram_size);
+        let curr_cwnd = convert_to_f64(curr_cwnd);
+        let new_acked_bytes = convert_to_f64(new_acked_bytes);
+        let max_datagram_size = convert_to_f64(max_datagram_size);
 
         let t_epoch = if let Some(t) = self.t_epoch {
-            self.reno_acked_bytes += new_acked_bytes_f64;
+            self.reno_acked_bytes += new_acked_bytes;
             t
         } else {
             // If we get here with `self.t_epoch == None` this is a new congestion
@@ -260,12 +260,7 @@ impl WindowAdjustment for Cubic {
             // timing as per RFC 9438 section 5.8.
             //
             // <https://datatracker.ietf.org/doc/html/rfc9438#app-limited>
-            self.start_epoch(
-                curr_cwnd_f64,
-                new_acked_bytes_f64,
-                max_datagram_size_f64,
-                now,
-            );
+            self.start_epoch(curr_cwnd, new_acked_bytes, max_datagram_size, now);
             self.t_epoch
                 .expect("unwrapping `None` value -- it should've been set by `start_epoch`")
         };
@@ -275,7 +270,7 @@ impl WindowAdjustment for Cubic {
         // <https://datatracker.ietf.org/doc/html/rfc8312#section-4.3>
         // <https://datatracker.ietf.org/doc/html/rfc8312#section-4.4>
         let t = now.saturating_duration_since(t_epoch);
-        let target_cubic = self.w_cubic((t + min_rtt).as_secs_f64(), max_datagram_size_f64);
+        let target_cubic = self.w_cubic((t + min_rtt).as_secs_f64(), max_datagram_size);
 
         // Calculate w_est for the Reno-friendly region with a slightly adjusted formula per the
         // below:
@@ -289,13 +284,13 @@ impl WindowAdjustment for Cubic {
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-9>
 
         // We first calculate the increase in segments and floor it to only include whole segments.
-        let increase = (CUBIC_ALPHA * self.reno_acked_bytes / curr_cwnd_f64).floor();
+        let increase = (CUBIC_ALPHA * self.reno_acked_bytes / curr_cwnd).floor();
         // Only apply the increase if it is at least by one segment.
         if increase > 0.0 {
-            self.w_est += increase * max_datagram_size_f64;
+            self.w_est += increase * max_datagram_size;
             // Because we floored the increase to whole segments we cannot just zero
             // `reno_acked_bytes` but have to calculate the actual bytes used.
-            let acked_bytes_used = increase * curr_cwnd_f64 / CUBIC_ALPHA;
+            let acked_bytes_used = increase * curr_cwnd / CUBIC_ALPHA;
             self.reno_acked_bytes -= acked_bytes_used;
         }
 
@@ -311,18 +306,17 @@ impl WindowAdjustment for Cubic {
         let target_cwnd = target_cubic.max(self.w_est);
 
         // Calculate the number of bytes that would need to be acknowledged for an increase
-        // of `max_datagram_size_f64` to match the increase of `target - cwnd / cwnd` as defined
+        // of `max_datagram_size` to match the increase of `target - cwnd / cwnd` as defined
         // in the specification (Sections 4.4 and 4.5).
         // The amount of data required therefore reduces asymptotically as the target increases.
         // If the target is not significantly higher than the congestion window, require a very
         // large amount of acknowledged data (effectively block increases).
         let mut acked_to_increase =
-            max_datagram_size_f64 * curr_cwnd_f64 / (target_cwnd - curr_cwnd_f64).max(1.0);
+            max_datagram_size * curr_cwnd / (target_cwnd - curr_cwnd).max(1.0);
 
         // Limit increase to max 1 MSS per EXPONENTIAL_GROWTH_REDUCTION ack packets.
         // This effectively limits target_cwnd to (1 + 1 / EXPONENTIAL_GROWTH_REDUCTION) cwnd.
-        acked_to_increase =
-            acked_to_increase.max(EXPONENTIAL_GROWTH_REDUCTION * max_datagram_size_f64);
+        acked_to_increase = acked_to_increase.max(EXPONENTIAL_GROWTH_REDUCTION * max_datagram_size);
         acked_to_increase as usize
     }
 
