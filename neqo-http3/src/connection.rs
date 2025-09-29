@@ -383,8 +383,12 @@ impl Http3Connection {
 
     /// Inform an [`Http3Connection`] that a stream has data to send and that
     /// [`SendStream::send`] should be called for the stream.
-    pub(crate) fn stream_has_pending_data(&mut self, stream_id: StreamId) {
-        // Only add to pending data if the stream is not blocked
+    pub(crate) fn mark_stream_for_sending(&mut self, stream_id: StreamId) {
+        // Only add to pending data if the stream is not blocked.
+        // Blocked streams are tracked separately in `blocked_streams` to avoid
+        // repeated send attempts that would fail due to flow control restrictions.
+        // Once a blocked stream becomes unblocked (see `check_blocked_streams`),
+        // it will be moved to `streams_with_pending_data` for sending.
         if !self.blocked_streams.contains(&stream_id) {
             self.streams_with_pending_data.insert(stream_id);
         }
@@ -423,7 +427,7 @@ impl Http3Connection {
             self.blocked_streams.remove(&stream_id);
             if let Some(stream) = self.send_streams.get(&stream_id) {
                 if stream.has_data_to_send() {
-                    self.streams_with_pending_data.insert(stream_id);
+                    self.mark_stream_for_sending(stream_id);
                 }
             }
         }
@@ -1171,7 +1175,7 @@ impl Http3Connection {
         if send_stream.done() {
             self.remove_send_stream(stream_id, conn);
         } else if send_stream.has_data_to_send() {
-            self.stream_has_pending_data(stream_id);
+            self.mark_stream_for_sending(stream_id);
         }
         Ok(())
     }
@@ -1259,7 +1263,7 @@ impl Http3Connection {
         extended_conn
             .borrow_mut()
             .send_request(&final_headers, conn)?;
-        self.stream_has_pending_data(id);
+        self.mark_stream_for_sending(id);
         Ok(id)
     }
 
@@ -1341,7 +1345,7 @@ impl Http3Connection {
                     drop(self.stream_close_send(conn, stream_id));
                     // TODO issue 1294: add a timer to clean up the recv_stream if the peer does not
                     // do that in a short time.
-                    self.stream_has_pending_data(stream_id);
+                    self.mark_stream_for_sending(stream_id);
                 } else {
                     self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
                 }
@@ -1372,7 +1376,7 @@ impl Http3Connection {
                         Box::new(Rc::clone(&extended_conn)),
                         Box::new(extended_conn),
                     );
-                    self.stream_has_pending_data(stream_id);
+                    self.mark_stream_for_sending(stream_id);
                 } else {
                     self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
                     return Err(Error::InvalidStreamId);
@@ -1678,7 +1682,7 @@ impl Http3Connection {
         recv_stream: Box<dyn RecvStream>,
     ) {
         if send_stream.has_data_to_send() {
-            self.stream_has_pending_data(stream_id);
+            self.mark_stream_for_sending(stream_id);
         }
         self.send_streams.insert(stream_id, send_stream);
         self.recv_streams.insert(stream_id, recv_stream);
@@ -1899,7 +1903,7 @@ mod tests {
     }
 
     #[test]
-    fn stream_has_pending_data_with_blocked_stream() {
+    fn mark_stream_for_sending_with_blocked_stream() {
         let mut conn = create_test_connection();
         let stream_id = StreamId::new(4); // Client-initiated bidirectional stream
 
@@ -1907,7 +1911,7 @@ mod tests {
         conn.blocked_streams.insert(stream_id);
 
         // Try to mark the blocked stream as having pending data
-        conn.stream_has_pending_data(stream_id);
+        conn.mark_stream_for_sending(stream_id);
 
         // Verify the stream is NOT added to pending data because it's blocked
         assert!(!conn.streams_with_pending_data.contains(&stream_id));
@@ -1915,7 +1919,7 @@ mod tests {
     }
 
     #[test]
-    fn stream_has_pending_data_with_unblocked_stream() {
+    fn mark_stream_for_sending_with_unblocked_stream() {
         let mut conn = create_test_connection();
         let stream_id = StreamId::new(4);
 
@@ -1923,7 +1927,7 @@ mod tests {
         assert!(!conn.blocked_streams.contains(&stream_id));
 
         // Mark stream as having pending data
-        conn.stream_has_pending_data(stream_id);
+        conn.mark_stream_for_sending(stream_id);
 
         // Verify the stream IS added to pending data
         assert!(conn.streams_with_pending_data.contains(&stream_id));
@@ -2028,11 +2032,11 @@ mod tests {
         conn.blocked_streams.insert(stream_3);
 
         // Try to add blocked stream to pending data
-        conn.stream_has_pending_data(stream_2);
+        conn.mark_stream_for_sending(stream_2);
         assert!(!conn.streams_with_pending_data.contains(&stream_2));
 
         // Add unblocked stream to pending data
-        conn.stream_has_pending_data(stream_1);
+        conn.mark_stream_for_sending(stream_1);
         assert!(conn.streams_with_pending_data.contains(&stream_1));
 
         // Check that blocked streams remain blocked
