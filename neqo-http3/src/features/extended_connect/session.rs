@@ -551,5 +551,5 @@ pub(crate) enum DgramContextIdError {
     #[error("Missing context identifier")]
     MissingIdentifier,
     #[error("Unknown context identifier: {0}")]
-    UnknownIdentifier(u8),
+    UnknownIdentifier(u64),
 }
