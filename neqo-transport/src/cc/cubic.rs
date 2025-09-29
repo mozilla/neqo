@@ -250,7 +250,7 @@ impl WindowAdjustment for Cubic {
             // <https://datatracker.ietf.org/doc/html/rfc9438#app-limited>
             self.start_epoch(curr_cwnd_f64, new_acked_f64, max_datagram_size_f64, now);
             self.t_epoch
-                .expect("unwrapping `none` value -- it should've been set by `start_epoch`")
+                .expect("unwrapping `None` value -- it should've been set by `start_epoch`")
         };
 
         // Cubic concave or convex region
