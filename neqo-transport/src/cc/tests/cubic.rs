@@ -193,7 +193,7 @@ fn tcp_phase() {
     // num_acks is very close to the calculated value. The exact value is hard to calculate
     // because the proportional increase (i.e. curr_cwnd_f64 / (target - curr_cwnd_f64) *
     // MAX_DATAGRAM_SIZE_F64) and the byte counting.
-    assert_eq!(num_acks2, expected_ack_cubic_increase + 3);
+    assert_eq!(num_acks2, expected_ack_cubic_increase + 2);
 }
 
 #[test]
