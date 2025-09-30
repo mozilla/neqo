@@ -22,7 +22,7 @@ use crate::{
     connection::{Http3State, SessionAcceptAction},
     connection_server::Http3ServerHandler,
     features::extended_connect,
-    Error, Http3StreamInfo, Http3StreamType, Priority, Res,
+    DatagramPayload, Error, Http3StreamInfo, Http3StreamType, Priority, Res,
 };
 
 #[derive(Debug, Clone)]
@@ -508,7 +508,7 @@ pub enum WebTransportServerEvent {
     NewStream(Http3OrWebTransportStream),
     Datagram {
         session: WebTransportRequest,
-        datagram: crate::DatagramPayload,
+        datagram: DatagramPayload,
     },
 }
 
@@ -525,7 +525,7 @@ pub enum ConnectUdpServerEvent {
     },
     Datagram {
         session: ConnectUdpRequest,
-        datagram: crate::DatagramPayload,
+        datagram: DatagramPayload,
     },
 }
 
@@ -727,7 +727,7 @@ impl Http3ServerEvents {
     pub(crate) fn webtransport_datagram(
         &self,
         session: WebTransportRequest,
-        datagram: crate::DatagramPayload,
+        datagram: DatagramPayload,
     ) {
         self.insert(Http3ServerEvent::WebTransport(
             WebTransportServerEvent::Datagram { session, datagram },
@@ -736,7 +736,7 @@ impl Http3ServerEvents {
     pub(crate) fn connect_udp_datagram(
         &self,
         session: ConnectUdpRequest,
-        datagram: crate::DatagramPayload,
+        datagram: DatagramPayload,
     ) {
         self.insert(Http3ServerEvent::ConnectUdp(
             ConnectUdpServerEvent::Datagram { session, datagram },

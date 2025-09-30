@@ -23,8 +23,8 @@ use crate::{
     priority::PriorityHandler,
     recv_message::{RecvMessage, RecvMessageInfo},
     send_message::SendMessage,
-    CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
-    SendStream, Stream,
+    CloseType, DatagramPayload, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput,
+    RecvStream, Res, SendStream, Stream,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -404,13 +404,14 @@ impl Session {
             return;
         }
 
-        // dgram_context_id returns the payload after stripping any context ID; length difference indicates context ID presence.
+        // dgram_context_id returns the payload after stripping any context ID; length difference
+        // indicates context ID presence.
         match self.protocol.dgram_context_id(&datagram[payload_offset..]) {
             Ok(slice) => {
                 // differ, a context ID is present.
                 let context_offset = usize::from(slice.len() != datagram[payload_offset..].len());
                 let total_offset = payload_offset + context_offset;
-                let payload = crate::DatagramPayload::new(datagram, total_offset);
+                let payload = DatagramPayload::new(datagram, total_offset);
 
                 self.events
                     .new_datagram(self.id, payload, self.protocol.connect_type());

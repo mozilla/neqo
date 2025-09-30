@@ -12,8 +12,8 @@ use neqo_transport::{AppError, StreamId};
 use crate::{
     connection::Http3State,
     features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
-    CloseType, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents, Res,
-    SendStreamEvents,
+    CloseType, DatagramPayload, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents,
+    Res, SendStreamEvents,
 };
 
 /// Server events for a single connection.
@@ -64,7 +64,7 @@ pub enum WebTransportEvent {
     NewStream(Http3StreamInfo),
     Datagram {
         session_id: StreamId,
-        datagram: crate::DatagramPayload,
+        datagram: DatagramPayload,
     },
 }
 
@@ -81,7 +81,7 @@ pub enum ConnectUdpEvent {
     },
     Datagram {
         session_id: StreamId,
-        datagram: crate::DatagramPayload,
+        datagram: DatagramPayload,
     },
 }
 
@@ -220,7 +220,7 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
     fn new_datagram(
         &self,
         session_id: StreamId,
-        datagram: crate::DatagramPayload,
+        datagram: DatagramPayload,
         connect_type: ExtendedConnectType,
     ) {
         let event = match connect_type {

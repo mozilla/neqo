@@ -25,7 +25,8 @@ use crate::{
         NegotiationState,
     },
     settings::{HSettingType, HSettings},
-    Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res, SendStreamEvents,
+    DatagramPayload, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res,
+    SendStreamEvents,
 };
 
 pub(crate) trait ExtendedConnectEvents: Debug {
@@ -51,7 +52,7 @@ pub(crate) trait ExtendedConnectEvents: Debug {
     fn new_datagram(
         &self,
         session_id: StreamId,
-        datagram: crate::DatagramPayload,
+        datagram: DatagramPayload,
         connect_type: ExtendedConnectType,
     );
 }
