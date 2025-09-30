@@ -485,7 +485,7 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
             client.events().next(),
             Some(Http3ClientEvent::WebTransport(
                 WebTransportEvent::Datagram{ session_id, datagram }
-            )) if session_id == wt_server_session.stream_id() && datagram == b"PING",
+            )) if session_id == wt_server_session.stream_id() && &datagram == b"PING",
         ),
         "Should receive datagram"
     );

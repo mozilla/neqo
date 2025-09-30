@@ -162,6 +162,7 @@ mod stream_type_reader;
 use std::{cell::RefCell, fmt::Debug, rc::Rc};
 
 use buffered_send_stream::BufferedStream;
+use bytes::Bytes;
 pub use client_events::{ConnectUdpEvent, Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::{Http3State, SessionAcceptAction};
@@ -185,55 +186,45 @@ use thiserror::Error;
 use crate::{features::extended_connect, priority::PriorityHandler};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct DatagramPayload {
-    data: Vec<u8>,
-    payload_offset: usize,
-}
+pub struct DatagramPayload(Bytes);
 
 impl DatagramPayload {
     /// # Panics
     ///
     /// If the payload offset lies outside the data.
     #[must_use]
-    pub fn new(data: Vec<u8>, payload_offset: usize) -> Self {
-        assert!(payload_offset <= data.len());
-        Self {
-            data,
-            payload_offset,
-        }
+    pub fn new(data: Vec<u8>, offset: usize) -> Self {
+        assert!(offset <= data.len());
+        Self(Bytes::from(data).slice(offset..))
     }
 
     #[must_use]
-    pub fn payload(&self) -> &[u8] {
-        &self.data[self.payload_offset..]
+    pub const fn payload(&self) -> &Bytes {
+        &self.0
     }
 }
 
 impl AsRef<[u8]> for DatagramPayload {
     fn as_ref(&self) -> &[u8] {
-        self.payload()
+        &self.0
     }
 }
 
-impl From<DatagramPayload> for Vec<u8> {
+impl From<DatagramPayload> for Bytes {
     fn from(payload: DatagramPayload) -> Self {
-        if payload.payload_offset == 0 {
-            payload.data
-        } else {
-            payload.data[payload.payload_offset..].to_vec()
-        }
+        payload.0
     }
 }
 
-impl<const N: usize> PartialEq<&[u8; N]> for DatagramPayload {
-    fn eq(&self, other: &&[u8; N]) -> bool {
-        self.payload() == other.as_slice()
+impl<const N: usize> PartialEq<[u8; N]> for DatagramPayload {
+    fn eq(&self, other: &[u8; N]) -> bool {
+        self.0 == other.as_slice()
     }
 }
 
 impl PartialEq<&[u8]> for DatagramPayload {
     fn eq(&self, other: &&[u8]) -> bool {
-        self.payload() == *other
+        self.0 == *other
     }
 }
 

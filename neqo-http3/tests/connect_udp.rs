@@ -6,6 +6,7 @@
 
 #![cfg(test)]
 
+use bytes::Bytes;
 use neqo_common::{event::Provider as _, header::HeadersExt as _, qinfo, Datagram, Tos};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
@@ -141,7 +142,7 @@ fn exchange_packets_through_proxy(
                 DEFAULT_ADDR,
                 DEFAULT_ADDR,
                 Tos::default(),
-                datagram,
+                Bytes::from(datagram),
             ))
         }
         _ => None,
@@ -182,7 +183,7 @@ fn exchange_packets_through_proxy(
                 DEFAULT_ADDR,
                 DEFAULT_ADDR,
                 Tos::default(),
-                datagram,
+                Bytes::from(datagram),
             ))
         } else {
             None
