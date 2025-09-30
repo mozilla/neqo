@@ -7,7 +7,7 @@
 use std::cell::RefCell;
 
 use neqo_common::qerror;
-use neqo_crypto::{hkdf, Aead, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
+use neqo_crypto::{hkdf, Aead, AeadTrait as _, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 
 use crate::{version::Version, Error, Res};
 
@@ -50,6 +50,6 @@ where
 
 /// Determine how large the expansion is for a given key.
 pub fn expansion(version: Version) -> usize {
-    use_aead(version, |_| Ok(Aead::expansion()))
+    use_aead(version, |aead| Ok(aead.expansion()))
         .unwrap_or_else(|_| panic!("Unable to access Retry AEAD"))
 }

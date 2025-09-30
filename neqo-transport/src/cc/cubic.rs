@@ -234,30 +234,31 @@ impl WindowAdjustment for Cubic {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
         let new_acked_f64 = convert_to_f64(new_acked_bytes);
         let max_datagram_size_f64 = convert_to_f64(max_datagram_size);
-        if self.t_epoch.is_none() {
-            // This is a start of a new congestion avoidance phase.
-            self.start_epoch(curr_cwnd_f64, new_acked_f64, max_datagram_size_f64, now);
-        } else {
+
+        let t_epoch = if let Some(t) = self.t_epoch {
             self.tcp_acked_bytes += new_acked_f64;
-        }
+            t
+        } else {
+            // If we get here with `self.t_epoch == None` this is a new congestion
+            // avoidance stage. It's been set to `None` by
+            // [`super::ClassicCongestionControl::reduce_cwnd`] or needs to be
+            // initialized after slow start. It could also have been reset by
+            // [`super::ClassicCongestionControl::on_app_limited`] in which case we also start a
+            // new congestion avoidance stage for the purpose of resetting
+            // timing as per RFC 9438 section 5.8.
+            //
+            // <https://datatracker.ietf.org/doc/html/rfc9438#app-limited>
+            self.start_epoch(curr_cwnd_f64, new_acked_f64, max_datagram_size_f64, now);
+            self.t_epoch
+                .expect("unwrapping `None` value -- it should've been set by `start_epoch`")
+        };
 
         // Cubic concave or convex region
         //
         // <https://datatracker.ietf.org/doc/html/rfc8312#section-4.3>
         // <https://datatracker.ietf.org/doc/html/rfc8312#section-4.4>
-        let time_ca = self
-            .t_epoch
-            .map_or(min_rtt, |t| {
-                if now + min_rtt < t {
-                    // This only happens when processing old packets
-                    // that were saved and replayed with old timestamps.
-                    min_rtt
-                } else {
-                    now + min_rtt - t
-                }
-            })
-            .as_secs_f64();
-        let target_cubic = self.w_cubic(time_ca, max_datagram_size_f64);
+        let t = now.saturating_duration_since(t_epoch);
+        let target_cubic = self.w_cubic((t + min_rtt).as_secs_f64(), max_datagram_size_f64);
 
         // Cubic TCP-friendly region
         //

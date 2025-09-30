@@ -85,7 +85,9 @@ fn establish_new_session() -> (
                         && headers.contains_header(":protocol", "connect-udp")
                 );
 
-                session.response(&SessionAcceptAction::Accept).unwrap();
+                session
+                    .response(&SessionAcceptAction::Accept, now())
+                    .unwrap();
                 Some(session)
             } else {
                 None
@@ -245,7 +247,7 @@ fn session_lifecycle(client_closes: bool) {
 
     if client_closes {
         client
-            .connect_udp_close_session(session_id, 0, "kthxbye")
+            .connect_udp_close_session(session_id, 0, "kthxbye", now())
             .unwrap();
 
         exchange_packets(&mut client, &mut proxy, false, None);
@@ -263,7 +265,7 @@ fn session_lifecycle(client_closes: bool) {
             })
             .unwrap();
     } else {
-        proxy_session.close_session(0, "kthxbye").unwrap();
+        proxy_session.close_session(0, "kthxbye", now()).unwrap();
 
         exchange_packets(&mut client, &mut proxy, false, None);
 
@@ -388,7 +390,7 @@ fn server_datagram_before_accept() {
             })
             .unwrap();
         proxy_session
-            .response(&SessionAcceptAction::Accept)
+            .response(&SessionAcceptAction::Accept, now())
             .unwrap();
         let proxy_accept = proxy.process_output(now()).dgram().unwrap();
         assert!(proxy.process_output(now()).dgram().is_none());
@@ -488,7 +490,7 @@ fn connect_udp_operation_on_fetch_stream() {
     );
 
     assert_eq!(
-        client.connect_udp_close_session(fetch_stream, 0, "kthxbye"),
+        client.connect_udp_close_session(fetch_stream, 0, "kthxbye", now()),
         Err(Error::InvalidStreamId)
     );
 }

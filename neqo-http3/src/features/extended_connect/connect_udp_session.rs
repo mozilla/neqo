@@ -4,9 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::{self, Display, Formatter};
+use std::{
+    fmt::{self, Display, Formatter},
+    time::Instant,
+};
 
-use neqo_common::Encoder;
+use neqo_common::{Decoder, Encoder};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -50,13 +53,14 @@ impl Protocol for Session {
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
         control_stream_recv: &mut Box<dyn RecvStream>,
+        now: Instant,
     ) -> Res<Option<State>> {
         let (f, fin) = self
             .frame_reader
-            .receive::<ConnectUdpFrame>(&mut StreamReaderRecvStreamWrapper::new(
-                conn,
-                control_stream_recv,
-            ))
+            .receive::<ConnectUdpFrame>(
+                &mut StreamReaderRecvStreamWrapper::new(conn, control_stream_recv),
+                now,
+            )
             .map_err(|_| Error::HttpGeneralProtocolStream)?;
 
         if let Some(f) = f {
@@ -85,9 +89,10 @@ impl Protocol for Session {
     }
 
     fn dgram_context_id<'a>(&self, datagram: &'a [u8]) -> Result<&'a [u8], DgramContextIdError> {
-        match datagram.split_first() {
-            Some((0, remainder)) => Ok(remainder),
-            Some((context_id, _)) => Err(DgramContextIdError::UnknownIdentifier(*context_id)),
+        let mut decoder = Decoder::new(datagram);
+        match decoder.decode_varint() {
+            Some(0) => Ok(decoder.decode_remainder()),
+            Some(context_id) => Err(DgramContextIdError::UnknownIdentifier(context_id)),
             None => {
                 // > all HTTP Datagrams associated with UDP Proxying request streams start with a Context ID field;
                 //
@@ -95,5 +100,28 @@ impl Protocol for Session {
                 Err(DgramContextIdError::MissingIdentifier)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use neqo_transport::StreamId;
+
+    use super::Session;
+    use crate::features::extended_connect::session::Protocol as _;
+
+    #[test]
+    fn varint_0_context_id() {
+        let session = Session::new(StreamId::new(42));
+        // Varint [0x00] is 0, i.e. a supported connect-udp context ID.
+        assert_eq!(
+            session.dgram_context_id(&[0x00, 0x00, 0x00]).unwrap(),
+            &[0x00, 0x00]
+        );
+        // Varint [0x40 0x00] is 0 as well, thus a supported connect-udp context ID, too.
+        assert_eq!(
+            session.dgram_context_id(&[0x40, 0x00, 0x00, 0x00]).unwrap(),
+            &[0x00, 0x00]
+        );
     }
 }
