@@ -409,8 +409,9 @@ impl Session {
             Ok(slice) => {
                 // Calculate total offset: session_id varint + context_id (if any)
                 // If the returned slice is shorter than the input, a context identifier is present.
-                // This detects the presence of a context identifier by comparing the length of the returned slice
-                // from dgram_context_id to the input slice. If they differ, a context ID is present.
+                // This detects the presence of a context identifier by comparing the length of the
+                // returned slice from dgram_context_id to the input slice. If they
+                // differ, a context ID is present.
                 let context_offset = usize::from(slice.len() != datagram[payload_offset..].len());
                 let total_offset = payload_offset + context_offset;
                 let payload = crate::DatagramPayload::new(datagram, total_offset);
