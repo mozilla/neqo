@@ -193,7 +193,7 @@ impl DatagramPayload {
     ///
     /// If the payload offset lies outside the data.
     #[must_use]
-    pub fn new(data: Vec<u8>, offset: usize) -> Self {
+    pub fn new(data: &[u8], offset: usize) -> Self {
         assert!(offset <= data.len());
         Self(Bytes::copy_from_slice(&data[offset..]))
     }

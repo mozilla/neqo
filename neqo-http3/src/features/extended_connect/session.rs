@@ -398,7 +398,7 @@ impl Session {
         Ok(())
     }
 
-    pub(crate) fn datagram(&self, datagram: Vec<u8>, payload_offset: usize) {
+    pub(crate) fn datagram(&self, datagram: &[u8], payload_offset: usize) {
         if self.state != State::Active {
             qdebug!("[{self}]: received datagram on {:?} session.", self.state);
             return;
