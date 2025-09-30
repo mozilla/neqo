@@ -195,7 +195,7 @@ impl DatagramPayload {
     #[must_use]
     pub fn new(data: Vec<u8>, offset: usize) -> Self {
         assert!(offset <= data.len());
-        Self(Bytes::from(data).slice(offset..))
+        Self(Bytes::copy_from_slice(&data[offset..]))
     }
 
     #[must_use]
