@@ -404,13 +404,9 @@ impl Session {
             return;
         }
 
-        // Validate the payload portion based on protocol requirements
+        // dgram_context_id returns the payload after stripping any context ID; length difference indicates context ID presence.
         match self.protocol.dgram_context_id(&datagram[payload_offset..]) {
             Ok(slice) => {
-                // Calculate total offset: session_id varint + context_id (if any)
-                // If the returned slice is shorter than the input, a context identifier is present.
-                // This detects the presence of a context identifier by comparing the length of the
-                // returned slice from dgram_context_id to the input slice. If they
                 // differ, a context ID is present.
                 let context_offset = usize::from(slice.len() != datagram[payload_offset..].len());
                 let total_offset = payload_offset + context_offset;
