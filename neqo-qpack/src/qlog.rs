@@ -8,18 +8,30 @@
 
 use std::time::Instant;
 
-use neqo_common::{hex, qlog::Qlog};
+#[cfg(feature = "qlog")]
+use neqo_common::hex;
+use neqo_common::qlog::Qlog;
+#[cfg(feature = "qlog")]
 use qlog::events::{
     qpack::{QPackInstruction, QpackInstructionParsed, QpackInstructionTypeName},
     EventData, RawInfo,
 };
 
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(
+        unused_variables,
+        clippy::missing_const_for_fn,
+        reason = "only without qlog"
+    )
+)]
 pub fn qpack_read_insert_count_increment_instruction(
     qlog: &Qlog,
     increment: u64,
     data: &[u8],
     now: Instant,
 ) {
+    #[cfg(feature = "qlog")]
     qlog.add_event_data_with_instant(
         || {
             let raw = RawInfo {

@@ -273,7 +273,14 @@ impl Server {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "qlog"),
+        expect(unused_variables, clippy::unused_self, reason = "only without qlog")
+    )]
     fn create_qlog_trace(&self, odcid: ConnectionIdRef<'_>, now: Instant) -> Qlog {
+        #[cfg(not(feature = "qlog"))]
+        return Qlog::disabled();
+        #[cfg(feature = "qlog")]
         self.qlog_dir
             .as_ref()
             .map_or_else(Qlog::disabled, |qlog_dir| {
@@ -292,10 +299,6 @@ impl Server {
             })
     }
 
-    #[cfg_attr(
-        not(feature = "qlog"),
-        expect(clippy::needless_pass_by_value, reason = "only without qlog")
-    )]
     fn setup_connection(
         &self,
         c: &mut Connection,

@@ -13,7 +13,16 @@ use neqo_transport::StreamId;
 #[cfg(feature = "qlog")]
 use qlog::events::{DataRecipient, EventData};
 
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(
+        unused_variables,
+        clippy::missing_const_for_fn,
+        reason = "only without qlog"
+    )
+)]
 pub fn h3_data_moved_up(qlog: &Qlog, stream_id: StreamId, amount: usize, now: Instant) {
+    #[cfg(feature = "qlog")]
     qlog.add_event_data_with_instant(
         || {
             let ev_data = EventData::DataMoved(qlog::events::quic::DataMoved {
@@ -31,7 +40,16 @@ pub fn h3_data_moved_up(qlog: &Qlog, stream_id: StreamId, amount: usize, now: In
     );
 }
 
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(
+        unused_variables,
+        clippy::missing_const_for_fn,
+        reason = "only without qlog"
+    )
+)]
 pub fn h3_data_moved_down(qlog: &Qlog, stream_id: StreamId, amount: usize, now: Instant) {
+    #[cfg(feature = "qlog")]
     qlog.add_event_data_with_instant(
         || {
             let ev_data = EventData::DataMoved(qlog::events::quic::DataMoved {
