@@ -131,7 +131,6 @@ pub fn client_connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
 
 #[cfg(feature = "qlog")]
 fn connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
-    #[cfg(feature = "qlog")]
     qlog.add_event_data_with_instant(
         || {
             let p = path.deref().borrow();
