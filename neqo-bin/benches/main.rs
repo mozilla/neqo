@@ -12,12 +12,12 @@ use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughpu
 use neqo_bin::{client, server};
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
-use tokio::runtime::Builder;
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
+use tokio::runtime::Builder;
 struct Benchmark {
     name: String,
     num_requests: usize,
