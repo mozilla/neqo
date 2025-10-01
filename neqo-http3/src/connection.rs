@@ -919,7 +919,7 @@ impl Http3Connection {
         Ok(id)
     }
 
-    #[expect(clippy::too_many_arguments, reason = "We need them all.")]
+    #[expect(clippy::too_many_arguments, reason = "Yes, but they are needed.")]
     fn request_with_stream<T>(
         &mut self,
         stream_id: StreamId,
@@ -1864,6 +1864,7 @@ impl Http3Connection {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use url::Url;
 

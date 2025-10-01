@@ -561,6 +561,7 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<Qlog> {
         Some("Neqo client qlog".to_string()),
         Some("Neqo client qlog".to_string()),
         format!("client-{hostname}-{cid}"),
+        Instant::now(),
     )
     .map_err(Error::Qlog)
 }

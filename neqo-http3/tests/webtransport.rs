@@ -370,9 +370,7 @@ fn wt_race_condition_server_stream_before_confirmation() {
         assert_eq!(server.process_output(now).dgram(), None);
 
         // Server creates a stream, but hold back the UDP datagram.
-        let wt_server_stream = wt_server_session
-            .create_stream(StreamType::UniDi, now)
-            .unwrap();
+        let wt_server_stream = wt_server_session.create_stream(StreamType::UniDi).unwrap();
         assert_eq!(wt_server_stream.send_data(&[42], now).unwrap(), 1);
         let server_stream_dgram = server
             .process_output(now)

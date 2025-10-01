@@ -252,6 +252,7 @@ impl DatagramBatch {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 

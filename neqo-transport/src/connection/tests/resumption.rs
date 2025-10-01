@@ -7,7 +7,7 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{Datagram, Decoder, Role};
-use neqo_crypto::AuthenticationStatus;
+use neqo_crypto::{AeadTrait as _, AuthenticationStatus};
 use test_fixture::{
     assertions,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},

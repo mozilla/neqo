@@ -4,8 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-/*!
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+/*!
 # The HTTP/3 protocol
 
 This crate implements [RFC9114](https://datatracker.ietf.org/doc/html/rfc9114).

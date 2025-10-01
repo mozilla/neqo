@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(clippy::unwrap_used, reason = "This is test code.")]
 
 #[cfg(feature = "qlog")]
@@ -203,6 +204,7 @@ where
                 Some("Neqo client qlog".to_string()),
                 Some("Neqo client qlog".to_string()),
                 format!("client-{cid}"),
+                now(),
             )
             .unwrap(),
         );
@@ -260,6 +262,7 @@ where
                 Some("Neqo server qlog".to_string()),
                 Some("Neqo server qlog".to_string()),
                 "server".to_string(),
+                now(),
             )
             .unwrap(),
         );

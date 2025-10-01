@@ -315,21 +315,32 @@ impl Pmtud {
 
     /// Starts the next upward PMTUD probe.
     pub fn start(&mut self, now: Instant, stats: &mut Stats) {
-        if self.probe_index < SEARCH_TABLE_LEN - 1 // Not at the end of the search table
-        // Next size is <= iface MTU
-            && self.search_table[self.probe_index + 1] <= self.iface_mtu
-        {
-            self.probe_state = Probe::Needed; // We need to send a probe
-            self.probe_count = 0; // For the first time
-            self.probe_index += 1; // At this size
+        if self.probe_index == SEARCH_TABLE_LEN - 1 {
             qdebug!(
-                "PMTUD started with probe size {}",
-                self.search_table[self.probe_index],
+                "PMTUD reached end of search table, i.e. {}, stopping upwards search",
+                self.mtu,
             );
-        } else {
-            // If we're at the end of the search table or hit the local interface MTU, we're done.
             self.stop(self.probe_index, now, stats);
+            return;
         }
+
+        if self.search_table[self.probe_index + 1] > self.iface_mtu {
+            qdebug!(
+                "PMTUD reached interface MTU limit {}, stopping upwards search at {}",
+                self.iface_mtu,
+                self.mtu
+            );
+            self.stop(self.probe_index, now, stats);
+            return;
+        }
+
+        self.probe_state = Probe::Needed; // We need to send a probe
+        self.probe_count = 0; // For the first time
+        self.probe_index += 1; // At this size
+        qdebug!(
+            "PMTUD started with probe size {}",
+            self.search_table[self.probe_index],
+        );
     }
 
     /// Returns the default PLPMTU for the given remote IP address.

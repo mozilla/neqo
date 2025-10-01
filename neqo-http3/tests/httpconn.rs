@@ -44,20 +44,20 @@ fn receive_request(server: &Http3Server) -> Option<Http3OrWebTransportStream> {
     None
 }
 
-fn set_response(request: &Http3OrWebTransportStream) {
+fn set_response(request: &Http3OrWebTransportStream, now: Instant) {
     request
         .send_headers(&[
             Header::new(":status", "200"),
             Header::new("content-length", "3"),
         ])
         .unwrap();
-    request.send_data(RESPONSE_DATA, now()).unwrap();
-    request.stream_close_send(now()).unwrap();
+    request.send_data(RESPONSE_DATA, now).unwrap();
+    request.stream_close_send(now).unwrap();
 }
 
-fn process_server_events(server: &Http3Server) {
+fn process_server_events(server: &Http3Server, now: Instant) {
     let request = receive_request(server).unwrap();
-    set_response(&request);
+    set_response(&request, now);
 }
 
 fn process_client_events(conn: &mut Http3Client) {
@@ -164,7 +164,7 @@ fn fetch() {
     qtrace!("-----server");
     let out = hconn_s.process(out.dgram(), now());
     drop(hconn_c.process(out.dgram(), now()));
-    process_server_events(&hconn_s);
+    process_server_events(&hconn_s, now());
     let out = hconn_s.process(None::<Datagram>, now());
 
     qtrace!("-----client");
@@ -211,7 +211,7 @@ fn response_103() {
     };
     assert!(hconn_c.events().any(info_headers_event));
 
-    set_response(&request);
+    set_response(&request, now());
     let out = hconn_s.process(None::<Datagram>, now());
     drop(hconn_c.process(out.dgram(), now()));
     process_client_events(&mut hconn_c);
@@ -463,7 +463,7 @@ fn zerortt() {
     let request_stream = request_stream.unwrap();
 
     // Send a response
-    set_response(&request_stream);
+    set_response(&request_stream, now());
 
     // Receive the response
     exchange_packets(&mut hconn_c, &mut hconn_s, false, out.dgram());
