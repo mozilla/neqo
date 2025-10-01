@@ -16,6 +16,12 @@ use test_fixture::{
         Simulator,
     },
 };
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 const ZERO: Duration = Duration::from_millis(0);
 const JITTER: Duration = Duration::from_millis(10);

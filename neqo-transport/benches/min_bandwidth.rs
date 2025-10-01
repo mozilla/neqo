@@ -24,6 +24,12 @@ use test_fixture::{
         Simulator,
     },
 };
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 /// Run a transfer of a gigabyte over a gigabit link.
 /// Check to see that the achieved transfer rate matches expectations.

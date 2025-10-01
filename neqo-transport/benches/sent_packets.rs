@@ -11,6 +11,12 @@ use neqo_transport::{
     self, packet,
     recovery::{self, sent},
 };
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 fn sent_packets() -> sent::Packets {
     let mut pkts = sent::Packets::default();

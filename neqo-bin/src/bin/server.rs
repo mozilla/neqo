@@ -6,6 +6,12 @@
 
 use clap::Parser as _;
 use neqo_bin::server::Res;
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 #[tokio::main(flavor = "current_thread")]
 #[allow(
