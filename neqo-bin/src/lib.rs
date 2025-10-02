@@ -40,8 +40,13 @@ pub struct SharedArgs {
     /// This client still only does HTTP/3 no matter what the ALPN says.
     alpn: String,
 
-    #[arg(name = "qlog-dir", long, value_parser=clap::value_parser!(PathBuf))]
-    /// Enable QLOG logging and QLOG traces to this directory
+    #[arg(name = "qlog-dir", long, value_parser=clap::value_parser!(PathBuf), help=
+        if cfg!(feature = "qlog") {
+            "Enable QLOG logging and QLOG traces to this directory"
+        } else {
+            "QLOG logging is disabled"
+        }
+    )]
     qlog_dir: Option<PathBuf>,
 
     #[arg(name = "encoder-table-size", long, default_value = "16384")]
