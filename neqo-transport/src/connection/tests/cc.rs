@@ -261,7 +261,11 @@ fn cc_cong_avoidance_recovery_period_to_cong_avoidance(cc_algorithm: CongestionC
         client.process_input(s_ack, now);
     }
 
-    assert!(cwnd_before_loss < cwnd(&client));
+    assert!(
+        cwnd_before_loss < cwnd(&client),
+        "cwnd_before_loss = {cwnd_before_loss} cwnd(&client) = {}",
+        cwnd(&client)
+    );
 }
 
 #[test]
