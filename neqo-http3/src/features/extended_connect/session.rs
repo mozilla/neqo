@@ -408,7 +408,7 @@ impl Session {
         // indicates context ID presence.
         match self.protocol.dgram_context_id(&datagram[payload_offset..]) {
             Ok(slice) => {
-                // differ, a context ID is present.
+                // If lengths differ, a context ID is present.
                 let context_offset = usize::from(slice.len() != datagram[payload_offset..].len());
                 let total_offset = payload_offset + context_offset;
                 let payload = DatagramPayload::new(datagram, total_offset);
