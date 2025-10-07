@@ -19,7 +19,7 @@ workspace = true
 enum-map = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
-strum = { workspace = true}
+strum = { workspace = true }
 thiserror = { workspace = true }
 
 [build-dependencies]
@@ -37,7 +37,7 @@ test-fixture = { path = "../test-fixture" }
 ignored = ["bindgen", "semver", "serde", "serde_derive", "toml"]
 
 [features]
-bench = []
+bench = ["log/release_max_level_off"]
 disable-encryption = []
 disable-random = []
 gecko = ["mozbuild"]
