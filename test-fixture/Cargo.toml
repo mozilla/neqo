@@ -29,7 +29,7 @@ bench = [
         "neqo-crypto/bench",
         "neqo-http3/bench",
         "neqo-transport/bench",
-        "log/release_max_level_off",
+        "log/release_max_level_info",
 ]
 disable-random = []
 

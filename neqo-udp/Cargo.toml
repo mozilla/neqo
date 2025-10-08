@@ -33,7 +33,7 @@ cfg_aliases = "0.2"
 ignored = ["cfg_aliases"]
 
 [features]
-bench = ["neqo-common/bench", "log/release_max_level_off"]
+bench = ["neqo-common/bench", "log/release_max_level_info"]
 fast-apple-datapath = ["quinn-udp/fast-apple-datapath"]
 
 [lib]

@@ -62,7 +62,7 @@ neqo-transport = { path = "./../neqo-transport", features = ["draft-29"] }
 tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [features]
-bench = ["neqo-bin/bench", "neqo-http3/bench", "neqo-transport/bench", "log/release_max_level_off"]
+bench = ["neqo-bin/bench", "neqo-http3/bench", "neqo-transport/bench", "log/release_max_level_info"]
 fast-apple-datapath = ["quinn-udp/fast-apple-datapath"]
 draft-29 = []
 

@@ -37,7 +37,7 @@ test-fixture = { path = "../test-fixture" }
 ignored = ["bindgen", "semver", "serde", "serde_derive", "toml"]
 
 [features]
-bench = ["log/release_max_level_off"]
+bench = ["log/release_max_level_info"]
 disable-encryption = []
 disable-random = []
 gecko = ["mozbuild"]

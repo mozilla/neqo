@@ -34,7 +34,7 @@ test-fixture = { path = "../test-fixture" }
 regex = { workspace = true }
 
 [features]
-bench = ["neqo-crypto/bench", "test-fixture/bench", "log/release_max_level_off"]
+bench = ["neqo-crypto/bench", "test-fixture/bench", "log/release_max_level_info"]
 build-fuzzing-corpus = ["hex/alloc"]
 ci = []
 test-fixture = []

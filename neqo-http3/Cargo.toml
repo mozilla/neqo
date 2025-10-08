@@ -44,7 +44,7 @@ bench = [
         "neqo-crypto/bench",
         "neqo-qpack/bench",
         "neqo-transport/bench",
-        "log/release_max_level_off",
+        "log/release_max_level_info",
 ]
 disable-encryption = ["neqo-transport/disable-encryption", "neqo-crypto/disable-encryption"]
 draft-29 = []
