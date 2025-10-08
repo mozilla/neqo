@@ -6,7 +6,6 @@
 
 #![cfg(test)]
 
-use bytes::Bytes;
 use neqo_common::{event::Provider as _, header::HeadersExt as _, qinfo, Datagram, Tos};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
@@ -144,7 +143,7 @@ fn exchange_packets_through_proxy(
                 DEFAULT_ADDR,
                 DEFAULT_ADDR,
                 Tos::default(),
-                Bytes::from(datagram),
+                datagram,
             ))
         }
         _ => None,
@@ -185,7 +184,7 @@ fn exchange_packets_through_proxy(
                 DEFAULT_ADDR,
                 DEFAULT_ADDR,
                 Tos::default(),
-                Bytes::from(datagram),
+                datagram,
             ))
         } else {
             None
@@ -221,7 +220,7 @@ fn session_lifecycle(client_closes: bool) {
         })
         .unwrap();
     assert_eq!(session_id, id);
-    assert_eq!(datagram, PING);
+    assert_eq!(&datagram, PING);
 
     proxy_session.send_datagram(PONG, None).unwrap();
 
@@ -243,7 +242,7 @@ fn session_lifecycle(client_closes: bool) {
         .unwrap();
 
     assert_eq!(session_id, id);
-    assert_eq!(datagram, PONG);
+    assert_eq!(&datagram, PONG);
 
     if client_closes {
         client

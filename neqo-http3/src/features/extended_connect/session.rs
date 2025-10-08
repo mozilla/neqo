@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType, Role};
+use neqo_common::{qdebug, qtrace, Bytes, Encoder, Header, MessageType, Role};
 use neqo_transport::{AppError, Connection, DatagramTracking, StreamId};
 
 use crate::{
@@ -23,8 +23,8 @@ use crate::{
     priority::PriorityHandler,
     recv_message::{RecvMessage, RecvMessageInfo},
     send_message::SendMessage,
-    CloseType, DatagramPayload, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput,
-    RecvStream, Res, SendStream, Stream,
+    CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
+    SendStream, Stream,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -398,7 +398,7 @@ impl Session {
         Ok(())
     }
 
-    pub(crate) fn datagram(&self, datagram: &[u8], payload_offset: usize) {
+    pub(crate) fn datagram(&self, datagram: Vec<u8>, payload_offset: usize) {
         if self.state != State::Active {
             qdebug!("[{self}]: received datagram on {:?} session.", self.state);
             return;
@@ -411,7 +411,7 @@ impl Session {
                 // If lengths differ, a context ID is present.
                 let context_offset = usize::from(slice.len() != datagram[payload_offset..].len());
                 let total_offset = payload_offset + context_offset;
-                let payload = DatagramPayload::new(datagram, total_offset);
+                let payload = Bytes::new(datagram, total_offset);
 
                 self.events
                     .new_datagram(self.id, payload, self.protocol.connect_type());

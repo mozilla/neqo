@@ -15,7 +15,7 @@ mod tests;
 
 use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
 
-use neqo_common::{Header, Role};
+use neqo_common::{Bytes, Header, Role};
 use neqo_transport::StreamId;
 
 use crate::{
@@ -25,8 +25,7 @@ use crate::{
         NegotiationState,
     },
     settings::{HSettingType, HSettings},
-    DatagramPayload, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res,
-    SendStreamEvents,
+    Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res, SendStreamEvents,
 };
 
 pub(crate) trait ExtendedConnectEvents: Debug {
@@ -52,7 +51,7 @@ pub(crate) trait ExtendedConnectEvents: Debug {
     fn new_datagram(
         &self,
         session_id: StreamId,
-        datagram: DatagramPayload,
+        datagram: Bytes,
         connect_type: ExtendedConnectType,
     );
 }

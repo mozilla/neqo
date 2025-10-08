@@ -6,14 +6,14 @@
 
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-use neqo_common::{header::HeadersExt as _, Header};
+use neqo_common::{header::HeadersExt as _, Bytes, Header};
 use neqo_transport::{AppError, StreamId};
 
 use crate::{
     connection::Http3State,
     features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
-    CloseType, DatagramPayload, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents,
-    Res, SendStreamEvents,
+    CloseType, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents, Res,
+    SendStreamEvents,
 };
 
 /// Server events for a single connection.
@@ -64,7 +64,7 @@ pub enum WebTransportEvent {
     NewStream(Http3StreamInfo),
     Datagram {
         session_id: StreamId,
-        datagram: DatagramPayload,
+        datagram: Bytes,
     },
 }
 
@@ -81,7 +81,7 @@ pub enum ConnectUdpEvent {
     },
     Datagram {
         session_id: StreamId,
-        datagram: DatagramPayload,
+        datagram: Bytes,
     },
 }
 
@@ -220,7 +220,7 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
     fn new_datagram(
         &self,
         session_id: StreamId,
-        datagram: DatagramPayload,
+        datagram: Bytes,
         connect_type: ExtendedConnectType,
     ) {
         let event = match connect_type {

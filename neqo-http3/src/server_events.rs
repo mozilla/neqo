@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qdebug, Encoder, Header};
+use neqo_common::{qdebug, Bytes, Encoder, Header};
 use neqo_transport::{
     server::ConnectionRef, AppError, Connection, DatagramTracking, StreamId, StreamType,
 };
@@ -22,7 +22,7 @@ use crate::{
     connection::{Http3State, SessionAcceptAction},
     connection_server::Http3ServerHandler,
     features::extended_connect,
-    DatagramPayload, Error, Http3StreamInfo, Http3StreamType, Priority, Res,
+    Error, Http3StreamInfo, Http3StreamType, Priority, Res,
 };
 
 #[derive(Debug, Clone)]
@@ -508,7 +508,7 @@ pub enum WebTransportServerEvent {
     NewStream(Http3OrWebTransportStream),
     Datagram {
         session: WebTransportRequest,
-        datagram: DatagramPayload,
+        datagram: Bytes,
     },
 }
 
@@ -525,7 +525,7 @@ pub enum ConnectUdpServerEvent {
     },
     Datagram {
         session: ConnectUdpRequest,
-        datagram: DatagramPayload,
+        datagram: Bytes,
     },
 }
 
@@ -724,20 +724,12 @@ impl Http3ServerEvents {
         ));
     }
 
-    pub(crate) fn webtransport_datagram(
-        &self,
-        session: WebTransportRequest,
-        datagram: DatagramPayload,
-    ) {
+    pub(crate) fn webtransport_datagram(&self, session: WebTransportRequest, datagram: Bytes) {
         self.insert(Http3ServerEvent::WebTransport(
             WebTransportServerEvent::Datagram { session, datagram },
         ));
     }
-    pub(crate) fn connect_udp_datagram(
-        &self,
-        session: ConnectUdpRequest,
-        datagram: DatagramPayload,
-    ) {
+    pub(crate) fn connect_udp_datagram(&self, session: ConnectUdpRequest, datagram: Bytes) {
         self.insert(Http3ServerEvent::ConnectUdp(
             ConnectUdpServerEvent::Datagram { session, datagram },
         ));

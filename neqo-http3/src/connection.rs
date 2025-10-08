@@ -660,8 +660,8 @@ impl Http3Connection {
         }
     }
 
-    pub(crate) fn handle_datagram(&mut self, datagram: &[u8]) {
-        let mut decoder = Decoder::new(datagram);
+    pub(crate) fn handle_datagram(&mut self, datagram: Vec<u8>) {
+        let mut decoder = Decoder::new(&datagram);
         let Some(id) = decoder.decode_varint() else {
             qdebug!("[{self}] handle_datagram: failed to decode session ID");
             return;
