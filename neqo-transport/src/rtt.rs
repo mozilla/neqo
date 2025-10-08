@@ -119,7 +119,7 @@ impl RttEstimate {
         // min_rtt ignores ack delay.
         self.min_rtt = min(self.min_rtt, rtt_sample);
         // Adjust for ack delay unless it goes below `min_rtt`.
-        if rtt_sample >= ack_delay + self.min_rtt{
+        if rtt_sample >= ack_delay + self.min_rtt {
             rtt_sample -= ack_delay;
         }
 
