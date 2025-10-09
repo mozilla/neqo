@@ -4,6 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+/// Owned contiguous byte array with an optional offset.
+///
+/// Inspired by `bytes` crate's `Bytes`.
 #[derive(Debug, Clone)]
 pub struct Bytes {
     data: Vec<u8>,
