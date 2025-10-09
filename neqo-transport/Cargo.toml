@@ -37,7 +37,7 @@ neqo-transport = { path = ".", features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]
-default = []
+default = ["qlog"]
 qlog = ["dep:qlog", "neqo-common/qlog", "test-fixture/qlog"]
 bench = ["neqo-common/bench", "neqo-crypto/bench"]
 build-fuzzing-corpus = [

@@ -52,7 +52,7 @@ neqo-transport = { path = "./../neqo-transport", features = ["draft-29"] }
 tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [features]
-default = []
+default = ["qlog"]
 qlog = ["dep:qlog", "neqo-common/qlog", "neqo-transport/qlog", "neqo-http3/qlog"]
 bench = ["neqo-bin/bench", "neqo-http3/bench", "neqo-transport/bench"]
 fast-apple-datapath = ["quinn-udp/fast-apple-datapath"]

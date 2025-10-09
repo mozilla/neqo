@@ -31,7 +31,7 @@ test-fixture = { path = "../test-fixture" }
 ignored = ["log"]
 
 [features]
-default = []
+default = ["qlog"]
 qlog = ["dep:qlog", "neqo-common/qlog", "neqo-transport/qlog", "test-fixture/qlog"]
 bench = ["neqo-common/bench", "neqo-transport/bench"]
 

@@ -24,7 +24,7 @@ neqo-transport = { path = "../neqo-transport", features = ["draft-29"] }
 qlog = { workspace = true, optional = true }
 
 [features]
-default = []
+default = ["qlog"]
 qlog = ["dep:qlog", "neqo-common/qlog", "neqo-transport/qlog", "neqo-http3/qlog"]
 bench = ["neqo-common/bench", "neqo-crypto/bench", "neqo-http3/bench", "neqo-transport/bench"]
 disable-random = []

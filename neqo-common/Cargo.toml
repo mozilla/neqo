@@ -34,7 +34,7 @@ test-fixture = { path = "../test-fixture" }
 regex = { workspace = true }
 
 [features]
-default = []
+default = ["qlog"]
 qlog = ["dep:qlog", "test-fixture/qlog"]
 bench = ["neqo-crypto/bench", "test-fixture/bench"]
 build-fuzzing-corpus = ["hex/alloc"]
