@@ -139,6 +139,7 @@ impl Protocol for Session {
         stream_id: StreamId,
         events: &mut Box<dyn ExtendedConnectEvents>,
         state: State,
+        _now: Instant,
     ) -> Res<()> {
         match state {
             State::Negotiating | State::Active => {}

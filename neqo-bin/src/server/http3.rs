@@ -92,8 +92,7 @@ impl super::HttpServer for HttpServer {
         self.server.process_multiple(dgrams, now, max_datagrams)
     }
 
-    fn process_events(&mut self, _now: Instant) {
-        let now = Instant::now();
+    fn process_events(&mut self, now: Instant) {
         while let Some(event) = self.server.next_event() {
             match event {
                 Http3ServerEvent::Headers {

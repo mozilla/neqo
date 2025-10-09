@@ -301,7 +301,7 @@ impl WtTest {
         stream_type: StreamType,
     ) -> StreamId {
         self.client
-            .webtransport_create_stream(wt_session_id, stream_type)
+            .webtransport_create_stream(wt_session_id, stream_type, now())
             .unwrap()
     }
 
@@ -451,7 +451,7 @@ impl WtTest {
         wt_server_session: &WebTransportRequest,
         stream_type: StreamType,
     ) -> Http3OrWebTransportStream {
-        wt_server_session.create_stream(stream_type).unwrap()
+        wt_server_session.create_stream(stream_type, now()).unwrap()
     }
 
     fn send_data_server(&mut self, wt_stream: &Http3OrWebTransportStream, data: &[u8]) {

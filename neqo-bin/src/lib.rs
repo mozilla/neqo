@@ -40,8 +40,13 @@ pub struct SharedArgs {
     /// This client still only does HTTP/3 no matter what the ALPN says.
     alpn: String,
 
-    #[arg(name = "qlog-dir", long, value_parser=clap::value_parser!(PathBuf))]
-    /// Enable QLOG logging and QLOG traces to this directory
+    #[arg(name = "qlog-dir", long, value_parser=clap::value_parser!(PathBuf), help=
+        if cfg!(feature = "qlog") {
+            "Enable QLOG logging and QLOG traces to this directory"
+        } else {
+            "QLOG logging is disabled"
+        }
+    )]
     qlog_dir: Option<PathBuf>,
 
     #[arg(name = "encoder-table-size", long, default_value = "16384")]
@@ -274,7 +279,7 @@ pub enum Error {
     Argument(&'static str),
 }
 
-#[cfg(not(target_os = "netbsd"))] // FIXME: Test fails on NetBSD.
+#[cfg(all(not(feature = "qlog"), target_os = "netbsd"))] // FIXME: Test fails on NetBSD.
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {

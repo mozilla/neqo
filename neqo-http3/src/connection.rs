@@ -1411,6 +1411,7 @@ impl Http3Connection {
         stream_type: StreamType,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
+        now: Instant,
     ) -> Res<StreamId> {
         qtrace!("Create new WebTransport stream session={session_id} type={stream_type:?}");
 
@@ -1437,6 +1438,7 @@ impl Http3Connection {
             send_events,
             recv_events,
             true,
+            now,
         )?;
         Ok(stream_id)
     }
@@ -1447,6 +1449,7 @@ impl Http3Connection {
         stream_id: StreamId,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
+        now: Instant,
     ) -> Res<()> {
         qtrace!("Create new WebTransport stream session={session_id} stream_id={stream_id}");
 
@@ -1464,10 +1467,12 @@ impl Http3Connection {
             send_events,
             recv_events,
             false,
+            now,
         )?;
         Ok(())
     }
 
+    #[expect(clippy::too_many_arguments, reason = "We need them all.")]
     fn webtransport_create_stream_internal(
         &mut self,
         webtransport_session: Rc<RefCell<extended_connect::session::Session>>,
@@ -1476,8 +1481,11 @@ impl Http3Connection {
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
         local: bool,
+        now: Instant,
     ) -> Res<()> {
-        webtransport_session.borrow_mut().add_stream(stream_id)?;
+        webtransport_session
+            .borrow_mut()
+            .add_stream(stream_id, now)?;
         if stream_id.stream_type() == StreamType::UniDi {
             if local {
                 self.send_streams.insert(

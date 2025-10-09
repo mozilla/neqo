@@ -18,9 +18,10 @@ use std::{
     time::Instant,
 };
 
+#[cfg(feature = "qlog")]
+use neqo_common::Role;
 use neqo_common::{
-    event::Provider as _, hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn, Datagram, Role,
-    Tos,
+    event::Provider as _, hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn, Datagram, Tos,
 };
 use neqo_crypto::{
     encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
@@ -31,11 +32,11 @@ use rustc_hash::FxHashSet as HashSet;
 pub use crate::addr_valid::ValidateAddress;
 use crate::{
     addr_valid::{AddressValidation, AddressValidationResult},
-    cid::{ConnectionId, ConnectionIdGenerator, ConnectionIdRef},
+    cid::{ConnectionId, ConnectionIdGenerator},
     connection::{Connection, Output, State},
     packet::{self, Public, MIN_INITIAL_PACKET_SIZE},
     saved::SavedDatagram,
-    ConnectionParameters, OutputBatch, Res, Version,
+    ConnectionIdRef, ConnectionParameters, OutputBatch, Res, Version,
 };
 
 /// A `ServerZeroRttChecker` is a simple wrapper around a single checker.
@@ -272,7 +273,14 @@ impl Server {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "qlog"),
+        expect(unused_variables, clippy::unused_self, reason = "only without qlog")
+    )]
     fn create_qlog_trace(&self, odcid: ConnectionIdRef<'_>, now: Instant) -> Qlog {
+        #[cfg(not(feature = "qlog"))]
+        return Qlog::disabled();
+        #[cfg(feature = "qlog")]
         self.qlog_dir
             .as_ref()
             .map_or_else(Qlog::disabled, |qlog_dir| {
