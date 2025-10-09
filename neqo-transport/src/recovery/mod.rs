@@ -1247,9 +1247,9 @@ mod tests {
     fn reduce_min_rtt() {
         let mut lr = setup_lr(2);
         let delta = ms(4);
-        let reduced_rtt = TEST_RTT - delta;
+        let reduced_rtt = TEST_RTT.checked_sub(delta).unwrap();
         ack(&mut lr, 1, reduced_rtt);
-        let expected_rtt = TEST_RTT - (delta / 8);
+        let expected_rtt = TEST_RTT.checked_sub(delta / 8).unwrap();
         let expected_rttvar = (TEST_RTTVAR * 3 + delta) / 4;
         assert_rtts(&lr, reduced_rtt, expected_rtt, expected_rttvar, reduced_rtt);
         assert_no_sent_times(&lr);

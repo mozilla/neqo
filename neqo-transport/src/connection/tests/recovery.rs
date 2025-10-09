@@ -829,7 +829,9 @@ fn fast_pto() {
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 
     let res = client.process_output(now);
-    let idle_timeout = ConnectionParameters::DEFAULT_IDLE_TIMEOUT - (DEFAULT_RTT / 2);
+    let idle_timeout = ConnectionParameters::DEFAULT_IDLE_TIMEOUT
+        .checked_sub(DEFAULT_RTT / 2)
+        .unwrap();
     assert_eq!(res, Output::Callback(idle_timeout));
 
     // Send data on two streams
@@ -872,7 +874,9 @@ fn fast_pto_persistent_congestion() {
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 
     let res = client.process_output(now);
-    let idle_timeout = ConnectionParameters::DEFAULT_IDLE_TIMEOUT - (DEFAULT_RTT / 2);
+    let idle_timeout = ConnectionParameters::DEFAULT_IDLE_TIMEOUT
+        .checked_sub(DEFAULT_RTT / 2)
+        .unwrap();
     assert_eq!(res, Output::Callback(idle_timeout));
 
     // Send packets spaced by the PTO timer.  And lose them.

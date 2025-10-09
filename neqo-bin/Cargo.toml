@@ -26,7 +26,14 @@ bench = false
 workspace = true
 
 [dependencies]
-clap = { version = "4.5", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "derive"] }
+clap = { version = "4.5", default-features = false, features = [
+        "std",
+        "help",
+        "usage",
+        "error-context",
+        "suggestions",
+        "derive",
+] }
 clap-verbosity-flag = { version = "3.0", default-features = false, features = ["log"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = { workspace = true, features = ["std"] }
@@ -45,7 +52,10 @@ tokio = { version = "1", default-features = false, features = ["net", "time", "m
 url = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "0.6", default-features = false, features = ["async_tokio", "cargo_bench_support"] }
+criterion = { version = "0.6", default-features = false, features = [
+        "async_tokio",
+        "cargo_bench_support",
+] }
 neqo-bin = { path = ".", features = ["draft-29"] }
 neqo-http3 = { path = "./../neqo-http3", features = ["draft-29"] }
 neqo-transport = { path = "./../neqo-transport", features = ["draft-29"] }
@@ -54,7 +64,7 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 [features]
 default = ["qlog"]
 qlog = ["dep:qlog", "neqo-common/qlog", "neqo-transport/qlog", "neqo-http3/qlog"]
-bench = ["neqo-bin/bench", "neqo-http3/bench", "neqo-transport/bench"]
+bench = ["neqo-bin/bench", "neqo-http3/bench", "neqo-transport/bench", "log/release_max_level_info"]
 fast-apple-datapath = ["quinn-udp/fast-apple-datapath"]
 draft-29 = []
 
