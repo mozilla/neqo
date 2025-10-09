@@ -398,7 +398,7 @@ impl Session {
         Ok(())
     }
 
-    pub(crate) fn datagram(&self, datagram: Vec<u8>, payload_offset: usize) {
+    pub(crate) fn datagram(&self, datagram: Bytes) {
         if self.state != State::Active {
             qdebug!("[{self}]: received datagram on {:?} session.", self.state);
             return;
@@ -406,15 +406,10 @@ impl Session {
 
         // dgram_context_id returns the payload after stripping any context ID; length difference
         // indicates context ID presence.
-        match self.protocol.dgram_context_id(&datagram[payload_offset..]) {
+        match self.protocol.dgram_context_id(datagram) {
             Ok(slice) => {
-                // If lengths differ, a context ID is present.
-                let context_offset = usize::from(slice.len() != datagram[payload_offset..].len());
-                let total_offset = payload_offset + context_offset;
-                let payload = Bytes::new(datagram, total_offset);
-
                 self.events
-                    .new_datagram(self.id, payload, self.protocol.connect_type());
+                    .new_datagram(self.id, slice, self.protocol.connect_type());
             }
             Err(e) => {
                 qdebug!("[{self}]: received datagram with invalid context identifier: {e}");
@@ -569,7 +564,7 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);
 
-    fn dgram_context_id<'a>(&self, datagram: &'a [u8]) -> Result<&'a [u8], DgramContextIdError>;
+    fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError>;
 }
 
 #[derive(Debug, Error)]

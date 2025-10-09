@@ -12,7 +12,9 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, MessageType, Role};
+use neqo_common::{
+    qdebug, qerror, qinfo, qtrace, qwarn, Bytes, Decoder, Header, MessageType, Role,
+};
 use neqo_qpack as qpack;
 use neqo_transport::{
     streams::SendOrder, AppError, CloseReason, Connection, DatagramTracking, State, StreamId,
@@ -677,7 +679,9 @@ impl Http3Connection {
             return;
         };
 
-        stream.borrow_mut().datagram(datagram, varint_len);
+        stream
+            .borrow_mut()
+            .datagram(Bytes::new(datagram, varint_len));
     }
 
     fn check_stream_exists(&self, stream_type: Http3StreamType) -> Res<()> {
