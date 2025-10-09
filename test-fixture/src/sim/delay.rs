@@ -32,7 +32,7 @@ impl RandomDelayIter {
     /// or more nanoseconds.
     /// A zero-length range means that random values won't be taken from the Rng
     pub fn new(bounds: Range<Duration>) -> Self {
-        let max = u64::try_from((bounds.end - bounds.start).as_nanos()).unwrap();
+        let max = u64::try_from(bounds.end.checked_sub(bounds.start).unwrap().as_nanos()).unwrap();
         Self {
             start: bounds.start,
             max,
