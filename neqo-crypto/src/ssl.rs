@@ -124,6 +124,7 @@ experimental_api!(SSL_SetCertificateCompressionAlgorithm(
 ));
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{SSL_GetNumImplementedCiphers, SSL_NumImplementedCiphers};
 

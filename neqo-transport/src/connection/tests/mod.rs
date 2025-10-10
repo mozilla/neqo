@@ -45,6 +45,7 @@ mod idle;
 mod keys;
 mod migration;
 mod null;
+mod pmtud;
 mod priority;
 mod recovery;
 mod resumption;
@@ -335,7 +336,7 @@ fn assert_idle(client: &mut Connection, server: &mut Connection, rtt: Duration, 
     // Client started its idle period half an RTT before now.
     assert_eq!(
         client.process_output(now),
-        Output::Callback(idle_timeout - rtt / 2)
+        Output::Callback(idle_timeout.checked_sub(rtt / 2).unwrap())
     );
     assert_eq!(server.process_output(now), Output::Callback(idle_timeout));
 }
