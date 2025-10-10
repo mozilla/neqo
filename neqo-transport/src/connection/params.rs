@@ -32,6 +32,7 @@ use crate::{
 const LOCAL_MAX_DATA: u64 = MAX_VARINT;
 const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
+// Maximum size of a QUIC DATAGRAM frame, as specified in RFC 9000 Section 7.4 (64KB).
 const MAX_DATAGRAM_FRAME_SIZE: u64 = 65536;
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
 
