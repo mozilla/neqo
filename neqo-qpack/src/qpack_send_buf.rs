@@ -10,7 +10,7 @@ use crate::{huffman, prefix::Prefix};
 
 /// Trait providing QPACK-specific encoding methods for `Encoder`.
 ///
-/// This trait extends the standard `neqo_common::Encoder` with QPACK-specific
+/// This trait extends the standard [`neqo_common::Encoder`] with QPACK-specific
 /// methods for encoding integers with prefixes and literal strings with
 /// optional Huffman encoding.
 pub trait QpackEncoder {
