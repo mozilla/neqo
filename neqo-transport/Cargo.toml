@@ -16,7 +16,6 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 enum-map = { workspace = true }
 enumset = { workspace = true }
 indexmap = { version = "2.2", default-features = false } # See https://github.com/mozilla/neqo/issues/1858
@@ -30,6 +29,9 @@ smallvec = { version = "1.13", default-features = false, features = ["union", "c
 static_assertions = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { version = "0.6", default-features = false }
 
 [dev-dependencies]
 criterion = { version = "0.6", default-features = false, features = ["cargo_bench_support"] }

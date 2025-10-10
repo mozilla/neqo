@@ -8,6 +8,12 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use neqo_transport::send_stream::RangeTracker;
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 const CHUNK: u64 = 1000;
 const END: u64 = 100_000;
