@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType, Role};
+use neqo_common::{qdebug, qtrace, Bytes, Encoder, Header, MessageType, Role};
 use neqo_transport::{AppError, Connection, DatagramTracking, StreamId};
 
 use crate::{
@@ -398,20 +398,22 @@ impl Session {
         Ok(())
     }
 
-    pub(crate) fn datagram(&self, datagram: &[u8]) {
+    pub(crate) fn datagram(&self, datagram: Bytes) {
         if self.state != State::Active {
             qdebug!("[{self}]: received datagram on {:?} session.", self.state);
             return;
         }
-        let datagram = match self.protocol.dgram_context_id(datagram) {
-            Ok(datagram) => datagram,
+
+        // dgram_context_id returns the payload after stripping any context ID
+        match self.protocol.dgram_context_id(datagram) {
+            Ok(slice) => {
+                self.events
+                    .new_datagram(self.id, slice, self.protocol.connect_type());
+            }
             Err(e) => {
                 qdebug!("[{self}]: received datagram with invalid context identifier: {e}");
-                return;
             }
-        };
-        self.events
-            .new_datagram(self.id, datagram.to_vec(), self.protocol.connect_type());
+        }
     }
 
     fn has_data_to_send(&self) -> bool {
@@ -561,7 +563,7 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);
 
-    fn dgram_context_id<'a>(&self, datagram: &'a [u8]) -> Result<&'a [u8], DgramContextIdError>;
+    fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError>;
 }
 
 #[derive(Debug, Error)]

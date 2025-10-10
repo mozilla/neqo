@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-use neqo_common::{event::Provider as EventProvider, qtrace, Header};
+use neqo_common::{event::Provider as EventProvider, qtrace, Bytes, Header};
 use neqo_crypto::ResumptionToken;
 use neqo_transport::{AppError, StreamId, StreamType};
 
@@ -40,7 +40,7 @@ pub enum WebTransportEvent {
     },
     Datagram {
         session_id: StreamId,
-        datagram: Vec<u8>,
+        datagram: Bytes,
     },
 }
 
@@ -62,7 +62,7 @@ pub enum ConnectUdpEvent {
     },
     Datagram {
         session_id: StreamId,
-        datagram: Vec<u8>,
+        datagram: Bytes,
     },
 }
 
@@ -283,7 +283,7 @@ impl ExtendedConnectEvents for Http3ClientEvents {
     fn new_datagram(
         &self,
         session_id: StreamId,
-        datagram: Vec<u8>,
+        datagram: Bytes,
         connect_type: ExtendedConnectType,
     ) {
         let event = match connect_type {

@@ -6,6 +6,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+pub mod bytes;
 mod codec;
 mod datagram;
 pub mod event;
@@ -26,6 +27,7 @@ use strum::Display;
 #[cfg(feature = "build-fuzzing-corpus")]
 pub use self::fuzz::write_item_to_fuzzing_corpus;
 pub use self::{
+    bytes::Bytes,
     codec::{Buffer, Decoder, Encoder, MAX_VARINT},
     datagram::{Datagram, DatagramBatch},
     header::Header,

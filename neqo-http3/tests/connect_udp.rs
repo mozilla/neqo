@@ -220,7 +220,7 @@ fn session_lifecycle(client_closes: bool) {
         })
         .unwrap();
     assert_eq!(session_id, id);
-    assert_eq!(datagram, PING);
+    assert_eq!(&datagram, PING);
 
     proxy_session.send_datagram(PONG, None).unwrap();
 
@@ -242,7 +242,7 @@ fn session_lifecycle(client_closes: bool) {
         .unwrap();
 
     assert_eq!(session_id, id);
-    assert_eq!(datagram, PONG);
+    assert_eq!(&datagram, PONG);
 
     if client_closes {
         client
