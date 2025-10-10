@@ -404,8 +404,7 @@ impl Session {
             return;
         }
 
-        // dgram_context_id returns the payload after stripping any context ID; length difference
-        // indicates context ID presence.
+        // dgram_context_id returns the payload after stripping any context ID
         match self.protocol.dgram_context_id(datagram) {
             Ok(slice) => {
                 self.events
