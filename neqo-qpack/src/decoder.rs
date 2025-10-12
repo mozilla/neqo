@@ -179,8 +179,8 @@ impl Decoder {
                 .map_err(|_| Error::DecoderStream)?;
             qdebug!("[{self}] {r} bytes sent");
             if r < self.send_buf.len() {
-                // Efficiently drain the sent bytes from the buffer
-                self.send_buf.drain(r).for_each(drop);
+                // Efficiently remove the sent bytes from the buffer and update internal state
+                self.send_buf.remove_prefix(r);
             } else {
                 self.send_buf = Encoder::default();
             }
