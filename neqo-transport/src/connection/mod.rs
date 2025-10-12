@@ -26,6 +26,7 @@ use neqo_crypto::{
     agent::{CertificateCompressor, CertificateInfo},
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
     PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttChecker,
+    AEAD_EXPANSION_SIZE,
 };
 use smallvec::SmallVec;
 use strum::IntoEnumIterator as _;
@@ -2656,6 +2657,15 @@ impl Connection {
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
 
+        // Configure the limits and padding for this packet.
+        let limit = if path.borrow().pmtud().needs_probe() {
+            needs_padding = true;
+            debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
+            path.borrow().pmtud().probe_size() - AEAD_EXPANSION_SIZE
+        } else {
+            profile.limit() - AEAD_EXPANSION_SIZE
+        };
+
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         for space in PacketNumberSpace::iter() {
@@ -2664,18 +2674,8 @@ impl Connection {
             else {
                 continue;
             };
-            let aead_expansion = tx.expansion();
 
             let header_start = encoder.len();
-
-            // Configure the limits and padding for this packet.
-            let limit = if path.borrow().pmtud().needs_probe() {
-                needs_padding = true;
-                debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
-                path.borrow().pmtud().probe_size() - aead_expansion
-            } else {
-                profile.limit() - aead_expansion
-            };
 
             let (pt, mut builder) = Self::build_packet_header(
                 &path.borrow(),
@@ -2730,7 +2730,7 @@ impl Connection {
                     path,
                     pt,
                     pn,
-                    builder.len() + aead_expansion,
+                    builder.len() + AEAD_EXPANSION_SIZE,
                     &builder.as_ref()[payload_start..],
                     packet_tos,
                 ),
@@ -3846,7 +3846,7 @@ impl Connection {
         );
 
         let data_len_possible =
-            u64::try_from(mtu.saturating_sub(tx.expansion() + builder.len() + 1))?;
+            u64::try_from(mtu.saturating_sub(AEAD_EXPANSION_SIZE + builder.len() + 1))?;
         Ok(min(data_len_possible, max_dgram_size))
     }
 

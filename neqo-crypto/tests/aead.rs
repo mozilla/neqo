@@ -9,7 +9,7 @@
 
 use neqo_crypto::{
     constants::{Cipher, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-    hkdf, Aead, AeadTrait as _,
+    hkdf, Aead, AeadTrait as _, AEAD_EXPANSION_SIZE,
 };
 use test_fixture::fixture_init;
 
@@ -126,7 +126,7 @@ fn aead_encrypt_in_place_too_small_buffer() {
     let aead = make_aead(TLS_AES_128_GCM_SHA256);
 
     // Create a buffer that's smaller than the expansion size
-    let mut small_buffer = vec![0u8; aead.expansion() - 1];
+    let mut small_buffer = vec![0u8; AEAD_EXPANSION_SIZE - 1];
 
     let result = aead.encrypt_in_place(1, AAD, &mut small_buffer);
     assert!(result.is_err());

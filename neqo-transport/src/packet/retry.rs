@@ -47,9 +47,3 @@ where
         Error::Internal
     })?
 }
-
-/// Determine how large the expansion is for a given key.
-pub fn expansion(version: Version) -> usize {
-    use_aead(version, |aead| Ok(aead.expansion()))
-        .unwrap_or_else(|_| panic!("Unable to access Retry AEAD"))
-}

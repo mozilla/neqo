@@ -7,7 +7,7 @@
 mod common;
 use common::assert_dscp;
 use neqo_common::{Datagram, Decoder, Encoder, Role};
-use neqo_crypto::AeadTrait as _;
+use neqo_crypto::{AeadTrait as _, AEAD_EXPANSION_SIZE};
 use neqo_transport::{
     CloseReason, ConnectionParameters, Error, State, StreamType, Version, MIN_INITIAL_PACKET_SIZE,
 };
@@ -161,6 +161,8 @@ fn reorder_server_initial() {
 
 #[cfg(test)]
 fn set_payload(server_packet: Option<&Datagram>, client_dcid: &[u8], payload: &[u8]) -> Datagram {
+    use neqo_crypto::AEAD_EXPANSION_SIZE;
+
     let (server_initial, _server_hs) = split_datagram(server_packet.as_ref().unwrap());
     let (protected_header, _, _, orig_payload) =
         decode_initial_header(&server_initial, Role::Server).unwrap();
@@ -176,13 +178,13 @@ fn set_payload(server_packet: Option<&Datagram>, client_dcid: &[u8], payload: &[
         - Encoder::varint_len(u64::try_from(pn_len + orig_payload.len()).unwrap());
     header.truncate(len_pos);
     let mut enc = Encoder::new_borrowed_vec(&mut header);
-    enc.encode_varint(u64::try_from(4 + payload.len() + aead.expansion()).unwrap());
+    enc.encode_varint(u64::try_from(4 + payload.len() + AEAD_EXPANSION_SIZE).unwrap());
     enc.encode_uint(4, pn);
     header[0] = header[0] & 0xfc | 0b0000_0011; // Set the packet number length to 4.
 
     // And build a packet containing the given payload.
     let mut packet = header.clone();
-    packet.resize(header.len() + payload.len() + aead.expansion(), 0);
+    packet.resize(header.len() + payload.len() + AEAD_EXPANSION_SIZE, 0);
     aead.encrypt(pn, &header, payload, &mut packet[header.len()..])
         .unwrap();
     header_protection::apply(&hp, &mut packet, protected_header.len()..header.len());
@@ -277,13 +279,13 @@ fn overflow_crypto() {
             .encode_vec(1, server_dcid)
             .encode_vec(1, server_scid)
             .encode_vvec(&[]) // token
-            .encode_varint(u64::try_from(2 + payload.len() + aead.expansion()).unwrap()); // length
+            .encode_varint(u64::try_from(2 + payload.len() + AEAD_EXPANSION_SIZE).unwrap()); // length
         let pn_offset = packet.len();
         packet.encode_uint(2, pn);
 
         let mut packet = Vec::from(packet);
         let header = packet.clone();
-        packet.resize(header.len() + payload.len() + aead.expansion(), 0);
+        packet.resize(header.len() + payload.len() + AEAD_EXPANSION_SIZE, 0);
         aead.encrypt(pn, &header, payload.as_ref(), &mut packet[header.len()..])
             .unwrap();
         header_protection::apply(&hp, &mut packet, pn_offset..(pn_offset + 2));

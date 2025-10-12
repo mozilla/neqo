@@ -15,7 +15,7 @@ use std::{
 
 use enum_map::Enum;
 use neqo_common::{hex, hex_with_len, qtrace, qwarn, Buffer, Decoder, Encoder};
-use neqo_crypto::{random, AeadTrait as _};
+use neqo_crypto::{random, AeadTrait as _, AEAD_EXPANSION_SIZE};
 use strum::{EnumIter, FromRepr};
 
 use crate::{
@@ -164,7 +164,7 @@ impl Builder<Vec<u8>> {
         debug_assert_ne!(token.len(), 0);
         encoder.encode(token);
         let tag = retry::use_aead(version, |aead| {
-            let mut buf = vec![0; aead.expansion()];
+            let mut buf = vec![0; AEAD_EXPANSION_SIZE];
             Ok(aead.encrypt(0, encoder.as_ref(), &[], &mut buf)?.to_vec())
         })?;
         encoder.encode(&tag);
@@ -416,12 +416,12 @@ impl<B: Buffer> Builder<B> {
         self.encoder.as_mut()[self.offsets.len + 1] = (len & 0xff) as u8;
     }
 
-    fn pad_for_crypto(&mut self, crypto: &CryptoDxState) {
+    fn pad_for_crypto(&mut self) {
         // Make sure that there is enough data in the packet.
         // The length of the packet number plus the payload length needs to
         // be at least 4 (MAX_PACKET_NUMBER_LEN) plus any amount by which
         // the header protection sample exceeds the AEAD expansion.
-        let crypto_pad = crypto.extra_padding();
+        let crypto_pad = CryptoDxState::EXTRA_PADDING;
         self.encoder.pad_to(
             self.offsets.pn.start + MAX_PACKET_NUMBER_LEN + crypto_pad,
             0,
@@ -458,9 +458,9 @@ impl<B: Buffer> Builder<B> {
             return Err(Error::Internal);
         }
 
-        self.pad_for_crypto(crypto);
+        self.pad_for_crypto();
         if self.offsets.len > 0 {
-            self.write_len(crypto.expansion());
+            self.write_len(AEAD_EXPANSION_SIZE);
         }
 
         qtrace!(
@@ -472,7 +472,7 @@ impl<B: Buffer> Builder<B> {
 
         // Add space for crypto expansion.
         let data_end = self.encoder.len();
-        self.pad_to(data_end + crypto.expansion(), 0);
+        self.pad_to(data_end + AEAD_EXPANSION_SIZE, 0);
 
         // Calculate the mask.
         let ciphertext = crypto.encrypt(self.pn, self.header.clone(), self.encoder.as_mut())?;
@@ -563,14 +563,10 @@ impl<'a> Public<'a> {
     /// Decode the type-specific portions of a long header.
     /// This includes reading the length and the remainder of the packet.
     /// Returns a tuple of any token and the length of the header.
-    fn decode_long(
-        decoder: &mut Decoder<'a>,
-        packet_type: Type,
-        version: Version,
-    ) -> Res<(&'a [u8], usize)> {
+    fn decode_long(decoder: &mut Decoder<'a>, packet_type: Type) -> Res<(&'a [u8], usize)> {
         if packet_type == Type::Retry {
             let header_len = decoder.offset();
-            let expansion = retry::expansion(version);
+            let expansion = AEAD_EXPANSION_SIZE;
             let token = decoder
                 .remaining()
                 .checked_sub(expansion)
@@ -674,7 +670,7 @@ impl<'a> Public<'a> {
         let packet_type = Type::from_byte((first >> 4) & 3, version);
 
         // The type-specific code includes a token.  This consumes the remainder of the packet.
-        let (token, header_len) = Public::decode_long(&mut decoder, packet_type, version)?;
+        let (token, header_len) = Public::decode_long(&mut decoder, packet_type)?;
         let token = token.to_vec();
         let end = data.len() - decoder.remaining();
         let (data, remainder) = data.split_at_mut(end);
@@ -701,7 +697,7 @@ impl<'a> Public<'a> {
         let Some(version) = self.version() else {
             return false;
         };
-        let expansion = retry::expansion(version);
+        let expansion = AEAD_EXPANSION_SIZE;
         if self.data.len() <= expansion {
             return false;
         }
@@ -957,6 +953,7 @@ pub const PACKET_LIMIT: usize = 2048;
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::Encoder;
+    use neqo_crypto::AEAD_EXPANSION_SIZE;
     use test_fixture::{fixture_init, now};
 
     use crate::{
@@ -1007,7 +1004,7 @@ mod tests {
         // So burn an encryption:
         let mut burn = [0; 16];
         prot.encrypt(0, 0..0, &mut burn).expect("burn OK");
-        assert_eq!(burn.len(), prot.expansion());
+        assert_eq!(burn.len(), AEAD_EXPANSION_SIZE);
 
         let mut builder = Builder::long(
             Encoder::new(),

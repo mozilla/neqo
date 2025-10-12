@@ -20,6 +20,9 @@ use crate::{
     ssl::{PRUint16, PRUint64, PRUint8, SSLAeadContext},
 };
 
+/// Expansion size (authentication tag length) for AEAD.
+pub const AEAD_EXPANSION_SIZE: usize = 16;
+
 /// Trait for AEAD (Authenticated Encryption with Associated Data) operations.
 ///
 /// This trait provides a common interface for both real and null AEAD implementations,
@@ -33,9 +36,6 @@ pub trait Aead {
     fn new(version: Version, cipher: Cipher, secret: &SymKey, prefix: &str) -> Res<Self>
     where
         Self: Sized;
-
-    /// Get the expansion size (authentication tag length) for this AEAD.
-    fn expansion(&self) -> usize;
 
     /// Encrypt plaintext with associated data.
     ///
@@ -146,10 +146,6 @@ impl Aead for RealAead {
         unsafe { Self::from_raw(version, cipher, s, prefix) }
     }
 
-    fn expansion(&self) -> usize {
-        16
-    }
-
     fn encrypt<'a>(
         &self,
         count: u64,
@@ -180,7 +176,7 @@ impl Aead for RealAead {
         aad: &[u8],
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
-        if data.len() < self.expansion() {
+        if data.len() < AEAD_EXPANSION_SIZE {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
 
@@ -192,7 +188,7 @@ impl Aead for RealAead {
                 aad.as_ptr(),
                 c_uint::try_from(aad.len())?,
                 data.as_ptr(),
-                c_uint::try_from(data.len() - self.expansion())?,
+                c_uint::try_from(data.len() - AEAD_EXPANSION_SIZE)?,
                 data.as_mut_ptr(),
                 &mut l,
                 c_uint::try_from(data.len())?,
@@ -252,7 +248,7 @@ impl Aead for RealAead {
                 c_uint::try_from(data.len())?,
             )
         }?;
-        debug_assert_eq!(usize::try_from(l)?, data.len() - self.expansion());
+        debug_assert_eq!(usize::try_from(l)?, data.len() - AEAD_EXPANSION_SIZE);
         Ok(&mut data[..l.try_into()?])
     }
 }

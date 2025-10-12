@@ -12,7 +12,7 @@ use common::{connect, connected_server, default_server, find_ticket, generate_ti
 use neqo_common::{qtrace, Datagram, Decoder, Encoder, Role};
 use neqo_crypto::{
     generate_ech_keys, AeadTrait as _, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult,
-    ZeroRttChecker,
+    ZeroRttChecker, AEAD_EXPANSION_SIZE,
 };
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
@@ -459,12 +459,15 @@ fn bad_client_initial() {
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + PN_LEN).unwrap())
+        .encode_varint(u64::try_from(payload_enc.len() + AEAD_EXPANSION_SIZE + PN_LEN).unwrap())
         .encode_byte(u8::try_from(pn >> 8).unwrap())
         .encode_byte(u8::try_from(pn & 0xff).unwrap());
 
     let mut ciphertext = header_enc.as_ref().to_vec();
-    ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
+    ciphertext.resize(
+        header_enc.len() + payload_enc.len() + AEAD_EXPANSION_SIZE,
+        0,
+    );
     let v = aead
         .encrypt(
             pn,
@@ -551,11 +554,14 @@ fn bad_client_initial_connection_close() {
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + 1).unwrap())
+        .encode_varint(u64::try_from(payload_enc.len() + AEAD_EXPANSION_SIZE + 1).unwrap())
         .encode_byte(u8::try_from(pn).unwrap());
 
     let mut ciphertext = header_enc.as_ref().to_vec();
-    ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
+    ciphertext.resize(
+        header_enc.len() + payload_enc.len() + AEAD_EXPANSION_SIZE,
+        0,
+    );
     let v = aead
         .encrypt(
             pn,

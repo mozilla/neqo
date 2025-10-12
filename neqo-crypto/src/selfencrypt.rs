@@ -14,7 +14,7 @@ use crate::{
     err::{Error, Res},
     hkdf,
     p11::{random, SymKey},
-    Aead,
+    Aead, AEAD_EXPANSION_SIZE,
 };
 
 #[derive(Debug)]
@@ -85,7 +85,7 @@ impl SelfEncrypt {
         // AAD covers the entire header, plus the value of the AAD parameter that is provided.
         let salt = random::<{ Self::SALT_LENGTH }>();
         let cipher = self.make_aead(&self.key, &salt)?;
-        let encoded_len = 2 + salt.len() + plaintext.len() + cipher.expansion();
+        let encoded_len = 2 + salt.len() + plaintext.len() + AEAD_EXPANSION_SIZE;
 
         let mut enc = Encoder::with_capacity(encoded_len);
         enc.encode_byte(Self::VERSION);

@@ -20,9 +20,9 @@ pub use neqo_crypto::Epoch;
 use neqo_crypto::{
     hkdf, hp, random, Aead, AeadTrait as _, Agent, AntiReplay, Cipher, Error as CryptoError,
     HandshakeState, PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey,
-    ZeroRttChecker, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
-    TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1,
-    TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
+    ZeroRttChecker, AEAD_EXPANSION_SIZE, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
+    TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1,
+    TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
 };
 
 use crate::{
@@ -471,6 +471,11 @@ pub struct CryptoDxState {
 const INITIAL_LARGEST_PACKET_LEN: usize = 1 << 11; // 2048
 
 impl CryptoDxState {
+    /// Get the amount of extra padding packets protected with this profile need.
+    /// This is the difference between the size of the header protection sample
+    /// and the AEAD expansion.
+    pub const EXTRA_PADDING: usize = hp::Key::SAMPLE_SIZE.saturating_sub(AEAD_EXPANSION_SIZE);
+
     pub fn new(
         version: Version,
         direction: CryptoDxDirection,
@@ -679,7 +684,7 @@ impl CryptoDxState {
 
         // The numbers in `Self::limit` assume a maximum packet size of `LIMIT`.
         // Adjust them as we encounter larger packets.
-        let body_len = data.len() - hdr.len() - self.aead.expansion();
+        let body_len = data.len() - hdr.len() - AEAD_EXPANSION_SIZE;
         debug_assert!(body_len <= u16::MAX.into());
         if body_len > self.largest_packet_len {
             let new_bits = usize::leading_zeros(self.largest_packet_len - 1)
@@ -698,11 +703,6 @@ impl CryptoDxState {
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
         Ok(data)
-    }
-
-    #[must_use]
-    pub fn expansion(&self) -> usize {
-        self.aead.expansion()
     }
 
     pub fn decrypt<'a>(
@@ -737,13 +737,6 @@ impl CryptoDxState {
             0,
         )
         .unwrap()
-    }
-
-    /// Get the amount of extra padding packets protected with this profile need.
-    /// This is the difference between the size of the header protection sample
-    /// and the AEAD expansion.
-    pub fn extra_padding(&self) -> usize {
-        hp::Key::SAMPLE_SIZE.saturating_sub(self.expansion())
     }
 }
 

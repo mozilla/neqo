@@ -7,25 +7,26 @@
 use std::fmt;
 
 use crate::{
-    aead::Aead,
+    aead::{Aead, AEAD_EXPANSION_SIZE},
     constants::{Cipher, Version},
     err::{sec::SEC_ERROR_BAD_DATA, Error, Res},
     p11::SymKey,
 };
 
-pub const AEAD_NULL_TAG: &[u8] = &[0x0a; 16];
+pub const AEAD_NULL_TAG: &[u8] = &[0x0a; AEAD_EXPANSION_SIZE];
 
 pub struct AeadNull {}
 
 impl AeadNull {
+    #[expect(clippy::unused_self, reason = "consistent interface with real AEAD")]
     fn decrypt_check(&self, _count: u64, _aad: &[u8], input: &[u8]) -> Res<usize> {
-        if input.len() < self.expansion() {
+        if input.len() < AEAD_EXPANSION_SIZE {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
 
         let len_encrypted = input
             .len()
-            .checked_sub(self.expansion())
+            .checked_sub(AEAD_EXPANSION_SIZE)
             .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
         // Check that:
         // 1) expansion is all zeros and
@@ -46,10 +47,6 @@ impl Aead for AeadNull {
         Ok(Self {})
     }
 
-    fn expansion(&self) -> usize {
-        AEAD_NULL_TAG.len()
-    }
-
     fn encrypt<'a>(
         &self,
         _count: u64,
@@ -59,8 +56,8 @@ impl Aead for AeadNull {
     ) -> Res<&'a [u8]> {
         let l = input.len();
         output[..l].copy_from_slice(input);
-        output[l..l + self.expansion()].copy_from_slice(AEAD_NULL_TAG);
-        Ok(&output[..l + self.expansion()])
+        output[l..l + AEAD_EXPANSION_SIZE].copy_from_slice(AEAD_NULL_TAG);
+        Ok(&output[..l + AEAD_EXPANSION_SIZE])
     }
 
     fn encrypt_in_place<'a>(
@@ -69,7 +66,7 @@ impl Aead for AeadNull {
         _aad: &[u8],
         data: &'a mut [u8],
     ) -> Res<&'a mut [u8]> {
-        let pos = data.len() - self.expansion();
+        let pos = data.len() - AEAD_EXPANSION_SIZE;
         data[pos..].copy_from_slice(AEAD_NULL_TAG);
         Ok(data)
     }
