@@ -433,7 +433,7 @@ impl Encoder<Vec<u8>> {
     pub fn drain(&mut self, n: usize) -> std::vec::Drain<'_, u8> {
         assert!(n <= self.len(), "Cannot drain beyond buffer length");
         let drain_iter = self.buf.drain(self.start..self.start + n);
-        self.start += n;
+        self.start = self.start.saturating_sub(n);
         drain_iter
     }
 
