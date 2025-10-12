@@ -8,7 +8,7 @@ use neqo_common::Encoder;
 
 use crate::{huffman, prefix::Prefix};
 
-/// Trait providing QPACK-specific encoding methods for `Encoder`.
+/// Extension trait providing QPACK-specific encoding methods for `Encoder`.
 ///
 /// This trait extends the standard [`neqo_common::Encoder`] with QPACK-specific
 /// methods for encoding integers with prefixes and literal strings with
