@@ -432,7 +432,9 @@ impl Encoder<Vec<u8>> {
     /// Panics if `n` is greater than the current length of the encoder.
     pub fn drain(&mut self, n: usize) -> std::vec::Drain<'_, u8> {
         assert!(n <= self.len(), "Cannot drain beyond buffer length");
-        self.buf.drain(self.start..self.start + n)
+        let drain_iter = self.buf.drain(self.start..self.start + n);
+        self.start += n;
+        drain_iter
     }
 
     /// Static helper function for previewing the results of encoding without doing it.
