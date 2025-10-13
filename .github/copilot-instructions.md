@@ -79,7 +79,7 @@ Run these commands in order before submitting a PR. All must pass:
 
 ### Known Issues and Workarounds
 
-1. **One mtu package test fails without IPv6**: The `inet_v6` test in the `mtu` crate testsfails if there is no IPv6 connectivity to the Internet. In such cases, set the `GITHUB_ACTIONS` environment variable to skip that test:
+1. **One mtu package test fails without IPv6**: The `inet_v6` test in the `mtu` crate tests fails if there is no IPv6 connectivity to the Internet. In such cases, set the `GITHUB_ACTIONS` environment variable to skip that test:
    ```bash
    GITHUB_ACTIONS=1 cargo test --locked --workspace
    ```
