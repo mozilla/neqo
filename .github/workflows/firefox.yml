@@ -67,7 +67,7 @@ jobs:
         run: choco install -y mozillabuild --version 4.0.2
 
       - name: Install Rust
-        uses: ./.github/actions/rust
+        uses: mozilla/neqo/.github/actions/rust@main
         with:
           version: stable
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -198,7 +198,7 @@ jobs:
           } > comment.md
           cat comment.md > "$GITHUB_STEP_SUMMARY"
 
-      - uses: ./.github/actions/pr-comment-data-export
+      - uses: mozilla/neqo/.github/actions/pr-comment-data-export@main
         with:
           name: ${{ github.workflow }}
           contents: comment.md

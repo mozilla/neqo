@@ -34,7 +34,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/pr-comment
+      - uses: mozilla/neqo/.github/actions/pr-comment@main
         with:
           name: ${{ github.event.workflow_run.name }}
           token: ${{ secrets.GITHUB_TOKEN }}

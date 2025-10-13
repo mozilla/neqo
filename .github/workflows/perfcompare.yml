@@ -99,7 +99,7 @@ jobs:
           echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
-        uses: ./neqo/.github/actions/rust
+        uses: mozilla/neqo/.github/actions/rust@main
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: hyperfine, flamegraph, samply
@@ -120,7 +120,7 @@ jobs:
 
       - name: Install NSS
         id: nss
-        uses: ./neqo/.github/actions/nss
+        uses: mozilla/neqo/.github/actions/nss@main
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
@@ -497,7 +497,7 @@ jobs:
           compression-level: 9
 
       - name: Export PR comment data
-        uses: ./neqo/.github/actions/pr-comment-data-export
+        uses: mozilla/neqo/.github/actions/pr-comment-data-export@main
         with:
           name: ${{ github.workflow }}
           contents: results.md

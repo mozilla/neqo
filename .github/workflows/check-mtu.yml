@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-      - uses: ./.github/actions/check-android
+      - uses: mozilla/neqo/.github/actions/check-android@main
         with:
           target: ${{ matrix.target }}
           working-directory: mtu
@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-      - uses: ./.github/actions/check-vm
+      - uses: mozilla/neqo/.github/actions/check-vm@main
         with:
           working-directory: mtu
           platform: ${{ matrix.os }}
