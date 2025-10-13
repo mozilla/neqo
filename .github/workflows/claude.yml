@@ -30,12 +30,23 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      # anthropics/claude-code-action depends on oven-sh/setup-bun, which is not allowlisted.
+      # Work around that.continue-on-error:
+      - name: Install bun
+        id: bun
+        run: |
+          curl -fsSL https://bun.sh/install | bash
+          echo "bun_path=$HOME/.bun/bin/bun" >> "$GITHUB_OUTPUT"
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1 # zizmor: ignore[unpinned-uses]
       # TODO: Would like to pin this, but the Mozilla org allowlist requires "anthropics/claude-code-action@v1"
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          use_sticky_comment: true
+          use_commit_signing: true
+          path_to_bun_executable: ${{ steps.bun.outputs.bun_path }}
           prompt: |
             Please review this pull request and provide feedback on:
             - Code quality and best practices
