@@ -73,7 +73,7 @@ impl Eq for Bytes {}
 impl From<Bytes> for Vec<u8> {
     fn from(bytes: Bytes) -> Self {
         // FIXME: This copies data, but the function is only used in tests.
-        // Tagging with with `#[cfg(test)]` does not work.
+        // Tagging with `#[cfg(test)]` does not work.
         bytes.as_ref().to_vec()
     }
 }
