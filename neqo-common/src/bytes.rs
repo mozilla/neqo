@@ -62,6 +62,12 @@ impl AsRef<[u8]> for Bytes {
     }
 }
 
+impl AsMut<[u8]> for Bytes {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.data[self.offset..]
+    }
+}
+
 impl PartialEq for Bytes {
     fn eq(&self, other: &Self) -> bool {
         self.as_ref() == other.as_ref()
@@ -69,14 +75,6 @@ impl PartialEq for Bytes {
 }
 
 impl Eq for Bytes {}
-
-impl From<Bytes> for Vec<u8> {
-    fn from(bytes: Bytes) -> Self {
-        // FIXME: This copies data, but the function is only used in tests.
-        // Tagging with `#[cfg(test)]` does not work.
-        bytes.as_ref().to_vec()
-    }
-}
 
 impl From<Vec<u8>> for Bytes {
     fn from(data: Vec<u8>) -> Self {
