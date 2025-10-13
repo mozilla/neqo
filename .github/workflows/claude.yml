@@ -30,11 +30,14 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Run Claude Code
+      - name: Run Claude Code Review
         id: claude
-        uses: anthropics/claude-code-action@f30f5eecfce2f34fa72e40fa5f7bcdbdcad12eb8 # v1.0.14
+        # TODO: Would like to pin this, but the Mozilla org allowlist requires "anthropics/claude-code-action@v1"        with:
+        uses: anthropics/claude-code-action@v1 # zizmor: ignore[unpinned-uses]
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          use_sticky_comment: true
+          use_commit_signing: true
           prompt: |
             Please review this pull request and provide feedback on:
             - Code quality and best practices
