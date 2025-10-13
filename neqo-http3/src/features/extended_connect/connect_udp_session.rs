@@ -122,14 +122,14 @@ mod tests {
             session
                 .dgram_context_id(Bytes::new(vec![0x00, 0x00, 0x00], 0))
                 .unwrap(),
-            [0x00, 0x00]
+            Bytes::new(vec![0x00, 0x00], 0)
         );
         // Varint [0x40 0x00] is 0 as well, thus a supported connect-udp context ID, too.
         assert_eq!(
             session
                 .dgram_context_id(Bytes::new(vec![0x40, 0x00, 0x00, 0x00], 0))
                 .unwrap(),
-            [0x00, 0x00]
+            Bytes::new(vec![0x00, 0x00], 0)
         );
     }
 }

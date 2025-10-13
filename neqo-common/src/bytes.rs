@@ -70,22 +70,20 @@ impl PartialEq for Bytes {
 
 impl Eq for Bytes {}
 
-#[cfg(test)]
 impl From<Bytes> for Vec<u8> {
     fn from(bytes: Bytes) -> Self {
-        // This copies data, but the function is only used in tests.
+        // FIXME: This copies data, but the function is only used in tests.
+        // Tagging with with `#[cfg(test)]` does not work.
         bytes.as_ref().to_vec()
     }
 }
 
-#[cfg(test)]
 impl<const N: usize> PartialEq<[u8; N]> for Bytes {
     fn eq(&self, other: &[u8; N]) -> bool {
         self.as_ref() == other.as_slice()
     }
 }
 
-#[cfg(test)]
 impl PartialEq<[u8]> for Bytes {
     fn eq(&self, other: &[u8]) -> bool {
         self.as_ref() == other
