@@ -283,7 +283,7 @@ impl WindowAdjustment for Cubic {
         // In neqo target is in bytes.
         let t = now.saturating_duration_since(t_epoch);
         // cwnd <= target <= cwnd * 1.5
-        let mut target = f64::clamp(
+        let target_cubic = f64::clamp(
             self.w_cubic((t + min_rtt).as_secs_f64(), max_datagram_size),
             curr_cwnd,
             curr_cwnd * 1.5,
@@ -302,6 +302,11 @@ impl WindowAdjustment for Cubic {
 
         // We first calculate the increase in segments and floor it to only include whole segments.
         let increase = (CUBIC_ALPHA * self.reno_acked_bytes / curr_cwnd).floor();
+
+        debug_assert!(increase < curr_cwnd / 2.0,
+           "detected exponential increase - curr_cwnd: {curr_cwnd}, increase: {increase}, reno_acked_bytes: {}",
+           self.reno_acked_bytes);
+
         // Only apply the increase if it is at least by one segment.
         if increase > 0.0 {
             self.w_est += increase * max_datagram_size;
@@ -324,7 +329,9 @@ impl WindowAdjustment for Cubic {
         // be used if we are in the cubic region.
         //
         // That is in line with what e.g. the Linux Kernel CUBIC implementation is doing.
-        target = target.max(self.w_est);
+        //
+        // <https://github.com/torvalds/linux/blob/d7ee5bdce7892643409dea7266c34977e651b479/net/ipv4/tcp_cubic.c#L313>
+        let target = target_cubic.max(self.w_est);
 
         let cwnd_increase = target - curr_cwnd;
 
@@ -347,6 +354,8 @@ impl WindowAdjustment for Cubic {
         // The RFC only applies this increase per acked cwnd to the Cubic (concave/convex) region.
         // We also apply it to the Reno region, as that is what the Linux Kernel CUBIC
         // implementation does, too.
+        //
+        // <https://github.com/torvalds/linux/blob/d7ee5bdce7892643409dea7266c34977e651b479/net/ipv4/tcp_cubic.c#L311-L315>
         //
         // We multiply by `max_datagram_size` as our `curr_cwnd` value is in bytes and prevent
         // division by zero by setting `cwnd_increase` to `1` for the `target == curr_cwnd` case.
