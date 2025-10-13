@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
 
       # anthropics/claude-code-action depends on oven-sh/setup-bun, which is not allowlisted.
-      # Work around that.continue-on-error:
+      # Workaround: Manually install Bun since oven-sh/setup-bun is not allowlisted in this environment.
       - name: Install bun
         id: bun
         run: |
