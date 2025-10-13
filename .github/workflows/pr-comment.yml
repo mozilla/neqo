@@ -11,6 +11,7 @@ on:
     workflows: ["QNS", "cargo bench", "Performance comparison", "Firefox"]
     types:
       - completed # zizmor: ignore[dangerous-triggers]
+  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

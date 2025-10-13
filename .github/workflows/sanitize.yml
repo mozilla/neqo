@@ -6,6 +6,7 @@ on:
     branches: ["main"]
   merge_group:
   workflow_dispatch:
+  workflow_call:
 env:
   DUMP_SIMULATION_SEEDS: /tmp/simulation-seeds
 

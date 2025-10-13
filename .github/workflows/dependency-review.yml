@@ -11,6 +11,7 @@ on:
   pull_request:
     branches: ["main"]
   merge_group:
+  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

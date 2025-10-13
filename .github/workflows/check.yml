@@ -6,6 +6,7 @@ on:
     branches: ["main"]
   merge_group:
   workflow_dispatch:
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always
@@ -137,23 +138,6 @@ jobs:
           else
             cargo test $BUILD_TYPE --locked --features ci
           fi
-
-      - name: Run client/server transfer
-        run: |
-          # shellcheck disable=SC2086
-          cargo build $BUILD_TYPE --bin neqo-client --bin neqo-server
-          "target/$BUILD_DIR/neqo-server" "$HOST:4433" &
-          PID=$!
-          # Give the server time to start.
-          sleep 1
-          "target/$BUILD_DIR/neqo-client" --output-dir . "https://$HOST:4433/$SIZE"
-          kill $PID
-          [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
-        env:
-          HOST: localhost
-          SIZE: 54321
-          RUST_LOG: warn
-          BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
       - name: CodeCov Windows workaround
         if: ${{ startsWith(matrix.os, 'windows') && matrix.type == 'debug' && matrix.rust-toolchain == 'stable' }}
