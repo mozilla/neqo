@@ -10,7 +10,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{hex_with_len, Tos};
+use crate::{hex_with_len, Bytes, Tos};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Datagram<D = Vec<u8>> {
@@ -126,6 +126,13 @@ impl<D: AsRef<[u8]>> Debug for Datagram<D> {
 impl<'a> Datagram<&'a mut [u8]> {
     #[must_use]
     pub fn from_slice(src: SocketAddr, dst: SocketAddr, tos: Tos, d: &'a mut [u8]) -> Self {
+        Self { src, dst, tos, d }
+    }
+}
+
+impl Datagram<Bytes> {
+    #[must_use]
+    pub const fn from_bytes(src: SocketAddr, dst: SocketAddr, tos: Tos, d: Bytes) -> Self {
         Self { src, dst, tos, d }
     }
 }
