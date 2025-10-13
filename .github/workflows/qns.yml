@@ -31,7 +31,7 @@ jobs:
     outputs:
       imageID: ${{ steps.docker_build_and_push.outputs.imageID }}
     permissions:
-      packages: write # To push to GitHub Container Registry.
+      packages: write # This permission is required to push to GitHub Container Registry.
     steps:
       - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
         with:
@@ -42,7 +42,7 @@ jobs:
         with:
           cache-binary: false
 
-      - uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
+      - uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
