@@ -270,7 +270,7 @@ impl WindowAdjustment for Cubic {
                 .expect("unwrapping `None` value -- it should've been set by `start_epoch`")
         };
 
-        // Calculate `target` for the concave or convex region
+        // Calculate `target_cubic` for the concave or convex region
         //
         // > Upon receiving a new ACK during congestion avoidance, CUBIC computes the target
         // > congestion window size after the next RTT [...], where RTT is the
@@ -280,9 +280,9 @@ impl WindowAdjustment for Cubic {
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.2-10>
         //
-        // In neqo target is in bytes.
+        // In neqo the target congestion window is in bytes.
         let t = now.saturating_duration_since(t_epoch);
-        // cwnd <= target <= cwnd * 1.5
+        // cwnd <= target_cubic <= cwnd * 1.5
         let target_cubic = f64::clamp(
             self.w_cubic((t + min_rtt).as_secs_f64(), max_datagram_size),
             curr_cwnd,
@@ -303,10 +303,6 @@ impl WindowAdjustment for Cubic {
         // We first calculate the increase in segments and floor it to only include whole segments.
         let increase = (CUBIC_ALPHA * self.reno_acked_bytes / curr_cwnd).floor();
 
-        debug_assert!(increase < curr_cwnd / 2.0,
-           "detected exponential increase - curr_cwnd: {curr_cwnd}, increase: {increase}, reno_acked_bytes: {}",
-           self.reno_acked_bytes);
-
         // Only apply the increase if it is at least by one segment.
         if increase > 0.0 {
             self.w_est += increase * max_datagram_size;
@@ -315,6 +311,10 @@ impl WindowAdjustment for Cubic {
             let acked_bytes_used = increase * curr_cwnd / CUBIC_ALPHA;
             self.reno_acked_bytes -= acked_bytes_used;
         }
+
+        debug_assert!(self.w_est <= curr_cwnd * 1.5,
+           "detected exponential increase of w_est - curr_cwnd: {curr_cwnd}, w_est: {}, reno_acked_bytes: {}",
+           self.w_est, self.reno_acked_bytes);
 
         // > When receiving a new ACK in congestion avoidance (where cwnd could be greater than
         // > or less than w_max), CUBIC checks whether W_cubic(t) is less than w_est.  If so, CUBIC
