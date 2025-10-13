@@ -52,12 +52,7 @@ pub fn init(level_filter: Option<log::LevelFilter>) {
 // TODO: Enable `#[clippy::format_args]` once our MSRV is >= 1.84
 macro_rules! qerror {
     ($($arg:tt)*) => ( {
-<<<<<<< Updated upstream
-||||||| Stash base
-        #[cfg(any(test, feature = "bench"))]
-=======
         #[cfg(debug_assertions)]
->>>>>>> Stashed changes
         ::neqo_common::log::init(None);
         ::log::error!($($arg)*);
     } );
@@ -66,12 +61,7 @@ macro_rules! qerror {
 // TODO: Enable `#[clippy::format_args]` once our MSRV is >= 1.84
 macro_rules! qwarn {
     ($($arg:tt)*) => ( {
-<<<<<<< Updated upstream
-||||||| Stash base
-        #[cfg(any(test, feature = "bench"))]
-=======
         #[cfg(debug_assertions)]
->>>>>>> Stashed changes
         ::neqo_common::log::init(None);
         ::log::warn!($($arg)*);
     } );
@@ -80,12 +70,7 @@ macro_rules! qwarn {
 // TODO: Enable `#[clippy::format_args]` once our MSRV is >= 1.84
 macro_rules! qinfo {
     ($($arg:tt)*) => ( {
-<<<<<<< Updated upstream
-||||||| Stash base
-        #[cfg(any(test, feature = "bench"))]
-=======
         #[cfg(debug_assertions)]
->>>>>>> Stashed changes
         ::neqo_common::log::init(None);
         ::log::info!($($arg)*);
     } );
@@ -94,12 +79,7 @@ macro_rules! qinfo {
 // TODO: Enable `#[clippy::format_args]` once our MSRV is >= 1.84
 macro_rules! qdebug {
     ($($arg:tt)*) => ( {
-<<<<<<< Updated upstream
-||||||| Stash base
-        #[cfg(any(test, feature = "bench"))]
-=======
         #[cfg(debug_assertions)]
->>>>>>> Stashed changes
         ::neqo_common::log::init(None);
         ::log::debug!($($arg)*);
     } );
@@ -108,12 +88,7 @@ macro_rules! qdebug {
 // TODO: Enable `#[clippy::format_args]` once our MSRV is >= 1.84
 macro_rules! qtrace {
     ($($arg:tt)*) => ( {
-<<<<<<< Updated upstream
-||||||| Stash base
-        #[cfg(any(test, feature = "bench"))]
-=======
         #[cfg(debug_assertions)]
->>>>>>> Stashed changes
         ::neqo_common::log::init(None);
         ::log::trace!($($arg)*);
     } );
