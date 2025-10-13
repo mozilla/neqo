@@ -7,7 +7,7 @@
 use std::ops::{AddAssign, Deref, DerefMut, Sub};
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{qdebug, qinfo, qwarn, Ecn};
+use neqo_common::{qdebug, qinfo, Ecn};
 
 use crate::{packet, recovery::sent, Stats};
 
@@ -302,7 +302,7 @@ impl Info {
         // > either the ECT(0) or ECT(1) codepoint set, ECN validation fails if the
         // > corresponding ECN counts are not present in the ACK frame.
         let Some(ack_ecn) = ack_ecn else {
-            qwarn!("ECN validation failed, no ECN counts in ACK frame");
+            qinfo!("ECN validation failed, no ECN counts in ACK frame");
             self.disable_ecn(stats, ValidationError::Bleaching);
             return;
         };
@@ -321,12 +321,12 @@ impl Info {
         let ecn_diff = ack_ecn - self.baseline;
         let sum_inc = ecn_diff[Ecn::Ect0] + ecn_diff[Ecn::Ce];
         if sum_inc < newly_acked_sent_with_ect0 {
-            qwarn!(
+            qinfo!(
                 "ECN validation failed, ACK counted {sum_inc} new marks, but {newly_acked_sent_with_ect0} of newly acked packets were sent with ECT(0)"
             );
             self.disable_ecn(stats, ValidationError::Bleaching);
         } else if ecn_diff[Ecn::Ect1] > 0 {
-            qwarn!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
+            qinfo!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
             self.disable_ecn(stats, ValidationError::ReceivedUnsentECT1);
         } else if self.state != ValidationState::Capable {
             qinfo!("ECN validation succeeded, path is capable");

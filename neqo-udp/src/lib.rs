@@ -255,6 +255,13 @@ impl<S: SocketRef> Socket<S> {
     ) -> Result<DatagramIter<'a>, io::Error> {
         recv_inner(local_address, &self.state, &self.inner, recv_buf)
     }
+
+    /// Whether transmitted datagrams might get fragmented by the IP layer
+    ///
+    /// Returns `false` on targets which employ e.g. the `IPV6_DONTFRAG` socket option.
+    pub fn may_fragment(&self) -> bool {
+        self.state.may_fragment()
+    }
 }
 
 #[cfg(test)]

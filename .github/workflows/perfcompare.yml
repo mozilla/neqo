@@ -133,11 +133,11 @@ jobs:
           mkdir -p binaries/neqo
           cd neqo
           git checkout origin/main
-          cargo build --locked --release --bin neqo-client --bin neqo-server
+          cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
           cp target/release/neqo-client ../binaries/neqo-main/
           cp target/release/neqo-server ../binaries/neqo-main/
           git checkout -
-          cargo build --locked --release --bin neqo-client --bin neqo-server
+          cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
           cp target/release/neqo-client ../binaries/neqo/
           cp target/release/neqo-server ../binaries/neqo/
 

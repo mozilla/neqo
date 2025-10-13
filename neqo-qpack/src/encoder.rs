@@ -8,6 +8,7 @@ use std::{
     cmp::min,
     collections::VecDeque,
     fmt::{self, Display, Formatter},
+    time::Instant,
 };
 
 use neqo_common::{qdebug, qerror, qlog::Qlog, qtrace, Header};
@@ -125,17 +126,22 @@ impl Encoder {
     ///
     /// May return: `ClosedCriticalStream` if stream has been closed or `DecoderStream`
     /// in case of any other transport error.
-    pub fn receive(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
-        self.read_instructions(conn, stream_id)
+    pub fn receive(&mut self, conn: &mut Connection, stream_id: StreamId, now: Instant) -> Res<()> {
+        self.read_instructions(conn, stream_id, now)
             .map_err(|e| map_error(&e))
     }
 
-    fn read_instructions(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
+    fn read_instructions(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        now: Instant,
+    ) -> Res<()> {
         qdebug!("[{self}] read a new instruction");
         loop {
             let mut recv = ReceiverConnWrapper::new(conn, stream_id);
             match self.instruction_reader.read_instructions(&mut recv) {
-                Ok(instruction) => self.call_instruction(instruction, conn.qlog_mut())?,
+                Ok(instruction) => self.call_instruction(instruction, conn.qlog_mut(), now)?,
                 Err(Error::NeedMoreData) => break Ok(()),
                 Err(e) => break Err(e),
             }
@@ -215,7 +221,12 @@ impl Encoder {
         }
     }
 
-    fn call_instruction(&mut self, instruction: DecoderInstruction, qlog: &Qlog) -> Res<()> {
+    fn call_instruction(
+        &mut self,
+        instruction: DecoderInstruction,
+        qlog: &Qlog,
+        now: Instant,
+    ) -> Res<()> {
         qdebug!("[{self}] call instruction {instruction:?}");
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
@@ -223,6 +234,7 @@ impl Encoder {
                     qlog,
                     increment,
                     &increment.to_be_bytes(),
+                    now,
                 );
 
                 self.insert_count_instruction(increment)
@@ -538,6 +550,8 @@ fn map_stream_send_atomic_error(err: &TransportError) -> Error {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::time::Instant;
+
     use neqo_transport::{ConnectionParameters, StreamId, StreamType};
     use test_fixture::{
         default_client, default_server, handshake, new_server, now, CountingConnectionIdGenerator,
@@ -643,16 +657,16 @@ mod tests {
         connect_generic(true, Some(max_data))
     }
 
-    fn recv_instruction(encoder: &mut TestEncoder, decoder_instruction: &[u8]) {
+    fn recv_instruction(encoder: &mut TestEncoder, decoder_instruction: &[u8], now: Instant) {
         encoder
             .peer_conn
             .stream_send(encoder.recv_stream_id, decoder_instruction)
             .unwrap();
-        let out = encoder.peer_conn.process_output(now());
-        drop(encoder.conn.process(out.dgram(), now()));
+        let out = encoder.peer_conn.process_output(now);
+        drop(encoder.conn.process(out.dgram(), now));
         assert!(encoder
             .encoder
-            .read_instructions(&mut encoder.conn, encoder.recv_stream_id)
+            .read_instructions(&mut encoder.conn, encoder.recv_stream_id, now)
             .is_ok());
     }
 
@@ -912,7 +926,7 @@ mod tests {
         encoder.send_instructions(&[]);
 
         // receive an insert count increment.
-        recv_instruction(&mut encoder, &[0x01]);
+        recv_instruction(&mut encoder, &[0x01], now());
 
         // insert "content-length: 12345 again it will succeed.
         let res =
@@ -943,7 +957,7 @@ mod tests {
         encoder.send_instructions(HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
         // receive an insert count increment.
-        recv_instruction(&mut encoder, &[0x01]);
+        recv_instruction(&mut encoder, &[0x01], now());
 
         // send a header block
         let buf = encoder.encoder.encode_header_block(
@@ -965,10 +979,10 @@ mod tests {
 
         if wait == 0 {
             // receive a header_ack.
-            recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1);
+            recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1, now());
         } else {
             // receive a stream canceled
-            recv_instruction(&mut encoder, STREAM_CANCELED_ID_1);
+            recv_instruction(&mut encoder, STREAM_CANCELED_ID_1, now());
         }
 
         // insert "content-length: 12345 again it will succeed.
@@ -1189,7 +1203,7 @@ mod tests {
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
 
         // receive a header_ack for the first header block.
-        recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1);
+        recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1, now());
 
         // The stream is still blocking because the second header block is not acked.
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -1229,7 +1243,7 @@ mod tests {
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
 
         // receive a header_ack for the first header block.
-        recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1);
+        recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1, now());
 
         // The stream is not blocking anymore because header ack also ACKs the instruction.
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
@@ -1269,7 +1283,7 @@ mod tests {
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 2);
 
         // receive a header_ack for the second header block. This will ack the first as well
-        recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_2);
+        recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_2, now());
 
         // The stream is not blocking anymore because header ack also ACKs the instruction.
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
@@ -1311,7 +1325,7 @@ mod tests {
         // receive a stream cancel for the first stream.
         // This will remove the first stream as blocking but it will not mark the instruction as
         // acked. and the second steam will still be blocking.
-        recv_instruction(&mut encoder, STREAM_CANCELED_ID_1);
+        recv_instruction(&mut encoder, STREAM_CANCELED_ID_1, now());
 
         // The stream is not blocking anymore because header ack also ACKs the instruction.
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -1363,7 +1377,7 @@ mod tests {
         // stream 1 is block on entries 1 and 2; stream 2 is block only on 1.
         // receive an Insert Count Increment for the first entry.
         // After that only stream 1 will be blocking.
-        recv_instruction(&mut encoder, &[0x01]);
+        recv_instruction(&mut encoder, &[0x01], now());
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
     }
@@ -1400,13 +1414,13 @@ mod tests {
         assert!(encoder.change_capacity(10).is_err());
 
         // receive an Insert Count Increment for the entry.
-        recv_instruction(&mut encoder, &[0x01]);
+        recv_instruction(&mut encoder, &[0x01], now());
 
         // trying to evict the entry will failed. The stream is still referring to it.
         assert!(encoder.change_capacity(10).is_err());
 
         // receive a header_ack for the header block.
-        recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1);
+        recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1, now());
 
         // now entry can be evicted.
         assert!(encoder.change_capacity(10).is_ok());
@@ -1444,13 +1458,13 @@ mod tests {
         assert!(encoder.change_capacity(10).is_err());
 
         // receive an Insert Count Increment for the entry.
-        recv_instruction(&mut encoder, &[0x01]);
+        recv_instruction(&mut encoder, &[0x01], now());
 
         // trying to evict the entry will failed. The stream is still referring to it.
         assert!(encoder.change_capacity(10).is_err());
 
         // receive a stream cancelled.
-        recv_instruction(&mut encoder, STREAM_CANCELED_ID_1);
+        recv_instruction(&mut encoder, STREAM_CANCELED_ID_1, now());
 
         // now entry can be evicted.
         assert!(encoder.change_capacity(10).is_ok());
@@ -1480,7 +1494,7 @@ mod tests {
         assert!(encoder.change_capacity(10).is_err());
 
         // receive an Insert Count Increment for the entry.
-        recv_instruction(&mut encoder, &[0x01]);
+        recv_instruction(&mut encoder, &[0x01], now());
 
         // now entry can be evicted.
         assert!(encoder.change_capacity(10).is_ok());
@@ -1519,7 +1533,7 @@ mod tests {
         assert!(encoder.change_capacity(10).is_err());
 
         // receive a header_ack for the header block. This will also ack the instruction.
-        recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1);
+        recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1, now());
 
         // now entry can be evicted.
         assert!(encoder.change_capacity(10).is_ok());
@@ -1628,7 +1642,7 @@ mod tests {
         let out = encoder.conn.process_output(now());
         drop(encoder.peer_conn.process(out.dgram(), now()));
         // receive an insert count increment.
-        recv_instruction(&mut encoder, &[0x01]);
+        recv_instruction(&mut encoder, &[0x01], now());
 
         // The first header will use the table entry and the second will use the literal
         // encoding because the first entry is referred to and cannot be evicted.
@@ -1677,8 +1691,8 @@ mod tests {
         );
 
         // receive a stream canceled instruction.
-        recv_instruction(&mut encoder, STREAM_CANCELED_ID_1);
+        recv_instruction(&mut encoder, STREAM_CANCELED_ID_1, now());
 
-        recv_instruction(&mut encoder, &[0x01]);
+        recv_instruction(&mut encoder, &[0x01], now());
     }
 }

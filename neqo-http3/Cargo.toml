@@ -26,10 +26,10 @@ neqo-crypto = { path = "./../neqo-crypto" }
 neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
 qlog = { workspace = true }
-rustc-hash = { workspace = true}
+rustc-hash = { workspace = true }
 sfv = { version = "0.14", default-features = false, features = ["parsed-types"] }
-strum = { workspace = true}
-thiserror = { workspace = true}
+strum = { workspace = true }
+thiserror = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
@@ -39,7 +39,13 @@ neqo-transport = { path = "./../neqo-transport", features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]
-bench = ["neqo-common/bench", "neqo-crypto/bench", "neqo-qpack/bench", "neqo-transport/bench"]
+bench = [
+        "neqo-common/bench",
+        "neqo-crypto/bench",
+        "neqo-qpack/bench",
+        "neqo-transport/bench",
+        "log/release_max_level_info",
+]
 disable-encryption = ["neqo-transport/disable-encryption", "neqo-crypto/disable-encryption"]
 draft-29 = []
 
