@@ -78,6 +78,12 @@ impl From<Bytes> for Vec<u8> {
     }
 }
 
+impl From<Vec<u8>> for Bytes {
+    fn from(data: Vec<u8>) -> Self {
+        Self::new(data, 0)
+    }
+}
+
 impl<const N: usize> PartialEq<[u8; N]> for Bytes {
     fn eq(&self, other: &[u8; N]) -> bool {
         self.as_ref() == other.as_slice()
@@ -128,7 +134,7 @@ mod tests {
     #[test]
     fn is_equal() {
         let a = Bytes::new(vec![1, 2, 3, 4], 1);
-        let b = Bytes::new(vec![2, 3, 4], 0);
+        let b = Bytes::from(vec![2, 3, 4]);
         assert_eq!(a, b);
     }
 }
