@@ -8,6 +8,7 @@ use std::{
     collections::HashSet,
     fmt::{self, Display, Formatter},
     mem,
+    time::Instant,
 };
 
 use neqo_common::{qtrace, Encoder, Role};
@@ -95,13 +96,14 @@ impl Protocol for Session {
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
         control_stream_recv: &mut Box<dyn RecvStream>,
+        now: Instant,
     ) -> Res<Option<State>> {
         let (f, fin) = self
             .frame_reader
-            .receive::<WebTransportFrame>(&mut StreamReaderRecvStreamWrapper::new(
-                conn,
-                control_stream_recv,
-            ))
+            .receive::<WebTransportFrame>(
+                &mut StreamReaderRecvStreamWrapper::new(conn, control_stream_recv),
+                now,
+            )
             .map_err(|_| Error::HttpGeneralProtocolStream)?;
         qtrace!("[{self}] Received frame: {f:?} fin={fin}");
         if let Some(WebTransportFrame::CloseSession { error, message }) = f {

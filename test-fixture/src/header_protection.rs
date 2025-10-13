@@ -16,7 +16,7 @@ use std::ops::Range;
 use neqo_common::{hex_with_len, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-    hkdf, hp, Aead,
+    hkdf, hp, Aead, AeadTrait as _,
 };
 
 pub use crate::{default_client, now, CountingConnectionIdGenerator};

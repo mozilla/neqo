@@ -1494,7 +1494,14 @@ fn server_initial_retransmits_identical() {
 
     // Server is amplification-limited now.
     let pto = server.process_output(now).callback();
-    assert_eq!(pto, server.conn_params.get_idle_timeout() - total_ptos);
+    assert_eq!(
+        pto,
+        server
+            .conn_params
+            .get_idle_timeout()
+            .checked_sub(total_ptos)
+            .expect("doesn't underflow")
+    );
 }
 
 #[test]

@@ -110,4 +110,11 @@ impl Socket {
     pub fn max_gso_segments(&self) -> usize {
         self.state.max_gso_segments()
     }
+
+    /// Whether transmitted datagrams might get fragmented by the IP layer
+    ///
+    /// Returns `false` on targets which employ e.g. the `IPV6_DONTFRAG` socket option.
+    pub fn may_fragment(&self) -> bool {
+        self.state.may_fragment()
+    }
 }

@@ -93,6 +93,7 @@ impl super::HttpServer for HttpServer {
     }
 
     fn process_events(&mut self, _now: Instant) {
+        let now = Instant::now();
         while let Some(event) = self.server.next_event() {
             match event {
                 Http3ServerEvent::Headers {
@@ -122,7 +123,7 @@ impl super::HttpServer for HttpServer {
                                 stream
                                     .send_headers(&[Header::new(":status", "404")])
                                     .unwrap();
-                                stream.stream_close_send().unwrap();
+                                stream.stream_close_send(now).unwrap();
                                 continue;
                             }
                         }
@@ -140,9 +141,9 @@ impl super::HttpServer for HttpServer {
                             Header::new("content-length", response.len().to_string()),
                         ])
                         .unwrap();
-                    let done = response.send(|chunk| stream.send_data(chunk).unwrap());
+                    let done = response.send(|chunk| stream.send_data(chunk, now).unwrap());
                     if done {
-                        stream.stream_close_send().unwrap();
+                        stream.stream_close_send(now).unwrap();
                     } else {
                         self.remaining_data.insert(stream.stream_id(), response);
                     }
@@ -150,10 +151,11 @@ impl super::HttpServer for HttpServer {
                 Http3ServerEvent::DataWritable { stream } => {
                     if self.posts.get_mut(&stream).is_none() {
                         if let Some(remaining) = self.remaining_data.get_mut(&stream.stream_id()) {
-                            let done = remaining.send(|chunk| stream.send_data(chunk).unwrap());
+                            let done =
+                                remaining.send(|chunk| stream.send_data(chunk, now).unwrap());
                             if done {
                                 self.remaining_data.remove(&stream.stream_id());
-                                stream.stream_close_send().unwrap();
+                                stream.stream_close_send(now).unwrap();
                             }
                         }
                     }
@@ -169,8 +171,8 @@ impl super::HttpServer for HttpServer {
                             stream
                                 .send_headers(&[Header::new(":status", "200")])
                                 .unwrap();
-                            stream.send_data(&msg).unwrap();
-                            stream.stream_close_send().unwrap();
+                            stream.send_data(&msg, now).unwrap();
+                            stream.stream_close_send(now).unwrap();
                         }
                     }
                 }
