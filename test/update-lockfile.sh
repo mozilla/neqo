@@ -1,4 +1,4 @@
-#! /usr/bin/env bash
+#!/usr/bin/env bash
 
 # This needs https://github.com/graydon/check-lockfile-intersection installed.
 # Execute at the workspace root, i.e., not inside `test`. It will spit out a
