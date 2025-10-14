@@ -25,7 +25,7 @@ mod table;
 pub use stats::Stats;
 use thiserror::Error;
 
-pub use crate::{decoder::Decoder, encoder::Encoder, qpack_send_buf::QpackEncoder};
+pub use crate::{decoder::Decoder, encoder::Encoder};
 
 type Res<T> = Result<T, Error>;
 

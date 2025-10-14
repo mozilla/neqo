@@ -20,7 +20,7 @@ use crate::{
         HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST, HEADER_FIELD_LITERAL_NAME_REF_STATIC,
         NO_PREFIX,
     },
-    qpack_send_buf::QpackEncoder as _,
+    qpack_send_buf::Encoder as _,
     reader::{parse_utf8, ReceiverBufferWrapper},
     table::HeaderTable,
     Error, Res,

@@ -16,7 +16,7 @@ use crate::{
         ENCODER_CAPACITY, ENCODER_DUPLICATE, ENCODER_INSERT_WITH_NAME_LITERAL,
         ENCODER_INSERT_WITH_NAME_REF_DYNAMIC, ENCODER_INSERT_WITH_NAME_REF_STATIC, NO_PREFIX,
     },
-    qpack_send_buf::QpackEncoder,
+    qpack_send_buf::Encoder,
     reader::{IntReader, LiteralReader, ReadByte, Reader},
     Res,
 };
@@ -52,7 +52,7 @@ pub enum EncoderInstruction<'a> {
 }
 
 impl EncoderInstruction<'_> {
-    pub(crate) fn marshal<T: QpackEncoder>(&self, enc: &mut T, use_huffman: bool) {
+    pub(crate) fn marshal<T: Encoder>(&self, enc: &mut T, use_huffman: bool) {
         match self {
             Self::Capacity { value } => {
                 enc.encode_prefixed_encoded_int(ENCODER_CAPACITY, *value);

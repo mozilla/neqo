@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::Encoder;
-
 use crate::{huffman, prefix::Prefix};
 
 /// Extension trait providing QPACK-specific encoding methods for `Encoder`.
@@ -13,7 +11,7 @@ use crate::{huffman, prefix::Prefix};
 /// This trait extends the standard [`neqo_common::Encoder`] with QPACK-specific
 /// methods for encoding integers with prefixes and literal strings with
 /// optional Huffman encoding.
-pub trait QpackEncoder {
+pub trait Encoder {
     /// Encode an integer with a QPACK prefix according to RFC 7541 Section 5.1.
     fn encode_prefixed_encoded_int(&mut self, prefix: Prefix, val: u64) -> usize;
 
@@ -21,7 +19,7 @@ pub trait QpackEncoder {
     fn encode_literal(&mut self, use_huffman: bool, prefix: Prefix, value: &[u8]);
 }
 
-impl<B> QpackEncoder for Encoder<B>
+impl<B> Encoder for neqo_common::Encoder<B>
 where
     B: neqo_common::Buffer,
 {
@@ -90,7 +88,7 @@ where
 mod tests {
     use neqo_common::Encoder;
 
-    use super::{Prefix, QpackEncoder as _};
+    use super::{Encoder as _, Prefix};
 
     #[test]
     fn encode_prefixed_encoded_int_1() {

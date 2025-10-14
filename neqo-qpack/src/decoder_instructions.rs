@@ -14,7 +14,7 @@ use neqo_transport::StreamId;
 
 use crate::{
     prefix::{DECODER_HEADER_ACK, DECODER_INSERT_COUNT_INCREMENT, DECODER_STREAM_CANCELLATION},
-    qpack_send_buf::QpackEncoder,
+    qpack_send_buf::Encoder,
     reader::{IntReader, ReadByte},
     Res,
 };
@@ -44,7 +44,7 @@ impl DecoderInstruction {
         }
     }
 
-    pub(crate) fn marshal<T: QpackEncoder>(&self, enc: &mut T) {
+    pub(crate) fn marshal<T: Encoder>(&self, enc: &mut T) {
         match self {
             Self::InsertCountIncrement { increment } => {
                 enc.encode_prefixed_encoded_int(DECODER_INSERT_COUNT_INCREMENT, *increment);
