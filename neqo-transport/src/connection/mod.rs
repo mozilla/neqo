@@ -651,8 +651,9 @@ impl Connection {
             // If we don't have a path, we don't have an RTT.
             || Duration::from_millis(0),
             |p| {
-                let rtt = p.borrow().rtt().estimate();
-                if p.borrow().rtt().is_guesstimate() {
+                let path = p.borrow();
+                let rtt = path.rtt().estimate();
+                if path.rtt().is_guesstimate() {
                     // When we have no actual RTT sample, do not encode a guestimated RTT larger
                     // than the default initial RTT. (The guess can be very large under lossy
                     // conditions.)
@@ -1423,8 +1424,10 @@ impl Connection {
 
             qinfo!("[{self}] Version negotiation: trying {version:?}");
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
-            let local_addr = path.borrow().local_address();
-            let remote_addr = path.borrow().remote_address();
+            let (local_addr, remote_addr) = {
+                let path = path.borrow();
+                (path.local_address(), path.remote_address())
+            };
             let conn_params = self
                 .conn_params
                 .clone()
@@ -1726,8 +1729,11 @@ impl Connection {
 
         // Handle each packet in the datagram.
         while !slc.is_empty() {
-            self.stats.borrow_mut().packets_rx += 1;
-            self.stats.borrow_mut().dscp_rx[tos.into()] += 1;
+            {
+                let mut stats = self.stats.borrow_mut();
+                stats.packets_rx += 1;
+                stats.dscp_rx[tos.into()] += 1;
+            }
             let slc_len = slc.len();
             let (mut packet, remainder) =
                 match packet::Public::decode(slc, self.cid_manager.decoder().as_ref()) {
@@ -2033,8 +2039,12 @@ impl Connection {
         }
 
         let path = self.paths.primary().ok_or(Error::InvalidMigration)?;
-        let local = local.unwrap_or_else(|| path.borrow().local_address());
-        let remote = remote.unwrap_or_else(|| path.borrow().remote_address());
+        let (default_local, default_remote) = {
+            let path = path.borrow();
+            (path.local_address(), path.remote_address())
+        };
+        let local = local.unwrap_or(default_local);
+        let remote = remote.unwrap_or(default_remote);
 
         if mem::discriminant(&local.ip()) != mem::discriminant(&remote.ip()) {
             // Can't mix address families.
@@ -2748,12 +2758,15 @@ impl Connection {
                 now,
             );
 
-            self.stats.borrow_mut().packets_tx += 1;
-            // Track which packet types are sent with which ECN codepoints. For
-            // coalesced packets, this increases the counts for each packet type
-            // contained in the coalesced packet. This is per Section 13.4.1 of
-            // RFC 9000.
-            self.stats.borrow_mut().ecn_tx[pt] += Ecn::from(packet_tos);
+            {
+                let mut stats = self.stats.borrow_mut();
+                stats.packets_tx += 1;
+                // Track which packet types are sent with which ECN codepoints. For
+                // coalesced packets, this increases the counts for each packet type
+                // contained in the coalesced packet. This is per Section 13.4.1 of
+                // RFC 9000.
+                stats.ecn_tx[pt] += Ecn::from(packet_tos);
+            }
             let tx = self
                 .crypto
                 .states_mut()

@@ -76,9 +76,15 @@ impl Streams {
         role: Role,
         events: ConnectionEvents,
     ) -> Self {
-        let limit_bidi = tps.borrow().local().get_integer(InitialMaxStreamsBidi);
-        let limit_uni = tps.borrow().local().get_integer(InitialMaxStreamsUni);
-        let max_data = tps.borrow().local().get_integer(InitialMaxData);
+        let (limit_bidi, limit_uni, max_data) = {
+            let tps = tps.borrow();
+            let local = tps.local();
+            (
+                local.get_integer(InitialMaxStreamsBidi),
+                local.get_integer(InitialMaxStreamsUni),
+                local.get_integer(InitialMaxData),
+            )
+        };
         Self {
             role,
             tps,
@@ -473,9 +479,13 @@ impl Streams {
     }
 
     pub fn handle_max_data(&mut self, maximum_data: u64) {
-        let previous_limit = self.sender_fc.borrow().available();
-        let Some(current_limit) = self.sender_fc.borrow_mut().update(maximum_data) else {
-            return;
+        let (previous_limit, current_limit) = {
+            let mut sender_fc = self.sender_fc.borrow_mut();
+            let previous_limit = sender_fc.available();
+            let Some(current_limit) = sender_fc.update(maximum_data) else {
+                return;
+            };
+            (previous_limit, current_limit)
         };
 
         for (_id, ss) in &mut self.send {
@@ -488,25 +498,24 @@ impl Streams {
     }
 
     pub fn set_initial_limits(&mut self) {
-        _ = self.local_stream_limits[StreamType::BiDi].update(
-            self.tps
-                .borrow()
-                .remote()
-                .get_integer(InitialMaxStreamsBidi),
-        );
+        let remote = self.tps.borrow();
+        let remote = remote.remote();
+
+        _ = self.local_stream_limits[StreamType::BiDi]
+            .update(remote.get_integer(InitialMaxStreamsBidi));
         _ = self.local_stream_limits[StreamType::UniDi]
-            .update(self.tps.borrow().remote().get_integer(InitialMaxStreamsUni));
+            .update(remote.get_integer(InitialMaxStreamsUni));
 
         // As a client, there are two sets of initial limits for sending stream data.
         // If the second limit is higher and streams have been created, then
         // ensure that streams are not blocked on the lower limit.
         if self.role == Role::Client {
-            self.send.update_initial_limit(self.tps.borrow().remote());
+            self.send.update_initial_limit(remote);
         }
 
         self.sender_fc
             .borrow_mut()
-            .update(self.tps.borrow().remote().get_integer(InitialMaxData));
+            .update(remote.get_integer(InitialMaxData));
 
         if self.local_stream_limits[StreamType::BiDi].available() > 0 {
             self.events.send_stream_creatable(StreamType::BiDi);

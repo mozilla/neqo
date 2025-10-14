@@ -1209,8 +1209,11 @@ impl SendStream {
                 fc.blocked();
             }
 
-            if conn_fc.borrow().available() <= needed_space {
-                conn_fc.borrow_mut().blocked();
+            {
+                let mut conn_fc = conn_fc.borrow_mut();
+                if conn_fc.available() <= needed_space {
+                    conn_fc.blocked();
+                }
             }
         }
     }

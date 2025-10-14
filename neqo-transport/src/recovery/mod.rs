@@ -624,11 +624,14 @@ impl Loss {
         // We need to ensure that we have sent any PTO probes before they are removed
         // as we rely on the count of in-flight packets to determine whether to send
         // another probe.  Removing them too soon would result in not sending on PTO.
-        let cleanup_delay = self.pto_period(primary_path.borrow().rtt());
+        let (cleanup_delay, loss_delay) = {
+            let path = primary_path.borrow();
+            let rtt = path.rtt();
+            (self.pto_period(rtt), rtt.loss_delay())
+        };
         let Some(sp) = self.spaces.get_mut(pn_space) else {
             return (Vec::new(), Vec::new());
         };
-        let loss_delay = primary_path.borrow().rtt().loss_delay();
         let mut lost = Vec::new();
         sp.detect_lost_packets(now, loss_delay, cleanup_delay, &mut lost);
         self.stats.borrow_mut().lost += lost.len();
@@ -875,12 +878,15 @@ impl Loss {
         let mut lost_packets = Vec::new();
         for space in self.spaces.iter_mut() {
             let first = lost_packets.len(); // The first packet lost in this space.
-            let pto = Self::pto_period_inner(
-                primary_path.borrow().rtt(),
-                self.pto_state.as_ref(),
-                confirmed,
-                self.fast_pto,
-            );
+            let pto = {
+                let path = primary_path.borrow();
+                Self::pto_period_inner(
+                    path.rtt(),
+                    self.pto_state.as_ref(),
+                    confirmed,
+                    self.fast_pto,
+                )
+            };
             space.detect_lost_packets(now, loss_delay, pto, &mut lost_packets);
 
             primary_path.borrow_mut().on_packets_lost(
