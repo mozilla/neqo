@@ -310,11 +310,17 @@ impl WindowAdjustment for Cubic {
             // `reno_acked_bytes` but have to calculate the actual bytes used.
             let acked_bytes_used = increase * curr_cwnd / CUBIC_ALPHA;
             self.reno_acked_bytes -= acked_bytes_used;
-        }
 
-        debug_assert!(self.w_est <= curr_cwnd * 1.5,
-           "detected exponential increase of w_est - curr_cwnd: {curr_cwnd}, w_est: {}, reno_acked_bytes: {}",
-           self.w_est, self.reno_acked_bytes);
+            // Enforce assumption that Reno adheres to the bounds in the RFC:
+            // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.2-10>
+            //
+            // On very small `curr_cwnd` values it can happen that an increase by just `1 *
+            // max_datagram_size` would violate the bounds. To avoid asserting in that case the
+            // additional `|| max_datagram_size > curr_cwnd * 0.5` predicate was added.
+            debug_assert!(self.w_est <= curr_cwnd * 1.5 || max_datagram_size > curr_cwnd * 0.5,
+               "expect w_est to increase slower than slow start, curr_cwnd: {curr_cwnd}, w_est: {}, acked_bytes_used: {acked_bytes_used}, max_datagram_size: {max_datagram_size}",
+               self.w_est);
+        }
 
         // > When receiving a new ACK in congestion avoidance (where cwnd could be greater than
         // > or less than w_max), CUBIC checks whether W_cubic(t) is less than w_est.  If so, CUBIC
