@@ -142,8 +142,6 @@ pub struct Cubic {
     ///
     /// This also is reset on being application limited.
     t_epoch: Option<Instant>,
-    /// New and unused leftover acked bytes for calculating the reno region increases to `w_est`.
-    reno_acked_bytes: f64,
 }
 
 impl Display for Cubic {
@@ -183,7 +181,7 @@ impl Cubic {
         (CUBIC_C * (t - self.k).powi(3)).mul_add(max_datagram_size, self.w_max)
     }
 
-    /// Sets `w_est`, `k`, `t_epoch` and `reno_acked_bytes` at the start of a new epoch
+    /// Sets `w_est`, `k` and `t_epoch` at the start of a new epoch
     /// (new congestion avoidance stage) according to RFC 9438. The `w_max` variable has
     /// been set in `reduce_cwnd()` prior to this call.
     ///
@@ -193,15 +191,8 @@ impl Cubic {
     ///
     /// Also initializes `k` and `w_max` if we start an epoch without having ever had
     /// a congestion event, which can happen upon exiting slow start.
-    fn start_epoch(
-        &mut self,
-        curr_cwnd: f64,
-        new_acked_bytes: f64,
-        max_datagram_size: f64,
-        now: Instant,
-    ) {
+    fn start_epoch(&mut self, curr_cwnd: f64, max_datagram_size: f64, now: Instant) {
         self.t_epoch = Some(now);
-        self.reno_acked_bytes = new_acked_bytes;
         self.w_est = curr_cwnd;
         // If `w_max < cwnd_epoch` we take the cubic root from a negative value in `calc_k()`. That
         // could only happen if somehow `cwnd` get's increased between calling `reduce_cwnd()` and
@@ -244,11 +235,9 @@ impl WindowAdjustment for Cubic {
         now: Instant,
     ) -> usize {
         let curr_cwnd = convert_to_f64(curr_cwnd);
-        let new_acked_bytes = convert_to_f64(new_acked_bytes);
         let max_datagram_size = convert_to_f64(max_datagram_size);
 
         let t_epoch = if let Some(t) = self.t_epoch {
-            self.reno_acked_bytes += new_acked_bytes;
             t
         } else {
             // If we get here with `self.t_epoch == None` this is a new congestion
@@ -260,7 +249,7 @@ impl WindowAdjustment for Cubic {
             // timing as per RFC 9438 section 5.8.
             //
             // <https://datatracker.ietf.org/doc/html/rfc9438#app-limited>
-            self.start_epoch(curr_cwnd, new_acked_bytes, max_datagram_size, now);
+            self.start_epoch(curr_cwnd, max_datagram_size, now);
             self.t_epoch
                 .expect("unwrapping `None` value -- it should've been set by `start_epoch`")
         };
@@ -283,16 +272,8 @@ impl WindowAdjustment for Cubic {
         //
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-9>
 
-        // We first calculate the increase in segments and floor it to only include whole segments.
-        let increase = (CUBIC_ALPHA * self.reno_acked_bytes / curr_cwnd).floor();
-        // Only apply the increase if it is at least by one segment.
-        if increase > 0.0 {
-            self.w_est += increase * max_datagram_size;
-            // Because we floored the increase to whole segments we cannot just zero
-            // `reno_acked_bytes` but have to calculate the actual bytes used.
-            let acked_bytes_used = increase * curr_cwnd / CUBIC_ALPHA;
-            self.reno_acked_bytes -= acked_bytes_used;
-        }
+        self.w_est +=
+            (CUBIC_ALPHA * convert_to_f64(new_acked_bytes) / curr_cwnd) * max_datagram_size;
 
         // Take the larger cwnd of Cubic concave or convex and Cubic
         // TCP-friendly region.
