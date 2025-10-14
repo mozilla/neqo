@@ -23,7 +23,7 @@ fn make_hp(cipher: Cipher) -> hp::Key {
 fn hp_test(cipher: Cipher, expected: &[u8]) {
     let hp = make_hp(cipher);
     let mask = hp.mask(&[0; 16]).expect("should produce a mask");
-    assert_eq!(mask, expected, "first invocation should be correct");
+    assert_eq!(&mask[..], expected, "first invocation should be correct");
 
     #[allow(
         clippy::allow_attributes,
@@ -32,10 +32,10 @@ fn hp_test(cipher: Cipher, expected: &[u8]) {
     )]
     let hp2 = hp.clone();
     let mask = hp2.mask(&[0; 16]).expect("clone produces mask");
-    assert_eq!(mask, expected, "clone should produce the same mask");
+    assert_eq!(&mask[..], expected, "clone should produce the same mask");
 
     let mask = hp.mask(&[0; 16]).expect("should produce a mask again");
-    assert_eq!(mask, expected, "second invocation should be the same");
+    assert_eq!(&mask[..], expected, "second invocation should be the same");
 }
 
 #[test]
@@ -66,18 +66,4 @@ fn chacha20_ctr() {
     ];
 
     hp_test(TLS_CHACHA20_POLY1305_SHA256, EXPECTED);
-}
-
-#[test]
-#[should_panic(expected = "out of range")]
-fn aes_short() {
-    let hp = make_hp(TLS_AES_128_GCM_SHA256);
-    drop(hp.mask(&[0; 15]));
-}
-
-#[test]
-#[should_panic(expected = "out of range")]
-fn chacha20_short() {
-    let hp = make_hp(TLS_CHACHA20_POLY1305_SHA256);
-    drop(hp.mask(&[0; 15]));
 }

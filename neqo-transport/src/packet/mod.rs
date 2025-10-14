@@ -480,7 +480,9 @@ impl<B: Buffer> Builder<B> {
         if offset + SAMPLE_SIZE > ciphertext.len() {
             return Err(Error::Internal);
         }
-        let sample = &ciphertext[offset..offset + SAMPLE_SIZE];
+        let sample: &[u8; SAMPLE_SIZE] = ciphertext[offset..offset + SAMPLE_SIZE]
+            .try_into()
+            .map_err(|_| Error::Internal)?;
         let mask = crypto.compute_mask(sample)?;
 
         // Apply the mask.
@@ -799,7 +801,9 @@ impl<'a> Public<'a> {
         let mask = self
             .data
             .get(sample_offset..(sample_offset + SAMPLE_SIZE))
-            .map_or(Err(Error::NoMoreData), |sample| {
+            .and_then(|s| <&[u8; SAMPLE_SIZE]>::try_from(s).ok())
+            .ok_or(Error::NoMoreData)
+            .and_then(|sample| {
                 qtrace!(
                     "{:?} unmask hdr={}",
                     crypto.version(),
