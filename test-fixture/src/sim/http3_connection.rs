@@ -276,11 +276,11 @@ impl Requests {
             if self.amount == 0 {
                 return;
             }
-
+            let now = now();
             let stream_id = match c.fetch(
-                now(),
+                now,
                 "POST",
-                &("https", "something.com", "/"),
+                ("https", "something.com", "/"),
                 &[],
                 Priority::default(),
             ) {
@@ -293,17 +293,17 @@ impl Requests {
             qdebug!("[{c}] made stream {stream_id} for sending");
             self.remaining.insert(stream_id, self.send_per_request);
             self.amount -= 1;
-            self.send(c, stream_id);
+            self.send(c, stream_id, now);
         }
     }
 
-    fn send(&mut self, c: &mut Http3Client, stream_id: StreamId) -> GoalStatus {
+    fn send(&mut self, c: &mut Http3Client, stream_id: StreamId, now: Instant) -> GoalStatus {
         const DATA: &[u8] = &[0; 4096];
         let mut status = GoalStatus::Waiting;
         loop {
             let remaining = self.remaining.get_mut(&stream_id).unwrap();
             let end = min(*remaining, DATA.len());
-            let sent = c.send_data(stream_id, &DATA[..end]).unwrap();
+            let sent = c.send_data(stream_id, &DATA[..end], now).unwrap();
             if sent == 0 {
                 return status;
             }
@@ -311,7 +311,7 @@ impl Requests {
             *remaining -= sent;
             qtrace!("sent {sent} remaining {}", remaining);
             if *remaining == 0 {
-                c.stream_close_send(stream_id).unwrap();
+                c.stream_close_send(stream_id, now).unwrap();
                 self.remaining.remove(&stream_id);
                 return status;
             }
@@ -340,7 +340,7 @@ impl Goal for Requests {
         GoalStatus::Waiting
     }
 
-    fn handle_event(&mut self, c: &mut Endpoint, e: &Event, _now: Instant) -> GoalStatus {
+    fn handle_event(&mut self, c: &mut Endpoint, e: &Event, now: Instant) -> GoalStatus {
         let e = match e {
             Event::Client(http3_client_event) => http3_client_event,
             Event::Server(_) => unreachable!("only client can make a request"),
@@ -354,7 +354,7 @@ impl Goal for Requests {
                 self.fetch(c);
                 GoalStatus::Active
             }
-            Http3ClientEvent::DataWritable { stream_id } => self.send(c, *stream_id),
+            Http3ClientEvent::DataWritable { stream_id } => self.send(c, *stream_id, now),
 
             // If we sent data in 0-RTT, then we didn't track how much we should
             // have sent.  This is trivial to fix if 0-RTT testing is ever needed.
@@ -388,7 +388,7 @@ impl Responses {
 }
 
 impl Goal for Responses {
-    fn handle_event(&mut self, _c: &mut Endpoint, e: &Event, _now: Instant) -> GoalStatus {
+    fn handle_event(&mut self, _c: &mut Endpoint, e: &Event, now: Instant) -> GoalStatus {
         let e = match e {
             Event::Client(_) => unreachable!("only server can send a response"),
             Event::Server(http3_server_event) => http3_server_event,
@@ -417,7 +417,7 @@ impl Goal for Responses {
                     stream
                         .send_headers(&[Header::new(":status", "200")])
                         .unwrap();
-                    stream.stream_close_send().unwrap();
+                    stream.stream_close_send(now).unwrap();
                     self.remaining.remove(&stream_id);
                 }
 
@@ -433,6 +433,7 @@ impl Goal for Responses {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use crate::{
         boxed,

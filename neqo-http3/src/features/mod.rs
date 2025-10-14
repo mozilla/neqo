@@ -10,6 +10,7 @@ use neqo_common::qtrace;
 
 use crate::{
     client_events::Http3ClientEvents,
+    features::extended_connect::ExtendedConnectType,
     settings::{HSettingType, HSettings},
 };
 
@@ -88,4 +89,14 @@ impl NegotiationState {
     pub const fn locally_enabled(&self) -> bool {
         !matches!(self, &Self::Disabled)
     }
+}
+
+/// The type of an HTTP CONNECT.
+#[derive(Debug, PartialEq, Copy, Clone, Eq)]
+pub(crate) enum ConnectType {
+    /// Classic HTTP CONNECT see
+    /// <https://datatracker.ietf.org/doc/html/rfc9114#name-the-connect-method>.
+    Classic,
+    /// Extended CONNECT see <https://www.rfc-editor.org/rfc/rfc9220>.
+    Extended(ExtendedConnectType),
 }

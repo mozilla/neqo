@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(
     clippy::missing_errors_doc,
     reason = "Functions simply delegate to tokio and quinn-udp."
@@ -254,9 +255,17 @@ impl<S: SocketRef> Socket<S> {
     ) -> Result<DatagramIter<'a>, io::Error> {
         recv_inner(local_address, &self.state, &self.inner, recv_buf)
     }
+
+    /// Whether transmitted datagrams might get fragmented by the IP layer
+    ///
+    /// Returns `false` on targets which employ e.g. the `IPV6_DONTFRAG` socket option.
+    pub fn may_fragment(&self) -> bool {
+        self.state.may_fragment()
+    }
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     #![allow(
         clippy::allow_attributes,

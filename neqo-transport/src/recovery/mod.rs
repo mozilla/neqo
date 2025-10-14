@@ -28,7 +28,7 @@ pub use token::{StreamRecoveryToken, Token, Tokens};
 use crate::{
     ecn, packet,
     path::{Path, PathRef},
-    qlog::{self, QlogMetric},
+    qlog,
     rtt::{RttEstimate, RttSource},
     stats::{Stats, StatsCell},
     tracking::{PacketNumberSpace, PacketNumberSpaceSet},
@@ -534,7 +534,7 @@ impl Loss {
             space.on_packet_sent(sent_packet);
         } else {
             qinfo!(
-                "[{self}] ignoring {pn_space}-{} from dropped space",
+                "[{self}] ignoring packet {} from dropped space {pn_space}",
                 sent_packet.pn()
             );
         }
@@ -808,7 +808,7 @@ impl Loss {
 
         if let Some(st) = &mut self.pto_state {
             st.count_pto(&mut self.stats.borrow_mut());
-            qlog::metrics_updated(&self.qlog, &[QlogMetric::PtoCount(st.count())], now);
+            qlog::metrics_updated(&self.qlog, &[qlog::Metric::PtoCount(st.count())], now);
         }
     }
 
@@ -946,6 +946,7 @@ impl Display for Loss {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::{
         cell::RefCell,
@@ -1246,9 +1247,9 @@ mod tests {
     fn reduce_min_rtt() {
         let mut lr = setup_lr(2);
         let delta = ms(4);
-        let reduced_rtt = TEST_RTT - delta;
+        let reduced_rtt = TEST_RTT.checked_sub(delta).unwrap();
         ack(&mut lr, 1, reduced_rtt);
-        let expected_rtt = TEST_RTT - (delta / 8);
+        let expected_rtt = TEST_RTT.checked_sub(delta / 8).unwrap();
         let expected_rttvar = (TEST_RTTVAR * 3 + delta) / 4;
         assert_rtts(&lr, reduced_rtt, expected_rtt, expected_rttvar, reduced_rtt);
         assert_no_sent_times(&lr);

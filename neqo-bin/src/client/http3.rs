@@ -60,14 +60,6 @@ impl Handler {
             read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
         }
     }
-
-    fn reinit(&mut self) {
-        for url in self.url_handler.handled_urls.drain(..) {
-            self.url_handler.url_queue.push_front(url);
-        }
-        self.url_handler.stream_handlers.clear();
-        self.url_handler.all_paths.clear();
-    }
 }
 
 pub fn create_client(
@@ -239,7 +231,7 @@ impl super::Handler for Handler {
                             qwarn!("Data on unexpected stream: {stream_id}");
                         }
                         Some(handler) => {
-                            handler.process_data_writable(client, stream_id);
+                            handler.process_data_writable(client, stream_id, Instant::now());
                         }
                     }
                 }
@@ -251,7 +243,7 @@ impl super::Handler for Handler {
                 Http3ClientEvent::ZeroRttRejected => {
                     qinfo!("{event:?}");
                     // All 0-RTT data was rejected. We need to retransmit it.
-                    self.reinit();
+                    self.url_handler.reinit();
                     self.url_handler.process_urls(client);
                 }
                 Http3ClientEvent::ResumptionToken(t) => self.token = Some(t),
@@ -277,7 +269,12 @@ trait StreamHandler {
         data: &[u8],
         output_read_data: bool,
     ) -> Res<()>;
-    fn process_data_writable(&mut self, client: &mut Http3Client, stream_id: StreamId);
+    fn process_data_writable(
+        &mut self,
+        client: &mut Http3Client,
+        stream_id: StreamId,
+        now: Instant,
+    );
 }
 
 struct DownloadStreamHandler {
@@ -318,7 +315,13 @@ impl StreamHandler for DownloadStreamHandler {
         Ok(())
     }
 
-    fn process_data_writable(&mut self, _client: &mut Http3Client, _stream_id: StreamId) {}
+    fn process_data_writable(
+        &mut self,
+        _client: &mut Http3Client,
+        _stream_id: StreamId,
+        _now: Instant,
+    ) {
+    }
 }
 
 struct UploadStreamHandler {
@@ -350,12 +353,17 @@ impl StreamHandler for UploadStreamHandler {
         }
     }
 
-    fn process_data_writable(&mut self, client: &mut Http3Client, stream_id: StreamId) {
+    fn process_data_writable(
+        &mut self,
+        client: &mut Http3Client,
+        stream_id: StreamId,
+        now: Instant,
+    ) {
         let done = self
             .data
-            .send(|chunk| client.send_data(stream_id, chunk).unwrap());
+            .send(|chunk| client.send_data(stream_id, chunk, now).unwrap());
         if done {
-            client.stream_close_send(stream_id).unwrap();
+            client.stream_close_send(stream_id, now).unwrap();
         }
     }
 }
@@ -392,8 +400,9 @@ impl UrlHandler {
             .url_queue
             .pop_front()
             .expect("download_next called with empty queue");
+        let now = Instant::now();
         match client.fetch(
-            Instant::now(),
+            now,
             &self.args.method,
             &url,
             &self.args.headers,
@@ -409,12 +418,12 @@ impl UrlHandler {
                             self.args.output_dir.as_ref(),
                             &mut self.all_paths,
                         );
-                        client.stream_close_send(client_stream_id).unwrap();
+                        client.stream_close_send(client_stream_id, now).unwrap();
                         Box::new(DownloadStreamHandler { out_file })
                     }
                     "POST" => Box::new(UploadStreamHandler {
                         data: SendData::zeroes(self.args.upload_size),
-                        start: Instant::now(),
+                        start: now,
                     }),
                     _ => unimplemented!(),
                 };
@@ -444,5 +453,13 @@ impl UrlHandler {
     fn on_stream_fin(&mut self, client: &mut Http3Client, stream_id: StreamId) {
         self.stream_handlers.remove(&stream_id);
         self.process_urls(client);
+    }
+
+    fn reinit(&mut self) {
+        for url in self.handled_urls.drain(..).rev() {
+            self.url_queue.push_front(url);
+        }
+        self.stream_handlers.clear();
+        self.all_paths.clear();
     }
 }

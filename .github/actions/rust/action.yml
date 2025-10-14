@@ -24,6 +24,10 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Set RUST_BACKTRACE
+      shell: bash
+      run: echo "RUST_BACKTRACE=full" >> "$GITHUB_ENV"
+
     - name: Install Rust
       # TODO: Manually upate this, Dependabot will skip it because no tags associated with SHA:
       uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # zizmor: ignore[stale-action-refs]

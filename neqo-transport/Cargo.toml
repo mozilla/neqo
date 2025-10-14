@@ -37,7 +37,7 @@ neqo-transport = { path = ".", features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]
-bench = ["neqo-common/bench", "neqo-crypto/bench"]
+bench = ["neqo-common/bench", "neqo-crypto/bench", "log/release_max_level_info"]
 build-fuzzing-corpus = [
         "neqo-common/build-fuzzing-corpus",
         "neqo-crypto/disable-encryption",

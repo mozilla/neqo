@@ -50,8 +50,8 @@ impl crate::connection::test_internal::FrameWriter for InsertDatagram<'_> {
 
 #[test]
 fn datagram_disabled_both() {
-    let mut client = default_client();
-    let mut server = default_server();
+    let mut client = new_client(ConnectionParameters::default().datagram_size(0));
+    let mut server = new_server(ConnectionParameters::default().datagram_size(0));
     connect_force_idle(&mut client, &mut server);
 
     assert_eq!(client.max_datagram_size(), Err(Error::NotAvailable));
@@ -72,7 +72,7 @@ fn datagram_disabled_both() {
 fn datagram_enabled_on_client() {
     let mut client =
         new_client(ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU));
-    let mut server = default_server();
+    let mut server = new_server(ConnectionParameters::default().datagram_size(0));
     connect_force_idle(&mut client, &mut server);
 
     assert_eq!(client.max_datagram_size(), Err(Error::NotAvailable));
@@ -101,7 +101,7 @@ fn datagram_enabled_on_client() {
 
 #[test]
 fn datagram_enabled_on_server() {
-    let mut client = default_client();
+    let mut client = new_client(ConnectionParameters::default().datagram_size(0));
     let mut server =
         new_server(ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU));
     connect_force_idle(&mut client, &mut server);

@@ -24,7 +24,13 @@ neqo-transport = { path = "../neqo-transport", features = ["draft-29"] }
 qlog = { workspace = true }
 
 [features]
-bench = ["neqo-common/bench", "neqo-crypto/bench", "neqo-http3/bench", "neqo-transport/bench"]
+bench = [
+        "neqo-common/bench",
+        "neqo-crypto/bench",
+        "neqo-http3/bench",
+        "neqo-transport/bench",
+        "log/release_max_level_info",
+]
 disable-random = []
 
 [package.metadata.cargo-machete]
