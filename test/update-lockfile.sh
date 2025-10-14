@@ -10,6 +10,10 @@ set -euo pipefail
 # `Cargo.lock`. It also doesn't deal with Gecko's ".999" version patching scheme,
 # so some updates will just fail.
 
+if ! command -v check-lockfile-intersection >/dev/null 2>&1; then
+    echo "Error: check-lockfile-intersection is not installed or not in PATH." >&2
+    exit 1
+fi
 check-lockfile-intersection \
     --exclude-pkg-a wasi,thiserror,rustc-hash,itertools,base64,bindgen,bitflags,getrandom,half,hashbrown \
     https://raw.githubusercontent.com/mozilla-firefox/firefox/refs/heads/main/Cargo.lock \
