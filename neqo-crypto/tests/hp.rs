@@ -23,7 +23,7 @@ fn make_hp(cipher: Cipher) -> hp::Key {
 fn hp_test(cipher: Cipher, expected: &[u8]) {
     let hp = make_hp(cipher);
     let mask = hp.mask(&[0; 16]).expect("should produce a mask");
-    assert_eq!(&mask[..], expected, "first invocation should be correct");
+    assert_eq!(mask, expected, "first invocation should be correct");
 
     #[allow(
         clippy::allow_attributes,
@@ -32,10 +32,10 @@ fn hp_test(cipher: Cipher, expected: &[u8]) {
     )]
     let hp2 = hp.clone();
     let mask = hp2.mask(&[0; 16]).expect("clone produces mask");
-    assert_eq!(&mask[..], expected, "clone should produce the same mask");
+    assert_eq!(mask, expected, "clone should produce the same mask");
 
     let mask = hp.mask(&[0; 16]).expect("should produce a mask again");
-    assert_eq!(&mask[..], expected, "second invocation should be the same");
+    assert_eq!(mask, expected, "second invocation should be the same");
 }
 
 #[test]
