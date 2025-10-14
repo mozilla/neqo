@@ -11,7 +11,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qtrace, Encoder, Role};
+use neqo_common::{qtrace, Bytes, Encoder, Role};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -206,7 +206,7 @@ impl Protocol for Session {
         // WebTransport does not add prefix (i.e. context ID).
     }
 
-    fn dgram_context_id<'a>(&self, datagram: &'a [u8]) -> Result<&'a [u8], DgramContextIdError> {
+    fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError> {
         // WebTransport does not use a prefix (i.e. context ID).
         Ok(datagram)
     }

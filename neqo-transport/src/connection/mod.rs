@@ -2656,6 +2656,15 @@ impl Connection {
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
 
+        // Determine the size limit and padding for this UDP datagram.
+        let limit = if path.borrow().pmtud().needs_probe() {
+            needs_padding = true;
+            debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
+            path.borrow().pmtud().probe_size()
+        } else {
+            profile.limit()
+        };
+
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         for space in PacketNumberSpace::iter() {
@@ -2668,15 +2677,6 @@ impl Connection {
 
             let header_start = encoder.len();
 
-            // Configure the limits and padding for this packet.
-            let limit = if path.borrow().pmtud().needs_probe() {
-                needs_padding = true;
-                debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
-                path.borrow().pmtud().probe_size() - aead_expansion
-            } else {
-                profile.limit() - aead_expansion
-            };
-
             let (pt, mut builder) = Self::build_packet_header(
                 &path.borrow(),
                 epoch,
@@ -2685,7 +2685,9 @@ impl Connection {
                 &self.address_validation,
                 version,
                 grease_quic_bit,
-                limit,
+                // Limit the packet builder further to leave space for AEAD
+                // expansion added in `builder.build` below.
+                limit - aead_expansion,
             );
             let pn = Self::add_packet_number(
                 &mut builder,

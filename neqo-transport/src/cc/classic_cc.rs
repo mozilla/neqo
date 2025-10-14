@@ -205,7 +205,6 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
             if self.state.in_recovery() {
                 self.set_state(State::CongestionAvoidance, now);
-
                 qlog::metrics_updated(&self.qlog, &[qlog::Metric::InRecovery(false)], now);
             }
 

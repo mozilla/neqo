@@ -9,7 +9,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Decoder, Encoder};
+use neqo_common::{Bytes, Decoder, Encoder};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -88,10 +88,13 @@ impl Protocol for Session {
         encoder.encode_varint(0u64);
     }
 
-    fn dgram_context_id<'a>(&self, datagram: &'a [u8]) -> Result<&'a [u8], DgramContextIdError> {
-        let mut decoder = Decoder::new(datagram);
-        match decoder.decode_varint() {
-            Some(0) => Ok(decoder.decode_remainder()),
+    fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError> {
+        let (context_id, offset) = {
+            let mut decoder = Decoder::new(datagram.as_ref());
+            (decoder.decode_varint(), decoder.offset())
+        };
+        match context_id {
+            Some(0) => Ok(datagram.skip(offset)),
             Some(context_id) => Err(DgramContextIdError::UnknownIdentifier(context_id)),
             None => {
                 // > all HTTP Datagrams associated with UDP Proxying request streams start with a Context ID field;
@@ -105,6 +108,7 @@ impl Protocol for Session {
 
 #[cfg(test)]
 mod tests {
+    use neqo_common::Bytes;
     use neqo_transport::StreamId;
 
     use super::Session;
@@ -115,13 +119,17 @@ mod tests {
         let session = Session::new(StreamId::new(42));
         // Varint [0x00] is 0, i.e. a supported connect-udp context ID.
         assert_eq!(
-            session.dgram_context_id(&[0x00, 0x00, 0x00]).unwrap(),
-            &[0x00, 0x00]
+            session
+                .dgram_context_id(Bytes::from(vec![0x00, 0x00, 0x00]))
+                .unwrap(),
+            Bytes::from(vec![0x00, 0x00])
         );
         // Varint [0x40 0x00] is 0 as well, thus a supported connect-udp context ID, too.
         assert_eq!(
-            session.dgram_context_id(&[0x40, 0x00, 0x00, 0x00]).unwrap(),
-            &[0x00, 0x00]
+            session
+                .dgram_context_id(Bytes::from(vec![0x40, 0x00, 0x00, 0x00]))
+                .unwrap(),
+            Bytes::from(vec![0x00, 0x00])
         );
     }
 }

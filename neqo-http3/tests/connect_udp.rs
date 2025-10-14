@@ -139,7 +139,7 @@ fn exchange_packets_through_proxy(
     let server_dgrams = proxy.events().filter_map(|event| match event {
         Http3ServerEvent::ConnectUdp(ConnectUdpServerEvent::Datagram { datagram, session }) => {
             assert_eq!(session.stream_id(), connect_udp_session_id);
-            Some(Datagram::new(
+            Some(Datagram::from_bytes(
                 DEFAULT_ADDR,
                 DEFAULT_ADDR,
                 Tos::default(),
@@ -180,7 +180,7 @@ fn exchange_packets_through_proxy(
         }) = event
         {
             assert_eq!(session_id, connect_udp_session_id);
-            Some(Datagram::new(
+            Some(Datagram::from_bytes(
                 DEFAULT_ADDR,
                 DEFAULT_ADDR,
                 Tos::default(),
@@ -220,7 +220,7 @@ fn session_lifecycle(client_closes: bool) {
         })
         .unwrap();
     assert_eq!(session_id, id);
-    assert_eq!(datagram, PING);
+    assert_eq!(&datagram, PING);
 
     proxy_session.send_datagram(PONG, None).unwrap();
 
@@ -242,7 +242,7 @@ fn session_lifecycle(client_closes: bool) {
         .unwrap();
 
     assert_eq!(session_id, id);
-    assert_eq!(datagram, PONG);
+    assert_eq!(&datagram, PONG);
 
     if client_closes {
         client
