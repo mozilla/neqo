@@ -2546,12 +2546,17 @@ impl Connection {
         mut closing_frame: Option<&ClosingFrame>,
         max_datagrams: NonZeroUsize,
     ) -> Res<SendOptionBatch> {
-        let packet_tos = path.borrow().tos();
+        let (packet_tos, mtu, address_family_max_mtu) = {
+            let path = path.borrow();
+            (
+                path.tos(),
+                path.plpmtu(),
+                path.pmtud().address_family_max_mtu(),
+            )
+        };
         let mut send_buffer = Vec::new();
         let mut max_datagram_size = None;
         let mut num_datagrams = 0;
-        let mtu = path.borrow().plpmtu();
-        let address_family_max_mtu = path.borrow().pmtud().address_family_max_mtu();
 
         loop {
             if max_datagrams.get() <= num_datagrams {
@@ -2657,12 +2662,16 @@ impl Connection {
         let version = self.version();
 
         // Determine the size limit and padding for this UDP datagram.
-        let limit = if path.borrow().pmtud().needs_probe() {
-            needs_padding = true;
-            debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
-            path.borrow().pmtud().probe_size()
-        } else {
-            profile.limit()
+        let limit = {
+            let path = path.borrow();
+            if path.pmtud().needs_probe() {
+                needs_padding = true;
+                let probe_size = path.pmtud().probe_size();
+                debug_assert!(probe_size >= profile.limit());
+                probe_size
+            } else {
+                profile.limit()
+            }
         };
 
         // Frames for different epochs must go in different packets, but then these
