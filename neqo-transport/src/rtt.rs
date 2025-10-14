@@ -138,7 +138,6 @@ impl RttEstimate {
             self.smoothed_rtt,
             self.rttvar
         );
-
         qlog::metrics_updated(
             qlog,
             &[

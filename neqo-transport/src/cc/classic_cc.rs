@@ -258,7 +258,6 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             // acknowledged bytes after increasing the congestion window twice.
             self.acked_bytes = min(bytes_for_increase, self.acked_bytes);
         }
-
         qlog::metrics_updated(
             &self.qlog,
             &[
@@ -293,7 +292,6 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             // event, we may still declare packets lost that were sent before the rebinding.
             self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
         }
-
         qlog::metrics_updated(
             &self.qlog,
             &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
@@ -341,7 +339,6 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         if pkt.cc_outstanding() {
             assert!(self.bytes_in_flight >= pkt.len());
             self.bytes_in_flight -= pkt.len();
-
             qlog::metrics_updated(
                 &self.qlog,
                 &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
@@ -353,7 +350,6 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
     fn discard_in_flight(&mut self, now: Instant) {
         self.bytes_in_flight = 0;
-
         qlog::metrics_updated(
             &self.qlog,
             &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
@@ -385,7 +381,6 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             pkt.pn(),
             pkt.len()
         );
-
         qlog::metrics_updated(
             &self.qlog,
             &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],

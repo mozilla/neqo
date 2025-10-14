@@ -101,7 +101,6 @@ impl BufferedStream {
             return Ok(false);
         }
         let res = conn.stream_send_atomic(*stream_id, to_send)?;
-
         if res {
             qlog::h3_data_moved_down(conn.qlog_mut(), *stream_id, to_send.len(), now);
         }

@@ -410,6 +410,10 @@ pub enum Metric {
     PacingRate(u64),
 }
 
+#[cfg_attr(
+    not(feature = "qlog"),
+    expect(unused_variables, reason = "Only used with qlog.")
+)]
 pub fn metrics_updated(qlog: &Qlog, updated_metrics: &[Metric], now: Instant) {
     debug_assert!(!updated_metrics.is_empty());
 

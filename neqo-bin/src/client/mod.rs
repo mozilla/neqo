@@ -532,29 +532,27 @@ impl<'a, H: Handler> Runner<'a, H> {
     }
 }
 
-#[cfg_attr(
-    not(feature = "qlog"),
-    expect(unused_variables, reason = "Only used with qlog.")
-)]
+#[cfg(not(feature = "qlog"))]
+const fn qlog_new(_args: &Args, _hostname: &str, _cid: &ConnectionId) -> Res<Qlog> {
+    Err(Error::Argument(
+        "qlog feature not enabled, cannot use --qlog-dir",
+    ))
+}
+
+#[cfg(feature = "qlog")]
 fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<Qlog> {
     let Some(qlog_dir) = args.shared.qlog_dir.clone() else {
         return Ok(Qlog::disabled());
     };
 
-    #[cfg(not(feature = "qlog"))]
-    return Err(Error::Argument(
-        "qlog feature not enabled, cannot use --qlog-dir",
-    ));
-
     // hostname might be an IPv6 address, e.g. `[::1]`. `:` is an invalid
     // Windows file name character.
-    #[cfg(all(feature = "qlog", windows))]
+    #[cfg(windows)]
     let hostname: String = hostname
         .chars()
         .map(|c| if c == ':' { '_' } else { c })
         .collect();
 
-    #[cfg(feature = "qlog")]
     Qlog::enabled_with_file(
         qlog_dir,
         Role::Client,

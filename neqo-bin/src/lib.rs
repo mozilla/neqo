@@ -279,7 +279,7 @@ pub enum Error {
     Argument(&'static str),
 }
 
-#[cfg(all(not(feature = "qlog"), target_os = "netbsd"))] // FIXME: Test fails on NetBSD.
+#[cfg(all(not(feature = "qlog"), target_os = "netbsd"))] // Test fails without QLOG and (FIXME) on NetBSD.
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {

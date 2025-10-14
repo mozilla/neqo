@@ -100,7 +100,6 @@ impl Qlog {
         streamer.start_log()?;
 
         Ok(Self {
-            #[cfg(feature = "qlog")]
             inner: Rc::new(RefCell::new(Some(SharedStreamer {
                 qlog_path,
                 streamer,
