@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 # This needs https://github.com/graydon/check-lockfile-intersection installed.
 # Execute at the workspace root, i.e., not inside `test`. It will spit out a
