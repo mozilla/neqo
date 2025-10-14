@@ -179,7 +179,7 @@ impl Decoder {
                 .map_err(|_| Error::DecoderStream)?;
             qdebug!("[{self}] {r} bytes sent");
             if r < self.send_buf.len() {
-                self.send_buf.drain(r).for_each(drop);
+                self.send_buf.skip(r);
             } else {
                 self.send_buf = Encoder::default();
             }
