@@ -22,6 +22,7 @@ neqo-transport = { path = "./../neqo-transport" }
 qlog = { workspace = true }
 rustc-hash = { workspace = true }
 static_assertions = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
@@ -30,7 +31,7 @@ test-fixture = { path = "../test-fixture" }
 ignored = ["log"]
 
 [features]
-bench = ["neqo-common/bench", "neqo-transport/bench"]
+bench = ["neqo-common/bench", "neqo-transport/bench", "log/release_max_level_info"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

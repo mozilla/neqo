@@ -43,10 +43,10 @@ impl FrameReaderTest {
         drop(self.conn_c.process(out.dgram(), now()));
         let (frame, fin) = self
             .fr
-            .receive::<T>(&mut StreamReaderConnectionWrapper::new(
-                &mut self.conn_c,
-                self.stream_id,
-            ))
+            .receive::<T>(
+                &mut StreamReaderConnectionWrapper::new(&mut self.conn_c, self.stream_id),
+                now(),
+            )
             .ok()?;
         assert!(!fin);
         frame
@@ -58,18 +58,22 @@ impl FrameReaderTest {
 fn frame_reading_with_stream_settings1() {
     let mut fr = FrameReaderTest::new();
 
-    // Send and read settings frame 040406040804
+    // Send and read settings frame 040406040801
     assert!(fr.process::<HFrame>(&[0x4]).is_none());
     assert!(fr.process::<HFrame>(&[0x4]).is_none());
     assert!(fr.process::<HFrame>(&[0x6]).is_none());
     assert!(fr.process::<HFrame>(&[0x4]).is_none());
     assert!(fr.process::<HFrame>(&[0x8]).is_none());
-    let frame = fr.process(&[0x4]);
+    let frame = fr.process(&[0x1]);
 
     assert!(frame.is_some());
     if let HFrame::Settings { settings } = frame.unwrap() {
-        assert!(settings.len() == 1);
-        assert!(settings[0] == HSetting::new(HSettingType::MaxHeaderListSize, 4));
+        assert_eq!(settings.len(), 2);
+        assert_eq!(
+            settings[0],
+            HSetting::new(HSettingType::MaxHeaderListSize, 4)
+        );
+        assert_eq!(settings[1], HSetting::new(HSettingType::EnableConnect, 1));
     } else {
         panic!("wrong frame type");
     }
@@ -80,16 +84,20 @@ fn frame_reading_with_stream_settings1() {
 fn frame_reading_with_stream_settings2() {
     let mut fr = FrameReaderTest::new();
 
-    // Read settings frame 400406064004084100
-    for i in &[0x40, 0x04, 0x06, 0x06, 0x40, 0x04, 0x08, 0x41] {
+    // Read settings frame 400406064004080100
+    for i in &[0x40, 0x04, 0x05, 0x06, 0x40, 0x04, 0x08] {
         assert!(fr.process::<HFrame>(&[*i]).is_none());
     }
-    let frame = fr.process(&[0x0]);
+    let frame = fr.process(&[0x01]);
 
-    assert!(frame.is_some());
+    assert!(&frame.is_some());
     if let HFrame::Settings { settings } = frame.unwrap() {
-        assert!(settings.len() == 1);
-        assert!(settings[0] == HSetting::new(HSettingType::MaxHeaderListSize, 4));
+        assert_eq!(settings.len(), 2);
+        assert_eq!(
+            settings[0],
+            HSetting::new(HSettingType::MaxHeaderListSize, 4)
+        );
+        assert_eq!(settings[1], HSetting::new(HSettingType::EnableConnect, 1));
     } else {
         panic!("wrong frame type");
     }
@@ -239,10 +247,10 @@ fn test_reading_frame<T: FrameDecoder<T> + PartialEq + Debug>(
         drop(fr.conn_c.process(out.dgram(), now()));
     }
 
-    let rv = fr.fr.receive::<T>(&mut StreamReaderConnectionWrapper::new(
-        &mut fr.conn_c,
-        fr.stream_id,
-    ));
+    let rv = fr.fr.receive::<T>(
+        &mut StreamReaderConnectionWrapper::new(&mut fr.conn_c, fr.stream_id),
+        now(),
+    );
 
     match expected_result {
         FrameReadingTestExpect::Error => assert_eq!(Err(Error::HttpFrame), rv),
@@ -490,11 +498,10 @@ fn frame_reading_when_stream_is_closed_before_sending_data() {
     drop(fr.conn_s.process(out.dgram(), now()));
     assert_eq!(
         Ok((None, true)),
-        fr.fr
-            .receive::<HFrame>(&mut StreamReaderConnectionWrapper::new(
-                &mut fr.conn_s,
-                fr.stream_id
-            ))
+        fr.fr.receive::<HFrame>(
+            &mut StreamReaderConnectionWrapper::new(&mut fr.conn_s, fr.stream_id),
+            now()
+        )
     );
 }
 
@@ -513,10 +520,9 @@ fn wt_frame_reading_when_stream_is_closed_before_sending_data() {
     drop(fr.conn_s.process(out.dgram(), now()));
     assert_eq!(
         Ok((None, true)),
-        fr.fr
-            .receive::<WebTransportFrame>(&mut StreamReaderConnectionWrapper::new(
-                &mut fr.conn_s,
-                fr.stream_id
-            ))
+        fr.fr.receive::<WebTransportFrame>(
+            &mut StreamReaderConnectionWrapper::new(&mut fr.conn_s, fr.stream_id),
+            now()
+        )
     );
 }

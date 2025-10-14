@@ -52,6 +52,7 @@ fn result_helper(rv: ssl::SECStatus, allow_blocked: bool) -> Res<bool> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{result, result_or_blocked};
     use crate::{

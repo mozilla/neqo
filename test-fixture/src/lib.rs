@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(clippy::unwrap_used, reason = "This is test code.")]
 
 use std::{
@@ -26,7 +27,7 @@ use neqo_common::{
     qtrace, Datagram, Decoder, Ecn, Role,
 };
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
-use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
+use neqo_http3::{Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State};
 use neqo_transport::{
     version, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
     ConnectionIdRef, ConnectionParameters, State, Version,
@@ -196,6 +197,7 @@ where
                 Some("Neqo client qlog".to_string()),
                 Some("Neqo client qlog".to_string()),
                 format!("client-{cid}"),
+                now(),
             )
             .unwrap(),
         );
@@ -253,6 +255,7 @@ where
                 Some("Neqo server qlog".to_string()),
                 Some("Neqo server qlog".to_string()),
                 "server".to_string(),
+                now(),
             )
             .unwrap(),
         );
@@ -399,6 +402,34 @@ pub fn exchange_packets(
             break;
         }
     }
+}
+
+/// # Panics
+///
+/// When connection establishment fails.
+pub fn connect_peers(hconn_c: &mut Http3Client, hconn_s: &mut Http3Server) -> Option<Datagram> {
+    assert_eq!(hconn_c.state(), Http3State::Initializing);
+    let out = hconn_c.process_output(now()); // Initial
+    let out2 = hconn_c.process_output(now()); // Initial
+    _ = hconn_s.process(out.dgram(), now()); // ACK
+    let out = hconn_s.process(out2.dgram(), now()); // Initial + Handshake
+    let out = hconn_c.process(out.dgram(), now());
+    let out = hconn_s.process(out.dgram(), now());
+    let out = hconn_c.process(out.dgram(), now());
+    drop(hconn_s.process(out.dgram(), now())); // consume ACK
+    let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
+    assert!(hconn_c.events().any(authentication_needed));
+    hconn_c.authenticated(AuthenticationStatus::Ok, now());
+    let out = hconn_c.process_output(now()); // Handshake
+    assert_eq!(hconn_c.state(), Http3State::Connected);
+    let out = hconn_s.process(out.dgram(), now()); // Handshake
+    let out = hconn_c.process(out.dgram(), now());
+    let out = hconn_s.process(out.dgram(), now());
+    // assert!(hconn_s.settings_received);
+    let out = hconn_c.process(out.dgram(), now());
+    // assert!(hconn_c.settings_received);
+
+    out.dgram()
 }
 
 /// Split the first packet off a coalesced packet.

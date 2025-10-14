@@ -104,6 +104,7 @@ impl Deref for Data {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{Data, Prefix};
 

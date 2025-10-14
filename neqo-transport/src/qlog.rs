@@ -122,7 +122,11 @@ fn connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
     );
 }
 
-#[expect(clippy::similar_names, reason = "new and now are similar.")]
+#[allow(
+    clippy::allow_attributes,
+    clippy::similar_names,
+    reason = "FIXME: 'new and now are similar' hits on MSRV <1.91."
+)]
 pub fn connection_state_updated(qlog: &Qlog, new: &State, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
@@ -294,7 +298,7 @@ pub fn packets_lost(qlog: &Qlog, pkts: &[sent::Packet], now: Instant) {
 }
 
 #[expect(dead_code, reason = "TODO: Construct all variants.")]
-pub enum QlogMetric {
+pub enum Metric {
     MinRtt(Duration),
     SmoothedRtt(Duration),
     LatestRtt(Duration),
@@ -309,7 +313,7 @@ pub enum QlogMetric {
     PacingRate(u64),
 }
 
-pub fn metrics_updated(qlog: &Qlog, updated_metrics: &[QlogMetric], now: Instant) {
+pub fn metrics_updated(qlog: &Qlog, updated_metrics: &[Metric], now: Instant) {
     debug_assert!(!updated_metrics.is_empty());
 
     qlog.add_event_data_with_instant(
@@ -327,24 +331,24 @@ pub fn metrics_updated(qlog: &Qlog, updated_metrics: &[QlogMetric], now: Instant
 
             for metric in updated_metrics {
                 match metric {
-                    QlogMetric::MinRtt(v) => min_rtt = Some(v.as_secs_f32() * 1000.0),
-                    QlogMetric::SmoothedRtt(v) => smoothed_rtt = Some(v.as_secs_f32() * 1000.0),
-                    QlogMetric::LatestRtt(v) => latest_rtt = Some(v.as_secs_f32() * 1000.0),
-                    QlogMetric::RttVariance(v) => rtt_variance = Some(v.as_secs_f32() * 1000.0),
-                    QlogMetric::PtoCount(v) => {
+                    Metric::MinRtt(v) => min_rtt = Some(v.as_secs_f32() * 1000.0),
+                    Metric::SmoothedRtt(v) => smoothed_rtt = Some(v.as_secs_f32() * 1000.0),
+                    Metric::LatestRtt(v) => latest_rtt = Some(v.as_secs_f32() * 1000.0),
+                    Metric::RttVariance(v) => rtt_variance = Some(v.as_secs_f32() * 1000.0),
+                    Metric::PtoCount(v) => {
                         pto_count = Some(u16::try_from(*v).expect("fits in u16"));
                     }
-                    QlogMetric::CongestionWindow(v) => {
+                    Metric::CongestionWindow(v) => {
                         congestion_window = Some(u64::try_from(*v).expect("fits in u64"));
                     }
-                    QlogMetric::BytesInFlight(v) => {
+                    Metric::BytesInFlight(v) => {
                         bytes_in_flight = Some(u64::try_from(*v).expect("fits in u64"));
                     }
-                    QlogMetric::SsThresh(v) => {
+                    Metric::SsThresh(v) => {
                         ssthresh = Some(u64::try_from(*v).expect("fits in u64"));
                     }
-                    QlogMetric::PacketsInFlight(v) => packets_in_flight = Some(*v),
-                    QlogMetric::PacingRate(v) => pacing_rate = Some(*v),
+                    Metric::PacketsInFlight(v) => packets_in_flight = Some(*v),
+                    Metric::PacingRate(v) => pacing_rate = Some(*v),
                     _ => (),
                 }
             }

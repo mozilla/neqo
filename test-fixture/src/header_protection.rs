@@ -4,14 +4,19 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::missing_panics_doc, reason = "This is test code.")]
+#![allow(
+    clippy::allow_attributes,
+    clippy::missing_panics_doc,
+    clippy::unwrap_in_result,
+    reason = "This is test code."
+)]
 
 use std::ops::Range;
 
 use neqo_common::{hex_with_len, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-    hkdf, hp, Aead,
+    hkdf, hp, Aead, AeadTrait as _,
 };
 
 pub use crate::{default_client, now, CountingConnectionIdGenerator};
@@ -99,6 +104,7 @@ pub fn remove(hp: &hp::Key, header: &[u8], payload: &[u8]) -> (Vec<u8>, u64) {
     let mut fixed_header = header.to_vec();
     let pn_offset = header.len();
     // Save 4 extra in case the packet number is that long.
+    assert!(payload.len() > 19);
     fixed_header.extend_from_slice(&payload[..4]);
 
     // Sample for masking and apply the mask.

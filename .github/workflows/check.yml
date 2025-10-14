@@ -156,13 +156,13 @@ jobs:
           BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
       - name: CodeCov Windows workaround
-        if: matrix.os == 'windows-2025' && matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
+        if: ${{ startsWith(matrix.os, 'windows') && matrix.type == 'debug' && matrix.rust-toolchain == 'stable' }}
         run: |
           # FIXME: Without this, the codecov/codecov-action fails. No idea why it's looking under C:/msys64 now, it shouldn't.
           mkdir -p C:/msys64/home/runneradmin/
           touch C:/msys64/home/runneradmin/.gitconfig
 
-      - uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0
+      - uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
         with:
           files: codecov.json
           fail_ci_if_error: false
@@ -214,7 +214,6 @@ jobs:
           target: ${{ matrix.target }}
           minimum-nss-version: ${{ steps.nss-version.outputs.minimum }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          codecov-token: ${{ secrets.CODECOV_TOKEN }}
 
   check-vm:
     name: Run checks for VM-only platforms

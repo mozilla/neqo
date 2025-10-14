@@ -20,6 +20,7 @@ enum-map = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 strum = { workspace = true }
+thiserror = { workspace = true }
 
 [build-dependencies]
 bindgen = { version = "0.69", default-features = false, features = ["runtime"] }
@@ -36,7 +37,7 @@ test-fixture = { path = "../test-fixture" }
 ignored = ["bindgen", "semver", "serde", "serde_derive", "toml"]
 
 [features]
-bench = []
+bench = ["log/release_max_level_info"]
 disable-encryption = []
 disable-random = []
 gecko = ["mozbuild"]

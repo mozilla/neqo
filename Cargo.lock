@@ -446,7 +446,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.15.0"
+version = "0.16.1"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.15.0"
+version = "0.16.1"
 dependencies = [
  "clap",
  "clap-verbosity-flag",
@@ -791,13 +791,14 @@ dependencies = [
  "quinn-udp",
  "regex",
  "rustc-hash 2.1.1",
+ "thiserror",
  "tokio",
  "url",
 ]
 
 [[package]]
 name = "neqo-common"
-version = "0.15.0"
+version = "0.16.1"
 dependencies = [
  "criterion",
  "enum-map",
@@ -815,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-crypto"
-version = "0.15.0"
+version = "0.16.1"
 dependencies = [
  "bindgen",
  "enum-map",
@@ -827,13 +828,15 @@ dependencies = [
  "serde_derive",
  "strum",
  "test-fixture",
+ "thiserror",
  "toml",
 ]
 
 [[package]]
 name = "neqo-http3"
-version = "0.15.0"
+version = "0.16.1"
 dependencies = [
+ "criterion",
  "enumset",
  "log",
  "neqo-common",
@@ -846,12 +849,13 @@ dependencies = [
  "sfv",
  "strum",
  "test-fixture",
+ "thiserror",
  "url",
 ]
 
 [[package]]
 name = "neqo-qpack"
-version = "0.15.0"
+version = "0.16.1"
 dependencies = [
  "log",
  "neqo-common",
@@ -860,11 +864,12 @@ dependencies = [
  "rustc-hash 2.1.1",
  "static_assertions",
  "test-fixture",
+ "thiserror",
 ]
 
 [[package]]
 name = "neqo-transport"
-version = "0.15.0"
+version = "0.16.1"
 dependencies = [
  "criterion",
  "enum-map",
@@ -881,11 +886,12 @@ dependencies = [
  "static_assertions",
  "strum",
  "test-fixture",
+ "thiserror",
 ]
 
 [[package]]
 name = "neqo-udp"
-version = "0.15.0"
+version = "0.16.1"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -1262,7 +1268,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.15.0"
+version = "0.16.1"
 dependencies = [
  "log",
  "neqo-common",

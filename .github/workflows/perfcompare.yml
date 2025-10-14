@@ -127,17 +127,17 @@ jobs:
       - name: Build neqo
         run: |
           # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
-          export RUSTFLAGS="-C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes $RUSTFLAGS"
+          export RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment -C force-frame-pointers=yes $RUSTFLAGS"
           echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
           mkdir -p binaries/neqo-main
           mkdir -p binaries/neqo
           cd neqo
           git checkout origin/main
-          cargo build --locked --release --bin neqo-client --bin neqo-server
+          cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
           cp target/release/neqo-client ../binaries/neqo-main/
           cp target/release/neqo-server ../binaries/neqo-main/
           git checkout -
-          cargo build --locked --release --bin neqo-client --bin neqo-server
+          cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
           cp target/release/neqo-client ../binaries/neqo/
           cp target/release/neqo-server ../binaries/neqo/
 
@@ -455,7 +455,7 @@ jobs:
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          TESTBED: ${{ inputs.bencher }}
+          TESTBED: ${{ inputs.bencher == 'gcp' && 'GCP' || 'On-prem' }}
         run: |
           SHA=$(cd neqo && git log origin/main -1 --format=%H)
           echo "$SHA" > main-sha.txt
@@ -474,7 +474,7 @@ jobs:
         id: export_samply
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}-perfcompare-samply
+          name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-perfcompare-samply
           path: |
             *.samply.json.gz
             binaries
@@ -484,7 +484,7 @@ jobs:
         id: export_perf
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}-perfcompare-perf
+          name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-perfcompare-perf
           path: |
             *.svg
             *.txt
@@ -505,7 +505,7 @@ jobs:
 
       - name: Fail on regression
         # Don't check for regressions when running on main.
-        if: github.ref != 'refs/heads/main'
+        if: github.ref != 'refs/heads/main' && github.event.merge_group.base_ref != 'refs/heads/main'
         run: |
           if grep -q "Performance has regressed." results.txt; then
             echo "Performance regression detected."

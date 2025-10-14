@@ -16,14 +16,7 @@ use ::qlog::events::{quic::CongestionStateUpdated, EventData};
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::Qlog, qtrace};
 
 use super::CongestionControl;
-use crate::{
-    packet,
-    qlog::{self, QlogMetric},
-    recovery::sent,
-    rtt::RttEstimate,
-    sender::PACING_BURST_SIZE,
-    Pmtud,
-};
+use crate::{packet, qlog, recovery::sent, rtt::RttEstimate, sender::PACING_BURST_SIZE, Pmtud};
 
 pub const CWND_INITIAL_PKTS: usize = 10;
 const PERSISTENT_CONG_THRESH: u32 = 3;
@@ -100,10 +93,6 @@ pub trait WindowAdjustment: Display + Debug {
     ) -> (usize, usize);
     /// Cubic needs this signal to reset its epoch.
     fn on_app_limited(&mut self);
-    #[cfg(test)]
-    fn last_max_cwnd(&self) -> f64;
-    #[cfg(test)]
-    fn set_last_max_cwnd(&mut self, last_max_cwnd: f64);
 }
 
 #[derive(Debug)]
@@ -214,7 +203,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
             if self.state.in_recovery() {
                 self.set_state(State::CongestionAvoidance, now);
-                qlog::metrics_updated(&self.qlog, &[QlogMetric::InRecovery(false)], now);
+                qlog::metrics_updated(&self.qlog, &[qlog::Metric::InRecovery(false)], now);
             }
 
             new_acked += pkt.len();
@@ -270,8 +259,8 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         qlog::metrics_updated(
             &self.qlog,
             &[
-                QlogMetric::CongestionWindow(self.congestion_window),
-                QlogMetric::BytesInFlight(self.bytes_in_flight),
+                qlog::Metric::CongestionWindow(self.congestion_window),
+                qlog::Metric::BytesInFlight(self.bytes_in_flight),
             ],
             now,
         );
@@ -303,7 +292,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         }
         qlog::metrics_updated(
             &self.qlog,
-            &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
+            &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
 
@@ -350,7 +339,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             self.bytes_in_flight -= pkt.len();
             qlog::metrics_updated(
                 &self.qlog,
-                &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
+                &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
                 now,
             );
             qtrace!("[{self}] Ignore pkt with size {}", pkt.len());
@@ -361,7 +350,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         self.bytes_in_flight = 0;
         qlog::metrics_updated(
             &self.qlog,
-            &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
+            &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
     }
@@ -392,7 +381,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         );
         qlog::metrics_updated(
             &self.qlog,
-            &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
+            &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
     }
@@ -434,14 +423,18 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         self.ssthresh = v;
     }
 
+    /// Accessor for [`ClassicCongestionControl::cc_algorithm`]. Is used to call Cubic getters in
+    /// tests.
     #[cfg(test)]
-    pub fn last_max_cwnd(&self) -> f64 {
-        self.cc_algorithm.last_max_cwnd()
+    pub const fn cc_algorithm(&self) -> &T {
+        &self.cc_algorithm
     }
 
+    /// Mutable accessor for [`ClassicCongestionControl::cc_algorithm`]. Is used to call Cubic
+    /// setters in tests.
     #[cfg(test)]
-    pub fn set_last_max_cwnd(&mut self, last_max_cwnd: f64) {
-        self.cc_algorithm.set_last_max_cwnd(last_max_cwnd);
+    pub fn cc_algorithm_mut(&mut self) -> &mut T {
+        &mut self.cc_algorithm
     }
 
     #[cfg(test)]
@@ -520,7 +513,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                     self.set_state(State::PersistentCongestion, now);
                     qlog::metrics_updated(
                         &self.qlog,
-                        &[QlogMetric::CongestionWindow(self.congestion_window)],
+                        &[qlog::Metric::CongestionWindow(self.congestion_window)],
                         now,
                     );
                     return true;
@@ -568,9 +561,9 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         qlog::metrics_updated(
             &self.qlog,
             &[
-                QlogMetric::CongestionWindow(self.congestion_window),
-                QlogMetric::SsThresh(self.ssthresh),
-                QlogMetric::InRecovery(true),
+                qlog::Metric::CongestionWindow(self.congestion_window),
+                qlog::Metric::SsThresh(self.ssthresh),
+                qlog::Metric::InRecovery(true),
             ],
             now,
         );
@@ -596,6 +589,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::time::{Duration, Instant};
 
@@ -674,7 +668,7 @@ mod tests {
             cc.on_packet_sent(p, now());
         }
 
-        cc.on_packets_lost(Some(now()), None, PTO, lost_packets, Instant::now());
+        cc.on_packets_lost(Some(now()), None, PTO, lost_packets, now());
 
         let persistent = if cc.cwnd() == reduced_cwnd {
             false
@@ -876,7 +870,7 @@ mod tests {
         rtt_time: u32,
         lost: &[sent::Packet],
     ) -> bool {
-        let now = Instant::now();
+        let now = now();
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
 
         let last_ack = Some(by_pto(last_ack));
@@ -1025,7 +1019,7 @@ mod tests {
     fn persistent_congestion_no_prev_ack_newreno() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
-        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), Instant::now());
+        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), now());
         assert_eq!(cc.cwnd(), cc.cwnd_min());
     }
 
@@ -1033,7 +1027,7 @@ mod tests {
     fn persistent_congestion_no_prev_ack_cubic() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         let mut cc = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
-        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), Instant::now());
+        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), now());
         assert_eq!(cc.cwnd(), cc.cwnd_min());
     }
 
