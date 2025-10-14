@@ -4,7 +4,7 @@
 # Execute at the workspace root, i.e., not inside `test`. It will spit out a
 # list of `cargo update` commands to apply.
 #
-# check-lockfile-intersection doesn't deal with deps that exists in multiple
+# check-lockfile-intersection doesn't deal with deps that exist in multiple
 # versions, so those are excluded below and will hence need manually updating in
 # `Cargo.lock`. It also doesn't deal with Gecko's ".999" version patching scheme,
 # so some updates will just fail.
