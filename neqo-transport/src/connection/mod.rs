@@ -2551,6 +2551,7 @@ impl Connection {
         let mut send_buffer = Vec::with_capacity(mtu);
         let mut max_datagram_size = None;
         let mut num_datagrams = 0;
+        let address_family_max_mtu = path.borrow().pmtud().address_family_max_mtu();
 
         loop {
             if max_datagrams.get() <= num_datagrams {
