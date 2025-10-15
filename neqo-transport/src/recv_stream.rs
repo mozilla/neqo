@@ -9,7 +9,7 @@
 
 use std::{
     cell::RefCell,
-    cmp::max,
+    cmp::{max, min},
     collections::BTreeMap,
     fmt::Debug,
     mem,
@@ -330,9 +330,9 @@ impl RxStreamOrderer {
     fn read(&mut self, buf: &mut [u8]) -> usize {
         qtrace!("Reading {} bytes, {} available", buf.len(), self.buffered());
         let mut copied = 0;
+        let mut first_keep: Option<u64> = None;
 
         for (&range_start, range_data) in &mut self.data_ranges {
-            let mut keep = false;
             if self.retired >= range_start {
                 // Frame data has new contiguous bytes.
                 let copy_offset = usize::try_from(max(range_start, self.retired) - range_start)
@@ -340,12 +340,7 @@ impl RxStreamOrderer {
                 assert!(range_data.len() >= copy_offset);
                 let available = range_data.len() - copy_offset;
                 let space = buf.len() - copied;
-                let copy_bytes = if available > space {
-                    keep = true;
-                    space
-                } else {
-                    available
-                };
+                let copy_bytes = min(available, space);
 
                 if copy_bytes > 0 {
                     let copy_slc = &range_data[copy_offset..copy_offset + copy_bytes];
@@ -353,18 +348,38 @@ impl RxStreamOrderer {
                     copied += copy_bytes;
                     self.retired += u64::try_from(copy_bytes).expect("usize fits in u64");
                 }
+
+                // Check if we need to keep this range.
+                if available > space {
+                    // Buffer is full, but more data available in this range.
+                    first_keep = Some(range_start);
+                    break;
+                }
+                // else: fully consumed, will be removed later
             } else {
-                // The data in the buffer isn't contiguous.
-                keep = true;
-            }
-            if keep {
-                let mut keep = self.data_ranges.split_off(&range_start);
-                mem::swap(&mut self.data_ranges, &mut keep);
-                return copied;
+                // Gap in data - keep this and all following ranges.
+                first_keep = Some(range_start);
+                break;
             }
         }
 
-        self.data_ranges.clear();
+        // Clean up consumed ranges.
+        if let Some(keep_from) = first_keep {
+            // Remove all ranges before keep_from.
+            let to_remove: SmallVec<[u64; 8]> = self
+                .data_ranges
+                .range(..keep_from)
+                .map(|(&k, _)| k)
+                .collect();
+
+            for key in to_remove {
+                self.data_ranges.remove(&key);
+            }
+        } else {
+            // All ranges were consumed.
+            self.data_ranges.clear();
+        }
+
         copied
     }
 
@@ -2252,5 +2267,147 @@ mod tests {
         s.inbound_stream_frame(false, SW / 2, &[0; 10]).unwrap();
         check_fc(&fc.borrow(), SW / 2 + 10, SW / 2 + 10);
         check_fc(s.fc().unwrap(), SW / 2 + 10, SW / 2 + 10);
+    }
+
+    // Tests for the new read() implementation without split_off.
+
+    #[test]
+    fn read_removes_consumed_ranges() {
+        let mut s = RxStreamOrderer::new();
+
+        // Insert 3 ranges with gaps to prevent merging.
+        s.inbound_frame(0, &[1; 10]);
+        s.inbound_frame(20, &[2; 10]);
+        s.inbound_frame(40, &[3; 10]);
+        check_chunks(&s, &[(0, 10), (20, 10), (40, 10)]);
+
+        // Read first range completely.
+        let mut buf = [0; 20];
+        assert_eq!(s.read(&mut buf), 10);
+
+        // First range should be removed, others kept due to gap.
+        check_chunks(&s, &[(20, 10), (40, 10)]);
+        assert_eq!(s.retired, 10);
+    }
+
+    #[test]
+    fn read_partial_keeps_current_range() {
+        let mut s = RxStreamOrderer::new();
+
+        s.inbound_frame(0, &[1; 100]);
+
+        // Read only part of the range.
+        let mut buf = [0; 30];
+        assert_eq!(s.read(&mut buf), 30);
+
+        // Range should still exist.
+        check_chunks(&s, &[(0, 100)]);
+        assert_eq!(s.retired, 30);
+
+        // Read rest.
+        let mut buf2 = [0; 100];
+        assert_eq!(s.read(&mut buf2), 70);
+        assert!(s.data_ranges.is_empty());
+    }
+
+    #[test]
+    fn read_stops_at_gap_removes_consumed() {
+        let mut s = RxStreamOrderer::new();
+
+        // Add ranges with a gap.
+        s.inbound_frame(0, &[1; 10]);
+        s.inbound_frame(10, &[2; 10]);
+        s.inbound_frame(30, &[3; 10]); // Gap at 20-30
+
+        let mut buf = [0; 50];
+        assert_eq!(s.read(&mut buf), 20);
+
+        // First two ranges consumed, third kept.
+        check_chunks(&s, &[(30, 10)]);
+        assert_eq!(s.retired, 20);
+    }
+
+    #[test]
+    fn read_multiple_partial_reads() {
+        let mut s = RxStreamOrderer::new();
+
+        s.inbound_frame(0, &[1; 100]);
+
+        // Multiple small reads.
+        let mut buf = [0; 10];
+        for i in 0..10 {
+            assert_eq!(s.read(&mut buf), 10);
+            assert_eq!(s.retired, (i + 1) * 10);
+            // Range should still exist until last read.
+            if i < 9 {
+                check_chunks(&s, &[(0, 100)]);
+            }
+        }
+
+        // After all reads, ranges should be empty.
+        assert!(s.data_ranges.is_empty());
+    }
+
+    #[test]
+    fn read_empty_buffer() {
+        let mut s = RxStreamOrderer::new();
+
+        s.inbound_frame(0, &[1; 10]);
+
+        // Read with empty buffer.
+        let mut buf = [0; 0];
+        assert_eq!(s.read(&mut buf), 0);
+
+        // Range should still exist.
+        check_chunks(&s, &[(0, 10)]);
+        assert_eq!(s.retired, 0);
+    }
+
+    #[test]
+    fn read_from_empty_orderer() {
+        let mut s = RxStreamOrderer::new();
+
+        let mut buf = [0; 10];
+        assert_eq!(s.read(&mut buf), 0);
+        assert!(s.data_ranges.is_empty());
+    }
+
+    #[test]
+    fn read_exact_boundary() {
+        let mut s = RxStreamOrderer::new();
+
+        // Create ranges with a gap.
+        s.inbound_frame(0, &[1; 10]);
+        s.inbound_frame(20, &[2; 10]);
+        check_chunks(&s, &[(0, 10), (20, 10)]);
+
+        // Read exactly the first range.
+        let mut buf = [0; 10];
+        assert_eq!(s.read(&mut buf), 10);
+
+        // First range removed, second kept.
+        check_chunks(&s, &[(20, 10)]);
+        assert_eq!(s.retired, 10);
+    }
+
+    #[test]
+    fn read_multiple_ranges_at_once() {
+        let mut s = RxStreamOrderer::new();
+
+        // Add many small contiguous ranges (they will be merged into one).
+        for i in 0..10 {
+            s.inbound_frame(i * 10, &[i as u8; 10]);
+        }
+
+        // Contiguous ranges get merged, so we have one large range.
+        check_chunks(&s, &[(0, 100)]);
+
+        // Read all at once.
+        let mut buf = [0; 100];
+        assert_eq!(s.read(&mut buf), 100);
+
+        // All ranges should be removed.
+        assert!(s.data_ranges.is_empty());
+        assert_eq!(s.retired, 100);
     }
 }
