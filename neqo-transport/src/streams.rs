@@ -76,15 +76,11 @@ impl Streams {
         role: Role,
         events: ConnectionEvents,
     ) -> Self {
-        let (limit_bidi, limit_uni, max_data) = {
-            let tps = tps.borrow();
-            let local = tps.local();
-            (
-                local.get_integer(InitialMaxStreamsBidi),
-                local.get_integer(InitialMaxStreamsUni),
-                local.get_integer(InitialMaxData),
-            )
-        };
+        let tps_ref = tps.borrow();
+        let limit_bidi = tps_ref.local().get_integer(InitialMaxStreamsBidi);
+        let limit_uni = tps_ref.local().get_integer(InitialMaxStreamsUni);
+        let max_data = tps_ref.local().get_integer(InitialMaxData);
+        drop(tps_ref);
         Self {
             role,
             tps,
@@ -479,14 +475,12 @@ impl Streams {
     }
 
     pub fn handle_max_data(&mut self, maximum_data: u64) {
-        let (previous_limit, current_limit) = {
-            let mut sender_fc = self.sender_fc.borrow_mut();
-            let previous_limit = sender_fc.available();
-            let Some(current_limit) = sender_fc.update(maximum_data) else {
-                return;
-            };
-            (previous_limit, current_limit)
+        let mut sender_fc = self.sender_fc.borrow_mut();
+        let previous_limit = sender_fc.available();
+        let Some(current_limit) = sender_fc.update(maximum_data) else {
+            return;
         };
+        drop(sender_fc);
 
         for (_id, ss) in &mut self.send {
             ss.maybe_emit_writable_event(previous_limit, current_limit);
