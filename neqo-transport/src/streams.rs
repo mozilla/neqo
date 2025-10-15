@@ -80,7 +80,6 @@ impl Streams {
         let limit_bidi = tps_ref.local().get_integer(InitialMaxStreamsBidi);
         let limit_uni = tps_ref.local().get_integer(InitialMaxStreamsUni);
         let max_data = tps_ref.local().get_integer(InitialMaxData);
-        drop(tps_ref);
         Self {
             role,
             tps,
