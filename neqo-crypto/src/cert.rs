@@ -48,7 +48,13 @@ fn stapled_ocsp_responses(fd: *mut PRFileDesc) -> Option<Vec<Vec<u8>>> {
                 qerror!("[{fd:p}] Received illegal OSCP length");
                 return None;
             };
-            let capacity = usize::try_from(len).unwrap_or(0);
+            let capacity = match usize::try_from(len) {
+                Ok(cap) => cap,
+                Err(_) => {
+                    qerror!("[{fd:p}] OCSP length could not be converted to usize");
+                    return None;
+                }
+            };
             let mut ocsp_helper: Vec<Vec<u8>> = Vec::with_capacity(capacity);
             for idx in 0..len {
                 let itemp: *const SECItem = unsafe { ocsp_ptr.as_ref().items.offset(idx).cast() };
