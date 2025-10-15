@@ -80,7 +80,6 @@ impl Streams {
         let limit_bidi = tps_ref.local().get_integer(InitialMaxStreamsBidi);
         let limit_uni = tps_ref.local().get_integer(InitialMaxStreamsUni);
         let max_data = tps_ref.local().get_integer(InitialMaxData);
-        drop(tps_ref);
         Self {
             role,
             tps,
@@ -480,7 +479,6 @@ impl Streams {
         let Some(current_limit) = sender_fc.update(maximum_data) else {
             return;
         };
-        drop(sender_fc);
 
         for (_id, ss) in &mut self.send {
             ss.maybe_emit_writable_event(previous_limit, current_limit);
