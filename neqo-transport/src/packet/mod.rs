@@ -897,7 +897,8 @@ impl<'a> Public<'a> {
             return Err(Error::InvalidPacket);
         }
         let mut decoder = Decoder::new(&self.data[self.header_len..]);
-        let capacity = decoder.remaining() / size_of::<version::Wire>();
+        let bytes = decoder.remaining();
+        let capacity = (bytes + size_of::<version::Wire>() - 1) / size_of::<version::Wire>();
         let mut res = Vec::with_capacity(capacity);
         while decoder.remaining() > 0 {
             let version = Self::opt(decoder.decode_uint::<version::Wire>())?;
