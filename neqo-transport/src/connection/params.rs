@@ -30,8 +30,11 @@ use crate::{
 };
 
 const LOCAL_MAX_DATA: u64 = MAX_VARINT;
-const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
-const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
+
+// Same as Google: https://github.com/google/quiche/blob/4f1f0fcea045cd71410c2c318773fc24c3523ed7/quiche/quic/core/quic_constants.h#L113-L114
+const LOCAL_STREAM_LIMIT_BIDI: u64 = 100;
+const LOCAL_STREAM_LIMIT_UNI: u64 = 100;
+
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
 
 /// What to do with preferred addresses.
