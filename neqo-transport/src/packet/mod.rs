@@ -796,19 +796,17 @@ impl<'a> Public<'a> {
         debug_assert_ne!(self.packet_type, Type::VersionNegotiation);
 
         let sample_offset = self.header_len + SAMPLE_OFFSET;
-        let mask = self
+        let sample = self
             .data
             .get(sample_offset..(sample_offset + SAMPLE_SIZE))
-            .and_then(|s| <&[u8; SAMPLE_SIZE]>::try_from(s).ok())
-            .ok_or(Error::NoMoreData)
-            .and_then(|sample| {
-                qtrace!(
-                    "{:?} unmask hdr={}",
-                    crypto.version(),
-                    hex(&self.data[..sample_offset])
-                );
-                crypto.compute_mask(sample)
-            })?;
+            .ok_or(Error::NoMoreData)?;
+        let sample: &[u8; SAMPLE_SIZE] = sample.try_into()?;
+        qtrace!(
+            "{:?} unmask hdr={}",
+            crypto.version(),
+            hex(&self.data[..sample_offset])
+        );
+        let mask = crypto.compute_mask(sample)?;
 
         // Un-mask the leading byte.
         let bits = if self.packet_type == Type::Short {
