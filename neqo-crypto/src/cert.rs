@@ -45,7 +45,7 @@ fn stapled_ocsp_responses(fd: *mut PRFileDesc) -> Option<Vec<Vec<u8>>> {
     match NonNull::new(ocsp_nss as *mut SECItemArray) {
         Some(ocsp_ptr) => {
             let Ok(len) = isize::try_from(unsafe { ocsp_ptr.as_ref().len }) else {
-                qerror!("[{fd:p}] Received illegal OSCP length");
+                qerror!("[{fd:p}] Received illegal OCSP length");
                 return None;
             };
             let capacity = match usize::try_from(len) {
