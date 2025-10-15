@@ -477,10 +477,8 @@ impl<B: Buffer> Builder<B> {
         // Calculate the mask.
         let ciphertext = crypto.encrypt(self.pn, self.header.clone(), self.encoder.as_mut())?;
         let offset = SAMPLE_OFFSET - self.offsets.pn.len();
-        if offset + SAMPLE_SIZE > ciphertext.len() {
-            return Err(Error::Internal);
-        }
-        let sample: &[u8; SAMPLE_SIZE] = ciphertext[offset..offset + SAMPLE_SIZE]
+        // `decode()` already checked that `decoder.remaining() >= SAMPLE_OFFSET + SAMPLE_SIZE`.
+        let sample = ciphertext[offset..offset + SAMPLE_SIZE]
             .try_into()
             .map_err(|_| Error::Internal)?;
         let mask = crypto.compute_mask(sample)?;
