@@ -61,6 +61,10 @@ Note: If you did not already compile NSS separately, you need to have
 [Mercurial (hg)][HG], installed. NSS builds require [GYP][GYP] and
 [Ninja][NINJA] to be installed.
 
+In some cases it might be necessary to compile NSS yourself before setting the environment variables as above.
+Find instructions [here](https://firefox-source-docs.mozilla.org/security/nss/build.html#mozilla-projects-nss-building).
+Usually it should suffice to run `./build.sh` in the `nss` directory.
+
 ## Debugging Neqo
 
 ### QUIC logging
