@@ -10,8 +10,7 @@ use neqo_common::event::Provider as _;
 use static_assertions::const_assert;
 
 use super::{
-    assert_error, connect_force_idle, default_client, default_server, new_client, new_server, now,
-    AT_LEAST_PTO,
+    assert_error, connect_force_idle, default_server, new_client, new_server, now, AT_LEAST_PTO,
 };
 use crate::{
     connection::tests::DEFAULT_ADDR,
@@ -391,21 +390,6 @@ fn datagram_sent_once() {
     // Call process_output again should not send any new Datagram.
     assert!(client.process_output(now()).dgram().is_none());
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
-}
-
-#[test]
-fn dgram_no_allowed() {
-    let mut client = default_client();
-    let mut server = default_server();
-    connect_force_idle(&mut client, &mut server);
-
-    let out = server
-        .test_write_frames(InsertDatagram { data: DATA_MTU }, now())
-        .dgram()
-        .unwrap();
-    client.process_input(out, now());
-
-    assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
 }
 
 #[test]
