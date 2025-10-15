@@ -44,18 +44,13 @@ fn stapled_ocsp_responses(fd: *mut PRFileDesc) -> Option<Vec<Vec<u8>>> {
     let ocsp_nss = unsafe { SSL_PeerStapledOCSPResponses(fd) };
     match NonNull::new(ocsp_nss as *mut SECItemArray) {
         Some(ocsp_ptr) => {
-            let Ok(len) = isize::try_from(unsafe { ocsp_ptr.as_ref().len }) else {
+            let Ok(len) = usize::try_from(unsafe { ocsp_ptr.as_ref().len }) else {
                 qerror!("[{fd:p}] Received illegal OCSP length");
                 return None;
             };
-            #[expect(
-                clippy::cast_sign_loss,
-                reason = "safe, len came from an u32 via isize::try_from"
-            )]
-            let capacity = len as usize;
-            let mut ocsp_helper: Vec<Vec<u8>> = Vec::with_capacity(capacity);
+            let mut ocsp_helper: Vec<Vec<u8>> = Vec::with_capacity(len);
             for idx in 0..len {
-                let itemp: *const SECItem = unsafe { ocsp_ptr.as_ref().items.offset(idx).cast() };
+                let itemp: *const SECItem = unsafe { ocsp_ptr.as_ref().items.add(idx).cast() };
                 let item = unsafe { null_safe_slice((*itemp).data, (*itemp).len) };
                 ocsp_helper.push(item.to_owned());
             }
