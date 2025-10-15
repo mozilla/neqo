@@ -878,15 +878,12 @@ impl Loss {
         let mut lost_packets = Vec::new();
         for space in self.spaces.iter_mut() {
             let first = lost_packets.len(); // The first packet lost in this space.
-            let pto = {
-                let path = primary_path.borrow();
-                Self::pto_period_inner(
-                    path.rtt(),
-                    self.pto_state.as_ref(),
-                    confirmed,
-                    self.fast_pto,
-                )
-            };
+            let pto = Self::pto_period_inner(
+                primary_path.borrow().rtt(),
+                self.pto_state.as_ref(),
+                confirmed,
+                self.fast_pto,
+            );
             space.detect_lost_packets(now, loss_delay, pto, &mut lost_packets);
 
             primary_path.borrow_mut().on_packets_lost(

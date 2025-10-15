@@ -2667,22 +2667,9 @@ impl Connection {
         packet_tos: Tos,
     ) -> Res<SendOption> {
         let mut initial_sent = None;
-        let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
-
-        // Determine the size limit and padding for this UDP datagram.
-        let limit = {
-            let path = path.borrow();
-            if path.pmtud().needs_probe() {
-                needs_padding = true;
-                let probe_size = path.pmtud().probe_size();
-                debug_assert!(probe_size >= profile.limit());
-                probe_size
-            } else {
-                profile.limit()
-            }
-        };
+        let (limit, mut needs_padding) = path.borrow().packet_limit_and_padding(profile);
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram

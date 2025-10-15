@@ -498,8 +498,8 @@ impl Streams {
     }
 
     pub fn set_initial_limits(&mut self) {
-        let remote = self.tps.borrow();
-        let remote = remote.remote();
+        let remote_ref = self.tps.borrow();
+        let remote = remote_ref.remote();
 
         _ = self.local_stream_limits[StreamType::BiDi]
             .update(remote.get_integer(InitialMaxStreamsBidi));

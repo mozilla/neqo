@@ -24,7 +24,7 @@ use crate::{
     frame::FrameType,
     packet,
     pmtud::Pmtud,
-    recovery::{self, sent},
+    recovery::{self, sent, SendProfile},
     rtt::{RttEstimate, RttSource},
     sender::PacketSender,
     stats::FrameStats,
@@ -1065,6 +1065,17 @@ impl Path {
                     };
                     budget.saturating_sub(self.sent_bytes)
                 })
+        }
+    }
+
+    /// Determine the size limit and padding for UDP datagrams on this path.
+    pub fn packet_limit_and_padding(&self, profile: &SendProfile) -> (usize, bool) {
+        if self.pmtud().needs_probe() {
+            let probe_size = self.pmtud().probe_size();
+            debug_assert!(probe_size >= profile.limit());
+            (probe_size, true)
+        } else {
+            (profile.limit(), false)
         }
     }
 
