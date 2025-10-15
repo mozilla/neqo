@@ -127,8 +127,8 @@ pub fn apply(hp: &hp::Key, packet: &mut [u8], pn_bytes: Range<usize>) {
     let sample_start = pn_bytes.start + 4;
     let sample_end = sample_start + 16;
     let mask = hp
-        .mask(packet[sample_start..sample_end].try_into().unwrap())
-        .unwrap();
+        .mask(packet[sample_start..sample_end].try_into().expect("Failed to convert sample slice to array for header protection mask"))
+        .expect("Failed to generate header protection mask");
     qtrace!(
         "sample={} mask={}",
         hex_with_len(&packet[sample_start..sample_end]),
