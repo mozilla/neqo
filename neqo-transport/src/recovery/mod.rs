@@ -624,11 +624,9 @@ impl Loss {
         // We need to ensure that we have sent any PTO probes before they are removed
         // as we rely on the count of in-flight packets to determine whether to send
         // another probe.  Removing them too soon would result in not sending on PTO.
-        let (cleanup_delay, loss_delay) = {
-            let path = primary_path.borrow();
-            let rtt = path.rtt();
-            (self.pto_period(rtt), rtt.loss_delay())
-        };
+        let mut path_ref = primary_path.borrow_mut();
+        let cleanup_delay = self.pto_period(path_ref.rtt());
+        let loss_delay = path_ref.rtt().loss_delay();
         let Some(sp) = self.spaces.get_mut(pn_space) else {
             return (Vec::new(), Vec::new());
         };
@@ -639,7 +637,7 @@ impl Loss {
         // Tell the congestion controller about any lost packets.
         // The PTO for congestion control is the raw number, without exponential
         // backoff, so that we can determine persistent congestion.
-        primary_path.borrow_mut().on_packets_lost(
+        path_ref.on_packets_lost(
             prev_largest_acked,
             self.confirmed(),
             &lost,
@@ -650,12 +648,7 @@ impl Loss {
         // This must happen after on_packets_lost. If in recovery, this could
         // take us out, and then lost packets will start a new recovery period
         // when it shouldn't.
-        primary_path.borrow_mut().on_packets_acked(
-            &acked_packets,
-            ack_ecn,
-            now,
-            &mut self.stats.borrow_mut(),
-        );
+        path_ref.on_packets_acked(&acked_packets, ack_ecn, now, &mut self.stats.borrow_mut());
 
         self.pto_state = None;
 

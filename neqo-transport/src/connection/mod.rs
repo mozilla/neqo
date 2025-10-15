@@ -1424,10 +1424,10 @@ impl Connection {
 
             qinfo!("[{self}] Version negotiation: trying {version:?}");
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
-            let (local_addr, remote_addr) = {
-                let path = path.borrow();
-                (path.local_address(), path.remote_address())
-            };
+            let path_ref = path.borrow();
+            let local_addr = path_ref.local_address();
+            let remote_addr = path_ref.remote_address();
+            drop(path_ref);
             let conn_params = self
                 .conn_params
                 .clone()
@@ -1729,11 +1729,10 @@ impl Connection {
 
         // Handle each packet in the datagram.
         while !slc.is_empty() {
-            {
-                let mut stats = self.stats.borrow_mut();
-                stats.packets_rx += 1;
-                stats.dscp_rx[tos.into()] += 1;
-            }
+            let mut stats_ref = self.stats.borrow_mut();
+            stats_ref.packets_rx += 1;
+            stats_ref.dscp_rx[tos.into()] += 1;
+            drop(stats_ref);
             let slc_len = slc.len();
             let (mut packet, remainder) =
                 match packet::Public::decode(slc, self.cid_manager.decoder().as_ref()) {
@@ -2039,12 +2038,10 @@ impl Connection {
         }
 
         let path = self.paths.primary().ok_or(Error::InvalidMigration)?;
-        let (default_local, default_remote) = {
-            let path = path.borrow();
-            (path.local_address(), path.remote_address())
-        };
-        let local = local.unwrap_or(default_local);
-        let remote = remote.unwrap_or(default_remote);
+        let path_ref = path.borrow();
+        let local = local.unwrap_or_else(|| path_ref.local_address());
+        let remote = remote.unwrap_or_else(|| path_ref.remote_address());
+        drop(path_ref);
 
         if mem::discriminant(&local.ip()) != mem::discriminant(&remote.ip()) {
             // Can't mix address families.
@@ -2556,14 +2553,11 @@ impl Connection {
         mut closing_frame: Option<&ClosingFrame>,
         max_datagrams: NonZeroUsize,
     ) -> Res<SendOptionBatch> {
-        let (packet_tos, mtu, address_family_max_mtu) = {
-            let path = path.borrow();
-            (
-                path.tos(),
-                path.plpmtu(),
-                path.pmtud().address_family_max_mtu(),
-            )
-        };
+        let path_ref = path.borrow();
+        let packet_tos = path_ref.tos();
+        let mtu = path_ref.plpmtu();
+        let address_family_max_mtu = path_ref.pmtud().address_family_max_mtu();
+        drop(path_ref);
         let mut send_buffer = Vec::new();
         let mut max_datagram_size = None;
         let mut num_datagrams = 0;
@@ -2745,15 +2739,14 @@ impl Connection {
                 now,
             );
 
-            {
-                let mut stats = self.stats.borrow_mut();
-                stats.packets_tx += 1;
-                // Track which packet types are sent with which ECN codepoints. For
-                // coalesced packets, this increases the counts for each packet type
-                // contained in the coalesced packet. This is per Section 13.4.1 of
-                // RFC 9000.
-                stats.ecn_tx[pt] += Ecn::from(packet_tos);
-            }
+            let mut stats_ref = self.stats.borrow_mut();
+            stats_ref.packets_tx += 1;
+            // Track which packet types are sent with which ECN codepoints. For
+            // coalesced packets, this increases the counts for each packet type
+            // contained in the coalesced packet. This is per Section 13.4.1 of
+            // RFC 9000.
+            stats_ref.ecn_tx[pt] += Ecn::from(packet_tos);
+            drop(stats_ref);
             let tx = self
                 .crypto
                 .states_mut()
