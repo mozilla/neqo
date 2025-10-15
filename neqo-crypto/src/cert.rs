@@ -48,6 +48,10 @@ fn stapled_ocsp_responses(fd: *mut PRFileDesc) -> Option<Vec<Vec<u8>>> {
                 qerror!("[{fd:p}] Received illegal OCSP length");
                 return None;
             };
+            #[expect(
+                clippy::cast_sign_loss,
+                reason = "safe, len came from an u32 via isize::try_from"
+            )]
             let capacity = len as usize;
             let mut ocsp_helper: Vec<Vec<u8>> = Vec::with_capacity(capacity);
             for idx in 0..len {
