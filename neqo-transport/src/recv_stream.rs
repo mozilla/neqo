@@ -2395,8 +2395,8 @@ mod tests {
         let mut s = RxStreamOrderer::new();
 
         // Add many small contiguous ranges (they will be merged into one).
-        for i in 0..10 {
-            s.inbound_frame(i * 10, &[i as u8; 10]);
+        for i in 0u8..10 {
+            s.inbound_frame((i * 10).into(), &[i; 10]);
         }
 
         // Contiguous ranges get merged, so we have one large range.
