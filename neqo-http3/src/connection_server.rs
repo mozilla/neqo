@@ -243,6 +243,7 @@ impl Http3ServerHandler {
         conn: &mut Connection,
         session_id: StreamId,
         stream_type: StreamType,
+        now: Instant,
     ) -> Res<StreamId> {
         self.needs_processing = true;
         self.base_handler.webtransport_create_stream_local(
@@ -251,6 +252,7 @@ impl Http3ServerHandler {
             stream_type,
             Box::new(self.events.clone()),
             Box::new(self.events.clone()),
+            now,
         )
     }
 
@@ -426,6 +428,7 @@ impl Http3ServerHandler {
                     stream_id,
                     Box::new(self.events.clone()),
                     Box::new(self.events.clone()),
+                    now,
                 )?;
                 let res = self
                     .base_handler

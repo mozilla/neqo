@@ -10,6 +10,7 @@
 use std::fmt::{self, Display, Formatter};
 
 use neqo_common::Tos;
+#[cfg(feature = "qlog")]
 use qlog::events::quic::PacketHeader;
 use strum::Display;
 
@@ -75,6 +76,7 @@ impl MetaData<'_> {
         self.direction
     }
 
+    #[cfg(feature = "qlog")]
     #[must_use]
     pub const fn length(&self) -> usize {
         self.len
@@ -86,6 +88,7 @@ impl MetaData<'_> {
     }
 }
 
+#[cfg(feature = "qlog")]
 impl From<MetaData<'_>> for PacketHeader {
     fn from(val: MetaData<'_>) -> Self {
         Self::with_type(

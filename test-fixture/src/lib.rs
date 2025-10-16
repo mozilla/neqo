@@ -7,6 +7,8 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(clippy::unwrap_used, reason = "This is test code.")]
 
+#[cfg(feature = "qlog")]
+use std::path::PathBuf;
 use std::{
     cell::{OnceCell, RefCell},
     cmp::max,
@@ -14,17 +16,16 @@ use std::{
     io::{self, Cursor, Result, Write},
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    path::PathBuf,
     rc::Rc,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
+use neqo_common::{event::Provider as _, hex, qtrace, Datagram, Decoder, Ecn};
+#[cfg(feature = "qlog")]
 use neqo_common::{
-    event::Provider as _,
-    hex,
     qlog::{new_trace, Qlog},
-    qtrace, Datagram, Decoder, Ecn, Role,
+    Role,
 };
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State};
@@ -32,6 +33,7 @@ use neqo_transport::{
     version, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
     ConnectionIdRef, ConnectionParameters, State, Version,
 };
+#[cfg(feature = "qlog")]
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 
 pub mod assertions;
@@ -177,6 +179,10 @@ where
     G: ConnectionIdGenerator + Default + 'static,
 {
     fixture_init();
+    #[cfg_attr(
+        not(feature = "qlog"),
+        expect(unused_mut, reason = "only without qlog")
+    )]
     let mut client = Connection::new_client(
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
@@ -188,6 +194,7 @@ where
     )
     .expect("create a client");
 
+    #[cfg(feature = "qlog")]
     if let Ok(dir) = std::env::var("QLOGDIR") {
         let cid = client.odcid().unwrap();
         client.set_qlog(
@@ -202,8 +209,7 @@ where
             .unwrap(),
         );
     } else {
-        let (log, _contents) = new_neqo_qlog();
-        client.set_qlog(log);
+        client.set_qlog(new_neqo_qlog().0);
     }
     client
 }
@@ -247,6 +253,7 @@ where
         params,
     )
     .expect("create a server");
+    #[cfg(feature = "qlog")]
     if let Ok(dir) = std::env::var("QLOGDIR") {
         c.set_qlog(
             Qlog::enabled_with_file(
@@ -260,8 +267,7 @@ where
             .unwrap(),
         );
     } else {
-        let (log, _contents) = new_neqo_qlog();
-        c.set_qlog(log);
+        c.set_qlog(new_neqo_qlog().0);
     }
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
         .expect("enable 0-RTT");
@@ -531,6 +537,7 @@ impl Display for SharedVec {
 /// # Panics
 ///
 /// Panics if the log cannot be created.
+#[cfg(feature = "qlog")]
 #[must_use]
 pub fn new_neqo_qlog() -> (Qlog, SharedVec) {
     let buf = SharedVec::default();
