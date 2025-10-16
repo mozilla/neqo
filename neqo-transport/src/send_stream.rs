@@ -541,7 +541,7 @@ impl TxBuffer {
 
         // Remove acked bytes from front. Using drain() is more efficient than
         // rotate_left() + truncate() because VecDeque's ring buffer structure allows
-        // removing from the front in O(n) time without moving all elements, whereas
+        // removing k elements from the front in O(k) time without moving all elements, whereas
         // rotate_left() always performs a full rotation which is less cache-friendly.
         let to_drain = usize::try_from(new_retirable).expect("u64 fits in usize");
         self.send_buf.drain(0..to_drain);
