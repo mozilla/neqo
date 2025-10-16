@@ -108,7 +108,8 @@ impl QuicDatagrams {
     ) {
         while let Some(dgram) = self.datagrams.pop_front() {
             let len = dgram.as_ref().len();
-            if builder.remaining() > len {
+            if len + DATAGRAM_FRAME_TYPE_VARINT_LEN <= builder.remaining() {
+                // The datagram fits into the packet.
                 let length_len =
                     Encoder::varint_len(u64::try_from(len).expect("usize fits in u64"));
                 // Include a length if there is space for another frame after this one.
