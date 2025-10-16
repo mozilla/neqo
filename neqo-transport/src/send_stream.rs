@@ -1703,16 +1703,11 @@ impl SendStreams {
 
         // Iterate the map, but only those without fairness, then iterate
         // OrderGroups, then iterate each group
-        qtrace!("processing streams...  unfair:");
         for stream in self.map.values_mut() {
-            if !stream.is_fair() {
-                qtrace!("   {stream}");
-                if !stream.write_frames(priority, builder, tokens, stats) {
-                    break;
-                }
+            if !stream.is_fair() && !stream.write_frames(priority, builder, tokens, stats) {
+                return;
             }
         }
-        qtrace!("fair streams:");
         let stream_ids = self.regular.iter().chain(
             self.sendordered
                 .values_mut()
@@ -1721,13 +1716,8 @@ impl SendStreams {
         );
         for stream_id in stream_ids {
             if let Some(stream) = self.map.get_mut(&stream_id) {
-                if let Some(order) = stream.sendorder() {
-                    qtrace!("   {stream_id} ({order})");
-                } else {
-                    qtrace!("   None");
-                }
                 if !stream.write_frames(priority, builder, tokens, stats) {
-                    break;
+                    return;
                 }
             }
         }
