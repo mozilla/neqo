@@ -43,7 +43,7 @@ use crate::{
     packet::{self},
     path::{Path, PathRef, Paths},
     qlog,
-    quic_datagrams::{DatagramTracking, QuicDatagrams},
+    quic_datagrams::{DatagramTracking, QuicDatagrams, DATAGRAM_FRAME_TYPE_VARINT_LEN},
     recovery::{self, sent, SendProfile},
     recv_stream,
     rtt::{RttEstimate, GRANULARITY},
@@ -3847,8 +3847,9 @@ impl Connection {
                 .largest_acknowledged_pn(PacketNumberSpace::ApplicationData),
         );
 
-        let data_len_possible =
-            u64::try_from(mtu.saturating_sub(tx.expansion() + builder.len() + 1))?;
+        let data_len_possible = u64::try_from(
+            mtu.saturating_sub(tx.expansion() + builder.len() + DATAGRAM_FRAME_TYPE_VARINT_LEN),
+        )?;
         Ok(min(data_len_possible, max_dgram_size))
     }
 
