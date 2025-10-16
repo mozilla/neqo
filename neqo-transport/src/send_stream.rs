@@ -538,11 +538,13 @@ impl TxBuffer {
         // Any newly-retired bytes can be dropped from the buffer.
         let new_retirable = self.retired() - prev_retired;
         debug_assert!(new_retirable <= self.buffered() as u64);
-        let keep = self.buffered() - usize::try_from(new_retirable).expect("u64 fits in usize");
 
-        // Truncate front
-        self.send_buf.rotate_left(self.buffered() - keep);
-        self.send_buf.truncate(keep);
+        // Remove acked bytes from front. Using drain() is more efficient than
+        // rotate_left() + truncate() because VecDeque's ring buffer structure allows
+        // removing from the front in O(n) time without moving all elements, whereas
+        // rotate_left() always performs a full rotation which is less cache-friendly.
+        let to_drain = usize::try_from(new_retirable).expect("u64 fits in usize");
+        self.send_buf.drain(0..to_drain);
     }
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize) {
