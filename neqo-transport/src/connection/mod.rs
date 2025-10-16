@@ -2547,10 +2547,14 @@ impl Connection {
         max_datagrams: NonZeroUsize,
     ) -> Res<SendOptionBatch> {
         let packet_tos = path.borrow().tos();
-        let mut send_buffer = Vec::new();
+        let mtu = path.borrow().plpmtu();
+
+        // Pre-allocate for typical batch of 2 packets to avoid reallocations.
+        let initial_capacity = mtu.saturating_mul(2);
+        let mut send_buffer = Vec::with_capacity(initial_capacity);
+
         let mut max_datagram_size = None;
         let mut num_datagrams = 0;
-        let mtu = path.borrow().plpmtu();
         let address_family_max_mtu = path.borrow().pmtud().address_family_max_mtu();
 
         loop {
@@ -3827,7 +3831,7 @@ impl Connection {
         };
         let path = self.paths.primary().ok_or(Error::NotAvailable)?;
         let mtu = path.borrow().plpmtu();
-        let mut buffer = Vec::new();
+        let mut buffer = Vec::with_capacity(mtu);
         let encoder = Encoder::new_borrowed_vec(&mut buffer);
 
         let (_, mut builder) = Self::build_packet_header(

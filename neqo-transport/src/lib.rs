@@ -41,6 +41,10 @@ mod saved;
 pub mod recv_stream;
 // #[cfg(not(feature = "bench"))]
 // mod recv_stream;
+#[cfg(feature = "bench")]
+pub mod rx_stream_orderer_heap;
+#[cfg(not(feature = "bench"))]
+mod rx_stream_orderer_heap;
 mod rtt;
 // #[cfg(feature = "bench")]
 pub mod send_stream;
