@@ -211,7 +211,13 @@ impl RangeTracker {
             return;
         }
 
-        self.first_unmarked = None;
+        // Only invalidate the cache if this operation could affect the first unmarked range.
+        // The first unmarked range is only affected if we're acking at or before its start.
+        if let Some((cached_off, _)) = self.first_unmarked {
+            if new_off <= cached_off {
+                self.first_unmarked = None;
+            }
+        }
         if new_off == self.acked {
             self.acked += new_len;
             self.coalesce_acked();
@@ -314,7 +320,13 @@ impl RangeTracker {
             return;
         }
 
-        self.first_unmarked = None;
+        // Only invalidate the cache if this operation could affect the first unmarked range.
+        // Marking sent at or before the first unmarked range might fill it in.
+        if let Some((cached_off, _)) = self.first_unmarked {
+            if new_off <= cached_off {
+                self.first_unmarked = None;
+            }
+        }
 
         // Get all existing ranges that start within this new range.
         let covered = self
@@ -397,7 +409,13 @@ impl RangeTracker {
             return;
         }
 
-        self.first_unmarked = None;
+        // Only invalidate the cache if this operation could affect the first unmarked range.
+        // Unmarking at or before the first unmarked range creates a new unmarked range.
+        if let Some((cached_off, _)) = self.first_unmarked {
+            if off <= cached_off {
+                self.first_unmarked = None;
+            }
+        }
         let len = u64::try_from(len).expect("usize fits in u64");
         let end_off = off + len;
 
