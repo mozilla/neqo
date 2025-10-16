@@ -7,7 +7,7 @@
 // A collection for sent packets.
 
 use std::{
-    collections::BTreeMap,
+    collections::VecDeque,
     ops::RangeInclusive,
     rc::Rc,
     time::{Duration, Instant},
@@ -182,10 +182,13 @@ impl Packet {
 }
 
 /// A collection for packets that we have sent that haven't been acknowledged.
+/// Optimized for sequential packet numbers using `VecDeque` for O(1) insertion.
 #[derive(Debug, Default)]
 pub struct Packets {
-    /// The collection.
-    packets: BTreeMap<u64, Packet>,
+    /// Packets stored sequentially, indexed by (pn - `base_pn`).
+    packets: VecDeque<Option<Packet>>,
+    /// The packet number corresponding to `packets[0]`.
+    base_pn: u64,
 }
 
 impl Packets {
@@ -196,15 +199,33 @@ impl Packets {
     )]
     #[must_use]
     pub fn len(&self) -> usize {
-        self.packets.len()
+        self.packets.iter().filter(|p| p.is_some()).count()
     }
 
     pub fn track(&mut self, packet: Packet) {
-        self.packets.insert(packet.pn, packet);
+        let pn = packet.pn;
+        let index =
+            usize::try_from(pn.saturating_sub(self.base_pn)).expect("packet number within range");
+
+        match index.cmp(&self.packets.len()) {
+            std::cmp::Ordering::Equal => {
+                // Common case: sequential packet (pn = pn + 1)
+                self.packets.push_back(Some(packet));
+            }
+            std::cmp::Ordering::Less => {
+                // Slot exists - overwrite (retransmission or gap fill)
+                self.packets[index] = Some(packet);
+            }
+            std::cmp::Ordering::Greater => {
+                // Gap in packet numbers (rare)
+                self.packets.resize(index + 1, None);
+                self.packets[index] = Some(packet);
+            }
+        }
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Packet> {
-        self.packets.values_mut()
+        self.packets.iter_mut().filter_map(|p| p.as_mut())
     }
 
     /// Take values from specified ranges of packet numbers.
@@ -218,89 +239,86 @@ impl Packets {
     {
         let mut result = Vec::new();
 
-        // Start with all packets. We will add unacknowledged packets back.
-        //  [---------------------------packets----------------------------]
-        let mut packets = std::mem::take(&mut self.packets);
-
-        let mut previous_range_start: Option<packet::Number> = None;
-
         for range in acked_ranges {
-            // Split off at the end of the acked range.
-            //
-            //  [---------packets--------][----------after_acked_range---------]
-            let after_acked_range = packets.split_off(&(*range.end() + 1));
-
-            // Split off at the start of the acked range.
-            //
-            //  [-packets-][-acked_range-][----------after_acked_range---------]
-            let acked_range = packets.split_off(range.start());
-
-            // According to RFC 9000 19.3.1 ACK ranges are in descending order:
-            //
-            // > Each ACK Range consists of alternating Gap and ACK Range Length
-            // > values in **descending packet number order**.
-            //
-            // <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.1>
-            debug_assert!(previous_range_start.map_or(true, |s| s > *range.end()));
-            previous_range_start = Some(*range.start());
-
-            // Thus none of the following ACK ranges will acknowledge packets in
-            // `after_acked_range`. Let's put those back early.
-            //
-            //  [-packets-][-acked_range-][------------self.packets------------]
-            if self.packets.is_empty() {
-                // Don't re-insert un-acked packets into empty collection, but
-                // instead replace the empty one entirely.
-                self.packets = after_acked_range;
-            } else {
-                // Need to extend existing one. Not the first iteration, thus
-                // `after_acked_range` should be small.
-                self.packets.extend(after_acked_range);
+            // Iterate in reverse order to match expected output order
+            for pn in (*range.start()..=*range.end()).rev() {
+                if let Some(index) = pn.checked_sub(self.base_pn) {
+                    if let Ok(index) = usize::try_from(index) {
+                        if index < self.packets.len() {
+                            if let Some(packet) = self.packets[index].take() {
+                                result.push(packet);
+                            }
+                        }
+                    }
+                }
             }
-
-            // Take the acked packets.
-            result.extend(acked_range.into_values().rev());
         }
 
-        // Put remaining non-acked packets back.
-        //
-        // This is inefficient if the acknowledged packets include the last sent
-        // packet AND there is a large unacknowledged span of packets. That's
-        // rare enough that we won't do anything special for that case.
-        self.packets.extend(packets);
+        // Shrink from front to reclaim memory from acked packets
+        while matches!(self.packets.front(), Some(None)) {
+            self.packets.pop_front();
+            self.base_pn += 1;
+        }
 
         result
     }
 
     /// Empty out the packets, but keep the offset.
     pub fn drain_all(&mut self) -> impl Iterator<Item = Packet> {
-        std::mem::take(&mut self.packets).into_values()
+        std::mem::take(&mut self.packets).into_iter().flatten()
     }
 
     /// See `LossRecoverySpace::remove_old_lost` for details on `now` and `cd`.
     /// Returns the number of ack-eliciting packets removed.
     pub fn remove_expired(&mut self, now: Instant, cd: Duration) -> usize {
-        let mut it = self.packets.iter();
-        // If the first item is not expired, do nothing (the most common case).
-        if it.next().is_some_and(|(_, p)| p.expired(now, cd)) {
-            // Find the index of the first unexpired packet.
-            let to_remove = if let Some(first_keep) =
-                it.find_map(|(i, p)| if p.expired(now, cd) { None } else { Some(*i) })
-            {
-                // Some packets haven't expired, so keep those.
-                let keep = self.packets.split_off(&first_keep);
-                std::mem::replace(&mut self.packets, keep)
-            } else {
-                // All packets are expired.
-                std::mem::take(&mut self.packets)
-            };
-            to_remove
-                .into_values()
-                .filter(Packet::ack_eliciting)
-                .count()
+        // Check if the first packet is expired (most common case: it's not)
+        if let Some(Some(first)) = self.packets.front() {
+            if !first.expired(now, cd) {
+                return 0;
+            }
         } else {
-            0
+            return 0;
         }
+
+        // Find the first non-expired packet
+        let first_keep_index = self
+            .packets
+            .iter()
+            .position(|p| p.as_ref().is_some_and(|pkt| !pkt.expired(now, cd)));
+
+        let ack_eliciting_count = if let Some(keep_at) = first_keep_index {
+            // Remove expired packets from front
+            let mut removed_count = 0;
+            for _ in 0..keep_at {
+                match self.packets.pop_front() {
+                    Some(Some(packet)) => {
+                        if packet.ack_eliciting() {
+                            removed_count += 1;
+                        }
+                    }
+                    Some(None) => {
+                        // Empty slot
+                    }
+                    None => {
+                        break;
+                    }
+                }
+                self.base_pn += 1;
+            }
+            removed_count
+        } else {
+            // All packets are expired
+            let removed_count = self
+                .packets
+                .iter()
+                .filter_map(|p| p.as_ref())
+                .filter(|p| p.ack_eliciting())
+                .count();
+            self.packets.clear();
+            removed_count
+        };
+
+        ack_eliciting_count
     }
 }
 
@@ -376,8 +394,8 @@ mod tests {
     #[test]
     fn iterate_skipped() {
         let mut pkts = pkts();
-        for (i, p) in pkts.packets.values().enumerate() {
-            assert_eq!(i, usize::try_from(p.pn).unwrap());
+        for (i, p) in pkts.iter_mut().enumerate() {
+            assert_eq!(i, usize::try_from(p.pn()).unwrap());
         }
         remove_one(&mut pkts, 1);
 
