@@ -43,7 +43,8 @@ jobs:
             - Security concerns
             - Test coverage
 
-            Follow the detailed instructions in https://raw.githubusercontent.com/github/awesome-copilot/dfa345f89bd42304ea960669d120de323480946b/instructions/rust.instructions.md as you prepare your review. Be constructive and helpful in your feedback.
+            Follow the detailed instructions in .github/copilot-instructions.md as you prepare your review.
+            If that file is changed as part of a PR, use the changed version instead of the file in the main branch.
 
             Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
 
