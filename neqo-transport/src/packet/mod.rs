@@ -383,7 +383,7 @@ impl<B: Buffer> Builder<B> {
     ///
     /// This will panic if the packet number length is too large.
     pub fn pn(&mut self, pn: Number, pn_len: usize) {
-        if self.remaining() < 4 {
+        if self.remaining() < MAX_PACKET_NUMBER_LEN {
             self.limit = 0;
             return;
         }
