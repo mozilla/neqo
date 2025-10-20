@@ -50,7 +50,7 @@ jobs:
             core.exportVariable("PR_BASE_SHA", prEvent.pull_request.base.sha || '');
             core.exportVariable("PR_NUMBER", prEvent.number || '');
 
-      - uses: bencherdev/bencher@v0.5.5 # zizmor: ignore[unpinned-uses]
+      - uses: bencherdev/bencher@v0.5.6 # zizmor: ignore[unpinned-uses]
 
       - name: Set env
         run: |
