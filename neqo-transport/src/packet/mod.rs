@@ -383,7 +383,7 @@ impl<B: Buffer> Builder<B> {
     ///
     /// This will panic if the packet number length is too large.
     pub fn pn(&mut self, pn: Number, pn_len: usize) {
-        if self.remaining() < 4 {
+        if self.remaining() < MAX_PACKET_NUMBER_LEN {
             self.limit = 0;
             return;
         }
@@ -477,10 +477,10 @@ impl<B: Buffer> Builder<B> {
         // Calculate the mask.
         let ciphertext = crypto.encrypt(self.pn, self.header.clone(), self.encoder.as_mut())?;
         let offset = SAMPLE_OFFSET - self.offsets.pn.len();
-        if offset + SAMPLE_SIZE > ciphertext.len() {
-            return Err(Error::Internal);
-        }
-        let sample = &ciphertext[offset..offset + SAMPLE_SIZE];
+        // `decode()` already checked that `decoder.remaining() >= SAMPLE_OFFSET + SAMPLE_SIZE`.
+        let sample = ciphertext[offset..offset + SAMPLE_SIZE]
+            .try_into()
+            .map_err(|_| Error::Internal)?;
         let mask = crypto.compute_mask(sample)?;
 
         // Apply the mask.
@@ -796,17 +796,17 @@ impl<'a> Public<'a> {
         debug_assert_ne!(self.packet_type, Type::VersionNegotiation);
 
         let sample_offset = self.header_len + SAMPLE_OFFSET;
-        let mask = self
+        let sample = self
             .data
             .get(sample_offset..(sample_offset + SAMPLE_SIZE))
-            .map_or(Err(Error::NoMoreData), |sample| {
-                qtrace!(
-                    "{:?} unmask hdr={}",
-                    crypto.version(),
-                    hex(&self.data[..sample_offset])
-                );
-                crypto.compute_mask(sample)
-            })?;
+            .ok_or(Error::NoMoreData)?;
+        let sample: &[u8; SAMPLE_SIZE] = sample.try_into()?;
+        qtrace!(
+            "{:?} unmask hdr={}",
+            crypto.version(),
+            hex(&self.data[..sample_offset])
+        );
+        let mask = crypto.compute_mask(sample)?;
 
         // Un-mask the leading byte.
         let bits = if self.packet_type == Type::Short {

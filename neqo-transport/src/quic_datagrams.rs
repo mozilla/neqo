@@ -17,6 +17,18 @@ use crate::{
 
 pub const MAX_QUIC_DATAGRAM: u64 = 65535;
 
+/// Length of a [`FrameType::Datagram`] or [`FrameType::DatagramWithLen`] in
+/// QUIC varint encoding.
+pub const DATAGRAM_FRAME_TYPE_VARINT_LEN: usize = 1;
+static_assertions::const_assert_eq!(
+    Encoder::varint_len(FrameType::Datagram as u64),
+    DATAGRAM_FRAME_TYPE_VARINT_LEN
+);
+static_assertions::const_assert_eq!(
+    Encoder::varint_len(FrameType::DatagramWithLen as u64),
+    DATAGRAM_FRAME_TYPE_VARINT_LEN
+);
+
 #[derive(Debug, Clone, Copy)]
 pub enum DatagramTracking {
     None,
@@ -96,12 +108,16 @@ impl QuicDatagrams {
     ) {
         while let Some(dgram) = self.datagrams.pop_front() {
             let len = dgram.as_ref().len();
-            if builder.remaining() > len {
-                // We need 1 more than `len` for the Frame type.
+            if len + DATAGRAM_FRAME_TYPE_VARINT_LEN <= builder.remaining() {
+                // The datagram fits into the packet.
                 let length_len =
                     Encoder::varint_len(u64::try_from(len).expect("usize fits in u64"));
                 // Include a length if there is space for another frame after this one.
-                if builder.remaining() >= 1 + length_len + len + packet::Builder::MINIMUM_FRAME_SIZE
+                if builder.remaining()
+                    >= DATAGRAM_FRAME_TYPE_VARINT_LEN
+                        + length_len
+                        + len
+                        + packet::Builder::MINIMUM_FRAME_SIZE
                 {
                     builder.encode_varint(FrameType::DatagramWithLen);
                     builder.encode_vvec(dgram.as_ref());
