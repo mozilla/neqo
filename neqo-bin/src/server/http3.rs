@@ -30,7 +30,8 @@ pub struct HttpServer {
     server: Http3Server,
     /// Progress writing to each stream.
     remaining_data: HashMap<StreamId, SendData>,
-    posts: HashMap<Http3OrWebTransportStream, usize>,
+    /// Tracks POST requests: (bytes received, optional response size from path)
+    posts: HashMap<Http3OrWebTransportStream, (usize, Option<usize>)>,
     is_qns_test: bool,
 }
 
@@ -104,7 +105,10 @@ impl super::HttpServer for HttpServer {
                     qdebug!("Headers (request={stream} fin={fin}): {headers:?}");
 
                     if headers.contains_header(":method", "POST") {
-                        self.posts.insert(stream, 0);
+                        let response_size = headers
+                            .find_header(":path")
+                            .and_then(|path| path.value().trim_matches('/').parse::<usize>().ok());
+                        self.posts.insert(stream, (0, response_size));
                         continue;
                     }
 
@@ -162,17 +166,28 @@ impl super::HttpServer for HttpServer {
                 }
 
                 Http3ServerEvent::Data { stream, data, fin } => {
-                    if let Some(received) = self.posts.get_mut(&stream) {
+                    if let Some((received, _)) = self.posts.get_mut(&stream) {
                         *received += data.len();
                     }
                     if fin {
-                        if let Some(received) = self.posts.remove(&stream) {
-                            let msg = received.to_string().as_bytes().to_vec();
+                        if let Some((received, response_size)) = self.posts.remove(&stream) {
+                            let mut response = response_size.map_or_else(
+                                || SendData::from(received.to_string().into_bytes()),
+                                SendData::zeroes,
+                            );
+
                             stream
-                                .send_headers(&[Header::new(":status", "200")])
+                                .send_headers(&[
+                                    Header::new(":status", "200"),
+                                    Header::new("content-length", response.len().to_string()),
+                                ])
                                 .unwrap();
-                            stream.send_data(&msg, now).unwrap();
-                            stream.stream_close_send(now).unwrap();
+                            let done = response.send(|chunk| stream.send_data(chunk, now).unwrap());
+                            if done {
+                                stream.stream_close_send(now).unwrap();
+                            } else {
+                                self.remaining_data.insert(stream.stream_id(), response);
+                            }
                         }
                     }
                 }
