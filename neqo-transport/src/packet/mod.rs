@@ -421,6 +421,14 @@ impl<B: Buffer> Builder<B> {
         // The length of the packet number plus the payload length needs to
         // be at least 4 (MAX_PACKET_NUMBER_LEN) plus any amount by which
         // the header protection sample exceeds the AEAD expansion.
+        //
+        // > To ensure that sufficient data is available for sampling, packets
+        // > are padded so that the combined lengths of the encoded packet number
+        // > and protected payload is at least 4 bytes longer than the sample
+        // > required for header protection.
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9001#section-5.4.2>
+
         let crypto_pad = crypto.extra_padding();
         self.encoder.pad_to(
             self.offsets.pn.start + MAX_PACKET_NUMBER_LEN + crypto_pad,
@@ -454,7 +462,12 @@ impl<B: Buffer> Builder<B> {
     pub fn build(mut self, crypto: &mut CryptoDxState) -> Res<Encoder<B>> {
         if self.len() > self.limit {
             qwarn!("Packet contents are more than the limit");
-            debug_assert!(false);
+            debug_assert!(
+                false,
+                "Builder length ({}) is larger than limit ({}).",
+                self.len(),
+                self.limit
+            );
             return Err(Error::Internal);
         }
 
@@ -1295,6 +1308,44 @@ mod tests {
         );
         assert_eq!(builder.remaining(), 0);
         assert_eq!(builder.abort(), encoder_copy);
+    }
+
+    /// Given an encoder that already contains some QUIC packet(s), i.e. is
+    /// filled close to the MTU, attempt to use the remaining insufficient space
+    /// for another QUIC packet.
+    ///
+    /// Details in <https://github.com/mozilla/neqo/issues/3046>.
+    #[test]
+    fn build_insufficient_space_for_dummy_length_and_pn() {
+        const MTU: usize = 1280;
+        const FIRST_QUIC_PACKET: usize = 1236;
+        fixture_init();
+        let crypto = CryptoDxState::test_default();
+
+        let mut encoder = Encoder::new();
+        encoder.pad_to(FIRST_QUIC_PACKET, 0);
+
+        // Builder::long should add 1 (first byte) + 4 (version) + 2
+        // (dcid+scid length) + 8 (dcid) + 8 (scid) = 23 bytes.
+        let mut builder = Builder::long(
+            encoder,
+            Type::Initial,
+            Version::default(),
+            Some(SERVER_CID),
+            Some(CLIENT_CID),
+            MTU - crypto.expansion(),
+        );
+        assert_eq!(builder.len() - FIRST_QUIC_PACKET, 23);
+
+        // Given the FIRST_QUIC_PACKET and the partial header from
+        // Builder::long, the builder should have 5 bytes remaining.
+        assert_eq!(builder.remaining(), 5);
+
+        // Builder::pn needs 2 bytes for the dummy packet length and 4 bytes for
+        // the maximum packet number, but only 5 bytes remain. The builder
+        // should now be full and needs to be aborted.
+        builder.pn(0, 1);
+        assert!(builder.is_full());
     }
 
     const SAMPLE_RETRY_V2: &[u8] = &[
