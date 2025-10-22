@@ -42,6 +42,8 @@ const PACKET_HP_MASK_SHORT: u8 = 0x1f;
 const SAMPLE_SIZE: usize = 16;
 const SAMPLE_OFFSET: usize = 4;
 const MAX_PACKET_NUMBER_LEN: usize = 4;
+/// The length of a long packet length field..
+const LONG_PACKET_LENGTH_LEN: usize = 2;
 
 pub mod metadata;
 mod retry;
@@ -390,8 +392,13 @@ impl<B: Buffer> Builder<B> {
 
         // Reserve space for a length in long headers.
         if self.is_long() {
+            if self.remaining() < LONG_PACKET_LENGTH_LEN + MAX_PACKET_NUMBER_LEN {
+                self.limit = 0;
+                return;
+            }
+
             self.offsets.len = self.encoder.len();
-            self.encoder.encode(&[0; 2]);
+            self.encoder.encode(&[0; LONG_PACKET_LENGTH_LEN]);
         }
 
         // This allows the input to be >4, which is absurd, but we can eat that.
@@ -411,7 +418,7 @@ impl<B: Buffer> Builder<B> {
 
     #[expect(clippy::cast_possible_truncation, reason = "AND'ing makes this safe.")]
     fn write_len(&mut self, expansion: usize) {
-        let len = self.encoder.len() - (self.offsets.len + 2) + expansion;
+        let len = self.encoder.len() - (self.offsets.len + LONG_PACKET_LENGTH_LEN) + expansion;
         self.encoder.as_mut()[self.offsets.len] = 0x40 | ((len >> 8) & 0x3f) as u8;
         self.encoder.as_mut()[self.offsets.len + 1] = (len & 0xff) as u8;
     }
