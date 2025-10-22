@@ -357,8 +357,9 @@ fn setup_standalone(nss: &str) -> Vec<String> {
     // $NSS_DIR/../dist/
     let nssdist = nss.parent().unwrap().join("dist");
     println!("cargo:rerun-if-env-changed=NSS_TARGET");
-    let nsstarget = env::var("NSS_TARGET")
-        .unwrap_or_else(|_| fs::read_to_string(nssdist.join("latest")).unwrap());
+    let nsstarget = env::var("NSS_TARGET").unwrap_or_else(|_| {
+        fs::read_to_string(nssdist.join("latest")).unwrap_or_else(|_| String::from("Release"))
+    });
 
     // If NSS_PREBUILT is set, we assume that the NSS libraries are already built.
     if env::var("NSS_PREBUILT").is_err() {
