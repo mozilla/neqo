@@ -12,6 +12,9 @@ use std::{
 
 use crate::{hex_with_len, Bytes, Tos};
 
+/// A UDP datagram.
+///
+/// Guaranteed to not be empty.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Datagram<D = Vec<u8>> {
     src: SocketAddr,
@@ -86,14 +89,14 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> AsMut<[u8]> for Datagram<D> {
 }
 
 impl Datagram<Vec<u8>> {
+    /// # Panics
+    ///
+    /// Panics if `d` converts to an empty vector.
     #[must_use]
     pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: Tos, d: V) -> Self {
-        Self {
-            src,
-            dst,
-            tos,
-            d: d.into(),
-        }
+        let d = d.into();
+        assert!(!d.is_empty(), "Datagram data cannot be empty");
+        Self { src, dst, tos, d }
     }
 }
 
@@ -124,15 +127,23 @@ impl<D: AsRef<[u8]>> Debug for Datagram<D> {
 }
 
 impl<'a> Datagram<&'a mut [u8]> {
+    /// # Panics
+    ///
+    /// Panics if the data is empty.
     #[must_use]
     pub fn from_slice(src: SocketAddr, dst: SocketAddr, tos: Tos, d: &'a mut [u8]) -> Self {
+        assert!(!d.is_empty(), "Datagram data cannot be empty");
         Self { src, dst, tos, d }
     }
 }
 
 impl Datagram<Bytes> {
+    /// # Panics
+    ///
+    /// Panics if the data is empty.
     #[must_use]
-    pub const fn from_bytes(src: SocketAddr, dst: SocketAddr, tos: Tos, d: Bytes) -> Self {
+    pub fn from_bytes(src: SocketAddr, dst: SocketAddr, tos: Tos, d: Bytes) -> Self {
+        assert!(!d.is_empty(), "Datagram data cannot be empty");
         Self { src, dst, tos, d }
     }
 }
@@ -263,9 +274,9 @@ impl DatagramBatch {
 mod tests {
     use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
-    use test_fixture::datagram;
+    use test_fixture::{datagram, DEFAULT_ADDR};
 
-    use crate::{DatagramBatch, Ecn, Tos};
+    use crate::{Datagram, DatagramBatch, Ecn, Tos};
 
     #[test]
     fn fmt_datagram() {
@@ -277,10 +288,21 @@ mod tests {
     }
 
     #[test]
-    fn is_empty() {
-        let d = datagram(vec![]);
-        assert_eq!(d.len(), 0);
-        assert!(d.is_empty());
+    #[should_panic(expected = "Datagram data cannot be empty")]
+    fn new_empty() {
+        let _d = Datagram::new(DEFAULT_ADDR, DEFAULT_ADDR, Ecn::Ect0.into(), vec![]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Datagram data cannot be empty")]
+    fn from_slice_empty() {
+        let _d = Datagram::from_slice(DEFAULT_ADDR, DEFAULT_ADDR, Ecn::Ect0.into(), &mut []);
+    }
+
+    #[test]
+    #[should_panic(expected = "Datagram data cannot be empty")]
+    fn from_bytes_empty() {
+        let _d = Datagram::from_bytes(DEFAULT_ADDR, DEFAULT_ADDR, Ecn::Ect0.into(), vec![].into());
     }
 
     #[test]
