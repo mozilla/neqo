@@ -274,9 +274,9 @@ impl DatagramBatch {
 mod tests {
     use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
-    use test_fixture::datagram;
+    use test_fixture::{datagram, DEFAULT_ADDR};
 
-    use crate::{DatagramBatch, Ecn, Tos};
+    use crate::{Datagram, DatagramBatch, Ecn, Tos};
 
     #[test]
     fn fmt_datagram() {
@@ -289,8 +289,20 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Datagram data cannot be empty")]
-    fn is_empty() {
-        let _d = datagram(vec![]);
+    fn new_empty() {
+        let _d = Datagram::new(DEFAULT_ADDR, DEFAULT_ADDR, Ecn::Ect0.into(), vec![]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Datagram data cannot be empty")]
+    fn from_slice_empty() {
+        let _d = Datagram::from_slice(DEFAULT_ADDR, DEFAULT_ADDR, Ecn::Ect0.into(), &mut []);
+    }
+
+    #[test]
+    #[should_panic(expected = "Datagram data cannot be empty")]
+    fn from_bytes_empty() {
+        let _d = Datagram::from_bytes(DEFAULT_ADDR, DEFAULT_ADDR, Ecn::Ect0.into(), vec![].into());
     }
 
     #[test]
