@@ -7,7 +7,7 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use neqo_transport::recv_stream::RxStreamOrderer;
+use neqo_transport::rx_stream_orderer_heap::RxStreamOrderer;
 
 fn rx_stream_orderer() {
     let mut rx = RxStreamOrderer::new();
