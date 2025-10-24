@@ -134,6 +134,15 @@ pub struct DatagramStats {
     pub dropped_queue_full: usize,
 }
 
+/// Congestion Control stats
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct CongestionControlStats {
+    /// Total number of congestion events
+    pub congestion_events: usize,
+    /// Number of spurious congestion events (congestion events due to lost packets that were later
+    /// acked)
+    pub spurious_congestion_events: usize,
+}
 /// ECN counts by QUIC [`packet::Type`].
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct EcnCount(EnumMap<packet::Type, ecn::Count>);
@@ -294,6 +303,8 @@ pub struct Stats {
 
     pub datagram_tx: DatagramStats,
 
+    pub cc: CongestionControlStats,
+
     /// ECN path validation count, indexed by validation outcome.
     pub ecn_path_validation: ecn::ValidationCount,
     /// ECN counts for outgoing UDP datagrams, recorded locally. For coalesced packets,
@@ -368,6 +379,11 @@ impl Debug for Stats {
             f,
             "  tx: {} lost {} lateack {} ptoack {} unackdrop {}",
             self.packets_tx, self.lost, self.late_ack, self.pto_ack, self.unacked_range_dropped
+        )?;
+        writeln!(
+            f,
+            "  cc: congestion_events {} spurious_congestion_events {}",
+            self.cc.congestion_events, self.cc.spurious_congestion_events
         )?;
         writeln!(
             f,
