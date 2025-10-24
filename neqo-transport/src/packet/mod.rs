@@ -9,6 +9,7 @@
 use std::{
     cmp::min,
     fmt,
+    mem::size_of,
     ops::{Deref, DerefMut, Range},
     time::Instant,
 };
@@ -916,7 +917,9 @@ impl<'a> Public<'a> {
             return Err(Error::InvalidPacket);
         }
         let mut decoder = Decoder::new(&self.data[self.header_len..]);
-        let mut res = Vec::new();
+        let bytes = decoder.remaining();
+        let capacity = bytes.div_ceil(size_of::<version::Wire>());
+        let mut res = Vec::with_capacity(capacity);
         while decoder.remaining() > 0 {
             let version = Self::opt(decoder.decode_uint::<version::Wire>())?;
             res.push(version);
