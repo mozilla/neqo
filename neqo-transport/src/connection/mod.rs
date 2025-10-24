@@ -2199,7 +2199,12 @@ impl Connection {
         version: Version,
         grease_quic_bit: bool,
         limit: usize,
-    ) -> (packet::Type, packet::Builder<&'a mut Vec<u8>>) {
+        largest_acknowledged: Option<packet::Number>,
+    ) -> (
+        packet::Type,
+        packet::Builder<&'a mut Vec<u8>>,
+        packet::Number,
+    ) {
         let pt = packet::Type::from(epoch);
         let mut builder = if pt == packet::Type::Short {
             qdebug!("Building Short dcid {:?}", path.remote_cid());
@@ -2226,16 +2231,6 @@ impl Connection {
             }
         }
 
-        (pt, builder)
-    }
-
-    #[must_use]
-    fn add_packet_number(
-        builder: &mut packet::Builder<&mut Vec<u8>>,
-        tx: &CryptoDxState,
-        largest_acknowledged: Option<packet::Number>,
-    ) -> packet::Number {
-        // Get the packet number and work out how long it is.
         let pn = tx.next_pn();
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
@@ -2247,7 +2242,8 @@ impl Connection {
         );
         // TODO(mt) also use `4*path CWND/path MTU` to set a minimum length.
         builder.pn(pn, pn_len);
-        pn
+
+        (pt, builder, pn)
     }
 
     fn can_grease_quic_bit(&self) -> bool {
@@ -2677,7 +2673,7 @@ impl Connection {
 
             let header_start = encoder.len();
 
-            let (pt, mut builder) = Self::build_packet_header(
+            let (pt, mut builder, pn) = Self::build_packet_header(
                 &path.borrow(),
                 epoch,
                 encoder,
@@ -2688,10 +2684,6 @@ impl Connection {
                 // Limit the packet builder further to leave space for AEAD
                 // expansion added in `builder.build` below.
                 limit - aead_expansion,
-            );
-            let pn = Self::add_packet_number(
-                &mut builder,
-                tx,
                 self.loss_recovery.largest_acknowledged_pn(space),
             );
             // The builder will set the limit to 0 if there isn't enough space for the header.
@@ -3830,7 +3822,7 @@ impl Connection {
         let mut buffer = Vec::new();
         let encoder = Encoder::new_borrowed_vec(&mut buffer);
 
-        let (_, mut builder) = Self::build_packet_header(
+        let (_, builder, _) = Self::build_packet_header(
             &path.borrow(),
             epoch,
             encoder,
@@ -3839,10 +3831,6 @@ impl Connection {
             version,
             false,
             usize::MAX,
-        );
-        _ = Self::add_packet_number(
-            &mut builder,
-            tx,
             self.loss_recovery
                 .largest_acknowledged_pn(PacketNumberSpace::ApplicationData),
         );
