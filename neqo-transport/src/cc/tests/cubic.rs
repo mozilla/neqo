@@ -15,6 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use neqo_common::qinfo;
 use test_fixture::now;
 
 use super::{IP_ADDR, MTU, RTT};
@@ -22,8 +23,8 @@ use crate::{
     cc::{
         classic_cc::ClassicCongestionControl,
         cubic::{
-            convert_to_f64, Cubic, CUBIC_ALPHA, CUBIC_BETA_USIZE_DIVIDEND,
-            CUBIC_BETA_USIZE_DIVISOR, CUBIC_C, CUBIC_FAST_CONVERGENCE_FACTOR,
+            convert_to_f64, Cubic, CUBIC_BETA_USIZE_DIVIDEND, CUBIC_BETA_USIZE_DIVISOR, CUBIC_C,
+            CUBIC_FAST_CONVERGENCE_FACTOR,
         },
         CongestionControl as _,
     },
@@ -82,11 +83,32 @@ fn packet_lost(cc: &mut ClassicCongestionControl<Cubic>, pn: u64) {
     cc.on_packets_lost(None, None, PTO, &[p_lost], now());
 }
 
-fn expected_tcp_acks(cwnd_rtt_start: usize, mtu: usize) -> u64 {
+fn expected_tcp_acks(cwnd_rtt_start: usize, mtu: usize, alpha: f64) -> u64 {
     (f64::from(i32::try_from(cwnd_rtt_start).unwrap())
         / f64::from(i32::try_from(mtu).unwrap())
-        / CUBIC_ALPHA)
+        / alpha)
         .round() as u64
+}
+
+/// Calculates the expected increase to `w_est` given the number of acked bytes, the current
+/// congestion window and the state of `alpha`.
+///
+/// Returns the expected increase to `w_est` and the acked bytes used for it as `(w_est_increase,
+/// acked_bytes_used)`.
+fn expected_w_est_increase(
+    curr_cwnd: f64,
+    max_datagram_size: f64,
+    acked_bytes: f64,
+    alpha: f64,
+) -> (f64, f64) {
+    let increase = (alpha * (acked_bytes / curr_cwnd)).floor();
+    if increase > 0.0 {
+        let w_est_increase = increase * max_datagram_size;
+        let acked_bytes_used = increase * curr_cwnd / alpha;
+        (w_est_increase, acked_bytes_used)
+    } else {
+        (0.0, 0.0)
+    }
 }
 
 #[test]
@@ -97,7 +119,6 @@ fn tcp_phase() {
     cubic.set_ssthresh(1);
 
     let mut now = now();
-    let start_time = now;
     // helper variables to remember the next packet number to be sent/acked.
     let mut next_pn_send = 0;
     let mut next_pn_ack = 0;
@@ -110,23 +131,33 @@ fn tcp_phase() {
     // The phase will end when cwnd calculated with cubic equation is equal to TCP estimate:
     // CUBIC_C * (n * RTT / CUBIC_ALPHA)^3 * MAX_DATAGRAM_SIZE = n * MAX_DATAGRAM_SIZE
     // from this n = sqrt(CUBIC_ALPHA^3/ (CUBIC_C * RTT^3)).
-    let num_tcp_increases = (CUBIC_ALPHA.powi(3) / (CUBIC_C * RTT.as_secs_f64().powi(3)))
+
+    // Because `cubic::Cubic::alpha` is uninialized here (it's initialized in
+    // `cubic::Cubic::start_epoch` and we never had an ack yet) we set it to `1.0` which would be
+    // the value it'd be initialized to after the first ack under this test's conditions.
+    let alpha: f64 = 1.0;
+    let num_tcp_increases = (alpha.powi(3) / (CUBIC_C * RTT.as_secs_f64().powi(3)))
         .sqrt()
         .floor() as u64;
 
-    for _ in 0..num_tcp_increases {
+    for i in 0..num_tcp_increases {
         let cwnd_rtt_start = cubic.cwnd();
         // Expected acks during a period of RTT / CUBIC_ALPHA.
-        let acks = expected_tcp_acks(cwnd_rtt_start, cubic.max_datagram_size());
+        let acks = expected_tcp_acks(cwnd_rtt_start, cubic.max_datagram_size(), alpha);
         // The time between acks if they are ideally paced over a RTT.
         let time_increase =
             RTT / u32::try_from(cwnd_rtt_start / cubic.max_datagram_size()).unwrap();
 
-        for _ in 0..acks {
+        for j in 0..acks {
             now += time_increase;
             ack_packet(&mut cubic, next_pn_ack, now);
             next_pn_ack += 1;
             next_pn_send = fill_cwnd(&mut cubic, next_pn_send, now);
+            qinfo!(
+                "round {i}, ACK {j}, cwnd: {}, alpha: {}",
+                cubic.cwnd(),
+                cubic.cc_algorithm().alpha(),
+            );
         }
 
         assert_eq!(cubic.cwnd() - cwnd_rtt_start, cubic.max_datagram_size());
@@ -150,16 +181,19 @@ fn tcp_phase() {
 
     // Make sure that the increase is not according to TCP equation, i.e., that it took
     // less than RTT / CUBIC_ALPHA.
-    let expected_ack_tcp_increase = expected_tcp_acks(cwnd_rtt_start, cubic.max_datagram_size());
+    let expected_ack_tcp_increase = expected_tcp_acks(
+        cwnd_rtt_start,
+        cubic.max_datagram_size(),
+        cubic.cc_algorithm().alpha(),
+    );
     assert!(num_acks < expected_ack_tcp_increase);
 
     // This first increase after a TCP phase may be shorter than what it would take by a regular
     // cubic phase, because of the proper byte counting and the credit it already had before
-    // entering this phase. Therefore We will perform another round and compare it to expected
-    // increase using the cubic equation.
+    // entering this phase. Therefore We will perform another round and compare it to the expected
+    // number of acks needed for TCP.
 
     let cwnd_rtt_start_after_tcp = cubic.cwnd();
-    let elapsed_time = now - start_time;
 
     // calculate new time_increase.
     let time_increase =
@@ -174,26 +208,12 @@ fn tcp_phase() {
         next_pn_send = fill_cwnd(&mut cubic, next_pn_send, now);
     }
 
-    let expected_ack_tcp_increase2 =
-        expected_tcp_acks(cwnd_rtt_start_after_tcp, cubic.max_datagram_size());
+    let expected_ack_tcp_increase2 = expected_tcp_acks(
+        cwnd_rtt_start_after_tcp,
+        cubic.max_datagram_size(),
+        cubic.cc_algorithm().alpha(),
+    );
     assert!(num_acks2 < expected_ack_tcp_increase2);
-
-    // The time needed to increase cwnd by MAX_DATAGRAM_SIZE using the cubic equation will be
-    // calculated from: W_cubic(elapsed_time + t_to_increase) - W_cubic(elapsed_time) =
-    // MAX_DATAGRAM_SIZE => CUBIC_C * (elapsed_time + t_to_increase)^3 * MAX_DATAGRAM_SIZE +
-    // CWND_INITIAL - CUBIC_C * elapsed_time^3 * MAX_DATAGRAM_SIZE + CWND_INITIAL =
-    // MAX_DATAGRAM_SIZE => t_to_increase = cbrt((1 + CUBIC_C * elapsed_time^3) / CUBIC_C) -
-    // elapsed_time (t_to_increase is in seconds)
-    // number of ack needed is t_to_increase / time_increase.
-    let expected_ack_cubic_increase =
-        (((CUBIC_C.mul_add((elapsed_time).as_secs_f64().powi(3), 1.0) / CUBIC_C).cbrt()
-            - elapsed_time.as_secs_f64())
-            / time_increase.as_secs_f64())
-        .ceil() as u64;
-    // num_acks is very close to the calculated value. The exact value is hard to calculate
-    // because the proportional increase (i.e. curr_cwnd_f64 / (target - curr_cwnd_f64) *
-    // MAX_DATAGRAM_SIZE_F64) and the byte counting.
-    assert_eq!(num_acks2, expected_ack_cubic_increase + 2);
 }
 
 #[test]
@@ -365,4 +385,102 @@ fn congestion_event_congestion_avoidance_no_overflow() {
 
     // Now ack packet that was send earlier.
     ack_packet(&mut cubic, 0, now().checked_sub(PTO).unwrap());
+}
+
+/// This tests the dynamic changing of the `alpha` value outlined in RFC 9438 section 4.3.
+///
+/// <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-11>
+#[test]
+fn alpha_changes_for_high_w_est_values() {
+    const NORMAL_ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7);
+    const INCREASED_ALPHA: f64 = 1.0;
+    let mut cc = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
+    let mut next_pn_to_send = 0;
+    let mut last_sent_pn;
+    let mut first_sent_pn;
+    let mut w_est_projected = convert_to_f64(cc.cwnd_initial()); // initial value
+    let max_datagram_size = convert_to_f64(cc.max_datagram_size());
+    let mut w_est_increase;
+    let mut acked_bytes_used;
+    let mut acked_bytes = 0.0;
+
+    // Set ssthresh to something small to make sure that cc is in the congection avoidance phase.
+    cc.set_ssthresh(1);
+
+    // Send enough packets to have at least one congestion window increase
+    next_pn_to_send = fill_cwnd(&mut cc, next_pn_to_send, now());
+    last_sent_pn = next_pn_to_send - 1;
+    for pn in 0..=last_sent_pn {
+        // Calculate the projected increase of w_est
+        acked_bytes += max_datagram_size;
+        (w_est_increase, acked_bytes_used) = expected_w_est_increase(
+            convert_to_f64(cc.cwnd()),
+            max_datagram_size,
+            acked_bytes,
+            INCREASED_ALPHA,
+        );
+        acked_bytes -= acked_bytes_used;
+        w_est_projected += w_est_increase;
+
+        // Actually process the ACK
+        ack_packet(&mut cc, pn, now());
+
+        qinfo!(
+            "pn acked: {pn}, alpha: {}, w_est: {}, w_est_projected: {w_est_projected}",
+            cc.cc_algorithm().alpha(),
+            cc.cc_algorithm().w_est()
+        );
+        // Since we never had a congestion event we started with the initial values for `w_est =
+        // cwnd_prior = current_cwnd`, thus `w_est >= cwnd_prior` should be `true`, `alpha`
+        // should be set to it's increased value and `w_est` should be growing accordingly.
+        assert!(cc.cc_algorithm().w_est() >= cc.cc_algorithm().cwnd_prior());
+        assert_within(cc.cc_algorithm().alpha(), INCREASED_ALPHA, f64::EPSILON);
+        assert_within(cc.cc_algorithm().w_est(), w_est_projected, f64::EPSILON);
+    }
+
+    // Trigger a congestion event, which calls `reduce_cwnd` where `cwnd_prior` is updated to the
+    // current congestion window before reducing it. The next ACK after a congestion event will call
+    // `start_epoch` where `alpha` is set to it's default value and `w_est` is set to the newly
+    // reduced congestion window. Thus we now have `w_est < cwnd_prior` and `alpha ==
+    // NORMAL_ALPHA`.
+    packet_lost(&mut cc, last_sent_pn);
+    w_est_projected = convert_to_f64(cc.cwnd()); // update the value after the congestion event
+    acked_bytes = 0.0; // reset the acked bytes counter for the next epoch
+
+    // Send and ack packets until the congestion window grew so much that `w_est` is as big as
+    // `cwnd_prior`.
+    loop {
+        first_sent_pn = next_pn_to_send;
+        next_pn_to_send = fill_cwnd(&mut cc, next_pn_to_send, now());
+        last_sent_pn = next_pn_to_send - 1;
+        for pn in first_sent_pn..=last_sent_pn {
+            // Calculate the projected increase of w_est
+            acked_bytes += max_datagram_size;
+            (w_est_increase, acked_bytes_used) = expected_w_est_increase(
+                convert_to_f64(cc.cwnd()),
+                max_datagram_size,
+                acked_bytes,
+                NORMAL_ALPHA,
+            );
+            acked_bytes -= acked_bytes_used;
+            w_est_projected += w_est_increase;
+
+            // Actually process the ACK
+            ack_packet(&mut cc, pn, now());
+            qinfo!(
+                "pn acked: {pn}, alpha: {}, w_est: {}, w_est_projected: {w_est_projected}",
+                cc.cc_algorithm().alpha(),
+                cc.cc_algorithm().w_est()
+            );
+        }
+        if cc.cc_algorithm().w_est() >= cc.cc_algorithm().cwnd_prior() {
+            break;
+        }
+        // Make sure `w_est` grew by the amount expected with the normal `alpha` value
+        assert_within(cc.cc_algorithm().w_est(), w_est_projected, f64::EPSILON);
+    }
+
+    // Now `w_est` should be as big as `cwnd_prior`, thus `alpha` should have it's increased value.
+    assert!(cc.cc_algorithm().w_est() >= cc.cc_algorithm().cwnd_prior());
+    assert_within(cc.cc_algorithm().alpha(), INCREASED_ALPHA, f64::EPSILON);
 }
