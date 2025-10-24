@@ -26,6 +26,7 @@ use crate::{
     non_upper_case_globals,
     non_camel_case_types,
     clippy::unreadable_literal,
+    clippy::use_self,
     reason = "For included bindgen code."
 )]
 mod nss_p11 {

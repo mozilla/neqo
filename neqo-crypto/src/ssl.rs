@@ -11,6 +11,7 @@
     non_snake_case,
     clippy::cognitive_complexity,
     clippy::too_many_lines,
+    clippy::use_self,
     reason = "For included bindgen code."
 )]
 
