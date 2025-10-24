@@ -310,7 +310,11 @@ impl WebTransportRequest {
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn create_stream(&self, stream_type: StreamType) -> Res<Http3OrWebTransportStream> {
+    pub fn create_stream(
+        &self,
+        stream_type: StreamType,
+        now: Instant,
+    ) -> Res<Http3OrWebTransportStream> {
         let session_id = self.stream_handler.stream_id();
         let id = self
             .stream_handler
@@ -320,6 +324,7 @@ impl WebTransportRequest {
                 &mut self.stream_handler.conn.borrow_mut(),
                 session_id,
                 stream_type,
+                now,
             )?;
 
         Ok(Http3OrWebTransportStream::new(

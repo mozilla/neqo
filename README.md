@@ -65,8 +65,6 @@ Note: If you did not already compile NSS separately, you need to have
 
 ### QUIC logging
 
-Enable generation of [QLOG][QLOG] logs with:
-
 ```shell
 target/debug/neqo-server '[::]:12345' --qlog-dir .
 target/debug/neqo-client 'https://[::]:12345/' --qlog-dir .
