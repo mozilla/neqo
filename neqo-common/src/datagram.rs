@@ -7,6 +7,7 @@
 use std::{
     fmt::{self, Debug, Formatter},
     net::SocketAddr,
+    num::NonZeroUsize,
     ops::{Deref, DerefMut},
 };
 
@@ -163,7 +164,7 @@ pub struct DatagramBatch {
     src: SocketAddr,
     dst: SocketAddr,
     tos: Tos,
-    datagram_size: usize,
+    datagram_size: NonZeroUsize,
     d: Vec<u8>,
 }
 
@@ -187,7 +188,8 @@ impl From<Datagram<Vec<u8>>> for DatagramBatch {
             src: d.src,
             dst: d.dst,
             tos: d.tos,
-            datagram_size: d.d.len(),
+            datagram_size: NonZeroUsize::new(d.d.len())
+                .expect("Datagram is guaranteed to be non-empty"),
             d: d.d,
         }
     }
@@ -199,7 +201,7 @@ impl DatagramBatch {
         src: SocketAddr,
         dst: SocketAddr,
         tos: Tos,
-        datagram_size: usize,
+        datagram_size: NonZeroUsize,
         d: Vec<u8>,
     ) -> Self {
         Self {
@@ -231,7 +233,7 @@ impl DatagramBatch {
     }
 
     #[must_use]
-    pub const fn datagram_size(&self) -> usize {
+    pub const fn datagram_size(&self) -> NonZeroUsize {
         self.datagram_size
     }
 
@@ -247,11 +249,11 @@ impl DatagramBatch {
 
     #[must_use]
     pub fn num_datagrams(&self) -> usize {
-        self.d.len().div_ceil(self.datagram_size)
+        self.d.len().div_ceil(self.datagram_size.get())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = Datagram<&[u8]>> {
-        self.d.chunks(self.datagram_size).map(|d| Datagram {
+        self.d.chunks(self.datagram_size.get()).map(|d| Datagram {
             src: self.src,
             dst: self.dst,
             tos: self.tos,
@@ -260,19 +262,24 @@ impl DatagramBatch {
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = Datagram<&mut [u8]>> {
-        self.d.chunks_mut(self.datagram_size).map(|d| Datagram {
-            src: self.src,
-            dst: self.dst,
-            tos: self.tos,
-            d,
-        })
+        self.d
+            .chunks_mut(self.datagram_size.get())
+            .map(|d| Datagram {
+                src: self.src,
+                dst: self.dst,
+                tos: self.tos,
+                d,
+            })
     }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+    use std::{
+        net::{IpAddr, Ipv6Addr, SocketAddr},
+        num::NonZeroUsize,
+    };
 
     use test_fixture::{datagram, DEFAULT_ADDR};
 
@@ -312,19 +319,19 @@ mod tests {
         let tos = Tos::default();
 
         // 10 bytes, segment size 4 -> 3 datagrams (4+4+2)
-        let batch = DatagramBatch::new(src, dst, tos, 4, vec![0u8; 10]);
+        let batch = DatagramBatch::new(src, dst, tos, NonZeroUsize::new(4).unwrap(), vec![0u8; 10]);
         assert_eq!(batch.num_datagrams(), 3);
 
         // 8 bytes, segment size 4 -> 2 datagrams (4+4)
-        let batch = DatagramBatch::new(src, dst, tos, 4, vec![0u8; 8]);
+        let batch = DatagramBatch::new(src, dst, tos, NonZeroUsize::new(4).unwrap(), vec![0u8; 8]);
         assert_eq!(batch.num_datagrams(), 2);
 
         // 5 bytes, segment size 5 -> 1 datagram
-        let batch = DatagramBatch::new(src, dst, tos, 5, vec![0u8; 5]);
+        let batch = DatagramBatch::new(src, dst, tos, NonZeroUsize::new(5).unwrap(), vec![0u8; 5]);
         assert_eq!(batch.num_datagrams(), 1);
 
         // 6 bytes, segment size 5 -> 2 datagrams (5+1)
-        let batch = DatagramBatch::new(src, dst, tos, 5, vec![0u8; 6]);
+        let batch = DatagramBatch::new(src, dst, tos, NonZeroUsize::new(5).unwrap(), vec![0u8; 6]);
         assert_eq!(batch.num_datagrams(), 2);
     }
 
@@ -334,7 +341,7 @@ mod tests {
             SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234),
             SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678),
             Tos::default(),
-            4,
+            NonZeroUsize::new(4).unwrap(),
             vec![0u8; 10],
         );
         batch.set_tos(Ecn::Ce.into());
@@ -346,7 +353,13 @@ mod tests {
         let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
         let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
         let tos = Tos::default();
-        let batch = DatagramBatch::new(src, dst, tos, 4, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        let batch = DatagramBatch::new(
+            src,
+            dst,
+            tos,
+            NonZeroUsize::new(4).unwrap(),
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9],
+        );
         let datagrams: Vec<_> = batch.iter().collect();
         assert_eq!(datagrams.len(), 3);
         assert_eq!(datagrams[0].d, &[1, 2, 3, 4]);
@@ -365,7 +378,13 @@ mod tests {
         let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
         let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
         let tos = Tos::default();
-        let mut batch = DatagramBatch::new(src, dst, tos, 3, vec![10, 20, 30, 40, 50, 60, 70]);
+        let mut batch = DatagramBatch::new(
+            src,
+            dst,
+            tos,
+            NonZeroUsize::new(3).unwrap(),
+            vec![10, 20, 30, 40, 50, 60, 70],
+        );
         for datagram in batch.iter_mut() {
             assert_eq!(datagram.source(), src);
             assert_eq!(datagram.destination(), dst);
