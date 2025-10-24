@@ -8,6 +8,12 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use neqo_transport::recv_stream::RxStreamOrderer;
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 fn rx_stream_orderer() {
     let mut rx = RxStreamOrderer::new();
