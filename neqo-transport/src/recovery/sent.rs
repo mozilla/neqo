@@ -304,6 +304,13 @@ impl Packets {
     }
 }
 
+/// A packet that has supposedly been lost. Is used for spurious congestion event detection.
+#[derive(Debug)]
+pub struct MaybeLostPacket {
+    pub pn: packet::Number,
+    pub time_sent: Instant,
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
