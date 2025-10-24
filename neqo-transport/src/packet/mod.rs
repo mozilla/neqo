@@ -986,7 +986,7 @@ mod tests {
             Builder, Public, Type, PACKET_BIT_FIXED_QUIC, PACKET_BIT_LONG, PACKET_BIT_SPIN,
             PACKET_LIMIT,
         },
-        ConnectionId, EmptyConnectionIdGenerator, RandomConnectionIdGenerator, Version,
+        ConnectionId, EmptyConnectionIdGenerator, Error, RandomConnectionIdGenerator, Version,
     };
 
     const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
@@ -1353,6 +1353,40 @@ mod tests {
         // should now be full and needs to be aborted.
         builder.pn(0, 1);
         assert!(builder.is_full());
+    }
+
+    #[test]
+    #[cfg_attr(
+        debug_assertions,
+        should_panic(expected = "Builder length (30) is larger than limit (20)")
+    )]
+    fn build_insufficient_space_error() {
+        const SMALL_LIMIT: usize = 20;
+        fixture_init();
+
+        // Set up a builder with a very small limit
+        let mut builder = Builder::short(
+            Encoder::new(),
+            false,
+            Some(ConnectionId::from(SERVER_CID)),
+            SMALL_LIMIT,
+        );
+        builder.pn(0, 1);
+
+        // Add more data than the limit allows. This will exceed the limit when
+        // combined with header.
+        let large_payload = vec![0u8; SMALL_LIMIT];
+        builder.encode(&large_payload);
+
+        // Verify that the length exceeds the limit.
+        assert!(builder.is_full());
+
+        // Building should trigger the debug_assert in debug mode, returning
+        // internal error in release mode.
+        assert_eq!(
+            builder.build(&mut CryptoDxState::test_default()),
+            Err(Error::Internal)
+        );
     }
 
     const SAMPLE_RETRY_V2: &[u8] = &[
