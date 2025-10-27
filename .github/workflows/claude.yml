@@ -1,14 +1,9 @@
-name: Claude Code
+name: Claude Code Review
 
 on:
-  issue_comment:
-    types: [created]
-  pull_request_review_comment:
-    types: [created]
-  issues:
-    types: [opened, assigned]
-  pull_request_review:
-    types: [submitted]
+  pull_request:
+    branches: ["main"]
+    types: [opened, synchronize]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -18,20 +13,16 @@ permissions:
   contents: read
 
 jobs:
-  claude:
-    name: Claude
-    if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
-    runs-on: ubuntu-latest
+  claude-review:
+    name: Claude Code Review
+
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       pull-requests: read # Required to read PR details.
       issues: read # Required to read issue details.
       id-token: write # Required for OIDC authentication.
-      actions: read # Required for Claude to read CI results on PRs
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -39,21 +30,28 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Run Claude Code
+      - name: Run Claude Code Review
         id: claude
-        uses: anthropics/claude-code-action@f30f5eecfce2f34fa72e40fa5f7bcdbdcad12eb8 # v1.0.14
+        # TODO: Would like to pin this, but the Mozilla org allowlist requires "anthropics/claude-code-action@v1"
+        uses: anthropics/claude-code-action@v1 # zizmor: ignore[unpinned-uses]
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          use_sticky_comment: true
+          use_commit_signing: true
+          prompt: |
+            Please review this pull request and provide feedback on:
+            - Code quality and best practices
+            - Potential bugs or issues
+            - Performance considerations
+            - Security concerns
+            - Test coverage
 
-          # This is an optional setting that allows Claude to read CI results on PRs
-          additional_permissions: |
-            actions: read
+            Follow the detailed instructions in `.github/copilot-instructions.md` as you prepare your review.
+            If that file is changed as part of a PR, use the changed version instead of the file in the main branch.
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
+            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
 
-          # Optional: Add claude_args to customize behavior and configuration
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://docs.anthropic.com/en/docs/claude-code/sdk#command-line for available options
-          # claude_args: '--model claude-opus-4-1-20250805 --allowed-tools Bash(gh pr:*)'
+          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
 
