@@ -21,6 +21,8 @@ log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 strum = { workspace = true }
 thiserror = { workspace = true }
+# AWS-LC-RS for high-performance crypto implementations
+aws-lc-rs = { version = "1.14", optional = true }
 
 [build-dependencies]
 bindgen = { version = "0.69", default-features = false, features = ["runtime"] }
@@ -37,6 +39,8 @@ test-fixture = { path = "../test-fixture" }
 ignored = ["bindgen", "semver", "serde", "serde_derive", "toml"]
 
 [features]
+default = ["awslc"]
+awslc = ["aws-lc-rs"]
 bench = ["log/release_max_level_info"]
 disable-encryption = []
 disable-random = []
