@@ -32,7 +32,7 @@ jobs:
 
       - name: Run Claude Code Review
         id: claude
-        # TODO: Would like to pin this, but the Mozilla org allowlist requires "anthropics/claude-code-action@v1"        with:
+        # TODO: Would like to pin this, but the Mozilla org allowlist requires "anthropics/claude-code-action@v1"
         uses: anthropics/claude-code-action@v1 # zizmor: ignore[unpinned-uses]
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
