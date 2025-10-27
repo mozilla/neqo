@@ -21,6 +21,11 @@ log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 strum = { workspace = true }
 thiserror = { workspace = true }
+# RustCrypto dependencies for pure-Rust crypto implementations
+aes-gcm = { version = "0.10", optional = true }
+chacha20poly1305 = { version = "0.10", optional = true }
+aes = { version = "0.8", optional = true }
+chacha20 = { version = "0.9", optional = true }
 
 [build-dependencies]
 bindgen = { version = "0.69", default-features = false, features = ["runtime"] }
@@ -37,10 +42,12 @@ test-fixture = { path = "../test-fixture" }
 ignored = ["bindgen", "semver", "serde", "serde_derive", "toml"]
 
 [features]
+default = ["rustcrypto"]
 bench = ["log/release_max_level_info"]
 disable-encryption = []
 disable-random = []
 gecko = ["mozbuild"]
+rustcrypto = ["aes-gcm", "chacha20poly1305", "aes", "chacha20"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

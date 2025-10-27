@@ -9,6 +9,8 @@
 mod aead;
 #[cfg(feature = "disable-encryption")]
 pub mod aead_null;
+#[cfg(feature = "rustcrypto")]
+pub mod aead_rustcrypto;
 pub mod agent;
 mod agentio;
 mod auth;
@@ -32,12 +34,16 @@ mod time;
 
 use std::{env, ffi::CString, path::PathBuf, ptr::null, sync::OnceLock};
 
-#[cfg(not(feature = "disable-encryption"))]
+#[cfg(all(not(feature = "rustcrypto"), not(feature = "disable-encryption")))]
 pub use self::aead::RealAead as Aead;
-#[cfg(feature = "disable-encryption")]
+// Always export RealAead for comparison/testing.
 pub use self::aead::RealAead;
+// Select AEAD implementation based on features.
+// Priority: disable-encryption > rustcrypto > default (NSS)
 #[cfg(feature = "disable-encryption")]
 pub use self::aead_null::AeadNull as Aead;
+#[cfg(all(feature = "rustcrypto", not(feature = "disable-encryption")))]
+pub use self::aead_rustcrypto::RustCryptoAead as Aead;
 pub use self::{
     aead::Aead as AeadTrait,
     agent::{
