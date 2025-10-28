@@ -23,6 +23,13 @@ fn make_hp(cipher: Cipher) -> hp::Key {
 fn hp_test(cipher: Cipher, expected: &[u8]) {
     let hp = make_hp(cipher);
     let mask = hp.mask(&[0; 16]).expect("should produce a mask");
+
+    // aws-lc-rs's QUIC header protection API is optimized to return only the 5 bytes
+    // that QUIC actually uses. NSS returns the full 16-byte AES block or ChaCha20 stream.
+    // For correctness, we only need to check the first 5 bytes that are used in QUIC.
+    #[cfg(feature = "awslc")]
+    assert_eq!(&mask[..5], &expected[..5], "first invocation should be correct (first 5 bytes)");
+    #[cfg(not(feature = "awslc"))]
     assert_eq!(mask, expected, "first invocation should be correct");
 
     #[allow(
@@ -32,9 +39,15 @@ fn hp_test(cipher: Cipher, expected: &[u8]) {
     )]
     let hp2 = hp.clone();
     let mask = hp2.mask(&[0; 16]).expect("clone produces mask");
+    #[cfg(feature = "awslc")]
+    assert_eq!(&mask[..5], &expected[..5], "clone should produce the same mask (first 5 bytes)");
+    #[cfg(not(feature = "awslc"))]
     assert_eq!(mask, expected, "clone should produce the same mask");
 
     let mask = hp.mask(&[0; 16]).expect("should produce a mask again");
+    #[cfg(feature = "awslc")]
+    assert_eq!(&mask[..5], &expected[..5], "second invocation should be the same (first 5 bytes)");
+    #[cfg(not(feature = "awslc"))]
     assert_eq!(mask, expected, "second invocation should be the same");
 }
 

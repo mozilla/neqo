@@ -19,11 +19,18 @@ use crate::{
     },
     err::{secstatus_to_res, Error, Res},
     p11::{
-        Context, Item, PK11SymKey, PK11_CipherOp, PK11_CreateContextBySymKey, PK11_Encrypt,
-        PK11_GetBlockSize, SymKey, CKA_ENCRYPT, CKM_AES_ECB, CKM_CHACHA20, CK_ATTRIBUTE_TYPE,
-        CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE,
+        Context, Item, PK11SymKey, PK11_CipherOp, PK11_Encrypt, SymKey,
+        CKM_AES_ECB, CKM_CHACHA20, CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE,
     },
 };
+
+#[cfg(not(feature = "awslc"))]
+use crate::p11::{
+    PK11_CreateContextBySymKey, PK11_GetBlockSize, CKA_ENCRYPT, CK_ATTRIBUTE_TYPE,
+};
+
+#[cfg(feature = "awslc")]
+use aws_lc_rs::aead::quic::{HeaderProtectionKey, AES_128, AES_256, CHACHA20};
 
 experimental_api!(SSL_HkdfExpandLabelWithMech(
     version: Version,
@@ -38,7 +45,6 @@ experimental_api!(SSL_HkdfExpandLabelWithMech(
     secret: *mut *mut PK11SymKey,
 ));
 
-#[derive(Clone)]
 pub enum Key {
     /// An AES encryption context.
     /// Note: as we need to clone this object, we clone the pointer and
@@ -48,6 +54,21 @@ pub enum Key {
     /// The `ChaCha20` mask has to invoke a new `PK11_Encrypt` every time as it needs to
     /// change the counter and nonce on each invocation.
     Chacha(SymKey),
+    /// AWS-LC-RS-based header protection key for improved performance.
+    /// Wrapped in `Rc` since `HeaderProtectionKey` doesn't implement Clone.
+    #[cfg(feature = "awslc")]
+    AwsLc(Rc<HeaderProtectionKey>),
+}
+
+impl Clone for Key {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Aes(context) => Self::Aes(Rc::clone(context)),
+            Self::Chacha(key) => Self::Chacha(key.clone()),
+            #[cfg(feature = "awslc")]
+            Self::AwsLc(hp_key) => Self::AwsLc(Rc::clone(hp_key)),
+        }
+    }
 }
 
 impl Debug for Key {
@@ -69,6 +90,7 @@ impl Key {
     ///
     /// When `cipher` is not known to this code.
     pub fn extract(version: Version, cipher: Cipher, prk: &SymKey, label: &str) -> Res<Self> {
+        #[cfg(not(feature = "awslc"))]
         const ZERO: &[u8] = &[0; 12];
 
         let l = label.as_bytes();
@@ -99,30 +121,49 @@ impl Key {
         }?;
         let key = SymKey::from_ptr(secret).or(Err(Error::Hkdf))?;
 
-        let res = match cipher {
-            TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => {
-                let context_ptr = unsafe {
-                    PK11_CreateContextBySymKey(
-                        mech,
-                        CK_ATTRIBUTE_TYPE::from(CKA_ENCRYPT),
-                        *key,
-                        &Item::wrap(&ZERO[..0])?, // Borrow a zero-length slice of ZERO.
-                    )
-                };
-                let context = Context::from_ptr(context_ptr).or(Err(Error::CipherInit))?;
-                Self::Aes(Rc::new(RefCell::new(context)))
-            }
-            TLS_CHACHA20_POLY1305_SHA256 => Self::Chacha(key),
-            _ => unreachable!(),
-        };
+        #[cfg(feature = "awslc")]
+        {
+            // Use aws-lc-rs for header protection when available.
+            let key_bytes = key.as_bytes()?;
+            let algorithm = match cipher {
+                TLS_AES_128_GCM_SHA256 => &AES_128,
+                TLS_AES_256_GCM_SHA384 => &AES_256,
+                TLS_CHACHA20_POLY1305_SHA256 => &CHACHA20,
+                _ => unreachable!(),
+            };
+            let hp_key = HeaderProtectionKey::new(algorithm, key_bytes)
+                .map_err(|_| Error::CipherInit)?;
+            Ok(Self::AwsLc(Rc::new(hp_key)))
+        }
 
-        debug_assert_eq!(
-            res.block_size(),
-            usize::try_from(unsafe { PK11_GetBlockSize(mech, null_mut()) })?
-        );
-        Ok(res)
+        #[cfg(not(feature = "awslc"))]
+        {
+            let res = match cipher {
+                TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => {
+                    let context_ptr = unsafe {
+                        PK11_CreateContextBySymKey(
+                            mech,
+                            CK_ATTRIBUTE_TYPE::from(CKA_ENCRYPT),
+                            *key,
+                            &Item::wrap(&ZERO[..0])?, // Borrow a zero-length slice of ZERO.
+                        )
+                    };
+                    let context = Context::from_ptr(context_ptr).or(Err(Error::CipherInit))?;
+                    Self::Aes(Rc::new(RefCell::new(context)))
+                }
+                TLS_CHACHA20_POLY1305_SHA256 => Self::Chacha(key),
+                _ => unreachable!(),
+            };
+
+            debug_assert_eq!(
+                res.block_size(),
+                usize::try_from(unsafe { PK11_GetBlockSize(mech, null_mut()) })?
+            );
+            Ok(res)
+        }
     }
 
+    #[cfg(not(feature = "awslc"))]
     const fn block_size(&self) -> usize {
         match self {
             Self::Aes(_) => 16,
@@ -143,6 +184,17 @@ impl Key {
         let mut output = [0; Self::SAMPLE_SIZE];
 
         match self {
+            #[cfg(feature = "awslc")]
+            Self::AwsLc(hp_key) => {
+                // Generate the 5-byte mask using aws-lc-rs.
+                let mask = hp_key
+                    .new_mask(sample)
+                    .map_err(|_| Error::CipherInit)?;
+                // Copy the 5-byte mask into the output array (rest remains zeros).
+                output[..5].copy_from_slice(&mask);
+                Ok(output)
+            }
+
             Self::Aes(context) => {
                 let mut output_len: c_int = 0;
                 secstatus_to_res(unsafe {
