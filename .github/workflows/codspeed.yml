@@ -49,7 +49,9 @@ jobs:
 
       - run: |
           for crate in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name'); do
-            [ -e "$crate/benches" ] && cargo codspeed build --package "$crate" --locked --features bench
+            if [ -e "$crate/benches" ]; then
+              cargo codspeed build --package "$crate" --locked --features bench
+            fi
           done
 
       - name: Run the benchmarks
