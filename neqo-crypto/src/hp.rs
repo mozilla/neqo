@@ -12,6 +12,11 @@ use std::{
     rc::Rc,
 };
 
+#[cfg(feature = "awslc")]
+use aws_lc_rs::aead::quic::{HeaderProtectionKey, AES_128, AES_256, CHACHA20};
+
+#[cfg(not(feature = "awslc"))]
+use crate::p11::{PK11_CreateContextBySymKey, PK11_GetBlockSize, CKA_ENCRYPT, CK_ATTRIBUTE_TYPE};
 use crate::{
     constants::{
         Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
@@ -23,14 +28,6 @@ use crate::{
         PK11_CipherOp, PK11_Encrypt, PK11SymKey, SymKey,
     },
 };
-
-#[cfg(not(feature = "awslc"))]
-use crate::p11::{
-    PK11_CreateContextBySymKey, PK11_GetBlockSize, CKA_ENCRYPT, CK_ATTRIBUTE_TYPE,
-};
-
-#[cfg(feature = "awslc")]
-use aws_lc_rs::aead::quic::{HeaderProtectionKey, AES_128, AES_256, CHACHA20};
 
 experimental_api!(SSL_HkdfExpandLabelWithMech(
     version: Version,
@@ -131,8 +128,8 @@ impl Key {
                 TLS_CHACHA20_POLY1305_SHA256 => &CHACHA20,
                 _ => unreachable!(),
             };
-            let hp_key = HeaderProtectionKey::new(algorithm, key_bytes)
-                .map_err(|_| Error::CipherInit)?;
+            let hp_key =
+                HeaderProtectionKey::new(algorithm, key_bytes).map_err(|_| Error::CipherInit)?;
             Ok(Self::AwsLc(Rc::new(hp_key)))
         }
 
@@ -187,9 +184,7 @@ impl Key {
             #[cfg(feature = "awslc")]
             Self::AwsLc(hp_key) => {
                 // Generate the 5-byte mask using aws-lc-rs.
-                let mask = hp_key
-                    .new_mask(sample)
-                    .map_err(|_| Error::CipherInit)?;
+                let mask = hp_key.new_mask(sample).map_err(|_| Error::CipherInit)?;
                 // Copy the 5-byte mask into the output array (rest remains zeros).
                 output[..5].copy_from_slice(&mask);
                 Ok(output)

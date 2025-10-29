@@ -18,8 +18,7 @@ use std::{
 };
 
 use aws_lc_rs::aead::{
-    Aad, LessSafeKey, Nonce, UnboundKey, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305,
-    NONCE_LEN,
+    Aad, LessSafeKey, Nonce, UnboundKey, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305, NONCE_LEN,
 };
 
 use crate::{
@@ -128,8 +127,7 @@ impl crate::aead::Aead for AwsLcAead {
         iv.copy_from_slice(iv_bytes);
 
         // Create the UnboundKey and then the LessSafeKey.
-        let unbound_key = UnboundKey::new(algorithm, key_bytes)
-            .map_err(|_| Error::CipherInit)?;
+        let unbound_key = UnboundKey::new(algorithm, key_bytes).map_err(|_| Error::CipherInit)?;
         let key = LessSafeKey::new(unbound_key);
 
         Ok(Self { key, iv })
@@ -157,7 +155,8 @@ impl crate::aead::Aead for AwsLcAead {
         let aad = Aad::from(aad);
 
         // Encrypt in place.
-        let tag = self.key
+        let tag = self
+            .key
             .seal_in_place_separate_tag(nonce, aad, &mut output[..input.len()])
             .map_err(|_| Error::from(SEC_ERROR_BAD_DATA))?;
 
@@ -182,7 +181,8 @@ impl crate::aead::Aead for AwsLcAead {
         let plaintext_len = data.len() - TAG_SIZE;
 
         // Encrypt in place and get the tag.
-        let tag = self.key
+        let tag = self
+            .key
             .seal_in_place_separate_tag(nonce, aad, &mut data[..plaintext_len])
             .map_err(|_| Error::from(SEC_ERROR_BAD_DATA))?;
 
@@ -210,7 +210,8 @@ impl crate::aead::Aead for AwsLcAead {
         let aad = Aad::from(aad);
 
         // Decrypt in place.
-        let plaintext = self.key
+        let plaintext = self
+            .key
             .open_in_place(nonce, aad, &mut output[..input.len()])
             .map_err(|_| Error::from(SEC_ERROR_BAD_DATA))?;
 
@@ -231,7 +232,8 @@ impl crate::aead::Aead for AwsLcAead {
         let aad = Aad::from(aad);
 
         // Decrypt in place.
-        let plaintext = self.key
+        let plaintext = self
+            .key
             .open_in_place(nonce, aad, data)
             .map_err(|_| Error::from(SEC_ERROR_BAD_DATA))?;
 
