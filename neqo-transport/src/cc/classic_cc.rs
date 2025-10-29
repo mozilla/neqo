@@ -8,6 +8,7 @@
 
 use std::{
     cmp::{max, min},
+    collections::HashMap,
     fmt::{self, Debug, Display},
     time::{Duration, Instant},
 };
@@ -99,14 +100,20 @@ pub trait WindowAdjustment: Display + Debug {
 }
 
 #[derive(Debug)]
+struct MaybeLostPacket {
+    time_sent: Instant,
+}
+
+#[derive(Debug)]
 pub struct ClassicCongestionControl<T> {
     cc_algorithm: T,
     state: State,
     congestion_window: usize, // = kInitialWindow
     bytes_in_flight: usize,
     acked_bytes: usize,
-    /// Packets that have been lost. This is used to check for spurious congestion events.
-    maybe_lost_packets: Vec<sent::MaybeLostPacket>,
+    /// Packets that have supposedly been lost. These are used for spurious congestion event
+    /// detection.
+    maybe_lost_packets: HashMap<u64, MaybeLostPacket>,
     ssthresh: usize,
     /// Packet number of the first packet that was sent after a congestion event. When this one is
     /// acked we will exit [`State::Recovery`] and enter [`State::CongestionAvoidance`].
@@ -176,29 +183,36 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         &mut self.pmtud
     }
 
-    fn detect_spurious_congestion_event(&mut self, acked_packets: &[sent::Packet]) -> bool {
+    fn detect_spurious_congestion_event(
+        &mut self,
+        acked_packets: &[sent::Packet],
+        cc_stats: &mut CongestionControlStats,
+    ) {
         if self.maybe_lost_packets.is_empty() {
-            return false;
+            return;
         }
 
-        // Build HashSet for O(1) lookup
-        let acked_pns: std::collections::HashSet<_> =
-            acked_packets.iter().map(&sent::Packet::pn).collect();
-
         // Removes all newly acked packets from `maybe_lost_packets`
-        self.maybe_lost_packets
-            .retain(|packet| !acked_pns.contains(&packet.pn));
+        for acked_packet in acked_packets {
+            self.maybe_lost_packets.remove(&acked_packet.pn());
+        }
 
         // If all of them have been removed we detected a spurious congestion event
-        self.maybe_lost_packets.is_empty()
+
+        if self.maybe_lost_packets.is_empty() {
+            cc_stats.spurious_congestion_events += 1;
+            // TODO: Implement spurious congestion event handling: <https://github.com/mozilla/neqo/issues/2694>
+        }
     }
 
     /// Cleanup lost packets that we are fairly sure will never be getting a late acknowledgment
+    /// for.
     fn cleanup_maybe_lost_packets(&mut self, now: Instant, pto: Duration) {
-        // The `pto * 2` maximum age of the lost packets is taken from msquic's implementation
+        // The `pto * 2` maximum age of the lost packets is taken from msquic's implementation:
+        // <https://github.com/microsoft/msquic/blob/2623c07df62b4bd171f469fb29c2714b6735b676/src/core/loss_detection.c#L939-L943>
         let max_age = pto * 2;
         self.maybe_lost_packets
-            .retain(|packet| now.saturating_duration_since(packet.time_sent) <= max_age);
+            .retain(|_, packet| now.saturating_duration_since(packet.time_sent) <= max_age);
     }
 
     fn on_packets_acked(
@@ -211,10 +225,9 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         let mut is_app_limited = true;
         let mut new_acked = 0;
 
-        if self.detect_spurious_congestion_event(acked_pkts) {
-            cc_stats.spurious_congestion_events += 1;
-            // Could send signal to CUBIC for undo here
-        }
+        self.cleanup_maybe_lost_packets(now, rtt_est.pto(true));
+
+        self.detect_spurious_congestion_event(acked_pkts, cc_stats);
 
         for pkt in acked_pkts {
             qtrace!(
@@ -320,8 +333,6 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             return false;
         }
 
-        self.cleanup_maybe_lost_packets(now, pto);
-
         for pkt in lost_packets {
             if pkt.cc_in_flight() {
                 qdebug!(
@@ -334,10 +345,12 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                 // before the rebinding.
                 self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
             }
-            self.maybe_lost_packets.push(sent::MaybeLostPacket {
-                pn: pkt.pn(),
-                time_sent: pkt.time_sent(),
-            });
+            self.maybe_lost_packets.insert(
+                pkt.pn(),
+                MaybeLostPacket {
+                    time_sent: pkt.time_sent(),
+                },
+            );
         }
 
         qlog::metrics_updated(
@@ -459,7 +472,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             congestion_window: cwnd_initial(pmtud.plpmtu()),
             bytes_in_flight: 0,
             acked_bytes: 0,
-            maybe_lost_packets: Vec::new(),
+            maybe_lost_packets: HashMap::new(),
             ssthresh: usize::MAX,
             recovery_start: None,
             qlog: Qlog::disabled(),
