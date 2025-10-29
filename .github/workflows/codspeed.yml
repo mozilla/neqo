@@ -45,17 +45,18 @@ jobs:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - run: |
-          for crate in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name'); do
-            if [ -e "$crate/benches" ]; then
-              for bench in "$crate/benches"/*.rs; do
+          while IFS=: read -r crate manifest_path; do
+            dir=$(dirname "$manifest_path")
+            if [ -e "$dir/benches" ]; then
+              for bench in "$dir/benches"/*.rs; do
                 bench=$(basename -s .rs "$bench")
                 # Set measurement mode from Cargo.toml metadata, default to "instrumentation".
                 mode=$(cargo metadata --no-deps --format-version 1 | jq -r --arg crate "$crate" --arg bench "$bench" '.packages[] | select(.name == $crate) | .metadata.bench[$bench].codspeed.mode // "instrumentation"')
-                echo "Building benchmark '$bench' in crate '$crate' with measurement mode '$mode'"
+                echo "Building benchmark '$bench' in crate '$crate' (dir '$dir') with measurement mode '$mode'"
                 cargo codspeed build --package "$crate" --locked --features bench --bench "$bench" --release --measurement-mode "$mode"
               done
             fi
-          done
+          done < <(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | .name + ":" + .manifest_path')
 
       - name: Run the benchmarks
         uses: CodSpeedHQ/action@4348f634fa7309fe23aac9502e88b999ec90a164 # v4.3.1
