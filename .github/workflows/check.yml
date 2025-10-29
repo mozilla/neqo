@@ -111,6 +111,8 @@ jobs:
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "$TOOLCHAIN" == "stable" ]; then
+            export CC=clang
+            export AWS_LC_SYS_PREBUILT_NASM=1
             cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
             if [ -n "$CAREFUL" ]; then
