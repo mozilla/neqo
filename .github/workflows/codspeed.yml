@@ -10,9 +10,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-#   RUST_TEST_TIME_UNIT: 10,30
-#   RUST_TEST_TIME_INTEGRATION: 10,30
-#   RUST_TEST_TIME_DOCTEST: 10,30
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
