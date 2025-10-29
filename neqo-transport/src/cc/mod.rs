@@ -78,7 +78,11 @@ pub trait CongestionControl: Display + Debug {
         cc_stats: &mut CongestionControlStats,
     ) -> bool;
 
-    fn detect_spurious_congestion_event(&mut self, acked_packets: &[sent::Packet]) -> bool;
+    fn detect_spurious_congestion_event(
+        &mut self,
+        acked_packets: &[sent::Packet],
+        cc_stats: &mut CongestionControlStats,
+    );
 
     fn cleanup_maybe_lost_packets(&mut self, now: Instant, pto: Duration);
 
