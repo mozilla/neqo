@@ -47,7 +47,8 @@ jobs:
       - run: |
           for crate in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name'); do
             if [ -e "$crate/benches" ]; then
-              for bench in $(find "$crate/benches" -depth 1 -print0 -iname "*.rs" | xargs -0 -n1 basename -s .rs); do
+              for bench in "$crate/benches"/*.rs; do
+                bench=$(basename -s .rs "$bench")
                 # Set measurement mode from Cargo.toml metadata, default to "instrumentation".
                 mode=$(cargo metadata --no-deps --format-version 1 | jq -r --arg crate "$crate" --arg bench "$bench" '.packages[] | select(.name == $crate) | .metadata.bench[$bench].codspeed.mode // "instrumentation"')
                 echo "Building benchmark '$bench' in crate '$crate' with measurement mode '$mode'"

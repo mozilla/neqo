@@ -73,7 +73,7 @@ ignored = ["log"]
 bench = false
 
 [package.metadata.bench.main]
-codspeed.mode = "wallclock" # Use "wallclock" mode for "main" bench with codspeed.
+codspeed.mode = "walltime" # Use "walltime" mode for "main" bench with codspeed.
 
 [[bench]]
 name = "main"
