@@ -6,6 +6,10 @@ on:
     # SAFETY: We are not running any code from the triggering PR, so this is safe.
     types: [completed] # zizmor: ignore[dangerous-triggers]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -33,7 +37,7 @@ jobs:
           echo "$EVENT" | jq
 
       - name: Download benchmark results
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           run-id: ${{ github.event.workflow_run.id }}
           name: ${{ github.event.repository.name }}-${{ env.SHA }}-${{ env.DATA_TAG }}-perf
