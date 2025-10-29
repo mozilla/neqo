@@ -63,7 +63,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         group.finish();
     }
 
-    Criterion::default().configure_from_args().final_summary();
+    //FIXME: This fails with codspeed: Criterion::default().configure_from_args().final_summary();
 }
 
 criterion_group!(benches, criterion_benchmark);
