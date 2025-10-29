@@ -53,7 +53,7 @@ jobs:
                 # Set measurement mode from Cargo.toml metadata, default to "instrumentation".
                 mode=$(cargo metadata --no-deps --format-version 1 | jq -r --arg crate "$crate" --arg bench "$bench" '.packages[] | select(.name == $crate) | .metadata.bench[$bench].codspeed.mode // "instrumentation"')
                 echo "Building benchmark '$bench' in crate '$crate' (dir '$dir') with measurement mode '$mode'"
-                cargo codspeed build --package "$crate" --locked --features bench --bench "$bench" --release --measurement-mode "$mode"
+                cargo codspeed build --package "$crate" --locked --features bench --bench "$bench" --measurement-mode "$mode"
               done
             fi
           done < <(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | .name + ":" + .manifest_path')
