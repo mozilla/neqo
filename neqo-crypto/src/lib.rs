@@ -7,10 +7,10 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 mod aead;
-#[cfg(feature = "disable-encryption")]
-pub mod aead_null;
 #[cfg(feature = "awslc")]
 pub mod aead_awslc;
+#[cfg(feature = "disable-encryption")]
+pub mod aead_null;
 pub mod agent;
 mod agentio;
 mod auth;
@@ -38,12 +38,12 @@ use std::{env, ffi::CString, path::PathBuf, ptr::null, sync::OnceLock};
 pub use self::aead::RealAead as Aead;
 // Always export RealAead for comparison/testing.
 pub use self::aead::RealAead;
+#[cfg(all(feature = "awslc", not(feature = "disable-encryption")))]
+pub use self::aead_awslc::AwsLcAead as Aead;
 // Select AEAD implementation based on features.
 // Priority: disable-encryption > awslc > default (NSS)
 #[cfg(feature = "disable-encryption")]
 pub use self::aead_null::AeadNull as Aead;
-#[cfg(all(feature = "awslc", not(feature = "disable-encryption")))]
-pub use self::aead_awslc::AwsLcAead as Aead;
 pub use self::{
     aead::Aead as AeadTrait,
     agent::{
