@@ -137,10 +137,11 @@ pub struct DatagramStats {
 /// Congestion Control stats
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct CongestionControlStats {
-    /// Total number of congestion events
+    /// Total number of congestion events.
     pub congestion_events: usize,
-    /// Number of spurious congestion events (congestion events due to lost packets that were later
-    /// acked)
+    /// Number of spurious congestion events, where congestion was incorrectly inferred due to
+    /// packets initially considered lost but subsequently acknowledged. This indicates
+    /// instances where the congestion control algorithm overreacted to perceived losses.
     pub spurious_congestion_events: usize,
 }
 /// ECN counts by QUIC [`packet::Type`].
