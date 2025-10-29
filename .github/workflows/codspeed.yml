@@ -37,6 +37,7 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: stable
+          tools: cargo-codspeed
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
