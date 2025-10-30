@@ -92,6 +92,15 @@ jobs:
           version-file: neqo-crypto/min_version.txt
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install llvm (Linux)
+        shell: bash
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && inputs.target == '' }}
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+          sudo apt-get install -y --no-install-recommends llvm-20 clang-20
+
       - name: Check
         run: |
           # shellcheck disable=SC2086
