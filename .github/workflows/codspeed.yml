@@ -58,7 +58,8 @@ jobs:
             done < <(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | .name + ":" + .manifest_path')
             echo "]"
           } > benches.json
-          tee benches.json >> "$GITHUB_OUTPUT"
+          cat benches.json
+          cat benches.json >> "$GITHUB_OUTPUT"
 
   benchmarks:
     name: Run benchmarks
