@@ -31,38 +31,34 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          sparse-checkout: Cargo.toml
           persist-credentials: false
-      - uses: ./.github/actions/rust
-        with:
-          version: stable
-          token: ${{ secrets.GITHUB_TOKEN }}
       - id: benches
         run: |
           # Create a GitHub matrix where each entry is a bench with its
           # associated crate and benchmarking mode taken from the Cargo
           # metadata.
-          echo "benches=[" > benches.json
-          first=true
-          while IFS=: read -r crate manifest_path; do
-            dir=$(dirname "$manifest_path")
-            if [ -e "$dir/benches" ]; then
-              for bench in "$dir/benches"/*.rs; do
-                bench=$(basename -s .rs "$bench")
-                # Set measurement mode from Cargo.toml metadata, default to "instrumentation".
-                mode=$(cargo metadata --no-deps --format-version 1 | jq -r --arg crate "$crate" --arg bench "$bench" '.packages[] | select(.name == $crate) | .metadata.bench[$bench].codspeed.mode // "instrumentation"')
-                if [ "$first" = true ]; then
-                  first=false
-                else
-                  echo "," >> benches.json
-                fi
-                echo "{\"crate\":\"$crate\",\"bench\":\"$bench\",\"mode\":\"$mode\"}" >> benches.json
-              done
-            fi
-          done < <(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | .name + ":" + .manifest_path')
-          echo "]" >> benches.json
-          benches=$(cat benches.json)
-          echo "benches=$benches" >> "$GITHUB_OUTPUT"
+          {
+            echo "benches=["
+            first=true
+            while IFS=: read -r crate manifest_path; do
+              dir=$(dirname "$manifest_path")
+              if [ -e "$dir/benches" ]; then
+                for bench in "$dir/benches"/*.rs; do
+                  bench=$(basename -s .rs "$bench")
+                  # Set measurement mode from Cargo.toml metadata, default to "instrumentation".
+                  mode=$(cargo metadata --no-deps --format-version 1 | jq -r --arg crate "$crate" --arg bench "$bench" '.packages[] | select(.name == $crate) | .metadata.bench[$bench].codspeed.mode // "instrumentation"')
+                  if [ "$first" = true ]; then
+                    first=false
+                  else
+                    echo ","
+                  fi
+                  echo "{\"crate\":\"$crate\",\"bench\":\"$bench\",\"mode\":\"$mode\"}"
+                done
+              fi
+            done < <(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | .name + ":" + .manifest_path')
+            echo "]"
+          } > benches.json
+          tee benches.json >> "$GITHUB_OUTPUT"
 
   benchmarks:
     name: Run benchmarks
