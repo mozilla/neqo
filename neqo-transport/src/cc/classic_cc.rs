@@ -8,13 +8,13 @@
 
 use std::{
     cmp::{max, min},
-    collections::HashMap,
     fmt::{self, Debug, Display},
     time::{Duration, Instant},
 };
 
 use ::qlog::events::{quic::CongestionStateUpdated, EventData};
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::Qlog, qtrace};
+use rustc_hash::FxHashMap as HashMap;
 
 use super::CongestionControl;
 use crate::{
@@ -112,8 +112,9 @@ pub struct ClassicCongestionControl<T> {
     bytes_in_flight: usize,
     acked_bytes: usize,
     /// Packets that have supposedly been lost. These are used for spurious congestion event
-    /// detection.
-    maybe_lost_packets: HashMap<u64, MaybeLostPacket>,
+    /// detection. Gets drained when the same packets are later acked and regularly purged from too
+    /// old packets in [`Self::cleanup_maybe_lost_packets`].
+    maybe_lost_packets: HashMap<packet::Number, MaybeLostPacket>,
     ssthresh: usize,
     /// Packet number of the first packet that was sent after a congestion event. When this one is
     /// acked we will exit [`State::Recovery`] and enter [`State::CongestionAvoidance`].
@@ -183,38 +184,6 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         &mut self.pmtud
     }
 
-    fn detect_spurious_congestion_event(
-        &mut self,
-        acked_packets: &[sent::Packet],
-        cc_stats: &mut CongestionControlStats,
-    ) {
-        if self.maybe_lost_packets.is_empty() {
-            return;
-        }
-
-        // Removes all newly acked packets from `maybe_lost_packets`
-        for acked_packet in acked_packets {
-            self.maybe_lost_packets.remove(&acked_packet.pn());
-        }
-
-        // If all of them have been removed we detected a spurious congestion event
-
-        if self.maybe_lost_packets.is_empty() {
-            cc_stats.spurious_congestion_events += 1;
-            // TODO: Implement spurious congestion event handling: <https://github.com/mozilla/neqo/issues/2694>
-        }
-    }
-
-    /// Cleanup lost packets that we are fairly sure will never be getting a late acknowledgment
-    /// for.
-    fn cleanup_maybe_lost_packets(&mut self, now: Instant, pto: Duration) {
-        // The `pto * 2` maximum age of the lost packets is taken from msquic's implementation:
-        // <https://github.com/microsoft/msquic/blob/2623c07df62b4bd171f469fb29c2714b6735b676/src/core/loss_detection.c#L939-L943>
-        let max_age = pto * 2;
-        self.maybe_lost_packets
-            .retain(|_, packet| now.saturating_duration_since(packet.time_sent) <= max_age);
-    }
-
     fn on_packets_acked(
         &mut self,
         acked_pkts: &[sent::Packet],
@@ -225,6 +194,10 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         let mut is_app_limited = true;
         let mut new_acked = 0;
 
+        // Supplying `rtt_est.pto(true)` here is best effort not to have to track
+        // `recovery::Loss::confirmed()` all the way down to the congestion controller. Having too
+        // big a PTO does no harm here and usually the connection should be confirmed at this point
+        // anyway.
         self.cleanup_maybe_lost_packets(now, rtt_est.pto(true));
 
         self.detect_spurious_congestion_event(acked_pkts, cc_stats);
@@ -340,9 +313,9 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                     pkt.pn(),
                     pkt.len()
                 );
-                // BIF is set to 0 on a path change, but in case that was because of a simple
-                // rebinding event, we may still declare packets lost that were sent
-                // before the rebinding.
+                // bytes_in_flight is set to 0 on a path change, but in case that was because of a
+                // simple rebinding event, we may still declare packets lost that
+                // were sent before the rebinding.
                 self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
             }
             self.maybe_lost_packets.insert(
@@ -472,7 +445,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             congestion_window: cwnd_initial(pmtud.plpmtu()),
             bytes_in_flight: 0,
             acked_bytes: 0,
-            maybe_lost_packets: HashMap::new(),
+            maybe_lost_packets: HashMap::default(),
             ssthresh: usize::MAX,
             recovery_start: None,
             qlog: Qlog::disabled(),
@@ -533,6 +506,42 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             );
             self.state = state;
         }
+    }
+
+    // TODO: Maybe do tracking of lost packets per congestion epoch. Right now if we get a spurious
+    // event and then before the first was recovered get another (or even a real congestion event
+    // because of random loss, path change, ...), it will only be detected as spurious once the old
+    // and new lost packets are recovered. This means we'd have two spurious events counted as one
+    // and would also only be able to recover to the cwnd prior to the second event.
+    fn detect_spurious_congestion_event(
+        &mut self,
+        acked_packets: &[sent::Packet],
+        cc_stats: &mut CongestionControlStats,
+    ) {
+        if self.maybe_lost_packets.is_empty() {
+            return;
+        }
+
+        // Removes all newly acked packets that are late acks from `maybe_lost_packets`.
+        for acked_packet in acked_packets {
+            self.maybe_lost_packets.remove(&acked_packet.pn());
+        }
+
+        // If all of them have been removed we detected a spurious congestion event.
+        if self.maybe_lost_packets.is_empty() {
+            cc_stats.spurious_congestion_events += 1;
+            // TODO: Implement spurious congestion event handling: <https://github.com/mozilla/neqo/issues/2694>
+        }
+    }
+
+    /// Cleanup lost packets that we are fairly sure will never be getting a late acknowledgment
+    /// for.
+    fn cleanup_maybe_lost_packets(&mut self, now: Instant, pto: Duration) {
+        // The `pto * 2` maximum age of the lost packets is taken from msquic's implementation:
+        // <https://github.com/microsoft/msquic/blob/2623c07df62b4bd171f469fb29c2714b6735b676/src/core/loss_detection.c#L939-L943>
+        let max_age = pto * 2;
+        self.maybe_lost_packets
+            .retain(|_, packet| now.saturating_duration_since(packet.time_sent) <= max_age);
     }
 
     fn detect_persistent_congestion<'a>(
