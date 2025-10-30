@@ -1,4 +1,4 @@
-name: CodSpeed Benchmarks
+name: CodSpeed
 on:
   push:
     branches: ["main"]
@@ -24,7 +24,7 @@ defaults:
 
 jobs:
   bench-matrix:
-    name: Determine benchmark matrix
+    name: Determine bench matrix
     runs-on: ubuntu-24.04
     outputs:
       benches: ${{ steps.benches.outputs.benches }}
@@ -38,7 +38,7 @@ jobs:
           # associated crate and benchmarking mode taken from the Cargo
           # metadata.
           {
-            echo -n "["
+            echo -n "benches=["
             first=true
             while IFS=: read -r crate manifest_path; do
               dir=$(dirname "$manifest_path")
@@ -51,6 +51,8 @@ jobs:
                   # - Looks up .metadata.bench[$bench].codspeed.mode for the benchmark
                   # - If not set, defaults to "instrumentation"
                   mode=$(cargo metadata --no-deps --format-version 1 | jq -r --arg crate "$crate" --arg bench "$bench" '.packages[] | select(.name == $crate) | .metadata.bench[$bench].codspeed.mode // "instrumentation"')
+                  # FIXME: Always use "instrumentation" mode to eliminate CI VM effects.
+                  mode="instrumentation"
                   if [ "$first" = true ]; then
                     first=false
                   else
@@ -61,12 +63,10 @@ jobs:
               fi
             done < <(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | .name + ":" + .manifest_path')
             echo -n "]"
-          } > benches.json
-          cat benches.json
-          echo "benches=$(cat benches.json)" >> "${GITHUB_OUTPUT}"
+          } >> "${GITHUB_OUTPUT}"
 
   benchmarks:
-    name: Run benchmarks
+    name: Run bench
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -91,15 +91,14 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-      - env:
+      - name: Build bench
+        env:
           BENCH: ${{ matrix.bench.bench }}
           CRATE: ${{ matrix.bench.crate }}
           MODE: ${{ matrix.bench.mode }}
-        run: |
-          echo "Building benchmark '$BENCH' in crate '$CRATE' with measurement mode '$MODE'"
-          cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
+        run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
 
-      - name: Run the benchmarks
+      - name: Run bench & upload results
         uses: CodSpeedHQ/action@4348f634fa7309fe23aac9502e88b999ec90a164 # v4.3.1
         with:
           mode: ${{ matrix.bench.mode }}
