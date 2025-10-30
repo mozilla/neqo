@@ -123,7 +123,11 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
-          sudo apt-get install -y --no-install-recommends libclang-dev libclang-rt-dev
+          version=20
+          sudo apt-get install -y --no-install-recommends libclang-dev libclang-rt-dev clang-${version}
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${version} 100
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${version} 100
+          sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-${version} 100
 
       - name: Check
         run: |
