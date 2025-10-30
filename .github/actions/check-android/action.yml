@@ -47,7 +47,7 @@ runs:
       with:
         version: stable
         targets: ${{ inputs.target }}
-        tools: cargo-ndk@^4
+        tools: cargo-ndk@^4, bindgen-cli
         token: ${{ inputs.github-token }}
 
     - uses: mozilla/actions/nss@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0

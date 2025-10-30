@@ -121,9 +121,8 @@ jobs:
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "$TOOLCHAIN" == "stable" ]; then
-            clang -v
-            llvm-profdata --version
-            CC=clang cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
+            clang-20 -v
+            CC=clang-20 cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
             if [ -n "$CAREFUL" ]; then
               TRIPLE="--target $(rustc --print host-tuple)"
