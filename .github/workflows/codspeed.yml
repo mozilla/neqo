@@ -23,9 +23,50 @@ defaults:
     shell: bash
 
 jobs:
+  bench-matrix:
+    name: Determine benchmark matrix
+    runs-on: ubuntu-24.04
+    outputs:
+      benches: ${{ steps.benches.outputs.benches }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: Cargo.toml
+          persist-credentials: false
+      - id: benches
+        run: |
+          # Create a GitHub matrix where each entry is a bench with its
+          # associated crate and benchmarking mode taken from the Cargo
+          # metadata.
+          echo "benches=[" > benches.json
+          first=true
+          while IFS=: read -r crate manifest_path; do
+            dir=$(dirname "$manifest_path")
+            if [ -e "$dir/benches" ]; then
+              for bench in "$dir/benches"/*.rs; do
+                bench=$(basename -s .rs "$bench")
+                # Set measurement mode from Cargo.toml metadata, default to "instrumentation".
+                mode=$(cargo metadata --no-deps --format-version 1 | jq -r --arg crate "$crate" --arg bench "$bench" '.packages[] | select(.name == $crate) | .metadata.bench[$bench].codspeed.mode // "instrumentation"')
+                if [ "$first" = true ]; then
+                  first=false
+                else
+                  echo "," >> benches.json
+                fi
+                echo "{\"crate\":\"$crate\",\"bench\":\"$bench\",\"mode\":\"$mode\"}" >> benches.json
+              done
+            fi
+          done < <(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | .name + ":" + .manifest_path')
+          echo "]" >> benches.json
+          jq benches.json | tee >> "$GITHUB_OUTPUT"
+
   benchmarks:
     name: Run benchmarks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
+    needs: bench-matrix
+
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -44,22 +85,17 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-      - run: |
-          while IFS=: read -r crate manifest_path; do
-            dir=$(dirname "$manifest_path")
-            if [ -e "$dir/benches" ]; then
-              for bench in "$dir/benches"/*.rs; do
-                bench=$(basename -s .rs "$bench")
-                # Set measurement mode from Cargo.toml metadata, default to "instrumentation".
-                mode=$(cargo metadata --no-deps --format-version 1 | jq -r --arg crate "$crate" --arg bench "$bench" '.packages[] | select(.name == $crate) | .metadata.bench[$bench].codspeed.mode // "instrumentation"')
-                echo "Building benchmark '$bench' in crate '$crate' (dir '$dir') with measurement mode '$mode'"
-                cargo codspeed build --package "$crate" --locked --features bench --bench "$bench" --measurement-mode "$mode"
-              done
-            fi
-          done < <(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | .name + ":" + .manifest_path')
+      - env:
+          BENCH: ${{ matrix.bench.bench }}
+          CRATE: ${{ matrix.bench.crate }}
+          MODE: ${{ matrix.bench.mode }}
+        run: |
+          echo "Building benchmark '$BENCH' in crate '$CRATE' with measurement mode '$MODE'"
+          cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
 
       - name: Run the benchmarks
         uses: CodSpeedHQ/action@4348f634fa7309fe23aac9502e88b999ec90a164 # v4.3.1
         with:
+          mode: ${{ matrix.bench.mode }}
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }}
