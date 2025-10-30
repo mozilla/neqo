@@ -33,6 +33,10 @@ jobs:
         with:
           sparse-checkout: Cargo.toml
           persist-credentials: false
+      - uses: ./.github/actions/rust
+        with:
+          version: stable
+          token: ${{ secrets.GITHUB_TOKEN }}
       - id: benches
         run: |
           # Create a GitHub matrix where each entry is a bench with its
