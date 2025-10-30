@@ -99,7 +99,7 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
-          sudo apt-get install -y --no-install-recommends llvm-20 clang-20
+          sudo apt-get install -y --no-install-recommends libclang-dev libclang-rt-dev
 
       - name: Check
         run: |
@@ -121,8 +121,7 @@ jobs:
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "$TOOLCHAIN" == "stable" ]; then
-            clang-20 -v
-            CC=clang-20 cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
+            CC=clang cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
             if [ -n "$CAREFUL" ]; then
               TRIPLE="--target $(rustc --print host-tuple)"
