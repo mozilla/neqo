@@ -38,7 +38,7 @@ jobs:
           # associated crate and benchmarking mode taken from the Cargo
           # metadata.
           {
-            echo "["
+            echo -n "["
             first=true
             while IFS=: read -r crate manifest_path; do
               dir=$(dirname "$manifest_path")
@@ -50,14 +50,14 @@ jobs:
                   if [ "$first" = true ]; then
                     first=false
                   else
-                    echo ","
+                    echo -n ","
                   fi
-                  echo "{\"crate\":\"$crate\",\"bench\":\"$bench\",\"mode\":\"$mode\"}"
+                  echo -n "{\"crate\":\"$crate\",\"bench\":\"$bench\",\"mode\":\"$mode\"}"
                 done
               fi
             done < <(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | .name + ":" + .manifest_path')
-            echo "]"
-          } | jq --raw-input --compact-output --slurp > benches.json
+            echo -n "]"
+          } > benches.json
           cat benches.json
           echo "benches=$(cat benches.json)" >> "${GITHUB_OUTPUT}"
 
