@@ -46,6 +46,10 @@ jobs:
                 for bench in "$dir/benches"/*.rs; do
                   bench=$(basename -s .rs "$bench")
                   # Set measurement mode from Cargo.toml metadata, default to "instrumentation".
+                  # The following jq pipeline:
+                  # - Selects the package with name == $crate
+                  # - Looks up .metadata.bench[$bench].codspeed.mode for the benchmark
+                  # - If not set, defaults to "instrumentation"
                   mode=$(cargo metadata --no-deps --format-version 1 | jq -r --arg crate "$crate" --arg bench "$bench" '.packages[] | select(.name == $crate) | .metadata.bench[$bench].codspeed.mode // "instrumentation"')
                   if [ "$first" = true ]; then
                     first=false
