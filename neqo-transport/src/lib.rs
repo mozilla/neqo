@@ -253,7 +253,7 @@ pub enum CloseReason {
 
 impl CloseReason {
     /// Checks enclosed error for [`Error::None`] and
-    /// [`CloseReason::Application(0)`].
+    /// [`CloseReason::Application`] with code `0`.
     #[must_use]
     pub const fn is_error(&self) -> bool {
         !matches!(self, Self::Transport(Error::None) | Self::Application(0),)
