@@ -16,6 +16,7 @@ use crate::{
     pmtud::Pmtud,
     recovery::sent,
     rtt::RttEstimate,
+    stats::CongestionControlStats,
     ConnectionParameters, Stats,
 };
 
@@ -96,7 +97,8 @@ impl PacketSender {
         now: Instant,
         stats: &mut Stats,
     ) {
-        self.cc.on_packets_acked(acked_pkts, rtt_est, now);
+        self.cc
+            .on_packets_acked(acked_pkts, rtt_est, now, &mut stats.cc);
         self.pmtud_mut().on_packets_acked(acked_pkts, now, stats);
         self.maybe_update_pacer_mtu();
     }
@@ -117,6 +119,7 @@ impl PacketSender {
             pto,
             lost_packets,
             now,
+            &mut stats.cc,
         );
         // Call below may change the size of MTU probes, so it needs to happen after the CC
         // reaction above, which needs to ignore probes based on their size.
@@ -126,8 +129,13 @@ impl PacketSender {
     }
 
     /// Called when ECN CE mark received.  Returns true if the congestion window was reduced.
-    pub fn on_ecn_ce_received(&mut self, largest_acked_pkt: &sent::Packet, now: Instant) -> bool {
-        self.cc.on_ecn_ce_received(largest_acked_pkt, now)
+    pub fn on_ecn_ce_received(
+        &mut self,
+        largest_acked_pkt: &sent::Packet,
+        now: Instant,
+        cc_stats: &mut CongestionControlStats,
+    ) -> bool {
+        self.cc.on_ecn_ce_received(largest_acked_pkt, now, cc_stats)
     }
 
     pub fn discard(&mut self, pkt: &sent::Packet, now: Instant) {

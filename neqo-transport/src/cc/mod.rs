@@ -14,7 +14,7 @@ use std::{
 
 use neqo_common::qlog::Qlog;
 
-use crate::{recovery::sent, rtt::RttEstimate, Error, Pmtud};
+use crate::{recovery::sent, rtt::RttEstimate, stats::CongestionControlStats, Error, Pmtud};
 
 mod classic_cc;
 mod cubic;
@@ -56,6 +56,7 @@ pub trait CongestionControl: Display + Debug {
         acked_pkts: &[sent::Packet],
         rtt_est: &RttEstimate,
         now: Instant,
+        cc_stats: &mut CongestionControlStats,
     );
 
     /// Returns true if the congestion window was reduced.
@@ -66,10 +67,16 @@ pub trait CongestionControl: Display + Debug {
         pto: Duration,
         lost_packets: &[sent::Packet],
         now: Instant,
+        cc_stats: &mut CongestionControlStats,
     ) -> bool;
 
     /// Returns true if the congestion window was reduced.
-    fn on_ecn_ce_received(&mut self, largest_acked_pkt: &sent::Packet, now: Instant) -> bool;
+    fn on_ecn_ce_received(
+        &mut self,
+        largest_acked_pkt: &sent::Packet,
+        now: Instant,
+        cc_stats: &mut CongestionControlStats,
+    ) -> bool;
 
     #[must_use]
     fn recovery_packet(&self) -> bool;
