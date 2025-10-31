@@ -6,12 +6,10 @@
 
 use std::{cmp::max, time::Duration};
 
-use neqo_common::MAX_VARINT;
-
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
     connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT},
-    recv_stream::INITIAL_RECV_WINDOW_SIZE,
+    recv_stream::INITIAL_STREAM_RECV_WINDOW_SIZE,
     rtt::GRANULARITY,
     stream_id::StreamType,
     tparams::{
@@ -29,9 +27,17 @@ use crate::{
     CongestionControlAlgorithm, Res, DEFAULT_INITIAL_RTT,
 };
 
-const LOCAL_MAX_DATA: u64 = MAX_VARINT;
 const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
+
+/// Initial connection-level receive window size.
+///
+/// Set to 16 times the per-stream initial window to accommodate the default
+/// bidirectional stream limit ([`LOCAL_STREAM_LIMIT_BIDI`]).
+/// This provides sufficient capacity for concurrent streams without
+/// being excessively large, and allows auto-tuning to grow the window
+/// based on actual usage.
+const LOCAL_MAX_DATA: u64 = INITIAL_STREAM_RECV_WINDOW_SIZE as u64 * LOCAL_STREAM_LIMIT_BIDI;
 // Maximum size of a QUIC DATAGRAM frame, as specified in https://datatracker.ietf.org/doc/html/rfc9221#section-3-4.
 const MAX_DATAGRAM_FRAME_SIZE: u64 = 65535;
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
@@ -106,11 +112,11 @@ impl Default for ConnectionParameters {
             versions: version::Config::default(),
             cc_algorithm: CongestionControlAlgorithm::Cubic,
             max_data: LOCAL_MAX_DATA,
-            max_stream_data_bidi_remote: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
+            max_stream_data_bidi_remote: u64::try_from(INITIAL_STREAM_RECV_WINDOW_SIZE)
                 .expect("usize fits in u64"),
-            max_stream_data_bidi_local: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
+            max_stream_data_bidi_local: u64::try_from(INITIAL_STREAM_RECV_WINDOW_SIZE)
                 .expect("usize fits in u64"),
-            max_stream_data_uni: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
+            max_stream_data_uni: u64::try_from(INITIAL_STREAM_RECV_WINDOW_SIZE)
                 .expect("usize fits in u64"),
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,

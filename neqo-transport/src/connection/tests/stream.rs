@@ -18,7 +18,7 @@ use crate::{
     events::ConnectionEvent,
     frame::FrameType,
     packet,
-    recv_stream::INITIAL_RECV_WINDOW_SIZE,
+    recv_stream::INITIAL_STREAM_RECV_WINDOW_SIZE,
     send_stream::{self, OrderGroup},
     streams::{SendOrder, StreamOrder},
     tparams::{TransportParameter, TransportParameterId::*},
@@ -438,7 +438,7 @@ fn max_data() {
     client.streams.handle_max_data(100_000_000);
     assert_eq!(
         client.stream_avail_send_space(stream_id).unwrap(),
-        INITIAL_RECV_WINDOW_SIZE - SMALL_MAX_DATA
+        INITIAL_STREAM_RECV_WINDOW_SIZE - SMALL_MAX_DATA
     );
 
     let evts = client.events().collect::<Vec<_>>();
@@ -885,7 +885,7 @@ fn stream_data_blocked_generates_max_stream_data() {
         }
         written += amount;
     }
-    assert_eq!(written, INITIAL_RECV_WINDOW_SIZE);
+    assert_eq!(written, INITIAL_STREAM_RECV_WINDOW_SIZE);
 }
 
 /// See <https://github.com/mozilla/neqo/issues/871>

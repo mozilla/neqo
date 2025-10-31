@@ -70,7 +70,7 @@ pub use self::{
     packet::MIN_INITIAL_PACKET_SIZE,
     pmtud::Pmtud,
     quic_datagrams::DatagramTracking,
-    recv_stream::INITIAL_RECV_WINDOW_SIZE,
+    recv_stream::INITIAL_STREAM_RECV_WINDOW_SIZE,
     rtt::DEFAULT_INITIAL_RTT,
     sni::find_sni,
     stats::Stats,
