@@ -83,6 +83,10 @@ impl Version {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "draft-29"),
+        expect(clippy::unused_self, reason = "Only used with draft-29 feature.")
+    )]
     pub(crate) const fn is_draft(self) -> bool {
         #[cfg(feature = "draft-29")]
         return matches!(self, Self::Draft29);
