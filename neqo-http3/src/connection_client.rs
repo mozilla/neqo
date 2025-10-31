@@ -1019,9 +1019,9 @@ impl Http3Client {
     /// library, but instead must be driven by the application).
     ///
     /// [`Http3Client::process_multiple_output`] can return:
-    /// - a [`OutputBatch::Datagram(Datagram)`]: data that should be sent as a UDP payload,
-    /// - a [`OutputBatch::Callback(Duration)`]: the duration of a  timer. `process_output` should
-    ///   be called at least after the time expires,
+    /// - a [`OutputBatch::DatagramBatch`]: data that should be sent as a UDP payload,
+    /// - a [`OutputBatch::Callback`]: the duration of a  timer. `process_output` should be called
+    ///   at least after the time expires,
     /// - [`OutputBatch::None`]: this is returned when `Http3Client` is done and can be destroyed.
     ///
     /// The application should call this function repeatedly until a timer value or None is

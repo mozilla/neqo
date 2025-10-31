@@ -11,9 +11,9 @@ use std::{io, net::SocketAddr};
 use neqo_common::{qdebug, DatagramBatch};
 use neqo_udp::{DatagramIter, RecvBuf};
 
-/// Ideally this would live in [`neqo-udp`]. [`neqo-udp`] is used in Firefox.
+/// Ideally this would live in [`neqo_udp`]. [`neqo_udp`] is used in Firefox.
 ///
-/// Firefox uses `cargo vet`. [`tokio`] the dependency of [`neqo-udp`] is not
+/// Firefox uses `cargo vet`. [`tokio`] the dependency of [`neqo_udp`] is not
 /// audited as `safe-to-deploy`. `cargo vet` will require `safe-to-deploy` for
 /// [`tokio`] even when behind a feature flag.
 ///

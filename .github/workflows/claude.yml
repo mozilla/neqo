@@ -35,7 +35,7 @@ jobs:
         uses: anthropics/claude-code-action@v1 # zizmor: ignore[unpinned-uses]
         with:
           track_progress: true
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           use_sticky_comment: true
           use_commit_signing: true
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
