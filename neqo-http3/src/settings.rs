@@ -6,7 +6,7 @@
 
 use std::ops::Deref;
 
-use neqo_common::{qdebug, Buffer, Decoder, Encoder};
+use neqo_common::{Buffer, Decoder, Encoder, qdebug, qwarn};
 use neqo_crypto::{ZeroRttCheckResult, ZeroRttChecker};
 
 use crate::{Error, Http3Parameters, Res};
@@ -20,13 +20,20 @@ const SETTINGS_ZERO_RTT_VERSION: u64 = 1;
 const SETTINGS_MAX_HEADER_LIST_SIZE: SettingsType = 0x6;
 const SETTINGS_QPACK_MAX_TABLE_CAPACITY: SettingsType = 0x1;
 const SETTINGS_QPACK_BLOCKED_STREAMS: SettingsType = 0x7;
-const SETTINGS_ENABLE_WEB_TRANSPORT: SettingsType = 0x2b60_3742;
 // draft-ietf-masque-h3-datagram-04.
 // We also use this old value because the current web-platform test only supports
 // this value.
 const SETTINGS_H3_DATAGRAM_DRAFT04: SettingsType = 0x00ff_d277;
 
 const SETTINGS_H3_DATAGRAM: SettingsType = 0x33;
+
+/// WebTransport draft 4.
+const SETTINGS_ENABLE_WEB_TRANSPORT: SettingsType = 0x2b60_3742;
+/// WebTransport draft 14.
+const SETTINGS_WT_MAX_SESSIONS: SettingsType = 0x14e9cd29;
+const SETTINGS_WT_INITIAL_MAX_STREAMS_UNI: SettingsType = 0x2b64;
+const SETTINGS_WT_INITIAL_MAX_STREAMS_BIDI: SettingsType = 0x2b65;
+const SETTINGS_WT_INITIAL_MAX_DATA: SettingsType = 0x2b61;
 
 /// Advertises support for HTTP Extended CONNECT.
 ///
@@ -48,9 +55,9 @@ pub enum HSettingType {
 const fn hsetting_default(setting_type: HSettingType) -> u64 {
     match setting_type {
         HSettingType::MaxHeaderListSize => 1 << 62,
+        HSettingType::EnableWebTransport => 1,
         HSettingType::MaxTableCapacity
         | HSettingType::BlockedStreams
-        | HSettingType::EnableWebTransport
         | HSettingType::EnableH3Datagram
         | HSettingType::EnableConnect => 0,
     }
@@ -112,6 +119,9 @@ impl HSettings {
                     HSettingType::EnableWebTransport => {
                         enc_inner.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT);
                         enc_inner.encode_varint(iter.value);
+
+                        enc_inner.encode_varint(SETTINGS_WT_MAX_SESSIONS);
+                        enc_inner.encode_varint(iter.value);
                     }
                     HSettingType::EnableH3Datagram => {
                         if iter.value == 1 {
@@ -161,6 +171,22 @@ impl HSettings {
                     }
                     self.settings
                         .push(HSetting::new(HSettingType::EnableWebTransport, value));
+                }
+                (Some(SETTINGS_WT_MAX_SESSIONS), Some(value)) => {
+                    if value > 1 {
+                        return Err(Error::HttpSettings);
+                    }
+                    self.settings
+                        .push(HSetting::new(HSettingType::EnableWebTransport, value));
+                }
+                (Some(SETTINGS_WT_INITIAL_MAX_STREAMS_UNI), Some(value)) => {
+                    qwarn!("SETTINGS_WT_INITIAL_MAX_STREAMS_UNI {value}");
+                }
+                (Some(SETTINGS_WT_INITIAL_MAX_STREAMS_BIDI), Some(value)) => {
+                    qwarn!("SETTINGS_WT_INITIAL_MAX_STREAMS_BIDI {value}");
+                }
+                (Some(SETTINGS_WT_INITIAL_MAX_DATA), Some(value)) => {
+                    qwarn!("SETTINGS_WT_INITIAL_MAX_DATA {value}");
                 }
                 (Some(SETTINGS_H3_DATAGRAM_DRAFT04), Some(value)) => {
                     if value > 1 {
@@ -264,6 +290,8 @@ impl HttpZeroRttChecker {
             .encode_varint(settings.get_max_blocked_streams());
         if settings.get_webtransport() {
             enc.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT)
+                .encode_varint(true);
+            enc.encode_varint(SETTINGS_WT_MAX_SESSIONS)
                 .encode_varint(true);
         }
         if settings.get_http3_datagram() {
