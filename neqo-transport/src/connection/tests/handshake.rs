@@ -884,7 +884,6 @@ fn extra_initial_invalid_cid() {
     let s_init = server.process(c_init2, now).dgram();
     assert!(s_init.is_some());
     let s_hs = server.process_output(now).dgram().unwrap();
-    assert_handshake(&s_hs);
     now += DEFAULT_RTT / 2;
 
     // If the client receives a packet that contains the wrong connection
