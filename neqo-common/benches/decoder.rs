@@ -5,6 +5,10 @@
 // except according to those terms.
 
 #![expect(clippy::unwrap_used, reason = "OK in a bench.")]
+#![expect(
+    clippy::significant_drop_tightening,
+    reason = "Inherent in codspeed criterion_group! macro."
+)]
 
 use std::hint::black_box;
 
