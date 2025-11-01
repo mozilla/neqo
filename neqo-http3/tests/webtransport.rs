@@ -247,7 +247,7 @@ fn wt_client_stream_uni() {
     let (mut client, mut server) = connect();
     let wt_session = create_wt_session(&mut client, &mut server);
     let wt_stream = client
-        .webtransport_create_stream(wt_session.stream_id(), StreamType::UniDi)
+        .webtransport_create_stream(wt_session.stream_id(), StreamType::UniDi, now())
         .unwrap();
     send_data_client(&mut client, &mut server, wt_stream, BUF_CLIENT);
     exchange_packets(&mut client, &mut server, false, None);
@@ -262,7 +262,7 @@ fn wt_client_stream_bidi() {
     let (mut client, mut server) = connect();
     let wt_session = create_wt_session(&mut client, &mut server);
     let wt_client_stream = client
-        .webtransport_create_stream(wt_session.stream_id(), StreamType::BiDi)
+        .webtransport_create_stream(wt_session.stream_id(), StreamType::BiDi, now())
         .unwrap();
     send_data_client(&mut client, &mut server, wt_client_stream, BUF_CLIENT);
     let wt_server_stream = receive_data_server(
@@ -283,7 +283,7 @@ fn wt_server_stream_uni() {
 
     let (mut client, mut server) = connect();
     let wt_session = create_wt_session(&mut client, &mut server);
-    let wt_server_stream = wt_session.create_stream(StreamType::UniDi).unwrap();
+    let wt_server_stream = wt_session.create_stream(StreamType::UniDi, now()).unwrap();
     send_data_server(&mut client, &mut server, &wt_server_stream, BUF_SERVER);
     receive_data_client(
         &mut client,
@@ -301,7 +301,7 @@ fn wt_server_stream_bidi() {
 
     let (mut client, mut server) = connect();
     let wt_session = create_wt_session(&mut client, &mut server);
-    let wt_server_stream = wt_session.create_stream(StreamType::BiDi).unwrap();
+    let wt_server_stream = wt_session.create_stream(StreamType::BiDi, now()).unwrap();
     send_data_server(&mut client, &mut server, &wt_server_stream, BUF_SERVER);
     receive_data_client(
         &mut client,
@@ -370,7 +370,9 @@ fn wt_race_condition_server_stream_before_confirmation() {
         assert_eq!(server.process_output(now).dgram(), None);
 
         // Server creates a stream, but hold back the UDP datagram.
-        let wt_server_stream = wt_server_session.create_stream(StreamType::UniDi).unwrap();
+        let wt_server_stream = wt_server_session
+            .create_stream(StreamType::UniDi, now)
+            .unwrap();
         assert_eq!(wt_server_stream.send_data(&[42], now).unwrap(), 1);
         let server_stream_dgram = server
             .process_output(now)
