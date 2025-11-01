@@ -13,7 +13,7 @@ use std::{
 
 use neqo_common::{event::Provider as _, qdebug, Datagram};
 use neqo_crypto::{
-    constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus,
+    constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus, Epoch,
 };
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
@@ -38,7 +38,8 @@ use crate::{
     stats::FrameStats,
     tparams::{TransportParameter, TransportParameterId::*},
     tracking::DEFAULT_LOCAL_ACK_DELAY,
-    CloseReason, ConnectionParameters, Error, Pmtud, StreamType, Version,
+    CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
+    Version,
 };
 
 const ECH_CONFIG_ID: u8 = 7;
@@ -1561,4 +1562,63 @@ fn zero_rtt_with_ech() {
     assert!(server.tls_info().unwrap().ech_accepted());
     assert!(client.tls_info().unwrap().early_data_accepted());
     assert!(server.tls_info().unwrap().early_data_accepted());
+}
+
+/// Test that `can_grease_quic_bit()` correctly handles cached 0-RTT parameters.
+///
+/// RFC 9287 Section 3.1 states: "A server MUST NOT remember that a client negotiated
+/// the extension in a previous connection and set the QUIC Bit to 0 based on that information."
+///
+/// This test ensures that:
+/// 1. `Initial` and 0-RTT packets are NOT greased based solely on cached 0-RTT parameters
+/// 2. `Handshake` and `ApplicationData` packets can use cached parameters
+///
+/// Regression test for the `handshakeloss` interop test failure where Initial packets
+/// with the fixed bit cleared were discarded by the server.
+#[test]
+fn grease_quic_bit_respects_current_handshake() {
+    fixture_init();
+
+    // Create a client connection.
+    let client = Connection::new_client(
+        test_fixture::DEFAULT_SERVER_NAME,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
+        ConnectionParameters::default(),
+        now(),
+    )
+    .unwrap();
+
+    // Simulate having cached 0-RTT transport parameters that include grease_quic_bit.
+    // In reality, this would come from a previous connection's session ticket.
+    let mut tp = crate::tparams::TransportParameters::default();
+    tp.set_empty(GreaseQuicBit);
+    client.tps.borrow_mut().set_remote_0rtt(Some(tp));
+
+    // At this point:
+    // - We have remote_0rtt params with GreaseQuicBit
+    // - We do NOT have remote_handshake params (no current handshake confirmation)
+
+    // With only cached 0-RTT params, Initial and ZeroRtt MUST NOT be greased.
+    // RFC 9287 requires confirmation in the current handshake before greasing.
+    assert!(
+        !client.can_grease_quic_bit(Epoch::Initial),
+        "Initial packets must not be greased with only cached 0-RTT params (RFC 9287 Section 3.1)"
+    );
+    assert!(
+        !client.can_grease_quic_bit(Epoch::ZeroRtt),
+        "0-RTT packets must not be greased with only cached 0-RTT params (RFC 9287 Section 3.1)"
+    );
+
+    // Handshake and ApplicationData can use cached params.
+    assert!(
+        client.can_grease_quic_bit(Epoch::Handshake),
+        "Handshake packets can use cached params for greasing"
+    );
+    assert!(
+        client.can_grease_quic_bit(Epoch::ApplicationData),
+        "ApplicationData packets can use cached params for greasing"
+    );
 }
