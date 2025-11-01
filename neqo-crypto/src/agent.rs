@@ -414,6 +414,7 @@ impl SecretAgentInfo {
     pub const fn alpn(&self) -> Option<&String> {
         self.alpn.as_ref()
     }
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn signature_scheme(&self) -> SignatureScheme {
         self.signature_scheme
@@ -557,8 +558,14 @@ impl SecretAgent {
         self.set_option(ssl::Opt::Locking, false)?;
         self.set_option(ssl::Opt::Tickets, false)?;
         self.set_option(ssl::Opt::OcspStapling, true)?;
-        self.set_option(ssl::Opt::Grease, grease)?;
-        self.set_option(ssl::Opt::EnableChExtensionPermutation, true)?;
+        self.set_option(
+            ssl::Opt::Grease,
+            cfg!(not(feature = "disable-random")) && grease,
+        )?;
+        self.set_option(
+            ssl::Opt::EnableChExtensionPermutation,
+            cfg!(not(feature = "disable-random")),
+        )?;
         Ok(())
     }
 
@@ -1269,7 +1276,7 @@ impl Server {
                 return Err(Error::CertificateLoading);
             };
             secstatus_to_res(unsafe {
-                ssl::SSL_ConfigServerCert(agent.fd, *cert, *key, null(), 0)
+                ssl::SSL_ConfigServerCert(agent.fd, (*cert).cast(), (*key).cast(), null(), 0)
             })?;
         }
 
@@ -1445,14 +1452,13 @@ impl From<Server> for Agent {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::time::Instant;
-
     use crate::ResumptionToken;
 
     #[test]
     fn resumption_token_debug_impl() {
-        let now = Instant::now();
+        let now = test_fixture::now();
         let token = [
             2, 0, 6, 60, 37, 21, 238, 165, 182, 0, 6, 60, 77, 81, 157, 101, 182, 0, 6, 60, 37, 21,
             238, 165, 182, 0, 2, 163, 0, 0, 0, 0, 1, 72, 146, 254, 127, 255, 255, 255, 255, 0, 1,

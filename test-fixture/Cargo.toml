@@ -16,7 +16,6 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 log = { workspace = true }
 neqo-common = { path = "../neqo-common", features = ["test-fixture"] }
 neqo-crypto = { path = "../neqo-crypto" }
@@ -25,7 +24,13 @@ neqo-transport = { path = "../neqo-transport", features = ["draft-29"] }
 qlog = { workspace = true }
 
 [features]
-bench = ["neqo-common/bench", "neqo-crypto/bench", "neqo-http3/bench", "neqo-transport/bench"]
+bench = [
+        "neqo-common/bench",
+        "neqo-crypto/bench",
+        "neqo-http3/bench",
+        "neqo-transport/bench",
+        "log/release_max_level_info",
+]
 disable-random = []
 
 [package.metadata.cargo-machete]

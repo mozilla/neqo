@@ -9,6 +9,7 @@ use std::mem;
 use neqo_common::{hex, qinfo, qtrace, Encoder};
 
 use crate::{
+    aead::Aead as _,
     constants::{Cipher, Version},
     err::{Error, Res},
     hkdf,
@@ -84,7 +85,7 @@ impl SelfEncrypt {
         // AAD covers the entire header, plus the value of the AAD parameter that is provided.
         let salt = random::<{ Self::SALT_LENGTH }>();
         let cipher = self.make_aead(&self.key, &salt)?;
-        let encoded_len = 2 + salt.len() + plaintext.len() + Aead::expansion();
+        let encoded_len = 2 + salt.len() + plaintext.len() + cipher.expansion();
 
         let mut enc = Encoder::with_capacity(encoded_len);
         enc.encode_byte(Self::VERSION);
@@ -128,10 +129,10 @@ impl SelfEncrypt {
     /// when the keys have been rotated; or when NSS fails.
     #[expect(clippy::similar_names, reason = "aad is similar to aead.")]
     pub fn open(&self, aad: &[u8], ciphertext: &[u8]) -> Res<Vec<u8>> {
-        if ciphertext[0] != Self::VERSION {
+        if *ciphertext.first().ok_or(Error::SelfEncrypt)? != Self::VERSION {
             return Err(Error::SelfEncrypt);
         }
-        let Some(key) = self.select_key(ciphertext[1]) else {
+        let Some(key) = self.select_key(*ciphertext.get(1).ok_or(Error::SelfEncrypt)?) else {
             return Err(Error::SelfEncrypt);
         };
         let offset = 2 + Self::SALT_LENGTH;

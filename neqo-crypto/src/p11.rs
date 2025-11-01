@@ -7,7 +7,7 @@
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Formatter},
-    ops::{Deref, DerefMut},
+    ops::Deref,
     os::raw::c_uint,
     ptr::null_mut,
     slice::Iter as SliceIter,
@@ -20,12 +20,14 @@ use crate::{
     null_safe_slice,
 };
 
-#[expect(
+#[allow(
+    clippy::allow_attributes,
     dead_code,
     non_snake_case,
     non_upper_case_globals,
     non_camel_case_types,
     clippy::unreadable_literal,
+    clippy::use_self,
     reason = "For included bindgen code."
 )]
 mod nss_p11 {
@@ -65,12 +67,6 @@ macro_rules! scoped_ptr {
             type Target = *mut $target;
             fn deref(&self) -> &*mut $target {
                 &self.ptr
-            }
-        }
-
-        impl DerefMut for $scoped {
-            fn deref_mut(&mut self) -> &mut *mut $target {
-                &mut self.ptr
             }
         }
 
@@ -402,6 +398,7 @@ pub fn random<const N: usize>() -> [u8; N] {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use test_fixture::fixture_init;
 

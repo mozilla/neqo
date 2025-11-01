@@ -22,9 +22,10 @@ hex = { workspace = true, optional = true }
 log = { workspace = true }
 qlog = { workspace = true }
 strum = { workspace = true }
+thiserror = { workspace = true }
 
 [target."cfg(windows)".dependencies]
-windows = { workspace = true , features = ["Win32_Media"] }
+windows = { workspace = true, features = ["Win32_Media"] }
 
 [dev-dependencies]
 criterion = { version = "0.6", default-features = false, features = ["cargo_bench_support"] }
@@ -33,7 +34,7 @@ test-fixture = { path = "../test-fixture" }
 regex = { workspace = true }
 
 [features]
-bench = ["neqo-crypto/bench", "test-fixture/bench"]
+bench = ["neqo-crypto/bench", "test-fixture/bench", "log/release_max_level_info"]
 build-fuzzing-corpus = ["hex/alloc"]
 ci = []
 test-fixture = []

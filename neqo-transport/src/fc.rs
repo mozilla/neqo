@@ -9,7 +9,7 @@
 
 use std::{
     cmp::min,
-    fmt::Debug,
+    fmt::{Debug, Display},
     num::NonZeroU64,
     ops::{Deref, DerefMut, Index, IndexMut},
     time::{Duration, Instant},
@@ -21,7 +21,7 @@ use crate::{
     frame::FrameType,
     packet,
     recovery::{self, StreamRecoveryToken},
-    recv_stream::MAX_RECV_WINDOW_SIZE,
+    recv_stream::{MAX_CONN_RECV_WINDOW_SIZE, MAX_RECV_WINDOW_SIZE},
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     Error, Res,
@@ -43,6 +43,23 @@ pub const WINDOW_UPDATE_FRACTION: u64 = 4;
 /// Note that the flow control window should grow at least as fast as the
 /// congestion control window, in order to not unnecessarily limit throughput.
 const WINDOW_INCREASE_MULTIPLIER: u64 = 4;
+
+/// Subject for flow control auto-tuning, used to avoid heap allocations
+/// when logging.
+#[derive(Debug, Clone, Copy)]
+enum AutoTuneSubject {
+    Connection,
+    Stream(StreamId),
+}
+
+impl Display for AutoTuneSubject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Connection => write!(f, "connection"),
+            Self::Stream(id) => write!(f, "stream {id}"),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct SenderFlowControl<T>
@@ -225,8 +242,10 @@ where
     max_allowed: u64,
     /// Last time a flow control update was sent.
     ///
-    /// Only used in [`ReceiverFlowControl<StreamId>`] implementation for
-    /// receive window auto-tuning.
+    /// Used by auto-tuning logic to estimate sending rate between updates.
+    /// This is active for both stream-level
+    /// ([`ReceiverFlowControl<StreamId>`]) and connection-level
+    /// ([`ReceiverFlowControl<()>`]) flow control.
     last_update: Option<Instant>,
     /// Item received, but not retired yet.
     /// This will be used for byte flow control: each stream will remember its largest byte
@@ -322,6 +341,70 @@ where
     pub const fn consumed(&self) -> u64 {
         self.consumed
     }
+
+    /// Core auto-tuning logic for adjusting the maximum flow control window.
+    ///
+    /// This method is called by both connection-level and stream-level
+    /// implementations. It increases `max_active` when the sending rate exceeds
+    /// what the current window and RTT would allow, capping at `max_window`.
+    fn auto_tune_inner(
+        &mut self,
+        now: Instant,
+        rtt: Duration,
+        max_window: u64,
+        subject: AutoTuneSubject,
+    ) {
+        let Some(max_allowed_sent_at) = self.last_update else {
+            return;
+        };
+
+        let Ok(elapsed): Result<u64, _> = now
+            .duration_since(max_allowed_sent_at)
+            .as_micros()
+            .try_into()
+        else {
+            return;
+        };
+
+        let Ok(rtt): Result<NonZeroU64, _> = rtt
+            .as_micros()
+            .try_into()
+            .and_then(|rtt: u64| NonZeroU64::try_from(rtt))
+        else {
+            // RTT is zero, no need for tuning.
+            return;
+        };
+
+        // Compute the amount of bytes we have received in excess
+        // of what `max_active` might allow.
+        let window_bytes_expected = self.max_active * elapsed / rtt;
+        let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
+        let Some(excess) = window_bytes_used.checked_sub(window_bytes_expected) else {
+            // Used below expected. No auto-tuning needed.
+            return;
+        };
+
+        let prev_max_active = self.max_active;
+        self.max_active = min(
+            self.max_active + excess * WINDOW_INCREASE_MULTIPLIER,
+            max_window,
+        );
+
+        let increase = self.max_active - prev_max_active;
+        if increase > 0 {
+            qdebug!(
+                "Increasing max {subject} receive window by {} B, \
+                previous max_active: {} MiB, \
+                new max_active: {} MiB, \
+                last update: {:?}, \
+                rtt: {rtt:?}",
+                increase,
+                prev_max_active / 1024 / 1024,
+                self.max_active / 1024 / 1024,
+                now - max_allowed_sent_at,
+            );
+        }
+    }
 }
 
 impl ReceiverFlowControl<()> {
@@ -330,10 +413,15 @@ impl ReceiverFlowControl<()> {
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
+        now: Instant,
+        rtt: Duration,
     ) {
         if !self.frame_needed() {
             return;
         }
+
+        self.auto_tune(now, rtt);
+
         let max_allowed = self.next_limit();
         if builder.write_varint_frame(&[FrameType::MaxData.into(), max_allowed]) {
             stats.max_data += 1;
@@ -341,7 +429,24 @@ impl ReceiverFlowControl<()> {
                 max_allowed,
             )));
             self.frame_sent(max_allowed);
+            self.last_update = Some(now);
         }
+    }
+
+    /// Auto-tune [`ReceiverFlowControl::max_active`], i.e. the connection flow
+    /// control window.
+    ///
+    /// If the sending rate (`window_bytes_used`) exceeds the rate allowed by
+    /// the maximum flow control window and the current rtt
+    /// (`window_bytes_expected`), try to increase the maximum flow control
+    /// window ([`ReceiverFlowControl::max_active`]).
+    fn auto_tune(&mut self, now: Instant, rtt: Duration) {
+        self.auto_tune_inner(
+            now,
+            rtt,
+            MAX_CONN_RECV_WINDOW_SIZE,
+            AutoTuneSubject::Connection,
+        );
     }
 
     pub fn add_retired(&mut self, count: u64) {
@@ -407,53 +512,11 @@ impl ReceiverFlowControl<StreamId> {
     /// (`window_bytes_expected`), try to increase the maximum flow control
     /// window ([`ReceiverFlowControl::max_active`]).
     fn auto_tune(&mut self, now: Instant, rtt: Duration) {
-        let Some(max_allowed_sent_at) = self.last_update else {
-            return;
-        };
-
-        let Ok(elapsed): Result<u64, _> = now
-            .duration_since(max_allowed_sent_at)
-            .as_micros()
-            .try_into()
-        else {
-            return;
-        };
-
-        let Ok(rtt): Result<NonZeroU64, _> = rtt
-            .as_micros()
-            .try_into()
-            .and_then(|rtt: u64| NonZeroU64::try_from(rtt))
-        else {
-            // RTT is zero, no need for tuning.
-            return;
-        };
-
-        // Compute the amount of bytes we have received in excess
-        // of what `max_active` might allow.
-        let window_bytes_expected = self.max_active * elapsed / rtt;
-        let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
-        let Some(excess) = window_bytes_used.checked_sub(window_bytes_expected) else {
-            // Used below expected. No auto-tuning needed.
-            return;
-        };
-
-        let prev_max_active = self.max_active;
-        self.max_active = min(
-            self.max_active + excess * WINDOW_INCREASE_MULTIPLIER,
+        self.auto_tune_inner(
+            now,
+            rtt,
             MAX_RECV_WINDOW_SIZE,
-        );
-        qdebug!(
-            "Increasing max stream receive window by {} B, \
-            previous max_active: {} MiB, \
-            new max_active: {} MiB, \
-            last update: {:?}, \
-            rtt: {rtt:?}, \
-            stream_id: {}",
-            self.max_active - prev_max_active,
-            prev_max_active / 1024 / 1024,
-            self.max_active / 1024 / 1024,
-            now - max_allowed_sent_at,
-            self.subject,
+            AutoTuneSubject::Stream(self.subject),
         );
     }
 
@@ -657,14 +720,21 @@ impl IndexMut<StreamType> for LocalStreamLimits {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
+    #![allow(
+        clippy::allow_attributes,
+        clippy::unwrap_in_result,
+        reason = "OK in tests."
+    )]
+
     use std::{
         cmp::min,
         collections::VecDeque,
         time::{Duration, Instant},
     };
 
-    use neqo_common::{qdebug, Encoder, Role, MAX_VARINT};
+    use neqo_common::{qdebug, Encoder, Role};
     use neqo_crypto::random;
 
     use super::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
@@ -672,10 +742,10 @@ mod test {
         fc::WINDOW_UPDATE_FRACTION,
         packet::{self, PACKET_LIMIT},
         recovery,
-        recv_stream::MAX_RECV_WINDOW_SIZE,
+        recv_stream::{MAX_CONN_RECV_WINDOW_SIZE, MAX_RECV_WINDOW_SIZE},
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
-        ConnectionParameters, Error, Res, INITIAL_RECV_WINDOW_SIZE,
+        ConnectionParameters, Error, Res, INITIAL_STREAM_RECV_WINDOW_SIZE,
     };
 
     #[test]
@@ -1038,10 +1108,11 @@ mod test {
     #[test]
     fn trigger_factor() -> Res<()> {
         let rtt = Duration::from_millis(40);
-        let now = Instant::now();
-        let mut fc = ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
+        let now = test_fixture::now();
+        let mut fc =
+            ReceiverFlowControl::new(StreamId::new(0), INITIAL_STREAM_RECV_WINDOW_SIZE as u64);
 
-        let fraction = INITIAL_RECV_WINDOW_SIZE as u64 / WINDOW_UPDATE_FRACTION;
+        let fraction = INITIAL_STREAM_RECV_WINDOW_SIZE as u64 / WINDOW_UPDATE_FRACTION;
 
         let consumed = fc.set_consumed(fraction)?;
         fc.add_retired(consumed);
@@ -1059,8 +1130,9 @@ mod test {
     #[test]
     fn auto_tuning_increase_no_decrease() -> Res<()> {
         let rtt = Duration::from_millis(40);
-        let mut now = Instant::now();
-        let mut fc = ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
+        let mut now = test_fixture::now();
+        let mut fc =
+            ReceiverFlowControl::new(StreamId::new(0), INITIAL_STREAM_RECV_WINDOW_SIZE as u64);
         let initial_max_active = fc.max_active();
 
         // Consume and retire multiple receive windows without increasing time.
@@ -1094,8 +1166,9 @@ mod test {
     #[test]
     fn stream_data_blocked_triggers_auto_tuning() -> Res<()> {
         let rtt = Duration::from_millis(40);
-        let now = Instant::now();
-        let mut fc = ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
+        let now = test_fixture::now();
+        let mut fc =
+            ReceiverFlowControl::new(StreamId::new(0), INITIAL_STREAM_RECV_WINDOW_SIZE as u64);
 
         // Send first window update to give auto-tuning algorithm a baseline.
         let consumed = fc.set_consumed(fc.next_limit())?;
@@ -1138,7 +1211,7 @@ mod test {
         test_fixture::fixture_init();
 
         // Run multiple iterations with randomized bandwidth and rtt.
-        for _ in 0..1_000 {
+        for _ in 0..100 {
             // Random bandwidth between 1 Mbit/s and 1 Gbit/s.
             let bandwidth =
                 u64::from(u16::from_be_bytes(random::<2>()) % 1_000 + 1) * 1_000 * 1_000;
@@ -1146,17 +1219,17 @@ mod test {
             let rtt = Duration::from_millis(u64::from(random::<1>()[0]) + 1);
             let bdp = bandwidth * u64::try_from(rtt.as_millis()).unwrap() / 1_000 / 8;
 
-            let mut now = Instant::now();
+            let mut now = test_fixture::now();
 
             let mut send_to_recv = VecDeque::new();
             let mut recv_to_send = VecDeque::new();
 
-            let mut last_max_active = INITIAL_RECV_WINDOW_SIZE as u64;
+            let mut last_max_active = INITIAL_STREAM_RECV_WINDOW_SIZE as u64;
             let mut last_max_active_changed = now;
 
-            let mut sender_window = INITIAL_RECV_WINDOW_SIZE as u64;
+            let mut sender_window = INITIAL_STREAM_RECV_WINDOW_SIZE as u64;
             let mut fc =
-                ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
+                ReceiverFlowControl::new(StreamId::new(0), INITIAL_STREAM_RECV_WINDOW_SIZE as u64);
 
             loop {
                 // Sender receives window updates.
@@ -1224,7 +1297,7 @@ mod test {
             );
             assert!(
                 fc.max_active - TOLERANCE <= bdp
-                    || fc.max_active == INITIAL_RECV_WINDOW_SIZE as u64,
+                    || fc.max_active == INITIAL_STREAM_RECV_WINDOW_SIZE as u64,
                 "{summary} Receive window is larger than the bdp."
             );
 
@@ -1235,24 +1308,107 @@ mod test {
     }
 
     #[test]
-    fn max_active_larger_max_varint() {
-        // Instead of doing proper connection flow control, Neqo simply sets
-        // the largest connection flow control limit possible.
+    fn connection_flow_control_initial_window() {
+        // Connection flow control starts with a reasonable initial window
+        // (16x the stream window to accommodate 16 concurrent streams).
         let max_data = ConnectionParameters::default().get_max_data();
-        assert_eq!(max_data, MAX_VARINT);
-        let mut fc = ReceiverFlowControl::new((), max_data);
+        assert_eq!(max_data, (INITIAL_STREAM_RECV_WINDOW_SIZE * 16) as u64);
+    }
 
-        // Say that the remote consumes 1 byte of that connection flow control
-        // limit and then requests a connection flow control update.
-        fc.consume(1).unwrap();
-        fc.add_retired(1);
-        fc.send_flowc_update();
+    #[test]
+    fn connection_flow_control_auto_tune() -> Res<()> {
+        let rtt = Duration::from_millis(40);
+        let now = test_fixture::now();
+        let initial_window = (INITIAL_STREAM_RECV_WINDOW_SIZE * 16) as u64;
+        let mut fc = ReceiverFlowControl::new((), initial_window);
+        let initial_max_active = fc.max_active();
 
-        // Neqo should never attempt writing a connection flow control update
-        // larger than the largest possible QUIC varint value.
-        let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
-        let mut tokens = recovery::Tokens::new();
-        fc.write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
+        // Helper to write frames
+        let write_conn_frames = |fc: &mut ReceiverFlowControl<()>, now: Instant| {
+            let mut builder =
+                packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            let mut tokens = recovery::Tokens::new();
+            fc.write_frames(
+                &mut builder,
+                &mut tokens,
+                &mut FrameStats::default(),
+                now,
+                rtt,
+            );
+            tokens.len()
+        };
+
+        // Consume and retire multiple windows to trigger auto-tuning.
+        // Each iteration: consume a full window, retire it, send update.
+        for _ in 1..11 {
+            let to_consume = fc.max_active();
+            fc.consume(to_consume)?;
+            fc.add_retired(to_consume);
+            write_conn_frames(&mut fc, now);
+        }
+        let increased_max_active = fc.max_active();
+
+        assert!(
+            initial_max_active < increased_max_active,
+            "expect connection-level receive window auto-tuning to increase max_active on full utilization"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn connection_flow_control_respects_max_window() -> Res<()> {
+        let rtt = Duration::from_millis(40);
+        let now = test_fixture::now();
+        let initial_window = (INITIAL_STREAM_RECV_WINDOW_SIZE * 16) as u64;
+        let mut fc = ReceiverFlowControl::new((), initial_window);
+
+        // Helper to write frames
+        let write_conn_frames = |fc: &mut ReceiverFlowControl<()>| {
+            let mut builder =
+                packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            let mut tokens = recovery::Tokens::new();
+            fc.write_frames(
+                &mut builder,
+                &mut tokens,
+                &mut FrameStats::default(),
+                now,
+                rtt,
+            );
+            tokens.len()
+        };
+
+        // Consume and retire many full windows to push window to the limit.
+        // Keep consuming without advancing time to create maximum pressure.
+        for _ in 0..1000 {
+            let prev_max = fc.max_active();
+            let to_consume = fc.max_active();
+            fc.consume(to_consume)?;
+            fc.add_retired(to_consume);
+            write_conn_frames(&mut fc);
+
+            // Stop if we've reached the maximum and it's not growing anymore
+            if fc.max_active() == MAX_CONN_RECV_WINDOW_SIZE && fc.max_active() == prev_max {
+                qdebug!(
+                    "Reached and stabilized at max window: {} MiB",
+                    fc.max_active() / 1024 / 1024
+                );
+                break;
+            }
+        }
+
+        assert_eq!(
+            fc.max_active(),
+            MAX_CONN_RECV_WINDOW_SIZE,
+            "expect connection-level receive window to cap at MAX_CONN_RECV_WINDOW_SIZE (100 MiB), got {} MiB",
+            fc.max_active() / 1024 / 1024
+        );
+
+        qdebug!(
+            "Connection flow control window reached max: {} MiB",
+            fc.max_active() / 1024 / 1024
+        );
+
+        Ok(())
     }
 }

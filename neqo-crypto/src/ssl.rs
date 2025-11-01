@@ -11,6 +11,7 @@
     non_snake_case,
     clippy::cognitive_complexity,
     clippy::too_many_lines,
+    clippy::use_self,
     reason = "For included bindgen code."
 )]
 
@@ -124,6 +125,7 @@ experimental_api!(SSL_SetCertificateCompressionAlgorithm(
 ));
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{SSL_GetNumImplementedCiphers, SSL_NumImplementedCiphers};
 

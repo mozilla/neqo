@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::{self, Display, Formatter};
+use std::time::Instant;
 
 use neqo_common::Encoder;
 use neqo_transport::{Connection, StreamId};
@@ -19,12 +19,6 @@ pub enum BufferedStream {
         stream_id: StreamId,
         buf: Vec<u8>,
     },
-}
-
-impl Display for BufferedStream {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "BufferedStream {:?}", Option::<StreamId>::from(self))
-    }
 }
 
 impl BufferedStream {
@@ -69,7 +63,7 @@ impl BufferedStream {
     /// # Errors
     ///
     /// Returns `neqo_transport` errors.
-    pub fn send_buffer(&mut self, conn: &mut Connection) -> Res<usize> {
+    pub fn send_buffer(&mut self, conn: &mut Connection, now: Instant) -> Res<usize> {
         let Self::Initialized { stream_id, buf } = self else {
             return Ok(0);
         };
@@ -85,16 +79,21 @@ impl BufferedStream {
             let b = buf.split_off(sent);
             *buf = b;
         }
-        qlog::h3_data_moved_down(conn.qlog_mut(), *stream_id, sent);
+        qlog::h3_data_moved_down(conn.qlog_mut(), *stream_id, sent, now);
         Ok(sent)
     }
 
     /// # Errors
     ///
     /// Returns `neqo_transport` errors.
-    pub fn send_atomic(&mut self, conn: &mut Connection, to_send: &[u8]) -> Res<bool> {
+    pub fn send_atomic(
+        &mut self,
+        conn: &mut Connection,
+        to_send: &[u8],
+        now: Instant,
+    ) -> Res<bool> {
         // First try to send anything that is in the buffer.
-        self.send_buffer(conn)?;
+        self.send_buffer(conn, now)?;
         let Self::Initialized { stream_id, buf } = self else {
             return Ok(false);
         };
@@ -103,7 +102,7 @@ impl BufferedStream {
         }
         let res = conn.stream_send_atomic(*stream_id, to_send)?;
         if res {
-            qlog::h3_data_moved_down(conn.qlog_mut(), *stream_id, to_send.len());
+            qlog::h3_data_moved_down(conn.qlog_mut(), *stream_id, to_send.len(), now);
         }
         Ok(res)
     }

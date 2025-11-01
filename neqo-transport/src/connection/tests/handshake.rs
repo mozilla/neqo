@@ -1471,7 +1471,8 @@ fn client_initial_pto_matches_custom_initial_rtt() {
 #[test]
 fn server_initial_retransmits_identical() {
     let mut now = now();
-    let mut client = default_client();
+    // We calculate largest_acked, which is difficult with packet number randomization.
+    let mut client = new_client(ConnectionParameters::default().randomize_first_pn(false));
     let mut ci = client.process_output(now).dgram();
     let mut ci2 = client.process_output(now).dgram();
 
@@ -1505,7 +1506,14 @@ fn server_initial_retransmits_identical() {
 
     // Server is amplification-limited now.
     let pto = server.process_output(now).callback();
-    assert_eq!(pto, server.conn_params.get_idle_timeout() - total_ptos);
+    assert_eq!(
+        pto,
+        server
+            .conn_params
+            .get_idle_timeout()
+            .checked_sub(total_ptos)
+            .expect("doesn't underflow")
+    );
 }
 
 #[test]

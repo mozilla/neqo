@@ -335,6 +335,7 @@ pub fn parse_utf8(v: &[u8]) -> Res<&str> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod test_receiver {
 
     use std::collections::VecDeque;
@@ -376,6 +377,7 @@ pub(crate) mod test_receiver {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     use test_receiver::TestReceiver;
@@ -420,6 +422,7 @@ mod tests {
     #[test]
     fn read_prefixed_int_slow_writer() {
         let (buf, prefix_len, value) = &TEST_CASES_NUMBERS[4];
+        assert!(buf.len() > 1);
         let mut reader = IntReader::new(buf[0], *prefix_len);
         let mut test_receiver: TestReceiver = TestReceiver::default();
 

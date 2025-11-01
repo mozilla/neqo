@@ -65,16 +65,6 @@ impl Decoder {
         self.table.capacity()
     }
 
-    #[must_use]
-    pub const fn get_max_table_size(&self) -> u64 {
-        self.max_table_size
-    }
-
-    #[must_use]
-    pub const fn get_blocked_streams(&self) -> usize {
-        self.max_blocked_streams
-    }
-
     /// returns a list of unblocked streams
     ///
     /// # Errors
@@ -286,6 +276,7 @@ fn map_error(err: &Error) -> Error {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::Header;
     use neqo_transport::{StreamId, StreamType};

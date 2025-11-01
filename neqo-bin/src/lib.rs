@@ -4,8 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use std::{
-    fmt::{self, Display},
     net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     time::Duration,
@@ -16,6 +17,7 @@ use neqo_transport::{
     tparams::PreferredAddress, CongestionControlAlgorithm, ConnectionParameters, StreamType,
     Version, DEFAULT_INITIAL_RTT,
 };
+use thiserror::Error;
 
 pub mod client;
 mod send_data;
@@ -27,7 +29,7 @@ pub mod udp;
 /// See `network.buffer.cache.size` pref <https://searchfox.org/mozilla-central/rev/f6e3b81aac49e602f06c204f9278da30993cdc8a/modules/libpref/init/all.js#3212>
 const STREAM_IO_BUFFER_SIZE: usize = 32 * 1024;
 
-#[derive(Debug, Parser)]
+#[derive(Clone, Debug, Parser)]
 pub struct SharedArgs {
     #[command(flatten)]
     verbose: Option<clap_verbosity_flag::Verbosity>,
@@ -88,7 +90,7 @@ impl SharedArgs {
     }
 }
 
-#[derive(Debug, Parser)]
+#[derive(Clone, Debug, Parser)]
 pub struct QuicParameters {
     #[arg(
         short = 'Q',
@@ -266,21 +268,15 @@ fn from_str(s: &str) -> Result<Version, Error> {
     Version::try_from(v).map_err(|_| Error::Argument("unknown version"))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("Error: {0}")]
     Argument(&'static str),
 }
 
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error: {self:?}")?;
-        Ok(())
-    }
-}
-
-impl std::error::Error for Error {}
-
+#[cfg(not(target_os = "netbsd"))] // FIXME: Test fails on NetBSD.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::{fs, path::PathBuf, str::FromStr as _, time::SystemTime};
 

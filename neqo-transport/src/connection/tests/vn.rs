@@ -646,3 +646,29 @@ fn client_initial_versions() {
     assert_eq!(before.packets_rx + 1, after.packets_rx);
     assert_eq!(before.dropped_rx, after.dropped_rx);
 }
+
+/// This test configures the client and server so that they are unable to perform
+/// key exchange with the shares that the client offers in the first attempt.
+/// This produces CRYPTO frames in Initial packets from Version 1.
+/// Previously, the client used the version of the Initial packets
+/// that contain CRYPTO frames to decide the version.  That was not wise.
+#[test]
+fn tls_hello_retry_request() {
+    use neqo_crypto::constants::{TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_X25519};
+
+    let mut client = default_client();
+    let mut server = default_server();
+
+    // This includes two groups the server doesn't have up front,
+    // so that we get the server to spit out a HelloRetryRequest.
+    client
+        .set_groups(&[
+            TLS_GRP_EC_X25519,
+            TLS_GRP_EC_SECP384R1,
+            TLS_GRP_EC_SECP256R1,
+        ])
+        .unwrap();
+    server.set_groups(&[TLS_GRP_EC_SECP256R1]).unwrap();
+
+    connect(&mut client, &mut server);
+}

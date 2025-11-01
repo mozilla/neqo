@@ -722,22 +722,8 @@ impl SendStream {
         ss
     }
 
-    pub fn write_frames<B: Buffer>(
-        &mut self,
-        priority: TransmissionPriority,
-        builder: &mut packet::Builder<B>,
-        tokens: &mut recovery::Tokens,
-        stats: &mut FrameStats,
-    ) {
-        qtrace!("write STREAM frames at priority {priority:?}");
-        if !self.write_reset_frame(priority, builder, tokens, stats) {
-            self.write_blocked_frame(priority, builder, tokens, stats);
-            self.write_stream_frame(priority, builder, tokens, stats);
-        }
-    }
-
     // return false if the builder is full and the caller should stop iterating
-    pub fn write_frames_with_early_return<B: Buffer>(
+    pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
         builder: &mut packet::Builder<B>,
@@ -1684,7 +1670,6 @@ impl SendStreams {
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
-        qtrace!("write STREAM frames at priority {priority:?}");
         // WebTransport data (which is Normal) may have a SendOrder
         // priority attached.  The spec states (6.3 write-chunk 6.1):
 
@@ -1722,7 +1707,7 @@ impl SendStreams {
         for stream in self.map.values_mut() {
             if !stream.is_fair() {
                 qtrace!("   {stream}");
-                if !stream.write_frames_with_early_return(priority, builder, tokens, stats) {
+                if !stream.write_frames(priority, builder, tokens, stats) {
                     break;
                 }
             }
@@ -1741,7 +1726,7 @@ impl SendStreams {
                 } else {
                     qtrace!("   None");
                 }
-                if !stream.write_frames_with_early_return(priority, builder, tokens, stats) {
+                if !stream.write_frames(priority, builder, tokens, stats) {
                     break;
                 }
             }
@@ -1789,6 +1774,7 @@ pub struct RecoveryToken {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
@@ -1806,7 +1792,7 @@ mod tests {
             MAX_SEND_BUFFER_SIZE,
         },
         stats::FrameStats,
-        ConnectionEvents, StreamId, INITIAL_RECV_WINDOW_SIZE,
+        ConnectionEvents, StreamId, INITIAL_STREAM_RECV_WINDOW_SIZE,
     };
 
     fn connection_fc(limit: u64) -> Rc<RefCell<SenderFlowControl<()>>> {
@@ -2274,14 +2260,14 @@ mod tests {
         let mut txb = TxBuffer::new();
 
         // Fill the buffer
-        let big_buf = vec![1; INITIAL_RECV_WINDOW_SIZE];
-        assert_eq!(txb.send(&big_buf), INITIAL_RECV_WINDOW_SIZE);
+        let big_buf = vec![1; INITIAL_STREAM_RECV_WINDOW_SIZE];
+        assert_eq!(txb.send(&big_buf), INITIAL_STREAM_RECV_WINDOW_SIZE);
         assert!(matches!(txb.next_bytes(),
-                         Some((0, x)) if x.len() == INITIAL_RECV_WINDOW_SIZE
+                         Some((0, x)) if x.len() == INITIAL_STREAM_RECV_WINDOW_SIZE
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark almost all as sent. Get what's left
-        let one_byte_from_end = INITIAL_RECV_WINDOW_SIZE as u64 - 1;
+        let one_byte_from_end = INITIAL_STREAM_RECV_WINDOW_SIZE as u64 - 1;
         txb.mark_as_sent(0, usize::try_from(one_byte_from_end).unwrap());
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 1
@@ -2289,7 +2275,7 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark all as sent. Get nothing
-        txb.mark_as_sent(0, INITIAL_RECV_WINDOW_SIZE);
+        txb.mark_as_sent(0, INITIAL_STREAM_RECV_WINDOW_SIZE);
         assert!(txb.next_bytes().is_none());
 
         // Mark as lost. Get it again
@@ -2301,7 +2287,7 @@ mod tests {
 
         // Mark a larger range lost, including beyond what's in the buffer even.
         // Get a little more
-        let five_bytes_from_end = INITIAL_RECV_WINDOW_SIZE as u64 - 5;
+        let five_bytes_from_end = INITIAL_STREAM_RECV_WINDOW_SIZE as u64 - 5;
         txb.mark_as_lost(five_bytes_from_end, 100);
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 5
@@ -2326,7 +2312,7 @@ mod tests {
         txb.mark_as_sent(five_bytes_from_end, 5);
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 30
-                         && start == INITIAL_RECV_WINDOW_SIZE as u64
+                         && start == INITIAL_STREAM_RECV_WINDOW_SIZE as u64
                          && x.iter().all(|ch| *ch == 2)));
     }
 
@@ -2335,14 +2321,14 @@ mod tests {
         let mut txb = TxBuffer::new();
 
         // Fill the buffer
-        let big_buf = vec![1; INITIAL_RECV_WINDOW_SIZE];
-        assert_eq!(txb.send(&big_buf), INITIAL_RECV_WINDOW_SIZE);
+        let big_buf = vec![1; INITIAL_STREAM_RECV_WINDOW_SIZE];
+        assert_eq!(txb.send(&big_buf), INITIAL_STREAM_RECV_WINDOW_SIZE);
         assert!(matches!(txb.next_bytes(),
-                         Some((0, x)) if x.len()==INITIAL_RECV_WINDOW_SIZE
+                         Some((0, x)) if x.len()==INITIAL_STREAM_RECV_WINDOW_SIZE
                          && x.iter().all(|ch| *ch == 1)));
 
         // As above
-        let forty_bytes_from_end = INITIAL_RECV_WINDOW_SIZE as u64 - 40;
+        let forty_bytes_from_end = INITIAL_STREAM_RECV_WINDOW_SIZE as u64 - 40;
 
         txb.mark_as_acked(0, usize::try_from(forty_bytes_from_end).unwrap());
         assert!(matches!(txb.next_bytes(),
@@ -2362,7 +2348,7 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark a range 'A' in second slice as sent. Should still return the same
-        let range_a_start = INITIAL_RECV_WINDOW_SIZE as u64 + 30;
+        let range_a_start = INITIAL_STREAM_RECV_WINDOW_SIZE as u64 + 30;
         let range_a_end = range_a_start + 10;
         txb.mark_as_sent(range_a_start, 10);
         assert!(matches!(txb.next_bytes(),
@@ -2371,7 +2357,7 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Ack entire first slice and into second slice
-        let ten_bytes_past_end = INITIAL_RECV_WINDOW_SIZE as u64 + 10;
+        let ten_bytes_past_end = INITIAL_STREAM_RECV_WINDOW_SIZE as u64 + 10;
         txb.mark_as_acked(0, usize::try_from(ten_bytes_past_end).unwrap());
 
         // Get up to marked range A
@@ -2410,24 +2396,26 @@ mod tests {
         }
 
         // Should hit stream flow control limit before filling up send buffer
-        let big_buf = vec![4; INITIAL_RECV_WINDOW_SIZE + 100];
-        let res = s.send(&big_buf[..INITIAL_RECV_WINDOW_SIZE]).unwrap();
+        let big_buf = vec![4; INITIAL_STREAM_RECV_WINDOW_SIZE + 100];
+        let res = s.send(&big_buf[..INITIAL_STREAM_RECV_WINDOW_SIZE]).unwrap();
         assert_eq!(res, 1024 - 100);
 
         // should do nothing, max stream data already 1024
         s.set_max_stream_data(1024);
-        let res = s.send(&big_buf[..INITIAL_RECV_WINDOW_SIZE]).unwrap();
+        let res = s.send(&big_buf[..INITIAL_STREAM_RECV_WINDOW_SIZE]).unwrap();
         assert_eq!(res, 0);
 
         // should now hit the conn flow control (4096)
         s.set_max_stream_data(1_048_576);
-        let res = s.send(&big_buf[..INITIAL_RECV_WINDOW_SIZE]).unwrap();
+        let res = s.send(&big_buf[..INITIAL_STREAM_RECV_WINDOW_SIZE]).unwrap();
         assert_eq!(res, 3072);
 
         // should now hit the tx buffer size
-        conn_fc.borrow_mut().update(INITIAL_RECV_WINDOW_SIZE as u64);
+        conn_fc
+            .borrow_mut()
+            .update(INITIAL_STREAM_RECV_WINDOW_SIZE as u64);
         let res = s.send(&big_buf).unwrap();
-        assert_eq!(res, INITIAL_RECV_WINDOW_SIZE - 4096);
+        assert_eq!(res, INITIAL_STREAM_RECV_WINDOW_SIZE - 4096);
 
         // TODO(agrover@mozilla.com): test ooo acks somehow
         s.mark_as_acked(0, 40, false);
@@ -2493,8 +2481,8 @@ mod tests {
         conn_fc.borrow_mut().update(1_000_000_000);
         assert_eq!(conn_events.events().count(), 0);
 
-        let big_buf = vec![b'a'; INITIAL_RECV_WINDOW_SIZE];
-        assert_eq!(s.send(&big_buf).unwrap(), INITIAL_RECV_WINDOW_SIZE);
+        let big_buf = vec![b'a'; INITIAL_STREAM_RECV_WINDOW_SIZE];
+        assert_eq!(s.send(&big_buf).unwrap(), INITIAL_STREAM_RECV_WINDOW_SIZE);
     }
 
     #[test]

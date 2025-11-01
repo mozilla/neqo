@@ -9,7 +9,7 @@ use std::fmt;
 use neqo_transport::StreamId;
 use sfv::{BareItem, Dictionary, Integer, Item, ListEntry, Parser};
 
-use crate::{frames::HFrame, Error, Header, Res};
+use crate::{frames::HFrame, Error, Res};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Priority {
@@ -36,18 +36,6 @@ impl Priority {
         Self {
             urgency,
             incremental,
-        }
-    }
-
-    /// Returns a header if required to send
-    #[must_use]
-    pub fn header(self) -> Option<Header> {
-        match self {
-            Self {
-                urgency: 3,
-                incremental: false,
-            } => None,
-            other => Some(Header::new("priority", format!("{other}"))),
         }
     }
 
@@ -157,6 +145,7 @@ impl PriorityHandler {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use neqo_transport::StreamId;
 

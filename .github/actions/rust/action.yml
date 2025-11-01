@@ -24,6 +24,10 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Set RUST_BACKTRACE
+      shell: bash
+      run: echo "RUST_BACKTRACE=full" >> "$GITHUB_ENV"
+
     - name: Install Rust
       # TODO: Manually upate this, Dependabot will skip it because no tags associated with SHA:
       uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # zizmor: ignore[stale-action-refs]
@@ -46,18 +50,11 @@ runs:
     - name: Set up build environment
       shell: bash
       env:
-        TARGETS: ${{ inputs.targets }}
         RUNNER_OS: ${{ runner.os }}
       run: |
         {
           echo "CARGO_PROFILE_RELEASE_LTO=true"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
-          if [[ "$RUNNER_OS" == "Linux" && "$TARGETS" == "" && "$(command -v mold)" ]]; then
-            echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold $RUSTFLAGS"
-          elif [[ "$RUNNER_OS" == "Windows" ]]; then
-            echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld $RUSTFLAGS"
-          fi
-          echo "RUNNER_OS=$(uname -srm)"
         } >> "$GITHUB_ENV"
 
     - name: Enable sscache
@@ -77,7 +74,7 @@ runs:
       with:
         cache-bin: ${{ runner.environment != 'github-hosted' }}
         cache-all-crates: true
-        key: ${{ inputs.targets }}-${{ env.RUNNER_OS }}
+        key: ${{ inputs.targets != '' && format('{0}-', inputs.targets) || '' }}${{ runner.os }}
         workspaces: ${{ inputs.workspaces }}
          # Only create the cache when we push to `main` (also via a merge group).
         save-if: ${{ github.ref == 'refs/heads/main' || github.event.merge_group.base_ref == 'refs/heads/main' }}

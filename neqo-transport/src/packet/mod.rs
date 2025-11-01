@@ -16,14 +16,13 @@ use std::{
 use enum_map::Enum;
 use log::debug;
 use neqo_common::{hex, hex_with_len, qtrace, qwarn, Buffer, Decoder, Encoder};
-use neqo_crypto::{random, Aead};
+use neqo_crypto::{random, AeadTrait as _};
 use strum::{EnumIter, FromRepr};
 
 use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
     crypto::{CryptoDxState, CryptoStates, Epoch},
     frame::FrameType,
-    tracking::PacketNumberSpace,
     version::{self, Version},
     Error, Res,
 };
@@ -44,6 +43,8 @@ const PACKET_HP_MASK_SHORT: u8 = 0x1f;
 const SAMPLE_SIZE: usize = 16;
 const SAMPLE_OFFSET: usize = 4;
 const MAX_PACKET_NUMBER_LEN: usize = 4;
+/// The length of a long packet length field.
+const LONG_PACKET_LENGTH_LEN: usize = 2;
 
 pub mod metadata;
 mod retry;
@@ -111,16 +112,6 @@ impl From<Epoch> for Type {
     }
 }
 
-impl From<PacketNumberSpace> for Type {
-    fn from(space: PacketNumberSpace) -> Self {
-        match space {
-            PacketNumberSpace::Initial => Self::Initial,
-            PacketNumberSpace::Handshake => Self::Handshake,
-            PacketNumberSpace::ApplicationData => Self::Short,
-        }
-    }
-}
-
 struct BuilderOffsets {
     /// The bits of the first octet that need masking.
     first_byte_mask: u8,
@@ -176,7 +167,7 @@ impl Builder<Vec<u8>> {
         debug_assert_ne!(token.len(), 0);
         encoder.encode(token);
         let tag = retry::use_aead(version, |aead| {
-            let mut buf = vec![0; Aead::expansion()];
+            let mut buf = vec![0; aead.expansion()];
             Ok(aead.encrypt(0, encoder.as_ref(), &[], &mut buf)?.to_vec())
         })?;
         encoder.encode(&tag);
@@ -395,15 +386,20 @@ impl<B: Buffer> Builder<B> {
     ///
     /// This will panic if the packet number length is too large.
     pub fn pn(&mut self, pn: Number, pn_len: usize) {
-        if self.remaining() < 4 {
+        if self.remaining() < MAX_PACKET_NUMBER_LEN {
             self.limit = 0;
             return;
         }
 
         // Reserve space for a length in long headers.
         if self.is_long() {
+            if self.remaining() < LONG_PACKET_LENGTH_LEN + MAX_PACKET_NUMBER_LEN {
+                self.limit = 0;
+                return;
+            }
+
             self.offsets.len = self.encoder.len();
-            self.encoder.encode(&[0; 2]);
+            self.encoder.encode(&[0; LONG_PACKET_LENGTH_LEN]);
         }
 
         // This allows the input to be >4, which is absurd, but we can eat that.
@@ -423,17 +419,25 @@ impl<B: Buffer> Builder<B> {
 
     #[expect(clippy::cast_possible_truncation, reason = "AND'ing makes this safe.")]
     fn write_len(&mut self, expansion: usize) {
-        let len = self.encoder.len() - (self.offsets.len + 2) + expansion;
+        let len = self.encoder.len() - (self.offsets.len + LONG_PACKET_LENGTH_LEN) + expansion;
         self.encoder.as_mut()[self.offsets.len] = 0x40 | ((len >> 8) & 0x3f) as u8;
         self.encoder.as_mut()[self.offsets.len + 1] = (len & 0xff) as u8;
     }
 
-    fn pad_for_crypto(&mut self) {
+    fn pad_for_crypto(&mut self, crypto: &CryptoDxState) {
         // Make sure that there is enough data in the packet.
         // The length of the packet number plus the payload length needs to
         // be at least 4 (MAX_PACKET_NUMBER_LEN) plus any amount by which
         // the header protection sample exceeds the AEAD expansion.
-        let crypto_pad = CryptoDxState::extra_padding();
+        //
+        // > To ensure that sufficient data is available for sampling, packets
+        // > are padded so that the combined lengths of the encoded packet number
+        // > and protected payload is at least 4 bytes longer than the sample
+        // > required for header protection.
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9001#section-5.4.2>
+
+        let crypto_pad = crypto.extra_padding();
         self.encoder.pad_to(
             self.offsets.pn.start + MAX_PACKET_NUMBER_LEN + crypto_pad,
             0,
@@ -466,13 +470,18 @@ impl<B: Buffer> Builder<B> {
     pub fn build(mut self, crypto: &mut CryptoDxState) -> Res<Encoder<B>> {
         if self.len() > self.limit {
             qwarn!("Packet contents are more than the limit");
-            debug_assert!(false);
+            debug_assert!(
+                false,
+                "Builder length ({}) is larger than limit ({}).",
+                self.len(),
+                self.limit
+            );
             return Err(Error::Internal);
         }
 
-        self.pad_for_crypto();
+        self.pad_for_crypto(crypto);
         if self.offsets.len > 0 {
-            self.write_len(CryptoDxState::expansion());
+            self.write_len(crypto.expansion());
         }
 
         qtrace!(
@@ -484,15 +493,15 @@ impl<B: Buffer> Builder<B> {
 
         // Add space for crypto expansion.
         let data_end = self.encoder.len();
-        self.pad_to(data_end + CryptoDxState::expansion(), 0);
+        self.pad_to(data_end + crypto.expansion(), 0);
 
         // Calculate the mask.
         let ciphertext = crypto.encrypt(self.pn, self.header.clone(), self.encoder.as_mut())?;
         let offset = SAMPLE_OFFSET - self.offsets.pn.len();
-        if offset + SAMPLE_SIZE > ciphertext.len() {
-            return Err(Error::Internal);
-        }
-        let sample = &ciphertext[offset..offset + SAMPLE_SIZE];
+        // `decode()` already checked that `decoder.remaining() >= SAMPLE_OFFSET + SAMPLE_SIZE`.
+        let sample = ciphertext[offset..offset + SAMPLE_SIZE]
+            .try_into()
+            .map_err(|_| Error::Internal)?;
         let mask = crypto.compute_mask(sample)?;
 
         // Apply the mask.
@@ -852,17 +861,17 @@ impl<'a> Public<'a> {
         debug_assert_ne!(self.packet_type, Type::VersionNegotiation);
 
         let sample_offset = self.header_len + SAMPLE_OFFSET;
-        let mask = self
+        let sample = self
             .data
             .get(sample_offset..(sample_offset + SAMPLE_SIZE))
-            .map_or(Err(Error::NoMoreData), |sample| {
-                qtrace!(
-                    "{:?} unmask hdr={}",
-                    crypto.version(),
-                    hex(&self.data[..sample_offset])
-                );
-                crypto.compute_mask(sample)
-            })?;
+            .ok_or(Error::NoMoreData)?;
+        let sample: &[u8; SAMPLE_SIZE] = sample.try_into()?;
+        qtrace!(
+            "{:?} unmask hdr={}",
+            crypto.version(),
+            hex(&self.data[..sample_offset])
+        );
+        let mask = crypto.compute_mask(sample)?;
 
         // Un-mask the leading byte.
         let bits = if self.packet_type == Type::Short {
@@ -1010,6 +1019,7 @@ pub const PACKET_LIMIT: usize = 2048;
 
 #[cfg(all(test, not(feature = "disable-encryption")))]
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::Encoder;
     use test_fixture::{fixture_init, now};
@@ -1062,7 +1072,7 @@ mod tests {
         // So burn an encryption:
         let mut burn = [0; 16];
         prot.encrypt(0, 0..0, &mut burn).expect("burn OK");
-        assert_eq!(burn.len(), CryptoDxState::expansion());
+        assert_eq!(burn.len(), prot.expansion());
 
         let mut builder = Builder::long(
             Encoder::new(),
@@ -1354,6 +1364,78 @@ mod tests {
         );
         assert_eq!(builder.remaining(), 0);
         assert_eq!(builder.abort(), encoder_copy);
+    }
+
+    /// Given an encoder that already contains some QUIC packet(s), i.e. is
+    /// filled close to the MTU, attempt to use the remaining insufficient space
+    /// for another QUIC packet.
+    ///
+    /// Details in <https://github.com/mozilla/neqo/issues/3046>.
+    #[test]
+    fn build_insufficient_space_for_dummy_length_and_pn() {
+        const MTU: usize = 1280;
+        const FIRST_QUIC_PACKET: usize = 1236;
+        fixture_init();
+        let crypto = CryptoDxState::test_default();
+
+        let mut encoder = Encoder::new();
+        encoder.pad_to(FIRST_QUIC_PACKET, 0);
+
+        // Builder::long should add 1 (first byte) + 4 (version) + 2
+        // (dcid+scid length) + 8 (dcid) + 8 (scid) = 23 bytes.
+        let mut builder = Builder::long(
+            encoder,
+            Type::Initial,
+            Version::default(),
+            Some(SERVER_CID),
+            Some(CLIENT_CID),
+            MTU - crypto.expansion(),
+        );
+        assert_eq!(builder.len() - FIRST_QUIC_PACKET, 23);
+
+        // Given the FIRST_QUIC_PACKET and the partial header from
+        // Builder::long, the builder should have 5 bytes remaining.
+        assert_eq!(builder.remaining(), 5);
+
+        // Builder::pn needs 2 bytes for the dummy packet length and 4 bytes for
+        // the maximum packet number, but only 5 bytes remain. The builder
+        // should now be full and needs to be aborted.
+        builder.pn(0, 1);
+        assert!(builder.is_full());
+    }
+
+    #[test]
+    #[cfg_attr(
+        debug_assertions,
+        should_panic(expected = "Builder length (30) is larger than limit (20)")
+    )]
+    fn build_insufficient_space_error() {
+        const SMALL_LIMIT: usize = 20;
+        fixture_init();
+
+        // Set up a builder with a very small limit
+        let mut builder = Builder::short(
+            Encoder::new(),
+            false,
+            Some(ConnectionId::from(SERVER_CID)),
+            SMALL_LIMIT,
+        );
+        builder.pn(0, 1);
+
+        // Add more data than the limit allows. This will exceed the limit when
+        // combined with header.
+        let large_payload = vec![0u8; SMALL_LIMIT];
+        builder.encode(&large_payload);
+
+        // Verify that the length exceeds the limit.
+        assert!(builder.is_full());
+
+        // Building should trigger the debug_assert in debug mode, returning
+        // internal error in release mode.
+        assert_eq!(
+            builder.build(&mut CryptoDxState::test_default()),
+            Err(Error::Internal)
+        );
     }
 
     const SAMPLE_RETRY_V2: &[u8] = &[

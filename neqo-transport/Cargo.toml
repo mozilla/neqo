@@ -23,12 +23,13 @@ indexmap = { version = "2.2", default-features = false } # See https://github.co
 log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
-mtu = { version = "0.2.9", default-features = false } # neqo is only user currently, can bump freely
+mtu = { path = "../mtu" }
 qlog = { workspace = true }
 rustc-hash = { workspace = true }
 smallvec = { version = "1.13", default-features = false, features = ["union", "const_generics"] }
 static_assertions = { workspace = true }
 strum = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "0.6", default-features = false, features = ["cargo_bench_support"] }
@@ -36,7 +37,7 @@ neqo-transport = { path = ".", features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]
-bench = ["neqo-common/bench", "neqo-crypto/bench"]
+bench = ["neqo-common/bench", "neqo-crypto/bench", "log/release_max_level_info"]
 build-fuzzing-corpus = [
         "neqo-common/build-fuzzing-corpus",
         "neqo-crypto/disable-encryption",

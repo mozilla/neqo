@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "fuzz",
+  "mtu",
   "neqo-bin",
   "neqo-common",
   "neqo-crypto",
@@ -20,7 +21,7 @@ description = "Neqo, the Mozilla implementation of QUIC in Rust."
 keywords = ["quic", "http3", "neqo", "mozilla", "ietf", "firefox"]
 categories = ["network-programming", "web-programming"]
 readme = "README.md"
-version = "0.14.1"
+version = "0.18.0"
 # Keep in sync with `.rustfmt.toml` `edition`.
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -34,6 +35,7 @@ rust-version = "1.81.0"
 enum-map = { version = "2.7", default-features = false }
 enumset = { version = "1.1", default-features = false }
 hex = { version = "0.4", default-features = false }
+libc = { version = "0.2", default-features = false }
 log = { version = "0.4", default-features = false }
 qlog = { version = "0.15.1", default-features = false }
 quinn-udp = { version = "0.5.13", default-features = false, features = ["direct-log"] }
@@ -41,6 +43,7 @@ regex = { version = "1.9", default-features = false }
 rustc-hash = { version = "2.1", default-features = false, features = [ "std" ]}
 static_assertions = { version = "1.1", default-features = false }
 strum = { version = "0.27", default-features = false, features = ["derive"] }
+thiserror = { version = "2.0.12", default-features = false }
 url = { version = "2.5", default-features = false, features = ["std"] }
 windows = { version = "0.58", default-features = false }
 
@@ -59,6 +62,7 @@ non_ascii_idents = "warn"
 redundant_lifetimes = "warn"
 trivial_numeric_casts = "warn"
 unit_bindings = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
 unused_import_braces = "warn"
 unused_lifetimes = "warn"
 unused_macro_rules = "warn"
@@ -94,6 +98,7 @@ literal_string_with_formatting_args = "allow" # FIXME: Re-enable "warn" when MSR
 lossy_float_literal = "warn"
 map_with_unused_argument_over_ranges = "warn"
 mem_forget = "warn"
+missing_asserts_for_indexing = "warn"
 mixed_read_write_in_expression = "warn"
 module_name_repetitions = "warn"
 multiple_crate_versions = "allow"
@@ -101,6 +106,8 @@ multiple_inherent_impl = "warn"
 mutex_atomic = "warn"
 mutex_integer = "warn"
 needless_raw_strings = "warn"
+non_ascii_literal = "warn"
+non_zero_suggestions = "warn"
 partial_pub_fields = "warn"
 pathbuf_init_then_push = "warn"
 precedence_bits = "warn"

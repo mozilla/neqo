@@ -52,14 +52,6 @@ impl HeaderEncoder {
         }
     }
 
-    pub fn len(&self) -> usize {
-        self.buf.len()
-    }
-
-    pub fn read(&mut self, r: usize) {
-        self.buf.read(r);
-    }
-
     pub fn encode_indexed_static(&mut self, index: u64) {
         qtrace!("[{self}] encode static index {index}");
         self.buf
@@ -402,6 +394,7 @@ impl<'a> HeaderDecoder<'a> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     use super::{HeaderDecoder, HeaderDecoderResult, HeaderEncoder, HeaderTable};

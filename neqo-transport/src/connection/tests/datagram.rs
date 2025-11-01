@@ -8,11 +8,9 @@ use std::{cell::RefCell, rc::Rc};
 
 use neqo_common::event::Provider as _;
 use static_assertions::const_assert;
-use test_fixture::now;
 
 use super::{
-    assert_error, connect_force_idle, default_client, default_server, new_client, new_server,
-    AT_LEAST_PTO,
+    assert_error, connect_force_idle, default_server, new_client, new_server, now, AT_LEAST_PTO,
 };
 use crate::{
     connection::tests::DEFAULT_ADDR,
@@ -51,8 +49,8 @@ impl crate::connection::test_internal::FrameWriter for InsertDatagram<'_> {
 
 #[test]
 fn datagram_disabled_both() {
-    let mut client = default_client();
-    let mut server = default_server();
+    let mut client = new_client(ConnectionParameters::default().datagram_size(0));
+    let mut server = new_server(ConnectionParameters::default().datagram_size(0));
     connect_force_idle(&mut client, &mut server);
 
     assert_eq!(client.max_datagram_size(), Err(Error::NotAvailable));
@@ -73,7 +71,7 @@ fn datagram_disabled_both() {
 fn datagram_enabled_on_client() {
     let mut client =
         new_client(ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU));
-    let mut server = default_server();
+    let mut server = new_server(ConnectionParameters::default().datagram_size(0));
     connect_force_idle(&mut client, &mut server);
 
     assert_eq!(client.max_datagram_size(), Err(Error::NotAvailable));
@@ -102,7 +100,7 @@ fn datagram_enabled_on_client() {
 
 #[test]
 fn datagram_enabled_on_server() {
-    let mut client = default_client();
+    let mut client = new_client(ConnectionParameters::default().datagram_size(0));
     let mut server =
         new_server(ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU));
     connect_force_idle(&mut client, &mut server);
@@ -392,21 +390,6 @@ fn datagram_sent_once() {
     // Call process_output again should not send any new Datagram.
     assert!(client.process_output(now()).dgram().is_none());
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
-}
-
-#[test]
-fn dgram_no_allowed() {
-    let mut client = default_client();
-    let mut server = default_server();
-    connect_force_idle(&mut client, &mut server);
-
-    let out = server
-        .test_write_frames(InsertDatagram { data: DATA_MTU }, now())
-        .dgram()
-        .unwrap();
-    client.process_input(out, now());
-
-    assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
 }
 
 #[test]

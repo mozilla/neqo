@@ -8,7 +8,7 @@
 
 use std::{
     collections::VecDeque,
-    fmt::{self, Display},
+    fmt::Display,
     fs::{create_dir_all, File, OpenOptions},
     io::{self, BufWriter, ErrorKind},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _},
@@ -33,6 +33,7 @@ use neqo_http3::Header;
 use neqo_transport::{AppError, CloseReason, ConnectionId, OutputBatch, Version};
 use neqo_udp::RecvBuf;
 use rustc_hash::FxHashMap as HashMap;
+use thiserror::Error;
 use tokio::time::Sleep;
 use url::{Host, Origin, Url};
 
@@ -43,14 +44,21 @@ mod http3;
 
 const BUFWRITER_BUFFER_SIZE: usize = 64 * 1024;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("argument error: {0}")]
     Argument(&'static str),
+    #[error(transparent)]
     Http3(neqo_http3::Error),
+    #[error(transparent)]
     Io(io::Error),
+    #[error(transparent)]
     Qlog(qlog::Error),
+    #[error(transparent)]
     Transport(neqo_transport::Error),
+    #[error("application error: {0}")]
     Application(AppError),
+    #[error(transparent)]
     Crypto(neqo_crypto::Error),
 }
 
@@ -93,18 +101,9 @@ impl From<CloseReason> for Error {
     }
 }
 
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error: {self:?}")?;
-        Ok(())
-    }
-}
-
-impl std::error::Error for Error {}
-
 type Res<T> = Result<T, Error>;
 
-#[derive(Debug, Parser)]
+#[derive(Clone, Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 #[expect(
     clippy::struct_excessive_bools,
@@ -436,7 +435,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             handler,
             args,
             timeout: None,
-            recv_buf: RecvBuf::new(),
+            recv_buf: RecvBuf::default(),
         }
     }
 
@@ -548,6 +547,7 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<Qlog> {
         Some("Neqo client qlog".to_string()),
         Some("Neqo client qlog".to_string()),
         format!("client-{hostname}-{cid}"),
+        Instant::now(),
     )
     .map_err(Error::Qlog)
 }
@@ -614,6 +614,10 @@ pub async fn client(mut args: Args) -> Res<()> {
             exit(1);
         };
         let mut socket = crate::udp::Socket::bind(local_addr_for(&remote_addr, 0))?;
+        if socket.may_fragment() {
+            qinfo!("Datagrams may be fragmented by the IP layer. Disabling PMTUD.");
+            args.shared.quic_parameters.no_pmtud = true;
+        }
         let real_local = socket.local_addr().unwrap();
         qinfo!(
             "{} Client connecting: {real_local:?} -> {remote_addr:?}",
@@ -636,7 +640,7 @@ pub async fn client(mut args: Args) -> Res<()> {
                 let client = http3::create_client(&args, real_local, remote_addr, &hostname, token)
                     .expect("failed to create client");
 
-                let handler = http3::Handler::new(to_request, &args);
+                let handler = http3::Handler::new(to_request, args.clone());
 
                 Runner::new(real_local, &mut socket, client, handler, &args)
                     .run()

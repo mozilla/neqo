@@ -43,7 +43,7 @@ use crate::{
     packet::{self},
     path::{Path, PathRef, Paths},
     qlog,
-    quic_datagrams::{DatagramTracking, QuicDatagrams},
+    quic_datagrams::{DatagramTracking, QuicDatagrams, DATAGRAM_FRAME_TYPE_VARINT_LEN},
     recovery::{self, sent, SendProfile},
     recv_stream,
     rtt::{RttEstimate, GRANULARITY},
@@ -70,6 +70,7 @@ mod idle;
 pub mod params;
 mod state;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub mod test_internal;
 
 use idle::IdleTimeout;
@@ -144,17 +145,6 @@ impl OutputBatch {
             _ => None,
         }
     }
-
-    #[must_use]
-    pub fn or_else<F>(self, f: F) -> Self
-    where
-        F: FnOnce() -> Self,
-    {
-        match self {
-            x @ (Self::DatagramBatch(_) | Self::Callback(_)) => x,
-            Self::None => f(),
-        }
-    }
 }
 
 impl Output {
@@ -182,17 +172,6 @@ impl Output {
         match self {
             Self::Callback(t) => *t,
             _ => Duration::new(0, 0),
-        }
-    }
-
-    #[must_use]
-    pub fn or_else<F>(self, f: F) -> Self
-    where
-        F: FnOnce() -> Self,
-    {
-        match self {
-            x @ (Self::Datagram(_) | Self::Callback(_)) => x,
-            Self::None => f(),
         }
     }
 }
@@ -394,6 +373,7 @@ impl Connection {
             c.conn_params.get_versions().compatible(),
             Role::Client,
             &dcid,
+            c.conn_params.randomize_first_pn_enabled(),
         )?;
         c.original_destination_cid = Some(dcid);
         let path = Path::temporary(
@@ -511,6 +491,8 @@ impl Connection {
 
     /// # Errors
     /// When the operation fails.
+    //
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
         self.crypto.tls_mut().set_certificate_compression::<T>()?;
         Ok(())
@@ -1287,7 +1269,7 @@ impl Connection {
         if self.test_frame_writer.is_none() {
             if let OutputBatch::DatagramBatch(batch) = &output {
                 for dgram in batch.iter() {
-                    neqo_common::write_item_to_fuzzing_corpus("packet", dgram);
+                    neqo_common::write_item_to_fuzzing_corpus("packet", &dgram);
                 }
             }
         }
@@ -1338,6 +1320,7 @@ impl Connection {
             self.conn_params.get_versions().compatible(),
             self.role,
             &retry_scid,
+            false, // don't randomize on Retry
         )?;
         self.address_validation = AddressValidationInfo::Retry {
             token: packet.token().to_vec(),
@@ -1525,7 +1508,11 @@ impl Connection {
                 // Record the client's selected CID so that it can be accepted until
                 // the client starts using a real connection ID.
                 let dcid = ConnectionId::from(packet.dcid());
-                self.crypto.states_mut().init_server(version, &dcid)?;
+                self.crypto.states_mut().init_server(
+                    version,
+                    &dcid,
+                    self.conn_params.randomize_first_pn_enabled(),
+                )?;
                 self.original_destination_cid = Some(dcid);
                 self.set_state(State::WaitInitial, now);
 
@@ -2214,7 +2201,12 @@ impl Connection {
         version: Version,
         grease_quic_bit: bool,
         limit: usize,
-    ) -> (packet::Type, packet::Builder<&'a mut Vec<u8>>) {
+        largest_acknowledged: Option<packet::Number>,
+    ) -> (
+        packet::Type,
+        packet::Builder<&'a mut Vec<u8>>,
+        packet::Number,
+    ) {
         let pt = packet::Type::from(epoch);
         let mut builder = if pt == packet::Type::Short {
             qdebug!("Building Short dcid {:?}", path.remote_cid());
@@ -2241,16 +2233,6 @@ impl Connection {
             }
         }
 
-        (pt, builder)
-    }
-
-    #[must_use]
-    fn add_packet_number(
-        builder: &mut packet::Builder<&mut Vec<u8>>,
-        tx: &CryptoDxState,
-        largest_acknowledged: Option<packet::Number>,
-    ) -> packet::Number {
-        // Get the packet number and work out how long it is.
         let pn = tx.next_pn();
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
@@ -2262,7 +2244,8 @@ impl Connection {
         );
         // TODO(mt) also use `4*path CWND/path MTU` to set a minimum length.
         builder.pn(pn, pn_len);
-        pn
+
+        (pt, builder, pn)
     }
 
     fn can_grease_quic_bit(&self) -> bool {
@@ -2554,10 +2537,6 @@ impl Connection {
     }
 
     /// Build batch of datagrams to be sent on the provided path.
-    #[expect(
-        clippy::unwrap_in_result,
-        reason = "expect() used on internal invariants"
-    )]
     fn output_dgram_batch_on_path(
         &mut self,
         path: &PathRef,
@@ -2567,18 +2546,40 @@ impl Connection {
     ) -> Res<SendOptionBatch> {
         let packet_tos = path.borrow().tos();
         let mut send_buffer = Vec::new();
-
-        let mut datagram_size = None;
+        let mut max_datagram_size = None;
         let mut num_datagrams = 0;
+        let mtu = path.borrow().plpmtu();
+        let address_family_max_mtu = path.borrow().pmtud().address_family_max_mtu();
 
         loop {
             if max_datagrams.get() <= num_datagrams {
                 break;
             }
+            if path.borrow().pmtud().needs_probe() && num_datagrams != 0 {
+                // Next datagram will be larger due to PMTUD probing.  GSO
+                // requires that all datagrams in a batch are of equal size.
+                // Only the last datagram can be smaller. Given that this would
+                // not be the first datagram, close the batch early to uphold
+                // the above GSO requirement.
+                break;
+            }
+
+            let send_buffer_len_before = send_buffer.len();
 
             // Check if we can fit another PMTUD sized datagram into the batch.
-            if datagram_size.is_some_and(|datagram_size| {
-                min(datagram_size, DatagramBatch::MAX - send_buffer.len()) < path.borrow().plpmtu()
+            if max_datagram_size.is_some_and(|datagram_size| {
+                // GSO requires that all datagrams in a batch are of equal size.
+                // The last datagram can be smaller. The datagrams already in
+                // the batch are each `datagram_size` large. The next datagram
+                // can be up to `mtu` large. Break in case the next could be
+                // larger than the ones already in the batch.
+                datagram_size < mtu
+                // GSO allows total datagram batch size up to the address family
+                // max MTU. If the next datagram could exceed that limit, break.
+                //
+                // See for example Linux kernel:
+                // https://github.com/torvalds/linux/blob/fb4d33ab452ea254e2c319bac5703d1b56d895bf/include/linux/netdevice.h#L2402
+                || address_family_max_mtu - send_buffer.len() < mtu
             }) {
                 break;
             }
@@ -2596,12 +2597,20 @@ impl Connection {
                 packet_tos,
             )? {
                 SendOption::Yes => {
+                    debug_assert_eq!(
+                        mtu,
+                        path.borrow().plpmtu(),
+                        "MTU does not change within batch"
+                    );
                     num_datagrams += 1;
-                    let datagram_size = *datagram_size.get_or_insert(send_buffer.len());
-                    if ((send_buffer.len()) % datagram_size) > 0 {
-                        // GSO requires that all packets in a batch are of equal
-                        // size. Only the last packet can be smaller. This
-                        // packet was smaller. Make sure it was the last by
+                    let datagram_size = send_buffer.len() - send_buffer_len_before;
+                    let max_datagram_size = *max_datagram_size.get_or_insert(datagram_size);
+
+                    // GSO requires that all datagrams in a batch are of equal
+                    // size. Only the last datagram can be smaller.
+                    debug_assert!(datagram_size <= max_datagram_size);
+                    if datagram_size < max_datagram_size {
+                        // This packet was smaller. Make sure it is the last by
                         // breaking the loop.
                         break;
                     }
@@ -2621,7 +2630,7 @@ impl Connection {
             send_buffer,
             packet_tos,
             num_datagrams,
-            datagram_size.expect("one or more datagrams"),
+            max_datagram_size.ok_or(Error::Internal)?,
             &mut self.stats.borrow_mut(),
         );
 
@@ -2653,7 +2662,7 @@ impl Connection {
             else {
                 continue;
             };
-            let aead_expansion = CryptoDxState::expansion();
+            let aead_expansion = tx.expansion();
 
             let header_start = encoder.len();
 
@@ -2676,7 +2685,7 @@ impl Connection {
                     }
             } - aead_expansion;
 
-            let (pt, mut builder) = Self::build_packet_header(
+            let (pt, mut builder, pn) = Self::build_packet_header(
                 &path.borrow(),
                 epoch,
                 encoder,
@@ -2685,10 +2694,6 @@ impl Connection {
                 version,
                 grease_quic_bit,
                 limit,
-            );
-            let pn = Self::add_packet_number(
-                &mut builder,
-                tx,
                 self.loss_recovery.largest_acknowledged_pn(space),
             );
             // The builder will set the limit to 0 if there isn't enough space for the header.
@@ -3106,7 +3111,8 @@ impl Connection {
                 .original_destination_cid
                 .as_ref()
                 .ok_or(Error::ProtocolViolation)?;
-            self.crypto.states_mut().init_server(version, dcid)?;
+            // No need to randomize the starting packet number; that's already taken care of.
+            self.crypto.states_mut().init_server(version, dcid, false)?;
             version
         };
 
@@ -3848,7 +3854,7 @@ impl Connection {
         let mut buffer = Vec::new();
         let encoder = Encoder::new_borrowed_vec(&mut buffer);
 
-        let (_, mut builder) = Self::build_packet_header(
+        let (_, builder, _) = Self::build_packet_header(
             &path.borrow(),
             epoch,
             encoder,
@@ -3857,16 +3863,13 @@ impl Connection {
             version,
             false,
             usize::MAX,
-        );
-        _ = Self::add_packet_number(
-            &mut builder,
-            tx,
             self.loss_recovery
                 .largest_acknowledged_pn(PacketNumberSpace::ApplicationData),
         );
 
-        let data_len_possible =
-            u64::try_from(mtu.saturating_sub(CryptoDxState::expansion() + builder.len() + 1))?;
+        let data_len_possible = u64::try_from(
+            mtu.saturating_sub(tx.expansion() + builder.len() + DATAGRAM_FRAME_TYPE_VARINT_LEN),
+        )?;
         Ok(min(data_len_possible, max_dgram_size))
     }
 
@@ -3947,4 +3950,5 @@ impl Display for Connection {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

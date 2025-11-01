@@ -14,18 +14,21 @@
 
 use std::time::Duration;
 
+use neqo_common::{log::init as init_log, qinfo};
 use neqo_transport::{ConnectionParameters, State};
 use test_fixture::{
     boxed,
     sim::{
         connection::{Node, ReachState, ReceiveData, SendData},
-        network::{Delay, Mtu, TailDrop},
+        network::{Mtu, TailDrop},
         Simulator,
     },
 };
 
+/// Run a transfer of a gigabyte over a gigabit link.
+/// Check to see that the achieved transfer rate matches expectations.
 #[expect(clippy::cast_precision_loss, reason = "OK in a bench.")]
-pub fn main() {
+fn gbit_bandwidth(ecn: bool) {
     const MIB: usize = 1_024 * 1_024;
     const GIB: usize = 1_024 * MIB;
 
@@ -34,46 +37,64 @@ pub fn main() {
 
     const TRANSFER_AMOUNT: usize = GIB;
     const LINK_BANDWIDTH: usize = GBIT;
-    const LINK_RTT_MS: usize = 40;
-    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.85;
+    const LINK_RTT_MS: u64 = 40;
+    /// The amount of delay that the link buffer will add when full.
+    const BUFFER_LATENCY_MS: usize = 4;
+    /// How much of the theoretical bandwidth we will expect to deliver.
+    /// Because we're not transferring a whole lot relative to the bandwidth,
+    /// this ratio is relatively low.
+    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.3;
 
     let gbit_link = || {
         let rate_byte = LINK_BANDWIDTH / 8;
-        // Router buffer set to bandwidth-delay product.
-        let capacity_byte = rate_byte * LINK_RTT_MS / 1_000;
-        TailDrop::new(rate_byte, capacity_byte, Duration::ZERO)
+        // Set capacity to double when ECN is enabled
+        // so that the overall throughput remains roughly consistent.
+        let capacity_byte = (1 + usize::from(ecn)) * rate_byte * BUFFER_LATENCY_MS / 1000;
+        let delay = Duration::from_millis(LINK_RTT_MS) / 2;
+        TailDrop::new(rate_byte, capacity_byte, ecn, delay)
     };
 
+    init_log(None);
+
+    let name = format!("gbit-bandwidth{}", if ecn { "-ecn" } else { "-noecn" });
     let simulated_time = Simulator::new(
-        "gbit-bandwidth",
+        &name,
         boxed![
             Node::new_client(
-                ConnectionParameters::default(),
+                ConnectionParameters::default().ack_ratio(200),
                 boxed![ReachState::new(State::Confirmed)],
                 boxed![ReceiveData::new(TRANSFER_AMOUNT)]
             ),
             Mtu::new(1500),
             gbit_link(),
-            Delay::new(Duration::from_millis(LINK_RTT_MS as u64 / 2)),
             Node::new_server(
-                ConnectionParameters::default(),
+                ConnectionParameters::default().ack_ratio(200),
                 boxed![ReachState::new(State::Confirmed)],
                 boxed![SendData::new(TRANSFER_AMOUNT)]
             ),
             Mtu::new(1500),
             gbit_link(),
-            Delay::new(Duration::from_millis(LINK_RTT_MS as u64 / 2)),
         ],
     )
     .setup()
     .run();
 
     let achieved_bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
+    qinfo!(
+        "{name} achieved {a} Mb/s bandwidth (link rate {t})",
+        a = achieved_bandwidth / MBIT as f64,
+        t = LINK_BANDWIDTH / MBIT
+    );
 
     assert!(
         LINK_BANDWIDTH as f64 * MINIMUM_EXPECTED_UTILIZATION < achieved_bandwidth,
-        "expected to reach {MINIMUM_EXPECTED_UTILIZATION} of maximum bandwidth ({} Mbit/s) but got {} Mbit/s",
-        LINK_BANDWIDTH  / MBIT,
-        achieved_bandwidth / MBIT as f64,
+        "{name} expected to reach {MINIMUM_EXPECTED_UTILIZATION} of maximum bandwidth ({t} Mbit/s) but got {a} Mbit/s",
+        t = LINK_BANDWIDTH / MBIT,
+        a = achieved_bandwidth / MBIT as f64,
     );
+}
+
+fn main() {
+    gbit_bandwidth(false);
+    gbit_bandwidth(true);
 }

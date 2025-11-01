@@ -15,7 +15,7 @@ use crate::{
     cid::MAX_CONNECTION_ID_LEN,
     ecn, packet,
     stream_id::{StreamId, StreamType},
-    AppError, CloseReason, Error, Res, TransportError,
+    AppError, Error, Res, TransportError,
 };
 
 #[repr(u64)]
@@ -133,15 +133,6 @@ impl CloseError {
     pub const fn code(&self) -> u64 {
         match self {
             Self::Transport(c) | Self::Application(c) => *c,
-        }
-    }
-}
-
-impl From<CloseReason> for CloseError {
-    fn from(err: CloseReason) -> Self {
-        match err {
-            CloseReason::Transport(c) => Self::Transport(c.code()),
-            CloseReason::Application(c) => Self::Application(c),
         }
     }
 }
@@ -695,6 +686,7 @@ impl<'a> Frame<'a> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::{Decoder, Encoder};
 

@@ -16,10 +16,6 @@ pub struct Data {
 }
 
 impl Data {
-    pub fn len(&self) -> usize {
-        self.buf.len()
-    }
-
     fn write_byte(&mut self, b: u8) {
         self.buf.push(b);
     }
@@ -108,6 +104,7 @@ impl Deref for Data {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{Data, Prefix};
 

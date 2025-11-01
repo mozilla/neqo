@@ -6,12 +6,10 @@
 
 use std::{cmp::max, time::Duration};
 
-use neqo_common::MAX_VARINT;
-
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
     connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT},
-    recv_stream::INITIAL_RECV_WINDOW_SIZE,
+    recv_stream::INITIAL_STREAM_RECV_WINDOW_SIZE,
     rtt::GRANULARITY,
     stream_id::StreamType,
     tparams::{
@@ -29,9 +27,19 @@ use crate::{
     CongestionControlAlgorithm, Res, DEFAULT_INITIAL_RTT,
 };
 
-const LOCAL_MAX_DATA: u64 = MAX_VARINT;
 const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
+
+/// Initial connection-level receive window size.
+///
+/// Set to 16 times the per-stream initial window to accommodate the default
+/// bidirectional stream limit ([`LOCAL_STREAM_LIMIT_BIDI`]).
+/// This provides sufficient capacity for concurrent streams without
+/// being excessively large, and allows auto-tuning to grow the window
+/// based on actual usage.
+const LOCAL_MAX_DATA: u64 = INITIAL_STREAM_RECV_WINDOW_SIZE as u64 * LOCAL_STREAM_LIMIT_BIDI;
+// Maximum size of a QUIC DATAGRAM frame, as specified in https://datatracker.ietf.org/doc/html/rfc9221#section-3-4.
+const MAX_DATAGRAM_FRAME_SIZE: u64 = 65535;
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
 
 /// What to do with preferred addresses.
@@ -94,6 +102,8 @@ pub struct ConnectionParameters {
     sni_slicing: bool,
     /// Whether to enable mlkem768nistp256-sha256.
     mlkem: bool,
+    /// Whether to randomize the packet number of the first Initial packet.
+    randomize_first_pn: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -102,18 +112,18 @@ impl Default for ConnectionParameters {
             versions: version::Config::default(),
             cc_algorithm: CongestionControlAlgorithm::Cubic,
             max_data: LOCAL_MAX_DATA,
-            max_stream_data_bidi_remote: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
+            max_stream_data_bidi_remote: u64::try_from(INITIAL_STREAM_RECV_WINDOW_SIZE)
                 .expect("usize fits in u64"),
-            max_stream_data_bidi_local: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
+            max_stream_data_bidi_local: u64::try_from(INITIAL_STREAM_RECV_WINDOW_SIZE)
                 .expect("usize fits in u64"),
-            max_stream_data_uni: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
+            max_stream_data_uni: u64::try_from(INITIAL_STREAM_RECV_WINDOW_SIZE)
                 .expect("usize fits in u64"),
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
             ack_ratio: Self::DEFAULT_ACK_RATIO,
             idle_timeout: Self::DEFAULT_IDLE_TIMEOUT,
             preferred_address: PreferredAddressConfig::Default,
-            datagram_size: 0,
+            datagram_size: MAX_DATAGRAM_FRAME_SIZE,
             outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             incoming_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             initial_rtt: DEFAULT_INITIAL_RTT,
@@ -125,6 +135,7 @@ impl Default for ConnectionParameters {
             pmtud_iface_mtu: true,
             sni_slicing: true,
             mlkem: true,
+            randomize_first_pn: true,
         }
     }
 }
@@ -202,23 +213,6 @@ impl ConnectionParameters {
             }
         }
         self
-    }
-
-    /// Get the maximum stream data that we will accept on different types of streams.
-    ///
-    /// # Panics
-    ///
-    /// If `StreamType::UniDi` and `false` are passed as that is not a valid combination.
-    #[must_use]
-    pub fn get_max_stream_data(&self, stream_type: StreamType, remote: bool) -> u64 {
-        match (stream_type, remote) {
-            (StreamType::BiDi, false) => self.max_stream_data_bidi_local,
-            (StreamType::BiDi, true) => self.max_stream_data_bidi_remote,
-            (StreamType::UniDi, false) => {
-                panic!("Can't get receive limit on a stream that can only be sent")
-            }
-            (StreamType::UniDi, true) => self.max_stream_data_uni,
-        }
     }
 
     /// Set the maximum stream data that we will accept on different types of streams.
@@ -409,6 +403,7 @@ impl ConnectionParameters {
         self.pmtud_iface_mtu
     }
 
+    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn pmtud_iface_mtu(mut self, pmtud_iface_mtu: bool) -> Self {
         self.pmtud_iface_mtu = pmtud_iface_mtu;
@@ -434,6 +429,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn mlkem(mut self, mlkem: bool) -> Self {
         self.mlkem = mlkem;
+        self
+    }
+
+    #[must_use]
+    pub const fn randomize_first_pn_enabled(&self) -> bool {
+        self.randomize_first_pn
+    }
+
+    #[must_use]
+    pub const fn randomize_first_pn(mut self, randomize_first_pn: bool) -> Self {
+        self.randomize_first_pn = randomize_first_pn;
         self
     }
 
