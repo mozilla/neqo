@@ -188,7 +188,6 @@ runs:
       shell: bash
       if: ${{ !steps.system_nss.outputs.suitable }}
       env:
-        NSS_TYPE: ${{ inputs.type }}
         NSS_DIR: ${{ github.workspace }}/nss
         RUNNER_OS: ${{ runner.os }}
         WORKSPACE: ${{ github.workspace }}
