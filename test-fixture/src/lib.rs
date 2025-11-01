@@ -17,7 +17,7 @@ use std::{
     path::PathBuf,
     rc::Rc,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use neqo_common::{
@@ -248,13 +248,19 @@ where
     )
     .expect("create a server");
     if let Ok(dir) = std::env::var("QLOGDIR") {
+        // Use system time in microseconds to generate a unique name
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_micros();
+        let unique_name = format!("server-{timestamp}");
         c.set_qlog(
             Qlog::enabled_with_file(
                 dir.parse().unwrap(),
                 Role::Server,
                 Some("Neqo server qlog".to_string()),
                 Some("Neqo server qlog".to_string()),
-                "server".to_string(),
+                unique_name,
                 now(),
             )
             .unwrap(),
