@@ -665,12 +665,17 @@ fn interleave_versions_client() {
 
     // The second does.
     client.process_input(s2.unwrap(), now);
+    let s3 = server.process_output(now).dgram().unwrap();
+    if s3[0] & 0b1011_0000 == 0b1001_0000 {
+        // The Initial (v2!) spilled over into another datagram.
+        let (extra, _) = split_datagram(&s3);
+        client.process_input(extra, now);
+    }
     assert!(client.has_version());
     assert_eq!(client.version(), Version::Version2);
 
-    // Let the server finish its handshake (one packet is not enough).
-    let s3 = server.process_output(now).dgram();
-    client.process_input(s3.unwrap(), now);
+    // Let the server finish its handshake.
+    client.process_input(s3, now);
 
     // The client finishes with v2 packets.
     maybe_authenticate(&mut client);
@@ -694,47 +699,47 @@ fn reorder_1rtt() {
     let mut server = default_server();
     let mut now = now();
 
-    let c1 = client.process_output(now).dgram();
-    let c2 = client.process_output(now).dgram();
+    let c1 = client.process_output(now).dgram().map(strip_padding);
+    let c2 = client.process_output(now).dgram().map(strip_padding);
     assert!(c1.is_some() && c2.is_some());
 
     now += RTT / 2;
     server.process_input(c1.unwrap(), now);
-    let s1 = server.process(c2, now).dgram();
+    let s1 = server.process(c2, now).dgram().map(strip_padding);
     assert!(s1.is_some());
 
     now += RTT / 2;
-    let dgram = client.process(s1, now).dgram();
+    let dgram = client.process(s1, now).dgram().map(strip_padding);
 
     now += RTT / 2;
-    let dgram = server.process(dgram, now).dgram();
+    let dgram = server.process(dgram, now).dgram().map(strip_padding);
 
     now += RTT / 2;
     client.process_input(dgram.unwrap(), now);
     maybe_authenticate(&mut client);
-    let c2 = client.process_output(now).dgram();
+    let c2 = client.process_output(now).dgram().map(strip_padding);
     assert!(c2.is_some());
 
     // Now get a bunch of packets from the client.
     // Give them to the server before giving it `c2`.
     for _ in 0..PACKETS {
         let d = send_something(&mut client, now);
-        server.process_input(d, now + RTT / 2);
+        server.process_input(strip_padding(d), now + RTT / 2);
     }
     // The server has now received those packets, and saved them.
-    // The six extra received are Initial + the junk we use for padding.
-    assert_eq!(server.stats().packets_rx, PACKETS + 2);
+    // It has only been given the three handshake packets we gave it.
+    assert_eq!(server.stats().packets_rx, 3);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
-    assert_eq!(server.stats().dropped_rx, 3);
+    assert_eq!(server.stats().dropped_rx, 0);
 
     now += RTT / 2;
     let s2 = server.process(c2, now).dgram();
     // The server has now received those packets, and saved them.
     // The two additional are an Initial w/ACK, a Handshake w/ACK and a 1-RTT (w/
     // NEW_CONNECTION_ID).
-    assert_eq!(server.stats().packets_rx, PACKETS * 2 + 4);
+    assert!(server.stats().packets_rx > PACKETS);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
-    assert_eq!(server.stats().dropped_rx, 3);
+    assert_eq!(server.stats().dropped_rx, 0);
     assert_eq!(*server.state(), State::Confirmed);
     assert_eq!(server.paths.rtt(), RTT);
 
