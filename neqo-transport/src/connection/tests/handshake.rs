@@ -1567,8 +1567,10 @@ fn zero_rtt_with_ech() {
 /// RFC 9287 Section 3.1 states: "A server MUST NOT remember that a client negotiated
 /// the extension in a previous connection and set the QUIC Bit to 0 based on that information."
 ///
-/// Regression test for the `handshakeloss` interop test failure where Initial packets
-/// with the fixed bit cleared were discarded by the server.
+/// This test verifies that the client complies with RFC 9287 Section 3.1 by ensuring
+/// it does not grease the QUIC Bit based on cached (0-RTT) transport parameters.
+/// Regression test for the `handshakeloss` interop test failure, where client Initial
+/// packets with the fixed bit cleared (due to cached parameters) were discarded by the server.
 #[test]
 fn grease_quic_bit_respects_current_handshake() {
     fixture_init();
