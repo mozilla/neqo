@@ -19,7 +19,8 @@ use neqo_crypto::{
 use test_fixture::datagram;
 use test_fixture::{
     assertions::{assert_coalesced_0rtt, assert_handshake, assert_initial, assert_version},
-    damage_ech_config, fixture_init, now, split_datagram, strip_padding, DEFAULT_ADDR,
+    damage_ech_config, fixture_init, now, split_datagram,  strip_padding,
+    DEFAULT_ADDR,
 };
 
 use super::{
@@ -513,6 +514,7 @@ fn reorder_handshake() {
     server.process_input(c1.unwrap(), now);
     let _s_initial = server.process(c2, now).dgram().unwrap();
     let s_handshake = server.process_output(now).dgram().unwrap();
+    let s_hs_has_initial = s_handshake[0] & 0b1011_0000 == 0b1001_0000; // v2 Initial
 
     // Pass just the handshake packet in and the client can't handle it yet.
     // It can only send another Initial packet.
@@ -520,7 +522,7 @@ fn reorder_handshake() {
     let dgram = client.process(Some(s_handshake), now).dgram();
     assert_initial(dgram.as_ref().unwrap(), false);
     assert_eq!(client.stats().saved_datagrams, 1);
-    assert_eq!(client.stats().packets_rx, 0);
+    assert_eq!(client.stats().packets_rx, usize::from(s_hs_has_initial));
 
     // Get the server to try again.
     // Though we currently allow the server to arm its PTO timer, use
@@ -1477,27 +1479,32 @@ fn server_initial_retransmits_identical() {
     let mut now = now();
     // We calculate largest_acked, which is difficult with packet number randomization.
     let mut client = new_client(ConnectionParameters::default().randomize_first_pn(false));
-    let mut ci = client.process_output(now).dgram();
-    let mut ci2 = client.process_output(now).dgram();
+    let ci = client.process_output(now).dgram().unwrap();
+    let ci2 = client.process_output(now).dgram().unwrap();
 
     // Force the server to retransmit its Initial flight a number of times and make sure the
     // retranmissions are identical to the original. Also, verify the PTO durations.
     let mut server = new_server(ConnectionParameters::default().pacing(false));
+    server.process_input(ci, now);
+    server.process_input(ci2, now);
+
     let mut total_ptos = Duration::from_secs(0);
+    // Count for any extra packets in each flight due to coalescing.
+    let mut extra = 0;
     for i in 1..=3 {
         println!("==== iteration {i} ====");
-        _ = server.process(ci.take(), now).dgram().unwrap();
-        _ = server.process(ci2.take(), now).dgram().unwrap();
-        if i == 1 {
-            // On the first iteration, the server will want to send its entire flight.
-            // During later ones, we will have hit a PTO and can hence only send two packets.
-            _ = server.process(ci2.take(), now).dgram().unwrap();
+        let d1 = server.process_output(now).dgram().unwrap();
+        if let (_, Some(dh)) = split_datagram(&d1) {
+            extra += usize::from(dh[0] & 0b1011_0000 == 0b1010_0000); // count extra Handshake
         }
+        let d2 = server.process_output(now).dgram().unwrap();
+        extra += usize::from(d2[0] & 0b1011_0000 == 0b1001_0000); // count extra Initial
         assert_eq!(
             server.stats().frame_tx,
             FrameStats {
-                crypto: i * 3 - 1,
-                ack: i + 1,
+                // base count for CRYPTO is two per flight, plus any extra
+                crypto: i * 2 + extra,
+                ack: i,
                 largest_acknowledged: (i - i.saturating_sub(1)) as u64,
                 ..Default::default()
             }
