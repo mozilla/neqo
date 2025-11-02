@@ -997,13 +997,10 @@ fn pto_handshake_space_when_server_flight_lost() {
         State::Handshaking,
     );
 
-    let delay = client.process_output(now).callback();
+    let pto = client.process_output(now).callback();
+    now += pto;
 
-    // Record stats before PTO
     let initial_pto_count = client.stats.borrow().pto_counts[0];
-
-    // Advance time to trigger PTO
-    now += delay;
 
     // When PTO fires, client MUST send probe in Handshake space because:
     // - Handshake keys are installed
