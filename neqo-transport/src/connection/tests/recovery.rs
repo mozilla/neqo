@@ -955,8 +955,6 @@ fn ack_for_unsent() {
 /// 5. PTO timer never arms for Handshake space
 /// 6. Connection times out
 ///
-/// RFC 9002 Section 6.2.4: "When a PTO timer expires, a sender MUST send at least
-/// one ack-eliciting packet in the packet number space as a probe."
 ///
 /// The client should probe Handshake space to elicit server retransmission.
 #[test]
