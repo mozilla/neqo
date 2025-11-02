@@ -164,31 +164,25 @@ impl ConnectionEvents {
     }
 
     // The number of datagrams in the events queue is limited to max_queued_datagrams.
-    // This function ensure this and deletes the oldest datagrams if needed.
+    // This function ensure this and deletes the oldest datagrams (head-drop) if needed.
     fn check_datagram_queued(&self, max_queued_datagrams: usize, stats: &mut Stats) {
-        let mut q = self.events.borrow_mut();
-        let mut remove = None;
-        if q.iter()
+        let mut queue = self.events.borrow_mut();
+        let count = queue
+            .iter()
             .filter(|evt| matches!(evt, ConnectionEvent::Datagram(_)))
-            .count()
-            == max_queued_datagrams
-        {
-            if let Some(d) = q
-                .iter()
-                .rev()
-                .enumerate()
-                .filter(|(_, evt)| matches!(evt, ConnectionEvent::Datagram(_)))
-                .take(1)
-                .next()
-            {
-                remove = Some(d.0);
-            }
+            .count();
+        if count < max_queued_datagrams {
+            // Below the limit. No action needed.
+            return;
         }
-        if let Some(r) = remove {
-            q.remove(r);
-            q.push_back(ConnectionEvent::IncomingDatagramDropped);
-            stats.incoming_datagram_dropped += 1;
-        }
+        let first = queue
+            .iter_mut()
+            .find(|evt| matches!(evt, ConnectionEvent::Datagram(_)))
+            .expect("Checked above");
+        // Remove the oldest (head-drop), replacing it with an
+        // IncomingDatagramDropped placeholder.
+        *first = ConnectionEvent::IncomingDatagramDropped;
+        stats.incoming_datagram_dropped += 1;
     }
 
     pub fn add_datagram(&self, max_queued_datagrams: usize, data: &[u8], stats: &mut Stats) {
