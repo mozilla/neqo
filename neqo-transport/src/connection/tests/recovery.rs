@@ -963,7 +963,8 @@ fn ack_for_unsent() {
 fn pto_handshake_space_when_server_flight_lost() {
     const RTT: Duration = Duration::from_millis(10);
     let mut now = now();
-    // This test assumes PTOs only involve single-packet flights, which is incompatible with multi-packet flights as used by MLKEM.
+    // This test assumes PTOs only involve single-packet flights, which is incompatible with
+    // multi-packet flights as used by MLKEM.
     let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let mut server = default_server();
     // This is a greasing transport parameter, and large enough that the

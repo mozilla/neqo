@@ -686,9 +686,13 @@ impl Loss {
                 let needs_hs_priming = pto.space == PacketNumberSpace::Initial && pto.count() > 1;
                 if needs_hs_priming {
                     if let Some(hs_space) = self.spaces.get_mut(PacketNumberSpace::Handshake) {
-                        if hs_space.last_ack_eliciting.is_none() && hs_space.largest_acked.is_none() {
+                        if hs_space.last_ack_eliciting.is_none() && hs_space.largest_acked.is_none()
+                        {
                             // Use current time as baseline - PTO will fire at now + pto_period
-                            qtrace!("Priming Handshake PTO baseline (no HS packets after {} PTOs)", pto.count());
+                            qtrace!(
+                                "Priming Handshake PTO baseline (no HS packets after {} PTOs)",
+                                pto.count()
+                            );
                             hs_space.last_ack_eliciting = Some(now);
                         }
                     }
