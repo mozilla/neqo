@@ -2645,6 +2645,7 @@ impl Connection {
     ) -> Res<SendOption> {
         let mut initial_sent = None;
         let mut needs_padding = false;
+        let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
 
         // Determine the size limit and padding for this UDP datagram.
@@ -2659,7 +2660,7 @@ impl Connection {
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         for space in PacketNumberSpace::iter() {
-            let grease_quic_bit = self.can_grease_quic_bit();
+            // Ensure we have tx crypto state for this epoch, or skip it.
             let Some((epoch, tx)) = self.crypto.states_mut().select_tx_mut(self.version, space)
             else {
                 continue;
