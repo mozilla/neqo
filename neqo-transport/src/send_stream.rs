@@ -1006,6 +1006,7 @@ impl SendStream {
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) -> bool {
+        // TODO: Always use ResetStreamAt.
         if let State::ResetSent {
             final_size,
             err,

@@ -431,6 +431,21 @@ impl From<Frame<'_>> for QuicFrame {
                 length: None,
                 payload_length: None,
             },
+            Frame::ResetStreamAt {
+                stream_id,
+                application_error_code,
+                final_size,
+                reliable_size: _,
+            } => {
+                // TODO: Add definition to qlog crate.
+                Self::ResetStream {
+                    stream_id: stream_id.as_u64(),
+                    error_code: application_error_code,
+                    final_size,
+                    length: None,
+                    payload_length: None,
+                }
+            }
             Frame::StopSending {
                 stream_id,
                 application_error_code,
