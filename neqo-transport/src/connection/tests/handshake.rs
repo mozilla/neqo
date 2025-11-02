@@ -13,7 +13,7 @@ use std::{
 
 use neqo_common::{event::Provider as _, qdebug, Datagram};
 use neqo_crypto::{
-    constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus, Epoch,
+    constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus,
 };
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
@@ -1564,7 +1564,7 @@ fn zero_rtt_with_ech() {
     assert!(server.tls_info().unwrap().early_data_accepted());
 }
 
-/// Test that `can_grease_quic_bit()` correctly handles cached 0-RTT parameters.
+/// Test that `can_grease_quic_bit(s.
 ///
 /// RFC 9287 Section 3.1 states: "A server MUST NOT remember that a client negotiated
 /// the extension in a previous connection and set the QUIC Bit to 0 based on that information."
@@ -1601,24 +1601,9 @@ fn grease_quic_bit_respects_current_handshake() {
     // - We have remote_0rtt params with GreaseQuicBit
     // - We do NOT have remote_handshake params (no current handshake confirmation)
 
-    // With only cached 0-RTT params, Initial and ZeroRtt MUST NOT be greased.
-    // RFC 9287 requires confirmation in the current handshake before greasing.
+    // With only cached 0-RTT params, no greasing is allowed.
     assert!(
-        !client.can_grease_quic_bit(Epoch::Initial),
-        "Initial packets must not be greased with only cached 0-RTT params (RFC 9287 Section 3.1)"
-    );
-    assert!(
-        !client.can_grease_quic_bit(Epoch::ZeroRtt),
-        "0-RTT packets must not be greased with only cached 0-RTT params (RFC 9287 Section 3.1)"
-    );
-
-    // Handshake and ApplicationData can use cached params.
-    assert!(
-        client.can_grease_quic_bit(Epoch::Handshake),
-        "Handshake packets can use cached params for greasing"
-    );
-    assert!(
-        client.can_grease_quic_bit(Epoch::ApplicationData),
-        "ApplicationData packets can use cached params for greasing"
+        !client.can_grease_quic_bit(),
+        "Must not grease with only cached 0-RTT params (RFC 9287 Section 3.1)"
     );
 }

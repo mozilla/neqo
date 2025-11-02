@@ -2246,41 +2246,11 @@ impl Connection {
         (pt, builder, pn)
     }
 
-    fn can_grease_quic_bit(&self, epoch: Epoch) -> bool {
-        // RFC 9287 Section 3.1: "A server MUST NOT remember that a client negotiated
-        // the extension in a previous connection and set the QUIC Bit to 0 based on
-        // that information."
-        //
-        // This applies symmetrically: we must not use cached 0-RTT transport parameters
-        // to make greasing decisions for Initial or 0-RTT packets in a new handshake.
-        // The fixed bit MUST always be set in these packets per RFC 9000 Section 17.2.
-        //
-        // For Initial and 0-RTT packets: only grease if we have received transport
-        // parameters in the CURRENT handshake (remote_handshake is present).
-        //
-        // For Handshake and ApplicationData packets: we can use cached 0-RTT parameters
-        // because by the time we send these, we're past the Initial phase.
+    fn can_grease_quic_bit(&self) -> bool {
         let tph = self.tps.borrow();
-
-        // Check if the remote endpoint supports greasing in the current or cached session.
-        let remote_supports_greasing = tph.remote_handshake().as_ref().map_or_else(
-            || {
-                tph.remote_0rtt()
-                    .is_some_and(|r| r.get_empty(GreaseQuicBit))
-            },
-            |r| r.get_empty(GreaseQuicBit),
-        );
-
-        if !remote_supports_greasing {
-            return false;
-        }
-
-        // For Initial and 0-RTT epochs, only allow greasing if we've received
-        // transport parameters in the current handshake, not just cached 0-RTT params.
-        match epoch {
-            Epoch::Initial | Epoch::ZeroRtt => tph.remote_handshake().is_some(),
-            Epoch::Handshake | Epoch::ApplicationData => true,
-        }
+        tph.remote_handshake()
+            .as_ref()
+            .is_some_and(|r| r.get_empty(GreaseQuicBit))
     }
 
     /// Write the frames that are exchanged in the application data space.
@@ -2689,17 +2659,7 @@ impl Connection {
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         for space in PacketNumberSpace::iter() {
-            // First peek at the epoch to determine greasing (requires immutable borrow).
-            let Some((epoch, _)) = self.crypto.states().select_tx(self.version, space) else {
-                continue;
-            };
-
-            // Determine if we can grease the QUIC bit for this specific epoch.
-            // This must be computed per-epoch because Initial/0-RTT packets require
-            // current handshake confirmation, while later packets can use cached params.
-            let grease_quic_bit = self.can_grease_quic_bit(epoch);
-
-            // Now get mutable access to tx crypto state.
+            let grease_quic_bit = self.can_grease_quic_bit();
             let Some((epoch, tx)) = self.crypto.states_mut().select_tx_mut(self.version, space)
             else {
                 continue;
