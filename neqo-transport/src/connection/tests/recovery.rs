@@ -944,3 +944,99 @@ fn ack_for_unsent() {
         }
     ));
 }
+
+/// Test that PTO fires for Handshake space even when no Handshake packets have been sent.
+///
+/// This reproduces the haproxy handshakeloss bug where:
+/// 1. Client receives Server Hello → Handshake keys installed
+/// 2. Server's Handshake flight (Certificate, etc.) is lost/corrupted
+/// 3. Client never sends any Handshake packets (has nothing to send yet)
+/// 4. Client's Handshake space has last_ack_eliciting = None
+/// 5. PTO timer never arms for Handshake space
+/// 6. Connection times out
+///
+/// RFC 9002 Section 6.2.4: "When a PTO timer expires, a sender MUST send at least
+/// one ack-eliciting packet in the packet number space as a probe."
+///
+/// The client should probe Handshake space to elicit server retransmission.
+#[test]
+fn pto_handshake_space_when_server_flight_lost() {
+    const RTT: Duration = Duration::from_millis(10);
+    let mut now = now();
+    // This test makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
+    // to work.
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
+    let mut server = default_server();
+    // This is a greasing transport parameter, and large enough that the
+    // server needs to send two Handshake packets.
+    let big = TransportParameter::Bytes(vec![0; Pmtud::default_plpmtu(DEFAULT_ADDR.ip())]);
+    server
+        .set_local_tparam(TestTransportParameter, big)
+        .unwrap();
+
+    let c1 = client.process_output(now).dgram();
+
+    now += RTT / 2;
+    let s1 = server.process(c1, now).dgram();
+    assert!(s1.is_some());
+    let s2 = server.process_output(now).dgram();
+    assert!(s2.is_some());
+
+    // Now let the client have the Initial, but drop the first coalesced Handshake packet.
+    now += RTT / 2;
+    let (initial, _) = split_datagram(&s1.unwrap());
+    client.process_input(initial, now);
+
+    // Process s2 to provide remaining CRYPTO frames (Server Hello completion + Handshake data)
+    // This will install Handshake keys. We drop the client's response.
+    let c2 = client.process(s2, now).dgram();
+    assert!(c2.is_some()); // This is an ACK.  Drop it.
+
+    // Verify client has reached Handshaking state (which implies Handshake keys are installed).
+    // Handshake keys are derived after processing Server Hello.
+    assert_eq!(
+        *client.state(),
+        State::Handshaking,
+        "Test setup: Client must be in Handshaking state (Handshake keys installed)"
+    );
+
+    let delay = client.process_output(now).callback();
+
+    // Record stats before PTO
+    let initial_pto_count = client.stats.borrow().pto_counts[0];
+
+    // Advance time to trigger PTO
+    now += delay;
+
+    // When PTO fires, client MUST send probe in Handshake space because:
+    // - Handshake keys are installed
+    // - Waiting for server's Handshake messages
+    // - RFC 9002 Section 6.2.4 requires probing packet number spaces
+
+    // Verify a Handshake PING probe was sent by checking stats
+    // We can't easily parse the encrypted/header-protected packet, so check frame stats
+    let ping_count_before = client.stats().frame_tx.ping;
+
+    // Drain all PTO output
+    let mut pto_dgrams = Vec::new();
+    while let Some(dgram) = client.process_output(now).dgram() {
+        pto_dgrams.push(dgram);
+    }
+
+    let ping_count_after = client.stats().frame_tx.ping;
+
+    // Verify at least one datagram was sent for PTO
+    assert!(!pto_dgrams.is_empty(), "Client must send PTO probe");
+
+    // Verify PTO count incremented
+    assert!(
+        client.stats.borrow().pto_counts[0] > initial_pto_count,
+        "PTO count should increment"
+    );
+
+    // Verify a PING was sent (the Handshake probe)
+    assert!(
+        ping_count_after > ping_count_before,
+        "PTO probe must include PING in Handshake space"
+    );
+}

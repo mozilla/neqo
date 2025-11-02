@@ -134,6 +134,9 @@ pub struct LossRecoverySpace {
     /// The time used to calculate the PTO timer for this space.
     /// This is the time that the last ACK-eliciting packet in this space
     /// was sent.  This might be the time that a probe was sent.
+    /// For Initial and Handshake spaces, this may also be set when we haven't
+    /// sent any packets yet but need a PTO baseline (see `on_packet_sent` and
+    /// `on_packets_acked` for how this is established).
     last_ack_eliciting: Option<Instant>,
     /// The number of outstanding packets in this space that are in flight.
     /// This might be less than the number of ACK-eliciting packets,
@@ -191,17 +194,25 @@ impl LossRecoverySpace {
         } else if self.space == PacketNumberSpace::ApplicationData {
             None
         } else {
-            // Nasty special case to prevent handshake deadlocks.
+            // Special case to prevent handshake deadlocks.
             // A client needs to keep the PTO timer armed to prevent a stall
             // of the handshake.  Technically, this has to stop once we receive
             // an ACK of Handshake or 1-RTT, or when we receive HANDSHAKE_DONE,
             // but a few extra probes won't hurt.
-            // It only means that we fail anti-amplification tests.
-            // A server shouldn't arm its PTO timer this way. The server sends
-            // ack-eliciting, in-flight packets immediately so this only
-            // happens when the server has nothing outstanding.  If we had
-            // client authentication, this might cause some extra probes,
-            // but they would be harmless anyway.
+            //
+            // RFC 9002 Section 6.2.4 requires sending probes in packet number spaces
+            // with in-flight data. When we have keys for a space but haven't sent
+            // anything ack-eliciting yet (e.g., waiting for peer's Handshake flight),
+            // we still need to arm the PTO timer to probe and elicit retransmission.
+            //
+            // If no ack-eliciting packets have been sent in this space yet,
+            // last_ack_eliciting may be set as a PTO baseline in two ways:
+            // 1. When we send ANY packet in Initial/Handshake (see on_packet_sent)
+            // 2. When we receive ACKs in Initial and prime Handshake (see on_packets_acked)
+            //
+            // This ensures the PTO timer arms when we have keys for a space but
+            // nothing to send yet, allowing us to probe and elicit peer retransmission.
+            // RFC 9002 Section 6.2.4 requires probing packet number spaces.
             self.last_ack_eliciting
         }
     }
@@ -653,6 +664,37 @@ impl Loss {
             now,
             &mut self.stats.borrow_mut(),
         );
+
+        // When we receive ACKs in Initial space, prime the Handshake space PTO baseline
+        // if we haven't received any Handshake packets yet. This handles the case where:
+        // - Handshake keys are installed (from Server Hello in Initial packets)
+        // - Server's Handshake flight is lost/corrupted
+        // - We haven't sent any Handshake packets yet (nothing to send)
+        // - We haven't received any Handshake packets (largest_acked is None)
+        //
+        // Without this, pto_base_time() returns None for Handshake space and the PTO
+        // timer never arms, causing a deadlock/timeout.
+        //
+        // We need both conditions to avoid false positives:
+        // 1. largest_acked.is_none() - no Handshake packets received yet
+        // 2. Multiple PTOs fired (count > 1) - clearly stuck, not just first retry
+        //
+        // Without count > 1, we'd prime on first Initial ACK even when Handshake
+        // packet is about to arrive, affecting PTO timing in normal flow.
+        if pn_space == PacketNumberSpace::Initial {
+            if let Some(pto) = &self.pto_state {
+                let needs_hs_priming = pto.space == PacketNumberSpace::Initial && pto.count() > 1;
+                if needs_hs_priming {
+                    if let Some(hs_space) = self.spaces.get_mut(PacketNumberSpace::Handshake) {
+                        if hs_space.last_ack_eliciting.is_none() && hs_space.largest_acked.is_none() {
+                            // Use current time as baseline - PTO will fire at now + pto_period
+                            qtrace!("Priming Handshake PTO baseline (no HS packets after {} PTOs)", pto.count());
+                            hs_space.last_ack_eliciting = Some(now);
+                        }
+                    }
+                }
+            }
+        }
 
         self.pto_state = None;
 
