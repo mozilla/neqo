@@ -492,7 +492,7 @@ pub fn strip_padding(d: Datagram) -> Datagram {
                 d[..d.len() - second.len()].to_vec(),
             );
         }
-        remainder = &second[..];
+        remainder = second;
     }
     d
 }
