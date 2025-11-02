@@ -1564,14 +1564,8 @@ fn zero_rtt_with_ech() {
     assert!(server.tls_info().unwrap().early_data_accepted());
 }
 
-/// Test that `can_grease_quic_bit(s.
-///
 /// RFC 9287 Section 3.1 states: "A server MUST NOT remember that a client negotiated
 /// the extension in a previous connection and set the QUIC Bit to 0 based on that information."
-///
-/// This test ensures that:
-/// 1. `Initial` and 0-RTT packets are NOT greased based solely on cached 0-RTT parameters
-/// 2. `Handshake` and `ApplicationData` packets can use cached parameters
 ///
 /// Regression test for the `handshakeloss` interop test failure where Initial packets
 /// with the fixed bit cleared were discarded by the server.
