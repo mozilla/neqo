@@ -995,7 +995,6 @@ fn pto_handshake_space_when_server_flight_lost() {
     assert_eq!(
         *client.state(),
         State::Handshaking,
-        "Test setup: Client must be in Handshaking state (Handshake keys installed)"
     );
 
     let delay = client.process_output(now).callback();
