@@ -947,7 +947,7 @@ fn ack_for_unsent() {
 
 /// Test that PTO fires for Handshake space even when no Handshake packets have been sent.
 ///
-/// This reproduces the haproxy handshakeloss bug where:
+/// This reproduces a handshake loss scenario where:
 /// 1. Client receives Server Hello → Handshake keys installed
 /// 2. Server's Handshake flight (Certificate, etc.) is lost/corrupted
 /// 3. Client never sends any Handshake packets (has nothing to send yet)
