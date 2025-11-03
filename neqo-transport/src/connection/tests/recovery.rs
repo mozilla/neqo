@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use neqo_common::qdebug;
 use neqo_crypto::AuthenticationStatus;
 use test_fixture::{
-    assertions::{assert_handshake, assert_initial},
+    assertions::{assert_handshake, assert_initial, is_handshake, is_initial},
     now, split_datagram,
 };
 
@@ -955,7 +955,6 @@ fn ack_for_unsent() {
 /// 5. PTO timer never arms for Handshake space
 /// 6. Connection times out
 ///
-///
 /// The client should probe Handshake space to elicit server retransmission.
 #[test]
 fn pto_handshake_space_when_server_flight_lost() {
@@ -974,43 +973,97 @@ fn pto_handshake_space_when_server_flight_lost() {
 
     let c1 = client.process_output(now).dgram();
     now += RTT / 2;
-    let s1 = server.process(c1, now).dgram();
-    assert!(s1.is_some());
-    let s2 = server.process_output(now).dgram();
-    assert!(s2.is_some());
 
-    // Now let the client have the Initial, but drop the first coalesced Handshake packet.
+    // Collect all server output.
+    let mut server_dgrams = Vec::new();
+    server_dgrams.push(server.process(c1, now).dgram().unwrap());
+    while let Some(dgram) = server.process_output(now).dgram() {
+        server_dgrams.push(dgram);
+    }
+    assert!(!server_dgrams.is_empty());
+
+    // Verify packet structure. The server sends:
+    // - Zero or more Initial-only datagrams (if Initial is too big)
+    // - Exactly one Initial+Handshake coalesced datagram
+    // - Zero or more Handshake-only datagrams (rest of the flight)
+    let mut initial_plus_handshake_idx = None;
+    for (i, dgram) in server_dgrams.iter().enumerate() {
+        let (first, second) = split_datagram(dgram);
+
+        // Check if first packet is Initial or Handshake
+        let first_is_initial = is_initial(&first, false);
+        let first_is_handshake = is_handshake(&first);
+        assert!(first_is_initial || first_is_handshake);
+
+        // Check if there's a coalesced second packet
+        if let Some(s) = &second {
+            let second_is_handshake = is_handshake(s);
+            // If there's a coalesced Handshake, this must be the Initial+Handshake datagram
+            if first_is_initial && second_is_handshake {
+                assert!(initial_plus_handshake_idx.is_none());
+                initial_plus_handshake_idx = Some(i);
+            }
+        }
+
+        // Verify all datagrams after Initial+Handshake are Handshake-only
+        if let Some(init_hs_idx) = initial_plus_handshake_idx {
+            if i > init_hs_idx {
+                assert!(is_handshake(&first) && second.is_none());
+            }
+        }
+    }
+
+    let initial_plus_handshake_idx = initial_plus_handshake_idx
+        .expect("Expected at least one Initial+Handshake coalesced datagram");
+
+    // Now let the client receive all datagrams, but split the Initial+Handshake one
+    // and drop the Handshake part to simulate the Handshake packet being lost/corrupted.
     now += RTT / 2;
-    let (initial, _) = split_datagram(&s1.unwrap());
-    client.process_input(initial, now);
+    for (i, dgram) in server_dgrams.iter().enumerate() {
+        if i == initial_plus_handshake_idx {
+            // For the Initial+Handshake datagram, split it and only send the Initial part
+            let (initial, handshake) = split_datagram(dgram);
+            assert_initial(&initial, false);
+            assert_handshake(handshake.as_ref().unwrap());
+            client.process_input(initial, now);
+        } else {
+            // For Initial-only datagrams, send them; skip Handshake-only datagrams
+            if is_initial(&split_datagram(dgram).0, false) {
+                client.process_input(dgram.clone(), now);
+            }
+        }
+    }
 
-    // Process s2 to provide remaining CRYPTO frames (Server Hello completion + Handshake data)
-    // This will install Handshake keys. We drop the client's response.
-    let c2 = client.process(s2, now).dgram();
+    // Client processes the Initial packets (which install Handshake keys).
+    // We drop the client's ACK response.
+    let c2 = client.process_output(now).dgram();
     assert!(c2.is_some()); // This is an ACK.  Drop it.
-    assert_eq!(*client.state(), State::Handshaking,);
+    assert_eq!(*client.state(), State::Handshaking);
 
     let pto = client.process_output(now).callback();
     now += pto;
-    let initial_pto_count = client.stats.borrow().pto_counts[0];
 
-    // When PTO fires, client MUST send probe in Handshake space because:
-    // - Handshake keys are installed
-    // - Waiting for server's Handshake messages
-    // - RFC 9002 Section 6.2.4 requires probing packet number spaces
-    let ping_count_before = client.stats().frame_tx.ping;
-    let mut pto_dgrams = 0;
-    while client.process_output(now).dgram().is_some() {
-        pto_dgrams += 1;
+    // Fire Initial PTO - this should prime Handshake space
+    while client.process_output(now).dgram().is_some() {}
+
+    // Advance time - the next PTO should be for Handshake space (if primed).
+    let next_timeout = client.process_output(now).callback();
+    now += next_timeout;
+
+    // Collect all packets from this timeout
+    let mut pto_packets = Vec::new();
+    while let Some(dgram) = client.process_output(now).dgram() {
+        pto_packets.push(dgram);
     }
-    let ping_count_after = client.stats().frame_tx.ping;
-    assert!(pto_dgrams > 0, "Client must send PTO probe");
-    assert!(
-        client.stats.borrow().pto_counts[0] == initial_pto_count + pto_dgrams,
-        "PTO count should increment"
-    );
-    assert!(
-        ping_count_after > ping_count_before,
-        "PTO probe must include PING in Handshake space"
-    );
+
+    // Check if any Handshake PING probes packets were sent.
+    let mut has_handshake = false;
+    for dgram in &pto_packets {
+        let (first, second) = split_datagram(dgram);
+        has_handshake |= is_handshake(&first);
+        if let Some(s) = &second {
+            has_handshake |= is_handshake(s);
+        }
+    }
+    assert!(has_handshake, "Client sent Handshake PTO probe");
 }

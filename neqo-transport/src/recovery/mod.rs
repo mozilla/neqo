@@ -581,6 +581,39 @@ impl Loss {
         self.confirmed_time.is_some()
     }
 
+    /// Prime the Handshake space PTO timer when stuck in Initial space.
+    fn maybe_prime_handshake_pto(&mut self, now: Instant) {
+        let Some(pto) = &self.pto_state else {
+            return;
+        };
+
+        // Only prime if we're in Initial space (fire on first PTO).
+        if pto.space != PacketNumberSpace::Initial {
+            return;
+        }
+
+        // Only prime if we've received Initial ACKs (proving the peer is alive).
+        let Some(initial_space) = self.spaces.get(PacketNumberSpace::Initial) else {
+            return;
+        };
+        if initial_space.largest_acked.is_none() {
+            return;
+        }
+
+        let Some(hs_space) = self.spaces.get_mut(PacketNumberSpace::Handshake) else {
+            return;
+        };
+
+        // Only prime if we haven't sent or received anything in Handshake space yet.
+        if hs_space.last_ack_eliciting.is_none() && hs_space.largest_acked.is_none() {
+            qtrace!(
+                "Priming Handshake PTO baseline (no HS packets after {} Initial PTOs)",
+                pto.count()
+            );
+            hs_space.last_ack_eliciting = Some(now);
+        }
+    }
+
     /// Returns (acked packets, lost packets)
     pub fn on_ack_received<R>(
         &mut self,
@@ -664,40 +697,6 @@ impl Loss {
             now,
             &mut self.stats.borrow_mut(),
         );
-
-        // When we receive ACKs in Initial space, prime the Handshake space PTO baseline
-        // if we haven't received any Handshake packets yet. This handles the case where:
-        // - Handshake keys are installed (from Server Hello in Initial packets)
-        // - Server's Handshake flight is lost/corrupted
-        // - We haven't sent any Handshake packets yet (nothing to send)
-        // - We haven't received any Handshake packets (largest_acked is None)
-        //
-        // Without this, pto_base_time() returns None for Handshake space and the PTO
-        // timer never arms, causing a deadlock/timeout.
-        //
-        // We need both conditions to avoid false positives:
-        // 1. largest_acked.is_none() - no Handshake packets received yet
-        // 2. Multiple PTOs fired (count > 1) - clearly stuck, not just first retry
-        //
-        // Without count > 1, we'd prime on first Initial ACK even when Handshake
-        // packet is about to arrive, affecting PTO timing in normal flow.
-        if pn_space == PacketNumberSpace::Initial {
-            let Some(pto) = &self.pto_state else {
-                return (acked_packets, lost);
-            };
-            if pto.space != PacketNumberSpace::Initial || pto.count() <= 1 {
-                // No need to prime handshake PTO, continue.
-            } else if let Some(hs_space) = self.spaces.get_mut(PacketNumberSpace::Handshake) {
-                if hs_space.last_ack_eliciting.is_none() && hs_space.largest_acked.is_none() {
-                    qtrace!(
-                        "Priming Handshake PTO baseline (no HS packets after {} PTOs)",
-                        pto.count()
-                    );
-                    // Use current time as baseline - PTO will fire at now + pto_period
-                    hs_space.last_ack_eliciting = Some(now);
-                }
-            }
-        }
 
         self.pto_state = None;
         (acked_packets, lost)
@@ -907,6 +906,11 @@ impl Loss {
         if let Some(pn_space) = pto_space {
             qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
             self.fire_pto(pn_space, allow_probes, now);
+
+            // Maybe prime the Handshake PTO when PTO fires in Initial space.
+            if pn_space == PacketNumberSpace::Initial {
+                self.maybe_prime_handshake_pto(now);
+            }
         }
     }
 
