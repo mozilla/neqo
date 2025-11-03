@@ -951,7 +951,7 @@ fn ack_for_unsent() {
 /// 1. Client receives Server Hello → Handshake keys installed
 /// 2. Server's Handshake flight (Certificate, etc.) is lost/corrupted
 /// 3. Client never sends any Handshake packets (has nothing to send yet)
-/// 4. Client's Handshake space has last_ack_eliciting = None
+/// 4. Client's Handshake space has `last_ack_eliciting` = None
 /// 5. PTO timer never arms for Handshake space
 /// 6. Connection times out
 ///
@@ -973,7 +973,6 @@ fn pto_handshake_space_when_server_flight_lost() {
         .unwrap();
 
     let c1 = client.process_output(now).dgram();
-
     now += RTT / 2;
     let s1 = server.process(c1, now).dgram();
     assert!(s1.is_some());
@@ -989,46 +988,27 @@ fn pto_handshake_space_when_server_flight_lost() {
     // This will install Handshake keys. We drop the client's response.
     let c2 = client.process(s2, now).dgram();
     assert!(c2.is_some()); // This is an ACK.  Drop it.
-
-    // Verify client has reached Handshaking state (which implies Handshake keys are installed).
-    // Handshake keys are derived after processing Server Hello.
-    assert_eq!(
-        *client.state(),
-        State::Handshaking,
-    );
+    assert_eq!(*client.state(), State::Handshaking,);
 
     let pto = client.process_output(now).callback();
     now += pto;
-
     let initial_pto_count = client.stats.borrow().pto_counts[0];
 
     // When PTO fires, client MUST send probe in Handshake space because:
     // - Handshake keys are installed
     // - Waiting for server's Handshake messages
     // - RFC 9002 Section 6.2.4 requires probing packet number spaces
-
-    // Verify a Handshake PING probe was sent by checking stats
-    // We can't easily parse the encrypted/header-protected packet, so check frame stats
     let ping_count_before = client.stats().frame_tx.ping;
-
-    // Drain all PTO output
-    let mut pto_dgrams = Vec::new();
-    while let Some(dgram) = client.process_output(now).dgram() {
-        pto_dgrams.push(dgram);
+    let mut pto_dgrams = 0;
+    while client.process_output(now).dgram().is_some() {
+        pto_dgrams += 1;
     }
-
     let ping_count_after = client.stats().frame_tx.ping;
-
-    // Verify at least one datagram was sent for PTO
-    assert!(!pto_dgrams.is_empty(), "Client must send PTO probe");
-
-    // Verify PTO count incremented
+    assert!(pto_dgrams > 0, "Client must send PTO probe");
     assert!(
-        client.stats.borrow().pto_counts[0] > initial_pto_count,
+        client.stats.borrow().pto_counts[0] == initial_pto_count + pto_dgrams,
         "PTO count should increment"
     );
-
-    // Verify a PING was sent (the Handshake probe)
     assert!(
         ping_count_after > ping_count_before,
         "PTO probe must include PING in Handshake space"

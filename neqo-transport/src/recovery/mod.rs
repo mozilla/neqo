@@ -194,7 +194,7 @@ impl LossRecoverySpace {
         } else if self.space == PacketNumberSpace::ApplicationData {
             None
         } else {
-            // Special case to prevent handshake deadlocks.
+            // Nasty special case to prevent handshake deadlocks.
             // A client needs to keep the PTO timer armed to prevent a stall
             // of the handshake.  Technically, this has to stop once we receive
             // an ACK of Handshake or 1-RTT, or when we receive HANDSHAKE_DONE,
@@ -682,26 +682,24 @@ impl Loss {
         // Without count > 1, we'd prime on first Initial ACK even when Handshake
         // packet is about to arrive, affecting PTO timing in normal flow.
         if pn_space == PacketNumberSpace::Initial {
-            if let Some(pto) = &self.pto_state {
-                let needs_hs_priming = pto.space == PacketNumberSpace::Initial && pto.count() > 1;
-                if needs_hs_priming {
-                    if let Some(hs_space) = self.spaces.get_mut(PacketNumberSpace::Handshake) {
-                        if hs_space.last_ack_eliciting.is_none() && hs_space.largest_acked.is_none()
-                        {
-                            // Use current time as baseline - PTO will fire at now + pto_period
-                            qtrace!(
-                                "Priming Handshake PTO baseline (no HS packets after {} PTOs)",
-                                pto.count()
-                            );
-                            hs_space.last_ack_eliciting = Some(now);
-                        }
-                    }
+            let Some(pto) = &self.pto_state else {
+                return (acked_packets, lost);
+            };
+            if pto.space != PacketNumberSpace::Initial || pto.count() <= 1 {
+                // No need to prime handshake PTO, continue.
+            } else if let Some(hs_space) = self.spaces.get_mut(PacketNumberSpace::Handshake) {
+                if hs_space.last_ack_eliciting.is_none() && hs_space.largest_acked.is_none() {
+                    qtrace!(
+                        "Priming Handshake PTO baseline (no HS packets after {} PTOs)",
+                        pto.count()
+                    );
+                    // Use current time as baseline - PTO will fire at now + pto_period
+                    hs_space.last_ack_eliciting = Some(now);
                 }
             }
         }
 
         self.pto_state = None;
-
         (acked_packets, lost)
     }
 
