@@ -5,7 +5,10 @@
 // except according to those terms.
 
 use neqo_common::{qdebug, Datagram};
-use test_fixture::{now, split_datagram};
+use test_fixture::{
+    assertions::{assert_handshake, assert_initial},
+    now, split_datagram,
+};
 
 use super::{
     super::{
@@ -17,7 +20,7 @@ use super::{
 };
 use crate::{
     crypto::{OVERWRITE_INVOCATIONS, UPDATE_WRITE_KEYS_AT},
-    packet,
+    packet, MIN_INITIAL_PACKET_SIZE,
 };
 
 fn check_discarded(
@@ -355,4 +358,47 @@ fn automatic_update_write_keys_blocked() {
         client.state(),
         State::Closed(CloseReason::Transport(Error::KeysExhausted))
     ));
+}
+
+/// Test that when both Initial and Handshake packets are sent together due to PTO,
+/// the resulting datagram is properly padded to `MIN_INITIAL_PACKET_SIZE` (1200 bytes).
+#[test]
+fn initial_handshake_pto_padding() {
+    let mut client = default_client();
+    let mut now = now();
+
+    let c_init1 = client.process_output(now).dgram();
+    let c_init2 = client.process_output(now).dgram();
+    assert!(c_init1.is_some());
+    assert!(c_init2.is_some());
+
+    let mut server = default_server();
+    server.process_input(c_init1.unwrap(), now);
+    let s_hs1 = server.process(c_init2, now).dgram();
+    assert!(s_hs1.is_some());
+    let s_hs2 = server.process_output(now).dgram();
+    assert!(s_hs2.is_some());
+
+    // Client receives server handshake messages but we immediately advance time
+    // to trigger PTO before allowing any client output. This simulates the
+    // scenario where all client packets are lost.
+    client.process_input(s_hs1.unwrap(), now);
+    client.process_input(s_hs2.unwrap(), now);
+    now += AT_LEAST_PTO;
+    let pto_dgram = client.process_output(now).dgram();
+    assert!(pto_dgram.is_some());
+
+    // The datagram containing Initial packet(s) must be at least 1200 bytes
+    // per RFC 9000 Section 14.1.
+    let dgram = pto_dgram.unwrap();
+    assert!(dgram.len() >= MIN_INITIAL_PACKET_SIZE);
+
+    // Verify the datagram contains both an Initial and a Handshake packet.
+    let (initial_pkt, handshake_pkt) = split_datagram(&dgram);
+    assert_initial(&initial_pkt, false); // No token expected
+    assert!(
+        handshake_pkt.is_some(),
+        "PTO datagram should contain a Handshake packet"
+    );
+    assert_handshake(&handshake_pkt.unwrap());
 }

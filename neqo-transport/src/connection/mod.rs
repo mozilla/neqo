@@ -2766,7 +2766,10 @@ impl Connection {
                 needs_padding = true;
             } else {
                 if pt == packet::Type::Handshake && self.role == Role::Client {
-                    needs_padding = false;
+                    // Only disable padding if the UDP packet doesn't include an Initial packet.
+                    if initial_sent.is_none() {
+                        needs_padding = false;
+                    }
                 }
                 self.loss_recovery.on_packet_sent(path, sent, now);
             }
