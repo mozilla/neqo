@@ -982,75 +982,46 @@ fn pto_handshake_space_when_server_flight_lost() {
     }
     assert!(!server_dgrams.is_empty());
 
-    // Verify packet structure. The server sends:
-    // - Zero or more Initial-only datagrams (if Initial is too big)
-    // - Exactly one Initial+Handshake coalesced datagram
-    // - Zero or more Handshake-only datagrams (rest of the flight)
-    let mut initial_plus_handshake_idx = None;
-    for (i, dgram) in server_dgrams.iter().enumerate() {
-        let (first, second) = split_datagram(dgram);
-
-        // Check if first packet is Initial or Handshake
-        let first_is_initial = is_initial(&first, false);
-        let first_is_handshake = is_handshake(&first);
-        assert!(first_is_initial || first_is_handshake);
-
-        // Check if there's a coalesced second packet
-        if let Some(s) = &second {
-            let second_is_handshake = is_handshake(s);
-            // If there's a coalesced Handshake, this must be the Initial+Handshake datagram
-            if first_is_initial && second_is_handshake {
-                assert!(initial_plus_handshake_idx.is_none());
-                initial_plus_handshake_idx = Some(i);
-            }
-        }
-
-        // Verify all datagrams after Initial+Handshake are Handshake-only
-        if let Some(init_hs_idx) = initial_plus_handshake_idx {
-            if i > init_hs_idx {
-                assert!(is_handshake(&first) && second.is_none());
-            }
-        }
-    }
-
-    let initial_plus_handshake_idx = initial_plus_handshake_idx
-        .expect("Expected at least one Initial+Handshake coalesced datagram");
-
-    // Now let the client receive all datagrams, but split the Initial+Handshake one
-    // and drop the Handshake part to simulate the Handshake packet being lost/corrupted.
+    // Send all Initial packets to the client, but drop all Handshake packets.
     now += RTT / 2;
-    for (i, dgram) in server_dgrams.iter().enumerate() {
-        if i == initial_plus_handshake_idx {
-            // For the Initial+Handshake datagram, split it and only send the Initial part
-            let (initial, handshake) = split_datagram(dgram);
-            assert_initial(&initial, false);
-            assert_handshake(handshake.as_ref().unwrap());
-            client.process_input(initial, now);
-        } else {
-            // For Initial-only datagrams, send them; skip Handshake-only datagrams
-            if is_initial(&split_datagram(dgram).0, false) {
-                client.process_input(dgram.clone(), now);
+    let mut found_hs = false;
+    for dgram in server_dgrams {
+        let (first, second) = split_datagram(&dgram);
+        if is_initial(&first, false) {
+            assert!(!found_hs, "got Initial after Handshake");
+            if let Some(hs) = second {
+                found_hs |= is_handshake(&hs);
             }
+            client.process_input(first, now);
+        } else {
+            found_hs |= is_handshake(&first);
         }
     }
+    assert!(found_hs);
 
     // Client processes the Initial packets (which install Handshake keys).
-    // We drop the client's ACK response.
     let c2 = client.process_output(now).dgram();
     assert!(c2.is_some()); // This is an ACK.  Drop it.
     assert_eq!(*client.state(), State::Handshaking);
 
     let pto = client.process_output(now).callback();
+    assert_ne!(pto, Duration::ZERO);
     now += pto;
 
-    // Fire Initial PTO - this should prime Handshake space
-    while client.process_output(now).dgram().is_some() {}
-
-    // Advance time - the next PTO should be for Handshake space (if primed).
-    let next_timeout = client.process_output(now).callback();
+    // Drain all packets and get the next timeout.
+    let next_timeout = loop {
+        let out = client.process_output(now);
+        let callback = out.callback();
+        if out.dgram().is_none() {
+            break callback;
+        }
+    };
+    assert_ne!(next_timeout, Duration::ZERO);
+    // Fire PTO - this should prime Handshake space.
     now += next_timeout;
 
-    // Collect all packets from this timeout
+    // Collect all packets from this timeout and verify PING was sent.
+    let stats_before = client.stats().frame_tx;
     let mut pto_packets = Vec::new();
     while let Some(dgram) = client.process_output(now).dgram() {
         pto_packets.push(dgram);
@@ -1065,5 +1036,5 @@ fn pto_handshake_space_when_server_flight_lost() {
             has_handshake |= is_handshake(s);
         }
     }
-    assert!(has_handshake, "Client sent Handshake PTO probe");
+    assert!(has_handshake && client.stats().frame_tx.ping > stats_before.ping);
 }
