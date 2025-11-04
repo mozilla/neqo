@@ -6,7 +6,7 @@
 
 use neqo_common::{qdebug, Datagram};
 use test_fixture::{
-    assertions::{assert_handshake, assert_initial},
+    assertions::{is_handshake, is_initial},
     now, split_datagram,
 };
 
@@ -371,8 +371,7 @@ fn initial_handshake_pto_padding() {
 
     let c_init1 = client.process_output(now).dgram();
     let c_init2 = client.process_output(now).dgram();
-    assert!(c_init1.is_some());
-    assert!(c_init2.is_some());
+    assert!(c_init1.is_some() && c_init2.is_some());
 
     let mut server = default_server();
     server.process_input(c_init1.unwrap(), now);
@@ -387,20 +386,25 @@ fn initial_handshake_pto_padding() {
     client.process_input(s_hs1.unwrap(), now);
     client.process_input(s_hs2.unwrap(), now);
     now += AT_LEAST_PTO;
-    let pto_dgram = client.process_output(now).dgram();
-    assert!(pto_dgram.is_some());
 
-    // The datagram containing Initial packet(s) must be at least 1200 bytes
-    // per RFC 9000 Section 14.1.
-    let dgram = pto_dgram.unwrap();
-    assert!(dgram.len() >= MIN_INITIAL_PACKET_SIZE);
+    // Collect all PTO datagrams - there may be multiple.
+    let mut pto_dgrams = Vec::new();
+    while let Some(dgram) = client.process_output(now).dgram() {
+        pto_dgrams.push(dgram);
+    }
+    assert!(!pto_dgrams.is_empty());
 
-    // Verify the datagram contains both an Initial and a Handshake packet.
-    let (initial_pkt, handshake_pkt) = split_datagram(&dgram);
-    assert_initial(&initial_pkt, false); // No token expected
-    assert!(
-        handshake_pkt.is_some(),
-        "PTO datagram should contain a Handshake packet"
-    );
-    assert_handshake(&handshake_pkt.unwrap());
+    // Iterate over all datagrams to find one with coalesced Initial+Handshake.
+    // Any datagram containing an Initial packet must be properly padded.
+    let mut found_coalesced = false;
+    for dgram in &pto_dgrams {
+        let (first, second) = split_datagram(dgram);
+        if is_initial(&first, false) {
+            assert!(dgram.len() >= MIN_INITIAL_PACKET_SIZE);
+            if let Some(hs) = &second {
+                found_coalesced |= is_handshake(hs);
+            }
+        }
+    }
+    assert!(found_coalesced);
 }
