@@ -31,13 +31,22 @@ use crate::{
 /// Constant throughout the lifetime of the connection.
 ///
 /// See also <https://github.com/google/quiche/blob/4f1f0fcea045cd71410c2c318773fc24c3523ed7/quiche/quic/core/quic_constants.h#L113-L114>.
-const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
+const LOCAL_STREAM_LIMIT_BIDI: u64 = 100;
 /// Maximum number of unidirectional streams that the remote can open.
 ///
 /// Constant throughout the lifetime of the connection.
 ///
 /// See also <https://github.com/google/quiche/blob/4f1f0fcea045cd71410c2c318773fc24c3523ed7/quiche/quic/core/quic_constants.h#L113-L114>.
-const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
+const LOCAL_STREAM_LIMIT_UNI: u64 = 100;
+
+/// Factor to multiply stream-level data flow control limits to get
+/// connection-level data flow control limits.
+///
+/// Prevents a single stream from taking up the entire connection-level
+/// capacity.
+///
+/// Consider further tuning.
+const CONNECTION_FACTOR: u64 = 2;
 
 /// Initial stream-level receive window size.
 ///
@@ -55,7 +64,7 @@ pub const INITIAL_LOCAL_MAX_STREAM_DATA: usize = 1024 * 1024;
 /// implementation for details.
 ///
 /// See also <https://datatracker.ietf.org/doc/html/rfc9000#frame-max-data>.
-const INITIAL_LOCAL_MAX_DATA: u64 = INITIAL_LOCAL_MAX_STREAM_DATA as u64 * 16;
+pub const INITIAL_LOCAL_MAX_DATA: u64 = INITIAL_LOCAL_MAX_STREAM_DATA as u64 * CONNECTION_FACTOR;
 
 /// Limit for the maximum amount of bytes active on a single stream, i.e. limit
 /// for the size of the stream receive window.
@@ -75,7 +84,7 @@ pub const MAX_LOCAL_MAX_STREAM_DATA: u64 = 10 * 1024 * 1024;
 /// for the size of the connection-level receive window.
 ///
 /// See also <https://datatracker.ietf.org/doc/html/rfc9000#frame-max-data>.
-pub const MAX_LOCAL_MAX_DATA: u64 = 100 * 1024 * 1024;
+pub const MAX_LOCAL_MAX_DATA: u64 = MAX_LOCAL_MAX_STREAM_DATA * CONNECTION_FACTOR;
 
 // Maximum size of a QUIC DATAGRAM frame, as specified in https://datatracker.ietf.org/doc/html/rfc9221#section-3-4.
 const MAX_DATAGRAM_FRAME_SIZE: u64 = 65535;
