@@ -1395,7 +1395,7 @@ mod test {
         assert_eq!(
             fc.max_active(),
             MAX_LOCAL_MAX_DATA,
-            "expect connection-level receive window to cap at MAX_CONN_RECV_WINDOW_SIZE (100 MiB), got {} MiB",
+            "expect connection-level receive window to cap at MAX_LOCAL_MAX_DATA (100 MiB), got {} MiB",
             fc.max_active() / 1024 / 1024
         );
 
