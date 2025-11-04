@@ -362,6 +362,8 @@ fn automatic_update_write_keys_blocked() {
 
 /// Test that when both Initial and Handshake packets are sent together due to PTO,
 /// the resulting datagram is properly padded to `MIN_INITIAL_PACKET_SIZE` (1200 bytes).
+///
+/// See RFC 9000 14.1 <https://www.rfc-editor.org/rfc/rfc9000.html#name-initial-datagram-size>.
 #[test]
 fn initial_handshake_pto_padding() {
     let mut client = default_client();
