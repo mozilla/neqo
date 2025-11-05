@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(clippy::missing_panics_doc, reason = "These are test assertions.")]
+
 use std::net::SocketAddr;
 
 use neqo_common::{Datagram, Decoder, Tos};
@@ -19,7 +21,7 @@ fn assert_default_version(dec: &mut Decoder) -> Version {
     version
 }
 
-fn assert_long_packet_type(b: u8, v1_expected: u8, version: Version) {
+fn is_long_packet_type(b: u8, v1_expected: u8, version: Version) -> bool {
     assert_eq!(0, v1_expected & !PACKET_TYPE_MASK);
     let expected = if version == Version::Version2 {
         // Add one to the packet type and then clear the 0b0100_0000 bit if it overflows.
@@ -27,14 +29,17 @@ fn assert_long_packet_type(b: u8, v1_expected: u8, version: Version) {
     } else {
         v1_expected
     };
-    assert_eq!(b & PACKET_TYPE_MASK, expected);
+    (b & PACKET_TYPE_MASK) == expected
+}
+
+fn assert_long_packet_type(b: u8, v1_expected: u8, version: Version) {
+    assert!(
+        is_long_packet_type(b, v1_expected, version),
+        "expected long packet type {v1_expected:02x}, got {b:02x} for version {version:?}"
+    );
 }
 
 /// Simple checks for the version being correct.
-///
-/// # Panics
-///
-/// If this is not a long header packet with the given version.
 pub fn assert_version(payload: &[u8], v: u32) {
     let mut dec = Decoder::from(payload);
     assert_eq!(
@@ -46,10 +51,6 @@ pub fn assert_version(payload: &[u8], v: u32) {
 }
 
 /// Simple checks for a Version Negotiation packet.
-///
-/// # Panics
-///
-/// If this is clearly not a Version Negotiation packet.
 pub fn assert_vn(dgram: &Datagram) {
     assert_eq!(dgram.tos(), Tos::default()); // VN always uses default IP TOS.
     let mut dec = Decoder::from(dgram.as_ref());
@@ -65,10 +66,6 @@ pub fn assert_vn(dgram: &Datagram) {
 }
 
 /// Do a simple decode of the datagram to verify that it is coalesced.
-///
-/// # Panics
-///
-/// If the tests fail.
 pub fn assert_coalesced_0rtt(payload: &[u8]) {
     assert!(payload.len() >= MIN_INITIAL_PACKET_SIZE);
     let mut dec = Decoder::from(payload);
@@ -84,9 +81,6 @@ pub fn assert_coalesced_0rtt(payload: &[u8]) {
     assert_long_packet_type(zrtt_type, 0b1001_0000, version);
 }
 
-/// # Panics
-///
-/// If the tests fail.
 pub fn assert_retry(dgram: &Datagram) {
     assert_eq!(dgram.tos(), Tos::default()); // Retry always uses default IP TOS.
     let mut dec = Decoder::from(dgram.as_ref());
@@ -95,37 +89,50 @@ pub fn assert_retry(dgram: &Datagram) {
     assert_long_packet_type(t, 0b1011_0000, version);
 }
 
-/// Assert that this is an Initial packet with (or without) a token.
-///
-/// # Panics
-///
-/// If the tests fail.
-pub fn assert_initial(payload: &[u8], expect_token: bool) {
+/// Is this is an Initial packet with (or without) a token?
+#[must_use]
+pub fn is_initial(payload: &[u8], expect_token: bool) -> bool {
     let mut dec = Decoder::from(payload);
     let t = dec.decode_uint::<u8>().unwrap();
-    let version = assert_default_version(&mut dec);
-    assert_long_packet_type(t, 0b1000_0000, version);
+    let Ok(version) = Version::try_from(dec.decode_uint::<version::Wire>().unwrap()) else {
+        return false;
+    };
+    if version != Version::Version1 && version != Version::Version2 {
+        return false;
+    }
+    if !is_long_packet_type(t, 0b1000_0000, version) {
+        return false;
+    }
     dec.skip_vec(1); // Destination Connection ID.
     dec.skip_vec(1); // Source Connection ID.
     let token = dec.decode_vvec().unwrap();
-    assert_eq!(expect_token, !token.is_empty());
+    expect_token != token.is_empty()
+}
+
+/// Assert that this is an Initial packet with (or without) a token.
+pub fn assert_initial(payload: &[u8], expect_token: bool) {
+    assert!(is_initial(payload, expect_token));
+}
+
+/// Is this is a Handshake packet?
+#[must_use]
+pub fn is_handshake(payload: &[u8]) -> bool {
+    let mut dec = Decoder::from(payload);
+    let t = dec.decode_uint::<u8>().unwrap();
+    let Ok(version) = Version::try_from(dec.decode_uint::<version::Wire>().unwrap()) else {
+        return false;
+    };
+    if version != Version::Version1 && version != Version::Version2 {
+        return false;
+    }
+    is_long_packet_type(t, 0b1010_0000, version)
 }
 
 /// Assert that this is a Handshake packet.
-///
-/// # Panics
-///
-/// If the tests fail.
 pub fn assert_handshake(payload: &[u8]) {
-    let mut dec = Decoder::from(payload);
-    let t = dec.decode_uint::<u8>().unwrap();
-    let version = assert_default_version(&mut dec);
-    assert_long_packet_type(t, 0b1010_0000, version);
+    assert!(is_handshake(payload));
 }
 
-/// # Panics
-///
-/// If the tests fail.
 pub fn assert_no_1rtt(payload: &[u8]) {
     let mut dec = Decoder::from(payload);
     while let Some(b1) = dec.decode_uint::<u8>() {
