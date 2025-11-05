@@ -14,7 +14,10 @@ fi
 
 check-lockfile-intersection \
     https://raw.githubusercontent.com/mozilla-firefox/firefox/refs/heads/main/Cargo.lock \
-    Cargo.lock 2> /dev/null | grep DIFFERENT | while read -r d ; do
+    Cargo.lock 2> /dev/null | while read -r d ; do
+        if [[ "$d" != *DIFFERENT* ]]; then
+            continue
+        fi
         crate=$(echo "$d" | cut -d' ' -f2)
         version_a=$(echo "$d" | cut -d' ' -f3)
         version_b=$(echo "$d" | cut -d' ' -f5)
