@@ -64,7 +64,7 @@ pub fn send_inner(
         destination: d.destination(),
         ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
         contents: d.data(),
-        segment_size: Some(d.datagram_size()),
+        segment_size: Some(d.datagram_size().get()),
         src_ip: None,
     };
 
@@ -75,7 +75,7 @@ pub fn send_inner(
                 "Failed to send datagram of size {} bytes, in {} segments, each {} bytes, from {} to {}. PMTUD probe? Ignoring error: {}",
                 d.data().len(),
                 d.num_datagrams(),
-                d.datagram_size(),
+                d.datagram_size().get(),
                 d.source(),
                 d.destination(),
                 e
@@ -89,7 +89,7 @@ pub fn send_inner(
         "sent {} bytes, in {} segments, each {} bytes, from {} to {} ",
         d.data().len(),
         d.num_datagrams(),
-        d.datagram_size(),
+        d.datagram_size().get(),
         d.source(),
         d.destination(),
     );
@@ -356,6 +356,8 @@ mod tests {
         ignore = "GRO not available"
     )]
     fn many_datagrams_through_gso_gro() -> Result<(), io::Error> {
+        use std::num::NonZeroUsize;
+
         const SEGMENT_SIZE: usize = 128;
 
         let sender = socket()?;
@@ -368,7 +370,7 @@ mod tests {
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             Tos::from((Dscp::Le, Ecn::Ect0)),
-            SEGMENT_SIZE,
+            NonZeroUsize::new(SEGMENT_SIZE).expect("SEGMENT_SIZE cannot be zero"),
             msg,
         );
 

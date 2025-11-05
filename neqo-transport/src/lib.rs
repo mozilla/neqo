@@ -63,14 +63,14 @@ pub use self::{
         EmptyConnectionIdGenerator, RandomConnectionIdGenerator,
     },
     connection::{
-        params::ConnectionParameters, Connection, Output, OutputBatch, State, ZeroRttState,
+        params::{ConnectionParameters, INITIAL_LOCAL_MAX_STREAM_DATA, MAX_LOCAL_MAX_STREAM_DATA},
+        Connection, Output, OutputBatch, State, ZeroRttState,
     },
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
     packet::MIN_INITIAL_PACKET_SIZE,
     pmtud::Pmtud,
     quic_datagrams::DatagramTracking,
-    recv_stream::INITIAL_RECV_WINDOW_SIZE,
     rtt::DEFAULT_INITIAL_RTT,
     sni::find_sni,
     stats::Stats,
@@ -253,7 +253,7 @@ pub enum CloseReason {
 
 impl CloseReason {
     /// Checks enclosed error for [`Error::None`] and
-    /// [`CloseReason::Application(0)`].
+    /// [`CloseReason::Application`] with code `0`.
     #[must_use]
     pub const fn is_error(&self) -> bool {
         !matches!(self, Self::Transport(Error::None) | Self::Application(0),)

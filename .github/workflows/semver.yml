@@ -6,7 +6,7 @@ on:
   merge_group:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -31,4 +31,4 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-      - run: cargo semver-checks --default-features --baseline-rev origin/main --workspace
+      - run: cargo semver-checks --default-features --baseline-rev origin/main -p mtu

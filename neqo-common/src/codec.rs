@@ -239,7 +239,7 @@ impl<B: Buffer> Encoder<B> {
     /// Note: for a view of a slice, use `Decoder::new(&enc[s..e])`
     #[must_use]
     pub fn as_decoder(&self) -> Decoder<'_> {
-        Decoder::new(self.buf.as_slice())
+        Decoder::new(self.as_ref())
     }
 
     /// Generic encode routine for arbitrary data.
@@ -1193,5 +1193,19 @@ mod tests {
         let mut a = [0; 16];
         let buf = Cursor::new(&mut a[..]);
         assert_eq!(Buffer::position(&buf), 0);
+    }
+
+    /// [`Encoder::as_decoder`] should only expose the bytes actively encoded through this
+    /// [`Encoder`], not all bytes of the underlying [`Buffer`].
+    #[test]
+    fn as_decoder_exposes_encoded_bytes_only_not_whole_buffer() {
+        let mut buffer = vec![1, 2, 3, 4];
+        let mut enc = Encoder::new_borrowed_vec(&mut buffer);
+        enc.encode(&[5, 6, 7]);
+
+        let decoder = enc.as_decoder();
+        assert_eq!(decoder.as_ref().len(), 3);
+        assert_eq!(decoder.as_ref(), &[5, 6, 7]);
+        assert_eq!(buffer, &[1, 2, 3, 4, 5, 6, 7]);
     }
 }

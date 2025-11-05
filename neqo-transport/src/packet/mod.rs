@@ -42,6 +42,8 @@ const PACKET_HP_MASK_SHORT: u8 = 0x1f;
 const SAMPLE_SIZE: usize = 16;
 const SAMPLE_OFFSET: usize = 4;
 const MAX_PACKET_NUMBER_LEN: usize = 4;
+/// The length of a long packet length field.
+const LONG_PACKET_LENGTH_LEN: usize = 2;
 
 pub mod metadata;
 mod retry;
@@ -72,15 +74,17 @@ impl Type {
 
     #[must_use]
     fn to_byte(self, v: Version) -> u8 {
-        assert!(
-            matches!(
-                self,
-                Self::Initial | Self::ZeroRtt | Self::Handshake | Self::Retry
-            ),
-            "is a long header packet type"
-        );
+        assert!(self.is_long(), "is a long header packet type");
         // Version2 adds one to the type, modulo 4
         (self as u8 + u8::from(v == Version::Version2)) & 3
+    }
+
+    #[must_use]
+    pub const fn is_long(self) -> bool {
+        matches!(
+            self,
+            Self::Initial | Self::ZeroRtt | Self::Handshake | Self::Retry
+        )
     }
 }
 
@@ -390,8 +394,13 @@ impl<B: Buffer> Builder<B> {
 
         // Reserve space for a length in long headers.
         if self.is_long() {
+            if self.remaining() < LONG_PACKET_LENGTH_LEN + MAX_PACKET_NUMBER_LEN {
+                self.limit = 0;
+                return;
+            }
+
             self.offsets.len = self.encoder.len();
-            self.encoder.encode(&[0; 2]);
+            self.encoder.encode(&[0; LONG_PACKET_LENGTH_LEN]);
         }
 
         // This allows the input to be >4, which is absurd, but we can eat that.
@@ -411,7 +420,7 @@ impl<B: Buffer> Builder<B> {
 
     #[expect(clippy::cast_possible_truncation, reason = "AND'ing makes this safe.")]
     fn write_len(&mut self, expansion: usize) {
-        let len = self.encoder.len() - (self.offsets.len + 2) + expansion;
+        let len = self.encoder.len() - (self.offsets.len + LONG_PACKET_LENGTH_LEN) + expansion;
         self.encoder.as_mut()[self.offsets.len] = 0x40 | ((len >> 8) & 0x3f) as u8;
         self.encoder.as_mut()[self.offsets.len + 1] = (len & 0xff) as u8;
     }
@@ -421,6 +430,14 @@ impl<B: Buffer> Builder<B> {
         // The length of the packet number plus the payload length needs to
         // be at least 4 (MAX_PACKET_NUMBER_LEN) plus any amount by which
         // the header protection sample exceeds the AEAD expansion.
+        //
+        // > To ensure that sufficient data is available for sampling, packets
+        // > are padded so that the combined lengths of the encoded packet number
+        // > and protected payload is at least 4 bytes longer than the sample
+        // > required for header protection.
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9001#section-5.4.2>
+
         let crypto_pad = crypto.extra_padding();
         self.encoder.pad_to(
             self.offsets.pn.start + MAX_PACKET_NUMBER_LEN + crypto_pad,
@@ -454,7 +471,12 @@ impl<B: Buffer> Builder<B> {
     pub fn build(mut self, crypto: &mut CryptoDxState) -> Res<Encoder<B>> {
         if self.len() > self.limit {
             qwarn!("Packet contents are more than the limit");
-            debug_assert!(false);
+            debug_assert!(
+                false,
+                "Builder length ({}) is larger than limit ({}).",
+                self.len(),
+                self.limit
+            );
             return Err(Error::Internal);
         }
 
@@ -966,7 +988,7 @@ mod tests {
             Builder, Public, Type, PACKET_BIT_FIXED_QUIC, PACKET_BIT_LONG, PACKET_BIT_SPIN,
             PACKET_LIMIT,
         },
-        ConnectionId, EmptyConnectionIdGenerator, RandomConnectionIdGenerator, Version,
+        ConnectionId, EmptyConnectionIdGenerator, Error, RandomConnectionIdGenerator, Version,
     };
 
     const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
@@ -1295,6 +1317,78 @@ mod tests {
         );
         assert_eq!(builder.remaining(), 0);
         assert_eq!(builder.abort(), encoder_copy);
+    }
+
+    /// Given an encoder that already contains some QUIC packet(s), i.e. is
+    /// filled close to the MTU, attempt to use the remaining insufficient space
+    /// for another QUIC packet.
+    ///
+    /// Details in <https://github.com/mozilla/neqo/issues/3046>.
+    #[test]
+    fn build_insufficient_space_for_dummy_length_and_pn() {
+        const MTU: usize = 1280;
+        const FIRST_QUIC_PACKET: usize = 1236;
+        fixture_init();
+        let crypto = CryptoDxState::test_default();
+
+        let mut encoder = Encoder::new();
+        encoder.pad_to(FIRST_QUIC_PACKET, 0);
+
+        // Builder::long should add 1 (first byte) + 4 (version) + 2
+        // (dcid+scid length) + 8 (dcid) + 8 (scid) = 23 bytes.
+        let mut builder = Builder::long(
+            encoder,
+            Type::Initial,
+            Version::default(),
+            Some(SERVER_CID),
+            Some(CLIENT_CID),
+            MTU - crypto.expansion(),
+        );
+        assert_eq!(builder.len() - FIRST_QUIC_PACKET, 23);
+
+        // Given the FIRST_QUIC_PACKET and the partial header from
+        // Builder::long, the builder should have 5 bytes remaining.
+        assert_eq!(builder.remaining(), 5);
+
+        // Builder::pn needs 2 bytes for the dummy packet length and 4 bytes for
+        // the maximum packet number, but only 5 bytes remain. The builder
+        // should now be full and needs to be aborted.
+        builder.pn(0, 1);
+        assert!(builder.is_full());
+    }
+
+    #[test]
+    #[cfg_attr(
+        debug_assertions,
+        should_panic(expected = "Builder length (30) is larger than limit (20)")
+    )]
+    fn build_insufficient_space_error() {
+        const SMALL_LIMIT: usize = 20;
+        fixture_init();
+
+        // Set up a builder with a very small limit
+        let mut builder = Builder::short(
+            Encoder::new(),
+            false,
+            Some(ConnectionId::from(SERVER_CID)),
+            SMALL_LIMIT,
+        );
+        builder.pn(0, 1);
+
+        // Add more data than the limit allows. This will exceed the limit when
+        // combined with header.
+        let large_payload = vec![0u8; SMALL_LIMIT];
+        builder.encode(&large_payload);
+
+        // Verify that the length exceeds the limit.
+        assert!(builder.is_full());
+
+        // Building should trigger the debug_assert in debug mode, returning
+        // internal error in release mode.
+        assert_eq!(
+            builder.build(&mut CryptoDxState::test_default()),
+            Err(Error::Internal)
+        );
     }
 
     const SAMPLE_RETRY_V2: &[u8] = &[

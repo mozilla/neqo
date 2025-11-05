@@ -11,6 +11,7 @@
     clippy::cognitive_complexity,
     clippy::too_many_lines,
     clippy::used_underscore_binding,
+    clippy::use_self,
     reason = "For included bindgen code."
 )]
 
