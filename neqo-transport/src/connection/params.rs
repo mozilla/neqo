@@ -45,7 +45,7 @@ const LOCAL_STREAM_LIMIT_UNI: u64 = 100;
 /// Prevents a single stream from taking up the entire connection-level
 /// capacity.
 ///
-/// Consider further tuning.
+/// TODO: Consider further tuning.
 const CONNECTION_FACTOR: u64 = 2;
 
 /// Initial stream-level receive window size.
