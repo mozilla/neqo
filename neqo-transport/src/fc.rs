@@ -740,7 +740,7 @@ mod test {
         recovery,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
-        ConnectionParameters, Error, Res, INITIAL_LOCAL_MAX_STREAM_DATA,
+        ConnectionParameters, Error, Res, INITIAL_LOCAL_MAX_DATA, INITIAL_LOCAL_MAX_STREAM_DATA,
     };
 
     #[test]
@@ -1304,10 +1304,8 @@ mod test {
 
     #[test]
     fn connection_flow_control_initial_window() {
-        // Connection flow control starts with a reasonable initial window
-        // (16x the stream window to accommodate 16 concurrent streams).
         let max_data = ConnectionParameters::default().get_max_data();
-        assert_eq!(max_data, (INITIAL_LOCAL_MAX_STREAM_DATA * 16) as u64);
+        assert_eq!(max_data, INITIAL_LOCAL_MAX_DATA);
     }
 
     #[test]

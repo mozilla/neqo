@@ -74,15 +74,17 @@ impl Type {
 
     #[must_use]
     fn to_byte(self, v: Version) -> u8 {
-        assert!(
-            matches!(
-                self,
-                Self::Initial | Self::ZeroRtt | Self::Handshake | Self::Retry
-            ),
-            "is a long header packet type"
-        );
+        assert!(self.is_long(), "is a long header packet type");
         // Version2 adds one to the type, modulo 4
         (self as u8 + u8::from(v == Version::Version2)) & 3
+    }
+
+    #[must_use]
+    pub const fn is_long(self) -> bool {
+        matches!(
+            self,
+            Self::Initial | Self::ZeroRtt | Self::Handshake | Self::Retry
+        )
     }
 }
 
