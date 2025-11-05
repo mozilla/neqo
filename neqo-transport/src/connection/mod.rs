@@ -2766,7 +2766,7 @@ impl Connection {
                 needs_padding = true;
             } else {
                 if pt.is_long() && self.role == Role::Client && initial_sent.is_none() {
-                    // Disable padding if the UDP packet doesn't include an Initial packet.
+                    // Disable padding for any long header packet if the UDP packet doesn't include an Initial packet.
                     needs_padding = false;
                 }
                 self.loss_recovery.on_packet_sent(path, sent, now);
