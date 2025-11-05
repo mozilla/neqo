@@ -22,6 +22,9 @@ neqo-common = { path = "../neqo-common" }
 strum = { workspace = true }
 thiserror = { workspace = true }
 
+[target."cfg(windows)".dependencies]
+windows = { workspace = true, features = ["Win32_Security_Authentication_Identity"] }
+
 [build-dependencies]
 bindgen = { version = "0.69", default-features = false, features = ["runtime"] }
 mozbuild = { version = "0.1", default-features = false, optional = true }
