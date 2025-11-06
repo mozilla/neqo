@@ -217,7 +217,7 @@ fn debug() {
         "stats for\u{0020}
   rx: 0 drop 0 dup 0 saved 0
   tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
-  cc: congestion_events 0 spurious_congestion_events 0
+  cc: loss_congestion_events 0 ecn_congestion_events 0 spurious_congestion_events 0
   pmtud: 0 sent 0 acked 0 lost 0 change 0 iface_mtu 0 pmtu
   resumed: false
   frames rx:

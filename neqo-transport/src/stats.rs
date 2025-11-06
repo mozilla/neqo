@@ -137,8 +137,10 @@ pub struct DatagramStats {
 /// Congestion Control stats
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct CongestionControlStats {
-    /// Total number of congestion events.
-    pub congestion_events: usize,
+    /// Total number of congestion events caused by packet loss.
+    pub congestion_events_due_to_loss: usize,
+    /// Total number of congestion events caused by ECN-CE marked packets.
+    pub congestion_events_due_to_ecn: usize,
     /// Number of spurious congestion events, where congestion was incorrectly inferred due to
     /// packets initially considered lost but subsequently acknowledged. This indicates
     /// instances where the congestion control algorithm overreacted to perceived losses.
@@ -383,8 +385,8 @@ impl Debug for Stats {
         )?;
         writeln!(
             f,
-            "  cc: congestion_events {} spurious_congestion_events {}",
-            self.cc.congestion_events, self.cc.spurious_congestion_events
+            "  cc: loss_congestion_events {} ecn_congestion_events {} spurious_congestion_events {}",
+            self.cc.congestion_events_due_to_loss, self.cc.congestion_events_due_to_ecn, self.cc.spurious_congestion_events
         )?;
         writeln!(
             f,

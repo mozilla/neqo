@@ -344,7 +344,10 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             return false;
         };
 
-        let congestion = self.on_congestion_event(last_lost_packet, now, cc_stats);
+        let congestion = self.on_congestion_event(last_lost_packet, now);
+        if congestion {
+            cc_stats.congestion_events_due_to_loss += 1;
+        }
         let persistent_congestion = self.detect_persistent_congestion(
             first_rtt_sample_time,
             prev_largest_acked_sent,
@@ -371,7 +374,11 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) -> bool {
-        self.on_congestion_event(largest_acked_pkt, now, cc_stats)
+        let cwnd_reduced = self.on_congestion_event(largest_acked_pkt, now);
+        if cwnd_reduced {
+            cc_stats.congestion_events_due_to_ecn += 1;
+        }
+        cwnd_reduced
     }
 
     fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
@@ -616,12 +623,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
     /// Handle a congestion event.
     /// Returns true if this was a true congestion event.
-    fn on_congestion_event(
-        &mut self,
-        last_packet: &sent::Packet,
-        now: Instant,
-        cc_stats: &mut CongestionControlStats,
-    ) -> bool {
+    fn on_congestion_event(&mut self, last_packet: &sent::Packet, now: Instant) -> bool {
         // Start a new congestion event if lost or ECN CE marked packet was sent
         // after the start of the previous congestion recovery period.
         if !self.after_recovery_start(last_packet) {
@@ -650,7 +652,6 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             ],
             now,
         );
-        cc_stats.congestion_events += 1;
         self.set_state(State::RecoveryStart, now);
         true
     }
@@ -1386,11 +1387,13 @@ mod tests {
         cc.on_packet_sent(&p_ce, now);
         cwnd_is_default(&cc);
         assert_eq!(cc.state, State::SlowStart);
+        assert_eq!(cc_stats.congestion_events_due_to_ecn, 0);
 
         // Signal congestion (ECN CE) and thus change state to recovery start.
         cc.on_ecn_ce_received(&p_ce, now, &mut cc_stats);
         cwnd_is_halved(&cc);
         assert_eq!(cc.state, State::RecoveryStart);
+        assert_eq!(cc_stats.congestion_events_due_to_ecn, 1);
     }
 
     fn make_packet_by_pn(pn: u64, sent_time: Instant) -> sent::Packet {
@@ -1428,7 +1431,7 @@ mod tests {
 
         // Verify initial state
         assert_eq!(cc.state, State::SlowStart);
-        assert_eq!(cc_stats.congestion_events, 0);
+        assert_eq!(cc_stats.congestion_events_due_to_loss, 0);
         assert_eq!(cc_stats.spurious_congestion_events, 0);
 
         now += RTT;
@@ -1449,13 +1452,13 @@ mod tests {
 
         // Verify congestion event
         assert_eq!(cc.state, State::RecoveryStart);
-        assert_eq!(cc_stats.congestion_events, 1);
+        assert_eq!(cc_stats.congestion_events_due_to_loss, 1);
 
         let pkt3 = make_packet_by_pn(3, now);
         cc.on_packet_sent(&pkt3, now);
 
         assert_eq!(cc.state, State::Recovery);
-        assert_eq!(cc_stats.congestion_events, 1);
+        assert_eq!(cc_stats.congestion_events_due_to_loss, 1);
 
         cc.on_packets_acked(
             &[pkt3],
@@ -1465,7 +1468,7 @@ mod tests {
         );
 
         assert_eq!(cc.state, State::CongestionAvoidance);
-        assert_eq!(cc_stats.congestion_events, 1);
+        assert_eq!(cc_stats.congestion_events_due_to_loss, 1);
 
         cc.on_packets_acked(
             &[pkt1],
@@ -1475,7 +1478,7 @@ mod tests {
         );
 
         assert_eq!(cc.state, State::CongestionAvoidance);
-        assert_eq!(cc_stats.congestion_events, 1);
+        assert_eq!(cc_stats.congestion_events_due_to_loss, 1);
         assert_eq!(cc_stats.spurious_congestion_events, 0);
 
         cc.on_packets_acked(
@@ -1486,7 +1489,7 @@ mod tests {
         );
 
         assert_eq!(cc.state, State::CongestionAvoidance);
-        assert_eq!(cc_stats.congestion_events, 1);
+        assert_eq!(cc_stats.congestion_events_due_to_loss, 1);
         assert_eq!(cc_stats.spurious_congestion_events, 1);
     }
 }
