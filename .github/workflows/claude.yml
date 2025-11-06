@@ -10,17 +10,20 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
-  pull-requests: write # Required to write PR details.
-  id-token: write # Required for OIDC authentication.
-  issues: write
-  actions: read # Add this line
+  contents: read
 
 jobs:
   claude-review:
     name: Claude Code Review
 
     runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+      pull-requests: write # Required to write PR details.
+      id-token: write # Required for OIDC authentication.
+      issues: write
+      actions: read # Add this line
 
     steps:
       - name: Checkout repository
