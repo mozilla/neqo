@@ -20,12 +20,17 @@ use crate::{
     null_safe_slice,
 };
 
-#[expect(
+#[allow(
+    clippy::allow_attributes,
+    clippy::allow_attributes_without_reason,
+    clippy::needless_raw_strings,
+    clippy::derive_partial_eq_without_eq,
     dead_code,
     non_snake_case,
     non_upper_case_globals,
     non_camel_case_types,
     clippy::unreadable_literal,
+    clippy::use_self,
     reason = "For included bindgen code."
 )]
 mod nss_p11 {

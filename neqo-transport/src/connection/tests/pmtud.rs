@@ -44,11 +44,11 @@ fn gso_with_max_mtu() {
             .process_multiple_output(now(), 2.try_into().unwrap())
             .dgram()
             .unwrap();
-        if pkts.datagram_size() == 65507 {
+        if pkts.datagram_size().get() == 65507 {
             // Success. It reached the maximum IPv4 UDP MTU.
             break;
         }
-        assert!(pkts.datagram_size() < 65507);
+        assert!(pkts.datagram_size().get() < 65507);
 
         server.process_multiple_input(pkts.iter_mut(), now());
         let ack = server.process_output(now()).dgram();

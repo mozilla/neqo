@@ -37,8 +37,8 @@ fn gso() {
         .dgram()
         .unwrap();
 
-    assert_eq!(out.datagram_size(), 1232);
-    assert!(out.data().len() > out.datagram_size());
+    assert_eq!(out.datagram_size().get(), 1232);
+    assert!(out.data().len() > out.datagram_size().get());
 }
 
 #[test]

@@ -23,7 +23,7 @@ strum = { workspace = true }
 thiserror = { workspace = true }
 
 [build-dependencies]
-bindgen = { version = "0.69", default-features = false, features = ["runtime"] }
+bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
 mozbuild = { version = "0.1", default-features = false, optional = true }
 semver = { version = "1.0", default-features = false }
 serde = { version = "1.0", default-features = false }
