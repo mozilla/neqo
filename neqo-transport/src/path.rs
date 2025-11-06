@@ -1043,7 +1043,6 @@ impl Path {
         );
         if cwnd_reduced {
             self.rtt.update_ack_delay(self.sender.cwnd(), self.plpmtu());
-            stats.cc.congestion_events += 1;
         }
     }
 
