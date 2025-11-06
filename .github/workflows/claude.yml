@@ -1,9 +1,10 @@
 name: Claude Code Review
 
 on:
-  pull_request:
-    branches: ["main"]
-    types: [opened, synchronize, ready_for_review, reopened]
+#  pull_request:
+#    branches: ["main"]
+#    types: [opened, synchronize, ready_for_review, reopened]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -17,13 +18,10 @@ jobs:
     name: Claude Code Review
 
     runs-on: ubuntu-24.04
-
     permissions:
-      contents: write
+      contents: read
       pull-requests: write # Required to write PR details.
       id-token: write # Required for OIDC authentication.
-      issues: write
-      actions: read # Add this line
 
     steps:
       - name: Checkout repository
@@ -39,8 +37,6 @@ jobs:
         with:
           track_progress: true
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          additional_permissions: |
-            actions: read
           use_sticky_comment: true
           use_commit_signing: true
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
