@@ -90,6 +90,7 @@ pub trait WindowAdjustment: Display + Debug {
         curr_cwnd: usize,
         acked_bytes: usize,
         max_datagram_size: usize,
+        ecn: bool,
     ) -> (usize, usize);
     /// Cubic needs this signal to reset its epoch.
     fn on_app_limited(&mut self);
@@ -308,7 +309,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             return false;
         };
 
-        let congestion = self.on_congestion_event(last_lost_packet, now);
+        let congestion = self.on_congestion_event(last_lost_packet, false, now);
         let persistent_congestion = self.detect_persistent_congestion(
             first_rtt_sample_time,
             prev_largest_acked_sent,
@@ -330,7 +331,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     ///
     /// See <https://datatracker.ietf.org/doc/html/rfc9002#section-b.7>.
     fn on_ecn_ce_received(&mut self, largest_acked_pkt: &sent::Packet, now: Instant) -> bool {
-        self.on_congestion_event(largest_acked_pkt, now)
+        self.on_congestion_event(largest_acked_pkt, true, now)
     }
 
     fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
@@ -538,7 +539,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
     /// Handle a congestion event.
     /// Returns true if this was a true congestion event.
-    fn on_congestion_event(&mut self, last_packet: &sent::Packet, now: Instant) -> bool {
+    fn on_congestion_event(&mut self, last_packet: &sent::Packet, ecn: bool, now: Instant) -> bool {
         // Start a new congestion event if lost or ECN CE marked packet was sent
         // after the start of the previous congestion recovery period.
         if !self.after_recovery_start(last_packet) {
@@ -549,6 +550,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             self.congestion_window,
             self.acked_bytes,
             self.max_datagram_size(),
+            ecn,
         );
         self.congestion_window = max(cwnd, self.cwnd_min());
         self.acked_bytes = acked_bytes;

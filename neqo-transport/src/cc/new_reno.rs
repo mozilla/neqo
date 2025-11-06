@@ -41,6 +41,7 @@ impl WindowAdjustment for NewReno {
         curr_cwnd: usize,
         acked_bytes: usize,
         _max_datagram_size: usize,
+        ecn: bool,
     ) -> (usize, usize) {
         (curr_cwnd / 2, acked_bytes / 2)
     }

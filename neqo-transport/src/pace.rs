@@ -24,7 +24,7 @@ use crate::rtt::GRANULARITY;
 /// the case the congestion controller increases the congestion window.
 /// This value spaces packets over half the congestion window, which matches
 /// our current congestion controller, which double the window every RTT.
-const PACER_SPEEDUP: usize = 2;
+const PACER_SPEEDUP: usize = 1;
 
 /// A pacer that uses a leaky bucket.
 pub struct Pacer {

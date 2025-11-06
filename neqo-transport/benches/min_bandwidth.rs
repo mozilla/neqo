@@ -35,8 +35,8 @@ fn gbit_bandwidth(ecn: bool) {
     const MBIT: usize = 1_000 * 1_000;
     const GBIT: usize = 1_000 * MBIT;
 
-    const TRANSFER_AMOUNT: usize = GIB;
-    const LINK_BANDWIDTH: usize = GBIT;
+    const TRANSFER_AMOUNT: usize = 100 * MIB;
+    const LINK_BANDWIDTH: usize = 50 * MBIT;
     const LINK_RTT_MS: u64 = 40;
     /// The amount of delay that the link buffer will add when full.
     const BUFFER_LATENCY_MS: usize = 4;
@@ -95,6 +95,6 @@ fn gbit_bandwidth(ecn: bool) {
 }
 
 fn main() {
-    gbit_bandwidth(false);
+    // gbit_bandwidth(false);
     gbit_bandwidth(true);
 }
