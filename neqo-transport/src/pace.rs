@@ -34,8 +34,8 @@ pub struct Pacer {
     t: Instant,
     /// The maximum capacity, or burst size, in bytes.
     m: usize,
-    /// The current capacity, in bytes.
-    c: usize,
+    /// The current capacity, in bytes (can be negative to track debt).
+    c: isize,
     /// The packet size or minimum capacity for sending, in bytes.
     p: usize,
 }
@@ -57,8 +57,8 @@ impl Pacer {
             enabled,
             t: now,
             m,
-            c: m,
-            p,
+            c: isize::try_from(m).unwrap_or(isize::MAX),
+            p: min(p, isize::MAX as usize),
         }
     }
 
@@ -70,12 +70,14 @@ impl Pacer {
         self.p = mtu;
     }
 
-    /// Determine when the next packet will be available based on the provided RTT
-    /// and congestion window.  This doesn't update state.
-    /// This returns a time, which could be in the past (this object doesn't know what
-    /// the current time is).
+    /// Determine when the next packet will be available based on the provided
+    /// RTT, provided congestion window and accumulated credit or debt.  This
+    /// doesn't update state.  This returns a time, which could be in the past
+    /// (this object doesn't know what the current time is).
     pub fn next(&self, rtt: Duration, cwnd: usize) -> Instant {
-        if self.c >= self.p {
+        let packet = isize::try_from(self.p).expect("packet size fits into isize");
+
+        if self.c >= packet {
             qtrace!("[{self}] next {cwnd}/{rtt:?} no wait = {:?}", self.t);
             return self.t;
         }
@@ -83,7 +85,9 @@ impl Pacer {
         // This is the inverse of the function in `spend`:
         // self.t + rtt * (self.p - self.c) / (PACER_SPEEDUP * cwnd)
         let r = rtt.as_nanos();
-        let d = r.saturating_mul(u128::try_from(self.p - self.c).expect("usize fits into u128"));
+        let deficit =
+            u128::try_from(packet - self.c).expect("packet is larger than current credit");
+        let d = r.saturating_mul(deficit);
         let add = d / u128::try_from(cwnd * PACER_SPEEDUP).expect("usize fits into u128");
         let w = u64::try_from(add).map(Duration::from_nanos).unwrap_or(rtt);
 
@@ -98,10 +102,13 @@ impl Pacer {
         nxt
     }
 
-    /// Spend credit.  This cannot fail; users of this API are expected to call
-    /// `next()` to determine when to spend.  This takes the current time (`now`),
-    /// an estimate of the round trip time (`rtt`), the estimated congestion
-    /// window (`cwnd`), and the number of bytes that were sent (`count`).
+    /// Spend credit. This cannot fail, but instead may carry debt into the
+    /// future (see [`Pacer::c`]). Users of this API are expected to call
+    /// [`Pacer::next`] to determine when to spend.
+    ///
+    /// This function takes the current time (`now`), an estimate of the round
+    /// trip time (`rtt`), the estimated congestion window (`cwnd`), and the
+    /// number of bytes that were sent (`count`).
     pub fn spend(&mut self, now: Instant, rtt: Duration, cwnd: usize, count: usize) {
         if !self.enabled {
             self.t = now;
@@ -121,7 +128,12 @@ impl Pacer {
             .unwrap_or(self.m);
 
         // Add the capacity up to a limit of `self.m`, then subtract `count`.
-        self.c = min(self.m, (self.c + incr).saturating_sub(count));
+        self.c = min(
+            isize::try_from(self.m).unwrap_or(isize::MAX),
+            self.c
+                .saturating_add(isize::try_from(incr).unwrap_or(isize::MAX))
+                .saturating_sub(isize::try_from(count).unwrap_or(isize::MAX)),
+        );
         self.t = now;
     }
 }
