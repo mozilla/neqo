@@ -43,20 +43,18 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bindgen"
-version = "0.69.4"
+version = "0.72.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a00dc851838a2120612785d195287475a3ac45514741da670b735818822129a0"
+checksum = "4f72209734318d0b619a5e0f5129918b848c416e122a3c4ce054e03cb87b726f"
 dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
  "itertools 0.10.5",
- "lazy_static",
- "lazycell",
  "proc-macro2",
  "quote",
  "regex",
- "rustc-hash 1.1.0",
+ "rustc-hash",
  "shlex",
  "syn",
 ]
@@ -416,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.16.1"
+version = "0.18.0"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -667,18 +665,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lazy_static"
-version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
-
-[[package]]
-name = "lazycell"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
-
-[[package]]
 name = "libc"
 version = "0.2.175"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -760,7 +746,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.16.1"
+version = "0.18.0"
 dependencies = [
  "clap",
  "clap-verbosity-flag",
@@ -777,7 +763,7 @@ dependencies = [
  "qlog",
  "quinn-udp",
  "regex",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "thiserror",
  "tokio",
  "url",
@@ -785,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-common"
-version = "0.16.1"
+version = "0.18.0"
 dependencies = [
  "criterion",
  "enum-map",
@@ -803,7 +789,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-crypto"
-version = "0.16.1"
+version = "0.18.0"
 dependencies = [
  "bindgen",
  "enum-map",
@@ -817,11 +803,12 @@ dependencies = [
  "test-fixture",
  "thiserror",
  "toml",
+ "windows",
 ]
 
 [[package]]
 name = "neqo-http3"
-version = "0.16.1"
+version = "0.18.0"
 dependencies = [
  "criterion",
  "enumset",
@@ -832,7 +819,7 @@ dependencies = [
  "neqo-qpack",
  "neqo-transport",
  "qlog",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "sfv",
  "strum",
  "test-fixture",
@@ -842,13 +829,13 @@ dependencies = [
 
 [[package]]
 name = "neqo-qpack"
-version = "0.16.1"
+version = "0.18.0"
 dependencies = [
  "log",
  "neqo-common",
  "neqo-transport",
  "qlog",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "static_assertions",
  "test-fixture",
  "thiserror",
@@ -856,7 +843,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-transport"
-version = "0.16.1"
+version = "0.18.0"
 dependencies = [
  "criterion",
  "enum-map",
@@ -868,7 +855,7 @@ dependencies = [
  "neqo-crypto",
  "neqo-transport",
  "qlog",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "smallvec",
  "static_assertions",
  "strum",
@@ -878,7 +865,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-udp"
-version = "0.16.1"
+version = "0.18.0"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -1035,12 +1022,6 @@ name = "regex-syntax"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbb5fb1acd8a1a18b3dd5be62d25485eb770e05afb408a9627d14d451bae12da"
-
-[[package]]
-name = "rustc-hash"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
 name = "rustc-hash"
@@ -1240,7 +1221,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.16.1"
+version = "0.18.0"
 dependencies = [
  "log",
  "neqo-common",
@@ -1412,32 +1393,54 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windows"
-version = "0.58.0"
+version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd04d41d93c4992d421894c18c8b43496aa748dd4c081bac0dc93eb0489272b6"
+checksum = "527fadee13e0c05939a6a05d5bd6eec6cd2e3dbd648b9f8e447c6518133d8580"
+dependencies = [
+ "windows-collections",
+ "windows-core",
+ "windows-future",
+ "windows-numerics",
+]
+
+[[package]]
+name = "windows-collections"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23b2d95af1a8a14a3c7367e1ed4fc9c20e0a26e79551b1454d72583c97cc6610"
 dependencies = [
  "windows-core",
- "windows-targets 0.52.6",
 ]
 
 [[package]]
 name = "windows-core"
-version = "0.58.0"
+version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ba6d44ec8c2591c134257ce647b7ea6b20335bf6379a27dac5f1641fcf59f99"
+checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
 dependencies = [
  "windows-implement",
  "windows-interface",
+ "windows-link",
  "windows-result",
  "windows-strings",
- "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-future"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1d6f90251fe18a279739e78025bd6ddc52a7e22f921070ccdc67dde84c605cb"
+dependencies = [
+ "windows-core",
+ "windows-link",
+ "windows-threading",
 ]
 
 [[package]]
 name = "windows-implement"
-version = "0.58.0"
+version = "0.60.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bbd5b46c938e506ecbce286b6628a02171d56153ba733b6c741fc627ec9579b"
+checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1446,9 +1449,9 @@ dependencies = [
 
 [[package]]
 name = "windows-interface"
-version = "0.58.0"
+version = "0.59.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "053c4c462dc91d3b1504c6fe5a726dd15e216ba718e84a0e46a88fbe5ded3515"
+checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1462,22 +1465,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
 
 [[package]]
-name = "windows-result"
-version = "0.2.0"
+name = "windows-numerics"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d1043d8214f791817bab27572aaa8af63732e11bf84aa21a45a78d6c317ae0e"
+checksum = "6e2e40844ac143cdb44aead537bbf727de9b044e107a0f1220392177d15b0f26"
 dependencies = [
- "windows-targets 0.52.6",
+ "windows-core",
+ "windows-link",
+]
+
+[[package]]
+name = "windows-result"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5"
+dependencies = [
+ "windows-link",
 ]
 
 [[package]]
 name = "windows-strings"
-version = "0.1.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cd9b125c486025df0eabcb585e62173c6c9eddcec5d117d3b6e8c30e2ee4d10"
+checksum = "7837d08f69c77cf6b07689544538e017c1bfcf57e34b4c0ff58e6c2cd3b37091"
 dependencies = [
- "windows-result",
- "windows-targets 0.52.6",
+ "windows-link",
 ]
 
 [[package]]
@@ -1538,6 +1550,15 @@ dependencies = [
  "windows_x86_64_gnu 0.53.1",
  "windows_x86_64_gnullvm 0.53.1",
  "windows_x86_64_msvc 0.53.1",
+]
+
+[[package]]
+name = "windows-threading"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3949bd5b99cafdf1c7ca86b43ca564028dfe27d66958f2470940f73d86d75b37"
+dependencies = [
+ "windows-link",
 ]
 
 [[package]]
