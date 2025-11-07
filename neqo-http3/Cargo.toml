@@ -35,7 +35,6 @@ url = { workspace = true }
 [dev-dependencies]
 criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false }
 neqo-http3 = { path = ".", features = ["draft-29"] }
-neqo-transport = { path = "./../neqo-transport", features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]
@@ -47,7 +46,7 @@ bench = [
         "log/release_max_level_info",
 ]
 disable-encryption = ["neqo-transport/disable-encryption", "neqo-crypto/disable-encryption"]
-draft-29 = []
+draft-29 = ["neqo-transport/draft-29"]
 
 [package.metadata.cargo-machete]
 ignored = ["criterion", "log"]

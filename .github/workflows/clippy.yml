@@ -48,7 +48,7 @@ jobs:
       # respective default features only. Can reveal warnings otherwise
       # hidden given that a plain cargo clippy combines all features of the
       # workspace. See e.g. https://github.com/mozilla/neqo/pull/1695.
-      - run: cargo hack clippy --all-targets --benches --feature-powerset --exclude-features gecko -- -D warnings
+      - run: cargo hack clippy --feature-powerset --no-dev-deps --exclude-features gecko -- -D warnings
       - run: cargo doc --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"

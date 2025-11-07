@@ -46,7 +46,7 @@ Run these commands in order before submitting a PR. All must pass:
 
 2. **Clippy** (uses cargo-hack to check per-crate features):
    ```bash
-   cargo hack clippy --all-targets --benches --feature-powerset --exclude-features gecko -- -D warnings
+   cargo hack clippy --feature-powerset --no-dev-deps --exclude-features gecko -- -D warnings
    ```
 
 3. **Documentation build**:
