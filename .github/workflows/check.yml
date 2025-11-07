@@ -13,6 +13,7 @@ env:
   RUST_TEST_TIME_UNIT: 10,30
   RUST_TEST_TIME_INTEGRATION: 10,30
   RUST_TEST_TIME_DOCTEST: 10,30
+  AWS_LC_SYS_PREBUILT_NASM: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -115,6 +116,19 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
+      - name: Install llvm (Linux)
+        shell: bash
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && inputs.target == '' }}
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+          version=20
+          sudo apt-get install -y --no-install-recommends libclang-dev libclang-rt-dev clang-${version}
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${version} 100
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${version} 100
+          sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-${version} 100
+
       - name: Check
         run: |
           # shellcheck disable=SC2086
@@ -133,7 +147,7 @@ jobs:
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "$TOOLCHAIN" == "stable" ]; then
-            cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
+            CC=clang cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
             cargo test $BUILD_TYPE --locked --features ci
           fi
