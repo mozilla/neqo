@@ -33,8 +33,11 @@ toml = { version = "0.5", default-features = false }
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
 
+[target."cfg(windows)".dependencies]
+windows = { workspace = true, features = ["Win32_Security_Authentication_Identity"] }
+
 [package.metadata.cargo-machete]
-ignored = ["bindgen", "semver", "serde", "serde_derive", "toml"]
+ignored = ["bindgen", "semver", "serde", "serde_derive", "toml", "windows"]
 
 [features]
 bench = ["log/release_max_level_info"]

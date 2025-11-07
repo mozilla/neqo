@@ -1,9 +1,10 @@
 name: Claude Code Review
 
 on:
-  pull_request:
-    branches: ["main"]
-    types: [opened, synchronize, ready_for_review, reopened]
+#  pull_request:
+#    branches: ["main"]
+#    types: [opened, synchronize, ready_for_review, reopened]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
