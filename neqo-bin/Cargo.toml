@@ -52,7 +52,7 @@ tokio = { version = "1", default-features = false, features = ["net", "time", "m
 url = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "4.0", package = "codspeed-criterion-compat", default-features = false, features = [
+criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false, features = [
         "async_tokio",
 ] }
 neqo-bin = { path = ".", features = ["draft-29"] }
