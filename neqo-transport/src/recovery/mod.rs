@@ -583,20 +583,21 @@ impl Loss {
 
     /// Prime the Handshake space PTO timer when stuck in Initial space.
     fn maybe_prime_handshake_pto(&mut self, now: Instant) {
-        let Some(pto) = &self.pto_state else {
+        // Only prime if we're in Initial space (fire on first PTO).
+        let Some(pto) = self
+            .pto_state
+            .as_ref()
+            .filter(|pto| pto.space == PacketNumberSpace::Initial)
+        else {
             return;
         };
-
-        // Only prime if we're in Initial space (fire on first PTO).
-        if pto.space != PacketNumberSpace::Initial {
-            return;
-        }
 
         // Only prime if we've received Initial ACKs (proving the peer is alive).
-        let Some(initial_space) = self.spaces.get(PacketNumberSpace::Initial) else {
-            return;
-        };
-        if initial_space.largest_acked.is_none() {
+        if !self
+            .spaces
+            .get(PacketNumberSpace::Initial)
+            .is_some_and(|space| space.largest_acked.is_some())
+        {
             return;
         }
 
