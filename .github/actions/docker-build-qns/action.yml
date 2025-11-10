@@ -9,8 +9,7 @@ inputs:
     default: github.ref
   tag:
     description: 'Tag for the image'
-    required: false
-    default: ''
+    required: true
   push:
     description: 'Whether to push the image to registry'
     required: false
@@ -26,7 +25,7 @@ outputs:
     value: ${{ steps.docker_build.outputs.imageID }}
   artifact-name:
     description: 'The name of the uploaded artifact'
-    value: ${{ upload.outputs.artifact-name }}
+    value: ${{ steps.upload.outputs.artifact-name }}
 
 runs:
   using: "composite"
@@ -57,11 +56,11 @@ runs:
         file: qns/Dockerfile
         build-args: RUST_VERSION=stable
         platforms: ${{ inputs.platforms }}
-        outputs: type=docker,dest=/tmp/${{ format('{0}.tar', inputs.tag }}
+        outputs: type=docker,dest=/tmp/${{ format('{0}.tar', inputs.tag) }}
 
     - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
       id: upload
       if: ${{ inputs.push == 'false' }}
       with:
         name: ${{ format('{0} Docker image ', inputs.tag) }}
-        path: /tmp/${{ format('{0}.tar', inputs.tag }}
+        path: /tmp/${{ format('{0}.tar', inputs.tag) }}
