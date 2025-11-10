@@ -41,7 +41,7 @@ jobs:
             if [ "$GITHUB_EVENT_NAME" == "pull_request" ]; then
               echo -n ', {"name": "main", "ref": "'"$SHA"'"}'
             fi
-            echo -n ']}'
+            echo ']}'
             echo "EOF"
           } >> tmp
           cat tmp
