@@ -43,7 +43,9 @@ jobs:
             fi
             echo -n ']}'
             echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          } >> tmp
+          cat tmp
+          cat tmp >> "$GITHUB_OUTPUT"
 
   docker-image:
     name: Build Docker images
