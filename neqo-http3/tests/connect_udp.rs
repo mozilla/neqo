@@ -82,6 +82,7 @@ fn establish_new_session() -> (
                 assert!(
                     headers.contains_header(":method", "CONNECT")
                         && headers.contains_header(":protocol", "connect-udp")
+                        && headers.contains_header("capsule-protocol", "?1")
                 );
 
                 session
@@ -115,7 +116,7 @@ fn exchange_packets_through_proxy(
     qinfo!("Processing client_inner");
     while let Some(dgram) = client_inner.process_output(now()).dgram() {
         client_outer
-            .connect_udp_send_datagram(connect_udp_session_id, dgram.as_ref(), None)
+            .connect_udp_send_datagram(connect_udp_session_id, dgram.as_ref(), None, now())
             .unwrap();
     }
 
@@ -162,7 +163,9 @@ fn exchange_packets_through_proxy(
 
     qinfo!("Processing proxy");
     for dgram in server_out {
-        proxy_session.send_datagram(dgram.as_ref(), None).unwrap();
+        proxy_session
+            .send_datagram(dgram.as_ref(), None, now())
+            .unwrap();
     }
     let mut proxy_out = vec![];
     while let Some(dgram) = proxy.process(Vec::<Datagram>::new(), now()).dgram() {
@@ -200,7 +203,7 @@ fn session_lifecycle(client_closes: bool) {
     let (mut client, mut proxy, session_id, proxy_session) = establish_new_session();
 
     client
-        .connect_udp_send_datagram(session_id, PING, None)
+        .connect_udp_send_datagram(session_id, PING, None, now())
         .unwrap();
 
     exchange_packets(&mut client, &mut proxy, false, None);
@@ -222,7 +225,7 @@ fn session_lifecycle(client_closes: bool) {
     assert_eq!(session_id, id);
     assert_eq!(&datagram, PING);
 
-    proxy_session.send_datagram(PONG, None).unwrap();
+    proxy_session.send_datagram(PONG, None, now()).unwrap();
 
     exchange_packets(&mut client, &mut proxy, false, None);
 
@@ -362,7 +365,7 @@ fn send_dgram_on_non_active_session() {
     let (mut client, _proxy, connect_udp_session_id) = initiate_new_session();
 
     assert_eq!(
-        client.connect_udp_send_datagram(connect_udp_session_id, &[], None),
+        client.connect_udp_send_datagram(connect_udp_session_id, &[], None, now()),
         Err(Error::Unavailable)
     );
 }
@@ -394,7 +397,7 @@ fn server_datagram_before_accept() {
         let proxy_accept = proxy.process_output(now()).dgram().unwrap();
         assert!(proxy.process_output(now()).dgram().is_none());
 
-        proxy_session.send_datagram(b"ping", None).unwrap();
+        proxy_session.send_datagram(b"ping", None, now()).unwrap();
         let proxy_dgram = proxy.process_output(now()).dgram().unwrap();
 
         while client.next_event().is_some() {}
@@ -484,7 +487,7 @@ fn connect_udp_operation_on_fetch_stream() {
         .unwrap();
 
     assert_eq!(
-        client.connect_udp_send_datagram(fetch_stream, PING, None),
+        client.connect_udp_send_datagram(fetch_stream, PING, None, now()),
         Err(Error::InvalidStreamId)
     );
 
@@ -492,4 +495,183 @@ fn connect_udp_operation_on_fetch_stream() {
         client.connect_udp_close_session(fetch_stream, 0, "kthxbye", now()),
         Err(Error::InvalidStreamId)
     );
+}
+
+#[test]
+fn session_lifecycle_with_http_datagram_capsule() {
+    fixture_init();
+    neqo_common::log::init(None);
+
+    let conn_params = ConnectionParameters::default().datagram_size(0);
+
+    let mut client = http3_client_with_params(
+        Http3Parameters::default()
+            .connect(true)
+            .connection_parameters(conn_params.clone()),
+    );
+
+    let mut proxy = http3_server_with_params(
+        Http3Parameters::default()
+            .connect(true)
+            .connection_parameters(conn_params),
+    );
+
+    let out = test_fixture::connect_peers(&mut client, &mut proxy);
+    if let Some(dgram) = out {
+        let out = proxy.process(Some(dgram), now()).dgram();
+        if let Some(dgram) = out {
+            client.process_input(dgram, now());
+        }
+    }
+
+    let session_id = client
+        .connect_udp_create_session(
+            now(),
+            &Url::parse(&format!(
+                "https://[{}]:{}/",
+                DEFAULT_ADDR.ip(),
+                DEFAULT_ADDR.port()
+            ))
+            .unwrap(),
+            &[],
+        )
+        .unwrap();
+
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    let proxy_session = proxy
+        .events()
+        .find_map(|event| {
+            if let Http3ServerEvent::ConnectUdp(ConnectUdpServerEvent::NewSession {
+                session,
+                headers,
+            }) = event
+            {
+                assert_eq!(session.stream_id(), session_id);
+                assert!(
+                    headers.contains_header(":method", "CONNECT")
+                        && headers.contains_header(":protocol", "connect-udp")
+                        && headers.contains_header("capsule-protocol", "?1")
+                );
+                session
+                    .response(&SessionAcceptAction::Accept, now())
+                    .unwrap();
+                Some(session)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    client
+        .events()
+        .find(|e| {
+            matches!(
+                e,
+                Http3ClientEvent::ConnectUdp(ConnectUdpEvent::NewSession { stream_id, status, ..})
+                if *stream_id == session_id && *status == 200
+            )
+        })
+        .unwrap();
+
+    qinfo!("Testing Capsule send (client -> server)");
+    client
+        .connect_udp_send_datagram(session_id, PING, None, now())
+        .unwrap();
+
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    let (id, datagram) = proxy
+        .events()
+        .find_map(|event| {
+            if let Http3ServerEvent::ConnectUdp(ConnectUdpServerEvent::Datagram {
+                session,
+                datagram,
+            }) = event
+            {
+                Some((session.stream_id(), datagram))
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(session_id, id);
+    assert_eq!(&datagram, PING);
+    qinfo!("✓ Capsule decode successful (client -> server)");
+
+    qinfo!("Testing Capsule receive (server -> client)");
+    proxy_session.send_datagram(PONG, None, now()).unwrap();
+
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    let (id, datagram) = client
+        .events()
+        .find_map(|event| {
+            if let Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Datagram {
+                session_id: id,
+                datagram,
+            }) = event
+            {
+                Some((id, datagram))
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(session_id, id);
+    assert_eq!(&datagram, PONG);
+    qinfo!("✓ Capsule encode/decode successful (server -> client)");
+
+    qinfo!("Testing multiple datagrams via Capsules");
+    for i in 0..5 {
+        let mut payload = PING.to_vec();
+        payload.push(i);
+        client
+            .connect_udp_send_datagram(session_id, &payload, None, now())
+            .unwrap();
+    }
+
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    let mut count = 0;
+    for event in proxy.events() {
+        if let Http3ServerEvent::ConnectUdp(ConnectUdpServerEvent::Datagram { session, datagram }) =
+            event
+        {
+            assert_eq!(session.stream_id(), session_id);
+            assert_eq!(&datagram.as_ref()[..4], PING);
+            count += 1;
+        }
+    }
+    assert_eq!(count, 5, "Should receive all 5 datagrams via Capsules");
+    qinfo!("✓ Multiple Capsules transmitted successfully");
+
+    client
+        .connect_udp_close_session(session_id, 0, "capsule test complete", now())
+        .unwrap();
+
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    proxy
+        .events()
+        .find(|event| {
+            matches!(
+                event,
+                Http3ServerEvent::ConnectUdp(ConnectUdpServerEvent::SessionClosed {
+                    session,
+                    ..
+                }) if session.stream_id() == session_id
+            )
+        })
+        .unwrap();
+
+    assert_eq!(
+        client.transport_stats().frame_tx.datagram,
+        0,
+        "No QUIC datagram frames should have been sent by client"
+    );
+
+    qinfo!("✓ HTTP DATAGRAM Capsule test completed successfully");
 }
