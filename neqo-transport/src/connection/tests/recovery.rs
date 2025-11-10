@@ -1029,8 +1029,8 @@ fn pto_handshake_space_when_server_flight_lost() {
     let mut has_handshake = false;
     for dgram in &pto_packets {
         let (first, second) = split_datagram(dgram);
-        has_handshake |= is_handshake(&first) ||
-        second.as_ref().is_some_and(is_handshake);
+        has_handshake |= (is_handshake(&first) ||
+            second.as_ref().is_some_and(is_handshake));
     }
     assert!(has_handshake && client.stats().frame_tx.ping > stats_before.ping);
 }
