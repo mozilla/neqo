@@ -40,6 +40,8 @@ jobs:
             condition: ${{ github.event_name == 'pull_request' }}
           # GitHub fails if the matrix doesn't contain an entry matching the "exclude" criteria?!
           - name: always-exclude
+            ref: ''
+            tag: 'always-exclude'
             condition: false
         exclude:
           # Exclude main for non-PR events
