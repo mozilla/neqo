@@ -37,7 +37,10 @@ jobs:
           - name: main
             ref: ${{ github.event.pull_request.base.sha }}
             tag: 'neqo-main'
-            condition: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
+            condition: ${{ github.event_name == 'pull_request' }}
+          # GitHub fails if the matrix doesn't contain an entry matching the "exclude" criteria?!
+          - name: always-exclude
+            condition: false
         exclude:
           # Exclude main for non-PR events
           - condition: false
