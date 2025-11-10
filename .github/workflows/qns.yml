@@ -23,22 +23,35 @@ env:
   TIMEOUT: 20
 
 jobs:
-  docker-image:
-    name: Build Docker image ${{ matrix.name }}
+  branches:
+    name: Determine which branches to compare
     if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - id: matrix
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          {
+            echo "matrix<<EOF"
+            echo -n '{"include": [{"name": "pr","ref": ""}'
+            if [ "$GITHUB_EVENT_NAME" == "pull_request" ]; then
+              echo -n ', {"name": "main", "ref": "'"$SHA"'"}'
+            fi
+            echo -n ']}'
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  docker-image:
+    name: Build Docker images
+    if: github.actor != 'dependabot[bot]'
+    needs: branches
+    runs-on: ubuntu-24.04
     strategy:
-      matrix:
-        include:
-          - name: pr
-            ref: ''
-            tag: 'neqo-pr'
-          - name: main
-            ref: ${{ github.event.pull_request.base.sha }}
-            tag: 'neqo-main'
-        exclude:
-          # Exclude main for non-PR events
-          - name: ${{ github.event_name != 'pull_request' && 'main' || '' }}
+      matrix: ${{ fromJson(needs.branches.outputs.matrix) }}
     outputs:
       pr-artifact: ${{ steps.set-outputs.outputs.pr-artifact }}
       main-artifact: ${{ steps.set-outputs.outputs.main-artifact }}
@@ -67,7 +80,7 @@ jobs:
         id: docker-build
         with:
           ref: ${{ matrix.ref }}
-          tag: ${{ matrix.tag }}
+          tag: ${{ matrix.name }}
           push: ${{ github.event_name != 'pull_request' }}
           platforms: ${{ github.event_name != 'pull_request' && 'linux/amd64, linux/arm64' || 'linux/amd64' }}
 
@@ -75,10 +88,7 @@ jobs:
         env:
           STEPS_DOCKER_BUILD_OUTPUTS_ARTIFACT_NAME: ${{ steps.docker-build.outputs.artifact-name }}
           MATRIX_NAME: ${{ matrix.name }}
-          MATRIX_TAG: ${{ matrix.tag }}
-        run: |
-          echo "${MATRIX_NAME}-artifact=${STEPS_DOCKER_BUILD_OUTPUTS_ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
-          echo "${MATRIX_NAME}-tag=${MATRIX_TAG}" >> "$GITHUB_OUTPUT"
+        run: echo "${MATRIX_NAME}-artifact=${STEPS_DOCKER_BUILD_OUTPUTS_ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
 
   implementations:
     name: Determine interop pairs
