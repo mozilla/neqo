@@ -24,7 +24,7 @@ env:
 
 jobs:
   branches:
-    name: Determine which branches to compare
+    name: Determine branches
     if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     outputs:
@@ -110,14 +110,14 @@ jobs:
 
       - run: |
           # The tar file name is based on the tag from the matrix
-          docker load --input "/tmp/${PR_TAG}.tar"
+          docker load --input "/tmp/pr.tar"
           PR_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep pr | head -1)
           echo "PR_IMAGE=$PR_IMAGE" >> "$GITHUB_ENV"
 
       - if: ${{ github.event_name == 'pull_request' }}
         run: |
           # The tar file name is based on the tag from the matrix
-          docker load --input "/tmp/${MAIN_TAG}.tar"
+          docker load --input "/tmp/main.tar"
           MAIN_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep main | head -1)
           echo "MAIN_IMAGE=$MAIN_IMAGE" >> "$GITHUB_ENV"
 
