@@ -583,7 +583,7 @@ impl Loss {
 
     /// Prime the Handshake space PTO timer when stuck in Initial space.
     fn maybe_prime_handshake_pto(&mut self, now: Instant) {
-        // Only prime if we're in Initial space (fire on first PTO).
+        // Only prime if we're in Initial space.
         let Some(pto) = self
             .pto_state
             .as_ref()
@@ -700,6 +700,7 @@ impl Loss {
         );
 
         self.pto_state = None;
+
         (acked_packets, lost)
     }
 
