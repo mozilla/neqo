@@ -832,8 +832,13 @@ impl Http3Client {
         id: I,
     ) -> Res<()> {
         qtrace!("webtransport_send_datagram session:{session_id:?}");
-        self.base_handler
-            .webtransport_send_datagram(session_id, &mut self.conn, buf, id)
+        self.base_handler.webtransport_send_datagram(
+            session_id,
+            &mut self.conn,
+            buf,
+            id,
+            Instant::now(),
+        )
     }
 
     /// Send `ConnectUdp` datagram.
@@ -850,8 +855,13 @@ impl Http3Client {
         id: I,
     ) -> Res<()> {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
-        self.base_handler
-            .connect_udp_send_datagram(session_id, &mut self.conn, buf, id)
+        self.base_handler.connect_udp_send_datagram(
+            session_id,
+            &mut self.conn,
+            buf,
+            id,
+            Instant::now(),
+        )
     }
 
     /// Returns the current max size of a datagram that can fit into a packet.

@@ -263,7 +263,7 @@ impl Http3ServerHandler {
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler
-            .webtransport_send_datagram(session_id, conn, buf, id)
+            .webtransport_send_datagram(session_id, conn, buf, id, Instant::now())
     }
 
     pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
@@ -275,7 +275,7 @@ impl Http3ServerHandler {
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler
-            .connect_udp_send_datagram(session_id, conn, buf, id)
+            .connect_udp_send_datagram(session_id, conn, buf, id, Instant::now())
     }
 
     /// Process HTTTP3 layer.
