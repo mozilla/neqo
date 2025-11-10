@@ -9,7 +9,6 @@ use std::{cmp::max, time::Duration};
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
     connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT},
-    recv_stream::INITIAL_STREAM_RECV_WINDOW_SIZE,
     rtt::GRANULARITY,
     stream_id::StreamType,
     tparams::{
@@ -27,17 +26,66 @@ use crate::{
     CongestionControlAlgorithm, Res, DEFAULT_INITIAL_RTT,
 };
 
-const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
-const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
+/// Maximum number of bidirectional streams that the remote can open.
+///
+/// Constant throughout the lifetime of the connection.
+///
+/// See also <https://github.com/google/quiche/blob/4f1f0fcea045cd71410c2c318773fc24c3523ed7/quiche/quic/core/quic_constants.h#L113-L114>.
+const LOCAL_STREAM_LIMIT_BIDI: u64 = 100;
+/// Maximum number of unidirectional streams that the remote can open.
+///
+/// Constant throughout the lifetime of the connection.
+///
+/// See also <https://github.com/google/quiche/blob/4f1f0fcea045cd71410c2c318773fc24c3523ed7/quiche/quic/core/quic_constants.h#L113-L114>.
+const LOCAL_STREAM_LIMIT_UNI: u64 = 100;
 
+/// Factor to multiply stream-level data flow control limits to get
+/// connection-level data flow control limits.
+///
+/// Prevents a single stream from taking up the entire connection-level
+/// capacity.
+///
+/// TODO: Consider further tuning.
+const CONNECTION_FACTOR: u64 = 2;
+
+/// Initial stream-level receive window size.
+///
+/// Auto-tuned throughout the lifetime of the connection. See flow control
+/// implementation for details.
+///
+/// See also <https://datatracker.ietf.org/doc/html/rfc9000#name-max_stream_data-frames>.
+pub const INITIAL_LOCAL_MAX_STREAM_DATA: usize = 1024 * 1024;
 /// Initial connection-level receive window size.
 ///
-/// Set to 16 times the per-stream initial window to accommodate the default
-/// bidirectional stream limit ([`LOCAL_STREAM_LIMIT_BIDI`]).
-/// This provides sufficient capacity for concurrent streams without
-/// being excessively large, and allows auto-tuning to grow the window
-/// based on actual usage.
-const LOCAL_MAX_DATA: u64 = INITIAL_STREAM_RECV_WINDOW_SIZE as u64 * LOCAL_STREAM_LIMIT_BIDI;
+/// Set to 16 times the initial stream-level receive window to enable some
+/// connection-level parallelism.
+///
+/// Auto-tuned throughout the lifetime of the connection. See flow control
+/// implementation for details.
+///
+/// See also <https://datatracker.ietf.org/doc/html/rfc9000#frame-max-data>.
+pub const INITIAL_LOCAL_MAX_DATA: u64 = INITIAL_LOCAL_MAX_STREAM_DATA as u64 * CONNECTION_FACTOR;
+
+/// Limit for the maximum amount of bytes active on a single stream, i.e. limit
+/// for the size of the stream receive window.
+///
+/// A value of 10 MiB allows for:
+///
+/// - 10ms rtt and 8.3 GBit/s
+/// - 20ms rtt and 4.2 GBit/s
+/// - 40ms rtt and 2.1 GBit/s
+/// - 100ms rtt and 0.8 GBit/s
+///
+/// Keep in sync with [`crate::send_stream::MAX_SEND_BUFFER_SIZE`].
+///
+/// See also <https://datatracker.ietf.org/doc/html/rfc9000#name-max_stream_data-frames>.
+pub const MAX_LOCAL_MAX_STREAM_DATA: u64 = 10 * 1024 * 1024;
+/// Limit for the maximum amount of bytes active on the connection, i.e. limit
+/// for the size of the connection-level receive window.
+///
+/// See also <https://datatracker.ietf.org/doc/html/rfc9000#frame-max-data>.
+pub const MAX_LOCAL_MAX_DATA: u64 = MAX_LOCAL_MAX_STREAM_DATA * CONNECTION_FACTOR;
+
 // Maximum size of a QUIC DATAGRAM frame, as specified in https://datatracker.ietf.org/doc/html/rfc9221#section-3-4.
 const MAX_DATAGRAM_FRAME_SIZE: u64 = 65535;
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
@@ -111,12 +159,12 @@ impl Default for ConnectionParameters {
         Self {
             versions: version::Config::default(),
             cc_algorithm: CongestionControlAlgorithm::Cubic,
-            max_data: LOCAL_MAX_DATA,
-            max_stream_data_bidi_remote: u64::try_from(INITIAL_STREAM_RECV_WINDOW_SIZE)
+            max_data: INITIAL_LOCAL_MAX_DATA,
+            max_stream_data_bidi_remote: u64::try_from(INITIAL_LOCAL_MAX_STREAM_DATA)
                 .expect("usize fits in u64"),
-            max_stream_data_bidi_local: u64::try_from(INITIAL_STREAM_RECV_WINDOW_SIZE)
+            max_stream_data_bidi_local: u64::try_from(INITIAL_LOCAL_MAX_STREAM_DATA)
                 .expect("usize fits in u64"),
-            max_stream_data_uni: u64::try_from(INITIAL_STREAM_RECV_WINDOW_SIZE)
+            max_stream_data_uni: u64::try_from(INITIAL_LOCAL_MAX_STREAM_DATA)
                 .expect("usize fits in u64"),
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,

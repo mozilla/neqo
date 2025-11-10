@@ -22,6 +22,9 @@ use crate::{
 
 #[allow(
     clippy::allow_attributes,
+    clippy::allow_attributes_without_reason,
+    clippy::needless_raw_strings,
+    clippy::derive_partial_eq_without_eq,
     dead_code,
     non_snake_case,
     non_upper_case_globals,

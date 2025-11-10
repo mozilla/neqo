@@ -536,11 +536,11 @@ fn too_many_datagram_events() {
     // Datagram with FIRST_DATAGRAM data will be dropped.
     assert!(matches!(
         client.next_event().unwrap(),
-        ConnectionEvent::Datagram(data) if data == SECOND_DATAGRAM
+        ConnectionEvent::IncomingDatagramDropped
     ));
     assert!(matches!(
         client.next_event().unwrap(),
-        ConnectionEvent::IncomingDatagramDropped
+        ConnectionEvent::Datagram(data) if data == SECOND_DATAGRAM
     ));
     assert!(matches!(
         client.next_event().unwrap(),

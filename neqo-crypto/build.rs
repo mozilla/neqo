@@ -108,7 +108,7 @@ fn get_bash() -> PathBuf {
     )
 }
 
-fn build_nss(dir: PathBuf, nsstarget: &str) {
+fn build_nss(dir: PathBuf) {
     let mut build_nss = vec![
         String::from("./build.sh"),
         String::from("-Ddisable_tests=1"),
@@ -116,16 +116,10 @@ fn build_nss(dir: PathBuf, nsstarget: &str) {
         String::from("-Ddisable_libpkix=1"),
         String::from("-Ddisable_ckbi=1"),
         String::from("-Ddisable_fips=1"),
+        String::from("--opt"),
         // Generate static libraries in addition to shared libraries.
         String::from("--static"),
     ];
-    if nsstarget == "Release" {
-        build_nss.push(String::from("-o"));
-    }
-    if let Ok(d) = env::var("NSS_JOBS") {
-        build_nss.push(String::from("-j"));
-        build_nss.push(d);
-    }
     let target = env::var("TARGET").unwrap();
     if target.strip_prefix("aarch64-").is_some() {
         build_nss.push(String::from("--target=arm64"));
@@ -357,15 +351,14 @@ fn setup_standalone(nss: &str) -> Vec<String> {
     // $NSS_DIR/../dist/
     let nssdist = nss.parent().unwrap().join("dist");
     println!("cargo:rerun-if-env-changed=NSS_TARGET");
-    let nsstarget = env::var("NSS_TARGET")
-        .unwrap_or_else(|_| fs::read_to_string(nssdist.join("latest")).unwrap());
+    let nsstarget = "Release";
 
     // If NSS_PREBUILT is set, we assume that the NSS libraries are already built.
     if env::var("NSS_PREBUILT").is_err() {
-        build_nss(nss, &nsstarget);
+        build_nss(nss);
     }
 
-    let nsstarget = nssdist.join(nsstarget.trim());
+    let nsstarget = nssdist.join(nsstarget);
     let includes = get_includes(&nsstarget, &nssdist);
 
     let nsslibdir = nsstarget.join("lib");
