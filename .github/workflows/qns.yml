@@ -109,21 +109,19 @@ jobs:
           path: /tmp
 
       - run: |
-          # The tar file name is based on the tag from the matrix
           docker load --input "/tmp/pr.tar"
           PR_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep pr | head -1)
           echo "PR_IMAGE=$PR_IMAGE" >> "$GITHUB_ENV"
 
       - if: ${{ github.event_name == 'pull_request' }}
         run: |
-          # The tar file name is based on the tag from the matrix
           docker load --input "/tmp/main.tar"
           MAIN_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep main | head -1)
           echo "MAIN_IMAGE=$MAIN_IMAGE" >> "$GITHUB_ENV"
 
       - id: config
         run: |
-          # Add some non-default implementations
+          # Add neqo-or and some non-default implementations
           # tquic: https://github.com/quic-interop/quic-interop-runner/pull/385/files
           # openssl: https://github.com/quic-interop/quic-interop-runner/pull/402/files
           # linuxquic: https://github.com/quic-interop/quic-interop-runner/pull/428
@@ -153,6 +151,7 @@ jobs:
           EOF
 
           if [ -n "$MAIN_IMAGE" ]; then
+            # Add neqo-main
             cat <<EOF > neqo-main.json
             {
               "neqo-main": {
@@ -208,7 +207,7 @@ jobs:
   run-qns:
     name: Run QNS
     if: ${{ github.event_name != 'push' }}
-    needs: [implementations]
+    needs: implementations
     strategy:
       fail-fast: false
       matrix:
@@ -284,6 +283,7 @@ jobs:
           PAIRS: ${{ needs.implementations.outputs.pairs }}
           IS_PR: ${{ github.event_name == 'pull_request' }}
           SHA: ${{ github.event.pull_request.head.sha }}
+          PR: 'neqo-pr'
         run: |
           # shellcheck disable=SC2153
           mapfile -t LIST < <(echo "$PAIRS" | jq '.[]' | sort)
