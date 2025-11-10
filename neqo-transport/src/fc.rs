@@ -375,9 +375,42 @@ where
             return;
         };
 
+        // Scale the max_active window down by
+        // [(F-1) / F]; where F=WINDOW_UPDATE_FRACTION.
+        //
+        // In the ideal case, each byte sent would trigger a flow control
+        // update.  However, in practice we only send updates every
+        // WINDOW_UPDATE_FRACTION of the window.  Thus, when not application
+        // limited, in a steady state transfer it takes 1 RTT after sending 1 /
+        // F bytes for the sender to receive the next update. The sender is
+        // effectively limited to [(F-1) / F] bytes per RTT.
+        //
+        // By calculating with this effective window instead of the full
+        // max_active, we account for the inherent delay between when the sender
+        // would ideally receive flow control updates and when they actually
+        // arrive due to our batched update strategy.
+        //
+        // Example with F=4 without adjustment:
+        //
+        // t=0         start sending
+        // t=RTT/4     sent 1/4 of window total
+        // t=RTT       sent 1 window total
+        //             sender blocked for RTT/4
+        // t=RTT+RTT/4 receive update for 1/4 of window
+        //
+        // Example with F=4 with adjustment:
+        //
+        // t=0         start sending
+        // t=RTT/4     sent 1/4 of window total
+        // t=RTT       sent 1 window total
+        // t=RTT+RTT/4 sent 1+1/4 window total; receive update for 1/4 of window (just in time)
+        let effective_window =
+            (self.max_active * (WINDOW_UPDATE_FRACTION - 1)) / (WINDOW_UPDATE_FRACTION);
+
         // Compute the amount of bytes we have received in excess
         // of what `max_active` might allow.
-        let window_bytes_expected = self.max_active * elapsed / rtt;
+        let window_bytes_expected = (effective_window * elapsed) / (rtt);
+
         let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
         let Some(excess) = window_bytes_used.checked_sub(window_bytes_expected) else {
             // Used below expected. No auto-tuning needed.
