@@ -1008,13 +1008,14 @@ mod tests {
     use neqo_common::qlog::Qlog;
     use test_fixture::{now, DEFAULT_ADDR};
 
-    use super::{LossRecoverySpace, PacketNumberSpace, SendProfile, FAST_PTO_SCALE};
+    use super::{LossRecoverySpace, PacketNumberSpace, PtoState, SendProfile, FAST_PTO_SCALE};
     use crate::{
         cid::{ConnectionId, ConnectionIdEntry},
         ecn, packet,
         path::{Path, PathRef},
         recovery::{self, sent, MAX_PTO_PACKET_COUNT},
         stats::{Stats, StatsCell},
+        tracking::PacketNumberSpaceSet,
         ConnectionParameters,
     };
 
@@ -1780,5 +1781,54 @@ mod tests {
         assert_eq!(2, MAX_PTO_PACKET_COUNT); // because we're relying on that...
         let profile = lr.send_profile(now);
         assert!(profile.pto.is_none());
+    }
+
+    fn assert_no_handshake_last_ack_eliciting(lr: &Fixture) {
+        assert!(lr
+            .spaces
+            .get(PacketNumberSpace::Handshake)
+            .and_then(|s| s.last_ack_eliciting)
+            .is_none());
+    }
+
+    #[test]
+    fn maybe_prime_handshake_pto_no_pto_state() {
+        let mut lr = Fixture::default();
+        assert!(lr.pto_state.is_none());
+
+        // Verify nothing changes - the Handshake space should not be primed afterwards.
+        lr.maybe_prime_handshake_pto(now());
+        assert_no_handshake_last_ack_eliciting(&lr);
+    }
+
+    #[test]
+    fn maybe_prime_handshake_pto_wrong_space() {
+        // Create a PTO state in Handshake space.
+        let mut lr = Fixture::default();
+        let probe_set = PacketNumberSpaceSet::only(PacketNumberSpace::Handshake);
+        lr.pto_state = Some(PtoState::new(PacketNumberSpace::Handshake, probe_set));
+
+        // Verify nothing changes - the Handshake space should not be primed afterwards.
+        lr.maybe_prime_handshake_pto(now());
+        assert_no_handshake_last_ack_eliciting(&lr);
+    }
+
+    #[test]
+    fn maybe_prime_handshake_pto_no_handshake_space() {
+        // Create a PTO state in Initial space.
+        let mut lr = Fixture::default();
+        let probe_set = PacketNumberSpaceSet::only(PacketNumberSpace::Initial);
+        lr.pto_state = Some(PtoState::new(PacketNumberSpace::Initial, probe_set));
+
+        // Set up Initial space with an ACK and drop Handshake space.
+        lr.spaces
+            .get_mut(PacketNumberSpace::Initial)
+            .unwrap()
+            .largest_acked = Some(0);
+        lr.spaces.drop_space(PacketNumberSpace::Handshake);
+
+        // Verify Handshake space still doesn't exist afterwards.
+        lr.maybe_prime_handshake_pto(now());
+        assert!(lr.spaces.get(PacketNumberSpace::Handshake).is_none());
     }
 }
