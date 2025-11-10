@@ -54,11 +54,6 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix: ${{ fromJson(needs.branches.outputs.matrix) }}
-    outputs:
-      pr-artifact: ${{ steps.set-outputs.outputs.pr-artifact }}
-      main-artifact: ${{ steps.set-outputs.outputs.main-artifact }}
-      pr-tag: ${{ steps.set-outputs.outputs.pr-tag }}
-      main-tag: ${{ steps.set-outputs.outputs.main-tag }}
     permissions:
       packages: write # This permission is required to push to GitHub Container Registry.
     steps:
@@ -90,12 +85,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           platforms: ${{ github.event_name != 'pull_request' && 'linux/amd64, linux/arm64' || 'linux/amd64' }}
 
-      - id: set-outputs
-        env:
-          STEPS_DOCKER_BUILD_OUTPUTS_ARTIFACT_NAME: ${{ steps.docker-build.outputs.artifact-name }}
-          MATRIX_NAME: ${{ matrix.name }}
-        run: echo "${MATRIX_NAME}-artifact=${STEPS_DOCKER_BUILD_OUTPUTS_ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
-
   implementations:
     name: Determine interop pairs
     if: ${{ github.event_name != 'push' }}
@@ -110,31 +99,27 @@ jobs:
     steps:
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
-          name: ${{ needs.docker-image.outputs.pr-artifact }}
+          pattern: '*pr*'
           path: /tmp
 
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         if: ${{ github.event_name == 'pull_request' }}
         with:
-          name: ${{ needs.docker-image.outputs.main-artifact }}
+          pattern: '*main*'
           path: /tmp
 
       - run: |
           # The tar file name is based on the tag from the matrix
-          docker load --input "/tmp/${NEEDS_DOCKER_IMAGE_OUTPUTS_PR_TAG}.tar"
-          PR_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -1)
+          docker load --input "/tmp/${PR_TAG}.tar"
+          PR_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep pr | head -1)
           echo "PR_IMAGE=$PR_IMAGE" >> "$GITHUB_ENV"
-        env:
-          NEEDS_DOCKER_IMAGE_OUTPUTS_PR_TAG: ${{ needs.docker-image.outputs.pr-tag }}
 
       - if: ${{ github.event_name == 'pull_request' }}
         run: |
           # The tar file name is based on the tag from the matrix
-          docker load --input "/tmp/${NEEDS_DOCKER_IMAGE_OUTPUTS_MAIN_TAG}.tar"
+          docker load --input "/tmp/${MAIN_TAG}.tar"
           MAIN_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep main | head -1)
           echo "MAIN_IMAGE=$MAIN_IMAGE" >> "$GITHUB_ENV"
-        env:
-          NEEDS_DOCKER_IMAGE_OUTPUTS_MAIN_TAG: ${{ needs.docker-image.outputs.main-tag }}
 
       - id: config
         run: |
@@ -223,7 +208,7 @@ jobs:
   run-qns:
     name: Run QNS
     if: ${{ github.event_name != 'push' }}
-    needs: [docker-image, implementations]
+    needs: [implementations]
     strategy:
       fail-fast: false
       matrix:
@@ -239,23 +224,19 @@ jobs:
 
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
-          name: ${{ needs.docker-image.outputs.pr-artifact }}
+          name: 'pr Docker image'
           path: /tmp
 
-      - run: docker load --input "/tmp/${NEEDS_DOCKER_IMAGE_OUTPUTS_PR_TAG}.tar"
-        env:
-          NEEDS_DOCKER_IMAGE_OUTPUTS_PR_TAG: ${{ needs.docker-image.outputs.pr-tag }}
+      - run: docker load --input "/tmp/pr.tar"
 
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         if: ${{ github.event_name == 'pull_request' && contains(matrix.pair, 'neqo-main') }}
         with:
-          name: ${{ needs.docker-image.outputs.main-artifact }}
+          name: 'main Docker image'
           path: /tmp
 
       - if: ${{ github.event_name == 'pull_request' && contains(matrix.pair, 'neqo-main') }}
-        run: docker load --input "/tmp/${NEEDS_DOCKER_IMAGE_OUTPUTS_MAIN_TAG}.tar"
-        env:
-          NEEDS_DOCKER_IMAGE_OUTPUTS_MAIN_TAG: ${{ needs.docker-image.outputs.main-tag }}
+        run: docker load --input "/tmp/main.tar"
 
       - id: depair
         env:
@@ -302,8 +283,6 @@ jobs:
       - env:
           PAIRS: ${{ needs.implementations.outputs.pairs }}
           IS_PR: ${{ github.event_name == 'pull_request' }}
-          PR: ${{ needs.docker-image.outputs.pr-tag }}
-          MAIN: ${{ needs.docker-image.outputs.main-tag }}
           SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           # shellcheck disable=SC2153
