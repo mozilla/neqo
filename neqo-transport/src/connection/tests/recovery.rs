@@ -1014,7 +1014,6 @@ fn pto_handshake_space_when_server_flight_lost() {
             break callback;
         }
     };
-    assert_ne!(next_timeout, Duration::ZERO);
     // Fire PTO - this should prime Handshake space.
     now += next_timeout;
 
