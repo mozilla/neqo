@@ -19,14 +19,6 @@ inputs:
     required: false
     default: 'linux/amd64'
 
-outputs:
-  image-id:
-    description: 'The ID of the built Docker image'
-    value: ${{ steps.docker_build.outputs.imageID }}
-  artifact-name:
-    description: 'The name of the uploaded artifact'
-    value: ${{ steps.upload.outputs.artifact-name }}
-
 runs:
   using: "composite"
   steps:
