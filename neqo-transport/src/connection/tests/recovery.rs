@@ -1010,9 +1010,7 @@ fn pto_handshake_space_when_server_flight_lost() {
 
     // Drain all packets and get the next timeout.
     let next_timeout = loop {
-        let out = client.process_output(now);
-        let callback = out.callback();
-        if out.dgram().is_none() {
+        if let Some(callback) = client.process_output(now).callback();
             break callback;
         }
     };
