@@ -1010,7 +1010,7 @@ fn pto_handshake_space_when_server_flight_lost() {
 
     // Drain all packets and get the next timeout.
     let next_timeout = loop {
-        if let Some(callback) = client.process_output(now).callback();
+        if let Output::Callback(callback) = client.process_output(now) {
             break callback;
         }
     };
@@ -1029,8 +1029,7 @@ fn pto_handshake_space_when_server_flight_lost() {
     let mut has_handshake = false;
     for dgram in &pto_packets {
         let (first, second) = split_datagram(dgram);
-        has_handshake |= (is_handshake(&first) ||
-            second.as_ref().is_some_and(is_handshake));
+        has_handshake |= is_handshake(&first) || second.as_ref().is_some_and(|s| is_handshake(s));
     }
     assert!(has_handshake && client.stats().frame_tx.ping > stats_before.ping);
 }
