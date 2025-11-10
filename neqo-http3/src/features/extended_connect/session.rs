@@ -377,25 +377,40 @@ impl Session {
 
     /// # Errors
     ///
-    /// Returns an error if the datagram exceeds the remote datagram size limit.
+    /// Returns an error if:
+    /// - The session is not in Active state (`Error::Unavailable`)
+    /// - When QUIC datagrams are unavailable (`remote_datagram_size() == 0`):
+    ///   - Capsule writing fails (if the protocol supports HTTP DATAGRAM Capsules)
+    ///   - The protocol doesn't support capsules and QUIC datagram sending fails
+    /// - When QUIC datagrams are available: QUIC datagram sending fails
     pub(crate) fn send_datagram<I: Into<DatagramTracking>>(
-        &self,
+        &mut self,
         conn: &mut Connection,
         buf: &[u8],
         id: I,
+        now: Instant,
     ) -> Res<()> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
-        if self.state == State::Active {
-            let mut dgram_data = Encoder::default();
-            dgram_data.encode_varint(self.id.as_u64() / 4);
-            self.protocol.write_datagram_prefix(&mut dgram_data);
-            dgram_data.encode(buf);
-            conn.send_datagram(dgram_data.into(), id)?;
-        } else {
+        if self.state != State::Active {
             qdebug!("[{self}]: cannot send datagram in {:?} state.", self.state);
             debug_assert!(false);
             return Err(Error::Unavailable);
         }
+
+        if conn.remote_datagram_size() == 0 {
+            qtrace!("[{self}] remote_datagram_size is 0, trying HTTP DATAGRAM Capsule");
+            self.protocol
+                .write_datagram_capsule(&mut self.control_stream_send, conn, buf, now)?;
+            return Ok(());
+        }
+
+        let mut dgram_data = Encoder::default();
+        dgram_data.encode_varint(self.id.as_u64() / 4);
+        self.protocol.write_datagram_prefix(&mut dgram_data);
+        dgram_data.encode(buf);
+
+        conn.send_datagram(dgram_data.into(), id)?;
+        qtrace!("[{self}] sent datagram via QUIC datagram");
         Ok(())
     }
 
@@ -565,6 +580,14 @@ pub(crate) trait Protocol: Debug + Display {
     fn write_datagram_prefix(&self, encoder: &mut Encoder);
 
     fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError>;
+
+    fn write_datagram_capsule(
+        &self,
+        _control_stream_send: &mut Box<dyn SendStream>,
+        _conn: &mut Connection,
+        _buf: &[u8],
+        _now: Instant,
+    ) -> Res<()>;
 }
 
 #[derive(Debug, Error)]

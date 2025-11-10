@@ -9,7 +9,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Bytes, Decoder, Encoder};
+use neqo_common::{qdebug, qtrace, Bytes, Decoder, Encoder};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -17,8 +17,8 @@ use crate::{
         session::{DgramContextIdError, State},
         CloseReason, ExtendedConnectEvents, ExtendedConnectType, Protocol,
     },
-    frames::{ConnectUdpFrame, FrameReader, StreamReaderRecvStreamWrapper},
-    Error, RecvStream, Res,
+    frames::{capsule::Capsule, FrameReader, StreamReaderRecvStreamWrapper},
+    Error, RecvStream, Res, SendStream,
 };
 
 #[derive(Debug)]
@@ -55,32 +55,45 @@ impl Protocol for Session {
         control_stream_recv: &mut Box<dyn RecvStream>,
         now: Instant,
     ) -> Res<Option<State>> {
-        let (f, fin) = self
-            .frame_reader
-            .receive::<ConnectUdpFrame>(
-                &mut StreamReaderRecvStreamWrapper::new(conn, control_stream_recv),
-                now,
-            )
-            .map_err(|_| Error::HttpGeneralProtocolStream)?;
+        loop {
+            let (capsule, fin) = self
+                .frame_reader
+                .receive::<Capsule>(
+                    &mut StreamReaderRecvStreamWrapper::new(conn, control_stream_recv),
+                    now,
+                )
+                .map_err(|_| Error::HttpGeneralProtocolStream)?;
 
-        if let Some(f) = f {
-            // TODO: Implement HTTP Datagram <https://github.com/mozilla/neqo/issues/2843>.
-            match f {}
-        }
+            let capsule_is_some = capsule.is_some();
 
-        if fin {
-            events.session_end(
-                ExtendedConnectType::ConnectUdp,
-                self.session_id,
-                CloseReason::Clean {
-                    error: 0,
-                    message: String::new(),
+            match capsule {
+                Some(Capsule::Datagram { payload }) => match self.dgram_context_id(payload) {
+                    Ok(slice) => {
+                        events.new_datagram(self.session_id, slice, self.connect_type());
+                    }
+                    Err(e) => {
+                        qdebug!("[{self}]: received capsule with invalid context identifier: {e}");
+                    }
                 },
-                None,
-            );
-            Ok(Some(State::Done))
-        } else {
-            Ok(None)
+                None => {}
+            }
+
+            if fin {
+                events.session_end(
+                    ExtendedConnectType::ConnectUdp,
+                    self.session_id,
+                    CloseReason::Clean {
+                        error: 0,
+                        message: String::new(),
+                    },
+                    None,
+                );
+                return Ok(Some(State::Done));
+            }
+
+            if !capsule_is_some {
+                return Ok(None);
+            }
         }
     }
 
@@ -103,6 +116,33 @@ impl Protocol for Session {
                 Err(DgramContextIdError::MissingIdentifier)
             }
         }
+    }
+
+    fn write_datagram_capsule(
+        &self,
+        control_stream_send: &mut Box<dyn SendStream>,
+        conn: &mut Connection,
+        buf: &[u8],
+        now: Instant,
+    ) -> Res<()> {
+        let mut dgram_data = Encoder::default();
+        self.write_datagram_prefix(&mut dgram_data);
+        dgram_data.encode(buf);
+
+        if conn.stream_avail_send_space(self.session_id)? < dgram_data.len() {
+            qdebug!("Not enough space to send datagram capsule, dropping it.");
+            return Ok(());
+        }
+        // TODO: Make Capsule abstract over either an owned (Bytes) or borrowed (&[u8]) type
+        // to avoid this allocation.
+        let capsule = Capsule::Datagram {
+            payload: Bytes::from(Vec::from(dgram_data)),
+        };
+        let mut enc = Encoder::default();
+        capsule.encode(&mut enc);
+        control_stream_send.send_data_atomic(conn, enc.as_ref(), now)?;
+        qtrace!("[{self}] sent datagram via HTTP DATAGRAM Capsule");
+        Ok(())
     }
 }
 
