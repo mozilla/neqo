@@ -37,7 +37,7 @@ jobs:
           - name: main
             ref: ${{ github.event.pull_request.base.sha }}
             tag: 'neqo-main'
-            condition: ${{ github.event_name == 'pull_request' }}
+            condition: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
         exclude:
           # Exclude main for non-PR events
           - condition: false
