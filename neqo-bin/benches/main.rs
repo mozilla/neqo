@@ -14,8 +14,14 @@ use std::{env, hint::black_box, net::SocketAddr, path::PathBuf, str::FromStr as 
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use neqo_bin::{client, server};
-use tokio::runtime::Builder;
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
 
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
+use tokio::runtime::Builder;
 struct Benchmark {
     name: String,
     num_requests: usize,
