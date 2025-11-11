@@ -194,29 +194,21 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-          # For PRs, generate pairs for both neqo-pr and neqo-main
-          # For non-PRs, only generate pairs for neqo-pr
           if [ -n "$MAIN_IMAGE" ]; then
-            # PR case: pairs for both neqo-pr and neqo-main
-            jq < implementations.json "[
-                [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers |
-                [to_entries[] | select(.value.role==\"client\" or .value.role==\"both\").key] as \$clients |
-                \$clients[] as \$client |
-                \$servers[] as \$server |
-                \$client + \"$DELIM\" + \$server |
-                select(contains(\"neqo-pr\") or contains(\"neqo-main\"))
-              ]" > pairs.json
+            # For PRs, generate pairs for both neqo-pr and neqo-main
+            CONDITION='select(contains(\"neqo-pr\") != contains(\"neqo-main\"))'
           else
-            # Non-PR case: only pairs for neqo-pr
-            jq < implementations.json "[
-                [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers |
-                [to_entries[] | select(.value.role==\"client\" or .value.role==\"both\").key] as \$clients |
-                \$clients[] as \$client |
-                \$servers[] as \$server |
-                \$client + \"$DELIM\" + \$server |
-                select(contains(\"neqo-pr\"))
-              ]" > pairs.json
+            # For non-PRs, only generate pairs for neqo-pr
+            CONDITION='select(contains(\"neqo-pr\")'
           fi
+          jq < implementations.json "[
+            [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers |
+            [to_entries[] | select(.value.role==\"client\" or .value.role==\"both\").key] as \$clients |
+            \$clients[] as \$client |
+            \$servers[] as \$server |
+            \$client + \"$DELIM\" + \$server |
+            $CONDITION
+          ]" > pairs.json
 
           {
             echo "pairs<<EOF"
@@ -309,8 +301,8 @@ jobs:
           mapfile -t LIST < <(echo "$PAIRS" | jq '.[]' | sort)
 
           # For PRs, we'll build a map of baseline results from neqo-main
+          declare -A MAIN_RESULTS
           if [ "$IS_PR" == "true" ]; then
-            declare -A BASELINE_MAP
             for PREFIX in "${LIST[@]}"; do
               PREFIX=$(echo "$PREFIX" | tr -d '"')
               if [[ "$PREFIX" == *"neqo-main"* ]]; then
@@ -324,15 +316,17 @@ jobs:
                   KEY="$CLIENT $DELIM $PR"
                   ROLE=server
                 fi
-                BASELINE_MAP["$KEY,$ROLE"]="results/${PREFIX} results"
+                MAIN_RESULTS["$KEY,$ROLE"]="results/${PREFIX} results"
               fi
             done
           fi
+          echo "${#MAIN_RESULTS[@]}"
 
           for PREFIX in "${LIST[@]}"; do
+            echo "Processing $PREFIX"
             PREFIX=$(echo "$PREFIX" | tr -d '"')
             # Skip neqo-main results as they're only used as baseline
-            [[ "$PREFIX" == *"neqo-main"* ]] && [ "$IS_PR" == "true" ] && continue
+            [[ "$PREFIX" == *"neqo-main"* ]] && continue
 
             CLIENT=$(echo "$PREFIX" | cut -f1 -d " ")
             SERVER=$(echo "$PREFIX" | cut -f3 -d " ")
@@ -359,24 +353,26 @@ jobs:
             for ROLE in client server; do
               [ ! -e "$RUN/$ROLE.grouped.json" ] && continue
               for GROUP in $(jq -r < "$RUN/$ROLE.grouped.json" '.results | keys[]'); do
-                RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
+                PR_RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
                 LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
-                BASELINE=$(mktemp)
 
                 # Get baseline from neqo-main if PR, otherwise no baseline
-                if [ "$IS_PR" == "true" ] && [ -n "${BASELINE_MAP["$PAIR,$ROLE"]:-}" ]; then
-                  BASELINE_DIR="${BASELINE_MAP["$PAIR,$ROLE"]}"
-                  if [ -e "$BASELINE_DIR/$ROLE.grouped.json" ]; then
-                    jq < "$BASELINE_DIR/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE"
-                  else
-                    touch "$BASELINE"
+                MAIN_RESULT=$(mktemp)
+                if [ "$IS_PR" == "true" ] && [ -n "${MAIN_RESULTS["$PAIR,$ROLE"]:-}" ]; then
+                  MAIN_RESULT_DIR="${MAIN_RESULTS["$PAIR,$ROLE"]}"
+                  if [ -e "$MAIN_RESULT_DIR/$ROLE.grouped.json" ]; then
+                    echo "Using baseline from $MAIN_RESULT_DIR for $PAIR"
+                    jq < "$MAIN_RESULT_DIR/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$MAIN_RESULT"
                   fi
-                else
-                  touch "$BASELINE"
                 fi
+                touch "$MAIN_RESULT" # In case it wasn't created, so wdiff doesn't complain.
 
-                [ -n "$RESULT" ] || continue
-                DIFF=$(wdiff -n "$BASELINE" - <<< "$RESULT" || true)
+                [ -n "$PR_RESULT" ] || continue
+                DIFF=$(wdiff -n "$MAIN_RESULT" - <<< "$PR_RESULT" || true)
+                ADD=""
+                ADD_DELIM=""
+                DEL=""
+                DEL_DELIM=""
                 if [ "$GROUP" == "failed" ]; then
                   ADD=":warning:"
                   ADD_DELIM="\*\*"
@@ -387,11 +383,6 @@ jobs:
                   ADD_DELIM="~~"
                   DEL=":warning:"
                   DEL_DELIM="\*\*"
-                else
-                  ADD=""
-                  ADD_DELIM=""
-                  DEL=""
-                  DEL_DELIM=""
                 fi
                 RESULT=$(echo "$DIFF" | sed -E "s/\[-/ $DEL$DEL_DELIM/g; s/-\]/$DEL_DELIM /g; s/\{\+/ $ADD$ADD_DELIM/g; s/\+\}/$ADD_DELIM /g")
                 echo "* [$PAIR]($LOG): $RESULT" >> "$ROLE.$GROUP.md"
