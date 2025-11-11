@@ -4,6 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(
+    clippy::significant_drop_tightening,
+    reason = "Inherent in codspeed criterion_group! macro."
+)]
+
 use std::{hint::black_box, time::Duration};
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
@@ -62,8 +67,6 @@ fn criterion_benchmark(c: &mut Criterion) {
 
         group.finish();
     }
-
-    Criterion::default().configure_from_args().final_summary();
 }
 
 criterion_group!(benches, criterion_benchmark);
