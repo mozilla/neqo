@@ -300,7 +300,7 @@ jobs:
         run: |
           # shellcheck disable=SC2153
           mapfile -t LIST < <(echo "$PAIRS" | jq '.[]' | sort)
-          ls -la results
+          find results -ls
           for PREFIX in "${LIST[@]}"; do
             PREFIX=$(echo "$PREFIX" | tr -d '"')
             # Skip neqo-main results as they're only used as baseline
@@ -315,21 +315,23 @@ jobs:
               ROLE=server
             fi
             RUN="results/${PREFIX} results"
-            echo "Run directory: $RUN"
             PAIR="$CLIENT $DELIM $SERVER"
             if [ ! -e "$RUN/result.json" ]; then
               echo "* $PAIR: run cancelled after $TIMEOUT min" >> "$ROLE.failed.md"
               continue
             fi
-            jq < "$RUN/result.json" '
-                . as $data |
-                .results[][].result //= "failed" |
-                {
-                  results: [.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] |
-                  add
-                } |
-                . + {log_url: $data.log_url}
-              ' > "$RUN/$ROLE.grouped.json"
+            for BRANCH in "$RUN" "${RUN/$PR/neqo-main}"; do
+              jq < "$BRANCH/result.json" '
+                  . as $data |
+                  .results[][].result //= "failed" |
+                  {
+                    results: [.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] |
+                    add
+                  } |
+                  . + {log_url: $data.log_url}
+                ' > "$BRANCH/$ROLE.grouped.json"
+              find "$BRANCH" -ls
+            done
             for ROLE in client server; do
               echo "Processing $PAIR as $ROLE"
               [ ! -e "$RUN/$ROLE.grouped.json" ] && continue
