@@ -33,13 +33,14 @@ jobs:
       - id: matrix
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-          SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           {
             echo "matrix<<EOF"
-            echo -n '{"include": [{"name": "pr","ref": ""}'
+            echo -n '{"include": [{"name": "pr","ref": "'"$HEAD_SHA"'"}'
             if [ "$GITHUB_EVENT_NAME" == "pull_request" ]; then
-              echo -n ', {"name": "main", "ref": "'"$SHA"'"}'
+              echo -n ', {"name": "main", "ref": "'"$BASE_SHA"'"}'
             fi
             echo ']}'
             echo "EOF"
@@ -295,7 +296,7 @@ jobs:
       - run: sudo apt-get install -y --no-install-recommends wdiff
       - env:
           PAIRS: ${{ needs.implementations.outputs.pairs }}
-          SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR: 'neqo-pr'
         run: |
           # shellcheck disable=SC2153
@@ -305,7 +306,6 @@ jobs:
             PREFIX=$(echo "$PREFIX" | tr -d '"')
             # Skip neqo-main results as they're only used as baseline
             [[ "$PREFIX" == *"neqo-main"* ]] && continue
-            echo "Processing $PREFIX"
 
             CLIENT=$(echo "$PREFIX" | cut -f1 -d " ")
             SERVER=$(echo "$PREFIX" | cut -f3 -d " ")
@@ -333,19 +333,15 @@ jobs:
               find "$BRANCH" -ls
             done
             for ROLE in client server; do
-              echo "Processing $PAIR as $ROLE"
               [ ! -e "$RUN/$ROLE.grouped.json" ] && continue
               for GROUP in $(jq -r < "$RUN/$ROLE.grouped.json" '.results | keys[]'); do
-                echo "Processing $PAIR as $ROLE, group $GROUP"
                 PR_RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
                 LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
 
                 # Get baseline from neqo-main if PR, otherwise no baseline
                 BASELINE=$(mktemp)
                 MAIN_RUN="${RUN/$PR/neqo-main}/$ROLE.grouped.json"
-                echo "Looking for baseline in $MAIN_RUN"
                 if [ -e "$MAIN_RUN" ]; then
-                  echo "Using baseline from $MAIN_RUN"
                   jq < "$MAIN_RUN" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE"
                 fi
 
@@ -367,7 +363,6 @@ jobs:
                   DEL_DELIM="\*\*"
                 fi
                 RESULT=$(echo "$DIFF" | sed -E "s/\[-/ $DEL$DEL_DELIM/g; s/-\]/$DEL_DELIM /g; s/\{\+/ $ADD$ADD_DELIM/g; s/\+\}/$ADD_DELIM /g")
-                echo "Result: $RESULT"
                 echo "* [$PAIR]($LOG): $RESULT" >> "$ROLE.$GROUP.md"
               done
             done
@@ -376,8 +371,8 @@ jobs:
             echo "### Failed Interop Tests"
             if [ -e client.failed.md ] || [ -e server.failed.md ]; then
               echo -n "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
-              if [ "$SHA" ]; then
-                echo -n ", differences relative to base branch at ${SHA}"
+              if [ "$BASE_SHA" ]; then
+                echo -n ", differences relative to `main` at ${BASE_SHA}"
               fi
               echo "."
               echo
