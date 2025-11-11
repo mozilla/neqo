@@ -295,34 +295,11 @@ jobs:
       - run: sudo apt-get install -y --no-install-recommends wdiff
       - env:
           PAIRS: ${{ needs.implementations.outputs.pairs }}
-          IS_PR: ${{ github.event_name == 'pull_request' }}
           SHA: ${{ github.event.pull_request.head.sha }}
           PR: 'neqo-pr'
         run: |
           # shellcheck disable=SC2153
           mapfile -t LIST < <(echo "$PAIRS" | jq '.[]' | sort)
-
-          # For PRs, we'll build a map of baseline results from neqo-main
-          declare -A MAIN_RESULTS
-          if [ "$IS_PR" == "true" ]; then
-            for PREFIX in "${LIST[@]}"; do
-              PREFIX=$(echo "$PREFIX" | tr -d '"')
-              if [[ "$PREFIX" == *"neqo-main"* ]]; then
-                CLIENT=$(echo "$PREFIX" | cut -f1 -d " ")
-                SERVER=$(echo "$PREFIX" | cut -f3 -d " ")
-                # Create equivalent neqo-pr pair key
-                if [ "$CLIENT" == "neqo-main" ]; then
-                  KEY="$PR $DELIM $SERVER"
-                  ROLE=client
-                else
-                  KEY="$CLIENT $DELIM $PR"
-                  ROLE=server
-                fi
-                MAIN_RESULTS["$KEY,$ROLE"]="results/${PREFIX} results"
-              fi
-            done
-          fi
-          declare -p MAIN_RESULTS
 
           for PREFIX in "${LIST[@]}"; do
             PREFIX=$(echo "$PREFIX" | tr -d '"')
@@ -362,14 +339,11 @@ jobs:
 
                 # Get baseline from neqo-main if PR, otherwise no baseline
                 MAIN_RESULT=$(mktemp)
-                if [ "$IS_PR" == "true" ] && [ -n "${MAIN_RESULTS["$PAIR,$ROLE"]:-}" ]; then
-                  MAIN_RESULT_DIR="${MAIN_RESULTS["$PAIR,$ROLE"]}"
-                  if [ -e "$MAIN_RESULT_DIR/$ROLE.grouped.json" ]; then
-                    echo "Using baseline from $MAIN_RESULT_DIR for $PAIR"
-                    jq < "$MAIN_RESULT_DIR/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$MAIN_RESULT"
-                  fi
+                MAIN_RUN="${RUN/$PR/neqo-main}/$ROLE.grouped.json"
+                if [ -e "$MAIN_RUN" ]; then
+                  echo "Using baseline from $MAIN_RUN"
+                  jq < "$MAIN_RUN" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$MAIN_RESULT"
                 fi
-                touch "$MAIN_RESULT" # In case it wasn't created, so wdiff doesn't complain.
 
                 [ -n "$PR_RESULT" ] || continue
                 DIFF=$(wdiff -n "$MAIN_RESULT" - <<< "$PR_RESULT" || true)
@@ -398,11 +372,10 @@ jobs:
             echo "### Failed Interop Tests"
             if [ -e client.failed.md ] || [ -e server.failed.md ]; then
               echo -n "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
-              if [ "$IS_PR" == "true" ]; then
-                echo ", differences relative to base branch at ${SHA}."
-              else
-                echo "."
+              if [ "$SHA" ]; then
+                echo -n ", differences relative to base branch at ${SHA}"
               fi
+              echo "."
               echo
               echo "#### $PR as client"
               cat client.failed.md || echo
