@@ -77,13 +77,33 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/docker-build-qns
-        id: docker-build
+      - uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893 # v5.9.0
+        id: meta
         with:
-          ref: ${{ matrix.ref }}
-          tag: ${{ matrix.name }}
+          images: ghcr.io/${{ github.repository }}-qns${{ matrix.name }}
+          tags: |
+            # default
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+            # set latest tag for default branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
           push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          file: qns/Dockerfile
+          build-args: RUST_VERSION=stable
           platforms: ${{ github.event_name != 'pull_request' && 'linux/amd64, linux/arm64' || 'linux/amd64' }}
+          outputs: type=docker,dest=/tmp/${{ format('{0}.tar', matrix.name) }}
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        if: ${{ github.event_name == 'pull_request' }}
+        with:
+          name: ${{ format('{0} Docker image ', matrix.name) }}
+          path: /tmp/${{ format('{0}.tar', matrix.name) }}
 
   implementations:
     name: Determine interop pairs
