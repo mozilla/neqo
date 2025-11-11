@@ -372,7 +372,7 @@ jobs:
             if [ -e client.failed.md ] || [ -e server.failed.md ]; then
               echo -n "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
               if [ "$BASE_SHA" ]; then
-                echo -n ", differences relative to `main` at ${BASE_SHA}"
+                echo -n ", differences relative to \`main\` at ${BASE_SHA}"
               fi
               echo "."
               echo
