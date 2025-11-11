@@ -69,6 +69,9 @@ runs:
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
 
+    # Enabling the Rust cache causes too much pressure on the cache.
+    # Leaving this here in case we ever move to a paid GitHub tier.
+    #
     # - name: Enable Rust cache
     #   uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
     #   with:
