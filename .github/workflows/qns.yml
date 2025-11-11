@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  DELIM: ' vs. '
+  DELIM: 'vs.'
   TIMEOUT: 20
 
 jobs:
@@ -208,7 +208,7 @@ jobs:
             [to_entries[] | select(.value.role==\"client\" or .value.role==\"both\").key] as \$clients |
             \$clients[] as \$client |
             \$servers[] as \$server |
-            \$client + \"$DELIM\" + \$server |
+            \$client + \" $DELIM \" + \$server |
             $CONDITION
           ]" > pairs.json
 
@@ -255,7 +255,7 @@ jobs:
         env:
           PAIR: ${{ matrix.pair }}
         run: |
-          PAIR="${PAIR/$DELIM/%}"
+          PAIR="${PAIR/ $DELIM /%}"
           echo "client=$(echo "$PAIR" | cut -d% -f1)" >> "$GITHUB_OUTPUT"
           echo "server=$(echo "$PAIR" | cut -d% -f2)" >> "$GITHUB_OUTPUT"
 
