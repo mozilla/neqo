@@ -195,11 +195,13 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           if [ -n "$MAIN_IMAGE" ]; then
-            # For PRs, generate pairs for both neqo-pr and neqo-main
-            CONDITION='select(contains("neqo-pr") != contains("neqo-main"))'
+            # For PRs, generate pairs for both neqo-pr and neqo-main, where each runs against all other implementations but not itself.
+            # shellcheck disable=SC2016
+            CONDITION='select(contains("neqo-pr") != contains("neqo-main") and $client != $server)'
           else
             # For non-PRs, only generate pairs for neqo-pr
-            CONDITION='select(contains("neqo-pr")'
+            # shellcheck disable=SC2016
+            CONDITION='select(contains("neqo-pr" and $client != $server)'
           fi
           jq < implementations.json "[
             [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers |
@@ -320,13 +322,13 @@ jobs:
               fi
             done
           fi
-          echo "${#MAIN_RESULTS[@]}"
+          declare -p MAIN_RESULTS
 
           for PREFIX in "${LIST[@]}"; do
-            echo "Processing $PREFIX"
             PREFIX=$(echo "$PREFIX" | tr -d '"')
             # Skip neqo-main results as they're only used as baseline
             [[ "$PREFIX" == *"neqo-main"* ]] && continue
+            echo "Processing $PREFIX"
 
             CLIENT=$(echo "$PREFIX" | cut -f1 -d " ")
             SERVER=$(echo "$PREFIX" | cut -f3 -d " ")
@@ -351,8 +353,10 @@ jobs:
                 . + {log_url: $data.log_url}
               ' > "$RUN/$ROLE.grouped.json"
             for ROLE in client server; do
+              echo "Processing $PAIR as $ROLE"
               [ ! -e "$RUN/$ROLE.grouped.json" ] && continue
               for GROUP in $(jq -r < "$RUN/$ROLE.grouped.json" '.results | keys[]'); do
+                echo "Processing $PAIR as $ROLE, group $GROUP"
                 PR_RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
                 LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
 
@@ -385,6 +389,7 @@ jobs:
                   DEL_DELIM="\*\*"
                 fi
                 RESULT=$(echo "$DIFF" | sed -E "s/\[-/ $DEL$DEL_DELIM/g; s/-\]/$DEL_DELIM /g; s/\{\+/ $ADD$ADD_DELIM/g; s/\+\}/$ADD_DELIM /g")
+                echo "Result: $RESULT"
                 echo "* [$PAIR]($LOG): $RESULT" >> "$ROLE.$GROUP.md"
               done
             done
