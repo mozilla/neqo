@@ -80,7 +80,7 @@ jobs:
       - uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893 # v5.9.0
         id: meta
         with:
-          images: ghcr.io/${{ github.repository }}-qns${{ matrix.name }}
+          images: ghcr.io/${{ github.repository }}-qns-${{ matrix.name }}
           tags: |
             # default
             type=schedule
@@ -141,7 +141,7 @@ jobs:
 
       - id: config
         run: |
-          # Add neqo-or and some non-default implementations
+          # Add neqo-pr and some non-default implementations
           # tquic: https://github.com/quic-interop/quic-interop-runner/pull/385/files
           # openssl: https://github.com/quic-interop/quic-interop-runner/pull/402/files
           # linuxquic: https://github.com/quic-interop/quic-interop-runner/pull/428
@@ -300,7 +300,7 @@ jobs:
         run: |
           # shellcheck disable=SC2153
           mapfile -t LIST < <(echo "$PAIRS" | jq '.[]' | sort)
-
+          ls -la results
           for PREFIX in "${LIST[@]}"; do
             PREFIX=$(echo "$PREFIX" | tr -d '"')
             # Skip neqo-main results as they're only used as baseline
@@ -315,6 +315,7 @@ jobs:
               ROLE=server
             fi
             RUN="results/${PREFIX} results"
+            echo "Run directory: $RUN"
             PAIR="$CLIENT $DELIM $SERVER"
             if [ ! -e "$RUN/result.json" ]; then
               echo "* $PAIR: run cancelled after $TIMEOUT min" >> "$ROLE.failed.md"
@@ -338,15 +339,16 @@ jobs:
                 LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
 
                 # Get baseline from neqo-main if PR, otherwise no baseline
-                MAIN_RESULT=$(mktemp)
+                BASELINE=$(mktemp)
                 MAIN_RUN="${RUN/$PR/neqo-main}/$ROLE.grouped.json"
+                echo "Looking for baseline in $MAIN_RUN"
                 if [ -e "$MAIN_RUN" ]; then
                   echo "Using baseline from $MAIN_RUN"
-                  jq < "$MAIN_RUN" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$MAIN_RESULT"
+                  jq < "$MAIN_RUN" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE"
                 fi
 
                 [ -n "$PR_RESULT" ] || continue
-                DIFF=$(wdiff -n "$MAIN_RESULT" - <<< "$PR_RESULT" || true)
+                DIFF=$(wdiff -n "$BASELINE" - <<< "$PR_RESULT" || true)
                 ADD=""
                 ADD_DELIM=""
                 DEL=""
