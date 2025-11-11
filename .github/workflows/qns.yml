@@ -173,7 +173,6 @@ jobs:
             }
           }
           EOF
-
           if [ -n "$MAIN_IMAGE" ]; then
             # Add neqo-main
             cat <<EOF > neqo-main.json
@@ -188,8 +187,6 @@ jobs:
             jq '. += input' neqo-main.json additional.json > temp.json
             mv temp.json additional.json
           fi
-
-          # Merge all implementations
           curl -o runner.json https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json
           jq '. += input' runner.json additional.json > implementations.json
           {
@@ -197,13 +194,11 @@ jobs:
             cat implementations.json
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-
+          # Determine valid interop pairs
           if [ -n "$MAIN_IMAGE" ]; then
-            # For PRs, generate pairs for both neqo-pr and neqo-main, where each runs against all other implementations but not itself.
             # shellcheck disable=SC2016
             CONDITION='select(contains("neqo-pr") != contains("neqo-main") and $client != $server)'
           else
-            # For non-PRs, only generate pairs for neqo-pr
             # shellcheck disable=SC2016
             CONDITION='select(contains("neqo-pr") and $client != $server)'
           fi
@@ -215,7 +210,6 @@ jobs:
             \$client + \" $DELIM \" + \$server |
             $CONDITION
           ]" > pairs.json
-
           {
             echo "pairs<<EOF"
             cat pairs.json
@@ -308,7 +302,6 @@ jobs:
             PREFIX=$(echo "$PREFIX" | tr -d '"')
             # Skip neqo-main results as they're only used as baseline
             [[ "$PREFIX" == *"neqo-main"* ]] && continue
-
             CLIENT=$(echo "$PREFIX" | cut -f1 -d " ")
             SERVER=$(echo "$PREFIX" | cut -f3 -d " ")
             if [ "$CLIENT" == "$PR" ]; then
@@ -338,14 +331,12 @@ jobs:
               for GROUP in $(jq -r < "$RUN/$ROLE.grouped.json" '.results | keys[]'); do
                 PR_RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
                 LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
-
                 # Get baseline from neqo-main if PR, otherwise no baseline
                 BASELINE=$(mktemp)
                 MAIN_RUN="${RUN/$PR/neqo-main}/$ROLE.grouped.json"
                 if [ -e "$MAIN_RUN" ]; then
                   jq < "$MAIN_RUN" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE"
                 fi
-
                 [ -n "$PR_RESULT" ] || continue
                 DIFF=$(wdiff -n "$BASELINE" - <<< "$PR_RESULT" || true)
                 ADD=""
