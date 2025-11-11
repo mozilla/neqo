@@ -196,10 +196,10 @@ jobs:
 
           if [ -n "$MAIN_IMAGE" ]; then
             # For PRs, generate pairs for both neqo-pr and neqo-main
-            CONDITION='select(contains(\"neqo-pr\") != contains(\"neqo-main\"))'
+            CONDITION='select(contains("neqo-pr") != contains("neqo-main"))'
           else
             # For non-PRs, only generate pairs for neqo-pr
-            CONDITION='select(contains(\"neqo-pr\")'
+            CONDITION='select(contains("neqo-pr")'
           fi
           jq < implementations.json "[
             [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers |
