@@ -34,7 +34,7 @@ jobs:
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           {
             echo "matrix<<EOF"
@@ -130,12 +130,15 @@ jobs:
           path: /tmp
 
       - run: |
+          find /tmp -ls
           docker load --input "/tmp/pr.tar"
+          docker images --format "{{.Repository}}:{{.Tag}}"
           PR_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep pr | head -1)
           echo "PR_IMAGE=$PR_IMAGE" >> "$GITHUB_ENV"
 
       - if: ${{ github.event_name == 'pull_request' }}
         run: |
+          find /tmp -ls
           docker load --input "/tmp/main.tar"
           MAIN_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep main | head -1)
           echo "MAIN_IMAGE=$MAIN_IMAGE" >> "$GITHUB_ENV"
@@ -241,7 +244,9 @@ jobs:
           name: 'pr Docker image'
           path: /tmp
 
-      - run: docker load --input "/tmp/pr.tar"
+      - run: |
+          find /tmp -ls
+          docker load --input "/tmp/pr.tar"
 
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         if: ${{ github.event_name == 'pull_request' && contains(matrix.pair, 'neqo-main') }}
@@ -250,7 +255,9 @@ jobs:
           path: /tmp
 
       - if: ${{ github.event_name == 'pull_request' && contains(matrix.pair, 'neqo-main') }}
-        run: docker load --input "/tmp/main.tar"
+        run: |
+          find /tmp -ls
+          docker load --input "/tmp/main.tar"
 
       - id: depair
         env:
