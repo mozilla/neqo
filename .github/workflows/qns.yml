@@ -62,11 +62,11 @@ jobs:
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
           platforms: arm64
-          cache-image: false
+          cache-image: true
 
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
         with:
-          cache-binary: false
+          cache-binary: true
 
       - uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
@@ -99,6 +99,8 @@ jobs:
           build-args: RUST_VERSION=stable
           platforms: ${{ github.event_name != 'pull_request' && 'linux/amd64, linux/arm64' || 'linux/amd64' }}
           outputs: type=docker,dest=/tmp/${{ format('{0}.tar', matrix.name) }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         if: ${{ github.event_name == 'pull_request' }}
@@ -130,7 +132,6 @@ jobs:
           path: /tmp
 
       - run: |
-          find /tmp -ls
           docker load --input "/tmp/pr.tar"
           docker images --format "{{.Repository}}:{{.Tag}}"
           PR_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep pr | head -1)
@@ -138,7 +139,6 @@ jobs:
 
       - if: ${{ github.event_name == 'pull_request' }}
         run: |
-          find /tmp -ls
           docker load --input "/tmp/main.tar"
           MAIN_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep main | head -1)
           echo "MAIN_IMAGE=$MAIN_IMAGE" >> "$GITHUB_ENV"
@@ -244,9 +244,7 @@ jobs:
           name: 'pr Docker image'
           path: /tmp
 
-      - run: |
-          find /tmp -ls
-          docker load --input "/tmp/pr.tar"
+      - run: docker load --input "/tmp/pr.tar"
 
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         if: ${{ github.event_name == 'pull_request' && contains(matrix.pair, 'neqo-main') }}
@@ -255,9 +253,7 @@ jobs:
           path: /tmp
 
       - if: ${{ github.event_name == 'pull_request' && contains(matrix.pair, 'neqo-main') }}
-        run: |
-          find /tmp -ls
-          docker load --input "/tmp/main.tar"
+        run: docker load --input "/tmp/main.tar"
 
       - id: depair
         env:
@@ -308,7 +304,6 @@ jobs:
         run: |
           # shellcheck disable=SC2153
           mapfile -t LIST < <(echo "$PAIRS" | jq '.[]' | sort)
-          find results -ls
           for PREFIX in "${LIST[@]}"; do
             PREFIX=$(echo "$PREFIX" | tr -d '"')
             # Skip neqo-main results as they're only used as baseline
@@ -337,7 +332,6 @@ jobs:
                   } |
                   . + {log_url: $data.log_url}
                 ' > "$BRANCH/$ROLE.grouped.json"
-              find "$BRANCH" -ls
             done
             for ROLE in client server; do
               [ ! -e "$RUN/$ROLE.grouped.json" ] && continue
