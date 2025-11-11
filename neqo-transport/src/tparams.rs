@@ -6,6 +6,11 @@
 
 // Transport parameters. See -transport section 7.3.
 
+// TODO: When using 0-RTT, both endpoints MUST remember the value of this
+// transport parameter. This allows use of this extension in 0-RTT packets. When
+// the server accepts 0-RTT data, the server MUST NOT disable this extension on
+// the resumed connection.
+
 use std::{
     cell::RefCell,
     fmt::{self, Display, Formatter},
@@ -54,6 +59,7 @@ pub enum TransportParameterId {
     GreaseQuicBit = 0x2ab2,
     MinAckDelay = 0xff02_de1a,
     MaxDatagramFrameSize = 0x0020,
+    ResetStreamAt = 0x17f7586d2cb571,
     #[cfg(test)]
     TestTransportParameter = 0xce16,
 }
@@ -324,6 +330,7 @@ impl TransportParameter {
                 _ => return Err(Error::TransportParameter),
             },
             TransportParameterId::VersionInformation => Self::decode_versions(&mut d)?,
+            TransportParameterId::ResetStreamAt => Self::Empty,
             #[cfg(test)]
             TransportParameterId::TestTransportParameter => {
                 Self::Bytes(d.decode_remainder().to_vec())

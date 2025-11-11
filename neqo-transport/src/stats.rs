@@ -30,6 +30,7 @@ pub struct FrameStats {
     pub crypto: usize,
     pub stream: usize,
     pub reset_stream: usize,
+    pub reset_stream_at: usize,
     pub stop_sending: usize,
 
     pub ping: usize,
@@ -70,8 +71,8 @@ impl Debug for FrameStats {
         )?;
         writeln!(
             f,
-            "    stream {} reset {} stop {}",
-            self.stream, self.reset_stream, self.stop_sending,
+            "    stream {} reset {} reset_at {} stop {}",
+            self.stream, self.reset_stream, self.reset_stream_at, self.stop_sending,
         )?;
         writeln!(
             f,
@@ -103,6 +104,7 @@ impl FrameStats {
             + self.crypto
             + self.stream
             + self.reset_stream
+            + self.reset_stream_at
             + self.stop_sending
             + self.ping
             + self.padding
