@@ -202,7 +202,7 @@ jobs:
           else
             # For non-PRs, only generate pairs for neqo-pr
             # shellcheck disable=SC2016
-            CONDITION='select(contains("neqo-pr" and $client != $server)'
+            CONDITION='select(contains("neqo-pr") and $client != $server)'
           fi
           jq < implementations.json "[
             [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers |
