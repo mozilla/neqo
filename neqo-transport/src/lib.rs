@@ -49,6 +49,7 @@ pub mod send_stream;
 mod sender;
 pub mod server;
 mod sni;
+mod srt;
 mod stats;
 pub mod stream_id;
 pub mod streams;
@@ -76,6 +77,7 @@ pub use self::{
     quic_datagrams::DatagramTracking,
     rtt::DEFAULT_INITIAL_RTT,
     sni::find_sni,
+    srt::StatelessResetToken,
     stats::Stats,
     stream_id::{StreamId, StreamType},
     version::Version,

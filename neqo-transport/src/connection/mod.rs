@@ -49,6 +49,7 @@ use crate::{
     rtt::{RttEstimate, GRANULARITY},
     saved::SavedDatagrams,
     send_stream::{self, SendStream},
+    srt::StatelessResetToken as SRT,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
     streams::{SendOrder, Streams},
@@ -282,7 +283,7 @@ pub struct Connection {
     cid_manager: ConnectionIdManager,
     address_validation: AddressValidationInfo,
     /// The connection IDs that were provided by the peer.
-    cids: ConnectionIdStore<[u8; 16]>,
+    cids: ConnectionIdStore<SRT>,
 
     /// The source connection ID that this endpoint uses for the handshake.
     /// Since we need to communicate this to our peer in tparams, setting this
@@ -1343,8 +1344,8 @@ impl Connection {
         if d.len() < 16 || !self.state.connected() {
             return false;
         }
-        <&[u8; 16]>::try_from(&d[d.len() - 16..])
-            .is_ok_and(|token| path.borrow().is_stateless_reset(token))
+        SRT::try_from(&d[d.len() - 16..])
+            .is_ok_and(|token| path.borrow().is_stateless_reset(&token))
     }
 
     fn check_stateless_reset(
@@ -2073,7 +2074,7 @@ impl Connection {
     }
 
     fn migrate_to_preferred_address(&mut self, now: Instant) -> Res<()> {
-        let spa: Option<(tparams::PreferredAddress, ConnectionIdEntry<[u8; 16]>)> = if matches!(
+        let spa: Option<(tparams::PreferredAddress, ConnectionIdEntry<SRT>)> = if matches!(
             self.conn_params.get_preferred_address(),
             PreferredAddressConfig::Disabled
         ) {
@@ -2926,7 +2927,7 @@ impl Connection {
 
             let reset_token = remote.get_bytes(StatelessResetToken).map_or_else(
                 || Ok(ConnectionIdEntry::random_srt()),
-                |token| <[u8; 16]>::try_from(token).map_err(|_| Error::TransportParameter),
+                |token| SRT::try_from(token).map_err(|_| Error::TransportParameter),
             )?;
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
@@ -3273,7 +3274,7 @@ impl Connection {
                 self.cids.add_remote(ConnectionIdEntry::new(
                     sequence_number,
                     ConnectionId::from(connection_id),
-                    stateless_reset_token.to_owned(),
+                    stateless_reset_token,
                 ))?;
                 self.paths.retire_cids(retire_prior, &mut self.cids);
                 if self.cids.len() >= LOCAL_ACTIVE_CID_LIMIT {

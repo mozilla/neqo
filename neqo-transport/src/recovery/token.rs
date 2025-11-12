@@ -10,6 +10,7 @@ use crate::{
     crypto::CryptoRecoveryToken,
     quic_datagrams::DatagramTracking,
     send_stream,
+    srt::StatelessResetToken as SRT,
     stream_id::{StreamId, StreamType},
     tracking::AckToken,
 };
@@ -60,7 +61,7 @@ pub enum Token {
         reason = "This is how it is called in the spec."
     )]
     NewToken(usize),
-    NewConnectionId(ConnectionIdEntry<[u8; 16]>),
+    NewConnectionId(ConnectionIdEntry<SRT>),
     RetireConnectionId(u64),
     AckFrequency(AckRate),
     Datagram(DatagramTracking),

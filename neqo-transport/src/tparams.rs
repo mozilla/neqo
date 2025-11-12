@@ -25,6 +25,7 @@ use strum::FromRepr;
 use crate::{
     cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
     packet::MIN_INITIAL_PACKET_SIZE,
+    srt::{StatelessResetToken as SRT, SRT_LEN},
     tracking::DEFAULT_REMOTE_ACK_DELAY,
     version::{self, Version},
     Error, Res,
@@ -137,7 +138,7 @@ impl PreferredAddress {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TransportParameter {
     Bytes(Vec<u8>),
     Integer(u64),
@@ -146,7 +147,7 @@ pub enum TransportParameter {
         v4: Option<SocketAddrV4>,
         v6: Option<SocketAddrV6>,
         cid: ConnectionId,
-        srt: [u8; 16],
+        srt: SRT,
     },
     Versions {
         current: version::Wire,
@@ -185,7 +186,7 @@ impl TransportParameter {
                         enc_inner.encode(&[0; 18]);
                     }
                     enc_inner.encode_vec(1, &cid[..]);
-                    enc_inner.encode(&srt[..]);
+                    enc_inner.encode(srt.as_bytes());
                 });
             }
             Self::Versions { current, other } => {
@@ -238,8 +239,8 @@ impl TransportParameter {
         }
 
         // Stateless reset token
-        let srtbuf = d.decode(16).ok_or(Error::NoMoreData)?;
-        let srt = <[u8; 16]>::try_from(srtbuf)?;
+        let srtbuf = d.decode(SRT_LEN).ok_or(Error::NoMoreData)?;
+        let srt = SRT::try_from(srtbuf)?;
 
         Ok(Self::PreferredAddress { v4, v6, cid, srt })
     }
@@ -337,7 +338,7 @@ impl TransportParameter {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TransportParameters {
     params: EnumMap<TransportParameterId, Option<TransportParameter>>,
 }
@@ -586,13 +587,13 @@ impl TransportParameters {
 
     /// Get the preferred address in a usable form.
     #[must_use]
-    pub fn get_preferred_address(&self) -> Option<(PreferredAddress, ConnectionIdEntry<[u8; 16]>)> {
+    pub fn get_preferred_address(&self) -> Option<(PreferredAddress, ConnectionIdEntry<SRT>)> {
         if let Some(TransportParameter::PreferredAddress { v4, v6, cid, srt }) =
             &self.params[TransportParameterId::PreferredAddress]
         {
             Some((
                 PreferredAddress::new(*v4, *v6),
-                ConnectionIdEntry::new(CONNECTION_ID_SEQNO_PREFERRED, cid.clone(), *srt),
+                ConnectionIdEntry::new(CONNECTION_ID_SEQNO_PREFERRED, cid.clone(), srt.clone()),
             ))
         } else {
             None
@@ -891,6 +892,7 @@ mod tests {
 
     use super::PreferredAddress;
     use crate::{
+        srt::StatelessResetToken as SRT,
         tparams::{TransportParameter, TransportParameterId, TransportParameters},
         ConnectionId, Error, Version,
     };
@@ -941,7 +943,7 @@ mod tests {
                 0,
             )),
             cid: ConnectionId::from(&[1, 2, 3, 4, 5]),
-            srt: [3; 16],
+            srt: SRT::new([3; 16]),
         }
     }
 
