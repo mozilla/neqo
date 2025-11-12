@@ -22,7 +22,7 @@ use crate::Role;
 
 #[derive(Debug, Clone, Default)]
 pub struct Qlog {
-    inner: Rc<RefCell<Option<SharedStreamer>>>,
+    inner: Option<Rc<RefCell<Option<SharedStreamer>>>>,
 }
 
 pub struct SharedStreamer {
@@ -76,10 +76,10 @@ impl Qlog {
         streamer.start_log()?;
 
         Ok(Self {
-            inner: Rc::new(RefCell::new(Some(SharedStreamer {
+            inner: Some(Rc::new(RefCell::new(Some(SharedStreamer {
                 qlog_path,
                 streamer,
-            }))),
+            })))),
         })
     }
 
@@ -90,7 +90,7 @@ impl Qlog {
     }
 
     /// If logging enabled, closure may generate an event to be logged.
-    pub fn add_event_with_instant<F>(&self, f: F, now: Instant)
+    pub fn add_event_with_instant<F>(&mut self, f: F, now: Instant)
     where
         F: FnOnce() -> Option<qlog::events::Event>,
     {
@@ -103,7 +103,7 @@ impl Qlog {
     }
 
     /// If logging enabled, closure may generate an event to be logged.
-    pub fn add_event_data_with_instant<F>(&self, f: F, now: Instant)
+    pub fn add_event_data_with_instant<F>(&mut self, f: F, now: Instant)
     where
         F: FnOnce() -> Option<qlog::events::EventData>,
     {
@@ -117,15 +117,27 @@ impl Qlog {
 
     /// If logging enabled, closure is given the Qlog stream to write events and
     /// frames to.
-    pub fn add_event_with_stream<F>(&self, f: F)
+    pub fn add_event_with_stream<F>(&mut self, f: F)
     where
         F: FnOnce(&mut QlogStreamer) -> Result<(), qlog::Error>,
     {
-        if let Some(inner) = self.inner.borrow_mut().as_mut() {
-            if let Err(e) = f(&mut inner.streamer) {
-                log::error!("Qlog event generation failed with error {e}; closing qlog.");
-                *self.inner.borrow_mut() = None;
-            }
+        let Some(inner) = self.inner.as_mut() else {
+            return;
+        };
+
+        let mut borrow = inner.borrow_mut();
+
+        let Some(inner_inner) = borrow.as_mut() else {
+            return;
+        };
+
+        if let Err(e) = f(&mut inner_inner.streamer) {
+            log::error!("Qlog event generation failed with error {e}; closing qlog.");
+
+            // Remove the shared QLOG.
+            borrow.take();
+            // Remove the reference to the shared QLOG.
+            inner.take();
         }
     }
 }
@@ -199,7 +211,7 @@ mod test {
 
     #[test]
     fn add_event_with_instant() {
-        let (log, contents) = test_fixture::new_neqo_qlog();
+        let (mut log, contents) = test_fixture::new_neqo_qlog();
         log.add_event_with_instant(|| Some(Event::with_time(0.0, EV_DATA)), test_fixture::now());
         assert_eq!(
             Regex::new("\"time\":[0-9]+.[0-9]+,")
