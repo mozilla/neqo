@@ -27,7 +27,7 @@ env:
   WORKSPACE: ${{ github.workspace}}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -191,7 +191,7 @@ jobs:
 
       - name: Export profiler.firefox.com data
         id: export_samply
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-samply
           path: |
@@ -202,7 +202,7 @@ jobs:
 
       - name: Export performance data
         id: export_perf
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-perf
           path: |
@@ -225,7 +225,7 @@ jobs:
 
       - name: Fail on regression
         # Don't check for regressions when running on main.
-        if: github.ref != 'refs/heads/main'
+        if: github.ref != 'refs/heads/main' && github.event.merge_group.base_ref != 'refs/heads/main'
         run: |
           if grep -q "Performance has regressed." results.txt; then
             echo "Performance regression detected."

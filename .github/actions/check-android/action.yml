@@ -20,9 +20,6 @@ inputs:
   minimum-nss-version:
     description: 'If NSS is required, the minimum version required.'
     default: ''
-  codecov-token:
-    description: 'Codecov token, if Codecov upload is desired.'
-    default: ''
   github-token:
     description: 'A Github PAT'
     required: true
@@ -102,11 +99,3 @@ runs:
         emulator-boot-timeout: 120
         disk-size: 2G
         script: /tmp/rust-android-run-tests-on-emulator.sh
-
-    - if: ${{ inputs.codecov-token != '' }}
-      uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0
-      with:
-        files: lcov.info
-        fail_ci_if_error: false
-        token: ${{ inputs.codecov-token }}
-        verbose: true

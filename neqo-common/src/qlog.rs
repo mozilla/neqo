@@ -42,6 +42,7 @@ impl Qlog {
         title: Option<String>,
         description: Option<String>,
         file_prefix: D,
+        now: Instant,
     ) -> Result<Self, qlog::Error> {
         qlog_path.push(format!("{file_prefix}.sqlog"));
 
@@ -58,7 +59,7 @@ impl Qlog {
             title,
             description,
             None,
-            Instant::now(),
+            now,
             new_trace(role),
             qlog::events::EventImportance::Base,
             Box::new(BufWriter::new(file)),
@@ -109,27 +110,6 @@ impl Qlog {
         self.add_event_with_stream(|s| {
             if let Some(ev_data) = f() {
                 s.add_event_data_with_instant(ev_data, now)?;
-            }
-            Ok(())
-        });
-    }
-
-    /// If logging enabled, closure may generate an event to be logged.
-    ///
-    /// This function is similar to [`Qlog::add_event_data_with_instant`],
-    /// but it does not take `now: Instant` as an input parameter. Instead, it
-    /// internally calls [`std::time::Instant::now`]. Prefer calling
-    /// [`Qlog::add_event_data_with_instant`] when `now` is available, as it
-    /// ensures consistency with the current time, which might differ from
-    /// [`std::time::Instant::now`] (e.g., when using simulated time instead of
-    /// real time).
-    pub fn add_event_data_now<F>(&self, f: F)
-    where
-        F: FnOnce() -> Option<qlog::events::EventData>,
-    {
-        self.add_event_with_stream(|s| {
-            if let Some(ev_data) = f() {
-                s.add_event_data_now(ev_data)?;
             }
             Ok(())
         });
@@ -194,6 +174,7 @@ pub fn new_trace(role: Role) -> TraceSeq {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use qlog::events::Event;
     use regex::Regex;

@@ -12,6 +12,10 @@ on:
     types:
       - completed # zizmor: ignore[dangerous-triggers]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -19,7 +23,7 @@ jobs:
   comment:
     name: Comment on PR
     permissions:
-      pull-requests: write
+      pull-requests: write # This permission is required to post comments on PRs.
     runs-on: ubuntu-24.04
     if: |
       github.event.workflow_run.event == 'pull_request' &&

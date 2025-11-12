@@ -9,7 +9,7 @@
 
 use neqo_crypto::{
     constants::{Cipher, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-    hkdf, Aead,
+    hkdf, Aead, AeadTrait as _,
 };
 use test_fixture::fixture_init;
 
@@ -119,4 +119,15 @@ fn aead_encrypt_decrypt() {
     scratch[0] ^= TOGGLE;
     let res = aead.decrypt(1, &scratch[..], ciphertext, plaintext_buf);
     assert!(res.is_err());
+}
+
+#[test]
+fn aead_encrypt_in_place_too_small_buffer() {
+    let aead = make_aead(TLS_AES_128_GCM_SHA256);
+
+    // Create a buffer that's smaller than the expansion size
+    let mut small_buffer = vec![0u8; aead.expansion() - 1];
+
+    let result = aead.encrypt_in_place(1, AAD, &mut small_buffer);
+    assert!(result.is_err());
 }

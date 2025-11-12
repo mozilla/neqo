@@ -6,7 +6,7 @@
 
 use std::ops::Deref;
 
-use neqo_common::{Buffer, Decoder, Encoder};
+use neqo_common::{qdebug, Buffer, Decoder, Encoder};
 use neqo_crypto::{ZeroRttCheckResult, ZeroRttChecker};
 
 use crate::{Error, Http3Parameters, Res};
@@ -28,6 +28,11 @@ const SETTINGS_H3_DATAGRAM_DRAFT04: SettingsType = 0x00ff_d277;
 
 const SETTINGS_H3_DATAGRAM: SettingsType = 0x33;
 
+/// Advertises support for HTTP Extended CONNECT.
+///
+/// See <https://www.rfc-editor.org/rfc/rfc9220#section-5>
+pub const SETTINGS_ENABLE_CONNECT_PROTOCOL: SettingsType = 0x08;
+
 pub const H3_RESERVED_SETTINGS: &[SettingsType] = &[0x2, 0x3, 0x4, 0x5];
 
 #[derive(Clone, PartialEq, Eq, Debug, Copy)]
@@ -37,6 +42,7 @@ pub enum HSettingType {
     BlockedStreams,
     EnableWebTransport,
     EnableH3Datagram,
+    EnableConnect,
 }
 
 const fn hsetting_default(setting_type: HSettingType) -> u64 {
@@ -45,7 +51,8 @@ const fn hsetting_default(setting_type: HSettingType) -> u64 {
         HSettingType::MaxTableCapacity
         | HSettingType::BlockedStreams
         | HSettingType::EnableWebTransport
-        | HSettingType::EnableH3Datagram => 0,
+        | HSettingType::EnableH3Datagram
+        | HSettingType::EnableConnect => 0,
     }
 }
 
@@ -114,6 +121,12 @@ impl HSettings {
                             enc_inner.encode_varint(iter.value);
                         }
                     }
+                    HSettingType::EnableConnect => {
+                        if iter.value == 1 {
+                            enc_inner.encode_varint(SETTINGS_ENABLE_CONNECT_PROTOCOL);
+                            enc_inner.encode_varint(iter.value);
+                        }
+                    }
                 }
             }
         });
@@ -175,8 +188,16 @@ impl HSettings {
                             .push(HSetting::new(HSettingType::EnableH3Datagram, value));
                     }
                 }
-                // other supported settings here
-                (Some(_), Some(_)) => {} // ignore unknown setting, it is fine.
+                (Some(SETTINGS_ENABLE_CONNECT_PROTOCOL), Some(value)) => {
+                    if value > 1 {
+                        return Err(Error::HttpSettings);
+                    }
+                    self.settings
+                        .push(HSetting::new(HSettingType::EnableConnect, value));
+                }
+                (Some(t), Some(v)) => {
+                    qdebug!("Ignoring unknown setting type {t} with value {v}");
+                }
                 _ => return Err(Error::NotEnoughData),
             }
         }
@@ -210,6 +231,10 @@ impl From<&Http3Parameters> for HSettings {
                 HSetting {
                     setting_type: HSettingType::EnableH3Datagram,
                     value: u64::from(conn_param.get_http3_datagram()),
+                },
+                HSetting {
+                    setting_type: HSettingType::EnableConnect,
+                    value: u64::from(conn_param.get_connect()),
                 },
             ],
         }
@@ -287,6 +312,13 @@ impl ZeroRttChecker for HttpZeroRttChecker {
                 let value = setting.value == 1;
                 self.settings.get_http3_datagram() || !value
             }
+            HSettingType::EnableConnect => {
+                if setting.value > 1 {
+                    return false;
+                }
+                let value = setting.value == 1;
+                self.settings.get_connect() || !value
+            }
             HSettingType::MaxHeaderListSize => true,
         }) {
             ZeroRttCheckResult::Accept
@@ -297,6 +329,7 @@ impl ZeroRttChecker for HttpZeroRttChecker {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::Encoder;
 

@@ -5,6 +5,10 @@ on:
     # SAFETY: We are not running any code from the triggering PR, so this is safe.
     types: [closed] # zizmor: ignore[dangerous-triggers]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -19,5 +23,5 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-      - uses: bencherdev/bencher@v0.5.5 # zizmor: ignore[unpinned-uses]
+      - uses: bencherdev/bencher@v0.5.7 # zizmor: ignore[unpinned-uses]
       - run: bencher archive --branch "$GITHUB_HEAD_REF"

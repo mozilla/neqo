@@ -6,11 +6,15 @@
 
 #![allow(
     clippy::allow_attributes,
+    clippy::allow_attributes_without_reason,
+    clippy::needless_raw_strings,
+    clippy::derive_partial_eq_without_eq,
     dead_code,
     non_upper_case_globals,
     non_snake_case,
     clippy::cognitive_complexity,
     clippy::too_many_lines,
+    clippy::use_self,
     reason = "For included bindgen code."
 )]
 
@@ -124,6 +128,7 @@ experimental_api!(SSL_SetCertificateCompressionAlgorithm(
 ));
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{SSL_GetNumImplementedCiphers, SSL_NumImplementedCiphers};
 

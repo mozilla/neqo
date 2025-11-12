@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::cmp::min;
+use std::{cmp::min, time::Instant};
 
 use neqo_common::{qtrace, Decoder, IncrementalDecoderUint, Role};
 use neqo_qpack::{decoder::QPACK_UNI_STREAM_TYPE_DECODER, encoder::QPACK_UNI_STREAM_TYPE_ENCODER};
@@ -230,7 +230,7 @@ impl RecvStream for NewStreamHeadReader {
         Ok(())
     }
 
-    fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
+    fn receive(&mut self, conn: &mut Connection, _now: Instant) -> Res<(ReceiveOutput, bool)> {
         let t = self.get_type(conn)?;
         Ok((
             t.map_or(ReceiveOutput::NoOutput, ReceiveOutput::NewStream),
@@ -240,6 +240,7 @@ impl RecvStream for NewStreamHeadReader {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::{Encoder, Role};
     use neqo_qpack::{
@@ -296,7 +297,7 @@ mod tests {
                 let out = self.conn_s.process_output(now());
                 drop(self.conn_c.process(out.dgram(), now()));
                 assert_eq!(
-                    self.decoder.receive(&mut self.conn_c).unwrap(),
+                    self.decoder.receive(&mut self.conn_c, now()).unwrap(),
                     (ReceiveOutput::NoOutput, false)
                 );
                 assert!(!self.decoder.done());
@@ -309,7 +310,7 @@ mod tests {
             }
             let out = self.conn_s.process_output(now());
             drop(self.conn_c.process(out.dgram(), now()));
-            assert_eq!(&self.decoder.receive(&mut self.conn_c), outcome);
+            assert_eq!(&self.decoder.receive(&mut self.conn_c, now()), outcome);
             assert_eq!(self.decoder.done(), done);
         }
 

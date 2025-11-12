@@ -44,10 +44,10 @@ pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T
     drop(conn_c.process(out.dgram(), now()));
 
     let (frame, fin) = fr
-        .receive::<T>(&mut StreamReaderConnectionWrapper::new(
-            &mut conn_c,
-            stream_id,
-        ))
+        .receive::<T>(
+            &mut StreamReaderConnectionWrapper::new(&mut conn_c, stream_id),
+            now(),
+        )
         .unwrap();
     assert!(!fin);
     assert!(frame.is_some());

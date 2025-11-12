@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef@sha256:116399b1296ed6fc9fb2e530650e229caeb0e1883e68c7f2a82f2b0b9b639a9e AS chef
+FROM lukemathwalker/cargo-chef@sha256:9e564338159930326c71b6c3df9ed5e5b60b0437b84861c6bb6767b1964a0fd4 AS chef
 
 WORKDIR /app
 
@@ -41,7 +41,7 @@ RUN set -eux; \
 
 # Copy only binaries to the final image to keep it small.
 
-FROM martenseemann/quic-network-simulator-endpoint@sha256:3c373d0bac88ac0a005c56628e551fe980e44bf2dd50b9c6904d58d7f8d54089
+FROM martenseemann/quic-network-simulator-endpoint@sha256:019812e9cbc558d94af64f2f21a74717d0fea725a24e7e8e9b341136998e6452
 
 ENV LD_LIBRARY_PATH=/neqo/lib
 COPY --from=builder /neqo/target/release/neqo-client /neqo/target/release/neqo-server /neqo/bin/

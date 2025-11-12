@@ -15,7 +15,7 @@ env:
   RUST_TEST_TIME_DOCTEST: 10,30
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -156,7 +156,7 @@ jobs:
           BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
       - name: CodeCov Windows workaround
-        if: matrix.os == 'windows-2025' && matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
+        if: ${{ startsWith(matrix.os, 'windows') && matrix.type == 'debug' && matrix.rust-toolchain == 'stable' }}
         run: |
           # FIXME: Without this, the codecov/codecov-action fails. No idea why it's looking under C:/msys64 now, it shouldn't.
           mkdir -p C:/msys64/home/runneradmin/
@@ -174,7 +174,7 @@ jobs:
 
       - name: Save simulation seeds artifact
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
           path: simulation-seeds
@@ -214,7 +214,6 @@ jobs:
           target: ${{ matrix.target }}
           minimum-nss-version: ${{ steps.nss-version.outputs.minimum }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          codecov-token: ${{ secrets.CODECOV_TOKEN }}
 
   check-vm:
     name: Run checks for VM-only platforms

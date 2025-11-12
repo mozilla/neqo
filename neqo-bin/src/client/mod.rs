@@ -547,6 +547,7 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<Qlog> {
         Some("Neqo client qlog".to_string()),
         Some("Neqo client qlog".to_string()),
         format!("client-{hostname}-{cid}"),
+        Instant::now(),
     )
     .map_err(Error::Qlog)
 }
@@ -613,6 +614,10 @@ pub async fn client(mut args: Args) -> Res<()> {
             exit(1);
         };
         let mut socket = crate::udp::Socket::bind(local_addr_for(&remote_addr, 0))?;
+        if socket.may_fragment() {
+            qinfo!("Datagrams may be fragmented by the IP layer. Disabling PMTUD.");
+            args.shared.quic_parameters.no_pmtud = true;
+        }
         let real_local = socket.local_addr().unwrap();
         qinfo!(
             "{} Client connecting: {real_local:?} -> {remote_addr:?}",
