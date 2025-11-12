@@ -138,7 +138,7 @@ impl PreferredAddress {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TransportParameter {
     Bytes(Vec<u8>),
     Integer(u64),
@@ -338,7 +338,7 @@ impl TransportParameter {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TransportParameters {
     params: EnumMap<TransportParameterId, Option<TransportParameter>>,
 }

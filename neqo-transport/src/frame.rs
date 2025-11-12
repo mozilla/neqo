@@ -150,7 +150,7 @@ pub struct AckRange {
     range: u64,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Frame<'a> {
     Padding(u16),
     Ping,

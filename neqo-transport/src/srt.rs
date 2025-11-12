@@ -14,7 +14,7 @@ pub const SRT_LEN: usize = 16;
 
 /// A stateless reset token is a 16-byte value that is used to identify
 /// a stateless reset packet.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq)]
 pub struct StatelessResetToken([u8; SRT_LEN]);
 
 impl StatelessResetToken {
