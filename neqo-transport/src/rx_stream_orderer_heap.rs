@@ -10,8 +10,7 @@
 //! all frames in the heap and handles deduplication lazily during reads.
 //! This provides O(log n) insertion while deferring the complexity to read time.
 
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::{cmp::Ordering, collections::BinaryHeap};
 
 use neqo_common::qtrace;
 
@@ -138,9 +137,7 @@ impl RxStreamOrderer {
                 let start_in_buf = next_expected.saturating_sub(buf.offset);
                 let available = (buf.data.len() as u64).saturating_sub(start_in_buf);
                 if available > 0 {
-                    bytes = bytes.saturating_add(
-                        usize::try_from(available).unwrap_or(usize::MAX),
-                    );
+                    bytes = bytes.saturating_add(usize::try_from(available).unwrap_or(usize::MAX));
                     next_expected = buf.end();
                 }
             } else {

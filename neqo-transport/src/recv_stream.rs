@@ -21,6 +21,7 @@ use neqo_common::{qtrace, Buffer, Role};
 use smallvec::SmallVec;
 use strum::Display;
 
+pub use crate::rx_stream_orderer_heap::RxStreamOrderer;
 use crate::{
     events::ConnectionEvents,
     fc::ReceiverFlowControl,
@@ -1172,7 +1173,8 @@ mod tests {
 
         // Add a second frame that overlaps.
         s.inbound_frame(120, &[0; 60]);
-        // Should now have: 50 bytes remaining from first frame + 60 new bytes from second = 80 total readable
+        // Should now have: 50 bytes remaining from first frame + 60 new bytes from second = 80
+        // total readable
         assert_eq!(s.bytes_ready(), 80);
         // Read second part of first frame and all of the second frame
         let count = s.read(&mut buf[..]);
@@ -1250,9 +1252,9 @@ mod tests {
         assert_eq!(expected_read, stream_stats.bytes_read());
     }
 
-    // FIXME: This test fails with BinaryHeap implementation due to complex overlapping frame handling.
-    // The BinaryHeap implementation needs to trim frames against existing data on insertion for
-    // per-byte "first data wins" semantics in complex overlap scenarios.
+    // FIXME: This test fails with BinaryHeap implementation due to complex overlapping frame
+    // handling. The BinaryHeap implementation needs to trim frames against existing data on
+    // insertion for per-byte "first data wins" semantics in complex overlap scenarios.
     #[test]
     #[ignore]
     fn stream_rx() {
@@ -1333,9 +1335,9 @@ mod tests {
     }
 
     // Test deduplication when the new data is at the end.
-    // FIXME: This test fails with BinaryHeap implementation due to complex overlapping frame handling.
-    // The BinaryHeap implementation needs to trim frames against existing data on insertion for
-    // per-byte "first data wins" semantics in complex overlap scenarios.
+    // FIXME: This test fails with BinaryHeap implementation due to complex overlapping frame
+    // handling. The BinaryHeap implementation needs to trim frames against existing data on
+    // insertion for per-byte "first data wins" semantics in complex overlap scenarios.
     #[test]
     #[ignore]
     fn stream_rx_dedupe_tail() {
@@ -1359,9 +1361,9 @@ mod tests {
     }
 
     /// When chunks are added before existing data, they aren't merged.
-    // FIXME: This test fails with BinaryHeap implementation due to complex overlapping frame handling.
-    // The BinaryHeap implementation needs to trim frames against existing data on insertion for
-    // per-byte "first data wins" semantics in complex overlap scenarios.
+    // FIXME: This test fails with BinaryHeap implementation due to complex overlapping frame
+    // handling. The BinaryHeap implementation needs to trim frames against existing data on
+    // insertion for per-byte "first data wins" semantics in complex overlap scenarios.
     #[test]
     #[ignore]
     fn stream_rx_dedupe_head() {
@@ -1380,9 +1382,9 @@ mod tests {
         assert_eq!(buf[..7], [7, 6, 6, 6, 6, 6, 6]);
     }
 
-    // FIXME: This test fails with BinaryHeap implementation due to complex overlapping frame handling.
-    // The BinaryHeap implementation needs to trim frames against existing data on insertion for
-    // per-byte "first data wins" semantics in complex overlap scenarios.
+    // FIXME: This test fails with BinaryHeap implementation due to complex overlapping frame
+    // handling. The BinaryHeap implementation needs to trim frames against existing data on
+    // insertion for per-byte "first data wins" semantics in complex overlap scenarios.
     #[test]
     #[ignore]
     fn stream_rx_dedupe_new_tail() {
@@ -1494,9 +1496,9 @@ mod tests {
             .unwrap_err();
     }
 
-    // FIXME: This test fails with BinaryHeap implementation due to complex overlapping frame handling.
-    // The BinaryHeap implementation needs to trim frames against existing data on insertion for
-    // per-byte "first data wins" semantics in complex overlap scenarios.
+    // FIXME: This test fails with BinaryHeap implementation due to complex overlapping frame
+    // handling. The BinaryHeap implementation needs to trim frames against existing data on
+    // insertion for per-byte "first data wins" semantics in complex overlap scenarios.
     #[test]
     #[ignore]
     fn stream_orderer_bytes_ready() {

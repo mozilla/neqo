@@ -7,8 +7,10 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use neqo_transport::recv_stream::RxStreamOrdererBTreeMap as BTreeMapOrderer;
-use neqo_transport::rx_stream_orderer_heap::RxStreamOrderer as HeapOrderer;
+use neqo_transport::{
+    recv_stream::RxStreamOrdererBTreeMap as BTreeMapOrderer,
+    rx_stream_orderer_heap::RxStreamOrdererView as HeapOrderer,
+};
 
 const FRAME_SIZE: usize = 1337;
 
@@ -143,10 +145,7 @@ fn benchmark_overlapping_btreemap(c: &mut Criterion) {
 
             for i in 0..1000 {
                 // Each frame overlaps with the previous by half.
-                rx.inbound_frame(
-                    black_box(i * (FRAME_SIZE / 2) as u64),
-                    black_box(data),
-                );
+                rx.inbound_frame(black_box(i * (FRAME_SIZE / 2) as u64), black_box(data));
             }
         });
     });
@@ -159,10 +158,7 @@ fn benchmark_overlapping_heap(c: &mut Criterion) {
             let data: &[u8] = &[0; FRAME_SIZE];
 
             for i in 0..1000 {
-                rx.inbound_frame(
-                    black_box(i * (FRAME_SIZE / 2) as u64),
-                    black_box(data),
-                );
+                rx.inbound_frame(black_box(i * (FRAME_SIZE / 2) as u64), black_box(data));
             }
         });
     });

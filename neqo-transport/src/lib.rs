@@ -36,20 +36,11 @@ mod quic_datagrams;
 pub mod recovery;
 #[cfg(not(feature = "bench"))]
 mod recovery;
-mod saved;
-// #[cfg(feature = "bench")]
 pub mod recv_stream;
-// #[cfg(not(feature = "bench"))]
-// mod recv_stream;
-#[cfg(feature = "bench")]
-pub mod rx_stream_orderer_heap;
-#[cfg(not(feature = "bench"))]
-mod rx_stream_orderer_heap;
 mod rtt;
-// #[cfg(feature = "bench")]
+pub mod rx_stream_orderer_heap;
+mod saved;
 pub mod send_stream;
-// #[cfg(not(feature = "bench"))]
-// mod send_stream;
 mod sender;
 pub mod server;
 mod sni;
