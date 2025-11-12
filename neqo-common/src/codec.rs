@@ -1224,6 +1224,8 @@ mod tests {
     fn encoder_skip_too_much() {
         let mut enc = Encoder::from_hex("0102");
         enc.skip(3);
+    }
+
     /// [`Encoder::as_decoder`] should only expose the bytes actively encoded through this
     /// [`Encoder`], not all bytes of the underlying [`Buffer`].
     #[test]
