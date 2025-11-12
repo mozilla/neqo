@@ -4,27 +4,26 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::ops::Deref;
-
-use neqo_common::Encoder;
-
 use crate::{huffman, prefix::Prefix};
 
-#[derive(Default, Debug, PartialEq, Eq)]
-pub struct Data {
-    buf: Vec<u8>,
+/// Extension trait providing QPACK-specific encoding methods for `Encoder`.
+///
+/// This trait extends the standard [`neqo_common::Encoder`] with QPACK-specific
+/// methods for encoding integers with prefixes and literal strings with
+/// optional Huffman encoding.
+pub trait Encoder {
+    /// Encode an integer with a QPACK prefix according to RFC 7541 Section 5.1.
+    fn encode_prefixed_encoded_int(&mut self, prefix: Prefix, val: u64) -> usize;
+
+    /// Encode a literal string with optional Huffman encoding according to RFC 7541 Section 5.2.
+    fn encode_literal(&mut self, use_huffman: bool, prefix: Prefix, value: &[u8]);
 }
 
-impl Data {
-    fn write_byte(&mut self, b: u8) {
-        self.buf.push(b);
-    }
-
-    pub fn encode_varint(&mut self, i: u64) {
-        Encoder::new_borrowed_vec(&mut self.buf).encode_varint(i);
-    }
-
-    pub(crate) fn encode_prefixed_encoded_int(&mut self, prefix: Prefix, mut val: u64) -> usize {
+impl<B> Encoder for neqo_common::Encoder<B>
+where
+    B: neqo_common::Buffer,
+{
+    fn encode_prefixed_encoded_int(&mut self, prefix: Prefix, mut val: u64) -> usize {
         let first_byte_max: u8 = if prefix.len() == 0 {
             0xff
         } else {
@@ -33,11 +32,11 @@ impl Data {
 
         if val < u64::from(first_byte_max) {
             let v = u8::try_from(val).expect("first_byte_max is a u8 and val is smaller");
-            self.write_byte((prefix.prefix() & !first_byte_max) | v);
+            self.encode_byte((prefix.prefix() & !first_byte_max) | v);
             return 1;
         }
 
-        self.write_byte(prefix.prefix() | first_byte_max);
+        self.encode_byte(prefix.prefix() | first_byte_max);
         val -= u64::from(first_byte_max);
 
         let mut written = 1;
@@ -51,13 +50,13 @@ impl Data {
                 done = true;
             }
 
-            self.write_byte(b);
+            self.encode_byte(b);
             written += 1;
         }
         written
     }
 
-    pub fn encode_literal(&mut self, use_huffman: bool, prefix: Prefix, value: &[u8]) {
+    fn encode_literal(&mut self, use_huffman: bool, prefix: Prefix, value: &[u8]) {
         let real_prefix = Prefix::new(
             if use_huffman {
                 prefix.prefix() | (0x80 >> prefix.len())
@@ -73,68 +72,51 @@ impl Data {
                 real_prefix,
                 u64::try_from(encoded.len()).expect("usize fits in u64"),
             );
-            self.write_bytes(&encoded);
+            self.encode(&encoded);
         } else {
             self.encode_prefixed_encoded_int(
                 real_prefix,
                 u64::try_from(value.len()).expect("usize fits in u64"),
             );
-            self.write_bytes(value);
+            self.encode(value);
         }
-    }
-
-    pub fn write_bytes(&mut self, buf: &[u8]) {
-        self.buf.extend_from_slice(buf);
-    }
-
-    pub fn read(&mut self, r: usize) {
-        assert!(
-            r <= self.buf.len(),
-            "want to set more bytes read than remain in the buffer"
-        );
-        self.buf = self.buf.split_off(r);
-    }
-}
-
-impl Deref for Data {
-    type Target = [u8];
-    fn deref(&self) -> &Self::Target {
-        &self.buf
     }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::{Data, Prefix};
+    use neqo_common::Encoder;
+
+    use super::{Encoder as _, Prefix};
 
     #[test]
     fn encode_prefixed_encoded_int_1() {
-        let mut d = Data::default();
+        let mut d = Encoder::default();
         d.encode_prefixed_encoded_int(Prefix::new(0xC0, 2), 5);
-        assert_eq!(d[..], [0xc5]);
+        assert_eq!(d.as_ref(), [0xc5]);
     }
 
     #[test]
     fn encode_prefixed_encoded_int_2() {
-        let mut d = Data::default();
+        let mut d = Encoder::default();
         d.encode_prefixed_encoded_int(Prefix::new(0xC0, 2), 65);
-        assert_eq!(d[..], [0xff, 0x02]);
+        assert_eq!(d.as_ref(), [0xff, 0x02]);
     }
 
     #[test]
     fn encode_prefixed_encoded_int_3() {
-        let mut d = Data::default();
+        let mut d = Encoder::default();
         d.encode_prefixed_encoded_int(Prefix::new(0xC0, 2), 100_000);
-        assert_eq!(d[..], [0xff, 0xe1, 0x8c, 0x06]);
+        assert_eq!(d.as_ref(), [0xff, 0xe1, 0x8c, 0x06]);
     }
 
     #[test]
     fn max_int() {
-        let mut d = Data::default();
+        let mut d = Encoder::default();
         d.encode_prefixed_encoded_int(Prefix::new(0x80, 1), u64::MAX);
         assert_eq!(
-            d[..],
+            d.as_ref(),
             [0xff, 0x80, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01]
         );
     }
@@ -148,15 +130,15 @@ mod tests {
 
     #[test]
     fn encode_literal() {
-        let mut d = Data::default();
+        let mut d = Encoder::default();
         d.encode_literal(false, Prefix::new(0xC0, 2), VALUE);
-        assert_eq!(&&d[..], &LITERAL);
+        assert_eq!(d.as_ref(), LITERAL);
     }
 
     #[test]
     fn encode_literal_huffman() {
-        let mut d = Data::default();
+        let mut d = Encoder::default();
         d.encode_literal(true, Prefix::new(0xC0, 2), VALUE);
-        assert_eq!(&&d[..], &LITERAL_HUFFMAN);
+        assert_eq!(d.as_ref(), LITERAL_HUFFMAN);
     }
 }
