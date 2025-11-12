@@ -43,7 +43,7 @@ use crate::{
     packet::{self},
     path::{Path, PathRef, Paths},
     qlog,
-    quic_datagrams::{DatagramTracking, QuicDatagrams},
+    quic_datagrams::{DatagramTracking, QuicDatagrams, DATAGRAM_FRAME_TYPE_VARINT_LEN},
     recovery::{self, sent, SendProfile},
     recv_stream,
     rtt::{RttEstimate, GRANULARITY},
@@ -2199,7 +2199,12 @@ impl Connection {
         version: Version,
         grease_quic_bit: bool,
         limit: usize,
-    ) -> (packet::Type, packet::Builder<&'a mut Vec<u8>>) {
+        largest_acknowledged: Option<packet::Number>,
+    ) -> (
+        packet::Type,
+        packet::Builder<&'a mut Vec<u8>>,
+        packet::Number,
+    ) {
         let pt = packet::Type::from(epoch);
         let mut builder = if pt == packet::Type::Short {
             qdebug!("Building Short dcid {:?}", path.remote_cid());
@@ -2226,16 +2231,6 @@ impl Connection {
             }
         }
 
-        (pt, builder)
-    }
-
-    #[must_use]
-    fn add_packet_number(
-        builder: &mut packet::Builder<&mut Vec<u8>>,
-        tx: &CryptoDxState,
-        largest_acknowledged: Option<packet::Number>,
-    ) -> packet::Number {
-        // Get the packet number and work out how long it is.
         let pn = tx.next_pn();
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
@@ -2247,7 +2242,8 @@ impl Connection {
         );
         // TODO(mt) also use `4*path CWND/path MTU` to set a minimum length.
         builder.pn(pn, pn_len);
-        pn
+
+        (pt, builder, pn)
     }
 
     fn can_grease_quic_bit(&self) -> bool {
@@ -2681,7 +2677,7 @@ impl Connection {
 
             let header_start = encoder.len();
 
-            let (pt, mut builder) = Self::build_packet_header(
+            let (pt, mut builder, pn) = Self::build_packet_header(
                 &path.borrow(),
                 epoch,
                 encoder,
@@ -2692,10 +2688,6 @@ impl Connection {
                 // Limit the packet builder further to leave space for AEAD
                 // expansion added in `builder.build` below.
                 limit - aead_expansion,
-            );
-            let pn = Self::add_packet_number(
-                &mut builder,
-                tx,
                 self.loss_recovery.largest_acknowledged_pn(space),
             );
             // The builder will set the limit to 0 if there isn't enough space for the header.
@@ -2777,7 +2769,9 @@ impl Connection {
                 initial_sent = Some(sent);
                 needs_padding = true;
             } else {
-                if pt == packet::Type::Handshake && self.role == Role::Client {
+                if pt.is_long() && self.role == Role::Client && initial_sent.is_none() {
+                    // Disable padding for any long header packet if the UDP packet doesn't include
+                    // an Initial packet.
                     needs_padding = false;
                 }
                 self.loss_recovery.on_packet_sent(path, sent, now);
@@ -3834,7 +3828,7 @@ impl Connection {
         let mut buffer = Vec::with_capacity(mtu);
         let encoder = Encoder::new_borrowed_vec(&mut buffer);
 
-        let (_, mut builder) = Self::build_packet_header(
+        let (_, builder, _) = Self::build_packet_header(
             &path.borrow(),
             epoch,
             encoder,
@@ -3843,16 +3837,13 @@ impl Connection {
             version,
             false,
             usize::MAX,
-        );
-        _ = Self::add_packet_number(
-            &mut builder,
-            tx,
             self.loss_recovery
                 .largest_acknowledged_pn(PacketNumberSpace::ApplicationData),
         );
 
-        let data_len_possible =
-            u64::try_from(mtu.saturating_sub(tx.expansion() + builder.len() + 1))?;
+        let data_len_possible = u64::try_from(
+            mtu.saturating_sub(tx.expansion() + builder.len() + DATAGRAM_FRAME_TYPE_VARINT_LEN),
+        )?;
         Ok(min(data_len_possible, max_dgram_size))
     }
 
