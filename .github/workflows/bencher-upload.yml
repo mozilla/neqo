@@ -6,6 +6,10 @@ on:
     # SAFETY: We are not running any code from the triggering PR, so this is safe.
     types: [completed] # zizmor: ignore[dangerous-triggers]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -15,8 +19,8 @@ jobs:
     # The bench workflow fails when a regression is detected, but we want to upload results regardless.
     if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
     permissions:
-      pull-requests: write
-      checks: write
+      pull-requests: write # This permission is required to post comments on PRs.
+      checks: write # This permission is required to post "check" comments.
     runs-on: ubuntu-24.04
     env:
       BENCHER_PROJECT: ${{ github.event.repository.name }}
@@ -33,7 +37,7 @@ jobs:
           echo "$EVENT" | jq
 
       - name: Download benchmark results
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           run-id: ${{ github.event.workflow_run.id }}
           name: ${{ github.event.repository.name }}-${{ env.SHA }}-${{ env.DATA_TAG }}-perf
@@ -50,7 +54,7 @@ jobs:
             core.exportVariable("PR_BASE_SHA", prEvent.pull_request.base.sha || '');
             core.exportVariable("PR_NUMBER", prEvent.number || '');
 
-      - uses: bencherdev/bencher@v0.5.5 # zizmor: ignore[unpinned-uses]
+      - uses: bencherdev/bencher@v0.5.7 # zizmor: ignore[unpinned-uses]
 
       - name: Set env
         run: |

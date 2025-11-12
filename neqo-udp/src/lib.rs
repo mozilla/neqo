@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(
     clippy::missing_errors_doc,
     reason = "Functions simply delegate to tokio and quinn-udp."
@@ -63,7 +64,7 @@ pub fn send_inner(
         destination: d.destination(),
         ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
         contents: d.data(),
-        segment_size: Some(d.datagram_size()),
+        segment_size: Some(d.datagram_size().get()),
         src_ip: None,
     };
 
@@ -74,7 +75,7 @@ pub fn send_inner(
                 "Failed to send datagram of size {} bytes, in {} segments, each {} bytes, from {} to {}. PMTUD probe? Ignoring error: {}",
                 d.data().len(),
                 d.num_datagrams(),
-                d.datagram_size(),
+                d.datagram_size().get(),
                 d.source(),
                 d.destination(),
                 e
@@ -88,7 +89,7 @@ pub fn send_inner(
         "sent {} bytes, in {} segments, each {} bytes, from {} to {} ",
         d.data().len(),
         d.num_datagrams(),
-        d.datagram_size(),
+        d.datagram_size().get(),
         d.source(),
         d.destination(),
     );
@@ -254,9 +255,17 @@ impl<S: SocketRef> Socket<S> {
     ) -> Result<DatagramIter<'a>, io::Error> {
         recv_inner(local_address, &self.state, &self.inner, recv_buf)
     }
+
+    /// Whether transmitted datagrams might get fragmented by the IP layer
+    ///
+    /// Returns `false` on targets which employ e.g. the `IPV6_DONTFRAG` socket option.
+    pub fn may_fragment(&self) -> bool {
+        self.state.may_fragment()
+    }
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     #![allow(
         clippy::allow_attributes,
@@ -347,6 +356,8 @@ mod tests {
         ignore = "GRO not available"
     )]
     fn many_datagrams_through_gso_gro() -> Result<(), io::Error> {
+        use std::num::NonZeroUsize;
+
         const SEGMENT_SIZE: usize = 128;
 
         let sender = socket()?;
@@ -359,7 +370,7 @@ mod tests {
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             Tos::from((Dscp::Le, Ecn::Ect0)),
-            SEGMENT_SIZE,
+            NonZeroUsize::new(SEGMENT_SIZE).expect("SEGMENT_SIZE cannot be zero"),
             msg,
         );
 

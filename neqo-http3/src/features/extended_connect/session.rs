@@ -9,13 +9,16 @@ use std::{
     collections::HashSet,
     fmt::{self, Debug, Display, Formatter},
     rc::Rc,
+    time::Instant,
 };
 
-use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType, Role};
+use neqo_common::{qdebug, qtrace, Bytes, Encoder, Header, MessageType, Role};
 use neqo_transport::{AppError, Connection, DatagramTracking, StreamId};
 
 use crate::{
-    features::extended_connect::{ExtendedConnectEvents, ExtendedConnectType, Listener},
+    features::extended_connect::{
+        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
+    },
     frames::HFrame,
     priority::PriorityHandler,
     recv_message::{RecvMessage, RecvMessageInfo},
@@ -49,7 +52,7 @@ impl From<CloseType> for CloseReason {
 pub(crate) struct Session {
     control_stream_recv: Box<dyn RecvStream>,
     control_stream_send: Box<dyn SendStream>,
-    stream_event_listener: Rc<RefCell<Listener>>,
+    stream_event_listener: Rc<RefCell<HeaderListener>>,
     id: StreamId,
     state: State,
     events: Box<dyn ExtendedConnectEvents>,
@@ -88,7 +91,7 @@ impl Session {
         qpack_decoder: Rc<RefCell<neqo_qpack::Decoder>>,
         connect_type: ExtendedConnectType,
     ) -> Self {
-        let stream_event_listener = Rc::new(RefCell::new(Listener::default()));
+        let stream_event_listener = Rc::new(RefCell::new(HeaderListener::default()));
         let protocol = connect_type.new_protocol(session_id, role);
         Self {
             control_stream_recv: Box::new(RecvMessage::new(
@@ -126,7 +129,7 @@ impl Session {
         mut control_stream_send: Box<dyn SendStream>,
         connect_type: ExtendedConnectType,
     ) -> Res<Self> {
-        let stream_event_listener = Rc::new(RefCell::new(Listener::default()));
+        let stream_event_listener = Rc::new(RefCell::new(HeaderListener::default()));
         let protocol = connect_type.new_protocol(session_id, role);
         control_stream_recv
             .http_stream()
@@ -158,24 +161,28 @@ impl Session {
             .send_headers(headers, conn)
     }
 
-    fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
+    fn receive(&mut self, conn: &mut Connection, now: Instant) -> Res<(ReceiveOutput, bool)> {
         qtrace!("[{self}] receive control data");
-        let (out, _) = self.control_stream_recv.receive(conn)?;
+        let (out, _) = self.control_stream_recv.receive(conn, now)?;
         debug_assert!(out == ReceiveOutput::NoOutput);
         self.maybe_check_headers()?;
-        self.read_control_stream(conn)?;
+        self.read_control_stream(conn, now)?;
         Ok((ReceiveOutput::NoOutput, self.state == State::Done))
     }
 
-    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
+    fn header_unblocked(
+        &mut self,
+        conn: &mut Connection,
+        now: Instant,
+    ) -> Res<(ReceiveOutput, bool)> {
         let (out, _) = self
             .control_stream_recv
             .http_stream()
             .ok_or(Error::Internal)?
-            .header_unblocked(conn)?;
+            .header_unblocked(conn, now)?;
         debug_assert!(out == ReceiveOutput::NoOutput);
         self.maybe_check_headers()?;
-        self.read_control_stream(conn)?;
+        self.read_control_stream(conn, now)?;
         Ok((ReceiveOutput::NoOutput, self.state == State::Done))
     }
 
@@ -199,8 +206,8 @@ impl Session {
             .priority_update_sent()
     }
 
-    fn send(&mut self, conn: &mut Connection) -> Res<()> {
-        self.control_stream_send.send(conn)?;
+    fn send(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+        self.control_stream_send.send(conn, now)?;
         if self.control_stream_send.done() {
             self.state = State::Done;
         }
@@ -228,7 +235,11 @@ impl Session {
             return Ok(());
         }
 
-        if let Some((headers, interim, fin)) = self.stream_event_listener.borrow_mut().get_headers()
+        if let Some(Headers {
+            headers,
+            interim,
+            fin,
+        }) = self.stream_event_listener.borrow_mut().get_headers()
         {
             qtrace!("ExtendedConnect response headers {headers:?}, fin={fin}");
 
@@ -318,12 +329,13 @@ impl Session {
     /// # Errors
     ///
     /// It may return an error if the frame is not correctly decoded.
-    pub(crate) fn read_control_stream(&mut self, conn: &mut Connection) -> Res<()> {
+    pub(crate) fn read_control_stream(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
         qdebug!("[{self}]: read_control_stream");
         if let Some(new_state) = self.protocol.read_control_stream(
             conn,
             &mut self.events,
             &mut self.control_stream_recv,
+            now,
         )? {
             self.state = new_state;
         }
@@ -339,16 +351,17 @@ impl Session {
         conn: &mut Connection,
         error: u32,
         message: &str,
+        now: Instant,
     ) -> Res<()> {
         qdebug!("[{self}]: close_session");
         self.state = State::Done;
 
         if let Some(close_frame) = self.protocol.close_frame(error, message) {
             self.control_stream_send
-                .send_data_atomic(conn, close_frame.as_ref())?;
+                .send_data_atomic(conn, close_frame.as_ref(), now)?;
         }
 
-        self.control_stream_send.close(conn)?;
+        self.control_stream_send.close(conn, now)?;
         self.state = if self.control_stream_send.done() {
             State::Done
         } else {
@@ -357,8 +370,8 @@ impl Session {
         Ok(())
     }
 
-    fn send_data(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
-        self.control_stream_send.send_data(conn, buf)
+    fn send_data(&mut self, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<usize> {
+        self.control_stream_send.send_data(conn, buf, now)
     }
 
     /// # Errors
@@ -385,20 +398,22 @@ impl Session {
         Ok(())
     }
 
-    pub(crate) fn datagram(&self, datagram: &[u8]) {
+    pub(crate) fn datagram(&self, datagram: Bytes) {
         if self.state != State::Active {
             qdebug!("[{self}]: received datagram on {:?} session.", self.state);
             return;
         }
-        let datagram = match self.protocol.dgram_context_id(datagram) {
-            Ok(datagram) => datagram,
+
+        // dgram_context_id returns the payload after stripping any context ID
+        match self.protocol.dgram_context_id(datagram) {
+            Ok(slice) => {
+                self.events
+                    .new_datagram(self.id, slice, self.protocol.connect_type());
+            }
             Err(e) => {
                 qdebug!("[{self}]: received datagram with invalid context identifier: {e}");
-                return;
             }
-        };
-        self.events
-            .new_datagram(self.id, datagram.to_vec(), self.protocol.connect_type());
+        }
     }
 
     fn has_data_to_send(&self) -> bool {
@@ -417,8 +432,8 @@ impl Stream for Rc<RefCell<Session>> {
 }
 
 impl RecvStream for Rc<RefCell<Session>> {
-    fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
-        self.borrow_mut().receive(conn)
+    fn receive(&mut self, conn: &mut Connection, now: Instant) -> Res<(ReceiveOutput, bool)> {
+        self.borrow_mut().receive(conn, now)
     }
 
     fn reset(&mut self, close_type: CloseType) -> Res<()> {
@@ -436,8 +451,12 @@ impl RecvStream for Rc<RefCell<Session>> {
 }
 
 impl HttpRecvStream for Rc<RefCell<Session>> {
-    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
-        self.borrow_mut().header_unblocked(conn)
+    fn header_unblocked(
+        &mut self,
+        conn: &mut Connection,
+        now: Instant,
+    ) -> Res<(ReceiveOutput, bool)> {
+        self.borrow_mut().header_unblocked(conn, now)
     }
 
     fn maybe_update_priority(&mut self, priority: Priority) -> Res<bool> {
@@ -454,12 +473,12 @@ impl HttpRecvStream for Rc<RefCell<Session>> {
 }
 
 impl SendStream for Rc<RefCell<Session>> {
-    fn send(&mut self, conn: &mut Connection) -> Res<()> {
-        self.borrow_mut().send(conn)
+    fn send(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+        self.borrow_mut().send(conn, now)
     }
 
-    fn send_data(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
-        self.borrow_mut().send_data(conn, buf)
+    fn send_data(&mut self, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<usize> {
+        self.borrow_mut().send_data(conn, buf, now)
     }
 
     fn has_data_to_send(&self) -> bool {
@@ -472,12 +491,18 @@ impl SendStream for Rc<RefCell<Session>> {
         self.borrow_mut().done()
     }
 
-    fn close(&mut self, conn: &mut Connection) -> Res<()> {
-        self.borrow_mut().close_session(conn, 0, "")
+    fn close(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+        self.borrow_mut().close_session(conn, 0, "", now)
     }
 
-    fn close_with_message(&mut self, conn: &mut Connection, error: u32, message: &str) -> Res<()> {
-        self.borrow_mut().close_session(conn, error, message)
+    fn close_with_message(
+        &mut self,
+        conn: &mut Connection,
+        error: u32,
+        message: &str,
+        now: Instant,
+    ) -> Res<()> {
+        self.borrow_mut().close_session(conn, error, message, now)
     }
 
     fn handle_stop_sending(&mut self, close_type: CloseType) {
@@ -505,6 +530,7 @@ pub(crate) trait Protocol: Debug + Display {
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
         control_stream_recv: &mut Box<dyn RecvStream>,
+        now: Instant,
     ) -> Res<Option<State>>;
 
     fn add_stream(
@@ -537,7 +563,7 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);
 
-    fn dgram_context_id<'a>(&self, datagram: &'a [u8]) -> Result<&'a [u8], DgramContextIdError>;
+    fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError>;
 }
 
 #[derive(Debug, Error)]
@@ -545,5 +571,5 @@ pub(crate) enum DgramContextIdError {
     #[error("Missing context identifier")]
     MissingIdentifier,
     #[error("Unknown context identifier: {0}")]
-    UnknownIdentifier(u8),
+    UnknownIdentifier(u64),
 }

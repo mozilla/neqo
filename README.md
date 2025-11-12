@@ -40,26 +40,30 @@ To run test HTTP/3 programs (`neqo-client` and `neqo-server`):
 
 ## Build with separate NSS/NSPR
 
-You can clone [NSS][NSS] and [NSPR][NSPR] into the same directory and export an
-environment variable called `NSS_DIR` pointing to NSS. This causes the build to
-use the existing NSS checkout. However, in order to run anything that depends
-on NSS, you need to set an environment as follows:
+1. Clone [NSS][NSS] and [NSPR][NSPR] into the same directory and export an environment variable called `NSS_DIR` pointing to NSS.
+   For example if you have a folder `$HOME/neqo-dependencies` and cloned NSS and NSPR into it you'd set `NSS_DIR=$HOME/neqo-dependencies/nss`.
 
-### Linux
+2. If you did not already compile NSS separately, you need to have [Mercurial (hg)][HG] installed.
+   NSS builds require [GYP][GYP] and [Ninja][NINJA] to be installed.
 
-```shell
-export LD_LIBRARY_PATH="$(find . -name libssl3.so -print | head -1 | xargs dirname | xargs realpath)"
-```
+3. Run `cargo build` in your `neqo` checkout. The prior steps enable `cargo build` to use the existing NSS build or build it from the existing checkout if it hasn't been built yet.
 
-### macOS
+4. Now that NSS has been built you need to set another environment variable to be able to actually do anything that depends on NSS.
+   - For Linux:
 
-```shell
-export DYLD_LIBRARY_PATH="$(find . -name libssl3.dylib -print | head -1 | xargs dirname | xargs realpath)"
-```
+     ```shell
+     export LD_LIBRARY_PATH="$(find $NSS_DIR/.. -name libssl3.so -print | head -1 | xargs dirname | xargs realpath)"
+     ```
 
-Note: If you did not already compile NSS separately, you need to have
-[Mercurial (hg)][HG], installed. NSS builds require [GYP][GYP] and
-[Ninja][NINJA] to be installed.
+   - For MacOS:
+
+     ```shell
+     export DYLD_LIBRARY_PATH="$(find $NSS_DIR/.. -name libssl3.dylib -print | head -1 | xargs dirname | xargs realpath)"
+     ```
+
+5. (optional) After having an NSS build you can set the `NSS_PREBUILT=1` environment variable to skip building NSS again on future `cargo build` invocations.
+
+To confirm the NSS setup works you can run `cargo test -p neqo-crypto --lib`.
 
 ## Debugging Neqo
 
