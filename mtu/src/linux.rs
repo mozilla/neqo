@@ -23,6 +23,7 @@ use crate::{aligned_by, default_err, routesocket::RouteSocket, unlikely_err};
 
 #[allow(
     clippy::allow_attributes,
+    clippy::allow_attributes_without_reason,
     clippy::struct_field_names,
     non_camel_case_types,
     clippy::too_many_lines,

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use neqo_common::qdebug;
 use neqo_crypto::AuthenticationStatus;
 use test_fixture::{
-    assertions::{assert_handshake, assert_initial},
+    assertions::{assert_handshake, assert_initial, is_handshake, is_initial},
     now, split_datagram,
 };
 
@@ -943,4 +943,92 @@ fn ack_for_unsent() {
             ..
         }
     ));
+}
+
+/// Test that PTO fires for Handshake space even when no Handshake packets have been sent.
+///
+/// This reproduces a handshake loss scenario where:
+/// 1. Client receives Server Hello → Handshake keys installed
+/// 2. Server's Handshake flight (Certificate, etc.) is lost/corrupted
+/// 3. Client never sends any Handshake packets (has nothing to send yet)
+/// 4. Client's Handshake space has `last_ack_eliciting` = None
+/// 5. PTO timer never arms for Handshake space
+/// 6. Connection times out
+///
+/// The client should probe Handshake space to elicit server retransmission.
+#[test]
+fn pto_handshake_space_when_server_flight_lost() {
+    const RTT: Duration = Duration::from_millis(10);
+    let mut now = now();
+    // This test assumes PTOs only involve single-packet flights, which is incompatible with
+    // multi-packet flights as used by MLKEM.
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
+    let mut server = default_server();
+    // This is a greasing transport parameter, and large enough that the
+    // server needs to send two Handshake packets.
+    let big = TransportParameter::Bytes(vec![0; Pmtud::default_plpmtu(DEFAULT_ADDR.ip())]);
+    server
+        .set_local_tparam(TestTransportParameter, big)
+        .unwrap();
+
+    let c1 = client.process_output(now).dgram();
+    now += RTT / 2;
+
+    // Collect all server output.
+    let mut server_dgrams = Vec::new();
+    server_dgrams.push(server.process(c1, now).dgram().unwrap());
+    while let Some(dgram) = server.process_output(now).dgram() {
+        server_dgrams.push(dgram);
+    }
+    assert!(!server_dgrams.is_empty());
+
+    // Send all Initial packets to the client, but drop all Handshake packets.
+    now += RTT / 2;
+    let mut found_hs = false;
+    for dgram in server_dgrams {
+        let (first, second) = split_datagram(&dgram);
+        if is_initial(&first, false) {
+            assert!(!found_hs, "got Initial after Handshake");
+            if let Some(hs) = second {
+                found_hs |= is_handshake(&hs);
+            }
+            client.process_input(first, now);
+        } else {
+            found_hs |= is_handshake(&first);
+        }
+    }
+    assert!(found_hs);
+
+    // Client processes the Initial packets (which install Handshake keys).
+    let c2 = client.process_output(now).dgram();
+    assert!(c2.is_some()); // This is an ACK.  Drop it.
+    assert_eq!(*client.state(), State::Handshaking);
+
+    let pto = client.process_output(now).callback();
+    assert_ne!(pto, Duration::ZERO);
+    now += pto;
+
+    // Drain all packets and get the next timeout.
+    let next_timeout = loop {
+        if let Output::Callback(callback) = client.process_output(now) {
+            break callback;
+        }
+    };
+    // Fire PTO - this should prime Handshake space.
+    now += next_timeout;
+
+    // Collect all packets from this timeout and verify PING was sent.
+    let stats_before = client.stats().frame_tx;
+    let mut pto_packets = Vec::new();
+    while let Some(dgram) = client.process_output(now).dgram() {
+        pto_packets.push(dgram);
+    }
+
+    // Check if any Handshake PING probes packets were sent.
+    let mut has_handshake = false;
+    for dgram in &pto_packets {
+        let (first, second) = split_datagram(dgram);
+        has_handshake |= is_handshake(&first) || second.as_ref().is_some_and(|s| is_handshake(s));
+    }
+    assert!(has_handshake && client.stats().frame_tx.ping > stats_before.ping);
 }
