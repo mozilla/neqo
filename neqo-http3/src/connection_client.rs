@@ -1021,9 +1021,9 @@ impl Http3Client {
     /// library, but instead must be driven by the application).
     ///
     /// [`Http3Client::process_multiple_output`] can return:
-    /// - a [`OutputBatch::Datagram(Datagram)`]: data that should be sent as a UDP payload,
-    /// - a [`OutputBatch::Callback(Duration)`]: the duration of a  timer. `process_output` should
-    ///   be called at least after the time expires,
+    /// - a [`OutputBatch::DatagramBatch`]: data that should be sent as a UDP payload,
+    /// - a [`OutputBatch::Callback`]: the duration of a  timer. `process_output` should be called
+    ///   at least after the time expires,
     /// - [`OutputBatch::None`]: this is returned when `Http3Client` is done and can be destroyed.
     ///
     /// The application should call this function repeatedly until a timer value or None is
@@ -1386,7 +1386,7 @@ mod tests {
     use neqo_qpack as qpack;
     use neqo_transport::{
         CloseReason, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
-        Version, INITIAL_RECV_WINDOW_SIZE, MIN_INITIAL_PACKET_SIZE,
+        Version, INITIAL_LOCAL_MAX_STREAM_DATA, MIN_INITIAL_PACKET_SIZE,
     };
     use test_fixture::{
         anti_replay, default_server_h3, fixture_init, new_server, now,
@@ -2851,7 +2851,7 @@ mod tests {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read the DATA frame.
-                    let mut buf = vec![1_u8; INITIAL_RECV_WINDOW_SIZE];
+                    let mut buf = vec![1_u8; INITIAL_LOCAL_MAX_STREAM_DATA];
                     let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
                     assert!(fin);
                     assert_eq!(
@@ -2926,7 +2926,7 @@ mod tests {
         // The second frame cannot fit.
         let sent = client.send_data(
             request_stream_id,
-            &vec![0_u8; INITIAL_RECV_WINDOW_SIZE],
+            &vec![0_u8; INITIAL_LOCAL_MAX_STREAM_DATA],
             now(),
         );
         assert_eq!(sent, Ok(expected_second_data_frame.len()));
@@ -2937,7 +2937,7 @@ mod tests {
         let mut out = client.process_output(now());
         // We need to loop a bit until all data has been sent. Once for every 1K
         // of data.
-        for _i in 0..INITIAL_RECV_WINDOW_SIZE / 1000 {
+        for _i in 0..INITIAL_LOCAL_MAX_STREAM_DATA / 1000 {
             out = server.conn.process(out.dgram(), now());
             out = client.process(out.dgram(), now());
         }
@@ -2947,7 +2947,7 @@ mod tests {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read DATA frames.
-                    let mut buf = vec![1_u8; INITIAL_RECV_WINDOW_SIZE];
+                    let mut buf = vec![1_u8; INITIAL_LOCAL_MAX_STREAM_DATA];
                     let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
                     assert!(fin);
                     assert_eq!(
@@ -3000,7 +3000,7 @@ mod tests {
     // After the first frame there is exactly 63+2 bytes left in the send buffer.
     #[test]
     fn fetch_two_data_frame_second_63bytes() {
-        let (buf, hdr) = alloc_buffer(INITIAL_RECV_WINDOW_SIZE - 88);
+        let (buf, hdr) = alloc_buffer(INITIAL_LOCAL_MAX_STREAM_DATA - 88);
         fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x3f], &[0_u8; 63]);
     }
 
@@ -3009,7 +3009,7 @@ mod tests {
     // but we can only send 63 bytes.
     #[test]
     fn fetch_two_data_frame_second_63bytes_place_for_66() {
-        let (buf, hdr) = alloc_buffer(INITIAL_RECV_WINDOW_SIZE - 89);
+        let (buf, hdr) = alloc_buffer(INITIAL_LOCAL_MAX_STREAM_DATA - 89);
         fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x3f], &[0_u8; 63]);
     }
 
@@ -3018,7 +3018,7 @@ mod tests {
     // but we can only send 64 bytes.
     #[test]
     fn fetch_two_data_frame_second_64bytes_place_for_67() {
-        let (buf, hdr) = alloc_buffer(INITIAL_RECV_WINDOW_SIZE - 90);
+        let (buf, hdr) = alloc_buffer(INITIAL_LOCAL_MAX_STREAM_DATA - 90);
         fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x40, 0x40], &[0_u8; 64]);
     }
 
@@ -3026,7 +3026,7 @@ mod tests {
     // After the first frame there is exactly 16383+3 bytes left in the send buffer.
     #[test]
     fn fetch_two_data_frame_second_16383bytes() {
-        let (buf, hdr) = alloc_buffer(INITIAL_RECV_WINDOW_SIZE - 16409);
+        let (buf, hdr) = alloc_buffer(INITIAL_LOCAL_MAX_STREAM_DATA - 16409);
         fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x7f, 0xff], &[0_u8; 16383]);
     }
 
@@ -3035,7 +3035,7 @@ mod tests {
     // send 16383 bytes.
     #[test]
     fn fetch_two_data_frame_second_16383bytes_place_for_16387() {
-        let (buf, hdr) = alloc_buffer(INITIAL_RECV_WINDOW_SIZE - 16410);
+        let (buf, hdr) = alloc_buffer(INITIAL_LOCAL_MAX_STREAM_DATA - 16410);
         fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x7f, 0xff], &[0_u8; 16383]);
     }
 
@@ -3044,7 +3044,7 @@ mod tests {
     // send 16383 bytes.
     #[test]
     fn fetch_two_data_frame_second_16383bytes_place_for_16388() {
-        let (buf, hdr) = alloc_buffer(INITIAL_RECV_WINDOW_SIZE - 16411);
+        let (buf, hdr) = alloc_buffer(INITIAL_LOCAL_MAX_STREAM_DATA - 16411);
         fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x7f, 0xff], &[0_u8; 16383]);
     }
 
@@ -3053,7 +3053,7 @@ mod tests {
     // 16384 bytes.
     #[test]
     fn fetch_two_data_frame_second_16384bytes_place_for_16389() {
-        let (buf, hdr) = alloc_buffer(INITIAL_RECV_WINDOW_SIZE - 16412);
+        let (buf, hdr) = alloc_buffer(INITIAL_LOCAL_MAX_STREAM_DATA - 16412);
         fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x80, 0x0, 0x40, 0x0], &[0_u8; 16384]);
     }
 

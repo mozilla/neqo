@@ -15,7 +15,7 @@ env:
   RUST_TEST_TIME_DOCTEST: 10,30
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -174,7 +174,7 @@ jobs:
 
       - name: Save simulation seeds artifact
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
           path: simulation-seeds
