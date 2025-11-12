@@ -4,6 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(
+    clippy::significant_drop_tightening,
+    reason = "Inherent in codspeed criterion_group! macro."
+)]
+
 use std::{hint::black_box, time::Instant};
 
 use criterion::{criterion_group, criterion_main, Criterion};
