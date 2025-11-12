@@ -538,7 +538,7 @@ impl Http3Connection {
                 Ok(ReceiveOutput::NoOutput)
             }
             ReceiveOutput::ControlFrames(control_frames) => {
-                let mut rest = Vec::with_capacity(control_frames.len());
+                let mut rest = Vec::new();
                 for cf in control_frames {
                     if let Some(not_handled) = self.handle_control_frame(cf)? {
                         rest.push(not_handled);
