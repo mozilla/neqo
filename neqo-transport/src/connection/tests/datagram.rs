@@ -10,8 +10,7 @@ use neqo_common::event::Provider as _;
 use static_assertions::const_assert;
 
 use super::{
-    assert_error, connect_force_idle, default_client, default_server, new_client, new_server, now,
-    AT_LEAST_PTO,
+    assert_error, connect_force_idle, default_server, new_client, new_server, now, AT_LEAST_PTO,
 };
 use crate::{
     connection::tests::DEFAULT_ADDR,
@@ -394,21 +393,6 @@ fn datagram_sent_once() {
 }
 
 #[test]
-fn dgram_no_allowed() {
-    let mut client = default_client();
-    let mut server = default_server();
-    connect_force_idle(&mut client, &mut server);
-
-    let out = server
-        .test_write_frames(InsertDatagram { data: DATA_MTU }, now())
-        .dgram()
-        .unwrap();
-    client.process_input(out, now());
-
-    assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
-}
-
-#[test]
 fn dgram_too_big() {
     let mut client =
         new_client(ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU));
@@ -552,11 +536,11 @@ fn too_many_datagram_events() {
     // Datagram with FIRST_DATAGRAM data will be dropped.
     assert!(matches!(
         client.next_event().unwrap(),
-        ConnectionEvent::Datagram(data) if data == SECOND_DATAGRAM
+        ConnectionEvent::IncomingDatagramDropped
     ));
     assert!(matches!(
         client.next_event().unwrap(),
-        ConnectionEvent::IncomingDatagramDropped
+        ConnectionEvent::Datagram(data) if data == SECOND_DATAGRAM
     ));
     assert!(matches!(
         client.next_event().unwrap(),

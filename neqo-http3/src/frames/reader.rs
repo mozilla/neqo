@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cmp::min, fmt::Debug};
+use std::{cmp::min, fmt::Debug, time::Instant};
 
 use neqo_common::{
     hex_snip_middle, hex_with_len, qtrace, Decoder, IncrementalDecoderBuffer,
@@ -40,7 +40,7 @@ pub trait StreamReader {
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     /// Return an error if the stream was closed on the transport layer, but that information is not
     /// yet consumed on the  http/3 layer.
-    fn read_data(&mut self, buf: &mut [u8]) -> Res<(usize, bool)>;
+    fn read_data(&mut self, buf: &mut [u8], now: Instant) -> Res<(usize, bool)>;
 }
 
 pub struct StreamReaderConnectionWrapper<'a> {
@@ -58,7 +58,7 @@ impl StreamReader for StreamReaderConnectionWrapper<'_> {
     /// # Errors
     ///
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
-    fn read_data(&mut self, buf: &mut [u8]) -> Res<(usize, bool)> {
+    fn read_data(&mut self, buf: &mut [u8], _now: Instant) -> Res<(usize, bool)> {
         let res = self.conn.stream_recv(self.stream_id, buf)?;
         Ok(res)
     }
@@ -79,8 +79,8 @@ impl StreamReader for StreamReaderRecvStreamWrapper<'_> {
     /// # Errors
     ///
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
-    fn read_data(&mut self, buf: &mut [u8]) -> Res<(usize, bool)> {
-        self.recv_stream.read_data(self.conn, buf)
+    fn read_data(&mut self, buf: &mut [u8], now: Instant) -> Res<(usize, bool)> {
+        self.recv_stream.read_data(self.conn, buf, now)
     }
 }
 
@@ -173,11 +173,12 @@ impl FrameReader {
     pub fn receive<T: FrameDecoder<T>>(
         &mut self,
         stream_reader: &mut dyn StreamReader,
+        now: Instant,
     ) -> Res<(Option<T>, bool)> {
         loop {
             let to_read = min(self.min_remaining(), self.buffer.len());
             let (output, read, fin) = match stream_reader
-                .read_data(&mut self.buffer[..to_read])
+                .read_data(&mut self.buffer[..to_read], now)
                 .map_err(|e| Error::map_stream_recv_errors(&e))?
             {
                 (0, f) => (None, false, f),

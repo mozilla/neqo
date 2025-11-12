@@ -12,7 +12,7 @@ use crate::huffman_table::HUFFMAN_TABLE;
 static_assertions::const_assert!(HUFFMAN_TABLE.len() <= u16::MAX as usize);
 
 pub struct HuffmanDecoderNode {
-    pub next: [Option<Box<HuffmanDecoderNode>>; 2],
+    pub next: [Option<Box<Self>>; 2],
     pub value: Option<u16>,
 }
 
