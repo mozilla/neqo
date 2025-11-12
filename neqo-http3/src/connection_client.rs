@@ -808,6 +808,7 @@ impl Http3Client {
         &mut self,
         session_id: StreamId,
         stream_type: StreamType,
+        now: Instant,
     ) -> Res<StreamId> {
         self.base_handler.webtransport_create_stream_local(
             &mut self.conn,
@@ -815,6 +816,7 @@ impl Http3Client {
             stream_type,
             Box::new(self.events.clone()),
             Box::new(self.events.clone()),
+            now,
         )
     }
 
@@ -1201,6 +1203,7 @@ impl Http3Client {
                     stream_id,
                     Box::new(self.events.clone()),
                     Box::new(self.events.clone()),
+                    now,
                 )?;
                 let res =
                     self.base_handler

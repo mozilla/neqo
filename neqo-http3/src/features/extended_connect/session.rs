@@ -304,9 +304,9 @@ impl Session {
         Ok(())
     }
 
-    pub(crate) fn add_stream(&mut self, stream_id: StreamId) -> Res<()> {
+    pub(crate) fn add_stream(&mut self, stream_id: StreamId, now: Instant) -> Res<()> {
         self.protocol
-            .add_stream(stream_id, &mut self.events, self.state)
+            .add_stream(stream_id, &mut self.events, self.state, now)
     }
 
     pub(crate) fn remove_recv_stream(&mut self, stream_id: StreamId) {
@@ -538,6 +538,7 @@ pub(crate) trait Protocol: Debug + Display {
         _stream_id: StreamId,
         _events: &mut Box<dyn ExtendedConnectEvents>,
         _state: State,
+        _now: Instant,
     ) -> Res<()> {
         let msg = "Protocol does not support adding streams";
         qdebug!("{msg}");
