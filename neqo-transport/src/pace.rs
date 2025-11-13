@@ -34,7 +34,8 @@ pub struct Pacer {
     t: Instant,
     /// The maximum capacity, or burst size, in bytes.
     m: usize,
-    /// The current capacity, in bytes (can be negative to track debt).
+    /// The current capacity, in bytes. When negative, represents accumulated debt
+    /// from sub-granularity sends that will be paid off in future pacing calculations.
     c: isize,
     /// The packet size or minimum capacity for sending, in bytes.
     p: usize,
