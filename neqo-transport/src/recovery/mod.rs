@@ -1087,7 +1087,11 @@ mod tests {
             );
             path.make_permanent(
                 None,
-                ConnectionIdEntry::new(0, ConnectionId::from(&[1, 2, 3]), Srt::new([0; 16])),
+                ConnectionIdEntry::new(
+                    0,
+                    ConnectionId::from(&[1, 2, 3]),
+                    Srt::new([0; crate::stateless_reset::TOKEN_LEN]),
+                ),
             );
             path.set_primary(true, now());
             path.rtt_mut().set_initial(TEST_RTT);

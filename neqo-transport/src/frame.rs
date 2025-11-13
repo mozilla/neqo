@@ -612,7 +612,7 @@ impl<'a> Frame<'a> {
                 if connection_id.len() > MAX_CONNECTION_ID_LEN {
                     return Err(Error::FrameEncoding);
                 }
-                let srt = d(dec.decode(16))?;
+                let srt = d(dec.decode(crate::stateless_reset::TOKEN_LEN))?;
                 let stateless_reset_token = Srt::try_from(srt)?;
 
                 Ok(Self::NewConnectionId {

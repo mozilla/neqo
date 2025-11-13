@@ -1341,10 +1341,10 @@ impl Connection {
     fn is_stateless_reset(&self, path: &PathRef, d: &[u8]) -> bool {
         // If the datagram is too small, don't try.
         // If the connection is connected, then the reset token will be invalid.
-        if d.len() < 16 || !self.state.connected() {
+        if d.len() < crate::stateless_reset::TOKEN_LEN || !self.state.connected() {
             return false;
         }
-        Srt::try_from(&d[d.len() - 16..])
+        Srt::try_from(&d[d.len() - crate::stateless_reset::TOKEN_LEN..])
             .is_ok_and(|token| path.borrow().is_stateless_reset(&token))
     }
 
@@ -1358,7 +1358,10 @@ impl Connection {
         if first && self.is_stateless_reset(path, d) {
             // Failing to process a packet in a datagram might
             // indicate that there is a stateless reset present.
-            qdebug!("[{self}] Stateless reset: {}", hex(&d[d.len() - 16..]));
+            qdebug!(
+                "[{self}] Stateless reset: {}",
+                hex(&d[d.len() - crate::stateless_reset::TOKEN_LEN..])
+            );
             self.state_signaling.reset();
             self.set_state(
                 State::Draining {
@@ -2926,7 +2929,7 @@ impl Connection {
             }
 
             let reset_token = remote.get_bytes(StatelessResetToken).map_or_else(
-                || Ok(ConnectionIdEntry::random_srt()),
+                || Ok(Srt::random()),
                 |token| Srt::try_from(token).map_err(|_| Error::TransportParameter),
             )?;
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;

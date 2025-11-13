@@ -252,15 +252,9 @@ pub struct ConnectionIdEntry<SRT: Clone + PartialEq> {
 }
 
 impl ConnectionIdEntry<Srt> {
-    /// Create a random stateless reset token so that it is hard to guess the correct
-    /// value and reset the connection.
-    pub fn random_srt() -> Srt {
-        Srt::random()
-    }
-
     /// Create the first entry, which won't have a stateless reset token.
     pub fn initial_remote(cid: ConnectionId) -> Self {
-        Self::new(CONNECTION_ID_SEQNO_INITIAL, cid, Self::random_srt())
+        Self::new(CONNECTION_ID_SEQNO_INITIAL, cid, Srt::random())
     }
 
     /// Create an empty for when the peer chooses empty connection IDs.
@@ -269,7 +263,7 @@ impl ConnectionIdEntry<Srt> {
         Self::new(
             CONNECTION_ID_SEQNO_EMPTY,
             ConnectionId::from(&[]),
-            Self::random_srt(),
+            Srt::random(),
         )
     }
 
@@ -296,7 +290,12 @@ impl ConnectionIdEntry<Srt> {
         builder: &mut packet::Builder<B>,
         stats: &mut FrameStats,
     ) -> bool {
-        let len = 1 + Encoder::varint_len(self.seqno) + 1 + 1 + self.cid.len() + 16;
+        let len = 1
+            + Encoder::varint_len(self.seqno)
+            + 1
+            + 1
+            + self.cid.len()
+            + crate::stateless_reset::TOKEN_LEN;
         if builder.remaining() < len {
             return false;
         }
@@ -494,9 +493,7 @@ impl ConnectionIdManager {
             self.connection_ids
                 .add_local(ConnectionIdEntry::new(self.next_seqno, cid.clone(), ()));
             self.next_seqno += 1;
-
-            let srt = ConnectionIdEntry::random_srt();
-            Ok((cid, srt))
+            Ok((cid, Srt::random()))
         } else {
             Err(Error::ConnectionIdsExhausted)
         }
@@ -580,15 +577,13 @@ impl ConnectionIdManager {
             let maybe_cid = self.generator.borrow_mut().generate_cid();
             if let Some(cid) = maybe_cid {
                 assert_ne!(cid.len(), 0);
-                // TODO: generate the stateless reset tokens from the connection ID and a key.
-                let srt = ConnectionIdEntry::random_srt();
-
                 let seqno = self.next_seqno;
                 self.next_seqno += 1;
                 self.connection_ids
                     .add_local(ConnectionIdEntry::new(seqno, cid.clone(), ()));
 
-                let entry = ConnectionIdEntry::new(seqno, cid, srt);
+                // TODO: generate the stateless reset tokens from the connection ID and a key.
+                let entry = ConnectionIdEntry::new(seqno, cid, Srt::random());
                 entry.write(builder, stats);
                 tokens.push(recovery::Token::NewConnectionId(entry));
             }
