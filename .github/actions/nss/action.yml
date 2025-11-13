@@ -101,7 +101,7 @@ runs:
       if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
       env:
-        NSPR_VERSION: 4.37 # This changes so rarely that we can hardcode it.
+        NSPR_VERSION: 4.38.2 # This changes so rarely that we can hardcode it.
       run: |
         curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz |
           tar xz --strip-components=1
