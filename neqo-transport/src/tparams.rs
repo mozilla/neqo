@@ -945,7 +945,7 @@ mod tests {
                 0,
             )),
             cid: ConnectionId::from(&[1, 2, 3, 4, 5]),
-            srt: Srt::new([3; 16]),
+            srt: Srt::new([3; crate::stateless_reset::TOKEN_LEN]),
         }
     }
 

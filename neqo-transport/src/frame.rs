@@ -907,7 +907,7 @@ mod tests {
             sequence_number: 0x1234,
             retire_prior: 0,
             connection_id: &[0x01, 0x02],
-            stateless_reset_token: Srt::new([9; 16]),
+            stateless_reset_token: Srt::new([9; crate::stateless_reset::TOKEN_LEN]),
         };
 
         just_dec(&f, "1852340002010209090909090909090909090909090909");
