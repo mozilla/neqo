@@ -1016,7 +1016,7 @@ mod tests {
         recovery::{self, sent, MAX_PTO_PACKET_COUNT},
         stats::{Stats, StatsCell},
         tracking::PacketNumberSpaceSet,
-        ConnectionParameters, StatelessResetToken as SRT,
+        ConnectionParameters, Token as Srt,
     };
 
     // Shorthand for a time in milliseconds.
@@ -1087,7 +1087,7 @@ mod tests {
             );
             path.make_permanent(
                 None,
-                ConnectionIdEntry::new(0, ConnectionId::from(&[1, 2, 3]), SRT::new([0; 16])),
+                ConnectionIdEntry::new(0, ConnectionId::from(&[1, 2, 3]), Srt::new([0; 16])),
             );
             path.set_primary(true, now());
             path.rtt_mut().set_initial(TEST_RTT);

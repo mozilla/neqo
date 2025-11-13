@@ -20,7 +20,7 @@ use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
 use crate::{
-    frame::FrameType, packet, recovery, srt::StatelessResetToken as SRT, stats::FrameStats, Error,
+    frame::FrameType, packet, recovery, stateless_reset::Token as Srt, stats::FrameStats, Error,
     Res,
 };
 
@@ -251,11 +251,11 @@ pub struct ConnectionIdEntry<SRT: Clone + PartialEq> {
     srt: SRT,
 }
 
-impl ConnectionIdEntry<SRT> {
+impl ConnectionIdEntry<Srt> {
     /// Create a random stateless reset token so that it is hard to guess the correct
     /// value and reset the connection.
-    pub fn random_srt() -> SRT {
-        SRT::random()
+    pub fn random_srt() -> Srt {
+        Srt::random()
     }
 
     /// Create the first entry, which won't have a stateless reset token.
@@ -274,7 +274,7 @@ impl ConnectionIdEntry<SRT> {
     }
 
     /// Determine whether this is a valid stateless reset.
-    pub fn is_stateless_reset(&self, token: &SRT) -> bool {
+    pub fn is_stateless_reset(&self, token: &Srt) -> bool {
         // A sequence number of 2^62 or more has no corresponding stateless reset token.
         (self.seqno < (1 << 62)) && &self.srt == token
     }
@@ -348,7 +348,7 @@ impl<SRT: Clone + PartialEq> ConnectionIdEntry<SRT> {
     }
 }
 
-pub type RemoteConnectionIdEntry = ConnectionIdEntry<SRT>;
+pub type RemoteConnectionIdEntry = ConnectionIdEntry<Srt>;
 
 /// A collection of connection IDs that are indexed by a sequence number.
 /// Used to store connection IDs that are provided by a peer.
@@ -379,8 +379,8 @@ impl<SRT: Clone + PartialEq> ConnectionIdStore<SRT> {
     }
 }
 
-impl ConnectionIdStore<SRT> {
-    pub fn add_remote(&mut self, entry: ConnectionIdEntry<SRT>) -> Res<()> {
+impl ConnectionIdStore<Srt> {
+    pub fn add_remote(&mut self, entry: ConnectionIdEntry<Srt>) -> Res<()> {
         // It's OK if this perfectly matches an existing entry.
         if self.cids.iter().any(|c| c == &entry) {
             return Ok(());
@@ -450,7 +450,7 @@ pub struct ConnectionIdManager {
     /// The next sequence number that will be used for sending `NEW_CONNECTION_ID` frames.
     next_seqno: u64,
     /// Outstanding, but lost `NEW_CONNECTION_ID` frames will be stored here.
-    lost_new_connection_id: Vec<ConnectionIdEntry<SRT>>,
+    lost_new_connection_id: Vec<ConnectionIdEntry<Srt>>,
 }
 
 impl ConnectionIdManager {
@@ -484,7 +484,7 @@ impl ConnectionIdManager {
     }
 
     /// Generate a connection ID and stateless reset token for a preferred address.
-    pub fn preferred_address_cid(&mut self) -> Res<(ConnectionId, SRT)> {
+    pub fn preferred_address_cid(&mut self) -> Res<(ConnectionId, Srt)> {
         if self.generator.deref().borrow().generates_empty_cids() {
             return Err(Error::ConnectionIdsExhausted);
         }
@@ -595,11 +595,11 @@ impl ConnectionIdManager {
         }
     }
 
-    pub fn lost(&mut self, entry: &ConnectionIdEntry<SRT>) {
+    pub fn lost(&mut self, entry: &ConnectionIdEntry<Srt>) {
         self.lost_new_connection_id.push(entry.clone());
     }
 
-    pub fn acked(&mut self, entry: &ConnectionIdEntry<SRT>) {
+    pub fn acked(&mut self, entry: &ConnectionIdEntry<Srt>) {
         self.lost_new_connection_id
             .retain(|e| e.seqno != entry.seqno);
     }

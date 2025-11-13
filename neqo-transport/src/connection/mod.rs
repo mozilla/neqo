@@ -49,7 +49,7 @@ use crate::{
     rtt::{RttEstimate, GRANULARITY},
     saved::SavedDatagrams,
     send_stream::{self, SendStream},
-    srt::StatelessResetToken as SRT,
+    stateless_reset::Token as Srt,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
     streams::{SendOrder, Streams},
@@ -283,7 +283,7 @@ pub struct Connection {
     cid_manager: ConnectionIdManager,
     address_validation: AddressValidationInfo,
     /// The connection IDs that were provided by the peer.
-    cids: ConnectionIdStore<SRT>,
+    cids: ConnectionIdStore<Srt>,
 
     /// The source connection ID that this endpoint uses for the handshake.
     /// Since we need to communicate this to our peer in tparams, setting this
@@ -1344,7 +1344,7 @@ impl Connection {
         if d.len() < 16 || !self.state.connected() {
             return false;
         }
-        SRT::try_from(&d[d.len() - 16..])
+        Srt::try_from(&d[d.len() - 16..])
             .is_ok_and(|token| path.borrow().is_stateless_reset(&token))
     }
 
@@ -2074,7 +2074,7 @@ impl Connection {
     }
 
     fn migrate_to_preferred_address(&mut self, now: Instant) -> Res<()> {
-        let spa: Option<(tparams::PreferredAddress, ConnectionIdEntry<SRT>)> = if matches!(
+        let spa: Option<(tparams::PreferredAddress, ConnectionIdEntry<Srt>)> = if matches!(
             self.conn_params.get_preferred_address(),
             PreferredAddressConfig::Disabled
         ) {
@@ -2927,7 +2927,7 @@ impl Connection {
 
             let reset_token = remote.get_bytes(StatelessResetToken).map_or_else(
                 || Ok(ConnectionIdEntry::random_srt()),
-                |token| SRT::try_from(token).map_err(|_| Error::TransportParameter),
+                |token| Srt::try_from(token).map_err(|_| Error::TransportParameter),
             )?;
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
