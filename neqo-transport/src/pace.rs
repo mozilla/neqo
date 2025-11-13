@@ -54,12 +54,13 @@ impl Pacer {
     /// fraction of the maximum packet size, if not the packet size.
     pub fn new(enabled: bool, now: Instant, m: usize, p: usize) -> Self {
         assert!(m >= p, "maximum capacity has to be at least one packet");
+        assert!(isize::try_from(p).is_ok(), "p ({p}) exceeds isize::MAX");
         Self {
             enabled,
             t: now,
             m,
-            c: isize::try_from(m).unwrap_or(isize::MAX),
-            p: min(p, isize::MAX as usize),
+            c: isize::try_from(m).expect("maximum capacity fits into isize"),
+            p,
         }
     }
 
