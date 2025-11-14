@@ -134,6 +134,9 @@ pub struct LossRecoverySpace {
     /// The time used to calculate the PTO timer for this space.
     /// This is the time that the last ACK-eliciting packet in this space
     /// was sent.  This might be the time that a probe was sent.
+    /// For Initial and Handshake spaces, this may also be set when we haven't
+    /// sent any packets yet but need a PTO baseline (see `on_packet_sent` and
+    /// `on_packets_acked` for how this is established).
     last_ack_eliciting: Option<Instant>,
     /// The number of outstanding packets in this space that are in flight.
     /// This might be less than the number of ACK-eliciting packets,
@@ -196,12 +199,20 @@ impl LossRecoverySpace {
             // of the handshake.  Technically, this has to stop once we receive
             // an ACK of Handshake or 1-RTT, or when we receive HANDSHAKE_DONE,
             // but a few extra probes won't hurt.
-            // It only means that we fail anti-amplification tests.
-            // A server shouldn't arm its PTO timer this way. The server sends
-            // ack-eliciting, in-flight packets immediately so this only
-            // happens when the server has nothing outstanding.  If we had
-            // client authentication, this might cause some extra probes,
-            // but they would be harmless anyway.
+            //
+            // RFC 9002 Section 6.2.4 requires sending probes in packet number spaces
+            // with in-flight data. When we have keys for a space but haven't sent
+            // anything ack-eliciting yet (e.g., waiting for peer's Handshake flight),
+            // we still need to arm the PTO timer to probe and elicit retransmission.
+            //
+            // If no ack-eliciting packets have been sent in this space yet,
+            // last_ack_eliciting may be set as a PTO baseline in two ways:
+            // 1. When we send ANY packet in Initial/Handshake (see on_packet_sent)
+            // 2. When we receive ACKs in Initial and prime Handshake (see on_packets_acked)
+            //
+            // This ensures the PTO timer arms when we have keys for a space but
+            // nothing to send yet, allowing us to probe and elicit peer retransmission.
+            // RFC 9002 Section 6.2.4 requires probing packet number spaces.
             self.last_ack_eliciting
         }
     }
@@ -570,6 +581,40 @@ impl Loss {
         self.confirmed_time.is_some()
     }
 
+    /// Prime the Handshake space PTO timer when stuck in Initial space.
+    fn maybe_prime_handshake_pto(&mut self, now: Instant) {
+        // Only prime if we're in Initial space.
+        let Some(pto) = self
+            .pto_state
+            .as_ref()
+            .filter(|pto| pto.space == PacketNumberSpace::Initial)
+        else {
+            return;
+        };
+
+        // Only prime if we've received Initial ACKs (proving the peer is alive).
+        if !self
+            .spaces
+            .get(PacketNumberSpace::Initial)
+            .is_some_and(|space| space.largest_acked.is_some())
+        {
+            return;
+        }
+
+        let Some(hs_space) = self.spaces.get_mut(PacketNumberSpace::Handshake) else {
+            return;
+        };
+
+        // Only prime if we haven't sent or received anything in Handshake space yet.
+        if hs_space.last_ack_eliciting.is_none() && hs_space.largest_acked.is_none() {
+            qtrace!(
+                "Priming Handshake PTO baseline (no HS packets after {} Initial PTOs)",
+                pto.count()
+            );
+            hs_space.last_ack_eliciting = Some(now);
+        }
+    }
+
     /// Returns (acked packets, lost packets)
     pub fn on_ack_received<R>(
         &mut self,
@@ -863,6 +908,11 @@ impl Loss {
         if let Some(pn_space) = pto_space {
             qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
             self.fire_pto(pn_space, allow_probes, now);
+
+            // Maybe prime the Handshake PTO when PTO fires in Initial space.
+            if pn_space == PacketNumberSpace::Initial {
+                self.maybe_prime_handshake_pto(now);
+            }
         }
     }
 
@@ -958,13 +1008,14 @@ mod tests {
     use neqo_common::qlog::Qlog;
     use test_fixture::{now, DEFAULT_ADDR};
 
-    use super::{LossRecoverySpace, PacketNumberSpace, SendProfile, FAST_PTO_SCALE};
+    use super::{LossRecoverySpace, PacketNumberSpace, PtoState, SendProfile, FAST_PTO_SCALE};
     use crate::{
         cid::{ConnectionId, ConnectionIdEntry},
         ecn, packet,
         path::{Path, PathRef},
         recovery::{self, sent, MAX_PTO_PACKET_COUNT},
         stats::{Stats, StatsCell},
+        tracking::PacketNumberSpaceSet,
         ConnectionParameters,
     };
 
@@ -1730,5 +1781,54 @@ mod tests {
         assert_eq!(2, MAX_PTO_PACKET_COUNT); // because we're relying on that...
         let profile = lr.send_profile(now);
         assert!(profile.pto.is_none());
+    }
+
+    fn assert_no_handshake_last_ack_eliciting(lr: &Fixture) {
+        assert!(lr
+            .spaces
+            .get(PacketNumberSpace::Handshake)
+            .and_then(|s| s.last_ack_eliciting)
+            .is_none());
+    }
+
+    #[test]
+    fn maybe_prime_handshake_pto_no_pto_state() {
+        let mut lr = Fixture::default();
+        assert!(lr.pto_state.is_none());
+
+        // Verify nothing changes - the Handshake space should not be primed afterwards.
+        lr.maybe_prime_handshake_pto(now());
+        assert_no_handshake_last_ack_eliciting(&lr);
+    }
+
+    #[test]
+    fn maybe_prime_handshake_pto_wrong_space() {
+        // Create a PTO state in Handshake space.
+        let mut lr = Fixture::default();
+        let probe_set = PacketNumberSpaceSet::only(PacketNumberSpace::Handshake);
+        lr.pto_state = Some(PtoState::new(PacketNumberSpace::Handshake, probe_set));
+
+        // Verify nothing changes - the Handshake space should not be primed afterwards.
+        lr.maybe_prime_handshake_pto(now());
+        assert_no_handshake_last_ack_eliciting(&lr);
+    }
+
+    #[test]
+    fn maybe_prime_handshake_pto_no_handshake_space() {
+        // Create a PTO state in Initial space.
+        let mut lr = Fixture::default();
+        let probe_set = PacketNumberSpaceSet::only(PacketNumberSpace::Initial);
+        lr.pto_state = Some(PtoState::new(PacketNumberSpace::Initial, probe_set));
+
+        // Set up Initial space with an ACK and drop Handshake space.
+        lr.spaces
+            .get_mut(PacketNumberSpace::Initial)
+            .unwrap()
+            .largest_acked = Some(0);
+        lr.spaces.drop_space(PacketNumberSpace::Handshake);
+
+        // Verify Handshake space still doesn't exist afterwards.
+        lr.maybe_prime_handshake_pto(now());
+        assert!(lr.spaces.get(PacketNumberSpace::Handshake).is_none());
     }
 }

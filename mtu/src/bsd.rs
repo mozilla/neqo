@@ -22,6 +22,7 @@ use static_assertions::{const_assert, const_assert_eq};
 
 #[allow(
     clippy::allow_attributes,
+    clippy::allow_attributes_without_reason,
     non_camel_case_types,
     non_snake_case,
     clippy::struct_field_names,

@@ -169,7 +169,7 @@ impl QuicDatagrams {
             return Err(Error::TooMuchData);
         }
         if self.datagrams.len() == self.max_queued_outgoing_datagrams {
-            qdebug!("QUIC datagram queue full, dropping first datagram in queue.");
+            qdebug!("QUIC datagram queue full, dropping first datagram in queue (head-drop).");
             self.conn_events.datagram_outcome(
                 self.datagrams
                     .pop_front()

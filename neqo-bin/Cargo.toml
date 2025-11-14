@@ -52,9 +52,8 @@ tokio = { version = "1", default-features = false, features = ["net", "time", "m
 url = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "0.6", default-features = false, features = [
+criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false, features = [
         "async_tokio",
-        "cargo_bench_support",
 ] }
 neqo-bin = { path = ".", features = ["draft-29"] }
 tokio = { version = "1", default-features = false, features = ["sync"] }
@@ -70,6 +69,9 @@ ignored = ["log"]
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
+
+[package.metadata.bench.main]
+codspeed.mode = "walltime" # Use "walltime" mode for "main" bench with codspeed.
 
 [[bench]]
 name = "main"
