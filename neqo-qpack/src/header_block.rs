@@ -674,7 +674,7 @@ mod tests {
             {
                 assert_eq!(result.len(), 1);
                 assert_eq!(result[0].name(), *decoded1);
-                assert_eq!(result[0].value(), *decoded2);
+                assert_eq!(result[0].value(), decoded2.as_bytes());
             } else {
                 panic!("No headers");
             }
@@ -702,7 +702,7 @@ mod tests {
             {
                 assert_eq!(result.len(), 1);
                 assert_eq!(result[0].name(), *decoded1);
-                assert_eq!(result[0].value(), *decoded2);
+                assert_eq!(result[0].value(), decoded2.as_bytes());
             } else {
                 panic!("No headers");
             }
@@ -720,7 +720,7 @@ mod tests {
             {
                 assert_eq!(result.len(), 1);
                 assert_eq!(result[0].name(), *decoded1);
-                assert_eq!(result[0].value(), *decoded2);
+                assert_eq!(result[0].value(), decoded2.as_bytes());
             } else {
                 panic!("No headers");
             }
@@ -737,7 +737,7 @@ mod tests {
             {
                 assert_eq!(result.len(), 1);
                 assert_eq!(result[0].name(), *decoded1);
-                assert_eq!(result[0].value(), *decoded2);
+                assert_eq!(result[0].value(), decoded2.as_bytes());
             } else {
                 panic!("No headers");
             }
@@ -755,7 +755,7 @@ mod tests {
             {
                 assert_eq!(result.len(), 1);
                 assert_eq!(result[0].name(), *decoded1);
-                assert_eq!(result[0].value(), *decoded2);
+                assert_eq!(result[0].value(), decoded2.as_bytes());
             } else {
                 panic!("No headers");
             }
@@ -773,7 +773,7 @@ mod tests {
             {
                 assert_eq!(result.len(), 1);
                 assert_eq!(result[0].name(), *decoded1);
-                assert_eq!(result[0].value(), *decoded2);
+                assert_eq!(result[0].value(), decoded2.as_bytes());
             } else {
                 panic!("No headers");
             }
@@ -791,7 +791,7 @@ mod tests {
             {
                 assert_eq!(result.len(), 1);
                 assert_eq!(result[0].name(), *decoded1);
-                assert_eq!(result[0].value(), *decoded2);
+                assert_eq!(result[0].value(), decoded2.as_bytes());
             } else {
                 panic!("No headers");
             }
@@ -808,7 +808,7 @@ mod tests {
         {
             assert_eq!(result.len(), 1);
             assert_eq!(result[0].name(), LITERAL_VALUE);
-            assert_eq!(result[0].value(), LITERAL_VALUE);
+            assert_eq!(result[0].value(), LITERAL_VALUE.as_bytes());
         } else {
             panic!("No headers");
         }
@@ -819,7 +819,7 @@ mod tests {
         {
             assert_eq!(result.len(), 1);
             assert_eq!(result[0].name(), LITERAL_VALUE);
-            assert_eq!(result[0].value(), LITERAL_VALUE);
+            assert_eq!(result[0].value(), LITERAL_VALUE.as_bytes());
         } else {
             panic!("No headers");
         }
@@ -872,7 +872,7 @@ mod tests {
             {
                 assert_eq!(result.len(), 1);
                 assert_eq!(result[0].name(), *decoded1);
-                assert_eq!(result[0].value(), *decoded2);
+                assert_eq!(result[0].value(), decoded2.as_bytes());
             } else {
                 panic!("No headers");
             }

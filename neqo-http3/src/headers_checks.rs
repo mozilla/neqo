@@ -50,7 +50,10 @@ impl TryFrom<(MessageType, &str)> for PseudoHeaderState {
 /// a status header or if the value of the header is 101 or cannot be parsed.
 pub fn is_interim(headers: &[Header]) -> Res<bool> {
     if let Some(h) = headers.iter().take(1).find_header(":status") {
-        let status_code = h.value().parse::<u16>().map_err(|_| Error::InvalidHeader)?;
+        let status_code = std::str::from_utf8(h.value())
+            .map_err(|_| Error::InvalidHeader)?
+            .parse::<u16>()
+            .map_err(|_| Error::InvalidHeader)?;
         if status_code == 101 {
             // https://datatracker.ietf.org/doc/html/draft-ietf-quic-http#section-4.3
             Err(Error::InvalidHeader)
@@ -92,9 +95,9 @@ fn track_pseudo(
 ///
 /// Returns an error if headers are not well formed.
 pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
-    let mut method_value: Option<&str> = None;
-    let mut protocol_value: Option<&str> = None;
-    let mut scheme_value: Option<&str> = None;
+    let mut method_value: Option<&[u8]> = None;
+    let mut protocol_value: Option<&[u8]> = None;
+    let mut scheme_value: Option<&[u8]> = None;
     let mut pseudo_state = EnumSet::new();
     for header in headers {
         let is_pseudo = track_pseudo(header.name(), &mut pseudo_state, message_type)?;
@@ -120,11 +123,11 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
     let pseudo_header_mask = match message_type {
         MessageType::Response => enum_set!(PseudoHeaderState::Status),
         MessageType::Request => {
-            if method_value == Some("CONNECT") {
+            if method_value == Some(b"CONNECT".as_ref()) {
                 let connect_mask = PseudoHeaderState::Method | PseudoHeaderState::Authority;
                 if let Some(protocol) = protocol_value {
                     // For a webtransport CONNECT, the :scheme field must be set to https.
-                    if protocol == "webtransport" && scheme_value != Some("https") {
+                    if protocol == b"webtransport" && scheme_value != Some(b"https".as_ref()) {
                         return Err(Error::InvalidHeader);
                     }
                     // The CONNECT request for with :protocol included must have the scheme,
@@ -141,7 +144,7 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
 
     if (MessageType::Request == message_type)
         && pseudo_state.contains(PseudoHeaderState::Protocol)
-        && method_value != Some("CONNECT")
+        && method_value != Some(b"CONNECT".as_ref())
     {
         return Err(Error::InvalidHeader);
     }
