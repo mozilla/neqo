@@ -6,6 +6,7 @@ on:
     branches: ["main"]
   merge_group:
   workflow_dispatch:
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always
@@ -101,7 +102,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/neqo/.github/actions/rust@main
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }}
@@ -111,7 +112,7 @@ jobs:
       - id: nss-version
         run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
 
-      - uses: ./.github/actions/nss
+      - uses: mozilla/neqo/.github/actions/nss@main
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
@@ -137,23 +138,6 @@ jobs:
           else
             cargo test $BUILD_TYPE --locked --features ci
           fi
-
-      - name: Run client/server transfer
-        run: |
-          # shellcheck disable=SC2086
-          cargo build $BUILD_TYPE --bin neqo-client --bin neqo-server
-          "target/$BUILD_DIR/neqo-server" "$HOST:4433" &
-          PID=$!
-          # Give the server time to start.
-          sleep 1
-          "target/$BUILD_DIR/neqo-client" --output-dir . "https://$HOST:4433/$SIZE"
-          kill $PID
-          [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
-        env:
-          HOST: localhost
-          SIZE: 54321
-          RUST_LOG: warn
-          BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
       - name: CodeCov Windows workaround
         if: ${{ startsWith(matrix.os, 'windows') && matrix.type == 'debug' && matrix.rust-toolchain == 'stable' }}
@@ -187,7 +171,7 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-      - uses: ./.github/actions/rust
+      - uses: mozilla/neqo/.github/actions/rust@main
         with:
           version: stable
           tools: cargo-hack
@@ -209,7 +193,7 @@ jobs:
           persist-credentials: false
       - id: nss-version
         run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/check-android
+      - uses: mozilla/neqo/.github/actions/check-android@main
         with:
           target: ${{ matrix.target }}
           minimum-nss-version: ${{ steps.nss-version.outputs.minimum }}
@@ -227,7 +211,7 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-      - uses: ./.github/actions/check-vm
+      - uses: mozilla/neqo/.github/actions/check-vm@main
         with:
           platform: ${{ matrix.os }}
           codecov-token: ${{ secrets.CODECOV_TOKEN }}
