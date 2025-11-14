@@ -19,7 +19,10 @@ use neqo_common::{hex, hex_with_len, qdebug, qinfo, Buffer, Decoder, Encoder};
 use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
-use crate::{frame::FrameType, packet, recovery, stats::FrameStats, Error, Res};
+use crate::{
+    frame::FrameType, packet, recovery, stateless_reset::Token as Srt, stats::FrameStats, Error,
+    Res,
+};
 
 pub const MAX_CONNECTION_ID_LEN: usize = 20;
 pub const LOCAL_ACTIVE_CID_LIMIT: usize = 8;
@@ -248,16 +251,10 @@ pub struct ConnectionIdEntry<SRT: Clone + PartialEq> {
     srt: SRT,
 }
 
-impl ConnectionIdEntry<[u8; 16]> {
-    /// Create a random stateless reset token so that it is hard to guess the correct
-    /// value and reset the connection.
-    pub fn random_srt() -> [u8; 16] {
-        random::<16>()
-    }
-
+impl ConnectionIdEntry<Srt> {
     /// Create the first entry, which won't have a stateless reset token.
     pub fn initial_remote(cid: ConnectionId) -> Self {
-        Self::new(CONNECTION_ID_SEQNO_INITIAL, cid, Self::random_srt())
+        Self::new(CONNECTION_ID_SEQNO_INITIAL, cid, Srt::random())
     }
 
     /// Create an empty for when the peer chooses empty connection IDs.
@@ -266,24 +263,14 @@ impl ConnectionIdEntry<[u8; 16]> {
         Self::new(
             CONNECTION_ID_SEQNO_EMPTY,
             ConnectionId::from(&[]),
-            Self::random_srt(),
+            Srt::random(),
         )
     }
 
-    fn token_equal(a: &[u8; 16], b: &[u8; 16]) -> bool {
-        // rustc might decide to optimize this and make this non-constant-time
-        // with respect to `t`, but it doesn't appear to currently.
-        let mut c = 0;
-        for (&a, &b) in a.iter().zip(b) {
-            c |= a ^ b;
-        }
-        c == 0
-    }
-
     /// Determine whether this is a valid stateless reset.
-    pub fn is_stateless_reset(&self, token: &[u8; 16]) -> bool {
+    pub fn is_stateless_reset(&self, token: &Srt) -> bool {
         // A sequence number of 2^62 or more has no corresponding stateless reset token.
-        (self.seqno < (1 << 62)) && Self::token_equal(&self.srt, token)
+        (self.seqno < (1 << 62)) && &self.srt == token
     }
 
     /// Return true if the two contain any equal parts.
@@ -303,7 +290,12 @@ impl ConnectionIdEntry<[u8; 16]> {
         builder: &mut packet::Builder<B>,
         stats: &mut FrameStats,
     ) -> bool {
-        let len = 1 + Encoder::varint_len(self.seqno) + 1 + 1 + self.cid.len() + 16;
+        let len = 1
+            + Encoder::varint_len(self.seqno)
+            + 1
+            + 1
+            + self.cid.len()
+            + crate::stateless_reset::TOKEN_LEN;
         if builder.remaining() < len {
             return false;
         }
@@ -312,7 +304,7 @@ impl ConnectionIdEntry<[u8; 16]> {
         builder.encode_varint(self.seqno);
         builder.encode_varint(0u64);
         builder.encode_vec(1, &self.cid);
-        builder.encode(&self.srt);
+        builder.encode(self.srt.as_bytes());
         stats.new_connection_id += 1;
         true
     }
@@ -355,7 +347,7 @@ impl<SRT: Clone + PartialEq> ConnectionIdEntry<SRT> {
     }
 }
 
-pub type RemoteConnectionIdEntry = ConnectionIdEntry<[u8; 16]>;
+pub type RemoteConnectionIdEntry = ConnectionIdEntry<Srt>;
 
 /// A collection of connection IDs that are indexed by a sequence number.
 /// Used to store connection IDs that are provided by a peer.
@@ -386,8 +378,8 @@ impl<SRT: Clone + PartialEq> ConnectionIdStore<SRT> {
     }
 }
 
-impl ConnectionIdStore<[u8; 16]> {
-    pub fn add_remote(&mut self, entry: ConnectionIdEntry<[u8; 16]>) -> Res<()> {
+impl ConnectionIdStore<Srt> {
+    pub fn add_remote(&mut self, entry: ConnectionIdEntry<Srt>) -> Res<()> {
         // It's OK if this perfectly matches an existing entry.
         if self.cids.iter().any(|c| c == &entry) {
             return Ok(());
@@ -457,7 +449,7 @@ pub struct ConnectionIdManager {
     /// The next sequence number that will be used for sending `NEW_CONNECTION_ID` frames.
     next_seqno: u64,
     /// Outstanding, but lost `NEW_CONNECTION_ID` frames will be stored here.
-    lost_new_connection_id: Vec<ConnectionIdEntry<[u8; 16]>>,
+    lost_new_connection_id: Vec<ConnectionIdEntry<Srt>>,
 }
 
 impl ConnectionIdManager {
@@ -491,7 +483,7 @@ impl ConnectionIdManager {
     }
 
     /// Generate a connection ID and stateless reset token for a preferred address.
-    pub fn preferred_address_cid(&mut self) -> Res<(ConnectionId, [u8; 16])> {
+    pub fn preferred_address_cid(&mut self) -> Res<(ConnectionId, Srt)> {
         if self.generator.deref().borrow().generates_empty_cids() {
             return Err(Error::ConnectionIdsExhausted);
         }
@@ -501,9 +493,7 @@ impl ConnectionIdManager {
             self.connection_ids
                 .add_local(ConnectionIdEntry::new(self.next_seqno, cid.clone(), ()));
             self.next_seqno += 1;
-
-            let srt = ConnectionIdEntry::random_srt();
-            Ok((cid, srt))
+            Ok((cid, Srt::random()))
         } else {
             Err(Error::ConnectionIdsExhausted)
         }
@@ -587,26 +577,24 @@ impl ConnectionIdManager {
             let maybe_cid = self.generator.borrow_mut().generate_cid();
             if let Some(cid) = maybe_cid {
                 assert_ne!(cid.len(), 0);
-                // TODO: generate the stateless reset tokens from the connection ID and a key.
-                let srt = ConnectionIdEntry::random_srt();
-
                 let seqno = self.next_seqno;
                 self.next_seqno += 1;
                 self.connection_ids
                     .add_local(ConnectionIdEntry::new(seqno, cid.clone(), ()));
 
-                let entry = ConnectionIdEntry::new(seqno, cid, srt);
+                // TODO: generate the stateless reset tokens from the connection ID and a key.
+                let entry = ConnectionIdEntry::new(seqno, cid, Srt::random());
                 entry.write(builder, stats);
                 tokens.push(recovery::Token::NewConnectionId(entry));
             }
         }
     }
 
-    pub fn lost(&mut self, entry: &ConnectionIdEntry<[u8; 16]>) {
+    pub fn lost(&mut self, entry: &ConnectionIdEntry<Srt>) {
         self.lost_new_connection_id.push(entry.clone());
     }
 
-    pub fn acked(&mut self, entry: &ConnectionIdEntry<[u8; 16]>) {
+    pub fn acked(&mut self, entry: &ConnectionIdEntry<Srt>) {
         self.lost_new_connection_id
             .retain(|e| e.seqno != entry.seqno);
     }

@@ -211,7 +211,10 @@ fn stateless_reset_client() {
     let mut client = default_client();
     let mut server = default_server();
     server
-        .set_local_tparam(StatelessResetToken, TransportParameter::Bytes(vec![77; 16]))
+        .set_local_tparam(
+            StatelessResetToken,
+            TransportParameter::Bytes(vec![77; crate::stateless_reset::TOKEN_LEN]),
+        )
         .unwrap();
     connect_force_idle(&mut client, &mut server);
 
