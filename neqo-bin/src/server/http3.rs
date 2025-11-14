@@ -105,9 +105,13 @@ impl super::HttpServer for HttpServer {
                     qdebug!("Headers (request={stream} fin={fin}): {headers:?}");
 
                     if headers.contains_header(":method", b"POST") {
-                        let response_size = headers
-                            .find_header(":path")
-                            .and_then(|path| std::str::from_utf8(path.value()).ok()?.trim_matches('/').parse::<usize>().ok());
+                        let response_size = headers.find_header(":path").and_then(|path| {
+                            std::str::from_utf8(path.value())
+                                .ok()?
+                                .trim_matches('/')
+                                .parse::<usize>()
+                                .ok()
+                        });
                         self.posts.insert(stream, (0, response_size));
                         continue;
                     }
@@ -132,12 +136,11 @@ impl super::HttpServer for HttpServer {
                                 continue;
                             }
                         }
-                    } else if let Some(path_str) = std::str::from_utf8(path.value()).ok() {
-                        if let Ok(count) = path_str.trim_matches(|p| p == '/').parse::<usize>() {
-                            SendData::zeroes(count)
-                        } else {
-                            SendData::from(path.value())
-                        }
+                    } else if let Ok(path_str) = std::str::from_utf8(path.value()) {
+                        path_str
+                            .trim_matches(|p| p == '/')
+                            .parse::<usize>()
+                            .map_or_else(|_| SendData::from(path.value()), SendData::zeroes)
                     } else {
                         SendData::from(path.value())
                     };
