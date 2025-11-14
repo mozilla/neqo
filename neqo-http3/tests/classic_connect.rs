@@ -34,11 +34,11 @@ fn classic_connect() {
     };
     assert_eq!(
         headers.find_header(":method").map(Header::value),
-        Some("CONNECT")
+        Some(b"CONNECT".as_ref())
     );
     assert_eq!(
         headers.find_header(":authority").map(Header::value),
-        Some(AUTHORITY)
+        Some(AUTHORITY.as_bytes())
     );
     // > The :scheme and :path pseudo-header fields are omitted
     //
@@ -83,7 +83,7 @@ fn classic_connect() {
     assert_eq!(stream_id, stream.stream_id());
     assert_eq!(
         headers.find_header(":status").map(Header::value),
-        Some("200")
+        Some(b"200".as_ref())
     );
 
     let Some(Http3ClientEvent::DataReadable { stream_id }) = client.next_event() else {

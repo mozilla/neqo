@@ -11,18 +11,18 @@ use thiserror::Error;
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
 pub struct Header {
     name: String,
-    value: String,
+    value: Vec<u8>,
 }
 
 impl Header {
     pub fn new<N, V>(name: N, value: V) -> Self
     where
         N: Into<String>,
-        V: Into<String>,
+        V: AsRef<[u8]>,
     {
         Self {
             name: name.into(),
-            value: value.into(),
+            value: value.as_ref().to_vec(),
         }
     }
 
@@ -56,19 +56,19 @@ impl Header {
         reason = "False positive on 1.86, remove when MSRV is higher."
     )]
     #[must_use]
-    pub fn value(&self) -> &str {
+    pub fn value(&self) -> &[u8] {
         &self.value
     }
 }
 
-impl<T: AsRef<str>, U: AsRef<str>> PartialEq<(T, U)> for Header {
+impl<T: AsRef<str>, U: AsRef<[u8]>> PartialEq<(T, U)> for Header {
     fn eq(&self, other: &(T, U)) -> bool {
         self.name == other.0.as_ref() && self.value == other.1.as_ref()
     }
 }
 
 pub trait HeadersExt<'h> {
-    fn contains_header<T: AsRef<str>, U: AsRef<str>>(self, name: T, value: U) -> bool;
+    fn contains_header<T: AsRef<str>, U: AsRef<[u8]>>(self, name: T, value: U) -> bool;
     fn find_header<T: AsRef<str> + 'h>(self, name: T) -> Option<&'h Header>;
 }
 
@@ -76,7 +76,7 @@ impl<'h, H> HeadersExt<'h> for H
 where
     H: IntoIterator<Item = &'h Header> + 'h,
 {
-    fn contains_header<T: AsRef<str>, U: AsRef<str>>(self, name: T, value: U) -> bool {
+    fn contains_header<T: AsRef<str>, U: AsRef<[u8]>>(self, name: T, value: U) -> bool {
         let (name, value) = (name.as_ref(), value.as_ref());
         self.into_iter().any(|h| h == &(name, value))
     }
@@ -110,7 +110,7 @@ impl FromStr for Header {
             return Err(FromStrError::MissingName);
         }
 
-        let value = s[seperator + 1..].trim();
+        let value = s[seperator + 1..].trim().as_bytes().to_vec();
 
         Ok(Self::new(name, value))
     }
@@ -125,25 +125,25 @@ mod tests {
     fn from_str_valid() {
         let header = Header::from_str("Content-Type: text/html").unwrap();
         assert_eq!(header.name(), "content-type");
-        assert_eq!(header.value(), "text/html");
+        assert_eq!(header.value(), b"text/html");
 
         let header = Header::from_str("Content-Type:").unwrap();
         assert_eq!(header.name(), "content-type");
-        assert_eq!(header.value(), "");
+        assert_eq!(header.value(), b"");
     }
 
     #[test]
     fn from_str_pseudo_header() {
         let header = Header::from_str(":scheme: https").unwrap();
         assert_eq!(header.name(), ":scheme");
-        assert_eq!(header.value(), "https");
+        assert_eq!(header.value(), b"https");
     }
 
     #[test]
     fn from_str_pseudo_header_with_value_with_colon() {
         let header = Header::from_str(":some: he:ader").unwrap();
         assert_eq!(header.name(), ":some");
-        assert_eq!(header.value(), "he:ader");
+        assert_eq!(header.value(), b"he:ader");
     }
 
     #[test]
