@@ -383,8 +383,7 @@ mod tests {
     use test_receiver::TestReceiver;
 
     use super::{
-        test_receiver, Error, IntReader, LiteralReader, ReadByte as _,
-        ReceiverBufferWrapper, Res,
+        test_receiver, Error, IntReader, LiteralReader, ReadByte as _, ReceiverBufferWrapper, Res,
     };
 
     const TEST_CASES_NUMBERS: [(&[u8], u8, u64); 7] = [
@@ -547,10 +546,7 @@ mod tests {
             let mut reader = LiteralReader::new_with_first_byte(buf[0], *prefix_len);
             let mut test_receiver: TestReceiver = TestReceiver::default();
             test_receiver.write(&buf[1..]);
-            assert_eq!(
-                reader.read(&mut test_receiver).unwrap().as_slice(),
-                *value
-            );
+            assert_eq!(reader.read(&mut test_receiver).unwrap().as_slice(), *value);
         }
     }
 

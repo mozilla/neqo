@@ -313,10 +313,7 @@ impl<'a> HeaderDecoder<'a> {
             .read_prefixed_int(HEADER_FIELD_INDEX_STATIC.len())?;
         qtrace!("[{self}] decoder static indexed {index}");
         let entry = HeaderTable::get_static(index)?;
-        Ok(Header::new(
-            parse_utf8(entry.name())?,
-            entry.value(),
-        ))
+        Ok(Header::new(parse_utf8(entry.name())?, entry.value()))
     }
 
     fn read_indexed_dynamic(&mut self, table: &HeaderTable) -> Res<Header> {
@@ -325,10 +322,7 @@ impl<'a> HeaderDecoder<'a> {
             .read_prefixed_int(HEADER_FIELD_INDEX_DYNAMIC.len())?;
         qtrace!("[{self}] decoder dynamic indexed {index}");
         let entry = table.get_dynamic(index, self.base, false)?;
-        Ok(Header::new(
-            parse_utf8(entry.name())?,
-            entry.value(),
-        ))
+        Ok(Header::new(parse_utf8(entry.name())?, entry.value()))
     }
 
     fn read_indexed_dynamic_post(&mut self, table: &HeaderTable) -> Res<Header> {
@@ -337,10 +331,7 @@ impl<'a> HeaderDecoder<'a> {
             .read_prefixed_int(HEADER_FIELD_INDEX_DYNAMIC_POST.len())?;
         qtrace!("[{self}] decode post-based {index}");
         let entry = table.get_dynamic(index, self.base, true)?;
-        Ok(Header::new(
-            parse_utf8(entry.name())?,
-            entry.value(),
-        ))
+        Ok(Header::new(parse_utf8(entry.name())?, entry.value()))
     }
 
     fn read_literal_with_name_ref_static(&mut self) -> Res<Header> {
