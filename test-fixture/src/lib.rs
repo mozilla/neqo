@@ -476,19 +476,27 @@ pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
 /// Strip any padding off the packet.
 /// This uses a heuristic to detect padding packets.  Don't rely on that too much.
 #[must_use]
-pub fn strip_padding(dgram: Datagram) -> Datagram {
-    fn is_padding(dgram: &Datagram) -> bool {
+pub fn strip_padding(d: Datagram) -> Datagram {
+    fn is_padding(dgram: &[u8]) -> bool {
         // This is a pretty rough heuristic, but it works for now.
         // Below the minimum packets size of 19 (1 type, 1 packet len, 1 content, 16 tag)
         // OR all values the same (except the last, in anticipation of SCONE indications).
         dgram.len() < 19 || dgram[1..dgram.len() - 1].iter().all(|&x| x == dgram[0])
     }
-    let (first, second) = split_datagram(&dgram);
-    if second.as_ref().is_some_and(is_padding) {
-        first
-    } else {
-        dgram
+
+    let mut remainder = &d[..];
+    while let (_first, Some(second)) = split_packet(remainder) {
+        if is_padding(second) {
+            return Datagram::new(
+                d.source(),
+                d.destination(),
+                d.tos(),
+                d[..d.len() - second.len()].to_vec(),
+            );
+        }
+        remainder = second;
     }
+    d
 }
 
 #[derive(Clone, Default)]
