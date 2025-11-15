@@ -154,4 +154,42 @@ mod tests {
             Some(FromStrError::MissingName)
         );
     }
+
+    #[test]
+    fn non_utf8_header_value() {
+        // Create a header with non-UTF-8 bytes in the value
+        let non_utf8_bytes: Vec<u8> = vec![0xFF, 0xFE, 0xFD, 0x80, 0x81];
+        let header = Header::new("custom-header", &non_utf8_bytes);
+
+        assert_eq!(header.name(), "custom-header");
+        assert_eq!(header.value(), non_utf8_bytes.as_slice());
+
+        // Verify that the value is indeed not valid UTF-8
+        assert!(std::str::from_utf8(header.value()).is_err());
+    }
+
+    #[test]
+    fn non_ascii_header_value() {
+        // Create a header with non-ASCII but valid UTF-8 bytes
+        let emoji_value = "🚀🌟";
+        let header = Header::new("emoji-header", emoji_value);
+
+        assert_eq!(header.name(), "emoji-header");
+        assert_eq!(header.value(), emoji_value.as_bytes());
+
+        // Verify we can convert back to UTF-8
+        assert_eq!(std::str::from_utf8(header.value()).unwrap(), emoji_value);
+    }
+
+    #[test]
+    fn header_comparison_with_bytes() {
+        let header = Header::new("test", b"value");
+
+        // Test PartialEq with byte slice
+        assert_eq!(header, ("test", b"value".as_ref()));
+
+        // Test with string (converted to bytes)
+        let header2 = Header::new("test2", "string_value");
+        assert_eq!(header2, ("test2", b"string_value".as_ref()));
+    }
 }

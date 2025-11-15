@@ -315,7 +315,7 @@ impl<'a> HeaderDecoder<'a> {
         let entry = HeaderTable::get_static(index)?;
         Ok(Header::new(
             parse_utf8(entry.name())?,
-            parse_utf8(entry.value())?,
+            entry.value(),
         ))
     }
 
@@ -327,7 +327,7 @@ impl<'a> HeaderDecoder<'a> {
         let entry = table.get_dynamic(index, self.base, false)?;
         Ok(Header::new(
             parse_utf8(entry.name())?,
-            parse_utf8(entry.value())?,
+            entry.value(),
         ))
     }
 
@@ -339,7 +339,7 @@ impl<'a> HeaderDecoder<'a> {
         let entry = table.get_dynamic(index, self.base, true)?;
         Ok(Header::new(
             parse_utf8(entry.name())?,
-            parse_utf8(entry.value())?,
+            entry.value(),
         ))
     }
 
@@ -385,9 +385,12 @@ impl<'a> HeaderDecoder<'a> {
     fn read_literal_with_name_literal(&mut self) -> Res<Header> {
         qtrace!("[{self}] decode literal with name literal");
 
-        let name = self
+        let name_bytes = self
             .buf
             .read_literal_from_buffer(HEADER_FIELD_LITERAL_NAME_LITERAL.len())?;
+
+        // Header names must be valid UTF-8
+        let name = parse_utf8(&name_bytes)?.to_string();
 
         Ok(Header::new(name, self.buf.read_literal_from_buffer(0)?))
     }
