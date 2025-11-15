@@ -351,7 +351,7 @@ impl Server {
                 qwarn!("[{self}] Unable to create connection");
                 if e == crate::Error::VersionNegotiation {
                     crate::qlog::server_version_information_failed(
-                        &self.create_qlog_trace(
+                        &mut self.create_qlog_trace(
                             orig_dcid.unwrap_or(initial.dst_cid).as_cid_ref(),
                             now,
                         ),
@@ -462,7 +462,7 @@ impl Server {
                 );
 
                 crate::qlog::server_version_information_failed(
-                    &self.create_qlog_trace(packet.dcid(), now),
+                    &mut self.create_qlog_trace(packet.dcid(), now),
                     self.conn_params.get_versions().all(),
                     packet.wire_version(),
                     now,

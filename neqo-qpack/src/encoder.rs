@@ -225,7 +225,7 @@ impl Encoder {
     fn call_instruction(
         &mut self,
         instruction: DecoderInstruction,
-        qlog: &Qlog,
+        qlog: &mut Qlog,
         now: Instant,
     ) -> Res<()> {
         qdebug!("[{self}] call instruction {instruction:?}");
