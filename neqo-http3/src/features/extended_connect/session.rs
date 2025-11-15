@@ -261,7 +261,7 @@ impl Session {
                     .iter()
                     .find_map(|h| {
                         if h.name() == ":status" {
-                            h.value().parse::<u16>().ok()
+                            std::str::from_utf8(h.value()).ok()?.parse::<u16>().ok()
                         } else {
                             None
                         }

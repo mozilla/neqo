@@ -418,7 +418,7 @@ impl Encoder {
 
         for iter in h {
             let name = iter.name().as_bytes().to_vec();
-            let value = iter.value().as_bytes().to_vec();
+            let value = iter.value().to_vec();
             qtrace!("encoding {name:x?} {value:x?}");
 
             if let Some(LookupResult {
