@@ -64,8 +64,11 @@ impl Protocol for Session {
             .map_err(|_| Error::HttpGeneralProtocolStream)?;
 
         if let Some(f) = f {
-            // TODO: Implement HTTP Datagram <https://github.com/mozilla/neqo/issues/2843>.
-            match f {}
+            match f {
+                ConnectUdpFrame::Datagram { payload } => {
+                    events.new_datagram(self.session_id, payload, ExtendedConnectType::ConnectUdp);
+                }
+            }
         }
 
         if fin {
