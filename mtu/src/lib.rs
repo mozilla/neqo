@@ -208,8 +208,13 @@ mod test {
             0x2606, 0x4700, 0, 0, 0, 0, 0x6810, 0x84e5, // cloudflare.com
         ))) {
             Ok(res) => assert_eq!(res, INET),
-            // The GitHub CI environment does not have IPv6 connectivity.
-            Err(_) => assert!(env::var("GITHUB_ACTIONS").is_ok()),
+            Err(e)
+                if e.raw_os_error() == Some(libc::ENETUNREACH)
+                    || e.raw_os_error() == Some(libc::ESRCH) =>
+            {
+                eprintln!("skipping IPv6 test due to lack of IPv6 connectivity: {e}");
+            }
+            Err(e) => panic!("unexpected error on IPv6 interface_and_mtu lookup: {e}"),
         }
     }
 }
