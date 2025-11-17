@@ -598,9 +598,15 @@ impl ConnectionIdManager {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neqo_common::Encoder;
     use test_fixture::fixture_init;
 
-    use crate::{cid::MAX_CONNECTION_ID_LEN, ConnectionId};
+    use crate::{
+        cid::{ConnectionIdEntry, MAX_CONNECTION_ID_LEN},
+        packet,
+        stats::FrameStats,
+        ConnectionId, Token as Srt,
+    };
 
     #[test]
     fn generate_initial_cid() {
@@ -612,5 +618,28 @@ mod tests {
                 "connection ID length {cid:?}",
             );
         }
+    }
+
+    #[test]
+    fn write_checks_length_correctly() {
+        fixture_init();
+        let entry = ConnectionIdEntry::new(1, ConnectionId::from(&[]), Srt::random());
+        let limit = 1
+            + Encoder::varint_len(entry.sequence_number())
+            + 1
+            + 1
+            + entry.connection_id().len()
+            + Srt::LEN;
+        let enc = Encoder::with_capacity(limit);
+        let mut builder = packet::Builder::short(enc, false, Some(&[]), limit);
+        assert_eq!(
+            builder.remaining(),
+            limit - 1,
+            "Builder::short consumed one byte"
+        );
+        assert!(
+            !entry.write(&mut builder, &mut FrameStats::default()),
+            "couldn't write frame into too-short builder",
+        );
     }
 }
