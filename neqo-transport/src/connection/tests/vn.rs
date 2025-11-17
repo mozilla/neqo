@@ -75,7 +75,7 @@ fn create_vn(initial_pkt: &[u8], versions: &[u32]) -> Vec<u8> {
 
     let mut encoder = Encoder::default();
     encoder.encode_byte(PACKET_BIT_LONG);
-    encoder.encode(&[0; 4]); // Zero version == VN.
+    encoder.encode([0; 4]); // Zero version == VN.
     encoder.encode_vec(1, src_cid);
     encoder.encode_vec(1, dst_cid);
 

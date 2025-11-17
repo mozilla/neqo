@@ -188,7 +188,7 @@ impl Builder<Vec<u8>> {
         let mut grease = random::<4>();
         // This will not include the "QUIC bit" sometimes.  Intentionally.
         encoder.encode_byte(PACKET_BIT_LONG | (grease[3] & 0x7f));
-        encoder.encode(&[0; 4]); // Zero version == VN.
+        encoder.encode([0; 4]); // Zero version == VN.
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
 
@@ -400,7 +400,7 @@ impl<B: Buffer> Builder<B> {
             }
 
             self.offsets.len = self.encoder.len();
-            self.encoder.encode(&[0; LONG_PACKET_LENGTH_LEN]);
+            self.encoder.encode([0; LONG_PACKET_LENGTH_LEN]);
         }
 
         // This allows the input to be >4, which is absurd, but we can eat that.
@@ -1073,7 +1073,7 @@ mod tests {
         enc.encode_uint(4, Version::default().wire_version());
         enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 1]);
         enc.encode_vec(1, &[]);
-        enc.encode(&[0xff; 40]); // junk
+        enc.encode([0xff; 40]); // junk
 
         assert!(Public::decode(enc.as_mut(), &cid_mgr()).is_err());
     }
@@ -1085,7 +1085,7 @@ mod tests {
         enc.encode_uint(4, Version::default().wire_version());
         enc.encode_vec(1, &[]);
         enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 2]);
-        enc.encode(&[0xff; 40]); // junk
+        enc.encode([0xff; 40]); // junk
 
         assert!(Public::decode(enc.as_mut(), &cid_mgr()).is_err());
     }
@@ -1194,7 +1194,7 @@ mod tests {
             PACKET_LIMIT,
         );
         builder.pn(0, 1);
-        builder.encode(&[0; 3]);
+        builder.encode([0; 3]);
         let encoder = builder.build(&mut prot).expect("build");
         assert_eq!(encoder.len(), 45);
         let first = encoder.clone();
@@ -1206,7 +1206,7 @@ mod tests {
             PACKET_LIMIT,
         );
         builder.pn(1, 3);
-        builder.encode(&[0]); // Minimal size (packet number is big enough).
+        builder.encode([0]); // Minimal size (packet number is big enough).
         let encoder = builder.build(&mut prot).expect("build");
         assert_eq!(
             first.as_ref(),
@@ -1234,7 +1234,7 @@ mod tests {
             PACKET_LIMIT,
         );
         builder.pn(0, 1);
-        builder.encode(&[1, 2, 3]);
+        builder.encode([1, 2, 3]);
         let packet = builder.build(&mut CryptoDxState::test_default()).unwrap();
         assert_eq!(packet.as_ref(), EXPECTED);
     }
