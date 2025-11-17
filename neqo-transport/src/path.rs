@@ -820,7 +820,7 @@ impl Path {
             qtrace!("[{self}] Initiating path challenge {probe_count}");
             let data = random::<8>();
             builder.encode_varint(FrameType::PathChallenge);
-            builder.encode(&data);
+            builder.encode(data);
 
             // As above, no recovery token.
             stats.path_challenge += 1;
