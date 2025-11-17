@@ -808,7 +808,10 @@ impl<'a> Public<'a> {
     }
 
     /// Decrypt the header of the packet.
-    fn decrypt_header(&mut self, crypto: &CryptoDxState) -> Res<(bool, Number, Range<usize>)> {
+    fn decrypt_header(
+        &mut self,
+        crypto: &CryptoDxState,
+    ) -> Result<(bool, Number, Range<usize>), DecryptionError> {
         debug_assert_ne!(self.packet_type, Type::Retry);
         debug_assert_ne!(self.packet_type, Type::VersionNegotiation);
 
@@ -816,14 +819,18 @@ impl<'a> Public<'a> {
         let sample = self
             .data
             .get(sample_offset..(sample_offset + SAMPLE_SIZE))
-            .ok_or(Error::NoMoreData)?;
-        let sample: &[u8; SAMPLE_SIZE] = sample.try_into()?;
+            .ok_or_else(|| DecryptionError::from((&*self, Error::NoMoreData)))?;
+        let sample: &[u8; SAMPLE_SIZE] = sample
+            .try_into()
+            .map_err(|_| DecryptionError::from((&*self, Error::NoMoreData)))?;
         qtrace!(
             "{:?} unmask hdr={}",
             crypto.version(),
             hex(&self.data[..sample_offset])
         );
-        let mask = crypto.compute_mask(sample)?;
+        let mask = crypto
+            .compute_mask(sample)
+            .map_err(|e| DecryptionError::from((&*self, e)))?;
 
         // Un-mask the leading byte.
         let bits = if self.packet_type == Type::Short {
@@ -881,9 +888,7 @@ impl<'a> Public<'a> {
             // This is OK in this case because we the only reason this can
             // fail is if the cryptographic module is bad or the packet is
             // too small (which is public information).
-            let (key_phase, pn, header) = self
-                .decrypt_header(rx)
-                .map_err(|e| DecryptionError::from((&self, e)))?;
+            let (key_phase, pn, header) = self.decrypt_header(rx)?;
             let Some(rx) = crypto.rx(version, epoch, key_phase) else {
                 return Err(DecryptionError::from((&self, Error::Decrypt)));
             };
@@ -977,13 +982,16 @@ impl From<(&Public<'_>, Error)> for DecryptionError {
 
 impl DecryptionError {
     #[must_use]
-    #[allow(
-        clippy::allow_attributes,
-        clippy::len_without_is_empty,
-        reason = "OK here."
-    )]
     pub fn len(&self) -> usize {
         self.data.len()
+    }
+
+    // The packet module is made public when the `bench` feature is enabled or we're fuzzing, which
+    // triggers the `clippy::len_without_is_empty` lint without this.
+    #[cfg(any(fuzzing, feature = "bench"))]
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
     }
 
     #[must_use]
