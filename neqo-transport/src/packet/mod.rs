@@ -500,8 +500,9 @@ impl<B: Buffer> Builder<B> {
         crypto.encrypt(self.pn, self.header.clone(), self.encoder.as_mut())?;
         let offset = SAMPLE_OFFSET - self.offsets.pn.len();
         // `decode()` already checked that `decoder.remaining() >= SAMPLE_OFFSET + SAMPLE_SIZE`.
+        let sample_start = self.header.end + offset;
         let sample = self.encoder.as_ref()
-            [self.header.end + offset..self.header.end + offset + SAMPLE_SIZE]
+            [sample_start..sample_start + SAMPLE_SIZE]
             .try_into()
             .map_err(|_| Error::Internal)?;
         let mask = crypto.compute_mask(sample)?;
