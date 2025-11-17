@@ -11,6 +11,13 @@ use thiserror::Error;
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
 pub struct Header {
     name: String,
+    /// The raw header field value as bytes.
+    ///
+    /// HTTP allows field values to contain any visible ASCII characters and
+    /// arbitrary 0x80–0xFF bytes (`obs-text`).  Unlike field *names*, field
+    /// values are not guaranteed to be valid UTF-8.
+    ///
+    /// See also <https://www.rfc-editor.org/rfc/rfc9110#section-5.5>.
     value: Vec<u8>,
 }
 
@@ -18,11 +25,11 @@ impl Header {
     pub fn new<N, V>(name: N, value: V) -> Self
     where
         N: Into<String>,
-        V: AsRef<[u8]>,
+        V: Into<Vec<u8>>,
     {
         Self {
             name: name.into(),
-            value: value.as_ref().to_vec(),
+            value: value.into(),
         }
     }
 
@@ -120,6 +127,7 @@ impl FromStr for Header {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use std::str::from_utf8;
 
     #[test]
     fn from_str_valid() {
@@ -159,13 +167,13 @@ mod tests {
     fn non_utf8_header_value() {
         // Create a header with non-UTF-8 bytes in the value
         let non_utf8_bytes: Vec<u8> = vec![0xFF, 0xFE, 0xFD, 0x80, 0x81];
-        let header = Header::new("custom-header", &non_utf8_bytes);
+        let header = Header::new("custom-header", non_utf8_bytes.as_slice());
 
         assert_eq!(header.name(), "custom-header");
         assert_eq!(header.value(), non_utf8_bytes.as_slice());
 
         // Verify that the value is indeed not valid UTF-8
-        assert!(std::str::from_utf8(header.value()).is_err());
+        assert!(from_utf8(header.value()).is_err());
     }
 
     #[test]
@@ -178,7 +186,7 @@ mod tests {
         assert_eq!(header.value(), emoji_value.as_bytes());
 
         // Verify we can convert back to UTF-8
-        assert_eq!(std::str::from_utf8(header.value()).unwrap(), emoji_value);
+        assert_eq!(from_utf8(header.value()).unwrap(), emoji_value);
     }
 
     #[test]
