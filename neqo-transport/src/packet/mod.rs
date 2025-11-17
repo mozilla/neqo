@@ -501,8 +501,7 @@ impl<B: Buffer> Builder<B> {
         let offset = SAMPLE_OFFSET - self.offsets.pn.len();
         // `decode()` already checked that `decoder.remaining() >= SAMPLE_OFFSET + SAMPLE_SIZE`.
         let sample_start = self.header.end + offset;
-        let sample = self.encoder.as_ref()
-            [sample_start..sample_start + SAMPLE_SIZE]
+        let sample = self.encoder.as_ref()[sample_start..sample_start + SAMPLE_SIZE]
             .try_into()
             .map_err(|_| Error::Internal)?;
         let mask = crypto.compute_mask(sample)?;
