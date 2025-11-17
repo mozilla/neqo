@@ -247,9 +247,9 @@ impl<B: Buffer> Encoder<B> {
     /// # Panics
     ///
     /// When writing to the underlying buffer fails.
-    pub fn encode(&mut self, data: &[u8]) -> &mut Self {
+    pub fn encode(&mut self, data: impl AsRef<[u8]>) -> &mut Self {
         self.buf
-            .write_all(data)
+            .write_all(data.as_ref())
             .expect("Buffer has enough capacity.");
         self
     }
@@ -292,9 +292,9 @@ impl<B: Buffer> Encoder<B> {
         #[expect(clippy::cast_possible_truncation, reason = "This is intentional.")]
         match () {
             () if v < (1 << 6) => self.encode_byte(v as u8),
-            () if v < (1 << 14) => self.encode(&((v as u16 | (1 << 14)).to_be_bytes())),
-            () if v < (1 << 30) => self.encode(&((v as u32 | (2 << 30)).to_be_bytes())),
-            () if v < (1 << 62) => self.encode(&(v | (3 << 62)).to_be_bytes()),
+            () if v < (1 << 14) => self.encode((v as u16 | (1 << 14)).to_be_bytes()),
+            () if v < (1 << 30) => self.encode((v as u32 | (2 << 30)).to_be_bytes()),
+            () if v < (1 << 62) => self.encode((v | (3 << 62)).to_be_bytes()),
             () => panic!("Varint value too large"),
         }
     }
@@ -927,7 +927,7 @@ mod tests {
     #[test]
     fn encode() {
         let mut enc = Encoder::default();
-        enc.encode(&[1, 2, 3]);
+        enc.encode([1, 2, 3]);
         assert_eq!(enc, Encoder::from_hex("010203"));
     }
 
@@ -1036,7 +1036,7 @@ mod tests {
     fn encode_vec_with_overflow() {
         let mut enc = Encoder::default();
         enc.encode_vec_with(1, |enc_inner| {
-            enc_inner.encode(&[0xb0; 256]);
+            enc_inner.encode([0xb0; 256]);
         });
     }
 
@@ -1060,7 +1060,7 @@ mod tests {
     fn encode_vvec_with_longer() {
         let mut enc = Encoder::default();
         enc.encode_vvec_with(|enc_inner| {
-            enc_inner.encode(&[0xa5; 65]);
+            enc_inner.encode([0xa5; 65]);
         });
         let v: Vec<u8> = enc.into();
         assert_eq!(&v[..3], &[0x40, 0x41, 0xa5]);
@@ -1201,7 +1201,7 @@ mod tests {
     fn as_decoder_exposes_encoded_bytes_only_not_whole_buffer() {
         let mut buffer = vec![1, 2, 3, 4];
         let mut enc = Encoder::new_borrowed_vec(&mut buffer);
-        enc.encode(&[5, 6, 7]);
+        enc.encode([5, 6, 7]);
 
         let decoder = enc.as_decoder();
         assert_eq!(decoder.as_ref().len(), 3);

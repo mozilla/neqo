@@ -85,11 +85,11 @@ impl AddressValidation {
         match peer_address.ip() {
             IpAddr::V4(a) => {
                 aad.encode_byte(4);
-                aad.encode(&a.octets());
+                aad.encode(a.octets());
             }
             IpAddr::V6(a) => {
                 aad.encode_byte(6);
-                aad.encode(&a.octets());
+                aad.encode(a.octets());
             }
         }
         if retry {

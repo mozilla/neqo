@@ -1059,7 +1059,7 @@ impl crate::connection::test_internal::FrameWriter for RetireAll {
             .encode_varint(SEQNO)
             .encode_varint(SEQNO) // Retire Prior To
             .encode_vec(1, &cid)
-            .encode(&[0x7f; 16]);
+            .encode([0x7f; 16]);
     }
 }
 

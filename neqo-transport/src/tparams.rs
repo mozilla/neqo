@@ -176,13 +176,13 @@ impl TransportParameter {
                         enc_inner.encode(&v4.ip().octets()[..]);
                         enc_inner.encode_uint(2, v4.port());
                     } else {
-                        enc_inner.encode(&[0; 6]);
+                        enc_inner.encode([0; 6]);
                     }
                     if let Some(v6) = v6 {
                         enc_inner.encode(&v6.ip().octets()[..]);
                         enc_inner.encode_uint(2, v6.port());
                     } else {
-                        enc_inner.encode(&[0; 18]);
+                        enc_inner.encode([0; 18]);
                     }
                     enc_inner.encode_vec(1, &cid[..]);
                     enc_inner.encode(&srt[..]);

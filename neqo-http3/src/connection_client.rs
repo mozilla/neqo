@@ -4132,7 +4132,7 @@ mod tests {
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 3 };
         d_frame.encode(&mut d);
-        d.encode(&[0x61, 0x62, 0x63]);
+        d.encode([0x61, 0x62, 0x63]);
         server_send_response_and_exchange_packet(
             &mut client,
             &mut server,
@@ -5134,7 +5134,7 @@ mod tests {
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 3 };
         d_frame.encode(&mut d);
-        d.encode(&[0x61, 0x62, 0x63]);
+        d.encode([0x61, 0x62, 0x63]);
         _ = server
             .conn
             .stream_send(request_stream_id, d.as_ref())
