@@ -41,7 +41,7 @@ impl Token {
 impl PartialEq for Token {
     fn eq(&self, other: &Self) -> bool {
         // rustc might decide to optimize this and make this non-constant-time.
-        // with respect to `t`, but it doesn't appear to currently.
+        // It doesn't appear to currently.
         let mut c = 0;
         for (&a, &b) in self.0.iter().zip(&other.0) {
             c |= a ^ b;
