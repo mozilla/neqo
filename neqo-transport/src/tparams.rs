@@ -186,7 +186,7 @@ impl TransportParameter {
                         enc_inner.encode([0; 18]);
                     }
                     enc_inner.encode_vec(1, &cid[..]);
-                    enc_inner.encode(srt.as_bytes());
+                    enc_inner.encode(srt);
                 });
             }
             Self::Versions { current, other } => {

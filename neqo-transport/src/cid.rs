@@ -299,7 +299,7 @@ impl ConnectionIdEntry<Srt> {
         builder.encode_varint(self.seqno);
         builder.encode_varint(0u64);
         builder.encode_vec(1, &self.cid);
-        builder.encode(self.srt.as_bytes());
+        builder.encode(&self.srt);
         stats.new_connection_id += 1;
         true
     }
