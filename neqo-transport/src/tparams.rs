@@ -23,7 +23,7 @@ use neqo_crypto::{
 use strum::FromRepr;
 
 use crate::{
-    cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
+    cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED},
     packet::MIN_INITIAL_PACKET_SIZE,
     tracking::DEFAULT_REMOTE_ACK_DELAY,
     version::{self, Version},
@@ -233,7 +233,7 @@ impl TransportParameter {
 
         // Connection ID (non-zero length)
         let cid = ConnectionId::from(d.decode_vec(1).ok_or(Error::NoMoreData)?);
-        if cid.is_empty() || cid.len() > MAX_CONNECTION_ID_LEN {
+        if cid.is_empty() || cid.len() > ConnectionId::MAX_LEN {
             return Err(Error::TransportParameter);
         }
 

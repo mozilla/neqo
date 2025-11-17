@@ -21,7 +21,6 @@ use smallvec::{smallvec, SmallVec};
 
 use crate::{frame::FrameType, packet, recovery, stats::FrameStats, Error, Res};
 
-pub const MAX_CONNECTION_ID_LEN: usize = 20;
 pub const LOCAL_ACTIVE_CID_LIMIT: usize = 8;
 pub const CONNECTION_ID_SEQNO_INITIAL: u64 = 0;
 pub const CONNECTION_ID_SEQNO_PREFERRED: u64 = 1;
@@ -32,15 +31,17 @@ const CONNECTION_ID_SEQNO_EMPTY: u64 = u64::MAX - 1;
 
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
 pub struct ConnectionId {
-    cid: SmallVec<[u8; MAX_CONNECTION_ID_LEN]>,
+    cid: SmallVec<[u8; Self::MAX_LEN]>,
 }
 
 impl ConnectionId {
+    pub const MAX_LEN: usize = 20;
+
     /// # Panics
-    /// When `len` is larger than `MAX_CONNECTION_ID_LEN`.
+    /// When `len` is larger than `ConnectionId::MAX_LEN`.
     #[must_use]
     pub fn generate(len: usize) -> Self {
-        assert!(matches!(len, 0..=MAX_CONNECTION_ID_LEN));
+        assert!(matches!(len, 0..=Self::MAX_LEN));
         let mut cid = smallvec![0; len];
         randomize(&mut cid);
         Self { cid }
@@ -73,8 +74,8 @@ impl Borrow<[u8]> for ConnectionId {
     }
 }
 
-impl From<SmallVec<[u8; MAX_CONNECTION_ID_LEN]>> for ConnectionId {
-    fn from(cid: SmallVec<[u8; MAX_CONNECTION_ID_LEN]>) -> Self {
+impl From<SmallVec<[u8; Self::MAX_LEN]>> for ConnectionId {
+    fn from(cid: SmallVec<[u8; Self::MAX_LEN]>) -> Self {
         Self { cid }
     }
 }
@@ -617,7 +618,7 @@ impl ConnectionIdManager {
 mod tests {
     use test_fixture::fixture_init;
 
-    use crate::{cid::MAX_CONNECTION_ID_LEN, ConnectionId};
+    use crate::ConnectionId;
 
     #[test]
     fn generate_initial_cid() {
@@ -625,7 +626,7 @@ mod tests {
         for _ in 0..100 {
             let cid = ConnectionId::generate_initial();
             assert!(
-                matches!(cid.len(), 8..=MAX_CONNECTION_ID_LEN),
+                matches!(cid.len(), 8..=ConnectionId::MAX_LEN),
                 "connection ID length {cid:?}",
             );
         }

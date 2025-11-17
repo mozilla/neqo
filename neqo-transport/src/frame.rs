@@ -12,10 +12,9 @@ use neqo_common::{qtrace, Decoder, Encoder, MAX_VARINT};
 use strum::FromRepr;
 
 use crate::{
-    cid::MAX_CONNECTION_ID_LEN,
     ecn, packet,
     stream_id::{StreamId, StreamType},
-    AppError, Error, Res, TransportError,
+    AppError, ConnectionId, Error, Res, TransportError,
 };
 
 #[repr(u64)]
@@ -608,7 +607,7 @@ impl<'a> Frame<'a> {
                 let sequence_number = dv(dec)?;
                 let retire_prior = dv(dec)?;
                 let connection_id = d(dec.decode_vec(1))?;
-                if connection_id.len() > MAX_CONNECTION_ID_LEN {
+                if connection_id.len() > ConnectionId::MAX_LEN {
                     return Err(Error::FrameEncoding);
                 }
                 let srt = d(dec.decode(16))?;
@@ -691,10 +690,9 @@ mod tests {
     use neqo_common::{Decoder, Encoder};
 
     use crate::{
-        cid::MAX_CONNECTION_ID_LEN,
         ecn::Count,
         frame::{AckRange, Frame, FrameType},
-        CloseError, Error, StreamId, StreamType,
+        CloseError, ConnectionId, Error, StreamId, StreamType,
     };
 
     fn just_dec(f: &Frame, s: &str) {
@@ -915,7 +913,7 @@ mod tests {
     #[test]
     fn too_large_new_connection_id() {
         let mut enc = Encoder::from_hex("18523400"); // up to the CID
-        enc.encode_vvec(&[0x0c; MAX_CONNECTION_ID_LEN + 10]);
+        enc.encode_vvec(&[0x0c; ConnectionId::MAX_LEN + 10]);
         enc.encode(&[0x11; 16][..]);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
