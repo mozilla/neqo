@@ -612,8 +612,7 @@ impl<'a> Frame<'a> {
                 if connection_id.len() > MAX_CONNECTION_ID_LEN {
                     return Err(Error::FrameEncoding);
                 }
-                let srt = d(dec.decode(Srt::LEN))?;
-                let stateless_reset_token = Srt::try_from(srt)?;
+                let stateless_reset_token = Srt::try_from(dec)?;
 
                 Ok(Self::NewConnectionId {
                     sequence_number,

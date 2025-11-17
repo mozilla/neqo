@@ -239,8 +239,7 @@ impl TransportParameter {
         }
 
         // Stateless reset token
-        let srtbuf = d.decode(Srt::LEN).ok_or(Error::NoMoreData)?;
-        let srt = Srt::try_from(srtbuf)?;
+        let srt = Srt::try_from(d).map_err(|_| Error::TransportParameter)?;
 
         Ok(Self::PreferredAddress { v4, v6, cid, srt })
     }

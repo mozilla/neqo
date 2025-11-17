@@ -6,6 +6,7 @@
 
 //! Stateless Reset Token implementation.
 
+use neqo_common::Decoder;
 use neqo_crypto::random;
 
 use crate::Error;
@@ -54,12 +55,17 @@ impl TryFrom<&[u8]> for Token {
     type Error = Error;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if value.len() != Self::LEN {
-            return Err(Error::TransportParameter);
-        }
-        let mut token = [0u8; Self::LEN];
-        token.copy_from_slice(value);
-        Ok(Self(token))
+        Ok(Self(value.try_into()?))
+    }
+}
+
+impl TryFrom<&mut Decoder<'_>> for Token {
+    type Error = Error;
+
+    fn try_from(d: &mut Decoder<'_>) -> Result<Self, Self::Error> {
+        Ok(Self(
+            d.decode(Self::LEN).ok_or(Error::Internal)?.try_into()?,
+        ))
     }
 }
 
