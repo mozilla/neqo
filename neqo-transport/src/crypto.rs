@@ -667,12 +667,7 @@ impl CryptoDxState {
         self.used_pn.end
     }
 
-    pub fn encrypt<'a>(
-        &mut self,
-        pn: packet::Number,
-        hdr: Range<usize>,
-        data: &'a mut [u8],
-    ) -> Res<&'a mut [u8]> {
+    pub fn encrypt(&mut self, pn: packet::Number, hdr: Range<usize>, data: &mut [u8]) -> Res<()> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
         qtrace!(
             "[{self}] encrypt_in_place pn={pn} hdr={} body={}",
@@ -695,12 +690,12 @@ impl CryptoDxState {
         let (prev, data) = data.split_at_mut(hdr.end);
         // `prev` may have already-encrypted packets this one is being coalesced with.
         // Use only the actual current header for AAD.
-        let data = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
+        self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
 
-        qtrace!("[{self}] encrypt ct={}", hex(&data));
+        qtrace!("[{self}] encrypt ct={}", hex(data));
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
-        Ok(data)
+        Ok(())
     }
 
     #[must_use]
@@ -708,12 +703,7 @@ impl CryptoDxState {
         self.aead.expansion()
     }
 
-    pub fn decrypt<'a>(
-        &mut self,
-        pn: packet::Number,
-        hdr: Range<usize>,
-        data: &'a mut [u8],
-    ) -> Res<&'a mut [u8]> {
+    pub fn decrypt(&mut self, pn: packet::Number, hdr: Range<usize>, data: &mut [u8]) -> Res<()> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
         qtrace!(
             "[{self}] decrypt_in_place pn={pn} hdr={} body={}",
@@ -722,9 +712,9 @@ impl CryptoDxState {
         );
         self.invoked()?;
         let (hdr, data) = data.split_at_mut(hdr.end);
-        let data = self.aead.decrypt_in_place(pn, hdr, data)?;
+        self.aead.decrypt_in_place(pn, hdr, data)?;
         self.used(pn)?;
-        Ok(data)
+        Ok(())
     }
 
     #[cfg(not(feature = "disable-encryption"))]
