@@ -703,7 +703,7 @@ impl CryptoDxState {
         self.aead.expansion()
     }
 
-    pub fn decrypt(&mut self, pn: packet::Number, hdr: Range<usize>, data: &mut [u8]) -> Res<()> {
+    pub fn decrypt(&mut self, pn: packet::Number, hdr: &Range<usize>, data: &mut [u8]) -> Res<()> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
         qtrace!(
             "[{self}] decrypt_in_place pn={pn} hdr={} body={}",

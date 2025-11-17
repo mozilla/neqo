@@ -498,9 +498,8 @@ impl<B: Buffer> Builder<B> {
 
         // Calculate the mask.
         crypto.encrypt(self.pn, self.header.clone(), self.encoder.as_mut())?;
-        let offset = SAMPLE_OFFSET - self.offsets.pn.len();
         // `decode()` already checked that `decoder.remaining() >= SAMPLE_OFFSET + SAMPLE_SIZE`.
-        let sample_start = self.header.end + offset;
+        let sample_start = self.header.end + SAMPLE_OFFSET - self.offsets.pn.len();
         let sample = self.encoder.as_ref()[sample_start..sample_start + SAMPLE_SIZE]
             .try_into()
             .map_err(|_| Error::Internal)?;
@@ -889,7 +888,7 @@ impl<'a> Public<'a> {
                 return Err(Error::Decrypt);
             };
             let version = rx.version(); // Version fixup; see above.
-            rx.decrypt(pn, header, self.data)?;
+            rx.decrypt(pn, &header, self.data)?;
             let payload_len = self.data.len() - header.end - rx.expansion();
             let data = &self.data[header.end..header.end + payload_len];
             // If this is the first packet ever successfully decrypted
