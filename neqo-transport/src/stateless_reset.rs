@@ -10,29 +10,29 @@ use neqo_crypto::random;
 
 use crate::Error;
 
-pub const TOKEN_LEN: usize = 16;
-
 /// A stateless reset token is a 16-byte value that is used to identify
 /// a stateless reset packet.
 #[derive(Clone, Debug, Default, Eq)]
-pub struct Token([u8; TOKEN_LEN]);
+pub struct Token([u8; Self::LEN]);
 
 impl Token {
+    pub const LEN: usize = 16;
+
     /// Create a new stateless reset token from a byte array.
     #[must_use]
-    pub const fn new(token: [u8; TOKEN_LEN]) -> Self {
+    pub const fn new(token: [u8; Self::LEN]) -> Self {
         Self(token)
     }
 
     /// Generate a random stateless reset token.
     #[must_use]
     pub fn random() -> Self {
-        Self(random::<TOKEN_LEN>())
+        Self(random::<{ Self::LEN }>())
     }
 
     /// Get the token as a byte array.
     #[must_use]
-    pub const fn as_bytes(&self) -> &[u8; TOKEN_LEN] {
+    pub const fn as_bytes(&self) -> &[u8; Self::LEN] {
         &self.0
     }
 }
@@ -54,10 +54,10 @@ impl TryFrom<&[u8]> for Token {
     type Error = Error;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if value.len() != TOKEN_LEN {
+        if value.len() != Self::LEN {
             return Err(Error::TransportParameter);
         }
-        let mut token = [0u8; TOKEN_LEN];
+        let mut token = [0u8; Self::LEN];
         token.copy_from_slice(value);
         Ok(Self(token))
     }
@@ -75,7 +75,7 @@ mod tests {
 
     #[test]
     fn new_token() {
-        let bytes = [1u8; TOKEN_LEN];
+        let bytes = [1u8; Token::LEN];
         let token = Token::new(bytes);
         assert_eq!(token.as_bytes(), &bytes);
     }
@@ -91,7 +91,7 @@ mod tests {
 
     #[test]
     fn eq_same() {
-        let bytes = [42u8; TOKEN_LEN];
+        let bytes = [42u8; Token::LEN];
         let token1 = Token::new(bytes);
         let token2 = Token::new(bytes);
         assert_eq!(token1, token2);
@@ -99,14 +99,14 @@ mod tests {
 
     #[test]
     fn eq_different() {
-        let token1 = Token::new([1u8; TOKEN_LEN]);
-        let token2 = Token::new([2u8; TOKEN_LEN]);
+        let token1 = Token::new([1u8; Token::LEN]);
+        let token2 = Token::new([2u8; Token::LEN]);
         assert_ne!(token1, token2);
     }
 
     #[test]
     fn from_slice_valid() {
-        let bytes = [3u8; TOKEN_LEN];
+        let bytes = [3u8; Token::LEN];
         let token = Token::try_from(&bytes[..]).unwrap();
         assert_eq!(token.as_bytes(), &bytes);
     }

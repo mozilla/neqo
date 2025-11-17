@@ -290,12 +290,7 @@ impl ConnectionIdEntry<Srt> {
         builder: &mut packet::Builder<B>,
         stats: &mut FrameStats,
     ) -> bool {
-        let len = 1
-            + Encoder::varint_len(self.seqno)
-            + 1
-            + 1
-            + self.cid.len()
-            + crate::stateless_reset::TOKEN_LEN;
+        let len = 1 + Encoder::varint_len(self.seqno) + 1 + 1 + self.cid.len() + Srt::LEN;
         if builder.remaining() < len {
             return false;
         }

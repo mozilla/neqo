@@ -612,7 +612,7 @@ impl<'a> Frame<'a> {
                 if connection_id.len() > MAX_CONNECTION_ID_LEN {
                     return Err(Error::FrameEncoding);
                 }
-                let srt = d(dec.decode(crate::stateless_reset::TOKEN_LEN))?;
+                let srt = d(dec.decode(Srt::LEN))?;
                 let stateless_reset_token = Srt::try_from(srt)?;
 
                 Ok(Self::NewConnectionId {
@@ -907,7 +907,7 @@ mod tests {
             sequence_number: 0x1234,
             retire_prior: 0,
             connection_id: &[0x01, 0x02],
-            stateless_reset_token: Srt::new([9; crate::stateless_reset::TOKEN_LEN]),
+            stateless_reset_token: Srt::new([9; Srt::LEN]),
         };
 
         just_dec(&f, "1852340002010209090909090909090909090909090909");

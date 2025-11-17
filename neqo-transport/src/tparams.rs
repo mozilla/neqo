@@ -239,9 +239,7 @@ impl TransportParameter {
         }
 
         // Stateless reset token
-        let srtbuf = d
-            .decode(crate::stateless_reset::TOKEN_LEN)
-            .ok_or(Error::NoMoreData)?;
+        let srtbuf = d.decode(Srt::LEN).ok_or(Error::NoMoreData)?;
         let srt = Srt::try_from(srtbuf)?;
 
         Ok(Self::PreferredAddress { v4, v6, cid, srt })
@@ -945,7 +943,7 @@ mod tests {
                 0,
             )),
             cid: ConnectionId::from(&[1, 2, 3, 4, 5]),
-            srt: Srt::new([3; crate::stateless_reset::TOKEN_LEN]),
+            srt: Srt::new([3; Srt::LEN]),
         }
     }
 
