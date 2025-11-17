@@ -14,6 +14,7 @@ use strum::FromRepr;
 use crate::{
     cid::MAX_CONNECTION_ID_LEN,
     ecn, packet,
+    stateless_reset::Token as Srt,
     stream_id::{StreamId, StreamType},
     AppError, Error, Res, TransportError,
 };
@@ -209,7 +210,7 @@ pub enum Frame<'a> {
         sequence_number: u64,
         retire_prior: u64,
         connection_id: &'a [u8],
-        stateless_reset_token: &'a [u8; 16],
+        stateless_reset_token: Srt,
     },
     RetireConnectionId {
         sequence_number: u64,
@@ -611,8 +612,7 @@ impl<'a> Frame<'a> {
                 if connection_id.len() > MAX_CONNECTION_ID_LEN {
                     return Err(Error::FrameEncoding);
                 }
-                let srt = d(dec.decode(16))?;
-                let stateless_reset_token = <&[_; 16]>::try_from(srt)?;
+                let stateless_reset_token = Srt::try_from(dec)?;
 
                 Ok(Self::NewConnectionId {
                     sequence_number,
@@ -694,7 +694,7 @@ mod tests {
         cid::MAX_CONNECTION_ID_LEN,
         ecn::Count,
         frame::{AckRange, Frame, FrameType},
-        CloseError, Error, StreamId, StreamType,
+        CloseError, Error, StreamId, StreamType, Token as Srt,
     };
 
     fn just_dec(f: &Frame, s: &str) {
@@ -906,7 +906,7 @@ mod tests {
             sequence_number: 0x1234,
             retire_prior: 0,
             connection_id: &[0x01, 0x02],
-            stateless_reset_token: &[9; 16],
+            stateless_reset_token: Srt::new([9; Srt::LEN]),
         };
 
         just_dec(&f, "1852340002010209090909090909090909090909090909");
