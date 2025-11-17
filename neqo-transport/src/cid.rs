@@ -270,7 +270,7 @@ impl ConnectionIdEntry<Srt> {
     /// Determine whether this is a valid stateless reset.
     pub fn is_stateless_reset(&self, token: &Srt) -> bool {
         // A sequence number of 2^62 or more has no corresponding stateless reset token.
-        (self.seqno < (1 << 62)) && &self.srt == token
+        (self.seqno < (1 << 62)) && self.srt.eq(token)
     }
 
     /// Return true if the two contain any equal parts.
