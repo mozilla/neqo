@@ -11,17 +11,17 @@ use crate::{frames::reader::FrameDecoder, Error, Res};
 
 pub type WebTransportFrameType = u64;
 
-const WT_FRAME_CLOSE_SESSION: WebTransportFrameType = 0x2843;
-const WT_FRAME_CLOSE_MAX_MESSAGE_SIZE: u64 = 1024;
-
 #[derive(PartialEq, Eq, Debug)]
 pub enum WebTransportFrame {
     CloseSession { error: u32, message: String },
 }
 
 impl WebTransportFrame {
+    const CLOSE_SESSION: WebTransportFrameType = 0x2843;
+    const CLOSE_MAX_MESSAGE_SIZE: u64 = 1024;
+
     pub fn encode(&self, enc: &mut Encoder) {
-        enc.encode_varint(WT_FRAME_CLOSE_SESSION);
+        enc.encode_varint(Self::CLOSE_SESSION);
         let Self::CloseSession { error, message } = &self;
         enc.encode_varint(4 + message.len() as u64);
         enc.encode_uint(4, *error);
@@ -33,8 +33,8 @@ impl FrameDecoder<Self> for WebTransportFrame {
     fn decode(frame_type: HFrameType, frame_len: u64, data: Option<&[u8]>) -> Res<Option<Self>> {
         if let Some(payload) = data {
             let mut dec = Decoder::from(payload);
-            if frame_type == HFrameType(WT_FRAME_CLOSE_SESSION) {
-                if frame_len > WT_FRAME_CLOSE_MAX_MESSAGE_SIZE + 4 {
+            if frame_type == HFrameType(Self::CLOSE_SESSION) {
+                if frame_len > Self::CLOSE_MAX_MESSAGE_SIZE + 4 {
                     return Err(Error::HttpMessage);
                 }
                 let error = dec.decode_uint().ok_or(Error::HttpMessage)?;
@@ -51,6 +51,6 @@ impl FrameDecoder<Self> for WebTransportFrame {
     }
 
     fn is_known_type(frame_type: HFrameType) -> bool {
-        frame_type == HFrameType(WT_FRAME_CLOSE_SESSION)
+        frame_type == HFrameType(Self::CLOSE_SESSION)
     }
 }
