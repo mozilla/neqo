@@ -603,7 +603,7 @@ mod tests {
     use test_fixture::fixture_init;
 
     use crate::{
-        cid::{ConnectionIdEntry, ConnectionId},
+        cid::{ConnectionId, ConnectionIdEntry},
         packet,
         stats::FrameStats,
         ConnectionId, Token as Srt,
