@@ -135,16 +135,20 @@ pub struct DatagramStats {
 }
 
 /// Congestion Control stats
+#[expect(
+    clippy::struct_field_names,
+    reason = "more fields might be added in the future that won't be about congestion events"
+)]
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct CongestionControlStats {
     /// Total number of congestion events caused by packet loss.
-    pub congestion_events_due_to_loss: usize,
+    pub congestion_events_loss: usize,
     /// Total number of congestion events caused by ECN-CE marked packets.
-    pub congestion_events_due_to_ecn: usize,
+    pub congestion_events_ecn: usize,
     /// Number of spurious congestion events, where congestion was incorrectly inferred due to
     /// packets initially considered lost but subsequently acknowledged. This indicates
     /// instances where the congestion control algorithm overreacted to perceived losses.
-    pub spurious_congestion_events: usize,
+    pub congestion_events_spurious: usize,
 }
 /// ECN counts by QUIC [`packet::Type`].
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -385,8 +389,10 @@ impl Debug for Stats {
         )?;
         writeln!(
             f,
-            "  cc: loss_congestion_events {} ecn_congestion_events {} spurious_congestion_events {}",
-            self.cc.congestion_events_due_to_loss, self.cc.congestion_events_due_to_ecn, self.cc.spurious_congestion_events
+            "  cc: ce_loss {} ce_ecn {} ce_spurious {}",
+            self.cc.congestion_events_loss,
+            self.cc.congestion_events_ecn,
+            self.cc.congestion_events_spurious
         )?;
         writeln!(
             f,

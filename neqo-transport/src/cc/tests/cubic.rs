@@ -72,7 +72,11 @@ fn ack_packet(
     cc.on_packets_acked(&[acked], &RttEstimate::new(RTT), now, cc_stats);
 }
 
-fn packet_lost(cc: &mut ClassicCongestionControl<Cubic>, pn: u64) {
+fn packet_lost(
+    cc: &mut ClassicCongestionControl<Cubic>,
+    pn: u64,
+    cc_stats: &mut CongestionControlStats,
+) {
     const PTO: Duration = Duration::from_millis(120);
     let p_lost = sent::Packet::new(
         packet::Type::Short,
@@ -82,8 +86,7 @@ fn packet_lost(cc: &mut ClassicCongestionControl<Cubic>, pn: u64) {
         recovery::Tokens::new(),
         cc.max_datagram_size(),
     );
-    let mut cc_stats = CongestionControlStats::default();
-    cc.on_packets_lost(None, None, PTO, &[p_lost], now(), &mut cc_stats);
+    cc.on_packets_lost(None, None, PTO, &[p_lost], now(), cc_stats);
 }
 
 fn expected_tcp_acks(cwnd_rtt_start: usize, mtu: usize) -> u64 {
@@ -274,7 +277,7 @@ fn congestion_event_slow_start() {
     );
 
     // Trigger a congestion_event in slow start phase
-    packet_lost(&mut cubic, 1);
+    packet_lost(&mut cubic, 1, &mut cc_stats);
 
     // w_max is equal to cwnd before decrease.
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
@@ -287,6 +290,7 @@ fn congestion_event_slow_start() {
         cubic.cwnd(),
         cwnd_after_loss_slow_start(cubic.cwnd_initial(), cubic.max_datagram_size())
     );
+    assert_eq!(cc_stats.congestion_events_loss, 1);
 }
 
 #[test]
@@ -309,12 +313,13 @@ fn congestion_event_congestion_avoidance() {
 
     assert_eq!(cubic.cwnd(), cubic.cwnd_initial());
 
-    // Trigger a congestion_event in slow start phase
-    packet_lost(&mut cubic, 1);
+    // Trigger a congestion_event in congestion avoidance phase.
+    packet_lost(&mut cubic, 1, &mut cc_stats);
 
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
     assert_within(cubic.cc_algorithm().w_max(), cwnd_initial_f64, f64::EPSILON);
     assert_eq!(cubic.cwnd(), cwnd_after_loss(cubic.cwnd_initial()));
+    assert_eq!(cc_stats.congestion_events_loss, 1);
 }
 
 #[test]
@@ -340,7 +345,7 @@ fn congestion_event_congestion_avoidance_fast_convergence() {
     assert_eq!(cubic.cwnd(), cubic.cwnd_initial());
 
     // Trigger a congestion_event.
-    packet_lost(&mut cubic, 1);
+    packet_lost(&mut cubic, 1, &mut cc_stats);
 
     assert_within(
         cubic.cc_algorithm().w_max(),
@@ -348,6 +353,7 @@ fn congestion_event_congestion_avoidance_fast_convergence() {
         f64::EPSILON,
     );
     assert_eq!(cubic.cwnd(), cwnd_after_loss(cubic.cwnd_initial()));
+    assert_eq!(cc_stats.congestion_events_loss, 1);
 }
 
 #[test]

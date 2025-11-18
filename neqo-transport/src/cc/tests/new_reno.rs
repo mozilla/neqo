@@ -6,6 +6,11 @@
 
 // Congestion control
 
+#![expect(
+    clippy::too_many_lines,
+    reason = "A lot of multiline function calls due to formatting"
+)]
+
 use std::time::Duration;
 
 use test_fixture::now;
@@ -32,10 +37,6 @@ fn cwnd_is_halved(cc: &ClassicCongestionControl<NewReno>) {
     assert_eq!(cc.ssthresh(), cc.cwnd_initial() / 2);
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "A lot of multiline function calls due to formatting"
-)]
 #[test]
 fn issue_876() {
     let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
