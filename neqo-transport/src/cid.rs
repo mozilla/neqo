@@ -24,14 +24,6 @@ use crate::{
     Res,
 };
 
-pub const LOCAL_ACTIVE_CID_LIMIT: usize = 8;
-pub const CONNECTION_ID_SEQNO_INITIAL: u64 = 0;
-pub const CONNECTION_ID_SEQNO_PREFERRED: u64 = 1;
-/// A special value.  See `ConnectionIdManager::add_odcid`.
-const CONNECTION_ID_SEQNO_ODCID: u64 = u64::MAX;
-/// A special value.  See `ConnectionIdEntry::empty_remote`.
-const CONNECTION_ID_SEQNO_EMPTY: u64 = u64::MAX - 1;
-
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
 pub struct ConnectionId {
     cid: SmallVec<[u8; Self::MAX_LEN]>,
@@ -255,14 +247,14 @@ pub struct ConnectionIdEntry<SRT: Clone + PartialEq> {
 impl ConnectionIdEntry<Srt> {
     /// Create the first entry, which won't have a stateless reset token.
     pub fn initial_remote(cid: ConnectionId) -> Self {
-        Self::new(CONNECTION_ID_SEQNO_INITIAL, cid, Srt::random())
+        Self::new(ConnectionIdEntry::SEQNO_INITIAL, cid, Srt::random())
     }
 
     /// Create an empty for when the peer chooses empty connection IDs.
     /// This uses a special sequence number just because it can.
     pub fn empty_remote() -> Self {
         Self::new(
-            CONNECTION_ID_SEQNO_EMPTY,
+            ConnectionIdManager::SEQNO_EMPTY,
             ConnectionId::from(&[]),
             Srt::random(),
         )
@@ -306,11 +298,13 @@ impl ConnectionIdEntry<Srt> {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.seqno == CONNECTION_ID_SEQNO_EMPTY || self.cid.is_empty()
+        self.seqno == ConnectionIdManager::SEQNO_EMPTY || self.cid.is_empty()
     }
 }
 
 impl ConnectionIdEntry<()> {
+    const SEQNO_INITIAL: u64 = 0;
+
     /// Create an initial entry.
     pub const fn initial_local(cid: ConnectionId) -> Self {
         Self::new(0, cid, ())
@@ -324,13 +318,13 @@ impl<SRT: Clone + PartialEq> ConnectionIdEntry<SRT> {
 
     /// Update the stateless reset token.  This panics if the sequence number is non-zero.
     pub fn set_stateless_reset_token(&mut self, srt: SRT) {
-        assert_eq!(self.seqno, CONNECTION_ID_SEQNO_INITIAL);
+        assert_eq!(self.seqno, ConnectionIdEntry::SEQNO_INITIAL);
         self.srt = srt;
     }
 
     /// Replace the connection ID.  This panics if the sequence number is non-zero.
     pub fn update_cid(&mut self, cid: ConnectionId) {
-        assert_eq!(self.seqno, CONNECTION_ID_SEQNO_INITIAL);
+        assert_eq!(self.seqno, ConnectionIdEntry::SEQNO_INITIAL);
         self.cid = cid;
     }
 
@@ -440,7 +434,7 @@ pub struct ConnectionIdManager {
     /// the client.
     connection_ids: ConnectionIdStore<()>,
     /// The maximum number of connection IDs this will accept.  This is at least 2 and won't
-    /// be more than `LOCAL_ACTIVE_CID_LIMIT`.
+    /// be more than `Self::ACTIVE_LIMIT`.
     limit: usize,
     /// The next sequence number that will be used for sending `NEW_CONNECTION_ID` frames.
     next_seqno: u64,
@@ -449,6 +443,16 @@ pub struct ConnectionIdManager {
 }
 
 impl ConnectionIdManager {
+    pub const ACTIVE_LIMIT: usize = 8;
+
+    /// A special value.  See `ConnectionIdManager::add_odcid`.
+    const SEQNO_ODCID: u64 = u64::MAX;
+
+    /// A special value.  See `ConnectionIdEntry::empty_remote`.
+    const SEQNO_EMPTY: u64 = u64::MAX - 1;
+
+    pub const SEQNO_PREFERRED: u64 = 1;
+
     pub fn new(generator: Rc<RefCell<dyn ConnectionIdGenerator>>, initial: ConnectionId) -> Self {
         let mut connection_ids = ConnectionIdStore::default();
         connection_ids.add_local(ConnectionIdEntry::initial_local(initial));
@@ -485,7 +489,7 @@ impl ConnectionIdManager {
         }
         if let Some(cid) = self.generator.borrow_mut().generate_cid() {
             assert_ne!(cid.len(), 0);
-            debug_assert_eq!(self.next_seqno, CONNECTION_ID_SEQNO_PREFERRED);
+            debug_assert_eq!(self.next_seqno, Self::SEQNO_PREFERRED);
             self.connection_ids
                 .add_local(ConnectionIdEntry::new(self.next_seqno, cid.clone(), ()));
             self.next_seqno += 1;
@@ -502,7 +506,7 @@ impl ConnectionIdManager {
     pub fn retire(&mut self, seqno: u64) {
         // TODO(mt) - consider keeping connection IDs around for a short while.
 
-        let empty_cid = seqno == CONNECTION_ID_SEQNO_EMPTY
+        let empty_cid = seqno == Self::SEQNO_EMPTY
             || self
                 .connection_ids
                 .cids
@@ -521,20 +525,20 @@ impl ConnectionIdManager {
     /// Note that this is only done *after* an Initial packet from the client is
     /// successfully processed.
     pub fn add_odcid(&mut self, cid: ConnectionId) {
-        let entry = ConnectionIdEntry::new(CONNECTION_ID_SEQNO_ODCID, cid, ());
+        let entry = ConnectionIdEntry::new(Self::SEQNO_ODCID, cid, ());
         self.connection_ids.add_local(entry);
     }
 
     /// Stop treating the original destination connection ID as valid.
     pub fn remove_odcid(&mut self) {
-        self.connection_ids.retire(CONNECTION_ID_SEQNO_ODCID);
+        self.connection_ids.retire(Self::SEQNO_ODCID);
     }
 
     pub fn set_limit(&mut self, limit: u64) {
         debug_assert!(limit >= 2);
         self.limit = min(
-            LOCAL_ACTIVE_CID_LIMIT,
-            usize::try_from(limit).unwrap_or(LOCAL_ACTIVE_CID_LIMIT),
+            Self::ACTIVE_LIMIT,
+            usize::try_from(limit).unwrap_or(Self::ACTIVE_LIMIT),
         );
     }
 
