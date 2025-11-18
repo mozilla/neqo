@@ -697,7 +697,7 @@ impl CryptoDxState {
         // Use only the actual current header for AAD.
         let len = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
 
-        qtrace!("[{self}] encrypt ct={}", hex(&data));
+        qtrace!("[{self}] encrypt ct={}", hex(&data[..len]));
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
         Ok(len)
