@@ -990,8 +990,7 @@ mod tests {
     use super::RecvStream;
     use crate::{
         fc::{ReceiverFlowControl, WINDOW_UPDATE_FRACTION},
-        packet::{self, PACKET_LIMIT},
-        recovery,
+        packet, recovery,
         recv_stream::RxStreamOrderer,
         stats::FrameStats,
         ConnectionEvents, Error, StreamId, INITIAL_LOCAL_MAX_STREAM_DATA,
@@ -1462,7 +1461,7 @@ mod tests {
 
         // consume it
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
         s.write_frame(
             &mut builder,
@@ -1583,7 +1582,7 @@ mod tests {
         assert!(session_fc.borrow().frame_needed());
         // consume it
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
         session_fc.borrow_mut().write_frames(
             &mut builder,
@@ -1609,7 +1608,7 @@ mod tests {
         assert!(session_fc.borrow().frame_needed());
         // consume it
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
         session_fc.borrow_mut().write_frames(
             &mut builder,
@@ -1918,7 +1917,7 @@ mod tests {
 
         // Write the fc update frame
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         fc.borrow_mut().write_frames(
