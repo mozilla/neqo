@@ -25,6 +25,7 @@ use strum::FromRepr;
 use crate::{
     cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED},
     packet::MIN_INITIAL_PACKET_SIZE,
+    stateless_reset::Token as Srt,
     tracking::DEFAULT_REMOTE_ACK_DELAY,
     version::{self, Version},
     Error, Res,
@@ -146,7 +147,7 @@ pub enum TransportParameter {
         v4: Option<SocketAddrV4>,
         v6: Option<SocketAddrV6>,
         cid: ConnectionId,
-        srt: [u8; 16],
+        srt: Srt,
     },
     Versions {
         current: version::Wire,
@@ -185,7 +186,7 @@ impl TransportParameter {
                         enc_inner.encode([0; 18]);
                     }
                     enc_inner.encode_vec(1, &cid[..]);
-                    enc_inner.encode(&srt[..]);
+                    enc_inner.encode(srt);
                 });
             }
             Self::Versions { current, other } => {
@@ -238,8 +239,7 @@ impl TransportParameter {
         }
 
         // Stateless reset token
-        let srtbuf = d.decode(16).ok_or(Error::NoMoreData)?;
-        let srt = <[u8; 16]>::try_from(srtbuf)?;
+        let srt = Srt::try_from(d).map_err(|_| Error::TransportParameter)?;
 
         Ok(Self::PreferredAddress { v4, v6, cid, srt })
     }
@@ -586,13 +586,13 @@ impl TransportParameters {
 
     /// Get the preferred address in a usable form.
     #[must_use]
-    pub fn get_preferred_address(&self) -> Option<(PreferredAddress, ConnectionIdEntry<[u8; 16]>)> {
+    pub fn get_preferred_address(&self) -> Option<(PreferredAddress, ConnectionIdEntry<Srt>)> {
         if let Some(TransportParameter::PreferredAddress { v4, v6, cid, srt }) =
             &self.params[TransportParameterId::PreferredAddress]
         {
             Some((
                 PreferredAddress::new(*v4, *v6),
-                ConnectionIdEntry::new(CONNECTION_ID_SEQNO_PREFERRED, cid.clone(), *srt),
+                ConnectionIdEntry::new(CONNECTION_ID_SEQNO_PREFERRED, cid.clone(), srt.clone()),
             ))
         } else {
             None
@@ -891,6 +891,7 @@ mod tests {
 
     use super::PreferredAddress;
     use crate::{
+        stateless_reset::Token as Srt,
         tparams::{TransportParameter, TransportParameterId, TransportParameters},
         ConnectionId, Error, Version,
     };
@@ -941,7 +942,7 @@ mod tests {
                 0,
             )),
             cid: ConnectionId::from(&[1, 2, 3, 4, 5]),
-            srt: [3; 16],
+            srt: Srt::new([3; Srt::LEN]),
         }
     }
 
