@@ -113,8 +113,9 @@ pub struct ClassicCongestionControl<T> {
     acked_bytes: usize,
     /// Packets that have supposedly been lost. These are used for spurious congestion event
     /// detection. Gets drained when the same packets are later acked and regularly purged from too
-    /// old packets in [`Self::cleanup_maybe_lost_packets`].
-    maybe_lost_packets: HashMap<packet::Number, MaybeLostPacket>,
+    /// old packets in [`Self::cleanup_maybe_lost_packets`]. Needs a tuple of `(packet::Number,
+    /// packet::Type)` to identify packets across packet number spaces.
+    maybe_lost_packets: HashMap<(packet::Number, packet::Type), MaybeLostPacket>,
     ssthresh: usize,
     /// Packet number of the first packet that was sent after a congestion event. When this one is
     /// acked we will exit [`State::Recovery`] and enter [`State::CongestionAvoidance`].
@@ -194,10 +195,9 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         let mut is_app_limited = true;
         let mut new_acked = 0;
 
-        // Supplying `rtt_est.pto(true)` here is best effort not to have to track
+        // Supplying `true` for `rtt_est.pto(true)` here is best effort not to have to track
         // `recovery::Loss::confirmed()` all the way down to the congestion controller. Having too
-        // big a PTO does no harm here and usually the connection should be confirmed at this point
-        // anyway.
+        // big a PTO does no harm here.
         self.cleanup_maybe_lost_packets(now, rtt_est.pto(true));
 
         self.detect_spurious_congestion_event(acked_pkts, cc_stats);
@@ -318,12 +318,13 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                 // were sent before the rebinding.
                 self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
             }
-            self.maybe_lost_packets.insert(
-                pkt.pn(),
+            let present = self.maybe_lost_packets.insert(
+                (pkt.pn(), pkt.packet_type()),
                 MaybeLostPacket {
                     time_sent: pkt.time_sent(),
                 },
             );
+            debug_assert!(present.is_none());
         }
 
         qlog::metrics_updated(
@@ -346,7 +347,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
         let congestion = self.on_congestion_event(last_lost_packet, now);
         if congestion {
-            cc_stats.congestion_events_due_to_loss += 1;
+            cc_stats.congestion_events_loss += 1;
         }
         let persistent_congestion = self.detect_persistent_congestion(
             first_rtt_sample_time,
@@ -376,7 +377,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     ) -> bool {
         let cwnd_reduced = self.on_congestion_event(largest_acked_pkt, now);
         if cwnd_reduced {
-            cc_stats.congestion_events_due_to_ecn += 1;
+            cc_stats.congestion_events_ecn += 1;
         }
         cwnd_reduced
     }
@@ -515,7 +516,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         }
     }
 
-    // TODO: Maybe do tracking of lost packets per congestion epoch. Right now if we get a spurious
+    // NOTE: Maybe do tracking of lost packets per congestion epoch. Right now if we get a spurious
     // event and then before the first was recovered get another (or even a real congestion event
     // because of random loss, path change, ...), it will only be detected as spurious once the old
     // and new lost packets are recovered. This means we'd have two spurious events counted as one
@@ -531,12 +532,13 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
         // Removes all newly acked packets that are late acks from `maybe_lost_packets`.
         for acked_packet in acked_packets {
-            self.maybe_lost_packets.remove(&acked_packet.pn());
+            self.maybe_lost_packets
+                .remove(&(acked_packet.pn(), acked_packet.packet_type()));
         }
 
         // If all of them have been removed we detected a spurious congestion event.
         if self.maybe_lost_packets.is_empty() {
-            cc_stats.spurious_congestion_events += 1;
+            cc_stats.congestion_events_spurious += 1;
             // TODO: Implement spurious congestion event handling: <https://github.com/mozilla/neqo/issues/2694>
         }
     }
@@ -1387,24 +1389,13 @@ mod tests {
         cc.on_packet_sent(&p_ce, now);
         cwnd_is_default(&cc);
         assert_eq!(cc.state, State::SlowStart);
-        assert_eq!(cc_stats.congestion_events_due_to_ecn, 0);
+        assert_eq!(cc_stats.congestion_events_ecn, 0);
 
         // Signal congestion (ECN CE) and thus change state to recovery start.
         cc.on_ecn_ce_received(&p_ce, now, &mut cc_stats);
         cwnd_is_halved(&cc);
         assert_eq!(cc.state, State::RecoveryStart);
-        assert_eq!(cc_stats.congestion_events_due_to_ecn, 1);
-    }
-
-    fn make_packet_by_pn(pn: u64, sent_time: Instant) -> sent::Packet {
-        sent::Packet::new(
-            packet::Type::Short,
-            pn,
-            sent_time,
-            true,
-            recovery::Tokens::new(),
-            1000,
-        )
+        assert_eq!(cc_stats.congestion_events_ecn, 1);
     }
 
     /// This tests spurious congestion event detection and stat counting
@@ -1423,16 +1414,16 @@ mod tests {
         let mut now = now();
         let mut cc_stats = CongestionControlStats::default();
 
-        let pkt1 = make_packet_by_pn(1, now);
-        let pkt2 = make_packet_by_pn(2, now);
+        let pkt1 = sent::make_packet(1, now, 1000);
+        let pkt2 = sent::make_packet(2, now, 1000);
 
         cc.on_packet_sent(&pkt1, now);
         cc.on_packet_sent(&pkt2, now);
 
         // Verify initial state
         assert_eq!(cc.state, State::SlowStart);
-        assert_eq!(cc_stats.congestion_events_due_to_loss, 0);
-        assert_eq!(cc_stats.spurious_congestion_events, 0);
+        assert_eq!(cc_stats.congestion_events_loss, 0);
+        assert_eq!(cc_stats.congestion_events_spurious, 0);
 
         now += RTT;
 
@@ -1452,13 +1443,13 @@ mod tests {
 
         // Verify congestion event
         assert_eq!(cc.state, State::RecoveryStart);
-        assert_eq!(cc_stats.congestion_events_due_to_loss, 1);
+        assert_eq!(cc_stats.congestion_events_loss, 1);
 
-        let pkt3 = make_packet_by_pn(3, now);
+        let pkt3 = sent::make_packet(3, now, 1000);
         cc.on_packet_sent(&pkt3, now);
 
         assert_eq!(cc.state, State::Recovery);
-        assert_eq!(cc_stats.congestion_events_due_to_loss, 1);
+        assert_eq!(cc_stats.congestion_events_loss, 1);
 
         cc.on_packets_acked(
             &[pkt3],
@@ -1468,7 +1459,7 @@ mod tests {
         );
 
         assert_eq!(cc.state, State::CongestionAvoidance);
-        assert_eq!(cc_stats.congestion_events_due_to_loss, 1);
+        assert_eq!(cc_stats.congestion_events_loss, 1);
 
         cc.on_packets_acked(
             &[pkt1],
@@ -1478,8 +1469,8 @@ mod tests {
         );
 
         assert_eq!(cc.state, State::CongestionAvoidance);
-        assert_eq!(cc_stats.congestion_events_due_to_loss, 1);
-        assert_eq!(cc_stats.spurious_congestion_events, 0);
+        assert_eq!(cc_stats.congestion_events_loss, 1);
+        assert_eq!(cc_stats.congestion_events_spurious, 0);
 
         cc.on_packets_acked(
             &[pkt2],
@@ -1489,7 +1480,7 @@ mod tests {
         );
 
         assert_eq!(cc.state, State::CongestionAvoidance);
-        assert_eq!(cc_stats.congestion_events_due_to_loss, 1);
-        assert_eq!(cc_stats.spurious_congestion_events, 1);
+        assert_eq!(cc_stats.congestion_events_loss, 1);
+        assert_eq!(cc_stats.congestion_events_spurious, 1);
     }
 }
