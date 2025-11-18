@@ -241,7 +241,7 @@ impl Aead for RealAead {
             )
         }?;
         debug_assert_eq!(usize::try_from(l)?, data.len() - self.expansion());
-        Ok(data.len() - self.expansion())
+        Ok(l.try_into()?)
     }
 }
 
