@@ -117,7 +117,7 @@ impl FromStr for Header {
             return Err(FromStrError::MissingName);
         }
 
-        let value = s[seperator + 1..].trim().as_bytes().to_vec();
+        let value = s[seperator + 1..].trim();
 
         Ok(Self::new(name, value))
     }

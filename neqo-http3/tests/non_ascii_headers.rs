@@ -89,7 +89,7 @@ fn echo_header(request_header_name: &str, response_header_name: &str, test_data:
 }
 
 #[test]
-fn non_ascii_utf8_header_echo() {
+fn extended_ascii_non_utf8_header_echo() {
     // Create a header with binary data
     let test_bytes: Vec<u8> = vec![0xE4]; // "ä" in extended ASCII (ISO-8859-1), invalid UTF-8
     echo_header("x-custom-data", "x-echoed-data", &test_bytes);
