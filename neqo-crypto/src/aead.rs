@@ -55,7 +55,7 @@ pub trait Aead {
     /// # Errors
     ///
     /// Returns `Error` when encryption fails.
-    fn encrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<()>;
+    fn encrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize>;
 
     /// Decrypt ciphertext with associated data.
     ///
@@ -75,7 +75,7 @@ pub trait Aead {
     /// # Errors
     ///
     /// Returns `Error` when decryption or authentication fails.
-    fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<()>;
+    fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize>;
 }
 
 experimental_api!(SSL_MakeAead(
@@ -172,7 +172,7 @@ impl Aead for RealAead {
         Ok(&output[..l.try_into()?])
     }
 
-    fn encrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<()> {
+    fn encrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
         if data.len() < self.expansion() {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
@@ -192,7 +192,7 @@ impl Aead for RealAead {
             )
         }?;
         debug_assert_eq!(usize::try_from(l)?, data.len());
-        Ok(())
+        Ok(data.len())
     }
 
     fn decrypt<'a>(
@@ -222,7 +222,7 @@ impl Aead for RealAead {
         Ok(&output[..l.try_into()?])
     }
 
-    fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<()> {
+    fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
         let mut l: c_uint = 0;
         unsafe {
             // Note that NSS insists upon having extra space available for decryption, so
@@ -241,7 +241,7 @@ impl Aead for RealAead {
             )
         }?;
         debug_assert_eq!(usize::try_from(l)?, data.len() - self.expansion());
-        Ok(())
+        Ok(data.len() - self.expansion())
     }
 }
 

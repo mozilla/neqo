@@ -888,9 +888,9 @@ impl<'a> Public<'a> {
                 return Err(Error::Decrypt);
             };
             let version = rx.version(); // Version fixup; see above.
-            rx.decrypt(pn, &header, self.data)?;
-            let payload_len = self.data.len() - header.end - rx.expansion();
-            let data = &self.data[header.end..header.end + payload_len];
+            let header_end = header.end;
+            let payload_len = rx.decrypt(pn, header, self.data)?;
+            let data = &self.data[header_end..header_end + payload_len];
             // If this is the first packet ever successfully decrypted
             // using `rx`, make sure to initiate a key update.
             if rx.needs_update() {

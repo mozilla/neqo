@@ -63,10 +63,10 @@ impl Aead for AeadNull {
         Ok(&output[..l + self.expansion()])
     }
 
-    fn encrypt_in_place(&self, _count: u64, _aad: &[u8], data: &mut [u8]) -> Res<()> {
+    fn encrypt_in_place(&self, _count: u64, _aad: &[u8], data: &mut [u8]) -> Res<usize> {
         let pos = data.len() - self.expansion();
         data[pos..].copy_from_slice(AEAD_NULL_TAG);
-        Ok(())
+        Ok(data.len())
     }
 
     fn decrypt<'a>(
@@ -82,9 +82,8 @@ impl Aead for AeadNull {
         })
     }
 
-    fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<()> {
-        self.decrypt_check(count, aad, data)?;
-        Ok(())
+    fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
+        self.decrypt_check(count, aad, data)
     }
 }
 
