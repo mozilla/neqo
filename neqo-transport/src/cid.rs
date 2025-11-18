@@ -606,7 +606,7 @@ mod tests {
         cid::{ConnectionId, ConnectionIdEntry},
         packet,
         stats::FrameStats,
-        ConnectionId, Token as Srt,
+        Token as Srt,
     };
 
     #[test]
