@@ -100,7 +100,7 @@ pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
         )
     };
     if res != 0 {
-        return Err(Error::last_os_error());
+        return Err(Error::from_raw_os_error(res));
     }
 
     // Get a list of all interfaces with associated metadata.
@@ -108,7 +108,7 @@ pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
     // GetIpInterfaceTable allocates memory, which MibTablePtr::drop will free.
     let family = if remote.is_ipv4() { AF_INET } else { AF_INET6 };
     if unsafe { GetIpInterfaceTable(family, if_table.mut_ptr_ptr()) } != NO_ERROR {
-        return Err(Error::last_os_error());
+        return Err(Error::from_raw_os_error(res));
     }
     // Make a slice
     let ifaces = unsafe {
