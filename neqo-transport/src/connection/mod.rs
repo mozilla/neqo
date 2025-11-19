@@ -49,6 +49,7 @@ use crate::{
     rtt::{RttEstimate, GRANULARITY},
     saved::SavedDatagrams,
     send_stream::{self, SendStream},
+    stateless_reset::Token as Srt,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
     streams::{SendOrder, Streams},
@@ -282,7 +283,7 @@ pub struct Connection {
     cid_manager: ConnectionIdManager,
     address_validation: AddressValidationInfo,
     /// The connection IDs that were provided by the peer.
-    cids: ConnectionIdStore<[u8; 16]>,
+    cids: ConnectionIdStore<Srt>,
 
     /// The source connection ID that this endpoint uses for the handshake.
     /// Since we need to communicate this to our peer in tparams, setting this
@@ -1340,11 +1341,11 @@ impl Connection {
     fn is_stateless_reset(&self, path: &PathRef, d: &[u8]) -> bool {
         // If the datagram is too small, don't try.
         // If the connection is connected, then the reset token will be invalid.
-        if d.len() < 16 || !self.state.connected() {
+        if d.len() < Srt::LEN || !self.state.connected() {
             return false;
         }
-        <&[u8; 16]>::try_from(&d[d.len() - 16..])
-            .is_ok_and(|token| path.borrow().is_stateless_reset(token))
+        Srt::try_from(&d[d.len() - Srt::LEN..])
+            .is_ok_and(|token| path.borrow().is_stateless_reset(&token))
     }
 
     fn check_stateless_reset(
@@ -1357,7 +1358,10 @@ impl Connection {
         if first && self.is_stateless_reset(path, d) {
             // Failing to process a packet in a datagram might
             // indicate that there is a stateless reset present.
-            qdebug!("[{self}] Stateless reset: {}", hex(&d[d.len() - 16..]));
+            qdebug!(
+                "[{self}] Stateless reset: {}",
+                hex(&d[d.len() - Srt::LEN..])
+            );
             self.state_signaling.reset();
             self.set_state(
                 State::Draining {
@@ -2073,7 +2077,7 @@ impl Connection {
     }
 
     fn migrate_to_preferred_address(&mut self, now: Instant) -> Res<()> {
-        let spa: Option<(tparams::PreferredAddress, ConnectionIdEntry<[u8; 16]>)> = if matches!(
+        let spa: Option<(tparams::PreferredAddress, ConnectionIdEntry<Srt>)> = if matches!(
             self.conn_params.get_preferred_address(),
             PreferredAddressConfig::Disabled
         ) {
@@ -2925,8 +2929,8 @@ impl Connection {
             }
 
             let reset_token = remote.get_bytes(StatelessResetToken).map_or_else(
-                || Ok(ConnectionIdEntry::random_srt()),
-                |token| <[u8; 16]>::try_from(token).map_err(|_| Error::TransportParameter),
+                || Ok(Srt::random()),
+                |token| Srt::try_from(token).map_err(|_| Error::TransportParameter),
             )?;
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
@@ -3273,7 +3277,7 @@ impl Connection {
                 self.cids.add_remote(ConnectionIdEntry::new(
                     sequence_number,
                     ConnectionId::from(connection_id),
-                    stateless_reset_token.to_owned(),
+                    stateless_reset_token,
                 ))?;
                 self.paths.retire_cids(retire_prior, &mut self.cids);
                 if self.cids.len() >= LOCAL_ACTIVE_CID_LIMIT {

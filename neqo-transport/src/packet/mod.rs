@@ -19,7 +19,7 @@ use neqo_crypto::{random, AeadTrait as _};
 use strum::{EnumIter, FromRepr};
 
 use crate::{
-    cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
+    cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef},
     crypto::{CryptoDxState, CryptoStates, Epoch},
     frame::FrameType,
     version::{self, Version},
@@ -690,7 +690,7 @@ impl<'a> Public<'a> {
             ));
         };
 
-        if dcid.len() > MAX_CONNECTION_ID_LEN || scid.len() > MAX_CONNECTION_ID_LEN {
+        if dcid.len() > ConnectionId::MAX_LEN || scid.len() > ConnectionId::MAX_LEN {
             return Err(Error::InvalidPacket);
         }
         let packet_type = Type::from_byte((first >> 4) & 3, version);
@@ -984,7 +984,6 @@ mod tests {
     use test_fixture::{fixture_init, now};
 
     use crate::{
-        cid::MAX_CONNECTION_ID_LEN,
         crypto::{CryptoDxState, CryptoStates},
         packet::{
             Builder, Public, Type, PACKET_BIT_FIXED_QUIC, PACKET_BIT_LONG, PACKET_BIT_SPIN,
@@ -1073,7 +1072,7 @@ mod tests {
         let mut enc = Encoder::new();
         enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
         enc.encode_uint(4, Version::default().wire_version());
-        enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 1]);
+        enc.encode_vec(1, &[0x00; ConnectionId::MAX_LEN + 1]);
         enc.encode_vec(1, &[]);
         enc.encode([0xff; 40]); // junk
 
@@ -1086,7 +1085,7 @@ mod tests {
         enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
         enc.encode_uint(4, Version::default().wire_version());
         enc.encode_vec(1, &[]);
-        enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 2]);
+        enc.encode_vec(1, &[0x00; ConnectionId::MAX_LEN + 2]);
         enc.encode([0xff; 40]); // junk
 
         assert!(Public::decode(enc.as_mut(), &cid_mgr()).is_err());
@@ -1566,7 +1565,7 @@ mod tests {
     /// A Version Negotiation packet can have a long connection ID.
     #[test]
     fn parse_vn_big_cid() {
-        const BIG_DCID: &[u8] = &[0x44; MAX_CONNECTION_ID_LEN + 1];
+        const BIG_DCID: &[u8] = &[0x44; ConnectionId::MAX_LEN + 1];
         const BIG_SCID: &[u8] = &[0xee; 255];
 
         let mut enc = Encoder::from(&[0xff, 0x00, 0x00, 0x00, 0x00][..]);
