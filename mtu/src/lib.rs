@@ -135,10 +135,7 @@ pub fn interface_and_mtu(remote: IpAddr) -> Result<(String, usize)> {
 mod test {
     #![expect(clippy::unwrap_used, reason = "OK in tests.")]
 
-    use std::{
-        env,
-        net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    };
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     use crate::interface_and_mtu;
 
@@ -214,7 +211,10 @@ mod test {
             {
                 eprintln!("skipping IPv6 test due to lack of IPv6 connectivity: {e}");
             }
-            Err(e) => panic!("unexpected error on IPv6 interface_and_mtu lookup: {e}"),
+            Err(e) => panic!(
+                "unexpected error on IPv6 interface_and_mtu lookup: {:?} {e}",
+                e.raw_os_error()
+            ),
         }
     }
 }
