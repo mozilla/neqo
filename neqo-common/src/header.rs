@@ -135,8 +135,9 @@ impl FromStr for Header {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::*;
     use std::str::from_utf8;
+
+    use super::*;
 
     #[test]
     fn from_str_valid() {
