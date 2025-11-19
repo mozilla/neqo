@@ -26,6 +26,7 @@ impl HFrameType {
     pub const PRIORITY_UPDATE_REQUEST: Self = Self(0xf0700);
     pub const PRIORITY_UPDATE_PUSH: Self = Self(0xf0701);
 
+    /// See <https://www.rfc-editor.org/rfc/rfc9114.html#section-11.2.1> for these reserved types.
     pub const RESERVED: &[Self] = &[Self(0x2), Self(0x6), Self(0x8), Self(0x9)];
 }
 
