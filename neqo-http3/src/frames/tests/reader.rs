@@ -389,14 +389,14 @@ fn complete_and_incomplete_frames() {
     const FRAME_LEN: usize = 10;
     const HEADER_BLOCK: &[u8] = &[0x01, 0x02, 0x03, 0x04];
 
-    // H3_FRAME_TYPE_DATA len=0
+    // HFrameType::DATA len=0
     let f = HFrame::Data { len: 0 };
     let mut enc = Encoder::with_capacity(2);
     f.encode(&mut enc);
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, 2);
 
-    // H3_FRAME_TYPE_DATA len=FRAME_LEN
+    // HFrameType::DATA len=FRAME_LEN
     let f = HFrame::Data {
         len: FRAME_LEN as u64,
     };
@@ -406,7 +406,7 @@ fn complete_and_incomplete_frames() {
     buf.resize(FRAME_LEN + buf.len(), 0);
     test_complete_and_incomplete_frame::<HFrame>(&buf, 2);
 
-    // H3_FRAME_TYPE_HEADERS empty header block
+    // HFrameType::HEADERS empty header block
     let f = HFrame::Headers {
         header_block: Vec::new(),
     };
@@ -415,7 +415,7 @@ fn complete_and_incomplete_frames() {
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, 2);
 
-    // H3_FRAME_TYPE_HEADERS
+    // HFrameType::HEADERS
     let f = HFrame::Headers {
         header_block: HEADER_BLOCK.to_vec(),
     };
@@ -424,7 +424,7 @@ fn complete_and_incomplete_frames() {
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
 
-    // H3_FRAME_TYPE_CANCEL_PUSH
+    // HFrameType::CANCEL_PUSH
     let f = HFrame::CancelPush {
         push_id: PushId::new(5),
     };
@@ -433,7 +433,7 @@ fn complete_and_incomplete_frames() {
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
 
-    // H3_FRAME_TYPE_SETTINGS
+    // HFrameType::SETTINGS
     let f = HFrame::Settings {
         settings: HSettings::new(&[HSetting::new(HSettingType::MaxHeaderListSize, 4)]),
     };
@@ -442,7 +442,7 @@ fn complete_and_incomplete_frames() {
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
 
-    // H3_FRAME_TYPE_PUSH_PROMISE
+    // HFrameType::PUSH_PROMISE
     let f = HFrame::PushPromise {
         push_id: PushId::new(4),
         header_block: HEADER_BLOCK.to_vec(),
@@ -452,7 +452,7 @@ fn complete_and_incomplete_frames() {
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
 
-    // H3_FRAME_TYPE_GOAWAY
+    // HFrameType::GOAWAY
     let f = HFrame::Goaway {
         stream_id: StreamId::new(5),
     };
@@ -461,7 +461,7 @@ fn complete_and_incomplete_frames() {
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
 
-    // H3_FRAME_TYPE_MAX_PUSH_ID
+    // HFrameType::MAX_PUSH_ID
     let f = HFrame::MaxPushId {
         push_id: PushId::new(5),
     };
@@ -473,7 +473,7 @@ fn complete_and_incomplete_frames() {
 
 #[test]
 fn complete_and_incomplete_wt_frames() {
-    // H3_FRAME_TYPE_MAX_PUSH_ID
+    // HFrameType::MAX_PUSH_ID
     let f = WebTransportFrame::CloseSession {
         error: 5,
         message: "Hello".to_string(),

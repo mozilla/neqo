@@ -28,6 +28,7 @@ use crate::{
     recovery::{self, sent},
     rtt::{RttEstimate, RttSource},
     sender::PacketSender,
+    stateless_reset::Token as Srt,
     stats::FrameStats,
     ConnectionParameters, Stats,
 };
@@ -330,7 +331,7 @@ impl Paths {
     /// Keep active paths if possible by pulling new connection IDs from the provided store.
     /// One slightly non-obvious consequence of this is that if migration is being attempted
     /// and the new path cannot obtain a new connection ID, the migration attempt will fail.
-    pub fn retire_cids(&mut self, retire_prior: u64, store: &mut ConnectionIdStore<[u8; 16]>) {
+    pub fn retire_cids(&mut self, retire_prior: u64, store: &mut ConnectionIdStore<Srt>) {
         let to_retire = &mut self.to_retire;
         let migration_target = &mut self.migration_target;
 
@@ -682,14 +683,14 @@ impl Path {
     }
 
     /// Set the stateless reset token for the connection ID that is currently in use.
-    pub fn set_reset_token(&mut self, token: [u8; 16]) {
+    pub fn set_reset_token(&mut self, token: Srt) {
         if let Some(remote_cid) = self.remote_cid.as_mut() {
             remote_cid.set_stateless_reset_token(token);
         }
     }
 
     /// Determine if the provided token is a stateless reset token.
-    pub fn is_stateless_reset(&self, token: &[u8; 16]) -> bool {
+    pub fn is_stateless_reset(&self, token: &Srt) -> bool {
         self.remote_cid
             .as_ref()
             .is_some_and(|rcid| rcid.is_stateless_reset(token))
@@ -819,7 +820,7 @@ impl Path {
             qtrace!("[{self}] Initiating path challenge {probe_count}");
             let data = random::<8>();
             builder.encode_varint(FrameType::PathChallenge);
-            builder.encode(&data);
+            builder.encode(data);
 
             // As above, no recovery token.
             stats.path_challenge += 1;
