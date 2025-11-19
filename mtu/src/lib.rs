@@ -207,14 +207,13 @@ mod test {
             Ok(res) => assert_eq!(res, INET),
             Err(e)
                 if e.raw_os_error() == Some(libc::ENETUNREACH)
-                    || e.raw_os_error() == Some(libc::ESRCH) =>
+                    || e.raw_os_error() == Some(libc::ESRCH)
+                    // 1231 = ERROR_NETWORK_UNREACHABLE, see https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--1000-1299-
+                    || e.raw_os_error() == Some(1231) =>
             {
                 eprintln!("skipping IPv6 test due to lack of IPv6 connectivity: {e}");
             }
-            Err(e) => panic!(
-                "unexpected error on IPv6 interface_and_mtu lookup: {:?} {e}",
-                e.raw_os_error()
-            ),
+            Err(e) => panic!("unexpected error on IPv6 interface_and_mtu lookup: {e}"),
         }
     }
 }
