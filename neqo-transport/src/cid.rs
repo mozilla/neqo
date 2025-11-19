@@ -247,7 +247,7 @@ pub struct ConnectionIdEntry<SRT: Clone + PartialEq> {
 impl ConnectionIdEntry<Srt> {
     /// Create the first entry, which won't have a stateless reset token.
     pub fn initial_remote(cid: ConnectionId) -> Self {
-        Self::new(ConnectionIdEntry::SEQNO_INITIAL, cid, Srt::random())
+        Self::new(Self::SEQNO_INITIAL, cid, Srt::random())
     }
 
     /// Create an empty for when the peer chooses empty connection IDs.
@@ -302,9 +302,11 @@ impl ConnectionIdEntry<Srt> {
     }
 }
 
-impl ConnectionIdEntry<()> {
+impl<T: Clone + PartialEq> ConnectionIdEntry<T> {
     const SEQNO_INITIAL: u64 = 0;
+}
 
+impl ConnectionIdEntry<()> {
     /// Create an initial entry.
     pub const fn initial_local(cid: ConnectionId) -> Self {
         Self::new(0, cid, ())
@@ -318,13 +320,13 @@ impl<SRT: Clone + PartialEq> ConnectionIdEntry<SRT> {
 
     /// Update the stateless reset token.  This panics if the sequence number is non-zero.
     pub fn set_stateless_reset_token(&mut self, srt: SRT) {
-        assert_eq!(self.seqno, ConnectionIdEntry::SEQNO_INITIAL);
+        assert_eq!(self.seqno, Self::SEQNO_INITIAL);
         self.srt = srt;
     }
 
     /// Replace the connection ID.  This panics if the sequence number is non-zero.
     pub fn update_cid(&mut self, cid: ConnectionId) {
-        assert_eq!(self.seqno, ConnectionIdEntry::SEQNO_INITIAL);
+        assert_eq!(self.seqno, Self::SEQNO_INITIAL);
         self.cid = cid;
     }
 
