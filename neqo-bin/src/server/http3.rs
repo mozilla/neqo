@@ -106,7 +106,7 @@ impl super::HttpServer for HttpServer {
 
                     if headers.contains_header(":method", b"POST") {
                         let response_size = headers.find_header(":path").and_then(|path| {
-                            std::str::from_utf8(path.value())
+                            path.value_utf8()
                                 .ok()?
                                 .trim_matches('/')
                                 .parse::<usize>()
@@ -124,7 +124,7 @@ impl super::HttpServer for HttpServer {
                     };
 
                     let mut response = if self.is_qns_test {
-                        let path_str = std::str::from_utf8(path.value()).unwrap_or("/");
+                        let path_str = path.value_utf8().unwrap_or("/");
                         match qns_read_response(path_str) {
                             Ok(data) => SendData::from(data),
                             Err(e) => {
@@ -136,7 +136,7 @@ impl super::HttpServer for HttpServer {
                                 continue;
                             }
                         }
-                    } else if let Ok(path_str) = std::str::from_utf8(path.value()) {
+                    } else if let Ok(path_str) = path.value_utf8() {
                         path_str
                             .trim_matches(|p| p == '/')
                             .parse::<usize>()

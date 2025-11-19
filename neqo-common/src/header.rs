@@ -66,6 +66,15 @@ impl Header {
     pub fn value(&self) -> &[u8] {
         &self.value
     }
+
+    /// Try to interpret the header value as UTF-8.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the value contains invalid UTF-8.
+    pub fn value_utf8(&self) -> Result<&str, std::str::Utf8Error> {
+        std::str::from_utf8(&self.value)
+    }
 }
 
 impl<T: AsRef<str>, U: AsRef<[u8]>> PartialEq<(T, U)> for Header {
