@@ -30,7 +30,7 @@ use super::{
     CountingConnectionIdGenerator,
 };
 use crate::{
-    cid::LOCAL_ACTIVE_CID_LIMIT,
+    cid::ConnectionIdManager,
     connection::tests::{
         assert_path_challenge_min_len, connect, send_something_paced, send_with_extra,
     },
@@ -1093,7 +1093,7 @@ fn retire_all() {
     );
     assert_eq!(
         client.stats().frame_tx.retire_connection_id,
-        retire_cid_before + LOCAL_ACTIVE_CID_LIMIT
+        retire_cid_before + ConnectionIdManager::ACTIVE_LIMIT
     );
 
     assert_ne!(get_cid(&retire), original_cid);

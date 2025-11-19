@@ -23,7 +23,7 @@ use neqo_crypto::{
 use strum::FromRepr;
 
 use crate::{
-    cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED},
+    cid::{ConnectionId, ConnectionIdEntry, ConnectionIdManager},
     packet::MIN_INITIAL_PACKET_SIZE,
     stateless_reset::Token as Srt,
     tracking::DEFAULT_REMOTE_ACK_DELAY,
@@ -592,7 +592,11 @@ impl TransportParameters {
         {
             Some((
                 PreferredAddress::new(*v4, *v6),
-                ConnectionIdEntry::new(CONNECTION_ID_SEQNO_PREFERRED, cid.clone(), srt.clone()),
+                ConnectionIdEntry::new(
+                    ConnectionIdManager::SEQNO_PREFERRED,
+                    cid.clone(),
+                    srt.clone(),
+                ),
             ))
         } else {
             None
