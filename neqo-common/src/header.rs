@@ -183,19 +183,35 @@ mod tests {
 
         // Verify that the value is indeed not valid UTF-8
         assert!(from_utf8(header.value()).is_err());
+        // Test the value_utf8() helper method
+        assert!(header.value_utf8().is_err());
     }
 
     #[test]
     fn non_ascii_header_value() {
-        // Create a header with non-ASCII but valid UTF-8 bytes
-        let emoji_value = "🚀🌟";
-        let header = Header::new("emoji-header", emoji_value);
+        // Create a header with non-ASCII but valid UTF-8 bytes (emoji: rocket + star)
+        let emoji_bytes = b"\xF0\x9F\x9A\x80\xF0\x9F\x8C\x9F";
+        let header = Header::new("emoji-header", emoji_bytes.as_slice());
 
         assert_eq!(header.name(), "emoji-header");
-        assert_eq!(header.value(), emoji_value.as_bytes());
+        assert_eq!(header.value(), emoji_bytes.as_slice());
 
         // Verify we can convert back to UTF-8
-        assert_eq!(from_utf8(header.value()).unwrap(), emoji_value);
+        let emoji_str = from_utf8(header.value()).unwrap();
+        assert_eq!(emoji_str, from_utf8(emoji_bytes).unwrap());
+        // Test the value_utf8() helper method
+        assert_eq!(header.value_utf8().unwrap(), emoji_str);
+    }
+
+    #[test]
+    fn value_utf8_method() {
+        // Test value_utf8() with valid UTF-8
+        let header = Header::new("content-type", "text/html");
+        assert_eq!(header.value_utf8().unwrap(), "text/html");
+
+        // Test value_utf8() with bytes
+        let header2 = Header::new("test", b"value");
+        assert_eq!(header2.value_utf8().unwrap(), "value");
     }
 
     #[test]

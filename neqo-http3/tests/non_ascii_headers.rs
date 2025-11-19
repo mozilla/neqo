@@ -97,7 +97,7 @@ fn extended_ascii_non_utf8_header_echo() {
 
 #[test]
 fn non_ascii_emoji_header_echo() {
-    // Create a header with non-ASCII but valid UTF-8 (emojis)
-    let emoji_data = "🚀🌟💻";
-    echo_header("x-emoji-data", "x-echoed-emoji", emoji_data.as_bytes());
+    // Create a header with non-ASCII but valid UTF-8 (emojis: rocket + star + laptop)
+    let emoji_data = b"\xF0\x9F\x9A\x80\xF0\x9F\x8C\x9F\xF0\x9F\x92\xBB";
+    echo_header("x-emoji-data", "x-echoed-emoji", emoji_data);
 }
