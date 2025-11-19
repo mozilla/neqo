@@ -8,7 +8,7 @@ use std::{cmp::max, time::Duration};
 
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
-    connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT},
+    connection::{ConnectionIdManager, Role},
     rtt::GRANULARITY,
     stream_id::StreamType,
     tparams::{
@@ -504,7 +504,7 @@ impl ConnectionParameters {
         // default parameters
         tps.local_mut().set_integer(
             ActiveConnectionIdLimit,
-            u64::try_from(LOCAL_ACTIVE_CID_LIMIT)?,
+            u64::try_from(ConnectionIdManager::ACTIVE_LIMIT)?,
         );
         if self.disable_migration {
             tps.local_mut().set_empty(DisableMigration);

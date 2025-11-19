@@ -90,7 +90,7 @@ impl SelfEncrypt {
         let mut enc = Encoder::with_capacity(encoded_len);
         enc.encode_byte(Self::VERSION);
         enc.encode_byte(self.key_id);
-        enc.encode(&salt);
+        enc.encode(salt);
 
         let mut extended_aad = enc.clone();
         extended_aad.encode(aad);
