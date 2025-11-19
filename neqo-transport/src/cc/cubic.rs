@@ -379,6 +379,7 @@ impl WindowAdjustment for Cubic {
         curr_cwnd: usize,
         acked_bytes: usize,
         max_datagram_size: usize,
+        ecn: bool,
     ) -> (usize, usize) {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
         // Fast Convergence
@@ -405,10 +406,17 @@ impl WindowAdjustment for Cubic {
 
         // Reducing the congestion window and resetting time
         self.t_epoch = None;
-        (
-            curr_cwnd * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
-            acked_bytes * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
-        )
+        if ecn {
+            (
+                curr_cwnd * 9 / CUBIC_BETA_USIZE_DIVISOR,
+                acked_bytes * 9 / CUBIC_BETA_USIZE_DIVISOR,
+            )
+        } else {
+            (
+                curr_cwnd * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
+                acked_bytes * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
+            )
+        }
     }
 
     fn on_app_limited(&mut self) {
