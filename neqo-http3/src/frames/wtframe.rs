@@ -18,8 +18,8 @@ pub enum WebTransportFrame {
 
 impl WebTransportFrame {
     /// The frame type for WebTransport CLOSE_SESSION, as defined in
-    /// [WebTransport over HTTP/3](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3-03#section-4.6)
-    /// Section 4.6. The value 0x2843 is assigned for CLOSE_SESSION.
+    /// [WebTransport over HTTP/3](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3-03#section-4.6).
+    /// The value 0x2843 is assigned for CLOSE_SESSION.
     const CLOSE_SESSION: WebTransportFrameType = 0x2843;
     /// The maximum allowed message size for CLOSE_SESSION messages, as recommended
     /// in [WebTransport over HTTP/3](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3-03#section-4.6).
