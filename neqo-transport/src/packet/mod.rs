@@ -30,14 +30,14 @@ use crate::{
 /// a new connection across all QUIC versions this server supports.
 pub const MIN_INITIAL_PACKET_SIZE: usize = 1200;
 
-pub const PACKET_BIT_LONG: u8 = 0x80;
-const PACKET_BIT_SHORT: u8 = 0x00;
-const PACKET_BIT_FIXED_QUIC: u8 = 0x40;
-const PACKET_BIT_SPIN: u8 = 0x20;
-const PACKET_BIT_KEY_PHASE: u8 = 0x04;
+pub const BIT_LONG: u8 = 0x80;
+const BIT_SHORT: u8 = 0x00;
+const BIT_FIXED_QUIC: u8 = 0x40;
+const BIT_SPIN: u8 = 0x20;
+const BIT_KEY_PHASE: u8 = 0x04;
 
-const PACKET_HP_MASK_LONG: u8 = 0x0f;
-const PACKET_HP_MASK_SHORT: u8 = 0x1f;
+const HP_MASK_LONG: u8 = 0x0f;
+const HP_MASK_SHORT: u8 = 0x1f;
 
 const SAMPLE_SIZE: usize = 16;
 const SAMPLE_OFFSET: usize = 4;
@@ -157,8 +157,8 @@ impl Builder<Vec<u8>> {
         encoder.encode_vec(1, odcid);
         let start = encoder.len();
         encoder.encode_byte(
-            PACKET_BIT_LONG
-                | PACKET_BIT_FIXED_QUIC
+            BIT_LONG
+                | BIT_FIXED_QUIC
                 | (Type::Retry.to_byte(version) << 4)
                 | (random::<1>()[0] & 0xf),
         );
@@ -187,7 +187,7 @@ impl Builder<Vec<u8>> {
         let mut encoder = Encoder::default();
         let mut grease = random::<4>();
         // This will not include the "QUIC bit" sometimes.  Intentionally.
-        encoder.encode_byte(PACKET_BIT_LONG | (grease[3] & 0x7f));
+        encoder.encode_byte(BIT_LONG | (grease[3] & 0x7f));
         encoder.encode([0; 4]); // Zero version == VN.
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
@@ -233,8 +233,7 @@ impl<B: Buffer> Builder<B> {
         if limit > encoder.len()
             && 5 + dcid.as_ref().map_or(0, |d| d.as_ref().len()) < limit - encoder.len()
         {
-            encoder
-                .encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | (u8::from(key_phase) << 2));
+            encoder.encode_byte(BIT_SHORT | BIT_FIXED_QUIC | (u8::from(key_phase) << 2));
             if let Some(dcid) = dcid {
                 encoder.encode(dcid.as_ref());
             }
@@ -246,7 +245,7 @@ impl<B: Buffer> Builder<B> {
             pn: u64::MAX,
             header: header_start..header_start,
             offsets: BuilderOffsets {
-                first_byte_mask: PACKET_HP_MASK_SHORT,
+                first_byte_mask: HP_MASK_SHORT,
                 pn: 0..0,
                 len: 0,
             },
@@ -279,8 +278,7 @@ impl<B: Buffer> Builder<B> {
                 + scid.as_ref().map_or(0, |d| d.as_ref().len())
                 < limit - encoder.len()
         {
-            encoder
-                .encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | (pt.to_byte(version) << 4));
+            encoder.encode_byte(BIT_LONG | BIT_FIXED_QUIC | (pt.to_byte(version) << 4));
             encoder.encode_uint(4, version.wire_version());
             encoder.encode_vec(1, dcid.take().as_ref().map_or(&[], AsRef::as_ref));
             encoder.encode_vec(1, scid.take().as_ref().map_or(&[], AsRef::as_ref));
@@ -293,7 +291,7 @@ impl<B: Buffer> Builder<B> {
             pn: u64::MAX,
             header: header_start..header_start,
             offsets: BuilderOffsets {
-                first_byte_mask: PACKET_HP_MASK_LONG,
+                first_byte_mask: HP_MASK_LONG,
                 pn: 0..0,
                 len: 0,
             },
@@ -303,7 +301,7 @@ impl<B: Buffer> Builder<B> {
     }
 
     fn is_long(&self) -> bool {
-        self.as_ref()[self.header.start] & 0x80 == PACKET_BIT_LONG
+        self.as_ref()[self.header.start] & 0x80 == BIT_LONG
     }
 
     /// This stores a value that can be used as a limit.  This does not cause
@@ -361,8 +359,8 @@ impl<B: Buffer> Builder<B> {
     /// Add unpredictable values for unprotected parts of the packet.
     pub fn scramble(&mut self, quic_bit: bool) {
         debug_assert!(self.len() > self.header.start);
-        let mask = if quic_bit { PACKET_BIT_FIXED_QUIC } else { 0 }
-            | if self.is_long() { 0 } else { PACKET_BIT_SPIN };
+        let mask =
+            if quic_bit { BIT_FIXED_QUIC } else { 0 } | if self.is_long() { 0 } else { BIT_SPIN };
         let first = self.header.start;
         self.encoder.as_mut()[first] ^= random::<1>()[0] & mask;
     }
@@ -627,7 +625,7 @@ impl<'a> Public<'a> {
         let mut decoder = Decoder::new(data);
         let first = Self::opt(decoder.decode_uint::<u8>())?;
 
-        if first & 0x80 == PACKET_BIT_SHORT {
+        if first & 0x80 == BIT_SHORT {
             // Conveniently, this also guarantees that there is enough space
             // for a connection ID of any size.
             if decoder.remaining() < SAMPLE_OFFSET + SAMPLE_SIZE {
@@ -832,9 +830,9 @@ impl<'a> Public<'a> {
 
         // Un-mask the leading byte.
         let bits = if self.packet_type == Type::Short {
-            PACKET_HP_MASK_SHORT
+            HP_MASK_SHORT
         } else {
-            PACKET_HP_MASK_LONG
+            HP_MASK_LONG
         };
         let first_byte = self.data[0] ^ (mask[0] & bits);
 
@@ -858,8 +856,8 @@ impl<'a> Public<'a> {
 
         qtrace!("unmasked hdr={}", hex(&self.data[hdrbytes.clone()]));
 
-        let key_phase = self.packet_type == Type::Short
-            && (first_byte & PACKET_BIT_KEY_PHASE) == PACKET_BIT_KEY_PHASE;
+        let key_phase =
+            self.packet_type == Type::Short && (first_byte & BIT_KEY_PHASE) == BIT_KEY_PHASE;
         let pn = Self::decode_pn(crypto.next_pn(), pn_encoded, pn_len);
         Ok((key_phase, pn, hdrbytes))
     }
@@ -972,7 +970,7 @@ impl Deref for Decrypted<'_> {
 }
 
 #[cfg(test)]
-pub const PACKET_LIMIT: usize = 2048;
+pub const LIMIT: usize = 2048;
 
 #[cfg(all(test, not(feature = "disable-encryption")))]
 #[cfg(test)]
@@ -983,10 +981,7 @@ mod tests {
 
     use crate::{
         crypto::{CryptoDxState, CryptoStates},
-        packet::{
-            Builder, Public, Type, PACKET_BIT_FIXED_QUIC, PACKET_BIT_LONG, PACKET_BIT_SPIN,
-            PACKET_LIMIT,
-        },
+        packet::{self, Builder, Public, Type},
         ConnectionId, EmptyConnectionIdGenerator, Error, RandomConnectionIdGenerator, Version,
     };
 
@@ -1036,7 +1031,7 @@ mod tests {
             Version::default(),
             None::<&[u8]>,
             Some(ConnectionId::from(SERVER_CID)),
-            PACKET_LIMIT,
+            packet::LIMIT,
         );
         builder.initial_token(&[]);
         builder.pn(1, 2);
@@ -1068,7 +1063,7 @@ mod tests {
     #[test]
     fn disallow_long_dcid() {
         let mut enc = Encoder::new();
-        enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
+        enc.encode_byte(packet::BIT_LONG | packet::BIT_FIXED_QUIC);
         enc.encode_uint(4, Version::default().wire_version());
         enc.encode_vec(1, &[0x00; ConnectionId::MAX_LEN + 1]);
         enc.encode_vec(1, &[]);
@@ -1080,7 +1075,7 @@ mod tests {
     #[test]
     fn disallow_long_scid() {
         let mut enc = Encoder::new();
-        enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
+        enc.encode_byte(packet::BIT_LONG | packet::BIT_FIXED_QUIC);
         enc.encode_uint(4, Version::default().wire_version());
         enc.encode_vec(1, &[]);
         enc.encode_vec(1, &[0x00; ConnectionId::MAX_LEN + 2]);
@@ -1102,7 +1097,7 @@ mod tests {
             Encoder::new(),
             true,
             Some(ConnectionId::from(SERVER_CID)),
-            PACKET_LIMIT,
+            packet::LIMIT,
         );
         builder.pn(0, 1);
         builder.encode(SAMPLE_SHORT_PAYLOAD); // Enough payload for sampling.
@@ -1121,7 +1116,7 @@ mod tests {
                 Encoder::new(),
                 true,
                 Some(ConnectionId::from(SERVER_CID)),
-                PACKET_LIMIT,
+                packet::LIMIT,
             );
             builder.scramble(true);
             builder.pn(0, 1);
@@ -1129,13 +1124,13 @@ mod tests {
         }
         let is_set = |bit| move |v| v & bit == bit;
         // There should be at least one value with the QUIC bit set:
-        assert!(firsts.iter().any(is_set(PACKET_BIT_FIXED_QUIC)));
+        assert!(firsts.iter().any(is_set(packet::BIT_FIXED_QUIC)));
         // ... but not all:
-        assert!(!firsts.iter().all(is_set(PACKET_BIT_FIXED_QUIC)));
+        assert!(!firsts.iter().all(is_set(packet::BIT_FIXED_QUIC)));
         // There should be at least one value with the spin bit set:
-        assert!(firsts.iter().any(is_set(PACKET_BIT_SPIN)));
+        assert!(firsts.iter().any(is_set(packet::BIT_SPIN)));
         // ... but not all:
-        assert!(!firsts.iter().all(is_set(PACKET_BIT_SPIN)));
+        assert!(!firsts.iter().all(is_set(packet::BIT_SPIN)));
     }
 
     #[test]
@@ -1190,7 +1185,7 @@ mod tests {
             Version::default(),
             Some(ConnectionId::from(SERVER_CID)),
             Some(ConnectionId::from(CLIENT_CID)),
-            PACKET_LIMIT,
+            packet::LIMIT,
         );
         builder.pn(0, 1);
         builder.encode([0; 3]);
@@ -1202,7 +1197,7 @@ mod tests {
             encoder,
             false,
             Some(ConnectionId::from(SERVER_CID)),
-            PACKET_LIMIT,
+            packet::LIMIT,
         );
         builder.pn(1, 3);
         builder.encode([0]); // Minimal size (packet number is big enough).
@@ -1230,7 +1225,7 @@ mod tests {
             Version::default(),
             None::<&[u8]>,
             None::<&[u8]>,
-            PACKET_LIMIT,
+            packet::LIMIT,
         );
         builder.pn(0, 1);
         builder.encode([1, 2, 3]);
@@ -1250,11 +1245,11 @@ mod tests {
                 Version::default(),
                 None::<&[u8]>,
                 None::<&[u8]>,
-                PACKET_LIMIT,
+                packet::LIMIT,
             );
             builder.pn(0, 1);
             builder.scramble(true);
-            if (builder.as_ref()[0] & PACKET_BIT_FIXED_QUIC) == 0 {
+            if (builder.as_ref()[0] & packet::BIT_FIXED_QUIC) == 0 {
                 found_unset = true;
             } else {
                 found_set = true;
@@ -1272,7 +1267,7 @@ mod tests {
             Version::default(),
             None::<&[u8]>,
             Some(ConnectionId::from(SERVER_CID)),
-            PACKET_LIMIT,
+            packet::LIMIT,
         );
         assert_ne!(builder.remaining(), 0);
         builder.initial_token(&[]);
