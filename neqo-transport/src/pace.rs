@@ -85,7 +85,7 @@ impl Pacer {
         }
 
         // This is the inverse of the function in `spend`:
-        // self.t + rtt * (self.p - self.c) / (SPEEDUP * cwnd)
+        // self.t + rtt * (self.p - self.c) / (Self::SPEEDUP * cwnd)
         let r = rtt.as_nanos();
         let deficit =
             u128::try_from(packet - self.c).expect("packet is larger than current credit");
