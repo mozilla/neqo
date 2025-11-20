@@ -119,7 +119,7 @@ impl Pacer {
 
         qtrace!("[{self}] spend {count} over {cwnd}, {rtt:?}");
         // Increase the capacity by:
-        //    `(now - self.t) * SPEEDUP * cwnd / rtt`
+        //    `(now - self.t) * Self::SPEEDUP * cwnd / rtt`
         // That is, the elapsed fraction of the RTT times rate that data is added.
         let incr = now
             .saturating_duration_since(self.t)
