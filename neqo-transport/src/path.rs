@@ -527,8 +527,8 @@ pub struct Path {
 impl Path {
     /// The number of times that a path will be probed before it is considered failed.
     ///
-    /// Note that with [`crate::ecn`], a path is probed [`MAX_PROBES`] with ECN
-    /// marks and [`MAX_PROBES`] without.
+    /// Note that with [`crate::ecn`], a path is probed [`Self::MAX_PROBES`] with ECN
+    /// marks and [`Self::MAX_PROBES`] without.
     pub const MAX_PROBES: usize = 3;
 
     /// Create a path from addresses and a remote connection ID.
