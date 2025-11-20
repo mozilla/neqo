@@ -176,7 +176,7 @@ pub fn trailers_valid(headers: &[Header]) -> Res<()> {
 mod tests {
     use neqo_common::Header;
 
-    use super::headers_valid;
+    use super::{headers_valid, is_interim};
     use crate::MessageType;
 
     fn create_connect_headers() -> Vec<Header> {
@@ -239,5 +239,20 @@ mod tests {
             MessageType::Request
         )
         .is_err());
+    }
+
+    #[test]
+    fn is_interim_invalid_utf8() {
+        // Create a header with invalid UTF-8 bytes in the status value
+        let invalid_utf8_bytes = vec![0xFF, 0xFE, 0xFD];
+        let header = Header::new(":status", invalid_utf8_bytes.as_slice());
+        let headers = vec![header];
+        assert!(is_interim(&headers).is_err());
+    }
+
+    #[test]
+    fn is_interim_not_a_number() {
+        let headers = vec![Header::new(":status", "not-a-number")];
+        assert!(is_interim(&headers).is_err());
     }
 }
