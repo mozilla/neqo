@@ -383,7 +383,8 @@ mod tests {
     use test_receiver::TestReceiver;
 
     use super::{
-        test_receiver, Error, IntReader, LiteralReader, ReadByte as _, ReceiverBufferWrapper, Res,
+        huffman, test_receiver, Error, IntReader, LiteralReader, ReadByte as _,
+        ReceiverBufferWrapper, Res,
     };
 
     const TEST_CASES_NUMBERS: [(&[u8], u8, u64); 7] = [
@@ -595,5 +596,44 @@ mod tests {
             buffer.read_literal_from_buffer(*prefix_len),
             Err(Error::Decompression)
         );
+    }
+
+    #[test]
+    fn read_non_utf8_huffman_literal() {
+        // Test non-UTF8 data with Huffman encoding
+        // 0xE4 is 'ä' in ISO-8859-1 (extended ASCII), which is invalid UTF-8
+        let non_utf8_data = &[0xE4u8];
+        let encoded = huffman::encode(non_utf8_data);
+
+        // Build a QPACK literal: [huffman_bit | length][data]
+        // For prefix_len=3, the huffman bit is at position (0x80 >> 3) = 0x10
+        let mut buf = Vec::new();
+        #[expect(clippy::cast_possible_truncation, reason = "Test data is small")]
+        let len = encoded.len() as u8;
+        buf.push(0x10 | len); // Huffman bit set + length
+        buf.extend_from_slice(&encoded);
+
+        let mut buffer = ReceiverBufferWrapper::new(&buf);
+        let result = buffer.read_literal_from_buffer(3).unwrap();
+        assert_eq!(result, non_utf8_data);
+    }
+
+    #[test]
+    fn read_non_utf8_plain_literal() {
+        // Test non-UTF8 data without Huffman encoding
+        // 0xFF, 0xFE are invalid UTF-8 sequences
+        let non_utf8_data = &[0xFFu8, 0xFEu8];
+
+        // Build a QPACK literal without Huffman: [length][data]
+        // For prefix_len=3, no huffman bit
+        let mut buf = Vec::new();
+        #[expect(clippy::cast_possible_truncation, reason = "Test data is small")]
+        let len = non_utf8_data.len() as u8;
+        buf.push(len); // No Huffman bit, just length
+        buf.extend_from_slice(non_utf8_data);
+
+        let mut buffer = ReceiverBufferWrapper::new(&buf);
+        let result = buffer.read_literal_from_buffer(3).unwrap();
+        assert_eq!(result, non_utf8_data);
     }
 }

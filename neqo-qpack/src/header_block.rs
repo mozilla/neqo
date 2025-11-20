@@ -819,6 +819,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn decode_literal_non_utf8_value() {
+        // Test decoding a header with UTF-8 name but non-UTF8 value
+        // Based on LITERAL_LITERAL but with non-UTF8 value (0xE4 instead of "custom-key")
+        const LITERAL_NON_UTF8_VALUE: &[u8] = &[
+            0x0, 0x42, 0x27, 0x03, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x6b, 0x65, 0x79,
+            0x01, // value length = 1
+            0xE4, // non-UTF8 byte
+        ];
+
+        let table = HeaderTable::new(false);
+        let mut decoder_h = HeaderDecoder::new(LITERAL_NON_UTF8_VALUE);
+        if let HeaderDecoderResult::Headers(result) =
+            decoder_h.decode_header_block(&table, 1000, 0).unwrap()
+        {
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].name(), "custom-key");
+            assert_eq!(result[0].value(), &[0xE4u8]);
+        } else {
+            panic!("No headers");
+        }
+    }
+
     // Test that we are ignoring N-bit.
     #[test]
     fn decode_ignore_n_bit() {
