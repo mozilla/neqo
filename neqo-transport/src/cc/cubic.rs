@@ -116,7 +116,7 @@ impl Cubic {
     ///
     /// Formula:
     ///
-    /// `CUBIC_ALPHA = 3.0 * (1.0 - CUBIC_BETA) / (1.0 + CUBIC_BETA)`
+    /// `ALPHA = 3.0 * (1.0 - CUBIC_BETA) / (1.0 + CUBIC_BETA)`
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
     pub const ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7); // with CUBIC_BETA = 0.7
