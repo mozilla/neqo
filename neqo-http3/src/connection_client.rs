@@ -1397,7 +1397,7 @@ mod tests {
         Http3Parameters, Http3State, Rc, RefCell,
     };
     use crate::{
-        frames::{HFrame, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES},
+        frames::{HFrame, HFrameType},
         qpack_encoder_receiver::EncoderRecvStream,
         settings::{HSetting, HSettingType, H3_RESERVED_SETTINGS},
         Http3Server, Priority, PushId, RecvStream as _,
@@ -6886,7 +6886,7 @@ mod tests {
 
     #[test]
     fn reserved_frames() {
-        for f in H3_RESERVED_FRAME_TYPES {
+        for f in HFrameType::RESERVED {
             let mut enc = Encoder::default();
             enc.encode_varint(*f);
             test_wrong_frame_on_control_stream(enc.as_ref());
@@ -6907,7 +6907,7 @@ mod tests {
                 .unwrap();
             // Create a settings frame of length 2.
             let mut enc = Encoder::default();
-            enc.encode_varint(H3_FRAME_TYPE_SETTINGS);
+            enc.encode_varint(HFrameType::SETTINGS);
             enc.encode_varint(2_u64);
             // The settings frame contains a reserved settings type and some value (0x1).
             enc.encode_varint(*s);
