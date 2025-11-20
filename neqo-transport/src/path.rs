@@ -33,11 +33,6 @@ use crate::{
     ConnectionParameters, Stats,
 };
 
-/// The number of times that a path will be probed before it is considered failed.
-///
-/// Note that with [`crate::ecn`], a path is probed [`MAX_PATH_PROBES`] with ECN
-/// marks and [`MAX_PATH_PROBES`] without.
-pub const MAX_PATH_PROBES: usize = 3;
 /// The maximum number of paths that `Paths` will track.
 const MAX_PATHS: usize = 15;
 
@@ -530,6 +525,12 @@ pub struct Path {
 }
 
 impl Path {
+    /// The number of times that a path will be probed before it is considered failed.
+    ///
+    /// Note that with [`crate::ecn`], a path is probed [`MAX_PROBES`] with ECN
+    /// marks and [`MAX_PROBES`] without.
+    pub const MAX_PROBES: usize = 3;
+
     /// Create a path from addresses and a remote connection ID.
     /// This is used for migration and for new datagrams.
     pub fn temporary(
@@ -766,7 +767,7 @@ impl Path {
             ProbeState::ProbeNeeded { probe_count, .. } => *probe_count,
             _ => 0,
         };
-        self.state = if probe_count >= MAX_PATH_PROBES {
+        self.state = if probe_count >= Self::MAX_PROBES {
             if self.ecn_info.is_marking() {
                 // The path validation failure may be due to ECN blackholing, try again without ECN.
                 qinfo!("[{self}] Possible ECN blackhole, disabling ECN and re-probing path");
@@ -883,9 +884,9 @@ impl Path {
             true
         } else if matches!(self.state, ProbeState::Valid) {
             // Retire validated, non-primary paths.
-            // Allow more than `2 * MAX_PATH_PROBES` times the PTO so that an old
+            // Allow more than `2 * Self::MAX_PROBES` times the PTO so that an old
             // path remains around until after a previous path fails.
-            let count = u32::try_from(2 * MAX_PATH_PROBES + 1).expect("result fits in u32");
+            let count = u32::try_from(2 * Self::MAX_PROBES + 1).expect("result fits in u32");
             self.validated
                 .is_some_and(|validated| validated + (pto * count) > now)
         } else {

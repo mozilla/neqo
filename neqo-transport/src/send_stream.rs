@@ -37,14 +37,6 @@ use crate::{
     AppError, Error, Res,
 };
 
-/// The maximum stream send buffer size.
-///
-/// See [`crate::MAX_LOCAL_MAX_STREAM_DATA`] for an explanation of this
-/// concrete value.
-///
-/// Keep in sync with [`crate::MAX_LOCAL_MAX_STREAM_DATA`].
-pub const MAX_SEND_BUFFER_SIZE: usize = 10 * 1024 * 1024;
-
 /// The priority that is assigned to sending data for the stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub enum TransmissionPriority {
@@ -472,6 +464,14 @@ pub struct TxBuffer {
 }
 
 impl TxBuffer {
+    /// The maximum stream send buffer size.
+    ///
+    /// See [`crate::MAX_LOCAL_MAX_STREAM_DATA`] for an explanation of this
+    /// concrete value.
+    ///
+    /// Keep in sync with [`crate::MAX_LOCAL_MAX_STREAM_DATA`].
+    pub const MAX_SIZE: usize = 10 * 1024 * 1024;
+
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -479,10 +479,10 @@ impl TxBuffer {
 
     /// Attempt to add some or all of the passed-in buffer to the `TxBuffer`.
     pub fn send(&mut self, buf: &[u8]) -> usize {
-        let can_buffer = min(MAX_SEND_BUFFER_SIZE - self.buffered(), buf.len());
+        let can_buffer = min(Self::MAX_SIZE - self.buffered(), buf.len());
         if can_buffer > 0 {
             self.send_buf.extend(&buf[..can_buffer]);
-            debug_assert!(self.send_buf.len() <= MAX_SEND_BUFFER_SIZE);
+            debug_assert!(self.send_buf.len() <= Self::MAX_SIZE);
         }
         can_buffer
     }
@@ -564,7 +564,7 @@ impl TxBuffer {
     }
 
     fn avail(&self) -> usize {
-        MAX_SEND_BUFFER_SIZE - self.buffered()
+        Self::MAX_SIZE - self.buffered()
     }
 
     fn used(&self) -> u64 {
@@ -622,7 +622,7 @@ impl State {
     fn tx_avail(&self) -> usize {
         match self {
             // In Ready, TxBuffer not yet allocated but size is known
-            Self::Ready { .. } => MAX_SEND_BUFFER_SIZE,
+            Self::Ready { .. } => TxBuffer::MAX_SIZE,
             Self::Send { send_buf, .. } | Self::DataSent { send_buf, .. } => send_buf.avail(),
             Self::DataRecvd { .. } | Self::ResetSent { .. } | Self::ResetRecvd { .. } => 0,
         }
@@ -1787,10 +1787,7 @@ mod tests {
         fc::SenderFlowControl,
         packet,
         recovery::{self, StreamRecoveryToken},
-        send_stream::{
-            RangeState, RangeTracker, SendStream, SendStreams, State, TxBuffer,
-            MAX_SEND_BUFFER_SIZE,
-        },
+        send_stream::{RangeState, RangeTracker, SendStream, SendStreams, State, TxBuffer},
         stats::FrameStats,
         ConnectionEvents, StreamId, INITIAL_LOCAL_MAX_STREAM_DATA,
     };
@@ -2790,7 +2787,7 @@ mod tests {
             connection_fc(FC_LIMIT),
             ConnectionEvents::default(),
         );
-        assert_eq!(s.avail(), MAX_SEND_BUFFER_SIZE);
+        assert_eq!(s.avail(), TxBuffer::MAX_SIZE);
     }
 
     #[test]
