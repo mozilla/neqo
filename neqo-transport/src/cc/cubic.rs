@@ -105,8 +105,7 @@ impl Cubic {
     pub const C: f64 = 0.4;
 
     /// > CUBIC additive increase factor used in the Reno-friendly region \[to achieve approximately
-    /// > the
-    /// > same average congestion window size as Reno\].
+    /// > the same average congestion window size as Reno\].
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
     ///
