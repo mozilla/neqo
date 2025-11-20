@@ -129,8 +129,7 @@ impl Cubic {
     /// > window
     /// > decrease factor to 0.7 while Standard TCP uses 0.5. While this improves the scalability of
     /// > CUBIC, a side effect of this decision is slower convergence, especially under low
-    /// > statistical
-    /// > multiplexing environments.
+    /// > statistical multiplexing environments.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-principle-4-for-the-cubic-d>
     ///
