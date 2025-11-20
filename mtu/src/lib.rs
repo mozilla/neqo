@@ -201,19 +201,28 @@ mod test {
 
     #[test]
     fn inet_v6() {
-        match interface_and_mtu(IpAddr::V6(Ipv6Addr::new(
+        let res = interface_and_mtu(IpAddr::V6(Ipv6Addr::new(
             0x2606, 0x4700, 0, 0, 0, 0, 0x6810, 0x84e5, // cloudflare.com
-        ))) {
+        )));
+        match res {
             Ok(res) => assert_eq!(res, INET),
-            Err(e)
-                if e.raw_os_error() == Some(libc::ENETUNREACH)
-                    || e.raw_os_error() == Some(libc::ESRCH)
-                    // 1231 = ERROR_NETWORK_UNREACHABLE, see https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--1000-1299-
-                    || e.raw_os_error() == Some(1231) =>
-            {
-                eprintln!("skipping IPv6 test due to lack of IPv6 connectivity: {e}");
+            Err(e) => {
+                #[cfg(not(target_os = "windows"))]
+                let no_ipv6 = matches!(e.raw_os_error(), Some(libc::ENETUNREACH | libc::ESRCH));
+                #[cfg(target_os = "windows")]
+                let no_ipv6 = e.raw_os_error()
+                    == Some(
+                        windows::Win32::Foundation::ERROR_NETWORK_UNREACHABLE
+                            .0
+                            .try_into()
+                            .unwrap(),
+                    );
+                if no_ipv6 {
+                    eprintln!("skipping IPv6 test due to lack of IPv6 connectivity: {e}");
+                } else {
+                    panic!("unexpected error on IPv6 interface_and_mtu lookup: {e}");
+                }
             }
-            Err(e) => panic!("unexpected error on IPv6 interface_and_mtu lookup: {e}"),
         }
     }
 }
