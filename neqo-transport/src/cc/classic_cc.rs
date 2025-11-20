@@ -600,7 +600,7 @@ mod tests {
     use crate::{
         cc::{
             classic_cc::State,
-            cubic::{Cubic, CUBIC_BETA_USIZE_DIVIDEND, CUBIC_BETA_USIZE_DIVISOR},
+            cubic::Cubic,
             new_reno::NewReno,
             tests::{IP_ADDR, MTU, RTT},
             CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS,
@@ -689,7 +689,7 @@ mod tests {
         let cwnd_initial = cc.cwnd_initial();
         persistent_congestion_by_algorithm(
             cc,
-            cwnd_initial * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
+            cwnd_initial * Cubic::BETA_USIZE_DIVIDEND / Cubic::BETA_USIZE_DIVISOR,
             lost_packets,
             persistent_expected,
         );
