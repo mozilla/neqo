@@ -105,8 +105,8 @@ fn tcp_phase() {
     // in this phase cwnd is increase by CUBIC_ALPHA every RTT. We can look at it as
     // increase of MAX_DATAGRAM_SIZE every 1 / CUBIC_ALPHA RTTs.
     // The phase will end when cwnd calculated with cubic equation is equal to TCP estimate:
-    // CUBIC_C * (n * RTT / CUBIC_ALPHA)^3 * MAX_DATAGRAM_SIZE = n * MAX_DATAGRAM_SIZE
-    // from this n = sqrt(CUBIC_ALPHA^3/ (CUBIC_C * RTT^3)).
+    // Cubic::C * (n * RTT / Cubic::ALPHA)^3 * MAX_DATAGRAM_SIZE = n * MAX_DATAGRAM_SIZE
+    // from this n = sqrt(Cubic::ALPHA^3/ (Cubic::C * RTT^3)).
     let num_tcp_increases = (Cubic::ALPHA.powi(3) / (Cubic::C * RTT.as_secs_f64().powi(3)))
         .sqrt()
         .floor() as u64;
