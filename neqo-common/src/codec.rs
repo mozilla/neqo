@@ -409,6 +409,17 @@ impl Encoder<Vec<u8>> {
         Self::default()
     }
 
+    /// Skip the first `n` bytes from the encoder buffer without copying.
+    /// This advances the internal offset, making those bytes inaccessible.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `n` is greater than the current length of the encoder.
+    pub fn skip(&mut self, n: usize) {
+        assert!(n <= self.len(), "Cannot skip beyond buffer length");
+        self.start += n;
+    }
+
     /// Static helper function for previewing the results of encoding without doing it.
     ///
     /// # Panics
@@ -1193,6 +1204,26 @@ mod tests {
         let mut a = [0; 16];
         let buf = Cursor::new(&mut a[..]);
         assert_eq!(Buffer::position(&buf), 0);
+    }
+
+    #[test]
+    fn encoder_skip() {
+        let mut enc = Encoder::from_hex("010203040506");
+
+        enc.skip(2);
+        assert_eq!(enc.len(), 4);
+        assert_eq!(enc.as_ref(), &[0x03, 0x04, 0x05, 0x06]);
+
+        enc.skip(4);
+        assert_eq!(enc.len(), 0);
+        assert!(enc.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "Cannot skip beyond buffer length")]
+    fn encoder_skip_too_much() {
+        let mut enc = Encoder::from_hex("0102");
+        enc.skip(3);
     }
 
     /// [`Encoder::as_decoder`] should only expose the bytes actively encoded through this
