@@ -55,8 +55,7 @@ pub trait Aead {
     /// # Errors
     ///
     /// Returns `Error` when encryption fails.
-    fn encrypt_in_place<'a>(&self, count: u64, aad: &[u8], data: &'a mut [u8])
-        -> Res<&'a mut [u8]>;
+    fn encrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize>;
 
     /// Decrypt ciphertext with associated data.
     ///
@@ -76,8 +75,7 @@ pub trait Aead {
     /// # Errors
     ///
     /// Returns `Error` when decryption or authentication fails.
-    fn decrypt_in_place<'a>(&self, count: u64, aad: &[u8], data: &'a mut [u8])
-        -> Res<&'a mut [u8]>;
+    fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize>;
 }
 
 experimental_api!(SSL_MakeAead(
@@ -174,12 +172,7 @@ impl Aead for RealAead {
         Ok(&output[..l.try_into()?])
     }
 
-    fn encrypt_in_place<'a>(
-        &self,
-        count: u64,
-        aad: &[u8],
-        data: &'a mut [u8],
-    ) -> Res<&'a mut [u8]> {
+    fn encrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
         if data.len() < self.expansion() {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
@@ -199,7 +192,7 @@ impl Aead for RealAead {
             )
         }?;
         debug_assert_eq!(usize::try_from(l)?, data.len());
-        Ok(data)
+        Ok(data.len())
     }
 
     fn decrypt<'a>(
@@ -229,12 +222,7 @@ impl Aead for RealAead {
         Ok(&output[..l.try_into()?])
     }
 
-    fn decrypt_in_place<'a>(
-        &self,
-        count: u64,
-        aad: &[u8],
-        data: &'a mut [u8],
-    ) -> Res<&'a mut [u8]> {
+    fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
         let mut l: c_uint = 0;
         unsafe {
             // Note that NSS insists upon having extra space available for decryption, so
@@ -253,12 +241,40 @@ impl Aead for RealAead {
             )
         }?;
         debug_assert_eq!(usize::try_from(l)?, data.len() - self.expansion());
-        Ok(&mut data[..l.try_into()?])
+        Ok(l.try_into()?)
     }
 }
 
 impl fmt::Debug for RealAead {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "[AEAD Context]")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
+        hkdf, Aead, AeadTrait as _,
+    };
+
+    #[test]
+    fn encrypt_decrypt_in_place() {
+        crate::init().unwrap();
+
+        let secret = hkdf::import_key(TLS_VERSION_1_3, &[0x42; 32]).unwrap();
+        let aead = Aead::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &secret, "test").unwrap();
+
+        let plaintext = b"hello world";
+        let mut buffer = Vec::from(plaintext);
+        buffer.resize(plaintext.len() + aead.expansion(), 0);
+
+        let encrypted_len = aead.encrypt_in_place(0, b"aad", &mut buffer).unwrap();
+        assert_eq!(encrypted_len, plaintext.len() + aead.expansion());
+        assert_eq!(encrypted_len, buffer.len());
+
+        let decrypted_len = aead.decrypt_in_place(0, b"aad", &mut buffer).unwrap();
+        assert_eq!(decrypted_len, plaintext.len());
+        assert_eq!(&buffer[..decrypted_len], plaintext);
     }
 }
