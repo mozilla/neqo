@@ -6,7 +6,7 @@ set -euo pipefail
 # This will have failing tests, ignore them.
 cargo test --quiet --features build-fuzzing-corpus --no-fail-fast || true
 
-# Now, minimize the the various corpora.
+# Now, minimize the various corpora.
 for fuzzer in $(cargo fuzz list); do
     corpus="fuzz/corpus/$fuzzer"
     before=$(find "$corpus" | wc -l | tr -d ' ')
