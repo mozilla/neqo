@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+pub mod capsule;
 pub mod connect_udp_frame;
 pub mod hframe;
 pub mod reader;
