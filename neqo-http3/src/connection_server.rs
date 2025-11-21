@@ -76,7 +76,7 @@ impl Http3ServerHandler {
             .ok_or(Error::InvalidStreamId)?
             .send_data(conn, data, now)?;
         if n > 0 {
-            self.base_handler.stream_has_pending_data(stream_id);
+            self.base_handler.mark_stream_for_sending(stream_id);
         }
         self.needs_processing = true;
         Ok(n)
@@ -96,7 +96,7 @@ impl Http3ServerHandler {
             .http_stream()
             .ok_or(Error::InvalidStreamId)?
             .send_headers(headers, conn)?;
-        self.base_handler.stream_has_pending_data(stream_id);
+        self.base_handler.mark_stream_for_sending(stream_id);
         self.needs_processing = true;
         Ok(())
     }
