@@ -4,7 +4,7 @@ set -euo pipefail
 
 # First, let's run the test suite to generate initial fuzzing corpora.
 # This will have failing tests, ignore them.
-cargo test --quiet --features build-fuzzing-corpus --no-fail-fast || true
+cargo test --quiet --locked --features build-fuzzing-corpus --no-fail-fast || true
 
 # Now, minimize the various corpora.
 for fuzzer in $(cargo fuzz list); do
