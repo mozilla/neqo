@@ -20,8 +20,6 @@ use strum::IntoEnumIterator as _;
 
 use crate::{ecn, packet};
 
-pub const MAX_PTO_COUNTS: usize = 16;
-
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct FrameStats {
     pub ack: usize,
@@ -283,7 +281,7 @@ pub struct Stats {
 
     /// Count PTOs. Single PTOs, 2 PTOs in a row, 3 PTOs in row, etc. are counted
     /// separately.
-    pub pto_counts: [usize; MAX_PTO_COUNTS],
+    pub pto_counts: [usize; Self::MAX_PTO_COUNTS],
 
     /// Count frames received.
     pub frame_rx: FrameStats,
@@ -325,6 +323,8 @@ pub struct Stats {
 }
 
 impl Stats {
+    pub const MAX_PTO_COUNTS: usize = 16;
+
     pub fn init(&mut self, info: String) {
         self.info = info;
     }
@@ -344,7 +344,7 @@ impl Stats {
     /// When preconditions are violated.
     pub fn add_pto_count(&mut self, count: usize) {
         debug_assert!(count > 0);
-        if count >= MAX_PTO_COUNTS {
+        if count >= Self::MAX_PTO_COUNTS {
             // We can't move this count any further, so stop.
             return;
         }

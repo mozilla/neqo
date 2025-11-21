@@ -17,7 +17,7 @@ use crate::{
     events::{ConnectionEvent, OutgoingDatagramOutcome},
     frame::FrameType,
     packet,
-    quic_datagrams::MAX_QUIC_DATAGRAM,
+    quic_datagrams::QuicDatagram,
     send_stream::{RetransmissionPriority, TransmissionPriority},
     CloseReason, Connection, ConnectionParameters, Error, Pmtud, StreamType,
     MIN_INITIAL_PACKET_SIZE,
@@ -132,10 +132,11 @@ fn datagram_enabled_on_server() {
 fn connect_datagram() -> (Connection, Connection) {
     let mut client = new_client(
         ConnectionParameters::default()
-            .datagram_size(MAX_QUIC_DATAGRAM)
+            .datagram_size(QuicDatagram::MAX_SIZE)
             .outgoing_datagram_queue(OUTGOING_QUEUE),
     );
-    let mut server = new_server(ConnectionParameters::default().datagram_size(MAX_QUIC_DATAGRAM));
+    let mut server =
+        new_server(ConnectionParameters::default().datagram_size(QuicDatagram::MAX_SIZE));
     connect_force_idle(&mut client, &mut server);
     (client, server)
 }
