@@ -20,6 +20,7 @@ use std::{
 use indexmap::IndexMap;
 use neqo_common::{qdebug, qerror, qtrace, Buffer, Encoder, Role};
 use smallvec::SmallVec;
+use static_assertions::const_assert;
 
 use crate::{
     events::ConnectionEvents,
@@ -34,7 +35,7 @@ use crate::{
         TransportParameterId::{InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni},
         TransportParameters,
     },
-    AppError, Error, Res,
+    AppError, Error, Res, MAX_LOCAL_MAX_STREAM_DATA,
 };
 
 /// The priority that is assigned to sending data for the stream.
@@ -463,14 +464,15 @@ pub struct TxBuffer {
     ranges: RangeTracker,   // ranges in buffer that have been sent or acked
 }
 
+const_assert!(MAX_LOCAL_MAX_STREAM_DATA <= usize::MAX as u64);
+
 impl TxBuffer {
     /// The maximum stream send buffer size.
     ///
-    /// See [`crate::MAX_LOCAL_MAX_STREAM_DATA`] for an explanation of this
+    /// See [`MAX_LOCAL_MAX_STREAM_DATA`] for an explanation of this
     /// concrete value.
-    ///
-    /// Keep in sync with [`crate::MAX_LOCAL_MAX_STREAM_DATA`].
-    pub const MAX_SIZE: usize = 10 * 1024 * 1024;
+    #[expect(clippy::cast_possible_truncation, reason = "Checked by const_assert!")]
+    pub const MAX_SIZE: usize = MAX_LOCAL_MAX_STREAM_DATA as usize;
 
     #[must_use]
     pub fn new() -> Self {
