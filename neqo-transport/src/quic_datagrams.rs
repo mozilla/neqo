@@ -45,7 +45,7 @@ pub struct QuicDatagram {
 }
 
 impl QuicDatagram {
-    pub const MAX: u64 = 65535;
+    pub const MAX_SIZE: u64 = 65535;
 
     const fn tracking(&self) -> &DatagramTracking {
         &self.tracking
@@ -94,7 +94,7 @@ impl QuicDatagrams {
     }
 
     pub fn set_remote_datagram_size(&mut self, v: u64) {
-        self.remote_datagram_size = min(v, QuicDatagram::MAX);
+        self.remote_datagram_size = min(v, QuicDatagram::MAX_SIZE);
     }
 
     /// This function tries to write a datagram frame into a packet. If the

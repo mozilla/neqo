@@ -132,10 +132,11 @@ fn datagram_enabled_on_server() {
 fn connect_datagram() -> (Connection, Connection) {
     let mut client = new_client(
         ConnectionParameters::default()
-            .datagram_size(QuicDatagram::MAX)
+            .datagram_size(QuicDatagram::MAX_SIZE)
             .outgoing_datagram_queue(OUTGOING_QUEUE),
     );
-    let mut server = new_server(ConnectionParameters::default().datagram_size(QuicDatagram::MAX));
+    let mut server =
+        new_server(ConnectionParameters::default().datagram_size(QuicDatagram::MAX_SIZE));
     connect_force_idle(&mut client, &mut server);
     (client, server)
 }
