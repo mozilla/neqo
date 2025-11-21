@@ -11,7 +11,7 @@
 set -e
 tmp=$(mktemp -d)
 
-cargo build --locked --bin neqo-client --bin neqo-server
+cargo build --locked --bin neqo-client --bin neqo-server --features qlog
 
 addr=localhost
 port=4433

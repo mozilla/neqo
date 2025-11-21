@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "qlog")]
 use ::qlog::events::{quic::CongestionStateUpdated, EventData};
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::Qlog, qtrace};
 
@@ -60,6 +61,7 @@ impl State {
         };
     }
 
+    #[cfg(feature = "qlog")]
     pub const fn to_qlog(self) -> &'static str {
         match self {
             Self::SlowStart | Self::PersistentCongestion => "slow_start",
@@ -442,12 +444,17 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         self.acked_bytes
     }
 
+    #[cfg_attr(
+        not(feature = "qlog"),
+        expect(unused_variables, reason = "Only used with qlog.")
+    )]
     fn set_state(&mut self, state: State, now: Instant) {
         if self.state != state {
             qdebug!("[{self}] state -> {state:?}");
-            let old_state = self.state;
+            #[cfg(feature = "qlog")]
             self.qlog.add_event_data_with_instant(
                 || {
+                    let old_state = self.state;
                     // No need to tell qlog about exit from transient states.
                     if old_state.transient() {
                         None
@@ -511,6 +518,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                     self.congestion_window = self.cwnd_min();
                     self.acked_bytes = 0;
                     self.set_state(State::PersistentCongestion, now);
+                    #[cfg(feature = "qlog")]
                     qlog::metrics_updated(
                         &self.qlog,
                         &[qlog::Metric::CongestionWindow(self.congestion_window)],
@@ -558,6 +566,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             self.congestion_window,
             self.ssthresh
         );
+        #[cfg(feature = "qlog")]
         qlog::metrics_updated(
             &self.qlog,
             &[

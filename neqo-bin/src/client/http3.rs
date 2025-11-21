@@ -99,8 +99,8 @@ pub fn create_client(
             .max_concurrent_push_streams(args.max_concurrent_push_streams),
     );
 
-    let qlog = qlog_new(args, hostname, client.connection_id())?;
-    client.set_qlog(qlog);
+    client.set_qlog(qlog_new(args, hostname, client.connection_id())?);
+
     if let Some(ech) = &args.ech {
         client.enable_ech(ech)?;
     }
