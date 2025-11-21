@@ -1,4 +1,4 @@
-#! /usr/bin/env bash
+#!/usr/bin/env bash
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ cargo test --quiet --locked --features build-fuzzing-corpus --no-fail-fast || tr
 for fuzzer in $(cargo fuzz list); do
     corpus="fuzz/corpus/$fuzzer"
     before=$(find "$corpus" | wc -l | tr -d ' ')
-    cargo fuzz cmin --locked "$fuzzer"
+    cargo fuzz cmin "$fuzzer"
     after=$(find "$corpus" | wc -l | tr -d ' ')
     echo "Minimized corpus for $fuzzer: $before -> $after files"
     echo
