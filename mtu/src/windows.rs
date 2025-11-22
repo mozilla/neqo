@@ -12,7 +12,6 @@ use std::{
 };
 
 use windows::Win32::{
-    Foundation::NO_ERROR,
     NetworkManagement::{
         IpHelper::{
             if_indextoname, FreeMibTable, GetBestInterfaceEx, GetIpInterfaceTable,
@@ -100,15 +99,18 @@ pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
         )
     };
     if res != 0 {
-        return Err(Error::last_os_error());
+        return Err(Error::from_raw_os_error(res.try_into().unwrap_or(i32::MAX)));
     }
 
     // Get a list of all interfaces with associated metadata.
     let mut if_table = MibTablePtr::default();
     // GetIpInterfaceTable allocates memory, which MibTablePtr::drop will free.
     let family = if remote.is_ipv4() { AF_INET } else { AF_INET6 };
-    if unsafe { GetIpInterfaceTable(family, if_table.mut_ptr_ptr()) } != NO_ERROR {
-        return Err(Error::last_os_error());
+    let res = unsafe { GetIpInterfaceTable(family, if_table.mut_ptr_ptr()) };
+    if res.is_err() {
+        return Err(Error::from_raw_os_error(
+            res.0.try_into().unwrap_or(i32::MAX),
+        ));
     }
     // Make a slice
     let ifaces = unsafe {
