@@ -9,6 +9,7 @@ use std::{
     collections::HashSet,
     fmt::{self, Debug, Display, Formatter},
     rc::Rc,
+    str::from_utf8,
     time::Instant,
 };
 
@@ -261,7 +262,7 @@ impl Session {
                     .iter()
                     .find_map(|h| {
                         if h.name() == ":status" {
-                            h.value().parse::<u16>().ok()
+                            from_utf8(h.value()).ok()?.parse::<u16>().ok()
                         } else {
                             None
                         }

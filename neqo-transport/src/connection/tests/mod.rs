@@ -28,7 +28,7 @@ use crate::{
     packet,
     pmtud::Pmtud,
     recovery::ACK_ONLY_SIZE_LIMIT,
-    stats::{FrameStats, Stats, MAX_PTO_COUNTS},
+    stats::{FrameStats, Stats},
     tparams::TransportParameterId::*,
     ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, EmptyConnectionIdGenerator,
     Error, StreamId, StreamType, Version, MIN_INITIAL_PACKET_SIZE,
@@ -514,7 +514,7 @@ fn induce_persistent_congestion(
     qtrace!("[{client}] induce_persistent_congestion");
     now += AT_LEAST_PTO;
 
-    let mut pto_counts = [0; MAX_PTO_COUNTS];
+    let mut pto_counts = [0; Stats::MAX_PTO_COUNTS];
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
     qtrace!("[{client}] first PTO");

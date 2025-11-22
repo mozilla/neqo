@@ -21,10 +21,7 @@ use super::{IP_ADDR, MTU, RTT};
 use crate::{
     cc::{
         classic_cc::ClassicCongestionControl,
-        cubic::{
-            convert_to_f64, Cubic, CUBIC_ALPHA, CUBIC_BETA_USIZE_DIVIDEND,
-            CUBIC_BETA_USIZE_DIVISOR, CUBIC_C, CUBIC_FAST_CONVERGENCE_FACTOR,
-        },
+        cubic::{convert_to_f64, Cubic},
         CongestionControl as _,
     },
     packet,
@@ -34,11 +31,11 @@ use crate::{
 };
 
 const fn cwnd_after_loss(cwnd: usize) -> usize {
-    cwnd * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR
+    cwnd * Cubic::BETA_USIZE_DIVIDEND / Cubic::BETA_USIZE_DIVISOR
 }
 
 const fn cwnd_after_loss_slow_start(cwnd: usize, mtu: usize) -> usize {
-    (cwnd + mtu) * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR
+    (cwnd + mtu) * Cubic::BETA_USIZE_DIVIDEND / Cubic::BETA_USIZE_DIVISOR
 }
 
 fn fill_cwnd(cc: &mut ClassicCongestionControl<Cubic>, mut next_pn: u64, now: Instant) -> u64 {
@@ -85,7 +82,7 @@ fn packet_lost(cc: &mut ClassicCongestionControl<Cubic>, pn: u64) {
 fn expected_tcp_acks(cwnd_rtt_start: usize, mtu: usize) -> u64 {
     (f64::from(i32::try_from(cwnd_rtt_start).unwrap())
         / f64::from(i32::try_from(mtu).unwrap())
-        / CUBIC_ALPHA)
+        / Cubic::ALPHA)
         .round() as u64
 }
 
@@ -108,15 +105,15 @@ fn tcp_phase() {
     // in this phase cwnd is increase by CUBIC_ALPHA every RTT. We can look at it as
     // increase of MAX_DATAGRAM_SIZE every 1 / CUBIC_ALPHA RTTs.
     // The phase will end when cwnd calculated with cubic equation is equal to TCP estimate:
-    // CUBIC_C * (n * RTT / CUBIC_ALPHA)^3 * MAX_DATAGRAM_SIZE = n * MAX_DATAGRAM_SIZE
-    // from this n = sqrt(CUBIC_ALPHA^3/ (CUBIC_C * RTT^3)).
-    let num_tcp_increases = (CUBIC_ALPHA.powi(3) / (CUBIC_C * RTT.as_secs_f64().powi(3)))
+    // Cubic::C * (n * RTT / Cubic::ALPHA)^3 * MAX_DATAGRAM_SIZE = n * MAX_DATAGRAM_SIZE
+    // from this n = sqrt(Cubic::ALPHA^3/ (Cubic::C * RTT^3)).
+    let num_tcp_increases = (Cubic::ALPHA.powi(3) / (Cubic::C * RTT.as_secs_f64().powi(3)))
         .sqrt()
         .floor() as u64;
 
     for _ in 0..num_tcp_increases {
         let cwnd_rtt_start = cubic.cwnd();
-        // Expected acks during a period of RTT / CUBIC_ALPHA.
+        // Expected acks during a period of RTT / Cubic::ALPHA.
         let acks = expected_tcp_acks(cwnd_rtt_start, cubic.max_datagram_size());
         // The time between acks if they are ideally paced over a RTT.
         let time_increase =
@@ -149,7 +146,7 @@ fn tcp_phase() {
     }
 
     // Make sure that the increase is not according to TCP equation, i.e., that it took
-    // less than RTT / CUBIC_ALPHA.
+    // less than RTT / Cubic::ALPHA.
     let expected_ack_tcp_increase = expected_tcp_acks(cwnd_rtt_start, cubic.max_datagram_size());
     assert!(num_acks < expected_ack_tcp_increase);
 
@@ -180,13 +177,13 @@ fn tcp_phase() {
 
     // The time needed to increase cwnd by MAX_DATAGRAM_SIZE using the cubic equation will be
     // calculated from: W_cubic(elapsed_time + t_to_increase) - W_cubic(elapsed_time) =
-    // MAX_DATAGRAM_SIZE => CUBIC_C * (elapsed_time + t_to_increase)^3 * MAX_DATAGRAM_SIZE +
-    // CWND_INITIAL - CUBIC_C * elapsed_time^3 * MAX_DATAGRAM_SIZE + CWND_INITIAL =
-    // MAX_DATAGRAM_SIZE => t_to_increase = cbrt((1 + CUBIC_C * elapsed_time^3) / CUBIC_C) -
+    // MAX_DATAGRAM_SIZE => Cubic::C * (elapsed_time + t_to_increase)^3 * MAX_DATAGRAM_SIZE +
+    // CWND_INITIAL - Cubic::C * elapsed_time^3 * MAX_DATAGRAM_SIZE + CWND_INITIAL =
+    // MAX_DATAGRAM_SIZE => t_to_increase = cbrt((1 + Cubic::C * elapsed_time^3) / Cubic::C) -
     // elapsed_time (t_to_increase is in seconds)
     // number of ack needed is t_to_increase / time_increase.
     let expected_ack_cubic_increase =
-        (((CUBIC_C.mul_add((elapsed_time).as_secs_f64().powi(3), 1.0) / CUBIC_C).cbrt()
+        (((Cubic::C.mul_add((elapsed_time).as_secs_f64().powi(3), 1.0) / Cubic::C).cbrt()
             - elapsed_time.as_secs_f64())
             / time_increase.as_secs_f64())
         .ceil() as u64;
@@ -212,7 +209,7 @@ fn cubic_phase() {
     next_pn_send = fill_cwnd(&mut cubic, next_pn_send, now);
 
     let k = (cwnd_initial_f64.mul_add(10.0, -cwnd_initial_f64)
-        / CUBIC_C
+        / Cubic::C
         / convert_to_f64(cubic.max_datagram_size()))
     .cbrt();
     let epoch_start = now;
@@ -231,7 +228,7 @@ fn cubic_phase() {
             next_pn_send = fill_cwnd(&mut cubic, next_pn_send, now);
         }
 
-        let expected = (CUBIC_C * ((now - epoch_start).as_secs_f64() - k).powi(3))
+        let expected = (Cubic::C * ((now - epoch_start).as_secs_f64() - k).powi(3))
             .mul_add(
                 convert_to_f64(cubic.max_datagram_size()),
                 cwnd_initial_f64 * 10.0,
@@ -335,7 +332,7 @@ fn congestion_event_congestion_avoidance_fast_convergence() {
 
     assert_within(
         cubic.cc_algorithm().w_max(),
-        cwnd_initial_f64 * CUBIC_FAST_CONVERGENCE_FACTOR,
+        cwnd_initial_f64 * Cubic::FAST_CONVERGENCE_FACTOR,
         f64::EPSILON,
     );
     assert_eq!(cubic.cwnd(), cwnd_after_loss(cubic.cwnd_initial()));
