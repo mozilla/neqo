@@ -97,7 +97,7 @@ impl RttEstimate {
 
     pub fn update(
         &mut self,
-        qlog: &Qlog,
+        qlog: &mut Qlog,
         mut rtt_sample: Duration,
         ack_delay: Duration,
         source: RttSource,
