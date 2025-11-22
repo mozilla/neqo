@@ -1,0 +1,6 @@
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # Allows using branches (i.e. main) to reference action files in workflows
+        mozilla/neqo/*: any
