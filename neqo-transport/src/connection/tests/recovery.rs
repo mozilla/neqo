@@ -28,10 +28,9 @@ use crate::{
         FAST_PTO_SCALE, MAX_OUTSTANDING_UNACK, MAX_PTO_PACKET_COUNT, MIN_OUTSTANDING_UNACK,
     },
     rtt::GRANULARITY,
-    stats::MAX_PTO_COUNTS,
     tparams::{TransportParameter, TransportParameterId::*},
     tracking::{DEFAULT_LOCAL_ACK_DELAY, DEFAULT_REMOTE_ACK_DELAY},
-    CloseReason, Error, Pmtud, StreamType,
+    CloseReason, Error, Pmtud, Stats, StreamType,
 };
 
 #[test]
@@ -256,7 +255,7 @@ fn pto_handshake_complete() {
     let cb = client.process_output(now).callback();
     assert_eq!(cb, pto);
 
-    let mut pto_counts = [0; MAX_PTO_COUNTS];
+    let mut pto_counts = [0; Stats::MAX_PTO_COUNTS];
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
     // Wait for PTO to expire and resend a handshake packet.
@@ -481,7 +480,7 @@ fn handshake_ack_pto() {
     let delay = client.process_output(now).callback();
     assert_eq!(delay, RTT * 3);
 
-    let mut pto_counts = [0; MAX_PTO_COUNTS];
+    let mut pto_counts = [0; Stats::MAX_PTO_COUNTS];
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
     // Wait for the PTO and ensure that the client generates a packet.

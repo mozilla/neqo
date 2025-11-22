@@ -15,8 +15,6 @@ use crate::{
     Res, Stats,
 };
 
-pub const MAX_QUIC_DATAGRAM: u64 = 65535;
-
 /// Length of a [`FrameType::Datagram`] or [`FrameType::DatagramWithLen`] in
 /// QUIC varint encoding.
 pub const DATAGRAM_FRAME_TYPE_VARINT_LEN: usize = 1;
@@ -41,12 +39,14 @@ impl From<Option<u64>> for DatagramTracking {
     }
 }
 
-struct QuicDatagram {
+pub struct QuicDatagram {
     data: Vec<u8>,
     tracking: DatagramTracking,
 }
 
 impl QuicDatagram {
+    pub const MAX_SIZE: u64 = 65535;
+
     const fn tracking(&self) -> &DatagramTracking {
         &self.tracking
     }
@@ -94,7 +94,7 @@ impl QuicDatagrams {
     }
 
     pub fn set_remote_datagram_size(&mut self, v: u64) {
-        self.remote_datagram_size = min(v, MAX_QUIC_DATAGRAM);
+        self.remote_datagram_size = min(v, QuicDatagram::MAX_SIZE);
     }
 
     /// This function tries to write a datagram frame into a packet. If the

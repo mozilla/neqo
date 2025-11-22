@@ -21,7 +21,7 @@ use crate::{
         send_with_modifier_and_receive, DEFAULT_RTT,
     },
     ecn, packet,
-    path::MAX_PATH_PROBES,
+    path::Path,
     ConnectionEvent, ConnectionId, ConnectionParameters, Output, StreamType,
 };
 
@@ -180,10 +180,10 @@ fn migration_delay_to_ecn_blackhole() {
         .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), false, now)
         .unwrap();
 
-    // The client should send MAX_PATH_PROBES path challenges with ECN enabled, and then another
-    // MAX_PATH_PROBES without ECN.
+    // The client should send Path::MAX_PROBES path challenges with ECN enabled, and then another
+    // Path::MAX_PROBES without ECN.
     let mut probes = 0;
-    while probes < MAX_PATH_PROBES * 2 {
+    while probes < Path::MAX_PROBES * 2 {
         match client.process_output(now) {
             Output::Callback(t) => {
                 now += t;
@@ -195,7 +195,7 @@ fn migration_delay_to_ecn_blackhole() {
                     probes += 1;
                     assert_eq!(client.stats().frame_tx.path_challenge, probes);
                     assert_path_challenge_min_len(&client, &d, now);
-                    if probes <= MAX_PATH_PROBES {
+                    if probes <= Path::MAX_PROBES {
                         // The first probes should be sent with ECN.
                         assert_ecn_enabled(d.tos());
                     } else {

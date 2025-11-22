@@ -736,8 +736,7 @@ mod test {
     use crate::{
         connection::params::{MAX_LOCAL_MAX_DATA, MAX_LOCAL_MAX_STREAM_DATA},
         fc::WINDOW_UPDATE_FRACTION,
-        packet::{self, PACKET_LIMIT},
-        recovery,
+        packet, recovery,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
         ConnectionParameters, Error, Res, INITIAL_LOCAL_MAX_DATA, INITIAL_LOCAL_MAX_STREAM_DATA,
@@ -980,7 +979,7 @@ mod test {
         fc[StreamType::BiDi].send_flowc_update();
         // consume the frame
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         fc[StreamType::BiDi].write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
         assert_eq!(tokens.len(), 1);
@@ -1088,7 +1087,7 @@ mod test {
 
     fn write_frames(fc: &mut ReceiverFlowControl<StreamId>, rtt: Duration, now: Instant) -> usize {
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         fc.write_frames(
             &mut builder,
@@ -1319,7 +1318,7 @@ mod test {
         // Helper to write frames
         let write_conn_frames = |fc: &mut ReceiverFlowControl<()>, now: Instant| {
             let mut builder =
-                packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+                packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
             let mut tokens = recovery::Tokens::new();
             fc.write_frames(
                 &mut builder,
@@ -1359,7 +1358,7 @@ mod test {
         // Helper to write frames
         let write_conn_frames = |fc: &mut ReceiverFlowControl<()>| {
             let mut builder =
-                packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+                packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
             let mut tokens = recovery::Tokens::new();
             fc.write_frames(
                 &mut builder,
