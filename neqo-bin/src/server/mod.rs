@@ -361,7 +361,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
                                 if e.raw_os_error() == Some(libc::EIO)
                                     && dgram.num_datagrams() > 1 =>
                             {
-                                qinfo!("`libc::sendmsg` failed with io error; quinn-udp will halt segmentation offload");
+                                qinfo!("`libc::sendmsg` failed with {e}; quinn-udp will halt segmentation offload");
                                 // Drop the packets and let QUIC handle retransmission.
                                 break;
                             }
