@@ -355,7 +355,13 @@ impl TransportParameters {
 
     /// Decode is a static function that parses transport parameters
     /// using the provided decoder.
-    pub(crate) fn decode(d: &mut Decoder) -> Res<Self> {
+    ///
+    /// # Errors
+    /// When the transport parameters are malformed.
+    pub fn decode(d: &mut Decoder) -> Res<Self> {
+        #[cfg(all(feature = "build-fuzzing-corpus", test))]
+        neqo_common::write_item_to_fuzzing_corpus("tparams", d.as_ref());
+
         let mut tps = Self::default();
         qtrace!("Parsed fixed TP header");
 
