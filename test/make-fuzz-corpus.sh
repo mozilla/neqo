@@ -22,10 +22,10 @@ for fuzzer in $(cargo fuzz list); do
     echo "$fuzzer fuzzer: Building..."
     cargo fuzz build "$fuzzer" > /dev/null 2>&1
     corpus="fuzz/corpus/$fuzzer"
-    before=$(find "$corpus" | wc -l | tr -d ' ')
+    before=$(find "$corpus" -type f | wc -l | tr -d ' ')
     echo "$fuzzer fuzzer: Merging new unique samples into corpus ($before samples before)..."
     "target/$TRIPLE/release/$fuzzer" -merge=1 "$corpus" "$generated" 2> /dev/null
-    after=$(find "$corpus" | wc -l | tr -d ' ')
+    after=$(find "$corpus" -type f | wc -l | tr -d ' ')
     diff=$((after - before))
     echo "$fuzzer fuzzer: $diff new samples added (now $after)"
 done
