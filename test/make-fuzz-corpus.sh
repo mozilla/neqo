@@ -4,14 +4,28 @@ set -euo pipefail
 
 # First, let's run the test suite to generate initial fuzzing corpora.
 # This will have failing tests, ignore them.
-cargo test --quiet --locked --features build-fuzzing-corpus --no-fail-fast || true
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+echo "Generating new fuzzing corpora under $TMP..."
+NEQO_CORPUS=$TMP cargo test --quiet --locked --features build-fuzzing-corpus --no-fail-fast > /dev/null 2>&1 || true
 
-# Now, minimize the various corpora.
+# Now, only merge in those newly-generated samples that increase coverage.
+# "cargo fuzz" cannot do this, so use the underlying LLVM fuzzer binary directly.
+TRIPLE=$(rustc -vV | sed -n 's|host: ||p')
 for fuzzer in $(cargo fuzz list); do
+    echo
+    generated="$TMP/$fuzzer"
+    if [ ! -d "$generated" ]; then
+        echo "$fuzzer fuzzer: WARNING, test suite generated no corpus"
+        continue
+    fi
+    echo "$fuzzer fuzzer: Building..."
+    cargo fuzz build "$fuzzer" > /dev/null 2>&1
     corpus="fuzz/corpus/$fuzzer"
     before=$(find "$corpus" | wc -l | tr -d ' ')
-    cargo fuzz cmin "$fuzzer"
+    echo "$fuzzer fuzzer: Merging new unique samples into corpus ($before samples before)..."
+    "target/$TRIPLE/release/$fuzzer" -merge=1 "$corpus" "$generated" 2> /dev/null
     after=$(find "$corpus" | wc -l | tr -d ' ')
-    echo "Minimized corpus for $fuzzer: $before -> $after files"
-    echo
+    diff=$((after - before))
+    echo "$fuzzer fuzzer: $diff new samples added (now $after)"
 done
