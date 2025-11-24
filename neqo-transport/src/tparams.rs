@@ -358,7 +358,7 @@ impl TransportParameters {
     ///
     /// # Errors
     /// When the transport parameters are malformed.
-    pub fn decode(d: &mut Decoder) -> Res<Self> {
+    pub(crate) fn decode(d: &mut Decoder) -> Res<Self> {
         #[cfg(all(feature = "build-fuzzing-corpus", test))]
         neqo_common::write_item_to_fuzzing_corpus("tparams", d.as_ref());
 
@@ -375,6 +375,12 @@ impl TransportParameters {
             }
         }
         Ok(tps)
+    }
+
+    /// Conditionally make `decode` public when fuzzing.
+    #[cfg(fuzzing)]
+    pub fn decode_pub(d: &mut Decoder) -> Res<Self> {
+        Self::decode(d)
     }
 
     const fn retain_all(_tp: TransportParameterId, _v: Option<&TransportParameter>) -> bool {
