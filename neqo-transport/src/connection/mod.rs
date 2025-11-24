@@ -1735,7 +1735,11 @@ impl Connection {
             let slc_len = slc.len();
             let (mut packet, remainder) =
                 match packet::Public::decode(slc, self.cid_manager.decoder().as_ref()) {
-                    Ok((packet, remainder)) => (packet, remainder),
+                    Ok((packet, remainder)) => {
+                        #[cfg(feature = "build-fuzzing-corpus")]
+                        neqo_common::write_item_to_fuzzing_corpus("packet", packet.data());
+                        (packet, remainder)
+                    }
                     Err(e) => {
                         qinfo!("[{self}] Garbage packet: {e}");
                         self.stats.borrow_mut().pkt_dropped("Garbage packet");
@@ -2395,7 +2399,15 @@ impl Connection {
         if probe {
             // Nothing ack-eliciting and we need to probe; send PING.
             debug_assert_ne!(builder.remaining(), 0);
+
+            #[cfg(feature = "build-fuzzing-corpus")]
+            let frame_start = builder.len();
+
             builder.encode_varint(FrameType::Ping);
+
+            #[cfg(feature = "build-fuzzing-corpus")]
+            neqo_common::write_item_to_fuzzing_corpus("frame", &builder.as_ref()[frame_start..]);
+
             let stats = &mut self.stats.borrow_mut().frame_tx;
             stats.ping += 1;
         }

@@ -942,6 +942,9 @@ impl SendStream {
             }
 
             // Write the stream out.
+            #[cfg(feature = "build-fuzzing-corpus")]
+            let frame_start = builder.len();
+
             builder.encode_varint(Frame::stream_type(fin, offset > 0, fill));
             builder.encode_varint(id.as_u64());
             if offset > 0 {
@@ -953,6 +956,10 @@ impl SendStream {
             } else {
                 builder.encode_vvec(&data[..length]);
             }
+
+            #[cfg(feature = "build-fuzzing-corpus")]
+            neqo_common::write_item_to_fuzzing_corpus("frame", &builder.as_ref()[frame_start..]);
+
             debug_assert!(builder.len() <= builder.limit());
 
             self.mark_as_sent(offset, length, fin);

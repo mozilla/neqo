@@ -457,6 +457,9 @@ impl RecvdPackets {
             return;
         }
 
+        #[cfg(feature = "build-fuzzing-corpus")]
+        let frame_start = builder.len();
+
         builder.encode_varint(if self.ecn_count.is_some() {
             FrameType::AckEcn
         } else {
@@ -496,6 +499,9 @@ impl RecvdPackets {
             builder.encode_varint(self.ecn_count[Ecn::Ect1]);
             builder.encode_varint(self.ecn_count[Ecn::Ce]);
         }
+
+        #[cfg(feature = "build-fuzzing-corpus")]
+        neqo_common::write_item_to_fuzzing_corpus("frame", &builder.as_ref()[frame_start..]);
 
         // We've sent an ACK, reset the timer.
         self.ack_time = None;

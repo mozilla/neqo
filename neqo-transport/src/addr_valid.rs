@@ -419,8 +419,17 @@ impl NewTokenSender {
             if t.needs_sending && t.len() <= builder.remaining() {
                 t.needs_sending = false;
 
+                #[cfg(feature = "build-fuzzing-corpus")]
+                let frame_start = builder.len();
+
                 builder.encode_varint(FrameType::NewToken);
                 builder.encode_vvec(&t.token);
+
+                #[cfg(feature = "build-fuzzing-corpus")]
+                neqo_common::write_item_to_fuzzing_corpus(
+                    "frame",
+                    &builder.as_ref()[frame_start..],
+                );
 
                 tokens.push(recovery::Token::NewToken(t.seqno));
                 stats.new_token += 1;

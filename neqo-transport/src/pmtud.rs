@@ -120,7 +120,14 @@ impl Pmtud {
     pub fn send_probe<B: Buffer>(&mut self, builder: &mut packet::Builder<B>, stats: &mut Stats) {
         // The packet may include ACK-eliciting data already, but rather than check for that, it
         // seems OK to burn one byte here to simply include a PING.
+        #[cfg(feature = "build-fuzzing-corpus")]
+        let frame_start = builder.len();
+
         builder.encode_varint(FrameType::Ping);
+
+        #[cfg(feature = "build-fuzzing-corpus")]
+        neqo_common::write_item_to_fuzzing_corpus("frame", &builder.as_ref()[frame_start..]);
+
         stats.frame_tx.ping += 1;
         stats.pmtud_tx += 1;
         self.probe_count += 1;

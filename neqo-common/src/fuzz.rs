@@ -6,7 +6,7 @@
 
 use std::{env, fs::File, io::Write, path::Path};
 
-use sha1::{Digest, Sha1};
+use sha1::{Digest as _, Sha1};
 
 /// Write a data item `data` for the fuzzing target `target` to the fuzzing corpus. The caller needs
 /// to make sure that `target` is the correct fuzzing target name for the data written.
