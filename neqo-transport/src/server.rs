@@ -211,6 +211,25 @@ impl Server {
         now: Instant,
     ) -> Output {
         qdebug!("[{self}] Handle initial");
+        #[cfg(feature = "build-fuzzing-corpus")]
+        {
+            let mut d = Vec::new();
+            match dgram.source().ip() {
+                std::net::IpAddr::V4(ip) => {
+                    let bytes = ip.octets();
+                    d.push(u8::try_from(bytes.len()).expect("IP address len fits in u8"));
+                    d.extend_from_slice(&bytes);
+                }
+                std::net::IpAddr::V6(ip) => {
+                    let bytes = ip.octets();
+                    d.push(u8::try_from(bytes.len()).expect("IP address len fits in u8"));
+                    d.extend_from_slice(&bytes);
+                }
+            }
+            d.extend_from_slice(&dgram.source().port().to_be_bytes());
+            d.extend_from_slice(&initial.token);
+            neqo_common::write_item_to_fuzzing_corpus("addr_valid", &d);
+        }
         let res = self
             .address_validation
             .borrow()

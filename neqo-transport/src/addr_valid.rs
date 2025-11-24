@@ -131,9 +131,20 @@ impl AddressValidation {
         // Include the token identifier ("Retry"/~) in the AAD, then keep it for plaintext.
         let mut buf = Self::encode_aad(peer_address, retry);
         let encrypted = self.self_encrypt.seal(buf.as_ref(), data.as_ref())?;
+        #[cfg(feature = "build-fuzzing-corpus")]
+        let mut corpus_data = buf.as_ref()[TOKEN_IDENTIFIER_RETRY.len()..].to_vec();
         buf.truncate(TOKEN_IDENTIFIER_RETRY.len());
         buf.encode(&encrypted);
-        Ok(buf.into())
+        let token: Vec<u8> = buf.into();
+        #[cfg(feature = "build-fuzzing-corpus")]
+        {
+            if !retry {
+                corpus_data.extend_from_slice(&peer_address.port().to_be_bytes());
+            }
+            corpus_data.extend_from_slice(&token);
+            neqo_common::write_item_to_fuzzing_corpus("addr_valid", &corpus_data);
+        }
+        Ok(token)
     }
 
     /// This generates a token for use with Retry.
