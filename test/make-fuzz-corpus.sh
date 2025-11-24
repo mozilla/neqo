@@ -11,7 +11,7 @@ NEQO_CORPUS=$TMP cargo test --quiet --locked --features build-fuzzing-corpus --n
 
 # Now, only merge in those newly-generated samples that increase coverage.
 # "cargo fuzz" cannot do this, so use the underlying LLVM fuzzer binary directly.
-TRIPLE=$(rustc -vV | sed -n 's|host: ||p')
+TRIPLE="$(basename "$(dirname "$(rustc --print target-libdir)")")"
 for fuzzer in $(cargo fuzz list); do
     echo
     generated="$TMP/$fuzzer"
