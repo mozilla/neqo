@@ -206,6 +206,15 @@ impl Decoder {
         buf: &[u8],
         stream_id: StreamId,
     ) -> Res<Option<Vec<Header>>> {
+        #[cfg(all(feature = "build-fuzzing-corpus", test))]
+        {
+            // Copy `stream_id`` into the first 64 bits of corpus data.
+            let mut data = Vec::new();
+            data.extend_from_slice(&stream_id.as_u64().to_le_bytes());
+            data.extend_from_slice(buf);
+            neqo_common::write_item_to_fuzzing_corpus("qpack", &data);
+        }
+
         qdebug!("[{self}] decode header block");
         let mut decoder = HeaderDecoder::new(buf);
 
