@@ -263,6 +263,7 @@ impl FrameReader {
             if len > 0 { None } else { Some(&[]) },
         )? {
             #[cfg(feature = "build-fuzzing-corpus")]
+            // Pass `None` to indicate a frame with no additional data beyond type and length.
             self.write_item_to_fuzzing_corpus(None);
             self.reset();
             return Ok(Some(f));
