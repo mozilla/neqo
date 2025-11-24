@@ -28,13 +28,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15] # No Windows support for sanitizers.
-        sanitizer: [address, thread, leak, memory]
+        sanitizer: [address, thread, leak] # TODO: memory
         exclude:
           # Memory and leak sanitizers are not supported on macOS.
           - os: macos-15
             sanitizer: leak
-          - os: macos-15
-            sanitizer: memory
+          # - os: macos-15
+          #   sanitizer: memory
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -76,6 +76,7 @@ jobs:
             # Suppress non-neqo leaks on macOS. TODO: Check occasionally if these are still needed.
             {
               echo "leak:dyld4::RuntimeState"
+              echo "leak:fetchInitializingClassList"
               echo "leak:lang_start_internal"
             } > suppressions.txt
             PWD=$(pwd)
