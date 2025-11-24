@@ -294,7 +294,10 @@ impl FrameReader {
     }
 
     #[cfg(feature = "build-fuzzing-corpus")]
-    /// Write HFrame data to the fuzzing corpus.
+    /// Write HFrame data to fuzzing corpus.
+    ///
+    /// # Arguments
+    /// * `data` - The frame payload data, or `None` for frames with no payload.
     ///
     /// # Parameters
     /// - `data`: The frame payload as a byte slice, or `None` for frames without a payload.
