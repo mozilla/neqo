@@ -40,7 +40,7 @@ fuzz_target!(|data: &[u8]| {
     let mut frame_reader = FrameReader::new();
     let mut stream = FuzzStreamReader { data, offset: 0 };
 
-    // Run the fuzzer
+    // Attempt to decode an HFrame from the fuzzed input
     _ = frame_reader.receive::<HFrame>(&mut stream, now());
 });
 
