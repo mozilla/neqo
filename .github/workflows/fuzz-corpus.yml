@@ -39,7 +39,6 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.ref }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          USER: ${{ github.actor }}
         run: |
           ./test/make-fuzz-corpus.sh
           # If there are no new corpus samples, exit.
@@ -59,5 +58,6 @@ jobs:
           git checkout -b "$BRANCH"
           git add fuzz/corpus
           git commit -m "$MESSAGE"
+          git push -f -u origin "$BRANCH"
           git fetch origin "$HEAD_REF"
           gh pr create --draft --fill-verbose --base "$HEAD_REF" --head "origin:$BRANCH"
