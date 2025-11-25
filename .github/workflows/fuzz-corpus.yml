@@ -36,6 +36,7 @@ jobs:
       - env:
           PR_NUMBER: ${{ github.event.pull_request.number || github.ref_name }}
           BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ./test/make-fuzz-corpus.sh
           # If there are new corpus samples, create a PR to this PR to add them.
