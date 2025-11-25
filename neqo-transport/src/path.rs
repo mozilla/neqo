@@ -376,8 +376,16 @@ impl Paths {
                 self.to_retire.push(seqno);
                 break;
             }
+
+            #[cfg(feature = "build-fuzzing-corpus")]
+            let frame_start = builder.len();
+
             builder.encode_varint(FrameType::RetireConnectionId);
             builder.encode_varint(seqno);
+
+            #[cfg(feature = "build-fuzzing-corpus")]
+            neqo_common::write_item_to_fuzzing_corpus("frame", &builder.as_ref()[frame_start..]);
+
             tokens.push(recovery::Token::RetireConnectionId(seqno));
             stats.retire_connection_id += 1;
         }
@@ -802,8 +810,15 @@ impl Path {
         // Send PATH_RESPONSE.
         let resp_sent = if let Some(challenge) = self.challenge.take() {
             qtrace!("[{self}] Responding to path challenge {}", hex(challenge));
+
+            #[cfg(feature = "build-fuzzing-corpus")]
+            let frame_start = builder.len();
+
             builder.encode_varint(FrameType::PathResponse);
             builder.encode(&challenge[..]);
+
+            #[cfg(feature = "build-fuzzing-corpus")]
+            neqo_common::write_item_to_fuzzing_corpus("frame", &builder.as_ref()[frame_start..]);
 
             // These frames are not retransmitted in the usual fashion.
             stats.path_response += 1;
@@ -820,8 +835,15 @@ impl Path {
         if let ProbeState::ProbeNeeded { probe_count } = self.state {
             qtrace!("[{self}] Initiating path challenge {probe_count}");
             let data = random::<8>();
+
+            #[cfg(feature = "build-fuzzing-corpus")]
+            let frame_start = builder.len();
+
             builder.encode_varint(FrameType::PathChallenge);
             builder.encode(data);
+
+            #[cfg(feature = "build-fuzzing-corpus")]
+            neqo_common::write_item_to_fuzzing_corpus("frame", &builder.as_ref()[frame_start..]);
 
             // As above, no recovery token.
             stats.path_challenge += 1;

@@ -288,11 +288,18 @@ impl ConnectionIdEntry<Srt> {
             return false;
         }
 
+        #[cfg(feature = "build-fuzzing-corpus")]
+        let frame_start = builder.len();
+
         builder.encode_varint(FrameType::NewConnectionId);
         builder.encode_varint(self.seqno);
         builder.encode_varint(0u64);
         builder.encode_vec(1, &self.cid);
         builder.encode(&self.srt);
+
+        #[cfg(feature = "build-fuzzing-corpus")]
+        neqo_common::write_item_to_fuzzing_corpus("frame", &builder.as_ref()[frame_start..]);
+
         stats.new_connection_id += 1;
         true
     }
