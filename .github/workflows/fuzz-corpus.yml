@@ -14,6 +14,8 @@ jobs:
   fuzz-corpus:
     name: Check for new fuzzing samples
     runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: write # Needed to create PRs.
 
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
@@ -35,23 +37,25 @@ jobs:
 
       - env:
           PR_NUMBER: ${{ github.event.pull_request.number || github.ref_name }}
-          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          HEAD_REF: ${{ github.head_ref }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ./test/make-fuzz-corpus.sh
-          # If there are new corpus samples, create a PR to this PR to add them.
+          # If there are no new corpus samples, exit.
+          if [ ! -n "$(git status --porcelain fuzz/corpus)" ]; then
+            echo "No new fuzzing corpus samples generated."
+            exit 0
+          fi
+
+          # Otherwise, create a PR to this PR to add them.
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          SUBJECT="chore: Add new fuzzing corpus samples to #$PR_NUMBER"
-          if [ -n "$(git status --porcelain fuzz/corpus)" ]; then
-            git checkout -b chore-add-new-corpus-samples
-            git add fuzz/corpus
-            git commit -m "$SUBJECT"
-            gh pr create \
-              --title "$SUBJECT" \
-              --body "PR #$PR_NUMBER generated new fuzzing samples. This adds them to the fuzzing corpus." \
-              --base "$BASE_REF" \
-              --head chore-add-new-corpus-samples
-          else
-            echo "No new fuzzing corpus samples generated."
-          fi
+          BRANCH="chore-add-new-corpus-samples-$PR_NUMBER"
+          MESSAGE="chore: Add new fuzzing corpus samples to #$PR_NUMBER
+
+          PR #$PR_NUMBER generated new fuzzing samples. This PR adds them to the fuzzing corpus."
+          EOF
+          git checkout -b "$BRANCH"
+          git add fuzz/corpus
+          git commit -m "$MESSAGE"
+          gh pr create --draft --fill-verbose --base "$HEAD_REF" --head "$BRANCH"
