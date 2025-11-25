@@ -345,8 +345,14 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             return false;
         };
 
+        // State needs to be saved before `on_congestion_event` is called where it changes to
+        // `State::RecoveryStart`.
+        let in_slow_start = self.state.in_slow_start();
         let congestion = self.on_congestion_event(last_lost_packet, now);
         if congestion {
+            if in_slow_start {
+                cc_stats.slow_start_exited = true;
+            }
             cc_stats.congestion_events_loss += 1;
         }
         let persistent_congestion = self.detect_persistent_congestion(
@@ -375,8 +381,14 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) -> bool {
+        // State needs to be saved before `on_congestion_event` is called where it changes to
+        // `State::RecoveryStart`.
+        let in_slow_start = self.state.in_slow_start();
         let cwnd_reduced = self.on_congestion_event(largest_acked_pkt, now);
         if cwnd_reduced {
+            if in_slow_start {
+                cc_stats.slow_start_exited = true;
+            }
             cc_stats.congestion_events_ecn += 1;
         }
         cwnd_reduced
@@ -693,10 +705,7 @@ mod tests {
             CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS,
         },
         packet,
-        recovery::{
-            self,
-            sent::{self},
-        },
+        recovery::{self, sent},
         rtt::RttEstimate,
         stats::CongestionControlStats,
         Pmtud,
@@ -1411,7 +1420,7 @@ mod tests {
     #[test]
     fn spurious_congestion_event_detection() {
         let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
-        let mut now = now();
+        let now = now();
         let mut cc_stats = CongestionControlStats::default();
 
         let pkt1 = sent::make_packet(1, now, 1000);
@@ -1526,5 +1535,39 @@ mod tests {
 
         // Now the packet should be removed.
         assert!(cc.maybe_lost_packets.is_empty());
+    }
+
+    #[test]
+    fn slow_start_exited_stat_loss() {
+        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
+        let now = now();
+        let mut cc_stats = CongestionControlStats::default();
+
+        assert!(cc.state.in_slow_start());
+        assert!(!cc_stats.slow_start_exited);
+
+        let pkt1 = sent::make_packet(1, now, 1000);
+        cc.on_packet_sent(&pkt1, now);
+        cc.on_packets_lost(Some(now), None, PTO, &[pkt1], now, &mut cc_stats);
+
+        assert!(!cc.state.in_slow_start());
+        assert!(cc_stats.slow_start_exited);
+    }
+
+    #[test]
+    fn slow_start_exited_stat_ecn_ce() {
+        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
+        let now = now();
+        let mut cc_stats = CongestionControlStats::default();
+
+        assert!(cc.state.in_slow_start());
+        assert!(!cc_stats.slow_start_exited);
+
+        let pkt1 = sent::make_packet(1, now, 1000);
+        cc.on_packet_sent(&pkt1, now);
+        cc.on_ecn_ce_received(&pkt1, now, &mut cc_stats);
+
+        assert!(!cc.state.in_slow_start());
+        assert!(cc_stats.slow_start_exited);
     }
 }

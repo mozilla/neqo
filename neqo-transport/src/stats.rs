@@ -135,10 +135,6 @@ pub struct DatagramStats {
 }
 
 /// Congestion Control stats
-#[expect(
-    clippy::struct_field_names,
-    reason = "more fields might be added in the future that won't be about congestion events"
-)]
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct CongestionControlStats {
     /// Total number of congestion events caused by packet loss.
@@ -149,6 +145,8 @@ pub struct CongestionControlStats {
     /// packets initially considered lost but subsequently acknowledged. This indicates
     /// instances where the congestion control algorithm overreacted to perceived losses.
     pub congestion_events_spurious: usize,
+    /// Whether this connection has exited slow start.
+    pub slow_start_exited: bool,
 }
 /// ECN counts by QUIC [`packet::Type`].
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -392,8 +390,9 @@ impl Debug for Stats {
             "  cc: ce_loss {} ce_ecn {} ce_spurious {}",
             self.cc.congestion_events_loss,
             self.cc.congestion_events_ecn,
-            self.cc.congestion_events_spurious
+            self.cc.congestion_events_spurious,
         )?;
+        writeln!(f, "  ss_exited: {}", self.cc.slow_start_exited)?;
         writeln!(
             f,
             "  pmtud: {} sent {} acked {} lost {} change {} iface_mtu {} pmtu",
