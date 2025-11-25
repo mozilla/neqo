@@ -37,12 +37,12 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || github.ref_name }}
           BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
         run: |
-          bash -x ./test/make-fuzz-corpus.sh
+          ./test/make-fuzz-corpus.sh
           # If there are new corpus samples, create a PR to this PR to add them.
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           SUBJECT="chore: Add new fuzzing corpus samples to #$PR_NUMBER"
-          if ! git diff --quiet fuzz/corpus; then
+          if [ -n "$(git status --porcelain fuzz/corpus)" ]; then
             git checkout -b chore-add-new-corpus-samples
             git add fuzz/corpus
             git commit -m "$SUBJECT"
