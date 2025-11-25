@@ -21,7 +21,7 @@ use strum::{EnumIter, FromRepr};
 use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef},
     crypto::{CryptoDxState, CryptoStates, Epoch},
-    frame::FrameType,
+    frame::{FrameEncoder as _, FrameType},
     version::{self, Version},
     Error, Res,
 };
@@ -453,15 +453,13 @@ impl<B: Buffer> Builder<B> {
                 .map(|&v| Encoder::varint_len(v))
                 .sum::<usize>();
         if write {
-            #[cfg(feature = "build-fuzzing-corpus")]
-            let frame_start = self.len();
-
-            for v in values {
-                self.encode_varint(*v);
+            if let Some((frame_type, rest)) = values.split_first() {
+                self.encode_frame(*frame_type, |enc| {
+                    for v in rest {
+                        enc.encode_varint(*v);
+                    }
+                });
             }
-
-            #[cfg(feature = "build-fuzzing-corpus")]
-            neqo_common::write_item_to_fuzzing_corpus("frame", &self.as_ref()[frame_start..]);
 
             debug_assert!(self.len() <= self.limit());
         }

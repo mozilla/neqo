@@ -39,7 +39,7 @@ use crate::{
     crypto::{Crypto, CryptoDxState, Epoch},
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
-    frame::{CloseError, Frame, FrameType},
+    frame::{CloseError, Frame, FrameEncoder as _, FrameType},
     packet::{self},
     path::{Path, PathRef, Paths},
     qlog,
@@ -2399,15 +2399,7 @@ impl Connection {
         if probe {
             // Nothing ack-eliciting and we need to probe; send PING.
             debug_assert_ne!(builder.remaining(), 0);
-
-            #[cfg(feature = "build-fuzzing-corpus")]
-            let frame_start = builder.len();
-
-            builder.encode_varint(FrameType::Ping);
-
-            #[cfg(feature = "build-fuzzing-corpus")]
-            neqo_common::write_item_to_fuzzing_corpus("frame", &builder.as_ref()[frame_start..]);
-
+            builder.encode_frame(FrameType::Ping, |_| {});
             let stats = &mut self.stats.borrow_mut().frame_tx;
             stats.ping += 1;
         }

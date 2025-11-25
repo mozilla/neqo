@@ -23,7 +23,7 @@ use strum::{Display, EnumIter};
 
 use crate::{
     ecn,
-    frame::FrameType,
+    frame::{FrameEncoder as _, FrameType},
     packet,
     recovery::{self},
     stats::FrameStats,
@@ -457,17 +457,14 @@ impl RecvdPackets {
             return;
         }
 
-        #[cfg(feature = "build-fuzzing-corpus")]
-        let frame_start = builder.len();
-
-        builder.encode_varint(if self.ecn_count.is_some() {
+        let frame_type = if self.ecn_count.is_some() {
             FrameType::AckEcn
         } else {
             FrameType::Ack
-        });
+        };
+
         let mut iter = ranges.iter();
         let Some(first) = iter.next() else { return };
-        builder.encode_varint(first.largest);
         stats.largest_acknowledged = first.largest;
         stats.ack += 1;
 
@@ -478,30 +475,32 @@ impl RecvdPackets {
         // We use the default exponent, so delay is in multiples of 8 microseconds.
         let ack_delay = u64::try_from(elapsed.as_micros() / 8).unwrap_or(u64::MAX);
         let ack_delay = min(MAX_VARINT, ack_delay);
-        builder.encode_varint(ack_delay);
+
         let Ok(extra_ranges) = u64::try_from(ranges.len() - 1) else {
             return;
         };
-        builder.encode_varint(extra_ranges); // extra ranges
-        builder.encode_varint(first.len() - 1); // first range
 
-        let mut last = first.smallest;
-        for r in iter {
-            // the difference must be at least 2 because 0-length gaps,
-            // (difference 1) are illegal.
-            builder.encode_varint(last - r.largest - 2); // Gap
-            builder.encode_varint(r.len() - 1); // Range
-            last = r.smallest;
-        }
+        builder.encode_frame(frame_type, |b| {
+            b.encode_varint(first.largest);
+            b.encode_varint(ack_delay);
+            b.encode_varint(extra_ranges); // extra ranges
+            b.encode_varint(first.len() - 1); // first range
 
-        if self.ecn_count.is_some() {
-            builder.encode_varint(self.ecn_count[Ecn::Ect0]);
-            builder.encode_varint(self.ecn_count[Ecn::Ect1]);
-            builder.encode_varint(self.ecn_count[Ecn::Ce]);
-        }
+            let mut last = first.smallest;
+            for r in iter.clone() {
+                // the difference must be at least 2 because 0-length gaps,
+                // (difference 1) are illegal.
+                b.encode_varint(last - r.largest - 2); // Gap
+                b.encode_varint(r.len() - 1); // Range
+                last = r.smallest;
+            }
 
-        #[cfg(feature = "build-fuzzing-corpus")]
-        neqo_common::write_item_to_fuzzing_corpus("frame", &builder.as_ref()[frame_start..]);
+            if self.ecn_count.is_some() {
+                b.encode_varint(self.ecn_count[Ecn::Ect0]);
+                b.encode_varint(self.ecn_count[Ecn::Ect1]);
+                b.encode_varint(self.ecn_count[Ecn::Ce]);
+            }
+        });
 
         // We've sent an ACK, reset the timer.
         self.ack_time = None;

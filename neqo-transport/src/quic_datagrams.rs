@@ -11,8 +11,9 @@ use std::{cmp::min, collections::VecDeque};
 use neqo_common::{qdebug, Buffer, Encoder};
 
 use crate::{
-    events::OutgoingDatagramOutcome, frame::FrameType, packet, recovery, ConnectionEvents, Error,
-    Res, Stats,
+    events::OutgoingDatagramOutcome,
+    frame::{FrameEncoder as _, FrameType},
+    packet, recovery, ConnectionEvents, Error, Res, Stats,
 };
 
 /// Length of a [`FrameType::Datagram`] or [`FrameType::DatagramWithLen`] in
@@ -113,28 +114,21 @@ impl QuicDatagrams {
                 let length_len =
                     Encoder::varint_len(u64::try_from(len).expect("usize fits in u64"));
                 // Include a length if there is space for another frame after this one.
-                #[cfg(feature = "build-fuzzing-corpus")]
-                let frame_start = builder.len();
-
                 if builder.remaining()
                     >= DATAGRAM_FRAME_TYPE_VARINT_LEN
                         + length_len
                         + len
                         + packet::Builder::MINIMUM_FRAME_SIZE
                 {
-                    builder.encode_varint(FrameType::DatagramWithLen);
-                    builder.encode_vvec(dgram.as_ref());
+                    builder.encode_frame(FrameType::DatagramWithLen, |b| {
+                        b.encode_vvec(dgram.as_ref());
+                    });
                 } else {
-                    builder.encode_varint(FrameType::Datagram);
-                    builder.encode(dgram.as_ref());
+                    builder.encode_frame(FrameType::Datagram, |b| {
+                        b.encode(dgram.as_ref());
+                    });
                     builder.mark_full();
                 }
-
-                #[cfg(feature = "build-fuzzing-corpus")]
-                neqo_common::write_item_to_fuzzing_corpus(
-                    "frame",
-                    &builder.as_ref()[frame_start..],
-                );
 
                 debug_assert!(builder.len() <= builder.limit());
                 stats.frame_tx.datagram += 1;
