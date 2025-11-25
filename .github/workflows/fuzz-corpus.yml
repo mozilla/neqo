@@ -37,7 +37,7 @@ jobs:
 
       - env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REF: ${{ github.ref }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ./test/make-fuzz-corpus.sh
