@@ -19,7 +19,6 @@ cargo fuzz build --dev > /dev/null 2>&1
 # "cargo fuzz" cannot do this, so use the underlying LLVM fuzzer binary directly.
 TRIPLE="$(basename "$(dirname "$(rustc --print target-libdir)")")"
 for fuzzer in $(cargo fuzz list); do
-    echo
     generated="$TMP/$fuzzer"
     if [ ! -d "$generated" ]; then
         echo "$fuzzer fuzzer: WARNING, test suite generated no corpus"
