@@ -121,10 +121,6 @@ impl ClosingFrame {
         if builder.remaining() < Self::MIN_LENGTH {
             return;
         }
-
-        #[cfg(feature = "build-fuzzing-corpus")]
-        let frame_start = builder.len();
-
         match &self.error {
             CloseReason::Transport(e) => {
                 builder.encode_varint(FrameType::ConnectionCloseTransport);
@@ -145,9 +141,6 @@ impl ClosingFrame {
             &self.reason_phrase
         };
         builder.encode_vvec(reason);
-
-        #[cfg(feature = "build-fuzzing-corpus")]
-        neqo_common::write_item_to_fuzzing_corpus("frame", &builder.as_ref()[frame_start..]);
     }
 }
 
@@ -186,15 +179,7 @@ impl StateSignaling {
     ) -> Option<recovery::Token> {
         (matches!(self, Self::HandshakeDone) && builder.remaining() >= 1).then(|| {
             *self = Self::Idle;
-
-            #[cfg(feature = "build-fuzzing-corpus")]
-            let frame_start = builder.len();
-
             builder.encode_varint(FrameType::HandshakeDone);
-
-            #[cfg(feature = "build-fuzzing-corpus")]
-            neqo_common::write_item_to_fuzzing_corpus("frame", &builder.as_ref()[frame_start..]);
-
             recovery::Token::HandshakeDone
         })
     }

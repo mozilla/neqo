@@ -453,16 +453,9 @@ impl<B: Buffer> Builder<B> {
                 .map(|&v| Encoder::varint_len(v))
                 .sum::<usize>();
         if write {
-            #[cfg(feature = "build-fuzzing-corpus")]
-            let frame_start = self.len();
-
             for v in values {
                 self.encode_varint(*v);
             }
-
-            #[cfg(feature = "build-fuzzing-corpus")]
-            neqo_common::write_item_to_fuzzing_corpus("frame", &self.as_ref()[frame_start..]);
-
             debug_assert!(self.len() <= self.limit());
         }
         write
