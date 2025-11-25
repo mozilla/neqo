@@ -1,4 +1,4 @@
-name: Check for new fuzzzing samples
+name: Check for new fuzzing samples
 on:
   pull_request:
     branches: ["main"]
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   fuzz-corpus:
-    name: Check for new fuzzzing samples
+    name: Check for new fuzzing samples
     runs-on: ubuntu-24.04
 
     steps:
