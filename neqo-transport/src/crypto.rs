@@ -192,7 +192,6 @@ impl Crypto {
             if space == PacketNumberSpace::Initial && matches!(self.tls, Agent::Server(_)) {
                 neqo_common::write_item_to_fuzzing_corpus("find_sni", d);
             }
-
             let rec = Record {
                 ct: TLS_CT_HANDSHAKE,
                 epoch: space.into(),

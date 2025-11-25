@@ -957,7 +957,6 @@ impl SendStream {
             if fill {
                 builder.mark_full();
             }
-
             debug_assert!(builder.len() <= builder.limit());
 
             self.mark_as_sent(offset, length, fin);

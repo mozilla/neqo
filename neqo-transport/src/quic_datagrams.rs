@@ -129,7 +129,6 @@ impl QuicDatagrams {
                     });
                     builder.mark_full();
                 }
-
                 debug_assert!(builder.len() <= builder.limit());
                 stats.frame_tx.datagram += 1;
                 tokens.push(recovery::Token::Datagram(*dgram.tracking()));

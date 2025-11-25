@@ -460,7 +460,6 @@ impl<B: Buffer> Builder<B> {
                     }
                 });
             }
-
             debug_assert!(self.len() <= self.limit());
         }
         write
