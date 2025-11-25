@@ -43,7 +43,7 @@ jobs:
         run: |
           ./test/make-fuzz-corpus.sh
           # If there are no new corpus samples, exit.
-          if [ ! -n "$(git status --porcelain fuzz/corpus)" ]; then
+          if [ -z "$(git status --porcelain fuzz/corpus)" ]; then
             echo "No new fuzzing corpus samples generated."
             exit 0
           fi
