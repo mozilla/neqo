@@ -41,12 +41,13 @@ jobs:
           # If there are new corpus samples, create a PR to this PR to add them.
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          SUBJECT="chore: Add new fuzzing corpus samples to #$PR_NUMBER"
           if ! git diff --quiet fuzz/corpus; then
             git checkout -b chore-add-new-corpus-samples
             git add fuzz/corpus
-            git commit -m "chore: Add new fuzzing corpus samples"
+            git commit -m "$SUBJECT"
             gh pr create \
-              --title "Add new fuzzing corpus samples" \
+              --title "$SUBJECT" \
               --body "PR #$PR_NUMBER generated new fuzzing samples. This adds them to the fuzzing corpus." \
               --base "$BASE_REF" \
               --head chore-add-new-corpus-samples
