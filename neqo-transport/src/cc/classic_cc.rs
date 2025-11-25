@@ -1425,8 +1425,6 @@ mod tests {
         assert_eq!(cc_stats.congestion_events_loss, 0);
         assert_eq!(cc_stats.congestion_events_spurious, 0);
 
-        now += RTT;
-
         let mut lost_pkt1 = pkt1.clone();
         let mut lost_pkt2 = pkt2.clone();
         lost_pkt1.declare_lost(now);
@@ -1482,5 +1480,51 @@ mod tests {
         assert_eq!(cc.state, State::CongestionAvoidance);
         assert_eq!(cc_stats.congestion_events_loss, 1);
         assert_eq!(cc_stats.congestion_events_spurious, 1);
+    }
+
+    #[test]
+    fn spurious_congestion_event_detection_cleanup() {
+        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
+        let mut now = now();
+        let mut cc_stats = CongestionControlStats::default();
+        let rtt_estimate = RttEstimate::new(crate::DEFAULT_INITIAL_RTT);
+
+        let pkt1 = sent::make_packet(1, now, 1000);
+        cc.on_packet_sent(&pkt1, now);
+
+        cc.on_packets_lost(
+            Some(now),
+            None,
+            rtt_estimate.pto(true),
+            &[pkt1],
+            now,
+            &mut cc_stats,
+        );
+
+        // The lost should be added now.
+        assert!(!cc.maybe_lost_packets.is_empty());
+
+        // Packets older than 2 * PTO are removed, so we increase by exactly that.
+        now += 2 * rtt_estimate.pto(true);
+
+        // The cleanup is called when we ack packets, so we send and ack a new one.
+        let pkt2 = sent::make_packet(2, now, 1000);
+        cc.on_packet_sent(&pkt2, now);
+        cc.on_packets_acked(&[pkt2], &rtt_estimate, now, &mut cc_stats);
+
+        // The packet is exactly the maximum age, so it shouldn't be removed yet. This assert makes
+        // sure we don't clean up too early.
+        assert!(!cc.maybe_lost_packets.is_empty());
+
+        // Increase by 1ms to get over the maximum age.
+        now += Duration::from_millis(1);
+
+        // Send and ack another packet to trigger cleanup.
+        let pkt3 = sent::make_packet(3, now, 1000);
+        cc.on_packet_sent(&pkt3, now);
+        cc.on_packets_acked(&[pkt3], &rtt_estimate, now, &mut cc_stats);
+
+        // Now the packet should be removed.
+        assert!(cc.maybe_lost_packets.is_empty());
     }
 }
