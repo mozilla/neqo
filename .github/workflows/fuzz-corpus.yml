@@ -21,7 +21,6 @@ jobs:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
           persist-credentials: false
-          fetch-depth: 0
 
       - uses: ./.github/actions/rust
         with:
@@ -60,4 +59,5 @@ jobs:
           git add fuzz/corpus
           git commit -m "$MESSAGE"
           git log -1
+          git fetch origin "$HEAD_REF"
           gh pr create --draft --fill-verbose --base "$HEAD_REF" --head "$BRANCH"
