@@ -27,7 +27,7 @@ use neqo_crypto::{
 
 use crate::{
     cid::ConnectionIdRef,
-    frame::FrameType,
+    frame::{FrameEncoder as _, FrameType},
     packet::{self},
     recovery,
     recv_stream::RxStreamOrderer,
@@ -188,6 +188,10 @@ impl Crypto {
         data: Option<&[u8]>,
     ) -> Res<&HandshakeState> {
         let input = data.map(|d| {
+            #[cfg(feature = "build-fuzzing-corpus")]
+            if space == PacketNumberSpace::Initial && matches!(self.tls, Agent::Server(_)) {
+                neqo_common::write_item_to_fuzzing_corpus("find_sni", d);
+            }
             let rec = Record {
                 ct: TLS_CT_HANDSHAKE,
                 epoch: space.into(),
@@ -1605,9 +1609,10 @@ impl CryptoStreams {
                 Encoder::varint_len(u64::try_from(length).expect("usize fits in u64")) - 1;
             let length = min(data.len(), builder.remaining() - header_len);
 
-            builder.encode_varint(FrameType::Crypto);
-            builder.encode_varint(offset);
-            builder.encode_vvec(&data[..length]);
+            builder.encode_frame(FrameType::Crypto, |b| {
+                b.encode_varint(offset);
+                b.encode_vvec(&data[..length]);
+            });
             Some((offset, length))
         }
 
@@ -1662,7 +1667,7 @@ impl CryptoStreams {
             return;
         };
         while let Some((offset, data)) = cs.tx.next_bytes() {
-            #[cfg(all(feature = "build-fuzzing-corpus", test))]
+            #[cfg(feature = "build-fuzzing-corpus")]
             if offset == 0 {
                 neqo_common::write_item_to_fuzzing_corpus("find_sni", data);
             }
