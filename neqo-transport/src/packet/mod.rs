@@ -52,7 +52,7 @@ pub use metadata::MetaData;
 
 pub type Number = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, EnumIter, FromRepr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, EnumIter, FromRepr, Hash)]
 #[repr(u8)]
 pub enum Type {
     Initial = 0,
