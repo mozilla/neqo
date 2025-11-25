@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       pull-requests: write # Needed to create PRs.
+      contents: write # Needed to push branches.
 
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
@@ -39,6 +40,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.ref }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # USER: ${{ github.actor }}
         run: |
           ./test/make-fuzz-corpus.sh
           # If there are no new corpus samples, exit.
@@ -58,6 +60,6 @@ jobs:
           git checkout -b "$BRANCH"
           git add fuzz/corpus
           git commit -m "$MESSAGE"
-          git push -f -u origin "$BRANCH"
-          git fetch origin "$HEAD_REF"
-          gh pr create --draft --fill-verbose --base "$HEAD_REF" --head "origin:$BRANCH"
+          git push
+          # git fetch origin "$HEAD_REF"
+          gh pr create --draft --fill-verbose --base "$HEAD_REF" --head "$BRANCH"
