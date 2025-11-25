@@ -54,7 +54,6 @@ jobs:
           MESSAGE="chore: Add new fuzzing corpus samples to #$PR_NUMBER
 
           PR #$PR_NUMBER generated new fuzzing samples. This PR adds them to the fuzzing corpus."
-          EOF
           git checkout -b "$BRANCH"
           git add fuzz/corpus
           git commit -m "$MESSAGE"
