@@ -1,0 +1,55 @@
+name: Check for new fuzzzing samples
+on:
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz-corpus:
+    name: Check for new fuzzzing samples
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/rust
+        with:
+          version: nightly
+          tools: cargo-fuzz
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/nss
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+
+      - env:
+          PR_NUMBER: ${{ github.event.pull_request.number || github.ref_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+        run: |
+          ./test/make-fuzz-corpus.sh
+          # If there are new corpus samples, create a PR to this PR to add them.
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet fuzz/corpus; then
+            git checkout -b chore-add-new-corpus-samples
+            git add fuzz/corpus
+            git commit -m "chore: Add new fuzzing corpus samples"
+            gh pr create \
+              --title "Add new fuzzing corpus samples" \
+              --body "PR #$PR_NUMBER generated new fuzzing samples. This adds them to the fuzzing corpus." \
+              --base "$BASE_REF" \
+              --head chore-add-new-corpus-samples
+          else
+            echo "No new fuzzing corpus samples generated."
+          fi
