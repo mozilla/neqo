@@ -684,10 +684,9 @@ impl<'a> Frame<'a> {
     }
 }
 
-/// Extension trait for [`Encoder`] that adds frame encoding with automatic fuzzing corpus
-/// collection.
+/// Extension trait for [`Encoder`] that automates writing to fuzzing corpus.
 pub trait FrameEncoder {
-    /// Encode a frame with the given type and encoding logic.
+    /// Encode a frame with the given type and encoding closure.
     ///
     /// This method:
     /// 1. Encodes the frame type as a varint
@@ -698,10 +697,6 @@ pub trait FrameEncoder {
     /// ```ignore
     /// builder.encode_frame(FrameType::NewToken, |b| {
     ///     b.encode_vvec(&token);
-    /// });
-    /// // Also works with raw frame type values:
-    /// builder.encode_frame(0x1f, |b| {
-    ///     b.encode_varint(some_value);
     /// });
     /// ```
     fn encode_frame<T, F>(&mut self, frame_type: T, encode_fn: F) -> &mut Self
