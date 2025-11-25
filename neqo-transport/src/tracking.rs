@@ -485,7 +485,7 @@ impl RecvdPackets {
             b.encode_varint(first.len() - 1); // first range
 
             let mut last = first.smallest;
-            for r in iter.clone() {
+            for r in iter {
                 // the difference must be at least 2 because 0-length gaps,
                 // (difference 1) are illegal.
                 b.encode_varint(last - r.largest - 2); // Gap
