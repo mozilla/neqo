@@ -26,7 +26,7 @@ for fuzzer in $(cargo fuzz list); do
     fi
     corpus="fuzz/corpus/$fuzzer"
     before=$(find "$corpus" -type f | wc -l | tr -d ' ')
-    echo "$fuzzer fuzzer: Merging new unique samples into corpus ($before samples before)..."
+    echo "$fuzzer fuzzer: Merging new unique samples into corpus ($before samples currently)..."
     "target/$TRIPLE/debug/$fuzzer" -merge=1 "$corpus" "$generated" 2> /dev/null
     after=$(find "$corpus" -type f | wc -l | tr -d ' ')
     diff=$((after - before))

@@ -21,6 +21,7 @@ jobs:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - uses: ./.github/actions/rust
         with:
@@ -36,7 +37,7 @@ jobs:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - env:
-          PR_NUMBER: ${{ github.event.pull_request.number || github.ref_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.head_ref }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -50,11 +51,13 @@ jobs:
           # Otherwise, create a PR to this PR to add them.
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          BRANCH="chore-add-new-corpus-samples-$PR_NUMBER"
+          BRANCH="chore-corpus-samples-$PR_NUMBER"
           MESSAGE="chore: Add new fuzzing corpus samples to #$PR_NUMBER
 
-          PR #$PR_NUMBER generated new fuzzing samples. This PR adds them to the fuzzing corpus."
+          Running the test suite for #$PR_NUMBER generated new fuzzing samples.
+          This PR adds them to the fuzzing corpus."
           git checkout -b "$BRANCH"
           git add fuzz/corpus
           git commit -m "$MESSAGE"
+          git log -1
           gh pr create --draft --fill-verbose --base "$HEAD_REF" --head "$BRANCH"
