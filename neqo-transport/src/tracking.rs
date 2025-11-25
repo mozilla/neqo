@@ -457,11 +457,6 @@ impl RecvdPackets {
             return;
         }
 
-        let frame_type = if self.ecn_count.is_some() {
-            FrameType::AckEcn
-        } else {
-            FrameType::Ack
-        };
         let mut iter = ranges.iter();
         let Some(first) = iter.next() else { return };
         stats.largest_acknowledged = first.largest;
@@ -478,27 +473,34 @@ impl RecvdPackets {
             return;
         };
 
-        builder.encode_frame(frame_type, |b| {
-            b.encode_varint(first.largest);
-            b.encode_varint(ack_delay);
-            b.encode_varint(extra_ranges); // extra ranges
-            b.encode_varint(first.len() - 1); // first range
-
-            let mut last = first.smallest;
-            for r in iter {
-                // the difference must be at least 2 because 0-length gaps,
-                // (difference 1) are illegal.
-                b.encode_varint(last - r.largest - 2); // Gap
-                b.encode_varint(r.len() - 1); // Range
-                last = r.smallest;
-            }
-
+        builder.encode_frame(
             if self.ecn_count.is_some() {
-                b.encode_varint(self.ecn_count[Ecn::Ect0]);
-                b.encode_varint(self.ecn_count[Ecn::Ect1]);
-                b.encode_varint(self.ecn_count[Ecn::Ce]);
-            }
-        });
+                FrameType::AckEcn
+            } else {
+                FrameType::Ack
+            },
+            |b| {
+                b.encode_varint(first.largest);
+                b.encode_varint(ack_delay);
+                b.encode_varint(extra_ranges); // extra ranges
+                b.encode_varint(first.len() - 1); // first range
+
+                let mut last = first.smallest;
+                for r in iter {
+                    // The difference must be at least 2 because 0-length gaps,
+                    // (difference 1) are illegal.
+                    b.encode_varint(last - r.largest - 2); // Gap
+                    b.encode_varint(r.len() - 1); // Range
+                    last = r.smallest;
+                }
+
+                if self.ecn_count.is_some() {
+                    b.encode_varint(self.ecn_count[Ecn::Ect0]);
+                    b.encode_varint(self.ecn_count[Ecn::Ect1]);
+                    b.encode_varint(self.ecn_count[Ecn::Ce]);
+                }
+            },
+        );
 
         // We've sent an ACK, reset the timer.
         self.ack_time = None;
