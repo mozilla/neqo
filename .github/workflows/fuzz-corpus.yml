@@ -58,7 +58,5 @@ jobs:
           git checkout -b "$BRANCH"
           git add fuzz/corpus
           git commit -m "$MESSAGE"
-          git log -1
           git fetch origin "$HEAD_REF"
-          git branch -a
-          gh pr create --draft --fill-verbose --base "$HEAD_REF"
+          gh pr create --draft --fill-verbose --base "$HEAD_REF" --head "$BRANCH"
