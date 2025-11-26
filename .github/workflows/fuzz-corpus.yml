@@ -1,10 +1,13 @@
 name: Check for new fuzzing samples
 on:
-  pull_request:
-    branches: ["main"]
+  workflow_dispatch:
+  schedule:
+    # Run at 1 AM each day, so there is a `main`-branch baseline in the cache.
+    - cron: '0 1 * * *'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # If "pull_request" is added to triggers above, adjust "group" accordingly.
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -21,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
-          persist-credentials: true # zizmor: ignore[artipacked] Need to push branches.
+          persist-credentials: false
 
       - uses: ./.github/actions/rust
         with:
@@ -37,9 +40,8 @@ jobs:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_REF: ${{ github.ref }}
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
         run: |
           ./test/make-fuzz-corpus.sh
           # If there are no new corpus samples, exit.
@@ -48,17 +50,18 @@ jobs:
             exit 0
           fi
 
-          # Otherwise, create a PR to this PR to add them.
+          # Otherwise, create a PR to add them.
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global url."https://$TOKEN:x-oauth-basic@github.com/".insteadOf "https://github.com/"
-          BRANCH="chore-corpus-samples-$PR_NUMBER"
-          MESSAGE="chore: Add new fuzzing corpus samples to #$PR_NUMBER
+          SHA_SHORT=$(echo "$SHA" | cut -c1-7)
+          BRANCH="chore-corpus-samples-$SHA_SHORT"
+          MESSAGE="chore: Add new fuzzing corpus samples
 
-          Running the test suite for #$PR_NUMBER generated new fuzzing samples.
+          A periodic run of the test suite generated new fuzzing samples.
           This PR adds them to the fuzzing corpus."
           git checkout -b "$BRANCH"
           git add fuzz/corpus
           git commit -m "$MESSAGE"
           git push --set-upstream origin "$BRANCH"
-          gh pr create --draft --fill-verbose --base "$HEAD_REF" --head "$BRANCH"
+          gh pr create --draft --fill-verbose
