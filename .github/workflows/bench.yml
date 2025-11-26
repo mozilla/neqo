@@ -169,34 +169,131 @@ jobs:
         run: |
           SHA=$(cd neqo && git log origin/main -1 --format=%H)
           echo "$SHA" > main-sha.txt
-          # Generate collapsibles for all benchmark results.
-          sed -E -e 's/^                 //gi' \
-                -e '/cset:.*last message/d' \
-                -e '/Criterion.rs ERROR: Error in Gnuplot:.*$/d' \
-                -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
-            perl -p0e 's/(Change within noise threshold\.|No change in performance detected\.|Performance has regressed\.|Performance has improved\.)\n([a-zA-Z0-9][^F][^\s]*[\-\/])/$1\n\n$2/g' |\
-            perl -p -0777 -e 's/(.*?)\n(.*?)(((No change|Change within|Performance has).*?)(\nFound .*?)?)?\n\n/<details><summary>$1: $4<\/summary><pre>\n$2$6<\/pre><\/details>\n/gs' |\
-            sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
-                  -e 's/(Performance has improved.)/:green_heart: <b>\1<\/b>/gi' \
-                  -e 's/^ +((<\/pre>|Found).*)/\1/gi' > all-bench-results.md
-          # Extract complete <details> blocks for results with significant changes.
-          perl -0777 -ne 'print "$&\n" while /<details>.*?(:broken_heart:|:green_heart:).*?<\/details>/gs' all-bench-results.md > significant-results.md
+          # Parse benchmark results into collapsibles using awk.
+          # A benchmark block starts with a non-indented, non-empty line (not "Found"),
+          # and includes all following indented lines plus any "Found" lines.
+          awk '
+            function flush() {
+              if (name == "") return
+              # Determine status text and whether this is significant
+              if (status == "regressed") {
+                status_text = ":broken_heart: <b>Performance has regressed"
+                if (time_pct != "") status_text = status_text " by " time_pct
+                status_text = status_text ".</b>"
+                significant = 1
+              } else if (status == "improved") {
+                status_text = ":green_heart: <b>Performance has improved"
+                if (time_pct != "") status_text = status_text " by " time_pct
+                status_text = status_text "</b>"
+                significant = 1
+              } else if (status == "no_change") {
+                status_text = "No change in performance detected."
+                significant = 0
+              } else if (status == "noise") {
+                status_text = "Change within noise threshold."
+                significant = 0
+              } else {
+                status_text = ""
+                significant = 0
+              }
+              # Build the collapsible
+              summary = name
+              if (status_text != "") summary = summary ": " status_text
+              collapsible = "<details><summary>" summary "</summary><pre>\n" content "</pre></details>"
+              print collapsible > "all-bench-results.md"
+              if (significant) print collapsible > "significant-results.md"
+              # Reset state
+              name = ""; content = ""; status = ""; time_pct = ""; in_change = 0
+            }
+            function bold_middle_pct(s) {
+              # Bold the middle percentage in lines like "time: [x% y% z%]"
+              if (match(s, /\[[^\]]*%[^\]]*%[^\]]*%\]/)) {
+                pre = substr(s, 1, RSTART)
+                bracket = substr(s, RSTART + 1, RLENGTH - 2)
+                post = substr(s, RSTART + RLENGTH - 1)
+                # Split by % and reconstruct with middle one bolded
+                n = split(bracket, parts, "%")
+                if (n >= 3) {
+                  result = pre parts[1] "% <b>" parts[2] "%</b>"
+                  for (i = 3; i <= n; i++) {
+                    if (i < n) result = result parts[i] "%"
+                    else result = result parts[i]
+                  }
+                  return result post
+                }
+              }
+              return s
+            }
+            function extract_middle_pct(s) {
+              # Extract middle percentage from "[x% y% z%]"
+              if (match(s, /\[[^\]]*%[^\]]*%[^\]]*%\]/)) {
+                bracket = substr(s, RSTART + 1, RLENGTH - 2)
+                n = split(bracket, parts, "%")
+                if (n >= 2) {
+                  # Trim whitespace from middle value
+                  gsub(/^[ \t]+|[ \t]+$/, "", parts[2])
+                  return parts[2] "%"
+                }
+              }
+              return ""
+            }
+            BEGIN { name = ""; content = ""; status = ""; time_pct = ""; in_change = 0 }
+            # Skip noise and blank lines
+            /^cset:.*last message/ { next }
+            /^Criterion\.rs ERROR:/ { next }
+            /^[[:space:]]*$/ { next }
+            # New benchmark: starts at column 0, has content, not "Found"
+            /^[^ \t]/ && !/^Found.*outlier/ {
+              flush()
+              name = $0
+              next
+            }
+            # Content lines for current benchmark
+            name != "" {
+              line = $0
+              # Track when we enter the "change:" section
+              if (/^[[:space:]]*change:/) in_change = 1
+              # Capture time percentage from change section (handles both formats)
+              if (in_change && time_pct == "") {
+                # Format 1: "change: [x% y% z%]" on same line
+                # Format 2: "time: [x% y% z%]" on separate line after "change:"
+                if (/change:.*\[.*%.*%.*%\]/ || /time:.*\[.*%.*%.*%\]/) {
+                  time_pct = extract_middle_pct($0)
+                }
+              }
+              # Strip up to 17 leading spaces
+              gsub(/^ {1,17}/, "", line)
+              # Bold the middle percentage in bracketed ranges
+              line = bold_middle_pct(line)
+              # Detect status
+              if (/Performance has regressed\./) status = "regressed"
+              else if (/Performance has improved\./) status = "improved"
+              else if (/No change in performance detected\./ && status == "") status = "no_change"
+              else if (/Change within noise threshold\./ && status == "") status = "noise"
+              # Append to content
+              if (content != "") content = content "\n"
+              content = content line
+            }
+            END { flush() }
+          ' results.txt
+          # Build final markdown output
           {
             echo "### Benchmark results"
             echo
-            echo "Performance differences relative to $SHA."
+            echo "Significant performance differences relative to $SHA."
             echo
             if [ -s significant-results.md ]; then
               cat significant-results.md
             else
               echo "No significant performance differences."
             fi
+            echo
             echo "<details><summary>All results</summary>"
             echo
             cat all-bench-results.md
             echo
             echo "</details>"
-          } >> results.md
+          } > results.md
           rm -f all-bench-results.md significant-results.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
           echo "$TESTBED" > testbed.txt
