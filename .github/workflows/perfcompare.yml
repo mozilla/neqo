@@ -477,6 +477,7 @@ jobs:
             echo "Table above only shows statistically significant changes. See all results below."
             echo "<details><summary>All results</summary>"
             echo
+            echo
             cat comparison.md
             echo
             echo "</details>"
