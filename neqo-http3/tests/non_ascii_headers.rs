@@ -19,7 +19,6 @@ fn echo_header(request_header_name: &str, response_header_name: &str, test_data:
 
     // Ignore all events so far.
     drop(server.events());
-    drop(client.events());
 
     // Create a header with the test data
     let custom_header = Header::new(request_header_name, test_data);

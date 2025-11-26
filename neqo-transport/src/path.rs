@@ -22,7 +22,7 @@ use crate::{
     ackrate::{AckRate, PeerAckDelay},
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn,
-    frame::FrameType,
+    frame::{FrameEncoder as _, FrameType},
     packet,
     pmtud::Pmtud,
     recovery::{self, sent},
@@ -376,8 +376,9 @@ impl Paths {
                 self.to_retire.push(seqno);
                 break;
             }
-            builder.encode_varint(FrameType::RetireConnectionId);
-            builder.encode_varint(seqno);
+            builder.encode_frame(FrameType::RetireConnectionId, |b| {
+                b.encode_varint(seqno);
+            });
             tokens.push(recovery::Token::RetireConnectionId(seqno));
             stats.retire_connection_id += 1;
         }
@@ -802,8 +803,9 @@ impl Path {
         // Send PATH_RESPONSE.
         let resp_sent = if let Some(challenge) = self.challenge.take() {
             qtrace!("[{self}] Responding to path challenge {}", hex(challenge));
-            builder.encode_varint(FrameType::PathResponse);
-            builder.encode(&challenge[..]);
+            builder.encode_frame(FrameType::PathResponse, |b| {
+                b.encode(&challenge[..]);
+            });
 
             // These frames are not retransmitted in the usual fashion.
             stats.path_response += 1;
@@ -820,8 +822,9 @@ impl Path {
         if let ProbeState::ProbeNeeded { probe_count } = self.state {
             qtrace!("[{self}] Initiating path challenge {probe_count}");
             let data = random::<8>();
-            builder.encode_varint(FrameType::PathChallenge);
-            builder.encode(data);
+            builder.encode_frame(FrameType::PathChallenge, |b| {
+                b.encode(data);
+            });
 
             // As above, no recovery token.
             stats.path_challenge += 1;
@@ -1011,9 +1014,11 @@ impl Path {
 
         let ecn_ce_received = self.ecn_info.on_packets_acked(acked_pkts, ack_ecn, stats);
         if ecn_ce_received {
-            let cwnd_reduced = self
-                .sender
-                .on_ecn_ce_received(acked_pkts.first().expect("must be there"), now);
+            let cwnd_reduced = self.sender.on_ecn_ce_received(
+                acked_pkts.first().expect("must be there"),
+                now,
+                &mut stats.cc,
+            );
             if cwnd_reduced {
                 self.rtt.update_ack_delay(self.sender.cwnd(), self.plpmtu());
             }
