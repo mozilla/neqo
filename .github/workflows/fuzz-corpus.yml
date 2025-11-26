@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
-          persist-credentials: true # zizmor: ignore[artipacked] Need to push branches.
+          persist-credentials: false
 
       - uses: ./.github/actions/rust
         with:
@@ -39,6 +39,7 @@ jobs:
       - env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.ref }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ./test/make-fuzz-corpus.sh
           # If there are no new corpus samples, exit.
@@ -50,6 +51,7 @@ jobs:
           # Otherwise, create a PR to this PR to add them.
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global url."https://$TOKEN:x-oauth-basic@github.com/".insteadOf "https://github.com/"
           BRANCH="chore-corpus-samples-$PR_NUMBER"
           MESSAGE="chore: Add new fuzzing corpus samples to #$PR_NUMBER
 
