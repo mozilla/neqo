@@ -470,16 +470,13 @@ fn send_datagram(sender: &mut Connection, receiver: &mut Connection, data: Vec<u
 #[test]
 fn multiple_datagram_events() {
     const DATA_SIZE: usize = MIN_INITIAL_PACKET_SIZE;
-    const MAX_QUEUE: usize = 3;
     const FIRST_DATAGRAM: &[u8] = &[0; DATA_SIZE];
     const SECOND_DATAGRAM: &[u8] = &[1; DATA_SIZE];
     const THIRD_DATAGRAM: &[u8] = &[2; DATA_SIZE];
     const FOURTH_DATAGRAM: &[u8] = &[3; DATA_SIZE];
 
     let mut client = new_client(
-        ConnectionParameters::default()
-            .datagram_size(u64::try_from(DATA_SIZE).unwrap())
-            .incoming_datagram_queue(MAX_QUEUE),
+        ConnectionParameters::default().datagram_size(u64::try_from(DATA_SIZE).unwrap()),
     );
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
@@ -511,53 +508,6 @@ fn multiple_datagram_events() {
     });
     assert_eq!(datagrams.next().unwrap(), FOURTH_DATAGRAM);
     assert!(datagrams.next().is_none());
-}
-
-#[test]
-fn too_many_datagram_events() {
-    const DATA_SIZE: usize = MIN_INITIAL_PACKET_SIZE;
-    const MAX_QUEUE: usize = 2;
-    const FIRST_DATAGRAM: &[u8] = &[0; DATA_SIZE];
-    const SECOND_DATAGRAM: &[u8] = &[1; DATA_SIZE];
-    const THIRD_DATAGRAM: &[u8] = &[2; DATA_SIZE];
-    const FOURTH_DATAGRAM: &[u8] = &[3; DATA_SIZE];
-
-    let mut client = new_client(
-        ConnectionParameters::default()
-            .datagram_size(u64::try_from(DATA_SIZE).unwrap())
-            .incoming_datagram_queue(MAX_QUEUE),
-    );
-    let mut server = default_server();
-    connect_force_idle(&mut client, &mut server);
-
-    send_datagram(&mut server, &mut client, FIRST_DATAGRAM.to_vec());
-    send_datagram(&mut server, &mut client, SECOND_DATAGRAM.to_vec());
-    send_datagram(&mut server, &mut client, THIRD_DATAGRAM.to_vec());
-
-    // Datagram with FIRST_DATAGRAM data will be dropped.
-    assert!(matches!(
-        client.next_event().unwrap(),
-        ConnectionEvent::IncomingDatagramDropped
-    ));
-    assert!(matches!(
-        client.next_event().unwrap(),
-        ConnectionEvent::Datagram(data) if data == SECOND_DATAGRAM
-    ));
-    assert!(matches!(
-        client.next_event().unwrap(),
-        ConnectionEvent::Datagram(data) if data == THIRD_DATAGRAM
-    ));
-    assert!(client.next_event().is_none());
-    assert_eq!(client.stats().incoming_datagram_dropped, 1);
-
-    // New events can be queued.
-    send_datagram(&mut server, &mut client, FOURTH_DATAGRAM.to_vec());
-    assert!(matches!(
-        client.next_event().unwrap(),
-        ConnectionEvent::Datagram(data) if data == FOURTH_DATAGRAM
-    ));
-    assert!(client.next_event().is_none());
-    assert_eq!(client.stats().incoming_datagram_dropped, 1);
 }
 
 #[test]

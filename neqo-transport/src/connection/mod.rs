@@ -437,7 +437,6 @@ impl Connection {
         let quic_datagrams = QuicDatagrams::new(
             conn_params.get_datagram_size(),
             conn_params.get_outgoing_datagram_queue(),
-            conn_params.get_incoming_datagram_queue(),
             events.clone(),
         );
 
@@ -3368,8 +3367,7 @@ impl Connection {
             }
             Frame::Datagram { data, .. } => {
                 self.stats.borrow_mut().frame_rx.datagram += 1;
-                self.quic_datagrams
-                    .handle_datagram(data, &mut self.stats.borrow_mut())?;
+                self.quic_datagrams.handle_datagram(data)?;
             }
             _ => unreachable!("All other frames are for streams"),
         }
