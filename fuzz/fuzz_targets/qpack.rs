@@ -12,7 +12,7 @@ fuzz_target!(|data: &[u8]| {
     let (stream_id, data) = if data.len() >= U64_BYTES {
         let (left, right) = data.split_at(U64_BYTES);
         (
-            u64::from_le_bytes(left.try_into().unwrap_or_default()),
+            u64::from_le_bytes(left.try_into().unwrap()),
             right,
         )
     } else {
