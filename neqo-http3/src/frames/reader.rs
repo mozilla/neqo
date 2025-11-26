@@ -299,7 +299,6 @@ impl FrameReader {
     /// # Arguments
     /// * `data` - The frame payload data, or `None` for frames with no payload.
     ///
-    ///
     /// # Output format
     /// The output consists of the varint-encoded frame type and length, followed by the optional payload data.
     fn write_item_to_fuzzing_corpus(&self, data: Option<&[u8]>) {
