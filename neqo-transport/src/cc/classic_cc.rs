@@ -345,16 +345,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             return false;
         };
 
-        // State needs to be saved before `on_congestion_event` is called where it changes to
-        // `State::RecoveryStart`.
-        let in_slow_start = self.state.in_slow_start();
-        let congestion = self.on_congestion_event(last_lost_packet, now);
-        if congestion {
-            if in_slow_start {
-                cc_stats.slow_start_exited = true;
-            }
-            cc_stats.congestion_events_loss += 1;
-        }
+        let congestion = self.on_congestion_event(last_lost_packet, false, now, cc_stats);
         let persistent_congestion = self.detect_persistent_congestion(
             first_rtt_sample_time,
             prev_largest_acked_sent,
@@ -381,17 +372,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) -> bool {
-        // State needs to be saved before `on_congestion_event` is called where it changes to
-        // `State::RecoveryStart`.
-        let in_slow_start = self.state.in_slow_start();
-        let cwnd_reduced = self.on_congestion_event(largest_acked_pkt, now);
-        if cwnd_reduced {
-            if in_slow_start {
-                cc_stats.slow_start_exited = true;
-            }
-            cc_stats.congestion_events_ecn += 1;
-        }
-        cwnd_reduced
+        self.on_congestion_event(largest_acked_pkt, true, now, cc_stats)
     }
 
     fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
@@ -637,7 +618,13 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
     /// Handle a congestion event.
     /// Returns true if this was a true congestion event.
-    fn on_congestion_event(&mut self, last_packet: &sent::Packet, now: Instant) -> bool {
+    fn on_congestion_event(
+        &mut self,
+        last_packet: &sent::Packet,
+        ecn: bool,
+        now: Instant,
+        cc_stats: &mut CongestionControlStats,
+    ) -> bool {
         // Start a new congestion event if lost or ECN CE marked packet was sent
         // after the start of the previous congestion recovery period.
         if !self.after_recovery_start(last_packet) {
@@ -657,6 +644,14 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             self.congestion_window,
             self.ssthresh
         );
+
+        if ecn {
+            cc_stats.congestion_events_ecn += 1;
+        } else {
+            cc_stats.congestion_events_loss += 1;
+        }
+        cc_stats.slow_start_exited |= self.state.in_slow_start();
+
         qlog::metrics_updated(
             &self.qlog,
             &[
@@ -1537,8 +1532,7 @@ mod tests {
         assert!(cc.maybe_lost_packets.is_empty());
     }
 
-    #[test]
-    fn slow_start_exited_stat_loss() {
+    fn slow_start_exit_stats(ecn: bool) {
         let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
         let now = now();
         let mut cc_stats = CongestionControlStats::default();
@@ -1548,26 +1542,24 @@ mod tests {
 
         let pkt1 = sent::make_packet(1, now, 1000);
         cc.on_packet_sent(&pkt1, now);
-        cc.on_packets_lost(Some(now), None, PTO, &[pkt1], now, &mut cc_stats);
+
+        if ecn {
+            cc.on_ecn_ce_received(&pkt1, now, &mut cc_stats);
+        } else {
+            cc.on_packets_lost(Some(now), None, PTO, &[pkt1], now, &mut cc_stats);
+        }
 
         assert!(!cc.state.in_slow_start());
         assert!(cc_stats.slow_start_exited);
     }
 
     #[test]
-    fn slow_start_exited_stat_ecn_ce() {
-        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
-        let now = now();
-        let mut cc_stats = CongestionControlStats::default();
+    fn slow_start_exit_stats_loss() {
+        slow_start_exit_stats(false);
+    }
 
-        assert!(cc.state.in_slow_start());
-        assert!(!cc_stats.slow_start_exited);
-
-        let pkt1 = sent::make_packet(1, now, 1000);
-        cc.on_packet_sent(&pkt1, now);
-        cc.on_ecn_ce_received(&pkt1, now, &mut cc_stats);
-
-        assert!(!cc.state.in_slow_start());
-        assert!(cc_stats.slow_start_exited);
+    #[test]
+    fn slow_start_exit_stats_ecn_ce() {
+        slow_start_exit_stats(true);
     }
 }

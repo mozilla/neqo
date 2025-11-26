@@ -392,7 +392,7 @@ impl Debug for Stats {
             self.cc.congestion_events_ecn,
             self.cc.congestion_events_spurious,
         )?;
-        writeln!(f, "  ss_exited: {}", self.cc.slow_start_exited)?;
+        writeln!(f, "  ss_exit: {}", self.cc.slow_start_exited)?;
         writeln!(
             f,
             "  pmtud: {} sent {} acked {} lost {} change {} iface_mtu {} pmtu",
