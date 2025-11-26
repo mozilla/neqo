@@ -466,7 +466,8 @@ jobs:
             echo
             # Extract rows with significant changes (red or green heart).
             if grep -q ':broken_heart:\|:green_heart:' comparison.md; then
-              head -4 comparison.md
+              # Print all lines up to and including the first separator line (header)
+              awk 'BEGIN{found=0} /^[|][ -|:]+[|]$/ {found=1} {print} found{exit}' comparison.md
               grep ':broken_heart:\|:green_heart:' comparison.md
               echo
             else
