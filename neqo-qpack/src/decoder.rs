@@ -209,7 +209,7 @@ impl Decoder {
         #[cfg(all(feature = "build-fuzzing-corpus", test))]
         {
             // Copy `stream_id` into the first 64 bits of corpus data.
-            let mut data = Vec::new();
+            let mut data = Vec::with_capacity(8 + buf.len());
             data.extend_from_slice(&stream_id.as_u64().to_le_bytes());
             data.extend_from_slice(buf);
             neqo_common::write_item_to_fuzzing_corpus("qpack", &data);
