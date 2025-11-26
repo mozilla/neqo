@@ -53,7 +53,7 @@ jobs:
           # Otherwise, create a PR to add them.
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global url."https://$TOKEN:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+          echo "$TOKEN" | gh auth login --with-token
           SHA_SHORT=$(echo "$SHA" | cut -c1-7)
           BRANCH="chore-corpus-samples-$SHA_SHORT"
           MESSAGE="chore: Add new fuzzing corpus samples
