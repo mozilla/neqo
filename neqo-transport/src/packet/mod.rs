@@ -21,7 +21,7 @@ use strum::{EnumIter, FromRepr};
 use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef},
     crypto::{CryptoDxState, CryptoStates, Epoch},
-    frame::FrameType,
+    frame::{FrameEncoder as _, FrameType},
     version::{self, Version},
     Error, Res,
 };
@@ -52,7 +52,7 @@ pub use metadata::MetaData;
 
 pub type Number = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, EnumIter, FromRepr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, EnumIter, FromRepr, Hash)]
 #[repr(u8)]
 pub enum Type {
     Initial = 0,
@@ -453,8 +453,12 @@ impl<B: Buffer> Builder<B> {
                 .map(|&v| Encoder::varint_len(v))
                 .sum::<usize>();
         if write {
-            for v in values {
-                self.encode_varint(*v);
+            if let Some((frame_type, rest)) = values.split_first() {
+                self.encode_frame(*frame_type, |enc| {
+                    for v in rest {
+                        enc.encode_varint(*v);
+                    }
+                });
             }
             debug_assert!(self.len() <= self.limit());
         }
