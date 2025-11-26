@@ -497,6 +497,13 @@ impl<'a, H: Handler> Runner<'a, H> {
                             self.socket.writable().await?;
                             // Now try again.
                         }
+                        Err(e)
+                            if e.raw_os_error() == Some(libc::EIO) && dgram.num_datagrams() > 1 =>
+                        {
+                            qinfo!("`libc::sendmsg` failed with {e}; quinn-udp will halt segmentation offload");
+                            // Drop the packets and let QUIC handle retransmission.
+                            break;
+                        }
                         e @ Err(_) => return e,
                     }
                 },

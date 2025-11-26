@@ -135,10 +135,7 @@ pub fn interface_and_mtu(remote: IpAddr) -> Result<(String, usize)> {
 mod test {
     #![expect(clippy::unwrap_used, reason = "OK in tests.")]
 
-    use std::{
-        env,
-        net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    };
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     use crate::interface_and_mtu;
 
@@ -204,12 +201,28 @@ mod test {
 
     #[test]
     fn inet_v6() {
-        match interface_and_mtu(IpAddr::V6(Ipv6Addr::new(
+        let res = interface_and_mtu(IpAddr::V6(Ipv6Addr::new(
             0x2606, 0x4700, 0, 0, 0, 0, 0x6810, 0x84e5, // cloudflare.com
-        ))) {
+        )));
+        match res {
             Ok(res) => assert_eq!(res, INET),
-            // The GitHub CI environment does not have IPv6 connectivity.
-            Err(_) => assert!(env::var("GITHUB_ACTIONS").is_ok()),
+            Err(e) => {
+                #[cfg(not(target_os = "windows"))]
+                let no_ipv6 = matches!(e.raw_os_error(), Some(libc::ENETUNREACH | libc::ESRCH));
+                #[cfg(target_os = "windows")]
+                let no_ipv6 = e.raw_os_error()
+                    == Some(
+                        windows::Win32::Foundation::ERROR_NETWORK_UNREACHABLE
+                            .0
+                            .try_into()
+                            .unwrap(),
+                    );
+                if no_ipv6 {
+                    eprintln!("skipping IPv6 test due to lack of IPv6 connectivity: {e}");
+                } else {
+                    panic!("unexpected error on IPv6 interface_and_mtu lookup: {e}");
+                }
+            }
         }
     }
 }

@@ -23,8 +23,9 @@ use neqo_crypto::{
 use strum::FromRepr;
 
 use crate::{
-    cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
+    cid::{ConnectionId, ConnectionIdEntry, ConnectionIdManager},
     packet::MIN_INITIAL_PACKET_SIZE,
+    stateless_reset::Token as Srt,
     tracking::DEFAULT_REMOTE_ACK_DELAY,
     version::{self, Version},
     Error, Res,
@@ -146,7 +147,7 @@ pub enum TransportParameter {
         v4: Option<SocketAddrV4>,
         v6: Option<SocketAddrV6>,
         cid: ConnectionId,
-        srt: [u8; 16],
+        srt: Srt,
     },
     Versions {
         current: version::Wire,
@@ -176,16 +177,16 @@ impl TransportParameter {
                         enc_inner.encode(&v4.ip().octets()[..]);
                         enc_inner.encode_uint(2, v4.port());
                     } else {
-                        enc_inner.encode(&[0; 6]);
+                        enc_inner.encode([0; 6]);
                     }
                     if let Some(v6) = v6 {
                         enc_inner.encode(&v6.ip().octets()[..]);
                         enc_inner.encode_uint(2, v6.port());
                     } else {
-                        enc_inner.encode(&[0; 18]);
+                        enc_inner.encode([0; 18]);
                     }
                     enc_inner.encode_vec(1, &cid[..]);
-                    enc_inner.encode(&srt[..]);
+                    enc_inner.encode(srt);
                 });
             }
             Self::Versions { current, other } => {
@@ -233,13 +234,12 @@ impl TransportParameter {
 
         // Connection ID (non-zero length)
         let cid = ConnectionId::from(d.decode_vec(1).ok_or(Error::NoMoreData)?);
-        if cid.is_empty() || cid.len() > MAX_CONNECTION_ID_LEN {
+        if cid.is_empty() || cid.len() > ConnectionId::MAX_LEN {
             return Err(Error::TransportParameter);
         }
 
         // Stateless reset token
-        let srtbuf = d.decode(16).ok_or(Error::NoMoreData)?;
-        let srt = <[u8; 16]>::try_from(srtbuf)?;
+        let srt = Srt::try_from(d).map_err(|_| Error::TransportParameter)?;
 
         Ok(Self::PreferredAddress { v4, v6, cid, srt })
     }
@@ -355,7 +355,13 @@ impl TransportParameters {
 
     /// Decode is a static function that parses transport parameters
     /// using the provided decoder.
-    pub(crate) fn decode(d: &mut Decoder) -> Res<Self> {
+    ///
+    /// # Errors
+    /// When the transport parameters are malformed.
+    pub fn decode(d: &mut Decoder) -> Res<Self> {
+        #[cfg(feature = "build-fuzzing-corpus")]
+        neqo_common::write_item_to_fuzzing_corpus("tparams", d.as_ref());
+
         let mut tps = Self::default();
         qtrace!("Parsed fixed TP header");
 
@@ -376,7 +382,11 @@ impl TransportParameters {
     }
 
     pub(crate) fn encode<B: Buffer>(&self, enc: &mut Encoder<B>) {
+        #[cfg(feature = "build-fuzzing-corpus")]
+        let start = enc.len();
         self.encode_filtered(Self::retain_all, enc);
+        #[cfg(feature = "build-fuzzing-corpus")]
+        neqo_common::write_item_to_fuzzing_corpus("tparams", &enc.as_ref()[start..]);
     }
 
     fn encode_filtered<F, B: Buffer>(&self, f: F, enc: &mut Encoder<B>)
@@ -586,13 +596,17 @@ impl TransportParameters {
 
     /// Get the preferred address in a usable form.
     #[must_use]
-    pub fn get_preferred_address(&self) -> Option<(PreferredAddress, ConnectionIdEntry<[u8; 16]>)> {
+    pub fn get_preferred_address(&self) -> Option<(PreferredAddress, ConnectionIdEntry<Srt>)> {
         if let Some(TransportParameter::PreferredAddress { v4, v6, cid, srt }) =
             &self.params[TransportParameterId::PreferredAddress]
         {
             Some((
                 PreferredAddress::new(*v4, *v6),
-                ConnectionIdEntry::new(CONNECTION_ID_SEQNO_PREFERRED, cid.clone(), *srt),
+                ConnectionIdEntry::new(
+                    ConnectionIdManager::SEQNO_PREFERRED,
+                    cid.clone(),
+                    srt.clone(),
+                ),
             ))
         } else {
             None
@@ -891,6 +905,7 @@ mod tests {
 
     use super::PreferredAddress;
     use crate::{
+        stateless_reset::Token as Srt,
         tparams::{TransportParameter, TransportParameterId, TransportParameters},
         ConnectionId, Error, Version,
     };
@@ -941,7 +956,7 @@ mod tests {
                 0,
             )),
             cid: ConnectionId::from(&[1, 2, 3, 4, 5]),
-            srt: [3; 16],
+            srt: Srt::new([3; Srt::LEN]),
         }
     }
 

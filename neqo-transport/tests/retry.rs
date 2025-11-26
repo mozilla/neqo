@@ -413,7 +413,7 @@ fn vn_after_retry() {
 
     let mut encoder = Encoder::default();
     encoder.encode_byte(0x80);
-    encoder.encode(&[0; 4]); // Zero version == VN.
+    encoder.encode([0; 4]); // Zero version == VN.
     encoder.encode_vec(1, &client.odcid().unwrap()[..]);
     encoder.encode_vec(1, &[]);
     encoder.encode_uint(4, 0x5a5a_6a6a_u64);

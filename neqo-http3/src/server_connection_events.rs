@@ -148,12 +148,12 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
 
     fn extended_connect_new_session(&self, stream_id: StreamId, headers: Vec<Header>) {
         match headers.find_header(":protocol").map(Header::value) {
-            Some("webtransport") => {
+            Some(b"webtransport") => {
                 self.insert(Http3ServerConnEvent::WebTransport(
                     WebTransportEvent::Session { stream_id, headers },
                 ));
             }
-            Some("connect-udp") => {
+            Some(b"connect-udp") => {
                 self.insert(Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::Session {
                     stream_id,
                     headers,
