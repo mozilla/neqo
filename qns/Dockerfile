@@ -41,7 +41,7 @@ RUN set -eux; \
 
 # Copy only binaries to the final image to keep it small.
 
-FROM martenseemann/quic-network-simulator-endpoint@sha256:5dcc47af3993a51a067ae588d7fe41411d1a98c3349647ae36f983c4063d0378
+FROM martenseemann/quic-network-simulator-endpoint@sha256:3b2b9e6fa317da238c8140a7b6d2bf8d4d45a8464b873eecac3ff2a32520b71a
 
 ENV LD_LIBRARY_PATH=/neqo/lib
 COPY --from=builder /neqo/target/release/neqo-client /neqo/target/release/neqo-server /neqo/bin/

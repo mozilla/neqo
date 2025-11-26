@@ -16,16 +16,6 @@ use neqo_common::qtrace;
 
 use crate::rtt::GRANULARITY;
 
-/// This value determines how much faster the pacer operates than the
-/// congestion window.
-///
-/// A value of 1 would cause all packets to be spaced over the entire RTT,
-/// which is a little slow and might act as an additional restriction in
-/// the case the congestion controller increases the congestion window.
-/// This value spaces packets over half the congestion window, which matches
-/// our current congestion controller, which double the window every RTT.
-const PACER_SPEEDUP: usize = 2;
-
 /// A pacer that uses a leaky bucket.
 pub struct Pacer {
     /// Whether pacing is enabled.
@@ -42,6 +32,16 @@ pub struct Pacer {
 }
 
 impl Pacer {
+    /// This value determines how much faster the pacer operates than the
+    /// congestion window.
+    ///
+    /// A value of 1 would cause all packets to be spaced over the entire RTT,
+    /// which is a little slow and might act as an additional restriction in
+    /// the case the congestion controller increases the congestion window.
+    /// This value spaces packets over half the congestion window, which matches
+    /// our current congestion controller, which double the window every RTT.
+    const SPEEDUP: usize = 2;
+
     /// Create a new `Pacer`.  This takes the current time, the maximum burst size,
     /// and the packet size.
     ///
@@ -85,12 +85,12 @@ impl Pacer {
         }
 
         // This is the inverse of the function in `spend`:
-        // self.t + rtt * (self.p - self.c) / (PACER_SPEEDUP * cwnd)
+        // self.t + rtt * (self.p - self.c) / (Self::SPEEDUP * cwnd)
         let r = rtt.as_nanos();
         let deficit =
             u128::try_from(packet - self.c).expect("packet is larger than current credit");
         let d = r.saturating_mul(deficit);
-        let add = d / u128::try_from(cwnd * PACER_SPEEDUP).expect("usize fits into u128");
+        let add = d / u128::try_from(cwnd * Self::SPEEDUP).expect("usize fits into u128");
         let w = u64::try_from(add).map(Duration::from_nanos).unwrap_or(rtt);
 
         // If the increment is below the timer granularity, send immediately.
@@ -119,12 +119,12 @@ impl Pacer {
 
         qtrace!("[{self}] spend {count} over {cwnd}, {rtt:?}");
         // Increase the capacity by:
-        //    `(now - self.t) * PACER_SPEEDUP * cwnd / rtt`
+        //    `(now - self.t) * Self::SPEEDUP * cwnd / rtt`
         // That is, the elapsed fraction of the RTT times rate that data is added.
         let incr = now
             .saturating_duration_since(self.t)
             .as_nanos()
-            .saturating_mul(u128::try_from(cwnd * PACER_SPEEDUP).expect("usize fits into u128"))
+            .saturating_mul(u128::try_from(cwnd * Self::SPEEDUP).expect("usize fits into u128"))
             .checked_div(rtt.as_nanos())
             .and_then(|i| usize::try_from(i).ok())
             .unwrap_or(self.m);

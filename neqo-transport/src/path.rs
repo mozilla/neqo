@@ -22,7 +22,7 @@ use crate::{
     ackrate::{AckRate, PeerAckDelay},
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn,
-    frame::FrameType,
+    frame::{FrameEncoder as _, FrameType},
     packet,
     pmtud::Pmtud,
     recovery::{self, sent},
@@ -33,11 +33,6 @@ use crate::{
     ConnectionParameters, Stats,
 };
 
-/// The number of times that a path will be probed before it is considered failed.
-///
-/// Note that with [`crate::ecn`], a path is probed [`MAX_PATH_PROBES`] with ECN
-/// marks and [`MAX_PATH_PROBES`] without.
-pub const MAX_PATH_PROBES: usize = 3;
 /// The maximum number of paths that `Paths` will track.
 const MAX_PATHS: usize = 15;
 
@@ -381,8 +376,9 @@ impl Paths {
                 self.to_retire.push(seqno);
                 break;
             }
-            builder.encode_varint(FrameType::RetireConnectionId);
-            builder.encode_varint(seqno);
+            builder.encode_frame(FrameType::RetireConnectionId, |b| {
+                b.encode_varint(seqno);
+            });
             tokens.push(recovery::Token::RetireConnectionId(seqno));
             stats.retire_connection_id += 1;
         }
@@ -530,6 +526,12 @@ pub struct Path {
 }
 
 impl Path {
+    /// The number of times that a path will be probed before it is considered failed.
+    ///
+    /// Note that with [`crate::ecn`], a path is probed [`Self::MAX_PROBES`] with ECN
+    /// marks and [`Self::MAX_PROBES`] without.
+    pub const MAX_PROBES: usize = 3;
+
     /// Create a path from addresses and a remote connection ID.
     /// This is used for migration and for new datagrams.
     pub fn temporary(
@@ -766,7 +768,7 @@ impl Path {
             ProbeState::ProbeNeeded { probe_count, .. } => *probe_count,
             _ => 0,
         };
-        self.state = if probe_count >= MAX_PATH_PROBES {
+        self.state = if probe_count >= Self::MAX_PROBES {
             if self.ecn_info.is_marking() {
                 // The path validation failure may be due to ECN blackholing, try again without ECN.
                 qinfo!("[{self}] Possible ECN blackhole, disabling ECN and re-probing path");
@@ -801,8 +803,9 @@ impl Path {
         // Send PATH_RESPONSE.
         let resp_sent = if let Some(challenge) = self.challenge.take() {
             qtrace!("[{self}] Responding to path challenge {}", hex(challenge));
-            builder.encode_varint(FrameType::PathResponse);
-            builder.encode(&challenge[..]);
+            builder.encode_frame(FrameType::PathResponse, |b| {
+                b.encode(&challenge[..]);
+            });
 
             // These frames are not retransmitted in the usual fashion.
             stats.path_response += 1;
@@ -819,8 +822,9 @@ impl Path {
         if let ProbeState::ProbeNeeded { probe_count } = self.state {
             qtrace!("[{self}] Initiating path challenge {probe_count}");
             let data = random::<8>();
-            builder.encode_varint(FrameType::PathChallenge);
-            builder.encode(data);
+            builder.encode_frame(FrameType::PathChallenge, |b| {
+                b.encode(data);
+            });
 
             // As above, no recovery token.
             stats.path_challenge += 1;
@@ -883,9 +887,9 @@ impl Path {
             true
         } else if matches!(self.state, ProbeState::Valid) {
             // Retire validated, non-primary paths.
-            // Allow more than `2 * MAX_PATH_PROBES` times the PTO so that an old
+            // Allow more than `2 * Self::MAX_PROBES` times the PTO so that an old
             // path remains around until after a previous path fails.
-            let count = u32::try_from(2 * MAX_PATH_PROBES + 1).expect("result fits in u32");
+            let count = u32::try_from(2 * Self::MAX_PROBES + 1).expect("result fits in u32");
             self.validated
                 .is_some_and(|validated| validated + (pto * count) > now)
         } else {
@@ -1010,9 +1014,11 @@ impl Path {
 
         let ecn_ce_received = self.ecn_info.on_packets_acked(acked_pkts, ack_ecn, stats);
         if ecn_ce_received {
-            let cwnd_reduced = self
-                .sender
-                .on_ecn_ce_received(acked_pkts.first().expect("must be there"), now);
+            let cwnd_reduced = self.sender.on_ecn_ce_received(
+                acked_pkts.first().expect("must be there"),
+                now,
+                &mut stats.cc,
+            );
             if cwnd_reduced {
                 self.rtt.update_ack_delay(self.sender.cwnd(), self.plpmtu());
             }

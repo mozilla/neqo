@@ -62,3 +62,10 @@ path = "fuzz_targets/find_sni.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "tparams"
+path = "fuzz_targets/tparams.rs"
+test = false
+doc = false
+bench = false

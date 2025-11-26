@@ -20,8 +20,11 @@ use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
 use crate::{
-    frame::FrameType, packet, recovery, stateless_reset::Token as Srt, stats::FrameStats, Error,
-    Res,
+    frame::{FrameEncoder as _, FrameType},
+    packet, recovery,
+    stateless_reset::Token as Srt,
+    stats::FrameStats,
+    Error, Res,
 };
 
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
@@ -288,11 +291,12 @@ impl ConnectionIdEntry<Srt> {
             return false;
         }
 
-        builder.encode_varint(FrameType::NewConnectionId);
-        builder.encode_varint(self.seqno);
-        builder.encode_varint(0u64);
-        builder.encode_vec(1, &self.cid);
-        builder.encode(&self.srt);
+        builder.encode_frame(FrameType::NewConnectionId, |b| {
+            b.encode_varint(self.seqno);
+            b.encode_varint(0u64);
+            b.encode_vec(1, &self.cid);
+            b.encode(&self.srt);
+        });
         stats.new_connection_id += 1;
         true
     }

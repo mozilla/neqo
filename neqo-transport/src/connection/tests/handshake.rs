@@ -817,7 +817,7 @@ fn extra_initial_hs() {
     // Feed that undecryptable packet into the client a few times.
     // Do that MAX_SAVED_DATAGRAMS times and each time the client will emit
     // another Initial packet.
-    for _ in 0..crate::saved::MAX_SAVED_DATAGRAMS {
+    for _ in 0..crate::saved::SavedDatagrams::CAPACITY {
         let c_init = match client.process(Some(undecryptable.clone()), now) {
             Output::None => unreachable!(),
             Output::Datagram(c_init) => Some(c_init),

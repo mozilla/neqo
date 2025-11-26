@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(clippy::unwrap_used, reason = "OK in test code.")]
+
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_http3::{Header, Http3ClientEvent, Http3ServerEvent, Priority};
 use test_fixture::{default_http3_client, default_http3_server, exchange_packets, now};
@@ -17,7 +19,6 @@ fn echo_header(request_header_name: &str, response_header_name: &str, test_data:
 
     // Ignore all events so far.
     drop(server.events());
-    drop(client.events());
 
     // Create a header with the test data
     let custom_header = Header::new(request_header_name, test_data);
@@ -40,9 +41,7 @@ fn echo_header(request_header_name: &str, response_header_name: &str, test_data:
     let mut received_headers = None;
     while let Some(event) = server.next_event() {
         if let Http3ServerEvent::Headers {
-            stream,
-            headers,
-            fin: _,
+            stream, headers, ..
         } = event
         {
             received_stream = Some(stream);
