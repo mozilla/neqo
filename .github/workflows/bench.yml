@@ -179,18 +179,17 @@ jobs:
             sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
                   -e 's/(Performance has improved.)/:green_heart: <b>\1<\/b>/gi' \
                   -e 's/^ +((<\/pre>|Found).*)/\1/gi' > all-bench-results.md
+          # Extract complete <details> blocks for results with significant changes.
+          perl -0777 -ne 'print "$&\n" while /<details>.*?(:broken_heart:|:green_heart:).*?<\/details>/gs' all-bench-results.md > significant-results.md
           {
             echo "### Benchmark results"
             echo
             echo "Performance differences relative to $SHA."
             echo
-            # Show only results with significant changes first.
-            if grep -q ':broken_heart:\|:green_heart:' all-bench-results.md; then
-              grep ':broken_heart:\|:green_heart:' all-bench-results.md
-              echo
+            if [ -s significant-results.md ]; then
+              cat significant-results.md
             else
               echo "No significant performance differences."
-              echo
             fi
             echo "<details><summary>All results</summary>"
             echo
@@ -198,7 +197,7 @@ jobs:
             echo
             echo "</details>"
           } >> results.md
-          rm all-bench-results.md
+          rm -f all-bench-results.md significant-results.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
           echo "$TESTBED" > testbed.txt
           cp "$EVENT_PATH" event.json
