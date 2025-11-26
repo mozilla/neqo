@@ -10,6 +10,8 @@ pub mod decoder;
 mod decoder_instructions;
 pub mod encoder;
 mod encoder_instructions;
+#[cfg(any(fuzzing, feature = "build-fuzzing-corpus"))]
+mod fuzz;
 mod header_block;
 pub mod huffman;
 mod huffman_decode_helper;
@@ -81,15 +83,6 @@ pub enum Error {
     Transport(#[from] neqo_transport::Error),
     #[error("Qlog error")]
     Qlog,
-}
-
-/// Write QPACK data to the fuzzing corpus.
-#[cfg(feature = "build-fuzzing-corpus")]
-pub(crate) fn write_item_to_fuzzing_corpus(stream_id: neqo_transport::StreamId, buf: &[u8]) {
-    let mut data = Vec::with_capacity(size_of::<u64>() + buf.len());
-    data.extend_from_slice(&stream_id.as_u64().to_le_bytes());
-    data.extend_from_slice(buf);
-    neqo_common::write_item_to_fuzzing_corpus("qpack", &data);
 }
 
 impl Error {

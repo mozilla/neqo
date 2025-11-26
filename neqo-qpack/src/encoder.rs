@@ -493,7 +493,7 @@ impl Encoder {
             self.stats.dynamic_table_references += 1;
         }
         #[cfg(feature = "build-fuzzing-corpus")]
-        crate::write_item_to_fuzzing_corpus(stream_id, &encoded_h);
+        crate::fuzz::write_item_to_fuzzing_corpus(stream_id, &encoded_h);
         encoded_h
     }
 
