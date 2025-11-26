@@ -11,20 +11,14 @@ fuzz_target!(|data: &[u8]| {
     // Parse: stream_id (u64) | encoder_stream_len (u16) | encoder_stream | header_block
     let (stream_id, data) = if data.len() >= U64_BYTES {
         let (left, right) = data.split_at(U64_BYTES);
-        (
-            u64::from_le_bytes(left.try_into().unwrap()),
-            right,
-        )
+        (u64::from_le_bytes(left.try_into().unwrap()), right)
     } else {
         (0, data)
     };
 
     let (encoder_stream_len, data) = if data.len() >= U16_BYTES {
         let (left, right) = data.split_at(U16_BYTES);
-        (
-            u16::from_le_bytes(left.try_into().unwrap()) as usize,
-            right,
-        )
+        (u16::from_le_bytes(left.try_into().unwrap()) as usize, right)
     } else {
         (0, data)
     };
