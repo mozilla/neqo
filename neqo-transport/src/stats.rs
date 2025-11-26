@@ -134,6 +134,22 @@ pub struct DatagramStats {
     pub dropped_queue_full: usize,
 }
 
+/// Congestion Control stats
+#[expect(
+    clippy::struct_field_names,
+    reason = "more fields might be added in the future that won't be about congestion events"
+)]
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct CongestionControlStats {
+    /// Total number of congestion events caused by packet loss.
+    pub congestion_events_loss: usize,
+    /// Total number of congestion events caused by ECN-CE marked packets.
+    pub congestion_events_ecn: usize,
+    /// Number of spurious congestion events, where congestion was incorrectly inferred due to
+    /// packets initially considered lost but subsequently acknowledged. This indicates
+    /// instances where the congestion control algorithm overreacted to perceived losses.
+    pub congestion_events_spurious: usize,
+}
 /// ECN counts by QUIC [`packet::Type`].
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct EcnCount(EnumMap<packet::Type, ecn::Count>);
@@ -294,6 +310,8 @@ pub struct Stats {
 
     pub datagram_tx: DatagramStats,
 
+    pub cc: CongestionControlStats,
+
     /// ECN path validation count, indexed by validation outcome.
     pub ecn_path_validation: ecn::ValidationCount,
     /// ECN counts for outgoing UDP datagrams, recorded locally. For coalesced packets,
@@ -368,6 +386,13 @@ impl Debug for Stats {
             f,
             "  tx: {} lost {} lateack {} ptoack {} unackdrop {}",
             self.packets_tx, self.lost, self.late_ack, self.pto_ack, self.unacked_range_dropped
+        )?;
+        writeln!(
+            f,
+            "  cc: ce_loss {} ce_ecn {} ce_spurious {}",
+            self.cc.congestion_events_loss,
+            self.cc.congestion_events_ecn,
+            self.cc.congestion_events_spurious
         )?;
         writeln!(
             f,
