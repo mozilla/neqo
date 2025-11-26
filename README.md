@@ -69,8 +69,6 @@ To confirm the NSS setup works you can run `cargo test -p neqo-crypto --lib`.
 
 ### QUIC logging
 
-Enable generation of [QLOG][QLOG] logs with:
-
 ```shell
 target/debug/neqo-server '[::]:12345' --qlog-dir .
 target/debug/neqo-client 'https://[::]:12345/' --qlog-dir .

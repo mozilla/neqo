@@ -395,7 +395,7 @@ fn wt_close_session_cannot_be_sent_at_once() {
     WtTest::session_close_frame_server(&wt_session, ERROR_NUM, ERROR_MESSAGE);
     // server cannot create new streams.
     assert_eq!(
-        wt_session.create_stream(StreamType::UniDi),
+        wt_session.create_stream(StreamType::UniDi, now()),
         Err(Error::InvalidStreamId)
     );
 

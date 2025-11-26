@@ -84,6 +84,7 @@ impl From<neqo_http3::Error> for Error {
     }
 }
 
+#[cfg(feature = "qlog")]
 impl From<qlog::Error> for Error {
     fn from(_err: qlog::Error) -> Self {
         Self::Qlog
