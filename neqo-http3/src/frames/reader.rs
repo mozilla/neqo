@@ -299,8 +299,6 @@ impl FrameReader {
     /// # Arguments
     /// * `data` - The frame payload data, or `None` for frames with no payload.
     ///
-    /// # Parameters
-    /// - `data`: The frame payload as a byte slice, or `None` for frames without a payload.
     ///
     /// # Output format
     /// The output consists of the varint-encoded frame type and length, followed by the optional payload data.
