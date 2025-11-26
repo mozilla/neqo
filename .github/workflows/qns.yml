@@ -220,7 +220,7 @@ jobs:
           key: qns-${{ github.sha }}
           restore-keys: qns-
 
-      - run: sudo apt-get install -y --no-install-recommends wdiff
+      - run: sudo apt-get install -y --no-install-recommends wdiff cmark-gfm
       - env:
           PAIRS: ${{ needs.implementations.outputs.pairs }}
         run: |
@@ -296,12 +296,11 @@ jobs:
               echo "<table><tr><th align=\"left\">$LATEST as client</th><th align=\"left\">$LATEST as server</th></tr>"
               echo -n "<tr><td valign=\"top\">"
               if [ -e client.failed.md ]; then
-                # Remove leading "* ", convert newlines to <br> for table cell
-                sed 's/^\* //' client.failed.md | sed ':a;N;$!ba;s/\n/<br>/g' | tr -d '\n'
+                cmark-gfm -e strikethrough -e autolink client.failed.md | tr -d '\n'
               fi
               echo -n "</td><td valign=\"top\">"
               if [ -e server.failed.md ]; then
-                sed 's/^\* //' server.failed.md | sed ':a;N;$!ba;s/\n/<br>/g' | tr -d '\n'
+                cmark-gfm -e strikethrough -e autolink server.failed.md | tr -d '\n'
               fi
               echo "</td></tr></table>"
             else
