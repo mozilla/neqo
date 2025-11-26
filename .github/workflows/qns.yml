@@ -294,15 +294,15 @@ jobs:
               fi
               echo
               echo "| $LATEST as client | $LATEST as server |"
-              echo "|---|---|"
+              echo "|:---|:---|"
               echo -n "| "
               if [ -e client.failed.md ]; then
-                # Convert newlines to <br> for table cell
-                sed ':a;N;$!ba;s/\n/<br>/g' client.failed.md | tr -d '\n'
+                # Remove leading "* ", convert newlines to <br> for table cell
+                sed 's/^\* //' client.failed.md | sed ':a;N;$!ba;s/\n/<br>/g' | tr -d '\n'
               fi
               echo -n " | "
               if [ -e server.failed.md ]; then
-                sed ':a;N;$!ba;s/\n/<br>/g' server.failed.md | tr -d '\n'
+                sed 's/^\* //' server.failed.md | sed ':a;N;$!ba;s/\n/<br>/g' | tr -d '\n'
               fi
               echo " |"
             else
