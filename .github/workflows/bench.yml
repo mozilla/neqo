@@ -280,12 +280,11 @@ jobs:
           {
             echo "### Benchmark results"
             echo
-            echo "Significant performance differences relative to $SHA."
-            echo
             if [ -s significant-results.md ]; then
+              echo "Significant performance differences relative to $SHA."
               cat significant-results.md
             else
-              echo "No significant performance differences."
+              echo "No significant performance differences relative to $SHA."
             fi
             echo
             echo "<details><summary>All results</summary>"
