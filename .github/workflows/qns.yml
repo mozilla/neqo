@@ -293,18 +293,17 @@ jobs:
                 echo ", differences relative to $SHA."
               fi
               echo
-              echo "| $LATEST as client | $LATEST as server |"
-              echo "|:---|:---|"
-              echo -n "| "
+              echo "<table><tr><th align=\"left\">$LATEST as client</th><th align=\"left\">$LATEST as server</th></tr>"
+              echo -n "<tr><td valign=\"top\">"
               if [ -e client.failed.md ]; then
                 # Remove leading "* ", convert newlines to <br> for table cell
                 sed 's/^\* //' client.failed.md | sed ':a;N;$!ba;s/\n/<br>/g' | tr -d '\n'
               fi
-              echo -n " | "
+              echo -n "</td><td valign=\"top\">"
               if [ -e server.failed.md ]; then
                 sed 's/^\* //' server.failed.md | sed ':a;N;$!ba;s/\n/<br>/g' | tr -d '\n'
               fi
-              echo " |"
+              echo "</td></tr></table>"
             else
               echo -n "None "
               if [ -e "client.succeeded.md" ] || [ -e "server.succeeded.md" ] || [ -e "client.unsupported.md" ] || [ -e "server.unsupported.md" ]; then
