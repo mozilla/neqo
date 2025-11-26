@@ -843,6 +843,7 @@ dependencies = [
  "codspeed-criterion-compat",
  "futures",
  "hex",
+ "libc",
  "log",
  "neqo-bin",
  "neqo-common",

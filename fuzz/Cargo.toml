@@ -65,6 +65,12 @@ test = false
 doc = false
 bench = false
 
+name = "tparams"
+path = "fuzz_targets/tparams.rs"
+test = false
+doc = false
+bench = false
+
 [[bin]]
 name = "qpack"
 path = "fuzz_targets/qpack.rs"
