@@ -1411,7 +1411,7 @@ mod tests {
     #[test]
     fn spurious_congestion_event_detection() {
         let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
-        let mut now = now();
+        let now = now();
         let mut cc_stats = CongestionControlStats::default();
 
         let pkt1 = sent::make_packet(1, now, 1000);
