@@ -17,7 +17,7 @@ workspace = true
 
 [dependencies]
 enum-map = { workspace = true }
-env_logger = { version = "0.10", default-features = false }
+env_logger = { version = "0.11", default-features = false }
 hex = { workspace = true, optional = true }
 log = { workspace = true }
 qlog = { workspace = true }
