@@ -296,11 +296,11 @@ jobs:
               echo "<table><tr><th align=\"left\">$LATEST as client</th><th align=\"left\">$LATEST as server</th></tr>"
               echo -n "<tr><td valign=\"top\">"
               if [ -e client.failed.md ]; then
-                cmark-gfm -e strikethrough -e autolink client.failed.md | tr -d '\n'
+                cmark-gfm -e strikethrough -e autolink client.failed.md | tr -d '\n' | sed 's/<\/*ul>//g; s/<li>//g; s/<\/li>/<br>/g'
               fi
               echo -n "</td><td valign=\"top\">"
               if [ -e server.failed.md ]; then
-                cmark-gfm -e strikethrough -e autolink server.failed.md | tr -d '\n'
+                cmark-gfm -e strikethrough -e autolink server.failed.md | tr -d '\n' | sed 's/<\/*ul>//g; s/<li>//g; s/<\/li>/<br>/g'
               fi
               echo "</td></tr></table>"
             else
