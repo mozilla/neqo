@@ -17,7 +17,7 @@ cargo fuzz build --dev > /dev/null 2>&1
 
 # Now, only merge in those newly-generated samples that increase coverage.
 # "cargo fuzz" cannot do this, so use the underlying LLVM fuzzer binary directly.
-TRIPLE="$(basename "$(dirname "$(rustc --print target-libdir)")")"
+TRIPLE="$(rustc --print host-tuple)"
 for fuzzer in $(cargo fuzz list); do
     generated="$TMP/$fuzzer"
     if [ ! -d "$generated" ]; then
