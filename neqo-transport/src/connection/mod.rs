@@ -70,7 +70,7 @@ use crate::{
 mod idle;
 pub mod params;
 mod state;
-#[cfg(test)]
+#[cfg(any(test, feature = "build-fuzzing-corpus"))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod test_internal;
 
@@ -327,7 +327,7 @@ pub struct Connection {
     /// For testing purposes it is sometimes necessary to inject frames that wouldn't
     /// otherwise be sent, just to see how a connection handles them.  Inserting them
     /// into packets proper mean that the frames follow the entire processing path.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "build-fuzzing-corpus"))]
     test_frame_writer: Option<Box<dyn test_internal::FrameWriter>>,
 }
 
@@ -470,7 +470,7 @@ impl Connection {
             conn_params,
             hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
             quic_datagrams,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "build-fuzzing-corpus"))]
             test_frame_writer: None,
         };
         c.stats.borrow_mut().init(format!("{c}"));
@@ -1226,7 +1226,7 @@ impl Connection {
 
     /// A test-only output function that uses the provided writer to
     /// pack something extra into the output.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "build-fuzzing-corpus"))]
     pub fn test_write_frames<W>(&mut self, writer: W, now: Instant) -> Output
     where
         W: test_internal::FrameWriter + 'static,
@@ -1264,7 +1264,7 @@ impl Connection {
             self.process_saved(now);
         }
         let output = self.process_multiple_output(now, max_datagrams);
-        #[cfg(all(feature = "build-fuzzing-corpus", test))]
+        #[cfg(feature = "build-fuzzing-corpus")]
         if self.test_frame_writer.is_none() {
             if let OutputBatch::DatagramBatch(batch) = &output {
                 for dgram in batch.iter() {

@@ -306,6 +306,7 @@ impl Packets {
 
 /// Test helper to create a sent packet.
 #[cfg(test)]
+#[must_use]
 pub fn make_packet(pn: packet::Number, sent_time: Instant, len: usize) -> Packet {
     Packet::new(
         packet::Type::Short,
