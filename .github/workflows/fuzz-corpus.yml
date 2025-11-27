@@ -2,8 +2,8 @@ name: Check for new fuzzing samples
 on:
   workflow_dispatch:
   schedule:
-    # Run at 1 AM each day, so there is a `main`-branch baseline in the cache.
-    - cron: '0 1 * * *'
+    # Run at 12:00 AM on Sunday.
+    - cron: '0 0 * * 0'
 
 concurrency:
   # If "pull_request" is added to triggers above, adjust "group" accordingly.
