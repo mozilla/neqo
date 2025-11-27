@@ -520,6 +520,7 @@ dependencies = [
  "libfuzzer-sys",
  "neqo-common",
  "neqo-crypto",
+ "neqo-http3",
  "neqo-transport",
  "test-fixture",
 ]
