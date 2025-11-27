@@ -186,6 +186,12 @@ impl QuicDatagrams {
         Ok(())
     }
 
+    /// Returns the number of QUIC datagrams that can still be queued for
+    /// sending before the queue is full.
+    pub fn send_queue_capacity(&self) -> usize {
+        self.max_queued_outgoing_datagrams - self.datagrams.len()
+    }
+
     pub fn handle_datagram(&self, data: &[u8], stats: &mut Stats) -> Res<()> {
         if self.local_datagram_size < u64::try_from(data.len())? {
             return Err(Error::ProtocolViolation);
