@@ -375,9 +375,42 @@ where
             return;
         };
 
+        // Scale the max_active window down by
+        // [(F-1) / F]; where F=WINDOW_UPDATE_FRACTION.
+        //
+        // In the ideal case, each byte sent would trigger a flow control
+        // update.  However, in practice we only send updates every
+        // WINDOW_UPDATE_FRACTION of the window.  Thus, when not application
+        // limited, in a steady state transfer it takes 1 RTT after sending 1 /
+        // F bytes for the sender to receive the next update. The sender is
+        // effectively limited to [(F-1) / F] bytes per RTT.
+        //
+        // By calculating with this effective window instead of the full
+        // max_active, we account for the inherent delay between when the sender
+        // would ideally receive flow control updates and when they actually
+        // arrive due to our batched update strategy.
+        //
+        // Example with F=4 without adjustment:
+        //
+        // t=0         start sending
+        // t=RTT/4     sent 1/4 of window total
+        // t=RTT       sent 1 window total
+        //             sender blocked for RTT/4
+        // t=RTT+RTT/4 receive update for 1/4 of window
+        //
+        // Example with F=4 with adjustment:
+        //
+        // t=0         start sending
+        // t=RTT/4     sent 1/4 of window total
+        // t=RTT       sent 1 window total
+        // t=RTT+RTT/4 sent 1+1/4 window total; receive update for 1/4 of window (just in time)
+        let effective_window =
+            (self.max_active * (WINDOW_UPDATE_FRACTION - 1)) / (WINDOW_UPDATE_FRACTION);
+
         // Compute the amount of bytes we have received in excess
         // of what `max_active` might allow.
-        let window_bytes_expected = self.max_active * elapsed / rtt;
+        let window_bytes_expected = (effective_window * elapsed) / (rtt);
+
         let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
         let Some(excess) = window_bytes_used.checked_sub(window_bytes_expected) else {
             // Used below expected. No auto-tuning needed.
@@ -1201,6 +1234,7 @@ mod test {
         /// Allow auto-tuning algorithm to be off from actual bandwidth-delay
         /// product by up to 1KiB.
         const TOLERANCE: u64 = 1024;
+        const BW_TOLERANCE: f64 = 0.8;
 
         test_fixture::fixture_init();
 
@@ -1211,6 +1245,7 @@ mod test {
                 u64::from(u16::from_be_bytes(random::<2>()) % 1_000 + 1) * 1_000 * 1_000;
             // Random delay between 1 ms and 256 ms.
             let rtt = Duration::from_millis(u64::from(random::<1>()[0]) + 1);
+            let half_rtt = rtt / 2;
             let bdp = bandwidth * u64::try_from(rtt.as_millis()).unwrap() / 1_000 / 8;
 
             let mut now = test_fixture::now();
@@ -1225,6 +1260,11 @@ mod test {
             let mut fc =
                 ReceiverFlowControl::new(StreamId::new(0), INITIAL_LOCAL_MAX_STREAM_DATA as u64);
 
+            let mut bytes_received: u64 = 0;
+            let start_time = now;
+
+            // Track when sender can next send.
+            let mut next_send_time = now;
             loop {
                 // Sender receives window updates.
                 if recv_to_send.front().is_some_and(|(at, _)| *at <= now) {
@@ -1235,9 +1275,14 @@ mod test {
                 // Sender sends data frames.
                 let sender_progressed = if sender_window > 0 {
                     let to_send = min(DATA_FRAME_SIZE, sender_window);
-                    send_to_recv.push_back((now, to_send));
                     sender_window -= to_send;
-                    now += Duration::from_secs_f64(to_send as f64 * 8.0 / bandwidth as f64);
+                    let time_to_send =
+                        Duration::from_secs_f64(to_send as f64 * 8.0 / bandwidth as f64);
+
+                    let send_start = next_send_time.max(now);
+                    next_send_time = send_start + time_to_send;
+
+                    send_to_recv.push_back((send_start + time_to_send + half_rtt, to_send));
                     true
                 } else {
                     false
@@ -1247,13 +1292,14 @@ mod test {
                 let mut receiver_progressed = false;
                 if send_to_recv.front().is_some_and(|(at, _)| *at <= now) {
                     let (_, data) = send_to_recv.pop_front().unwrap();
+                    bytes_received += data;
                     let consumed = fc.set_consumed(fc.retired() + data)?;
                     fc.add_retired(consumed);
 
                     // Receiver sends window updates.
                     let prev_max_allowed = fc.max_allowed;
                     if write_frames(&mut fc, rtt, now) == 1 {
-                        recv_to_send.push_front((now, fc.max_allowed - prev_max_allowed));
+                        recv_to_send.push_back((now + half_rtt, fc.max_allowed - prev_max_allowed));
                         receiver_progressed = true;
                         if last_max_active < fc.max_active() {
                             last_max_active = fc.max_active();
@@ -1272,27 +1318,44 @@ mod test {
                         .expect("both are None");
                 }
 
-                // Consider auto-tuning done once receive window hasn't changed for 4 RTT.
-                if now.duration_since(last_max_active_changed) > 4 * rtt {
+                // Consider auto-tuning done once receive window hasn't changed for 8 RTT.
+                // A large amount to allow the observed bandwidth average to stabilize.
+                if now.duration_since(last_max_active_changed) > 8 * rtt {
                     break;
                 }
             }
 
+            // See comment in [`ReceiverFlowControl::auto_tune_inner`] for an
+            // explanation of the effective window.
+            let effective_window =
+                (fc.max_active() * (WINDOW_UPDATE_FRACTION - 1)) / WINDOW_UPDATE_FRACTION;
+            let at_max_stream_data = fc.max_active() == MAX_LOCAL_MAX_STREAM_DATA;
+
+            let observed_bw =
+                (8 * bytes_received) as f64 / now.duration_since(start_time).as_secs_f64();
             let summary = format!(
-                "Got receive window of {} MiB on connection with bandwidth {} MBit/s ({bandwidth} Bit/s), delay {rtt:?}, bdp {} MiB.",
-                fc.max_active() / 1024 / 1024,
+                "Got receive window of {} KiB (effectively {} KiB) on connection with observed bandwidth {} MBit/s. Expected: bandwidth {} MBit/s ({bandwidth} Bit/s), rtt {rtt:?}, bdp {} KiB.",
+                fc.max_active() / 1024,
+                effective_window / 1024,
+                observed_bw / 1_000.0 / 1_000.0,
                 bandwidth / 1_000 / 1_000,
-                bdp / 1024 / 1024,
+                bdp / 1024,
             );
 
             assert!(
-                fc.max_active() + TOLERANCE >= bdp || fc.max_active() == MAX_LOCAL_MAX_STREAM_DATA,
+                effective_window + TOLERANCE >= bdp || at_max_stream_data,
                 "{summary} Receive window is smaller than the bdp."
             );
+
             assert!(
-                fc.max_active - TOLERANCE <= bdp
+                effective_window - TOLERANCE <= bdp
                     || fc.max_active == INITIAL_LOCAL_MAX_STREAM_DATA as u64,
                 "{summary} Receive window is larger than the bdp."
+            );
+
+            assert!(
+                (bandwidth as f64) * BW_TOLERANCE <= observed_bw || at_max_stream_data,
+                "{summary} Observed bandwidth is smaller than the link rate."
             );
 
             qdebug!("{summary}");
