@@ -521,6 +521,7 @@ dependencies = [
  "neqo-common",
  "neqo-crypto",
  "neqo-http3",
+ "neqo-qpack",
  "neqo-transport",
  "test-fixture",
 ]
