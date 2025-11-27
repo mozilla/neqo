@@ -18,7 +18,13 @@ use neqo_crypto::{
 };
 use smallvec::SmallVec;
 
-use crate::{cid::ConnectionId, frame::FrameType, packet, recovery, stats::FrameStats, Res};
+use crate::{
+    cid::ConnectionId,
+    frame::{FrameEncoder as _, FrameType},
+    packet, recovery,
+    stats::FrameStats,
+    Res,
+};
 
 /// A prefix we add to Retry tokens to distinguish them from `NEW_TOKEN` tokens.
 const TOKEN_IDENTIFIER_RETRY: &[u8] = &[0x52, 0x65, 0x74, 0x72, 0x79];
@@ -85,11 +91,11 @@ impl AddressValidation {
         match peer_address.ip() {
             IpAddr::V4(a) => {
                 aad.encode_byte(4);
-                aad.encode(&a.octets());
+                aad.encode(a.octets());
             }
             IpAddr::V6(a) => {
                 aad.encode_byte(6);
-                aad.encode(&a.octets());
+                aad.encode(a.octets());
             }
         }
         if retry {
@@ -419,8 +425,9 @@ impl NewTokenSender {
             if t.needs_sending && t.len() <= builder.remaining() {
                 t.needs_sending = false;
 
-                builder.encode_varint(FrameType::NewToken);
-                builder.encode_vvec(&t.token);
+                builder.encode_frame(FrameType::NewToken, |b| {
+                    b.encode_vvec(&t.token);
+                });
 
                 tokens.push(recovery::Token::NewToken(t.seqno));
                 stats.new_token += 1;
