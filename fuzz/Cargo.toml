@@ -20,6 +20,7 @@ cargo-fuzz = true
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
 neqo-http3 = { path = "../neqo-http3" }
+neqo-qpack = { path = "../neqo-qpack" }
 neqo-transport = { path = "../neqo-transport" }
 test-fixture = { path = "../test-fixture" }
 
@@ -74,6 +75,13 @@ bench = false
 [[bin]]
 name = "tparams"
 path = "fuzz_targets/tparams.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "qpack"
+path = "fuzz_targets/qpack.rs"
 test = false
 doc = false
 bench = false
