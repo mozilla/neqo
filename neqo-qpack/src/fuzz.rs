@@ -6,8 +6,6 @@
 
 //! Fuzzing support for QPACK.
 
-#[cfg(fuzzing)]
-pub use fuzzing::*;
 #[cfg(feature = "build-fuzzing-corpus")]
 pub use write_corpus::write_item_to_fuzzing_corpus;
 
@@ -69,7 +67,7 @@ mod fuzzing {
     }
 
     fn map_error(err: Error) -> Error {
-        if *err == Error::ClosedCriticalStream {
+        if err == Error::ClosedCriticalStream {
             Error::ClosedCriticalStream
         } else {
             Error::EncoderStream

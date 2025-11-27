@@ -27,11 +27,11 @@ fuzz_target!(|data: &[u8]| {
     let (encoder_stream, header_block) = if encoder_stream_len <= data.len() {
         data.split_at(encoder_stream_len)
     } else {
-        (&[], data)
+        (&[][..], data)
     };
 
-    let settings = neqo_http3::Http3Parameters::default().get_qpack_settings();
-    let mut decoder = neqo_qpack::Decoder::new(settings);
+    let mut decoder =
+        neqo_qpack::Decoder::new(neqo_http3::Http3Parameters::default().get_qpack_settings());
 
     // Process encoder stream data to populate the dynamic table.
     _ = decoder.receive_encoder_stream(encoder_stream);
