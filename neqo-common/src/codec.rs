@@ -211,7 +211,6 @@ impl<'b> PartialEq<Decoder<'b>> for Decoder<'_> {
 }
 
 /// Encoder is good for building data structures.
-#[derive(Clone, PartialEq, Eq)]
 pub struct Encoder<B = Vec<u8>> {
     buf: B,
     /// Tracks the starting position of the buffer when the [`Encoder`] is created.
@@ -219,6 +218,23 @@ pub struct Encoder<B = Vec<u8>> {
     /// encoding began and those written by the [`Encoder`] itself.
     start: usize,
 }
+
+impl Clone for Encoder {
+    fn clone(&self) -> Self {
+        Self {
+            buf: self.as_ref().to_vec(),
+            start: 0,
+        }
+    }
+}
+
+impl<B: Buffer> PartialEq for Encoder<B> {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ref() == other.as_ref()
+    }
+}
+
+impl<B: Buffer> Eq for Encoder<B> {}
 
 impl<B: Buffer> Encoder<B> {
     /// Get the length of the [`Encoder`].
@@ -515,8 +531,11 @@ impl From<&[u8]> for Encoder {
 }
 
 impl From<Encoder> for Vec<u8> {
-    fn from(buf: Encoder) -> Self {
-        buf.buf
+    fn from(mut enc: Encoder) -> Self {
+        if enc.start > 0 {
+            enc.buf.drain(..enc.start);
+        }
+        enc.buf
     }
 }
 
@@ -1238,5 +1257,43 @@ mod tests {
         assert_eq!(decoder.as_ref().len(), 3);
         assert_eq!(decoder.as_ref(), &[5, 6, 7]);
         assert_eq!(buffer, &[1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    /// Converting an [`Encoder`] to [`Vec<u8>`] should respect the `start` offset.
+    #[test]
+    fn into_vec_respects_skip() {
+        let mut enc = Encoder::from_hex("010203040506");
+        enc.skip(2);
+        let v: Vec<u8> = enc.into();
+        assert_eq!(v, vec![0x03, 0x04, 0x05, 0x06]);
+    }
+
+    /// Converting an [`Encoder`] without skip should return the full buffer.
+    #[test]
+    fn into_vec_without_skip() {
+        let enc = Encoder::from_hex("010203");
+        let v: Vec<u8> = enc.into();
+        assert_eq!(v, vec![0x01, 0x02, 0x03]);
+    }
+
+    /// [`PartialEq`] should compare the logical view.
+    #[test]
+    fn partial_eq_respects_skip() {
+        let mut enc1 = Encoder::from_hex("010203040506");
+        enc1.skip(2);
+        let enc2 = Encoder::from_hex("03040506");
+        assert_eq!(enc1, enc2);
+    }
+
+    /// [`Clone`] should not clone skipped bytes.
+    #[test]
+    fn clone_respects_skip() {
+        let mut enc = Encoder::from_hex("010203040506");
+        enc.skip(2);
+        let cloned = enc.clone();
+        assert_eq!(cloned.as_ref(), &[0x03, 0x04, 0x05, 0x06]);
+        assert_eq!(cloned.len(), 4);
+        let v: Vec<u8> = cloned.into();
+        assert_eq!(v, vec![0x03, 0x04, 0x05, 0x06]);
     }
 }
