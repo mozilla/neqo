@@ -263,7 +263,8 @@ impl FrameReader {
             if len > 0 { None } else { Some(&[]) },
         )? {
             #[cfg(feature = "build-fuzzing-corpus")]
-            // Write zero-length frames to the fuzzing corpus to test parsing of frames with only type and length fields.
+            // Write zero-length frames to the fuzzing corpus to test parsing of frames with only
+            // type and length fields.
             self.write_item_to_fuzzing_corpus(None);
             self.reset();
             return Ok(Some(f));
@@ -294,13 +295,14 @@ impl FrameReader {
     }
 
     #[cfg(feature = "build-fuzzing-corpus")]
-    /// Write HFrame data to fuzzing corpus.
+    /// Write `HFrame` data to fuzzing corpus.
     ///
     /// # Arguments
     /// * `data` - The frame payload data, or `None` for frames with no payload.
     ///
     /// # Output format
-    /// The output consists of the varint-encoded frame type and length, followed by the optional payload data.
+    /// The output consists of the varint-encoded frame type and length, followed by the optional
+    /// payload data.
     fn write_item_to_fuzzing_corpus(&self, data: Option<&[u8]>) {
         // We need to include the frame type and length varints before the data
         // to create a complete frame that the fuzzer can process.
