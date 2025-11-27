@@ -29,8 +29,8 @@ def bold_middle_pct(line: str) -> str:
         bracket = line[start + 1 : end - 1]  # Content inside brackets
         parts = bracket.split("%")
         if len(parts) >= 3:
-            # Reconstruct with middle percentage bolded using slicing and joining
-            new_bracket = "%".join(parts[:1] + ['<b>' + parts[1] + '</b>'] + parts[2:])
+            # Reconstruct with middle percentage bolded using f-string formatting
+            new_bracket = f"{parts[0]}%<b>{parts[1]}</b>%{parts[2]}"
             return line[:start + 1] + new_bracket + line[end - 1 :]
     return line
 
