@@ -29,9 +29,8 @@ def bold_middle_pct(line: str) -> str:
         bracket = line[start + 1 : end - 1]  # Content inside brackets
         parts = bracket.split("%")
         if len(parts) >= 3:
-            # Reconstruct with middle percentage bolded using f-string formatting
             new_bracket = f"{parts[0]}%<b>{parts[1]}</b>%{parts[2]}"
-            return line[:start + 1] + new_bracket + line[end - 1 :]
+            return line[: start + 1] + new_bracket + line[end - 1 :]
     return line
 
 
@@ -142,20 +141,13 @@ def process_input(input_file) -> tuple[list[str], list[str]]:
             # Strip up to 17 leading spaces
             processed_line = re.sub(r"^ {1,17}", "", processed_line)
 
-            # Bold the middle percentage in bracketed ranges
             processed_line = bold_middle_pct(processed_line)
-
-            # Detect status
             status = _detect_status(line, status)
-
-            # Append to content
             if content:
                 content += "\n"
             content += processed_line
 
-    # Flush the last benchmark
     flush(name, content, status, time_pct, all_results, significant_results)
-
     return all_results, significant_results
 
 
@@ -168,7 +160,6 @@ def main() -> None:
     else:
         all_results, significant_results = process_input(sys.stdin)
 
-    # Write output files
     with open("all-bench-results.md", "w", encoding="utf-8") as f:
         f.write("\n".join(all_results))
         if all_results:
