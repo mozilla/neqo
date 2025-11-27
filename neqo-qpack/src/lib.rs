@@ -10,6 +10,7 @@ pub mod decoder;
 mod decoder_instructions;
 pub mod encoder;
 mod encoder_instructions;
+mod fuzz;
 mod header_block;
 pub mod huffman;
 mod huffman_decode_helper;
