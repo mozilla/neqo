@@ -53,7 +53,7 @@ def flush(
         status_text = ":broken_heart: <b>Performance has regressed"
         if time_pct:
             status_text += " by " + time_pct
-        status_text += ".</b>"
+        status_text += "</b>"
         significant = True
     elif status == "improved":
         status_text = ":green_heart: <b>Performance has improved"
