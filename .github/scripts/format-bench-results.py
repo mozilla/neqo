@@ -50,16 +50,10 @@ def flush(
     # Determine status text and whether this is significant
     significant = False
     if status == "regressed":
-        status_text = ":broken_heart: <b>Performance has regressed"
-        if time_pct:
-            status_text += " by " + time_pct
-        status_text += "</b>"
+        status_text = f":broken_heart: <b>Performance has regressed{f' by {time_pct}' if time_pct else ''}.</b>"
         significant = True
     elif status == "improved":
-        status_text = ":green_heart: <b>Performance has improved"
-        if time_pct:
-            status_text += " by " + time_pct
-        status_text += "</b>"
+        status_text = f":green_heart: <b>Performance has improved{f' by {time_pct}' if time_pct else ''}.</b>"
         significant = True
     elif status == "no_change":
         status_text = "No change in performance detected."
