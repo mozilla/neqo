@@ -147,9 +147,7 @@ def process_input(input_file) -> tuple[list[str], list[str]]:
 
             # Capture time percentage from change section
             if in_change and not time_pct:
-                if re.search(r"change:.*\[.*%.*%.*%\]", line) or re.search(
-                    r"time:.*\[.*%.*%.*%\]", line
-                ):
+                if re.search(r"(?:change:|time:).*?\[.*?%.*?%.*?%\]", line):
                     time_pct = extract_middle_pct(line)
 
             # Strip up to 17 leading spaces
