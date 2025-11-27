@@ -27,7 +27,7 @@ fuzz_target!(|data: &[u8]| {
     let (encoder_stream, header_block) = if encoder_stream_len <= data.len() {
         data.split_at(encoder_stream_len)
     } else {
-        (&[][..], data)
+        (&[], data)
     };
 
     let settings = neqo_http3::Http3Parameters::default().get_qpack_settings();
