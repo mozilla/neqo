@@ -6,83 +6,86 @@
 
 //! Fuzzing support for QPACK.
 
-#[cfg(feature = "build-fuzzing-corpus")]
-use neqo_transport::StreamId;
-
 #[cfg(fuzzing)]
-use crate::{
-    reader::{ReadByte, Reader},
-    Decoder, Error, Res,
-};
-
-/// Write QPACK data to the fuzzing corpus.
+pub use fuzzing::*;
 #[cfg(feature = "build-fuzzing-corpus")]
-pub(crate) fn write_item_to_fuzzing_corpus(stream_id: StreamId, buf: &[u8]) {
-    let mut data = Vec::with_capacity(size_of::<u64>() + buf.len());
-    data.extend_from_slice(&stream_id.as_u64().to_le_bytes());
-    data.extend_from_slice(buf);
-    neqo_common::write_item_to_fuzzing_corpus("qpack", &data);
-}
+pub use write_corpus::write_item_to_fuzzing_corpus;
 
-/// Buffer wrapper that implements `ReadByte` and `Reader` for a byte slice.
-/// Returns `NeedMoreData` when the buffer is exhausted.
-#[cfg(fuzzing)]
-struct BufferReader<'a> {
-    buf: &'a [u8],
-    offset: usize,
+#[cfg(feature = "build-fuzzing-corpus")]
+/// Helpers to write data to the fuzzing corpus.
+mod write_corpus {
+    use neqo_transport::StreamId;
+
+    /// Write QPACK data to the fuzzing corpus.
+    pub fn write_item_to_fuzzing_corpus(stream_id: StreamId, buf: &[u8]) {
+        let mut data = Vec::with_capacity(size_of::<u64>() + buf.len());
+        data.extend_from_slice(&stream_id.as_u64().to_le_bytes());
+        data.extend_from_slice(buf);
+        neqo_common::write_item_to_fuzzing_corpus("qpack", &data);
+    }
 }
 
 #[cfg(fuzzing)]
-impl ReadByte for BufferReader<'_> {
-    fn read_byte(&mut self) -> Res<u8> {
-        if self.offset < self.buf.len() {
-            let b = self.buf[self.offset];
-            self.offset += 1;
-            Ok(b)
-        } else {
-            Err(Error::NeedMoreData)
+/// Helpers to support fuzzing.
+mod fuzzing {
+    use crate::{
+        reader::{ReadByte, Reader},
+        Decoder, Error, Res,
+    };
+
+    /// Buffer wrapper that implements `ReadByte` and `Reader` for a byte slice.
+    /// Returns `NeedMoreData` when the buffer is exhausted.
+    struct BufferReader<'a> {
+        buf: &'a [u8],
+        offset: usize,
+    }
+
+    impl ReadByte for BufferReader<'_> {
+        fn read_byte(&mut self) -> Res<u8> {
+            if self.offset < self.buf.len() {
+                let b = self.buf[self.offset];
+                self.offset += 1;
+                Ok(b)
+            } else {
+                Err(Error::NeedMoreData)
+            }
         }
     }
-}
 
-#[cfg(fuzzing)]
-impl Reader for BufferReader<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> Res<usize> {
-        let available = self.buf.len() - self.offset;
-        let to_read = buf.len().min(available);
-        buf[..to_read].copy_from_slice(&self.buf[self.offset..self.offset + to_read]);
-        self.offset += to_read;
-        Ok(to_read)
+    impl Reader for BufferReader<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> Res<usize> {
+            let available = self.buf.len() - self.offset;
+            let to_read = buf.len().min(available);
+            buf[..to_read].copy_from_slice(&self.buf[self.offset..self.offset + to_read]);
+            self.offset += to_read;
+            Ok(to_read)
+        }
     }
-}
 
-#[cfg(fuzzing)]
-impl<'a> BufferReader<'a> {
-    const fn new(buf: &'a [u8]) -> Self {
-        Self { buf, offset: 0 }
+    impl<'a> BufferReader<'a> {
+        const fn new(buf: &'a [u8]) -> Self {
+            Self { buf, offset: 0 }
+        }
     }
-}
 
-#[cfg(fuzzing)]
-fn map_error(err: &Error) -> Error {
-    if *err == Error::ClosedCriticalStream {
-        Error::ClosedCriticalStream
-    } else {
-        Error::EncoderStream
+    fn map_error(err: Error) -> Error {
+        if *err == Error::ClosedCriticalStream {
+            Error::ClosedCriticalStream
+        } else {
+            Error::EncoderStream
+        }
     }
-}
 
-#[cfg(fuzzing)]
-impl Decoder {
-    /// Processes encoder stream data from a byte buffer.
-    /// This populates the dynamic table with header entries from encoder instructions.
-    ///
-    /// # Errors
-    ///
-    /// May return `Error::EncoderStream` if the encoder instructions are malformed.
-    pub fn receive_encoder_stream(&mut self, buf: &[u8]) -> Res<()> {
-        let mut recv = BufferReader::new(buf);
-        self.process_instructions(&mut recv)
-            .map_err(|e| map_error(&e))
+    impl Decoder {
+        /// Processes encoder stream data from a byte buffer.
+        /// This populates the dynamic table with header entries from encoder instructions.
+        ///
+        /// # Errors
+        ///
+        /// May return `Error::EncoderStream` if the encoder instructions are malformed.
+        pub fn receive_encoder_stream(&mut self, buf: &[u8]) -> Res<()> {
+            let mut recv = BufferReader::new(buf);
+            self.process_instructions(&mut recv).map_err(map_error)
+        }
     }
 }

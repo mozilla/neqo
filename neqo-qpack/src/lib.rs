@@ -10,7 +10,6 @@ pub mod decoder;
 mod decoder_instructions;
 pub mod encoder;
 mod encoder_instructions;
-#[cfg(any(fuzzing, feature = "build-fuzzing-corpus"))]
 mod fuzz;
 mod header_block;
 pub mod huffman;
