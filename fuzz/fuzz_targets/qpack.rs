@@ -30,8 +30,8 @@ fuzz_target!(|data: &[u8]| {
         (&[][..], data)
     };
 
-    let mut decoder =
-        neqo_qpack::Decoder::new(neqo_http3::Http3Parameters::default().get_qpack_settings());
+    let settings = neqo_http3::Http3Parameters::default().get_qpack_settings();
+    let mut decoder = neqo_qpack::Decoder::new(settings);
 
     // Process encoder stream data to populate the dynamic table.
     _ = decoder.receive_encoder_stream(encoder_stream);
