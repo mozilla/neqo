@@ -13,7 +13,6 @@ use crate::{
     decoder_instructions::DecoderInstruction,
     encoder_instructions::{DecodedEncoderInstruction, EncoderInstructionReader},
     header_block::{HeaderDecoder, HeaderDecoderResult},
-    qpack_send_buf::Data,
     reader::{ReadByte, Reader, ReceiverConnWrapper},
     stats::Stats,
     table::HeaderTable,
@@ -183,11 +182,7 @@ impl Decoder {
                 )
                 .map_err(|_| Error::DecoderStream)?;
             qdebug!("[{self}] {r} bytes sent");
-            if r < self.send_buf.len() {
-                self.send_buf.skip(r);
-            } else {
-                self.send_buf = Encoder::default();
-            }
+            self.send_buf.skip(r);
         }
         Ok(())
     }

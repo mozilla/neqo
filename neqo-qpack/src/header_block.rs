@@ -139,7 +139,7 @@ impl HeaderEncoder {
             .encode_prefixed_encoded_int(NO_PREFIX, enc_insert_cnt);
         self.buf.encode_prefixed_encoded_int(prefix, delta);
 
-        self.buf.encode(tmp.as_ref());
+        self.buf.encode(tmp);
     }
 }
 
