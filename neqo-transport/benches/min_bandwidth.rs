@@ -43,7 +43,7 @@ fn gbit_bandwidth(ecn: bool) {
     /// How much of the theoretical bandwidth we will expect to deliver.
     /// Because we're not transferring a whole lot relative to the bandwidth,
     /// this ratio is relatively low.
-    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.3;
+    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.4;
 
     let gbit_link = || {
         let rate_byte = LINK_BANDWIDTH / 8;
