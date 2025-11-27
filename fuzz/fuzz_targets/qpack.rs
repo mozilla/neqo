@@ -5,19 +5,19 @@ use libfuzzer_sys::fuzz_target;
 
 #[cfg(all(fuzzing, not(windows)))]
 fuzz_target!(|data: &[u8]| {
-    const U64_BYTES: usize = size_of::<u64>();
-    const U16_BYTES: usize = size_of::<u16>();
+    const STREAM_ID_SIZE: usize = size_of::<u64>();
+    const ENCODER_STREAM_LEN_SIZE: usize = size_of::<u16>();
 
     // Parse: stream_id (u64) | encoder_stream_len (u16) | encoder_stream | header_block
-    let (stream_id, data) = if data.len() >= U64_BYTES {
-        let (left, right) = data.split_at(U64_BYTES);
+    let (stream_id, data) = if data.len() >= STREAM_ID_SIZE {
+        let (left, right) = data.split_at(STREAM_ID_SIZE);
         (u64::from_le_bytes(left.try_into().unwrap()), right)
     } else {
         (0, data)
     };
 
-    let (encoder_stream_len, data) = if data.len() >= U16_BYTES {
-        let (left, right) = data.split_at(U16_BYTES);
+    let (encoder_stream_len, data) = if data.len() >= ENCODER_STREAM_LEN_SIZE {
+        let (left, right) = data.split_at(ENCODER_STREAM_LEN_SIZE);
         (u16::from_le_bytes(left.try_into().unwrap()) as usize, right)
     } else {
         (0, data)
