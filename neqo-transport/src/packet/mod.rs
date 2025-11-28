@@ -794,6 +794,12 @@ impl<'a> Public<'a> {
         self.data.len()
     }
 
+    #[cfg(feature = "build-fuzzing-corpus")]
+    #[must_use]
+    pub fn data(&self) -> &[u8] {
+        self.data
+    }
+
     const fn decode_pn(expected: Number, pn: u64, w: usize) -> Number {
         let window = 1_u64 << (w * 8);
         let candidate = (expected & !(window - 1)) | pn;
