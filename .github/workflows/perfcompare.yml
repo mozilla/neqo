@@ -175,6 +175,7 @@ jobs:
       - name: Compare QUIC implementations
         env:
           WORKSPACE: ${{ github.workspace }}
+          NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
         run: |
           python3 neqo/.github/scripts/compare-quic-implementations.py \
             --host 127.0.0.1 \
