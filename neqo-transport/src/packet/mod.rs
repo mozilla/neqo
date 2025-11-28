@@ -499,10 +499,10 @@ impl<B: Buffer> Builder<B> {
         self.pad_to(data_end + crypto.expansion(), 0);
 
         // Calculate the mask.
-        let ciphertext = crypto.encrypt(self.pn, self.header.clone(), self.encoder.as_mut())?;
-        let offset = SAMPLE_OFFSET - self.offsets.pn.len();
+        crypto.encrypt(self.pn, self.header.clone(), self.encoder.as_mut())?;
         // `decode()` already checked that `decoder.remaining() >= SAMPLE_OFFSET + SAMPLE_SIZE`.
-        let sample = ciphertext[offset..offset + SAMPLE_SIZE]
+        let sample_start = self.header.end + SAMPLE_OFFSET - self.offsets.pn.len();
+        let sample = self.encoder.as_ref()[sample_start..sample_start + SAMPLE_SIZE]
             .try_into()
             .map_err(|_| Error::Internal)?;
         let mask = crypto.compute_mask(sample)?;
@@ -890,7 +890,9 @@ impl<'a> Public<'a> {
                 return Err(Error::Decrypt);
             };
             let version = rx.version(); // Version fixup; see above.
-            let d = rx.decrypt(pn, header, self.data)?;
+            let header_end = header.end;
+            let payload_len = rx.decrypt(pn, header, self.data)?;
+            let data = &self.data[header_end..header_end + payload_len];
             // If this is the first packet ever successfully decrypted
             // using `rx`, make sure to initiate a key update.
             if rx.needs_update() {
@@ -901,7 +903,7 @@ impl<'a> Public<'a> {
                 version,
                 pt: self.packet_type,
                 pn,
-                data: d,
+                data,
             })
         } else if crypto.rx_pending(epoch) {
             Err(Error::KeysPending(epoch))
