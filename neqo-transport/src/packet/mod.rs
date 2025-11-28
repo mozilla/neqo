@@ -875,7 +875,7 @@ impl<'a> Public<'a> {
         mut self,
         crypto: &mut CryptoStates,
         release_at: Instant,
-    ) -> Result<Decrypted, DecryptionError> {
+    ) -> Result<Decrypted<'a>, DecryptionError> {
         let epoch: Epoch = self
             .packet_type
             .try_into()
@@ -896,7 +896,9 @@ impl<'a> Public<'a> {
             };
             let version = rx.version(); // Version fixup; see above.
             let header_end = header.end;
-            let payload_len = rx.decrypt(pn, header, self.data)?;
+            let payload_len = rx
+                .decrypt(pn, header, self.data)
+                .map_err(|e| DecryptionError::from((&self, e)))?;
             let data = &self.data[header_end..header_end + payload_len];
             // If this is the first packet ever successfully decrypted
             // using `rx`, make sure to initiate a key update.
@@ -912,6 +914,8 @@ impl<'a> Public<'a> {
                 version,
                 pt: self.packet_type,
                 pn,
+                dcid: self.dcid,
+                scid: self.scid,
                 data,
             })
         } else if crypto.rx_pending(epoch) {
@@ -997,16 +1001,16 @@ impl DecryptionError {
     }
 }
 
-pub struct Decrypted {
+pub struct Decrypted<'a> {
     version: Version,
     pt: Type,
     pn: Number,
-    data: Vec<u8>,
+    data: &'a [u8],
     dcid: ConnectionId,
     scid: Option<ConnectionId>,
 }
 
-impl Decrypted {
+impl Decrypted<'_> {
     #[must_use]
     pub const fn version(&self) -> Version {
         self.version
@@ -1039,11 +1043,11 @@ impl Decrypted {
     }
 }
 
-impl Deref for Decrypted {
+impl Deref for Decrypted<'_> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
-        &self.data
+        self.data
     }
 }
 
