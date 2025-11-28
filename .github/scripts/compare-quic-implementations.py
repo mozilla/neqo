@@ -194,9 +194,9 @@ def process(cfg, name, bold):
     if not rj.exists() or not rm.exists():
         return None
 
-    res = json.loads(rj.read_text())["results"][0]
+    res = json.loads(rj.read_text(encoding="utf-8"))["results"][0]
     mean, times = res["mean"], res["times"]
-    md = rm.read_text()
+    md = rm.read_text(encoding="utf-8")
     match = next(
         (
             x
@@ -215,7 +215,7 @@ def process(cfg, name, bold):
     row += f" {(cfg.size/1048576)/mean:.1f} ± {(cfg.size/1048576)/rng:.1f} "
 
     if bj.exists():
-        base = json.loads(bj.read_text())["results"][0]
+        base = json.loads(bj.read_text(encoding="utf-8"))["results"][0]
         delta = (mean - base["mean"]) * 1000
         pct = (mean - base["mean"]) / base["mean"] * 100
         if is_significant(base["times"], times):
@@ -326,7 +326,7 @@ def main():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-    (cfg.workspace / "steps.md").write_text("".join(steps))
+    (cfg.workspace / "steps.md").write_text("".join(steps), encoding="utf-8")
     header = (
         f"Transfer of {cfg.size} bytes over loopback, {cfg.mtu}-byte MTU, min. {cfg.runs} runs. "
         "All unit-less numbers are in milliseconds.\n\n"
@@ -334,7 +334,9 @@ def main():
         "|:---|---:|---:|---:|---:|---:|---:|\n"
     )
     sorted_steps = sorted(steps, key=lambda r: re.sub(r"^\| \*\*", "| ", r))
-    (cfg.workspace / "comparison.md").write_text(header + "".join(sorted_steps))
+    (cfg.workspace / "comparison.md").write_text(
+        header + "".join(sorted_steps), encoding="utf-8"
+    )
 
 
 if __name__ == "__main__":
