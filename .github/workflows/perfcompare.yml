@@ -173,13 +173,15 @@ jobs:
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
       - name: Compare QUIC implementations
+        env:
+          WORKSPACE: ${{ github.workspace }}
         run: |
           python3 neqo/.github/scripts/compare-quic-implementations.py \
             --host 127.0.0.1 \
             --port 4433 \
             --size 33554432 \
             --runs 100 \
-            --workspace "${{ github.workspace }}" \
+            --workspace "$WORKSPACE" \
             --perf-opt "record -F2999 --call-graph fp -g" \
             --mtu 1504 # https://github.com/microsoft/msquic/issues/4618
 

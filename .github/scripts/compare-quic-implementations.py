@@ -68,7 +68,8 @@ def is_significant(s1: list[float], s2: list[float]) -> bool:
 
 def sh(cmd, **kw):
     """Run shell command."""
-    return subprocess.run(cmd, shell=True, check=False, **kw)
+    kw.setdefault("check", False)
+    return subprocess.run(cmd, shell=True, **kw)
 
 
 def mangle(cmd, cc, pacing, flags, disk):
