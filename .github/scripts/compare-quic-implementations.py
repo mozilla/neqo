@@ -267,8 +267,8 @@ def run(cfg, tmp):
                 opts = [("", False)]
 
             for cc, pacing in opts:
-                cf, sf = (sflags if client != "neqo" else ""), (
-                    cflags if server != "neqo" else ""
+                cf, sf = (cflags if server == "neqo" else ""), (
+                    sflags if client == "neqo" else ""
                 )
 
                 def fmt(t):
@@ -281,12 +281,10 @@ def run(cfg, tmp):
                 ccmd, _ = mangle(fmt(ccmd_t), cc, pacing, sf, "")
                 name = f"{client}-{server}{ext}"
 
-                print(f"  Verify: {name}")
                 if not verify(cfg, tmp, client, scmd, ccmd_d):
                     raise RuntimeError(f"Transfer failed: {client} vs. {server}")
 
                 if client == "neqo" or server == "neqo":
-                    print(f"  Hyperfine (main): {name}")
                     hyperfine(
                         cfg,
                         scmd.replace("neqo/", "neqo-main/"),
@@ -295,9 +293,7 @@ def run(cfg, tmp):
                         cfg.workspace / "hyperfine-main",
                     )
 
-                print(f"  Hyperfine (PR): {name}")
                 hyperfine(cfg, scmd, ccmd, name, cfg.workspace / "hyperfine", md=True)
-                print(f"  Perf: {name}")
                 perf(cfg, scmd, ccmd, name)
 
                 bold = client == server or (
@@ -325,7 +321,6 @@ def main():
     (cfg.workspace / "results.txt").touch()
 
     tmp = setup(cfg)
-    print(f"COMPARE_TMP={tmp}")
     try:
         steps = run(cfg, tmp)
     finally:
