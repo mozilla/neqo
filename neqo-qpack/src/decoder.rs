@@ -14,7 +14,7 @@ use crate::{
     encoder_instructions::{DecodedEncoderInstruction, EncoderInstructionReader},
     header_block::{HeaderDecoder, HeaderDecoderResult},
     qpack_send_buf::Data,
-    reader::ReceiverConnWrapper,
+    reader::{ReadByte, Reader, ReceiverConnWrapper},
     stats::Stats,
     table::HeaderTable,
     Error, Res, Settings,
@@ -91,8 +91,12 @@ impl Decoder {
 
     fn read_instructions(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
         let mut recv = ReceiverConnWrapper::new(conn, stream_id);
+        self.process_instructions(&mut recv)
+    }
+
+    pub(crate) fn process_instructions<T: ReadByte + Reader>(&mut self, recv: &mut T) -> Res<()> {
         loop {
-            match self.instruction_reader.read_instructions(&mut recv) {
+            match self.instruction_reader.read_instructions(recv) {
                 Ok(instruction) => self.execute_instruction(instruction)?,
                 Err(Error::NeedMoreData) => break Ok(()),
                 Err(e) => break Err(e),
@@ -206,6 +210,9 @@ impl Decoder {
         buf: &[u8],
         stream_id: StreamId,
     ) -> Res<Option<Vec<Header>>> {
+        #[cfg(feature = "build-fuzzing-corpus")]
+        crate::fuzz::write_item_to_fuzzing_corpus(stream_id, buf);
+
         qdebug!("[{self}] decode header block");
         let mut decoder = HeaderDecoder::new(buf);
 

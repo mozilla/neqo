@@ -1,0 +1,67 @@
+name: Check for new fuzzing samples
+on:
+  workflow_dispatch:
+  schedule:
+    # Run at 12:00 AM on Sunday.
+    - cron: '0 0 * * 0'
+
+concurrency:
+  # If "pull_request" is added to triggers above, adjust "group" accordingly.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz-corpus:
+    name: Check for new fuzzing samples
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: write # Needed to create PRs.
+      contents: write # Needed to push branches.
+
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/rust
+        with:
+          version: nightly
+          tools: cargo-fuzz
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/nss
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+
+      - env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+        run: |
+          ./test/make-fuzz-corpus.sh
+          # If there are no new corpus samples, exit.
+          if [ -z "$(git status --porcelain fuzz/corpus)" ]; then
+            echo "No new fuzzing corpus samples generated."
+            exit 0
+          fi
+
+          # Otherwise, create a PR to add them.
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          echo "$TOKEN" | gh auth login --with-token
+          SHA_SHORT=$(echo "$SHA" | cut -c1-7)
+          BRANCH="chore-corpus-samples-$SHA_SHORT"
+          MESSAGE="chore: Add new fuzzing corpus samples
+
+          A periodic run of the test suite generated new fuzzing samples.
+          This PR adds them to the fuzzing corpus."
+          git checkout -b "$BRANCH"
+          git add fuzz/corpus
+          git commit -m "$MESSAGE"
+          git push --set-upstream origin "$BRANCH"
+          gh pr create --draft --fill-verbose

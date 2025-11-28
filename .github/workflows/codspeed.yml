@@ -29,7 +29,7 @@ jobs:
     outputs:
       benches: ${{ steps.benches.outputs.benches }}
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
           persist-credentials: false
       - id: benches
@@ -74,7 +74,7 @@ jobs:
     needs: bench-matrix
 
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
           persist-credentials: false
 
@@ -99,7 +99,7 @@ jobs:
         run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
 
       - name: Run bench & upload results
-        uses: CodSpeedHQ/action@4348f634fa7309fe23aac9502e88b999ec90a164 # v4.3.1
+        uses: CodSpeedHQ/action@346a2d8a8d9d38909abd0bc3d23f773110f076ad # v4.4.1
         with:
           mode: ${{ matrix.bench.mode }}
           run: cargo codspeed run

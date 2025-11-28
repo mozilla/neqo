@@ -29,7 +29,7 @@ runs:
   using: "composite"
   steps:
     - name: Checkout quic-interop/quic-interop-runner repository
-      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
       with:
         repository: 'quic-interop/quic-interop-runner'
         path: 'quic-interop-runner'
@@ -48,7 +48,7 @@ runs:
 
     - name: Checkout linuxquic repository
       if: ${{ inputs.server == 'linuxquic' || inputs.client == 'linuxquic' }}
-      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
       with:
         repository: 'lxin/quic'
         path: 'linuxquic'

@@ -8,7 +8,7 @@ use std::{cmp::max, time::Duration};
 
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
-    connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT},
+    connection::{ConnectionIdManager, Role},
     rtt::GRANULARITY,
     stream_id::StreamType,
     tparams::{
@@ -75,8 +75,6 @@ pub const INITIAL_LOCAL_MAX_DATA: u64 = INITIAL_LOCAL_MAX_STREAM_DATA as u64 * C
 /// - 20ms rtt and 4.2 GBit/s
 /// - 40ms rtt and 2.1 GBit/s
 /// - 100ms rtt and 0.8 GBit/s
-///
-/// Keep in sync with [`crate::send_stream::MAX_SEND_BUFFER_SIZE`].
 ///
 /// See also <https://datatracker.ietf.org/doc/html/rfc9000#name-max_stream_data-frames>.
 pub const MAX_LOCAL_MAX_STREAM_DATA: u64 = 10 * 1024 * 1024;
@@ -504,7 +502,7 @@ impl ConnectionParameters {
         // default parameters
         tps.local_mut().set_integer(
             ActiveConnectionIdLimit,
-            u64::try_from(LOCAL_ACTIVE_CID_LIMIT)?,
+            u64::try_from(ConnectionIdManager::ACTIVE_LIMIT)?,
         );
         if self.disable_migration {
             tps.local_mut().set_empty(DisableMigration);

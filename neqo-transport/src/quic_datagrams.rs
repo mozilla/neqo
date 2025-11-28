@@ -11,11 +11,10 @@ use std::{cmp::min, collections::VecDeque};
 use neqo_common::{qdebug, Buffer, Encoder};
 
 use crate::{
-    events::OutgoingDatagramOutcome, frame::FrameType, packet, recovery, ConnectionEvents, Error,
-    Res, Stats,
+    events::OutgoingDatagramOutcome,
+    frame::{FrameEncoder as _, FrameType},
+    packet, recovery, ConnectionEvents, Error, Res, Stats,
 };
-
-pub const MAX_QUIC_DATAGRAM: u64 = 65535;
 
 /// Length of a [`FrameType::Datagram`] or [`FrameType::DatagramWithLen`] in
 /// QUIC varint encoding.
@@ -41,12 +40,14 @@ impl From<Option<u64>> for DatagramTracking {
     }
 }
 
-struct QuicDatagram {
+pub struct QuicDatagram {
     data: Vec<u8>,
     tracking: DatagramTracking,
 }
 
 impl QuicDatagram {
+    pub const MAX_SIZE: u64 = 65535;
+
     const fn tracking(&self) -> &DatagramTracking {
         &self.tracking
     }
@@ -94,7 +95,7 @@ impl QuicDatagrams {
     }
 
     pub fn set_remote_datagram_size(&mut self, v: u64) {
-        self.remote_datagram_size = min(v, MAX_QUIC_DATAGRAM);
+        self.remote_datagram_size = min(v, QuicDatagram::MAX_SIZE);
     }
 
     /// This function tries to write a datagram frame into a packet. If the
@@ -119,11 +120,13 @@ impl QuicDatagrams {
                         + len
                         + packet::Builder::MINIMUM_FRAME_SIZE
                 {
-                    builder.encode_varint(FrameType::DatagramWithLen);
-                    builder.encode_vvec(dgram.as_ref());
+                    builder.encode_frame(FrameType::DatagramWithLen, |b| {
+                        b.encode_vvec(dgram.as_ref());
+                    });
                 } else {
-                    builder.encode_varint(FrameType::Datagram);
-                    builder.encode(dgram.as_ref());
+                    builder.encode_frame(FrameType::Datagram, |b| {
+                        b.encode(dgram.as_ref());
+                    });
                     builder.mark_full();
                 }
                 debug_assert!(builder.len() <= builder.limit());
