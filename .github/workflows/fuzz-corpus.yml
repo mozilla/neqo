@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
-          persist-credentials: false
+          persist-credentials: true # zizmor: ignore[artipacked] We need to push branches.
 
       - uses: ./.github/actions/rust
         with:
@@ -63,5 +63,5 @@ jobs:
           git checkout -b "$BRANCH"
           git add fuzz/corpus
           git commit -m "$MESSAGE"
-          gh repo set-default "$GITHUB_REPOSITORY"
-          gh pr create --draft --fill-verbose --head "$BRANCH" --push
+          git push --set-upstream origin "$BRANCH"
+          gh pr create --draft --fill-verbose
