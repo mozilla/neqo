@@ -63,5 +63,5 @@ jobs:
           git checkout -b "$BRANCH"
           git add fuzz/corpus
           git commit -m "$MESSAGE"
-          git push --set-upstream origin "$BRANCH"
-          gh pr create --draft --fill-verbose
+          gh repo set-default "$GITHUB_REPOSITORY"
+          gh pr create --draft --fill-verbose --head "$BRANCH" --push
