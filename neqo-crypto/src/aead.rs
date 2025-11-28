@@ -250,31 +250,3 @@ impl fmt::Debug for RealAead {
         write!(f, "[AEAD Context]")
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use crate::{
-//         constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-//         hkdf, Aead, AeadTrait as _,
-//     };
-
-//     #[test]
-//     fn encrypt_decrypt_in_place() {
-//         crate::init().unwrap();
-
-//         let secret = hkdf::import_key(TLS_VERSION_1_3, &[0x42; 32]).unwrap();
-//         let aead = Aead::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &secret, "test").unwrap();
-
-//         let plaintext = b"hello world";
-//         let mut buffer = Vec::from(plaintext);
-//         buffer.resize(plaintext.len() + aead.expansion(), 0);
-
-//         let encrypted_len = aead.encrypt_in_place(0, b"aad", &mut buffer).unwrap();
-//         assert_eq!(encrypted_len, plaintext.len() + aead.expansion());
-//         assert_eq!(encrypted_len, buffer.len());
-
-//         let decrypted_len = aead.decrypt_in_place(0, b"aad", &mut buffer).unwrap();
-//         assert_eq!(decrypted_len, plaintext.len());
-//         assert_eq!(&buffer[..decrypted_len], plaintext);
-//     }
-// }
