@@ -816,10 +816,7 @@ impl<'a> Public<'a> {
     }
 
     /// Decrypt the header of the packet.
-    fn decrypt_header(
-        &mut self,
-        crypto: &CryptoDxState,
-    ) -> Result<(bool, Number, Range<usize>), DecryptionError> {
+    fn decrypt_header(&mut self, crypto: &CryptoDxState) -> Res<(bool, Number, Range<usize>)> {
         debug_assert_ne!(self.packet_type, Type::Retry);
         debug_assert_ne!(self.packet_type, Type::VersionNegotiation);
 
@@ -827,18 +824,14 @@ impl<'a> Public<'a> {
         let sample = self
             .data
             .get(sample_offset..(sample_offset + SAMPLE_SIZE))
-            .ok_or_else(|| DecryptionError::from((&*self, Error::NoMoreData)))?;
-        let sample: &[u8; SAMPLE_SIZE] = sample
-            .try_into()
-            .map_err(|_| DecryptionError::from((&*self, Error::NoMoreData)))?;
+            .ok_or(Error::NoMoreData)?;
+        let sample: &[u8; SAMPLE_SIZE] = sample.try_into().map_err(|_| Error::NoMoreData)?;
         qtrace!(
             "{:?} unmask hdr={}",
             crypto.version(),
             hex(&self.data[..sample_offset])
         );
-        let mask = crypto
-            .compute_mask(sample)
-            .map_err(|e| DecryptionError::from((&*self, e)))?;
+        let mask = crypto.compute_mask(sample)?;
 
         // Un-mask the leading byte.
         let bits = if self.packet_type == Type::Short {
@@ -881,48 +874,54 @@ impl<'a> Public<'a> {
         mut self,
         crypto: &mut CryptoStates,
         release_at: Instant,
-    ) -> Result<Decrypted<'a>, DecryptionError> {
-        let epoch: Epoch = self
-            .packet_type
-            .try_into()
-            .map_err(|e| DecryptionError::from((&self, e)))?;
+    ) -> Result<Decrypted<'a>, DecryptionError<'a>> {
+        let epoch = match self.packet_type.try_into() {
+            Ok(e) => e,
+            Err(e) => return Err((self, e).into()),
+        };
         // When we don't have a version, the crypto code doesn't need a version
         // for lookup, so use the default, but fix it up if decryption succeeds.
         let version = self.version().unwrap_or_default();
         // This has to work in two stages because we need to remove header protection
         // before picking the keys to use.
         let Some(rx) = crypto.rx_hp(version, epoch) else {
-            return if crypto.rx_pending(epoch) {
-                Err(DecryptionError::from((&self, Error::KeysPending(epoch))))
-            } else {
-                qtrace!("keys for {epoch:?} already discarded");
-                Err(DecryptionError::from((&self, Error::KeysDiscarded(epoch))))
-            };
+            if crypto.rx_pending(epoch) {
+                return Err((self, Error::KeysPending(epoch)).into());
+            }
+            qtrace!("keys for {epoch:?} already discarded");
+            return Err((self, Error::KeysDiscarded(epoch)).into());
         };
         // Note that this will dump early, which creates a side-channel.
         // This is OK in this case because we the only reason this can
         // fail is if the cryptographic module is bad or the packet is
         // too small (which is public information).
-        let (key_phase, pn, header) = self.decrypt_header(rx)?;
-        let rx = crypto
-            .rx(version, epoch, key_phase)
-            .ok_or_else(|| DecryptionError::from((&self, Error::Decrypt)))?;
+        let (key_phase, pn, header) = match self.decrypt_header(rx) {
+            Ok(v) => v,
+            Err(e) => return Err((self, e).into()),
+        };
+        let Some(rx) = crypto.rx(version, epoch, key_phase) else {
+            return Err((self, Error::Decrypt).into());
+        };
         let version = rx.version(); // Version fixup; see above.
         let header_end = header.end;
-        let payload_len = rx
-            .decrypt(pn, header, self.data)
-            .map_err(|e| DecryptionError::from((&self, e)))?;
+        let payload_len = match rx.decrypt(pn, header, self.data) {
+            Ok(v) => v,
+            Err(e) => return Err((self, e).into()),
+        };
         let data = &self.data[header_end..header_end + payload_len];
+        // Helper for late errors where `self` is partially borrowed.
+        let make_err = |error| DecryptionError {
+            error,
+            data: self.data,
+            dcid: self.dcid.clone(),
+            packet_type: self.packet_type,
+        };
         // If this is the first packet ever successfully decrypted
         // using `rx`, make sure to initiate a key update.
         if rx.needs_update() {
-            crypto
-                .key_update_received(release_at)
-                .map_err(|e| DecryptionError::from((&self, e)))?;
+            crypto.key_update_received(release_at).map_err(&make_err)?;
         }
-        crypto
-            .check_pn_overlap()
-            .map_err(|e| DecryptionError::from((&self, e)))?;
+        crypto.check_pn_overlap().map_err(make_err)?;
         Ok(Decrypted {
             version,
             pt: self.packet_type,
@@ -966,31 +965,31 @@ impl fmt::Debug for Public<'_> {
 /// Error information from a failed decryption attempt.
 /// Contains minimal packet information needed for error handling.
 #[derive(Debug)]
-pub struct DecryptionError {
-    /// The error that occurred
+pub struct DecryptionError<'a> {
+    /// The error that occurred.
     pub error: Error,
-    /// The original packet data (unchanged since decryption failed)
-    pub data: Vec<u8>,
-    /// The destination connection ID
+    /// The original packet data (unchanged since decryption failed).
+    pub data: &'a [u8],
+    /// The destination connection ID.
     pub dcid: ConnectionId,
-    /// The packet type
+    /// The packet type.
     pub packet_type: Type,
 }
 
-impl From<(&Public<'_>, Error)> for DecryptionError {
-    fn from((packet, error): (&Public, Error)) -> Self {
+impl<'a> From<(Public<'a>, Error)> for DecryptionError<'a> {
+    fn from((packet, error): (Public<'a>, Error)) -> Self {
         Self {
             error,
-            data: packet.data.to_vec(),
-            dcid: packet.dcid.clone(),
+            data: packet.data,
+            dcid: packet.dcid,
             packet_type: packet.packet_type,
         }
     }
 }
 
-impl DecryptionError {
+impl DecryptionError<'_> {
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.data.len()
     }
 
@@ -998,7 +997,7 @@ impl DecryptionError {
     // triggers the `clippy::len_without_is_empty` lint without this.
     #[cfg(any(fuzzing, feature = "bench"))]
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 

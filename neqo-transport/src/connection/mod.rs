@@ -1826,10 +1826,10 @@ impl Connection {
                     // Decryption failure, or not having keys is not fatal.
                     // If the state isn't available, or we can't decrypt the packet, drop
                     // the rest of the datagram on the floor, but don't generate an error.
-                    self.check_stateless_reset(path, &e.data, dcid.is_none(), now)?;
+                    self.check_stateless_reset(path, e.data, dcid.is_none(), now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
                     qlog::packet_dropped(&self.qlog, &e, now);
-                    dcid = Some(e.dcid);
+                    dcid = Some(e.dcid.clone());
                 }
             }
             slc = remainder;
