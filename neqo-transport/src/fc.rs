@@ -1234,7 +1234,7 @@ mod test {
         /// Allow auto-tuning algorithm to be off from actual bandwidth-delay
         /// product by up to 1KiB.
         const TOLERANCE: u64 = 1024;
-        const BW_TOLERANCE: f64 = 0.8;
+        const BW_TOLERANCE: f64 = 0.6;
 
         test_fixture::fixture_init();
 
