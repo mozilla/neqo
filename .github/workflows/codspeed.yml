@@ -51,8 +51,6 @@ jobs:
                   # - Looks up .metadata.bench[$bench].codspeed.mode for the benchmark
                   # - If not set, defaults to "instrumentation"
                   mode=$(cargo metadata --no-deps --format-version 1 | jq -r --arg crate "$crate" --arg bench "$bench" '.packages[] | select(.name == $crate) | .metadata.bench[$bench].codspeed.mode // "instrumentation"')
-                  # FIXME: Always use "instrumentation" mode to eliminate CI VM effects.
-                  mode="instrumentation"
                   if [ "$first" = true ]; then
                     first=false
                   else
@@ -67,7 +65,7 @@ jobs:
 
   benchmarks:
     name: Run bench
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.bench.mode == 'walltime' && 'codspeed-macro' || 'ubuntu-24.04' }}
     strategy:
       matrix:
         bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}

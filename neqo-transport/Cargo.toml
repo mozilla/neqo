@@ -52,8 +52,19 @@ gecko = ["mtu/gecko"]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
 
+[package.metadata.bench.transfer_wallclock]
+codspeed.mode = "walltime"
+
+[package.metadata.bench.transfer_simulated]
+codspeed.mode = "instrumentation"
+
 [[bench]]
-name = "transfer"
+name = "transfer_wallclock"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "transfer_simulated"
 harness = false
 required-features = ["bench"]
 
