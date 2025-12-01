@@ -913,9 +913,7 @@ impl<'a> Public<'a> {
                     return Err(DecryptionError::from((&self, e)));
                 }
             }
-            if let Err(e) = crypto.check_pn_overlap() {
-                return Err(DecryptionError::from((&self, e)));
-            }
+            crypto.check_pn_overlap().map_err(|e| DecryptionError::from((&self, e)))?;
             Ok(Decrypted {
                 version,
                 pt: self.packet_type,
