@@ -134,10 +134,7 @@ impl HeaderTable {
     /// `HeaderLookup` if the index does not exist in the static table.
     pub fn get_static(index: u64) -> Res<&'static StaticTableEntry> {
         let inx = usize::try_from(index).or(Err(Error::HeaderLookup))?;
-        if inx >= HEADER_STATIC_TABLE.len() {
-            return Err(Error::HeaderLookup);
-        }
-        Ok(&HEADER_STATIC_TABLE[inx])
+        HEADER_STATIC_TABLE.get(inx).ok_or(Error::HeaderLookup)
     }
 
     fn get_dynamic_with_abs_index(&mut self, index: u64) -> Res<&mut DynamicTableEntry> {
@@ -147,18 +144,12 @@ impl HeaderTable {
         }
         let inx = self.base - index - 1;
         let inx = usize::try_from(inx).or(Err(Error::HeaderLookup))?;
-        if inx >= self.dynamic.len() {
-            return Err(Error::HeaderLookup);
-        }
-        Ok(&mut self.dynamic[inx])
+        self.dynamic.get_mut(inx).ok_or(Error::HeaderLookup)
     }
 
     fn get_dynamic_with_relative_index(&self, index: u64) -> Res<&DynamicTableEntry> {
         let inx = usize::try_from(index).or(Err(Error::HeaderLookup))?;
-        if inx >= self.dynamic.len() {
-            return Err(Error::HeaderLookup);
-        }
-        Ok(&self.dynamic[inx])
+        self.dynamic.get(inx).ok_or(Error::HeaderLookup)
     }
 
     /// Get a entry in the  dynamic table.
@@ -254,14 +245,15 @@ impl HeaderTable {
             "[{self}] reduce table to {reduce}, currently used:{}",
             self.used,
         );
-        while (!self.dynamic.is_empty()) && self.used > reduce {
-            if let Some(e) = self.dynamic.back() {
-                if !e.can_reduce(self.acked_inserts_cnt) {
-                    return false;
-                }
-                self.used -= u64::try_from(e.size()).expect("usize fits in u64");
-                self.dynamic.pop_back();
+        while let Some(e) = self.dynamic.back() {
+            if self.used <= reduce {
+                break;
             }
+            if !e.can_reduce(self.acked_inserts_cnt) {
+                return false;
+            }
+            self.used -= u64::try_from(e.size()).expect("usize fits in u64");
+            self.dynamic.pop_back();
         }
         true
     }

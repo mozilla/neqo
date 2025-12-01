@@ -425,7 +425,7 @@ jobs:
 
           # Make a single results table.
           {
-            echo "Transfer of $SIZE bytes over loopback, min. $RUNS runs. All unit-less numbers are in milliseconds."
+            echo "Transfer of $SIZE bytes over loopback, $MTU-byte MTU, min. $RUNS runs. All unit-less numbers are in milliseconds."
             echo
             # shellcheck disable=SC2016
             echo '| Client vs. server (params) | Mean ± σ | Min | Max | MiB/s ± σ | Δ `main` | Δ `main` |'
@@ -464,7 +464,22 @@ jobs:
             echo
             echo "Performance differences relative to $SHA."
             echo
+            # Extract rows with significant changes (red or green heart).
+            if grep -q ':broken_heart:\|:green_heart:' comparison.md; then
+              # Print all lines up to and including the first separator line (header)
+              awk 'BEGIN{found=0} /^[|][ -|:]+[|]$/ {found=1} {print} found{exit}' comparison.md
+              grep ':broken_heart:\|:green_heart:' comparison.md
+              echo
+            else
+              echo "No significant performance differences."
+              echo
+            fi
+            echo "Table above only shows statistically significant changes. See all results below."
+            echo "<details><summary>All results</summary>"
+            echo
             cat comparison.md
+            echo
+            echo "</details>"
           } >> results.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
           echo "$TESTBED" > testbed.txt
