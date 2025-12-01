@@ -891,43 +891,46 @@ impl<'a> Public<'a> {
         let version = self.version().unwrap_or_default();
         // This has to work in two stages because we need to remove header protection
         // before picking the keys to use.
-        if let Some(rx) = crypto.rx_hp(version, epoch) {
-            // Note that this will dump early, which creates a side-channel.
-            // This is OK in this case because we the only reason this can
-            // fail is if the cryptographic module is bad or the packet is
-            // too small (which is public information).
-            let (key_phase, pn, header) = self.decrypt_header(rx)?;
-            let Some(rx) = crypto.rx(version, epoch, key_phase) else {
-                return Err(DecryptionError::from((&self, Error::Decrypt)));
+        let Some(rx) = crypto.rx_hp(version, epoch) else {
+            return if crypto.rx_pending(epoch) {
+                Err(DecryptionError::from((&self, Error::KeysPending(epoch))))
+            } else {
+                qtrace!("keys for {epoch:?} already discarded");
+                Err(DecryptionError::from((&self, Error::KeysDiscarded(epoch))))
             };
-            let version = rx.version(); // Version fixup; see above.
-            let header_end = header.end;
-            let payload_len = rx
-                .decrypt(pn, header, self.data)
+        };
+        // Note that this will dump early, which creates a side-channel.
+        // This is OK in this case because we the only reason this can
+        // fail is if the cryptographic module is bad or the packet is
+        // too small (which is public information).
+        let (key_phase, pn, header) = self.decrypt_header(rx)?;
+        let rx = crypto
+            .rx(version, epoch, key_phase)
+            .ok_or_else(|| DecryptionError::from((&self, Error::Decrypt)))?;
+        let version = rx.version(); // Version fixup; see above.
+        let header_end = header.end;
+        let payload_len = rx
+            .decrypt(pn, header, self.data)
+            .map_err(|e| DecryptionError::from((&self, e)))?;
+        let data = &self.data[header_end..header_end + payload_len];
+        // If this is the first packet ever successfully decrypted
+        // using `rx`, make sure to initiate a key update.
+        if rx.needs_update() {
+            crypto
+                .key_update_received(release_at)
                 .map_err(|e| DecryptionError::from((&self, e)))?;
-            let data = &self.data[header_end..header_end + payload_len];
-            // If this is the first packet ever successfully decrypted
-            // using `rx`, make sure to initiate a key update.
-            if rx.needs_update() {
-                if let Err(e) = crypto.key_update_received(release_at) {
-                    return Err(DecryptionError::from((&self, e)));
-                }
-            }
-            crypto.check_pn_overlap().map_err(|e| DecryptionError::from((&self, e)))?;
-            Ok(Decrypted {
-                version,
-                pt: self.packet_type,
-                pn,
-                dcid: self.dcid,
-                scid: self.scid,
-                data,
-            })
-        } else if crypto.rx_pending(epoch) {
-            Err(DecryptionError::from((&self, Error::KeysPending(epoch))))
-        } else {
-            qtrace!("keys for {epoch:?} already discarded");
-            Err(DecryptionError::from((&self, Error::KeysDiscarded(epoch))))
         }
+        crypto
+            .check_pn_overlap()
+            .map_err(|e| DecryptionError::from((&self, e)))?;
+        Ok(Decrypted {
+            version,
+            pt: self.packet_type,
+            pn,
+            dcid: self.dcid,
+            scid: self.scid,
+            data,
+        })
     }
 
     /// # Errors
