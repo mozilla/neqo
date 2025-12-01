@@ -133,7 +133,6 @@ jobs:
 
       - run: |
           docker load --input "/tmp/pr.tar"
-          docker images --format "{{.Repository}}:{{.Tag}}"
           PR_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep pr | head -1)
           echo "PR_IMAGE=$PR_IMAGE" >> "$GITHUB_ENV"
 
