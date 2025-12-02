@@ -20,6 +20,7 @@ env:
   RUSTUP_TOOLCHAIN: stable
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
+  MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
 
@@ -168,7 +169,10 @@ jobs:
       # Also creates "cpu23", "cpu2" and "cpu3" CPU sets for use with cset.
       # On the bencher, logical cores 2 and 3 have been isolated for use by the benchmarks.
       - name: Prepare machine
-        run: sudo /root/bin/prep.sh
+        run: |
+          sudo /root/bin/prep.sh
+          # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
+          sudo ip link set dev lo mtu "$MTU"
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -177,14 +181,13 @@ jobs:
           WORKSPACE: ${{ github.workspace }}
           NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
         run: |
-          python3 neqo/.github/scripts/compare-quic-implementations.py \
+          python3 neqo/.github/scripts/perfcompare.py \
             --host 127.0.0.1 \
             --port 4433 \
             --size 33554432 \
             --runs 100 \
             --workspace "$WORKSPACE" \
-            --perf-opt "record -F2999 --call-graph fp -g" \
-            --mtu 1504 # https://github.com/microsoft/msquic/issues/4618
+            --perf-opt "record -F2999 --call-graph fp -g"
 
       # Re-enable turboboost, hyperthreading and use powersave governor. Remove all CPU sets.
       - name: Restore machine
