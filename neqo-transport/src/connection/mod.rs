@@ -1829,7 +1829,7 @@ impl Connection {
                     self.check_stateless_reset(path, e.data, dcid.is_none(), now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
                     qlog::packet_dropped(&self.qlog, &e, now);
-                    dcid = Some(e.dcid.clone());
+                    dcid = Some(e.dcid);
                 }
             }
             slc = remainder;
