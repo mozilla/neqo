@@ -221,17 +221,13 @@ impl Decoder {
                 if self.blocked_streams.len() > self.max_blocked_streams {
                     Err(Error::Decompression)
                 } else {
-                    let r = self
+                    let found = self
                         .blocked_streams
                         .iter()
-                        .filter_map(|(id, req)| (*id == stream_id).then_some(*req))
-                        .collect::<Vec<_>>();
-                    if !r.is_empty() {
-                        debug_assert!(r.len() == 1);
-                        debug_assert!(r[0] == req_insert_cnt);
-                        return Ok(None);
+                        .any(|(id, _req)| *id == stream_id);
+                    if !found {
+                        self.blocked_streams.push((stream_id, req_insert_cnt));
                     }
-                    self.blocked_streams.push((stream_id, req_insert_cnt));
                     Ok(None)
                 }
             }
