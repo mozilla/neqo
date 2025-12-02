@@ -257,14 +257,13 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
         now,
     );
 }
-
-pub fn packet_dropped(qlog: &mut Qlog, public_packet: &packet::Public, now: Instant) {
+pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
             let header =
-                PacketHeader::with_type(public_packet.packet_type().into(), None, None, None, None);
+                PacketHeader::with_type(decrypt_err.packet_type().into(), None, None, None, None);
             let raw = RawInfo {
-                length: Some(public_packet.len() as u64),
+                length: Some(decrypt_err.len() as u64),
                 ..Default::default()
             };
 

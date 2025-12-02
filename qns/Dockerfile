@@ -21,7 +21,7 @@ ENV NSS_DIR=/nss \
     NSS_PREBUILT=1 \
     NSPR_DIR=/nspr \
     LD_LIBRARY_PATH=/dist/Release/lib \
-    NSPR_VERSION=4.37
+    NSPR_VERSION=4.38.2
 
 RUN set -eux; \
     mkdir -p "$NSPR_DIR"; \
@@ -41,7 +41,7 @@ RUN set -eux; \
 
 # Copy only binaries to the final image to keep it small.
 
-FROM martenseemann/quic-network-simulator-endpoint@sha256:019812e9cbc558d94af64f2f21a74717d0fea725a24e7e8e9b341136998e6452
+FROM martenseemann/quic-network-simulator-endpoint@sha256:3b2b9e6fa317da238c8140a7b6d2bf8d4d45a8464b873eecac3ff2a32520b71a
 
 ENV LD_LIBRARY_PATH=/neqo/lib
 COPY --from=builder /neqo/target/release/neqo-client /neqo/target/release/neqo-server /neqo/bin/

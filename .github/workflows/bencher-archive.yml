@@ -20,8 +20,8 @@ jobs:
       BENCHER_PROJECT: neqo
       BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
           persist-credentials: false
-      - uses: bencherdev/bencher@v0.5.7 # zizmor: ignore[unpinned-uses]
+      - uses: bencherdev/bencher@v0.5.8 # zizmor: ignore[unpinned-uses]
       - run: bencher archive --branch "$GITHUB_HEAD_REF"

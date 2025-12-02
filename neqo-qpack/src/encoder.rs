@@ -418,14 +418,14 @@ impl Encoder {
 
         for iter in h {
             let name = iter.name().as_bytes().to_vec();
-            let value = iter.value().as_bytes().to_vec();
+            let value = iter.value();
             qtrace!("encoding {name:x?} {value:x?}");
 
             if let Some(LookupResult {
                 index,
                 static_table,
                 value_matches,
-            }) = self.table.lookup(&name, &value, can_block)
+            }) = self.table.lookup(&name, value, can_block)
             {
                 qtrace!(
                     "[{self}] found a {} entry, value-match={value_matches}",
@@ -438,7 +438,7 @@ impl Encoder {
                         encoded_h.encode_indexed_dynamic(index);
                     }
                 } else {
-                    encoded_h.encode_literal_with_name_ref(static_table, index, &value);
+                    encoded_h.encode_literal_with_name_ref(static_table, index, value);
                 }
                 if !static_table && ref_entries.insert(index) {
                     self.table.add_ref(index);
@@ -447,7 +447,7 @@ impl Encoder {
                 // Insert using an InsertWithNameLiteral instruction. This entry name does not match
                 // any name in the tables therefore we cannot use any other
                 // instruction.
-                if let Ok(index) = self.send_and_insert(conn, &name, &value) {
+                if let Ok(index) = self.send_and_insert(conn, &name, value) {
                     encoded_h.encode_indexed_dynamic(index);
                     ref_entries.insert(index);
                     self.table.add_ref(index);
@@ -466,10 +466,10 @@ impl Encoder {
                     // As soon as one of the instructions cannot be written or the table is full, do
                     // not try again.
                     encoder_blocked = true;
-                    encoded_h.encode_literal_with_name_literal(&name, &value);
+                    encoded_h.encode_literal_with_name_literal(&name, value);
                 }
             } else {
-                encoded_h.encode_literal_with_name_literal(&name, &value);
+                encoded_h.encode_literal_with_name_literal(&name, value);
             }
         }
 
@@ -492,6 +492,8 @@ impl Encoder {
                 .push_front(ref_entries);
             self.stats.dynamic_table_references += 1;
         }
+        #[cfg(feature = "build-fuzzing-corpus")]
+        crate::fuzz::write_item_to_fuzzing_corpus(stream_id, &encoded_h);
         encoded_h
     }
 

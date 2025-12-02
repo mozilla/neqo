@@ -90,7 +90,7 @@ runs:
 
     - name: Checkout NSS
       if: ${{ !steps.system_nss.outputs.suitable }}
-      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
       with:
         repository: nss-dev/nss
         path: nss
@@ -101,7 +101,7 @@ runs:
       if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
       env:
-        NSPR_VERSION: 4.37 # This changes so rarely that we can hardcode it.
+        NSPR_VERSION: 4.38.2 # This changes so rarely that we can hardcode it.
       run: |
         curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz |
           tar xz --strip-components=1

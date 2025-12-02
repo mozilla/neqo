@@ -104,10 +104,14 @@ impl super::HttpServer for HttpServer {
                 } => {
                     qdebug!("Headers (request={stream} fin={fin}): {headers:?}");
 
-                    if headers.contains_header(":method", "POST") {
-                        let response_size = headers
-                            .find_header(":path")
-                            .and_then(|path| path.value().trim_matches('/').parse::<usize>().ok());
+                    if headers.contains_header(":method", b"POST") {
+                        let response_size = headers.find_header(":path").and_then(|path| {
+                            path.value_utf8()
+                                .ok()?
+                                .trim_matches('/')
+                                .parse::<usize>()
+                                .ok()
+                        });
                         self.posts.insert(stream, (0, response_size));
                         continue;
                     }
@@ -120,10 +124,11 @@ impl super::HttpServer for HttpServer {
                     };
 
                     let mut response = if self.is_qns_test {
-                        match qns_read_response(path.value()) {
+                        let path_str = path.value_utf8().unwrap_or("/");
+                        match qns_read_response(path_str) {
                             Ok(data) => SendData::from(data),
                             Err(e) => {
-                                qerror!("Failed to read {}: {e}", path.value());
+                                qerror!("Failed to read {path_str}: {e}");
                                 stream
                                     .send_headers(&[Header::new(":status", "404")])
                                     .unwrap();
@@ -131,10 +136,11 @@ impl super::HttpServer for HttpServer {
                                 continue;
                             }
                         }
-                    } else if let Ok(count) =
-                        path.value().trim_matches(|p| p == '/').parse::<usize>()
-                    {
-                        SendData::zeroes(count)
+                    } else if let Ok(path_str) = path.value_utf8() {
+                        path_str
+                            .trim_matches(|p| p == '/')
+                            .parse::<usize>()
+                            .map_or_else(|_| SendData::from(path.value()), SendData::zeroes)
                     } else {
                         SendData::from(path.value())
                     };
