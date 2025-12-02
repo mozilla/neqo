@@ -7,24 +7,25 @@ use libfuzzer_sys::fuzz_target;
 fuzz_target!(|data: &[u8]| {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
+    use neqo_common::Decoder;
     use neqo_transport::{addr_valid::AddressValidation, server::ValidateAddress};
     use test_fixture::now;
 
-    // Binary format: [4 or 6] [ip octets: 4 or 16 bytes] [port: 2 bytes BE] [token...]
-    let (peer, token) = match data.first() {
-        Some(4) if data.len() >= 7 => {
-            let ip = Ipv4Addr::from([data[1], data[2], data[3], data[4]]);
-            let port = u16::from_be_bytes([data[5], data[6]]);
-            (SocketAddr::new(IpAddr::V4(ip), port), &data[7..])
-        }
-        Some(6) if data.len() >= 19 => {
-            let octets: [u8; 16] = data[1..17].try_into().expect("length checked");
-            let ip = Ipv6Addr::from(octets);
-            let port = u16::from_be_bytes([data[17], data[18]]);
-            (SocketAddr::new(IpAddr::V6(ip), port), &data[19..])
-        }
+    // Binary format: [1-byte length] [ip octets: 4 or 16 bytes] [port: 2 bytes BE] [token...]
+    let mut dec = Decoder::new(data);
+    let Some(ip_bytes) = dec.decode_vec(1) else {
+        return;
+    };
+    let ip = match ip_bytes.len() {
+        4 => IpAddr::V4(Ipv4Addr::from(<[u8; 4]>::try_from(ip_bytes).unwrap())),
+        16 => IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(ip_bytes).unwrap())),
         _ => return,
     };
+    let Some(port) = dec.decode_uint::<u16>() else {
+        return;
+    };
+    let peer = SocketAddr::new(ip, port);
+    let token = dec.decode_remainder();
 
     let now = now();
     let Ok(av) = AddressValidation::new(now, ValidateAddress::Always) else {
