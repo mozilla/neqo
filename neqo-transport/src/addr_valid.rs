@@ -17,6 +17,7 @@ use neqo_crypto::{
     selfencrypt::SelfEncrypt,
 };
 use smallvec::SmallVec;
+use static_assertions::const_assert;
 
 use crate::{
     cid::ConnectionId,
@@ -32,6 +33,8 @@ const TOKEN_IDENTIFIER_RETRY: &[u8] = &[0x52, 0x65, 0x74, 0x72, 0x79];
 /// Together, these need to have a low probability of collision, even if there is
 /// corruption of individual bits in transit.
 const TOKEN_IDENTIFIER_NEW_TOKEN: &[u8] = &[0xad, 0x9a, 0x8b, 0x8d, 0x86];
+
+const_assert!(TOKEN_IDENTIFIER_RETRY.len() == TOKEN_IDENTIFIER_NEW_TOKEN.len());
 
 /// The maximum number of tokens we'll save from `NEW_TOKEN` frames.
 /// This should be the same as the value of `MAX_TICKETS` in neqo-crypto.
@@ -132,10 +135,7 @@ impl AddressValidation {
         let mut buf = Self::encode_aad(peer_address, retry);
         let encrypted = self.self_encrypt.seal(buf.as_ref(), data.as_ref())?;
         #[cfg(feature = "build-fuzzing-corpus")]
-        {
-            assert!(TOKEN_IDENTIFIER_RETRY.len() == TOKEN_IDENTIFIER_NEW_TOKEN.len());
-            let mut corpus_data = buf.as_ref()[TOKEN_IDENTIFIER_RETRY.len()..].to_vec();
-        }
+        let mut corpus_data = buf.as_ref()[TOKEN_IDENTIFIER_RETRY.len()..].to_vec();
         buf.truncate(TOKEN_IDENTIFIER_RETRY.len());
         buf.encode(&encrypted);
         let token: Vec<u8> = buf.into();
