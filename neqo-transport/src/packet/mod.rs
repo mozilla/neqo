@@ -825,7 +825,7 @@ impl<'a> Public<'a> {
             .data
             .get(sample_offset..(sample_offset + SAMPLE_SIZE))
             .ok_or(Error::NoMoreData)?;
-        let sample: &[u8; SAMPLE_SIZE] = sample.try_into().expect("fixed size");
+        let sample: &[u8; SAMPLE_SIZE] = sample.try_into()?;
         qtrace!(
             "{:?} unmask hdr={}",
             crypto.version(),
