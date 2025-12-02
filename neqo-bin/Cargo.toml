@@ -52,6 +52,9 @@ thiserror = { workspace = true }
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt"] }
 url = { workspace = true }
 
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { version = "0.6", default-features = false }
+
 [dev-dependencies]
 criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false, features = [
         "async_tokio",
