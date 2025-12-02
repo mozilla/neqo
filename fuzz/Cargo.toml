@@ -78,3 +78,10 @@ path = "fuzz_targets/qpack.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "addr_valid"
+path = "fuzz_targets/addr_valid.rs"
+test = false
+doc = false
+bench = false

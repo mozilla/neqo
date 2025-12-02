@@ -204,6 +204,27 @@ impl Server {
         self.ech_config.as_ref().map_or(&[], |cfg| &cfg.encoded)
     }
 
+    /// Writes address validation fuzzing corpus data.
+    #[cfg(feature = "build-fuzzing-corpus")]
+    fn write_addr_valid_corpus(peer: std::net::SocketAddr, token: &[u8]) {
+        let mut d = Vec::new();
+        match peer.ip() {
+            std::net::IpAddr::V4(ip) => {
+                let bytes = ip.octets();
+                d.push(u8::try_from(bytes.len()).expect("IP address len fits in u8"));
+                d.extend_from_slice(&bytes);
+            }
+            std::net::IpAddr::V6(ip) => {
+                let bytes = ip.octets();
+                d.push(u8::try_from(bytes.len()).expect("IP address len fits in u8"));
+                d.extend_from_slice(&bytes);
+            }
+        }
+        d.extend_from_slice(&peer.port().to_be_bytes());
+        d.extend_from_slice(token);
+        neqo_common::write_item_to_fuzzing_corpus("addr_valid", &d);
+    }
+
     fn handle_initial(
         &mut self,
         initial: InitialDetails,
@@ -211,6 +232,8 @@ impl Server {
         now: Instant,
     ) -> Output {
         qdebug!("[{self}] Handle initial");
+        #[cfg(feature = "build-fuzzing-corpus")]
+        Self::write_addr_valid_corpus(dgram.source(), &initial.token);
         let res = self
             .address_validation
             .borrow()
