@@ -67,7 +67,8 @@ impl Pmtud {
     }
 
     /// Size of the IPv4/IPv6 and UDP headers, in bytes.
-    const fn header_size(remote_ip: IpAddr) -> usize {
+    #[must_use]
+    pub const fn header_size(remote_ip: IpAddr) -> usize {
         match remote_ip {
             IpAddr::V4(_) => 20 + 8,
             IpAddr::V6(_) => 40 + 8,
