@@ -28,17 +28,36 @@ impl WebTransportFrame {
     const CLOSE_MAX_MESSAGE_SIZE: u64 = 1024;
 
     pub fn encode(&self, enc: &mut Encoder) {
+        #[cfg(feature = "build-fuzzing-corpus")]
+        let start = enc.len();
+
         enc.encode_varint(Self::CLOSE_SESSION);
         let Self::CloseSession { error, message } = &self;
         enc.encode_varint(4 + message.len() as u64);
         enc.encode_uint(4, *error);
         enc.encode(message.as_bytes());
+
+        #[cfg(feature = "build-fuzzing-corpus")]
+        neqo_common::write_item_to_fuzzing_corpus("wtframe", &enc.as_ref()[start..]);
+    }
+
+    #[cfg(feature = "build-fuzzing-corpus")]
+    /// Write `WebTransportFrame` data to fuzzing corpus.
+    fn write_to_fuzzing_corpus(frame_type: HFrameType, frame_len: u64, data: &[u8]) {
+        let mut encoder = Encoder::default();
+        encoder.encode_varint(frame_type.0);
+        encoder.encode_varint(frame_len);
+        encoder.encode(data);
+        neqo_common::write_item_to_fuzzing_corpus("wtframe", encoder.as_ref());
     }
 }
 
 impl FrameDecoder<Self> for WebTransportFrame {
     fn decode(frame_type: HFrameType, frame_len: u64, data: Option<&[u8]>) -> Res<Option<Self>> {
         if let Some(payload) = data {
+            #[cfg(feature = "build-fuzzing-corpus")]
+            Self::write_to_fuzzing_corpus(frame_type, frame_len, payload);
+
             let mut dec = Decoder::from(payload);
             if frame_type == HFrameType(Self::CLOSE_SESSION) {
                 if frame_len > Self::CLOSE_MAX_MESSAGE_SIZE + 4 {
@@ -53,6 +72,9 @@ impl FrameDecoder<Self> for WebTransportFrame {
                 Ok(None)
             }
         } else {
+            #[cfg(feature = "build-fuzzing-corpus")]
+            Self::write_to_fuzzing_corpus(frame_type, frame_len, &[]);
+
             Ok(None)
         }
     }
