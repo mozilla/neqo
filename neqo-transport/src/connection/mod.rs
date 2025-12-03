@@ -441,7 +441,7 @@ impl Connection {
             events.clone(),
         );
 
-        let c = Self {
+        let mut c = Self {
             role,
             version: conn_params.get_versions().initial(),
             state: State::Init,
@@ -473,6 +473,7 @@ impl Connection {
             #[cfg(any(test, feature = "build-fuzzing-corpus"))]
             test_frame_writer: None,
         };
+        c.paths.set_pmtud(c.conn_params.pmtud_enabled());
         c.stats.borrow_mut().init(format!("{c}"));
         Ok(c)
     }
@@ -3300,6 +3301,13 @@ impl Connection {
                 // Report an error if we don't have enough connection IDs.
                 self.ensure_permanent(path, now)?;
                 path.borrow_mut().challenged(data);
+                // A PATH_CHALLENGE indicates the peer sees a different path,
+                // so start PMTUD to discover any MTU changes.
+                if self.conn_params.pmtud_enabled() {
+                    path.borrow_mut()
+                        .pmtud_mut()
+                        .start(now, &mut self.stats.borrow_mut());
+                }
             }
             Frame::PathResponse { data } => {
                 self.stats.borrow_mut().frame_rx.path_response += 1;
