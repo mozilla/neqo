@@ -2465,9 +2465,11 @@ impl Connection {
                     && !coalesced // Only send PMTUD probes using non-coalesced packets.
                     && full_mtu
                 {
-                    path.borrow_mut()
-                        .pmtud_mut()
-                        .send_probe(builder, &mut self.stats.borrow_mut());
+                    path.borrow_mut().pmtud_mut().send_probe(
+                        builder,
+                        &mut tokens,
+                        &mut self.stats.borrow_mut(),
+                    );
                     ack_eliciting = true;
                 }
                 self.write_appdata_frames(builder, &mut tokens, now);
@@ -3416,6 +3418,8 @@ impl Connection {
                         self.stats.borrow_mut().datagram_tx.lost += 1;
                     }
                     recovery::Token::EcnEct0 => self.paths.lost_ecn(&mut self.stats.borrow_mut()),
+                    // PMTUD probe loss is handled by the PMTUD state machine.
+                    recovery::Token::PmtudProbe => (),
                 }
             }
         }
@@ -3483,8 +3487,8 @@ impl Connection {
                         .events
                         .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Acked),
                     recovery::Token::EcnEct0 => self.paths.acked_ecn(),
-                    // We only worry when these are lost
-                    recovery::Token::HandshakeDone => (),
+                    // We don't care about these being ACK'ed
+                    recovery::Token::HandshakeDone | recovery::Token::PmtudProbe => (),
                 }
             }
         }

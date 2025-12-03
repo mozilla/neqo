@@ -15,7 +15,7 @@ use static_assertions::const_assert;
 use crate::{
     frame::{FrameEncoder as _, FrameType},
     packet,
-    recovery::sent,
+    recovery::{self, sent},
     Stats,
 };
 
@@ -120,10 +120,16 @@ impl Pmtud {
     }
 
     /// Sends a PMTUD probe.
-    pub fn send_probe<B: Buffer>(&mut self, builder: &mut packet::Builder<B>, stats: &mut Stats) {
+    pub fn send_probe<B: Buffer>(
+        &mut self,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
+        stats: &mut Stats,
+    ) {
         // The packet may include ACK-eliciting data already, but rather than check for that, it
         // seems OK to burn one byte here to simply include a PING.
         builder.encode_frame(FrameType::Ping, |_| {});
+        tokens.push(recovery::Token::PmtudProbe);
         stats.frame_tx.ping += 1;
         stats.pmtud_tx += 1;
         self.probe_count += 1;
@@ -135,18 +141,6 @@ impl Pmtud {
         );
     }
 
-    #[expect(rustdoc::private_intra_doc_links, reason = "Nicer docs.")]
-    /// Provides a [`Fn`] that returns true if the packet is a PMTUD probe.
-    ///
-    /// Allows filtering packets without holding a reference to [`Pmtud`]. When
-    /// in doubt, use [`Pmtud::is_probe`].
-    pub fn is_probe_filter(&self) -> impl Fn(&sent::Packet) -> bool {
-        let probe_state = self.probe_state;
-        let probe_size = self.probe_size();
-
-        move |p: &sent::Packet| -> bool { probe_state == Probe::Sent && p.len() == probe_size }
-    }
-
     /// Returns the maximum Packetization Layer Path MTU for the configured
     /// address family. Note that this ignores the interface MTU.
     #[expect(clippy::missing_panics_doc, reason = "search table is never empty")]
@@ -155,14 +149,9 @@ impl Pmtud {
         *self.search_table.last().expect("search table is empty")
     }
 
-    /// Returns true if the packet is a PMTUD probe.
-    fn is_probe(&self, p: &sent::Packet) -> bool {
-        self.is_probe_filter()(p)
-    }
-
     /// Count the PMTUD probes included in `pkts`.
-    fn count_probes(&self, pkts: &[sent::Packet]) -> usize {
-        pkts.iter().filter(|p| self.is_probe(p)).count()
+    fn count_probes(pkts: &[sent::Packet]) -> usize {
+        pkts.iter().filter(|p| p.is_pmtud_probe()).count()
     }
 
     /// Checks whether a PMTUD probe has been acknowledged, and if so, updates the PMTUD state.
@@ -293,9 +282,21 @@ mod tests {
         crypto::CryptoDxState,
         packet,
         pmtud::{Probe, PMTU_RAISE_TIMER, SEARCH_TABLE_LEN},
-        recovery::{sent, SendProfile},
+        recovery::{self, sent, SendProfile},
         Pmtud, Stats,
     };
+
+    /// Test helper to create a sent PMTUD probe packet.
+    fn make_pmtud_probe(pn: packet::Number, sent_time: Instant, len: usize) -> sent::Packet {
+        sent::Packet::new(
+            packet::Type::Short,
+            pn,
+            sent_time,
+            true,
+            vec![recovery::Token::PmtudProbe],
+            len,
+        )
+    }
 
     const V4: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
     const V6: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
@@ -346,14 +347,14 @@ mod tests {
         let pn = prot.next_pn();
         builder.pn(pn, 4);
         builder.enable_padding(true);
-        pmtud.send_probe(&mut builder, stats);
+        pmtud.send_probe(&mut builder, &mut Vec::new(), stats);
         builder.pad();
         let encoder = builder.build(prot).unwrap();
         assert_eq!(encoder.len(), pmtud.probe_size());
         assert!(!pmtud.needs_probe());
         assert_eq!(stats_before.pmtud_tx + 1, stats.pmtud_tx);
 
-        let packet = sent::make_packet(pn, now, encoder.len());
+        let packet = make_pmtud_probe(pn, now, encoder.len());
         if encoder.len() + Pmtud::header_size(addr) <= mtu {
             pmtud.on_packets_acked(&[packet], now, stats);
             assert_eq!(stats_before.pmtud_ack + 1, stats.pmtud_ack);
