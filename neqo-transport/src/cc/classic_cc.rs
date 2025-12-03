@@ -94,6 +94,7 @@ pub trait WindowAdjustment: Display + Debug {
         curr_cwnd: usize,
         acked_bytes: usize,
         max_datagram_size: usize,
+        ecn: bool,
     ) -> (usize, usize);
     /// Cubic needs this signal to reset its epoch.
     fn on_app_limited(&mut self);
@@ -635,6 +636,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             self.congestion_window,
             self.acked_bytes,
             self.max_datagram_size(),
+            ecn,
         );
         self.congestion_window = max(cwnd, self.cwnd_min());
         self.acked_bytes = acked_bytes;
@@ -1380,7 +1382,7 @@ mod tests {
     #[test]
     fn ecn_ce() {
         let now = now();
-        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
+        let mut cc = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
         let mut cc_stats = CongestionControlStats::default();
         let p_ce = sent::Packet::new(
             packet::Type::Short,
@@ -1391,13 +1393,15 @@ mod tests {
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&p_ce, now);
-        cwnd_is_default(&cc);
+        assert_eq!(cc.cwnd(), cc.cwnd_initial());
+        assert_eq!(cc.ssthresh(), usize::MAX);
         assert_eq!(cc.state, State::SlowStart);
         assert_eq!(cc_stats.congestion_events_ecn, 0);
 
         // Signal congestion (ECN CE) and thus change state to recovery start.
         cc.on_ecn_ce_received(&p_ce, now, &mut cc_stats);
-        cwnd_is_halved(&cc);
+        assert_eq!(cc.cwnd(), cc.cwnd_initial() * 85 / 100);
+        assert_eq!(cc.ssthresh(), cc.cwnd_initial() * 85 / 100);
         assert_eq!(cc.state, State::RecoveryStart);
         assert_eq!(cc_stats.congestion_events_ecn, 1);
     }

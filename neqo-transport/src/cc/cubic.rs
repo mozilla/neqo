@@ -121,7 +121,24 @@ impl Cubic {
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
     pub const ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7); // with CUBIC_BETA = 0.7
 
-    /// `CUBIC_BETA` = 0.7;
+    /// > CUBIC multiplicative decrease factor
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
+    ///
+    /// > To balance between the scalability and convergence speed, CUBIC sets the multiplicative
+    /// > window
+    /// > decrease factor to 0.7 while Standard TCP uses 0.5. While this improves the scalability of
+    /// > CUBIC, a side effect of this decision is slower convergence, especially under low
+    /// > statistical multiplexing environments.
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-principle-4-for-the-cubic-d>
+    ///
+    /// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing.
+    /// The divisor is set to `100` to also accomodate the `0.85` beta value for ECN induced
+    /// congestion events.
+    pub const BETA_USIZE_DIVISOR: usize = 100;
+
+    /// > CUBIC multiplicative decrease factor
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
     ///
@@ -134,25 +151,19 @@ impl Cubic {
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-principle-4-for-the-cubic-d>
     ///
     /// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing to
-    /// construct `CUBIC_BETA = 0.7`.
-    pub const BETA_USIZE_DIVIDEND: usize = 7;
+    /// construct `CUBIC_BETA = 0.7` from `70/100`.
+    pub const BETA_USIZE_DIVIDEND: usize = 70;
 
-    /// > CUBIC multiplicative decrease factor
+    /// As per RFC 8511 it makes sense to have a different decrease factor for ECN-CE congestion
+    /// events than for loss induced congestion events.
     ///
-    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
+    /// > CUBIC connections benefit from beta_{ecn} of 0.85.
     ///
-    /// > To balance between the scalability and convergence speed, CUBIC sets the multiplicative
-    /// > window
-    /// > decrease factor to 0.7 while Standard TCP uses 0.5. While this improves the scalability of
-    /// > CUBIC, a side effect of this decision is slower convergence, especially under low
-    /// > statistical
-    /// > multiplexing environments.
-    ///
-    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-principle-4-for-the-cubic-d>
+    /// <https://www.rfc-editor.org/rfc/rfc8511.html#section-3.1>
     ///
     /// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing to
-    /// construct `CUBIC_BETA = 0.7`
-    pub const BETA_USIZE_DIVISOR: usize = 10;
+    /// construct the beta value from `85/100`.
+    pub const BETA_USIZE_DIVIDEND_ECN: usize = 85;
 
     /// This is the factor that is used by fast convergence to further reduce the next `W_max` when
     /// a congestion event occurs while `cwnd < W_max`. This speeds up the bandwidth release for
@@ -385,6 +396,7 @@ impl WindowAdjustment for Cubic {
         curr_cwnd: usize,
         acked_bytes: usize,
         max_datagram_size: usize,
+        ecn: bool,
     ) -> (usize, usize) {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
         // Fast Convergence
@@ -411,10 +423,17 @@ impl WindowAdjustment for Cubic {
 
         // Reducing the congestion window and resetting time
         self.t_epoch = None;
-        (
-            curr_cwnd * Self::BETA_USIZE_DIVIDEND / Self::BETA_USIZE_DIVISOR,
-            acked_bytes * Self::BETA_USIZE_DIVIDEND / Self::BETA_USIZE_DIVISOR,
-        )
+        if ecn {
+            (
+                curr_cwnd * Self::BETA_USIZE_DIVIDEND_ECN / Self::BETA_USIZE_DIVISOR,
+                acked_bytes * Self::BETA_USIZE_DIVIDEND_ECN / Self::BETA_USIZE_DIVISOR,
+            )
+        } else {
+            (
+                curr_cwnd * Self::BETA_USIZE_DIVIDEND / Self::BETA_USIZE_DIVISOR,
+                acked_bytes * Self::BETA_USIZE_DIVIDEND / Self::BETA_USIZE_DIVISOR,
+            )
+        }
     }
 
     fn on_app_limited(&mut self) {
