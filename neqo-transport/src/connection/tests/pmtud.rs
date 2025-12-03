@@ -187,7 +187,7 @@ fn vpn_migration_triggers_pmtud() {
 
     // Verify both sides' PMTU reflects the VPN path's smaller MTU.
     // vpn_path_mtu is 1400; the largest IPv6 search table entry <= 1400 is 1380.
-    let expected_vpn_plpmtu = 1380 - header_size;
-    assert_eq!(server.plpmtu(), expected_vpn_plpmtu);
-    assert_eq!(client.plpmtu(), expected_vpn_plpmtu);
+    let expected_vpn_mtu = 1380 - header_size;
+    assert_eq!(server.plpmtu(), expected_vpn_mtu);
+    assert_eq!(client.plpmtu(), expected_vpn_mtu);
 }

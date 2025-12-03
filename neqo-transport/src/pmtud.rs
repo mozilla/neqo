@@ -162,7 +162,7 @@ impl Pmtud {
         now: Instant,
         stats: &mut Stats,
     ) {
-        let acked = self.count_probes(acked_pkts);
+        let acked = Self::count_probes(acked_pkts);
         if acked == 0 {
             return;
         }
@@ -198,7 +198,7 @@ impl Pmtud {
         stats: &mut Stats,
         now: Instant,
     ) {
-        let lost = self.count_probes(lost_packets);
+        let lost = Self::count_probes(lost_packets);
         if lost == 0 {
             return;
         }
