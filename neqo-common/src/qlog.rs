@@ -69,6 +69,9 @@ impl Qlog {
 
     /// Create an enabled `Qlog` configuration.
     ///
+    /// This needs to be called before the connection is used, because otherwise `Qlog`-logging will
+    /// remain disabled (for performance reasons).
+    ///
     /// # Errors
     ///
     /// Will return `qlog::Error` if it cannot write to the new log.
@@ -128,6 +131,8 @@ impl Qlog {
         let mut borrow = inner.borrow_mut();
 
         let Some(inner_inner) = borrow.as_mut() else {
+            drop(borrow);
+            self.inner = None;
             return;
         };
 
