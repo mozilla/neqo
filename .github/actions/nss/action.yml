@@ -117,7 +117,7 @@ runs:
 
     - name: Cache NSS
       id: cache
-      if: ${{ !steps.system_nss.outputs.suitable && runner.environment == 'github-hosted' }}
+      if: ${{ !steps.system_nss.outputs.suitable }}
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: dist
@@ -128,10 +128,9 @@ runs:
       if: ${{ !steps.system_nss.outputs.suitable }}
       env:
         CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
-        RUNNER_ENVIRONMENT: ${{ runner.environment }}
       shell: bash
       run: |
-        if [ "$RUNNER_ENVIRONMENT" != "github-hosted" ] || [ ! "$CACHE_HIT" ]; then
+        if [ ! "$CACHE_HIT" ]; then
           echo "Building NSS from source"
           echo "build_nss=1" >> "$GITHUB_OUTPUT"
         else
