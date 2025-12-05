@@ -20,7 +20,7 @@ use crate::{
         HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST, HEADER_FIELD_LITERAL_NAME_REF_STATIC,
         NO_PREFIX,
     },
-    qpack_send_buf::Data,
+    qpack_send_buf::Encoder as _,
     reader::{parse_utf8, ReceiverBufferWrapper},
     table::HeaderTable,
     Error, Res,
@@ -28,7 +28,7 @@ use crate::{
 
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct HeaderEncoder {
-    buf: Data,
+    buf: neqo_common::Encoder,
     base: u64,
     use_huffman: bool,
     max_entries: u64,
@@ -44,7 +44,7 @@ impl Display for HeaderEncoder {
 impl HeaderEncoder {
     pub fn new(base: u64, use_huffman: bool, max_entries: u64) -> Self {
         Self {
-            buf: Data::default(),
+            buf: neqo_common::Encoder::default(),
             base,
             use_huffman,
             max_entries,
@@ -139,14 +139,14 @@ impl HeaderEncoder {
             .encode_prefixed_encoded_int(NO_PREFIX, enc_insert_cnt);
         self.buf.encode_prefixed_encoded_int(prefix, delta);
 
-        self.buf.write_bytes(&tmp);
+        self.buf.encode(tmp);
     }
 }
 
 impl Deref for HeaderEncoder {
     type Target = [u8];
     fn deref(&self) -> &Self::Target {
-        &self.buf
+        self.buf.as_ref()
     }
 }
 

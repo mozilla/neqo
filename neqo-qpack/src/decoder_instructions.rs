@@ -14,7 +14,7 @@ use neqo_transport::StreamId;
 
 use crate::{
     prefix::{DECODER_HEADER_ACK, DECODER_INSERT_COUNT_INCREMENT, DECODER_STREAM_CANCELLATION},
-    qpack_send_buf::Data,
+    qpack_send_buf::Encoder,
     reader::{IntReader, ReadByte},
     Res,
 };
@@ -44,7 +44,7 @@ impl DecoderInstruction {
         }
     }
 
-    pub(crate) fn marshal(&self, enc: &mut Data) {
+    pub(crate) fn marshal<T: Encoder>(&self, enc: &mut T) {
         match self {
             Self::InsertCountIncrement { increment } => {
                 enc.encode_prefixed_encoded_int(DECODER_INSERT_COUNT_INCREMENT, *increment);
@@ -144,16 +144,17 @@ impl DecoderInstructionReader {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
 
+    use neqo_common::Encoder;
     use neqo_transport::StreamId;
 
-    use super::{Data, DecoderInstruction, DecoderInstructionReader};
+    use super::{DecoderInstruction, DecoderInstructionReader};
     use crate::{reader::test_receiver::TestReceiver, Error};
 
     fn test_encoding_decoding(instruction: DecoderInstruction) {
-        let mut buf = Data::default();
+        let mut buf = Encoder::default();
         instruction.marshal(&mut buf);
         let mut test_receiver: TestReceiver = TestReceiver::default();
-        test_receiver.write(&buf);
+        test_receiver.write(buf.as_ref());
         let mut decoder = DecoderInstructionReader::new();
         assert_eq!(
             decoder.read_instructions(&mut test_receiver).unwrap(),
@@ -182,18 +183,18 @@ mod test {
     }
 
     fn test_encoding_decoding_slow_reader(instruction: DecoderInstruction) {
-        let mut buf = Data::default();
+        let mut buf = Encoder::default();
         instruction.marshal(&mut buf);
         let mut test_receiver: TestReceiver = TestReceiver::default();
         let mut decoder = DecoderInstructionReader::new();
         for i in 0..buf.len() - 1 {
-            test_receiver.write(&buf[i..=i]);
+            test_receiver.write(&buf.as_ref()[i..=i]);
             assert_eq!(
                 decoder.read_instructions(&mut test_receiver),
                 Err(Error::NeedMoreData)
             );
         }
-        test_receiver.write(&buf[buf.len() - 1..buf.len()]);
+        test_receiver.write(&buf.as_ref()[buf.len() - 1..buf.len()]);
         assert_eq!(
             decoder.read_instructions(&mut test_receiver).unwrap(),
             instruction
