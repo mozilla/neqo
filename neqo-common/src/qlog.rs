@@ -22,6 +22,11 @@ use crate::Role;
 
 #[derive(Debug, Clone, Default)]
 pub struct Qlog {
+    /// Both the inner and the outer `Option` are set to `None`
+    /// on failure. The inner `None` will disable qlog for all other
+    /// references (correctness). The outer `None` will prevent
+    /// the local instance from de-referencing the `Rc` again
+    /// (performance). 
     inner: Option<Rc<RefCell<Option<SharedStreamer>>>>,
 }
 
