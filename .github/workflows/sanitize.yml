@@ -6,6 +6,7 @@ on:
     branches: ["main"]
   merge_group:
   workflow_dispatch:
+  workflow_call:
 env:
   DUMP_SIMULATION_SEEDS: /tmp/simulation-seeds
 
@@ -42,7 +43,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/neqo/.github/actions/rust@main
         with:
           version: nightly
           components: rust-src
@@ -52,7 +53,7 @@ jobs:
       - id: nss-version
         run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
 
-      - uses: ./.github/actions/nss
+      - uses: mozilla/neqo/.github/actions/nss@main
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 

@@ -6,6 +6,7 @@ on:
     branches: ["main"]
   merge_group:
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -31,7 +32,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/neqo/.github/actions/rust@main
         with:
           components: clippy
           tools: cargo-hack
@@ -40,7 +41,7 @@ jobs:
       - id: nss-version
         run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
 
-      - uses: ./.github/actions/nss
+      - uses: mozilla/neqo/.github/actions/nss@main
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 

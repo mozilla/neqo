@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
           persist-credentials: false
-      - uses: ./.github/actions/rust
+      - uses: mozilla/neqo/.github/actions/rust@main
         with:
           tools: cargo-readme
           token: ${{ secrets.GITHUB_TOKEN }}
