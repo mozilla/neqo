@@ -62,9 +62,16 @@ pub struct Paths {
 
     /// `QLog` handler.
     qlog: Qlog,
+
+    /// Whether PMTUD is enabled for this connection.
+    pmtud: bool,
 }
 
 impl Paths {
+    pub fn set_pmtud(&mut self, pmtud: bool) {
+        self.pmtud = pmtud;
+    }
+
     /// Find the path for the given addresses.
     /// This might be a temporary path.
     pub fn find_path(
@@ -264,6 +271,7 @@ impl Paths {
 
     /// Set the identified path to be primary.
     /// This panics if `make_permanent` hasn't been called.
+    /// If PMTUD is enabled, it will be started on the new primary path.
     pub fn handle_migration(
         &mut self,
         path: &PathRef,
@@ -288,6 +296,10 @@ impl Paths {
             old_path.borrow_mut().probe(stats);
             // TODO(mt) - suppress probing if the path was valid within 3PTO.
         }
+
+        if self.pmtud {
+            path.borrow_mut().pmtud_mut().start(now, stats);
+        }
     }
 
     /// Select a path to send on.  This will select the first path that has
@@ -301,6 +313,7 @@ impl Paths {
 
     /// A `PATH_RESPONSE` was received.
     /// Returns `true` if migration occurred.
+    /// If PMTUD is enabled and migration occurs, it will be started on the new primary path.
     #[must_use]
     pub fn path_response(&mut self, response: [u8; 8], now: Instant, stats: &mut Stats) -> bool {
         // TODO(mt) consider recording an RTT measurement here as we don't train
@@ -314,6 +327,9 @@ impl Paths {
                     .take_if(|target| Rc::ptr_eq(target, p))
                 {
                     drop(self.select_primary(&primary, now));
+                    if self.pmtud {
+                        primary.borrow_mut().pmtud_mut().start(now, stats);
+                    }
                     return true;
                 }
                 break;
