@@ -423,6 +423,12 @@ where
             max_window,
         );
 
+        // Debug <https://github.com/mozilla/neqo/issues/3208>.
+        debug_assert!(
+            self.max_active >= prev_max_active,
+            "expect no decrease, self: {self:?}, now: {now:?}, rtt: {rtt:?}, max_window: {max_window}, subject: {subject}"
+        );
+
         let increase = self.max_active - prev_max_active;
         if increase > 0 {
             qdebug!(
