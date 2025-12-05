@@ -917,7 +917,6 @@ dependencies = [
  "env_logger",
  "hex",
  "log",
- "neqo-crypto",
  "qlog",
  "regex",
  "sha1",
