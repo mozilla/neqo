@@ -76,3 +76,8 @@ required-features = ["bench"]
 name = "min_bandwidth"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "rx_stream_orderer_comparison"
+harness = false
+required-features = ["bench"]
