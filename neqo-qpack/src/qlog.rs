@@ -15,7 +15,7 @@ use qlog::events::{
 };
 
 pub fn qpack_read_insert_count_increment_instruction(
-    qlog: &Qlog,
+    qlog: &mut Qlog,
     increment: u64,
     data: &[u8],
     now: Instant,
