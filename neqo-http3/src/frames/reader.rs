@@ -70,6 +70,7 @@ pub struct StreamReaderRecvStreamWrapper<'a> {
 }
 
 impl<'a> StreamReaderRecvStreamWrapper<'a> {
+    #[cfg_attr(fuzzing, expect(private_interfaces, reason = "OK for fuzzing."))]
     pub fn new(conn: &'a mut Connection, recv_stream: &'a mut Box<dyn RecvStream>) -> Self {
         Self { recv_stream, conn }
     }
@@ -261,6 +262,10 @@ impl FrameReader {
             self.frame_len,
             if len > 0 { None } else { Some(&[]) },
         )? {
+            #[cfg(feature = "build-fuzzing-corpus")]
+            // Write zero-length frames to the fuzzing corpus to test parsing of frames with only
+            // type and length fields.
+            self.write_item_to_fuzzing_corpus(None);
             self.reset();
             return Ok(Some(f));
         } else if T::is_known_type(self.frame_type) {
@@ -282,8 +287,31 @@ impl FrameReader {
     }
 
     fn frame_data_decoded<T: FrameDecoder<T>>(&mut self, data: &[u8]) -> Res<Option<T>> {
+        #[cfg(feature = "build-fuzzing-corpus")]
+        self.write_item_to_fuzzing_corpus(Some(data));
         let res = T::decode(self.frame_type, self.frame_len, Some(data))?;
         self.reset();
         Ok(res)
+    }
+
+    #[cfg(feature = "build-fuzzing-corpus")]
+    /// Write `HFrame` data to fuzzing corpus.
+    ///
+    /// # Arguments
+    /// * `data` - The frame payload data, or `None` for frames with no payload.
+    ///
+    /// # Output format
+    /// The output consists of the varint-encoded frame type and length, followed by the optional
+    /// payload data.
+    fn write_item_to_fuzzing_corpus(&self, data: Option<&[u8]>) {
+        // We need to include the frame type and length varints before the data
+        // to create a complete frame that the fuzzer can process.
+        let mut encoder = neqo_common::Encoder::default();
+        encoder.encode_varint(self.frame_type.0);
+        encoder.encode_varint(self.frame_len);
+        if let Some(d) = data {
+            encoder.encode(d);
+        }
+        neqo_common::write_item_to_fuzzing_corpus("hframe", encoder.as_ref());
     }
 }
