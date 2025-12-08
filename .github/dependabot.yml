@@ -18,7 +18,9 @@ updates:
       semver-minor-days: 10
       semver-patch-days: 5
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/.github/actions/*"
+      - "/.github/workflows"
     schedule:
       interval: "weekly"
     cooldown:
