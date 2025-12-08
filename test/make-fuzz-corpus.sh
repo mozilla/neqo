@@ -10,7 +10,7 @@ TRIPLE="$(rustc --print host-tuple)"
 # Minimize a corpus until the sample count stabilizes.
 # Args: $1 = fuzzer name, $2 = corpus directory
 #
-# We shouldn;t need to do this, since merging one corpus into another
+# We shouldn't need to do this, since merging one corpus into another
 # should automatically minimize, but in practice it seems not to.
 # @choller said this is likely because we have not been able to eliminate
 # all randomization from the test suite.
