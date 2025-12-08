@@ -135,13 +135,13 @@ impl Qlog {
 
         let mut borrow = inner.borrow_mut();
 
-        let Some(inner_inner) = borrow.as_mut() else {
+        let Some(shared_streamer) = borrow.as_mut() else {
             drop(borrow);
             self.inner = None;
             return;
         };
 
-        if let Err(e) = f(&mut inner_inner.streamer) {
+        if let Err(e) = f(&mut shared_streamer.streamer) {
             log::error!("Qlog event generation failed with error {e}; closing qlog.");
 
             // Explicitly drop the RefCell borrow to release the mutable borrow.
