@@ -105,7 +105,7 @@ runs:
         echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
-      uses: vmactions/freebsd-vm@966989c456d41351f095a421f60e71342d3bce41 # v1.2.1
+      uses: vmactions/freebsd-vm@1885b78bae4c4c4b331b4b0461d23cc14cc72387 # v1.2.9
       with:
         usesh: true
         envs: ${{ steps.prep.outputs.envs }}
@@ -113,7 +113,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'openbsd' }}
-      uses: vmactions/openbsd-vm@0d65352eee1508bab7cb12d130536d3a556be487 # v1.1.8
+      uses: vmactions/openbsd-vm@7fd5a3e251db9d8bdff2f34aae11a43b6be5ad60 # v1.2.4
       with:
         usesh: true
         envs: ${{ steps.prep.outputs.envs }}
@@ -121,7 +121,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'netbsd' }}
-      uses: vmactions/netbsd-vm@d0228be27fbaba19418cc1b332609a895cf16561 # v1.1.9
+      uses: vmactions/netbsd-vm@b24ed5f7a605362ab1226e73df291c8b01990c85 # v1.2.3
       with:
         usesh: true
         envs: ${{ steps.prep.outputs.envs }}
@@ -129,7 +129,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'solaris' }}
-      uses: vmactions/solaris-vm@58cbd70c6e051860f9b8f65908cc582938fbbdba # v1.1.5
+      uses: vmactions/solaris-vm@47bea106d03acaf91084e52548ee460556011602 # v1.1.8
       with:
         release: "11.4-gcc"
         usesh: true
@@ -138,7 +138,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.codecov-token != '' }}
-      uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0
+      uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
       with:
         files: codecov.json
         fail_ci_if_error: false
