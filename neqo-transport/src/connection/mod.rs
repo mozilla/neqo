@@ -441,11 +441,11 @@ impl Connection {
             events.clone(),
         );
 
-        let mut c = Self {
+        let c = Self {
             role,
             version: conn_params.get_versions().initial(),
             state: State::Init,
-            paths: Paths::default(),
+            paths: Paths::new(conn_params.pmtud_enabled()),
             cid_manager,
             tps: Rc::clone(&tphandler),
             zero_rtt_state: ZeroRttState::Init,
@@ -473,7 +473,6 @@ impl Connection {
             #[cfg(any(test, feature = "build-fuzzing-corpus"))]
             test_frame_writer: None,
         };
-        c.paths.set_pmtud(c.conn_params.pmtud_enabled());
         c.stats.borrow_mut().init(format!("{c}"));
         Ok(c)
     }

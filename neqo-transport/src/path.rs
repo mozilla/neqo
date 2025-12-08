@@ -44,7 +44,7 @@ pub type PathRef = Rc<RefCell<Path>>;
 /// processing a packet.
 /// This structure limits its storage and will forget about paths if it
 /// is exposed to too many paths.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Paths {
     /// All of the paths.  All of these paths will be permanent.
     #[expect(clippy::struct_field_names, reason = "This is the best name.")]
@@ -68,8 +68,16 @@ pub struct Paths {
 }
 
 impl Paths {
-    pub fn set_pmtud(&mut self, pmtud: bool) {
-        self.pmtud = pmtud;
+    #[must_use]
+    pub fn new(pmtud: bool) -> Self {
+        Self {
+            paths: Vec::new(),
+            primary: None,
+            migration_target: None,
+            to_retire: Vec::new(),
+            qlog: Qlog::disabled(),
+            pmtud,
+        }
     }
 
     /// Find the path for the given addresses.
