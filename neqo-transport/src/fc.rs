@@ -668,11 +668,12 @@ impl DerefMut for RemoteStreamLimit {
 pub struct RemoteStreamLimits(EnumMap<StreamType, RemoteStreamLimit>);
 
 impl RemoteStreamLimits {
-    pub fn new(local_max_stream_bidi: u64, local_max_stream_uni: u64, role: Role) -> Self {
-        Self(EnumMap::from_fn(|stream_type| match stream_type {
-            StreamType::BiDi => RemoteStreamLimit::new(stream_type, local_max_stream_bidi, role),
-            StreamType::UniDi => RemoteStreamLimit::new(stream_type, local_max_stream_uni, role),
-        }))
+    pub const fn new(local_max_stream_bidi: u64, local_max_stream_uni: u64, role: Role) -> Self {
+        // Array order must match StreamType enum order: BiDi, UniDi
+        Self(EnumMap::from_array([
+            RemoteStreamLimit::new(StreamType::BiDi, local_max_stream_bidi, role),
+            RemoteStreamLimit::new(StreamType::UniDi, local_max_stream_uni, role),
+        ]))
     }
 }
 
@@ -696,9 +697,13 @@ pub struct LocalStreamLimits {
 }
 
 impl LocalStreamLimits {
-    pub fn new(role: Role) -> Self {
+    pub const fn new(role: Role) -> Self {
         Self {
-            limits: EnumMap::from_fn(|stream_type| SenderFlowControl::new(stream_type, 0)),
+            // Array order must match StreamType enum order: BiDi, UniDi
+            limits: EnumMap::from_array([
+                SenderFlowControl::new(StreamType::BiDi, 0),
+                SenderFlowControl::new(StreamType::UniDi, 0),
+            ]),
             role_bit: StreamId::role_bit(role),
         }
     }
