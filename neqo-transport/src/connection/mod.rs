@@ -2593,15 +2593,10 @@ impl Connection {
                 break;
             }
 
-            // Determine how we are sending packets (PTO, etc..).
-            let profile = self.loss_recovery.send_profile(&path.borrow(), now);
-            qdebug!("[{self}] output_path send_profile {profile:?}");
-
             match self.output_dgram_on_path(
                 path,
                 now,
                 closing_frame.take(),
-                &profile,
                 Encoder::new_borrowed_vec(&mut send_buffer),
                 packet_tos,
             )? {
@@ -2654,7 +2649,6 @@ impl Connection {
         path: &PathRef,
         now: Instant,
         closing_frame: Option<&ClosingFrame>,
-        profile: &SendProfile,
         mut encoder: Encoder<&mut Vec<u8>>,
         packet_tos: Tos,
     ) -> Res<SendOption> {
@@ -2662,6 +2656,10 @@ impl Connection {
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
+
+        // Determine how we are sending packets (PTO, etc..).
+        let profile = self.loss_recovery.send_profile(&path.borrow(), now);
+        qdebug!("[{self}] output_dgram_on_path send_profile {profile:?}");
 
         // Determine the size limit and padding for this UDP datagram.
         let limit = if path.borrow().pmtud().needs_probe() {
@@ -2717,7 +2715,7 @@ impl Connection {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, space, profile, &mut builder, header_start != 0, now);
+                    self.write_frames(path, space, &profile, &mut builder, header_start != 0, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
