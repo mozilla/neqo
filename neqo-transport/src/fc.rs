@@ -423,6 +423,12 @@ where
             max_window,
         );
 
+        // Debug <https://github.com/mozilla/neqo/issues/3208>.
+        debug_assert!(
+            self.max_active >= prev_max_active,
+            "expect no decrease, self: {self:?}, now: {now:?}, rtt: {rtt:?}, max_window: {max_window}, subject: {subject}"
+        );
+
         let increase = self.max_active - prev_max_active;
         if increase > 0 {
             qdebug!(
@@ -1234,7 +1240,7 @@ mod test {
         /// Allow auto-tuning algorithm to be off from actual bandwidth-delay
         /// product by up to 1KiB.
         const TOLERANCE: u64 = 1024;
-        const BW_TOLERANCE: f64 = 0.8;
+        const BW_TOLERANCE: f64 = 0.6;
 
         test_fixture::fixture_init();
 

@@ -11,6 +11,9 @@ use neqo_crypto::Error as CryptoError;
 use thiserror::Error;
 
 mod ackrate;
+#[cfg(fuzzing)]
+pub mod addr_valid;
+#[cfg(not(fuzzing))]
 mod addr_valid;
 mod cc;
 mod cid;
