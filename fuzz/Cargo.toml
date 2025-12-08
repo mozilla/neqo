@@ -87,6 +87,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "priority"
+path = "fuzz_targets/priority.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "hsettings"
 path = "fuzz_targets/hsettings.rs"
 test = false

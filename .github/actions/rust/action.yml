@@ -30,7 +30,7 @@ runs:
 
     - name: Install Rust
       # TODO: Manually upate this, Dependabot will skip it because no tags associated with SHA:
-      uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # zizmor: ignore[stale-action-refs]
+      uses: dtolnay/rust-toolchain@0b1efabc08b657293548b77fb76cc02d26091c7e # zizmor: ignore[stale-action-refs]
       with:
         toolchain: ${{ inputs.version  }}
         components: ${{ inputs.components }}
@@ -44,7 +44,7 @@ runs:
       # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
       # is too small for this to be effective there.
       if: ${{ env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted' }}
-      uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
+      uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
     # See https://corrode.dev/blog/tips-for-faster-ci-builds/
     - name: Set up build environment

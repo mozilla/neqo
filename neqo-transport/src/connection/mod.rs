@@ -445,7 +445,7 @@ impl Connection {
             role,
             version: conn_params.get_versions().initial(),
             state: State::Init,
-            paths: Paths::default(),
+            paths: Paths::new(conn_params.pmtud_enabled()),
             cid_manager,
             tps: Rc::clone(&tphandler),
             zero_rtt_state: ZeroRttState::Init,
@@ -3302,6 +3302,13 @@ impl Connection {
                 // Report an error if we don't have enough connection IDs.
                 self.ensure_permanent(path, now)?;
                 path.borrow_mut().challenged(data);
+                // A PATH_CHALLENGE indicates the peer sees a different path,
+                // so start PMTUD to discover any MTU changes.
+                if self.conn_params.pmtud_enabled() {
+                    path.borrow_mut()
+                        .pmtud_mut()
+                        .start(now, &mut self.stats.borrow_mut());
+                }
             }
             Frame::PathResponse { data } => {
                 self.stats.borrow_mut().frame_rx.path_response += 1;
