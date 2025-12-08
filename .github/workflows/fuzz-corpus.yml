@@ -58,10 +58,9 @@ jobs:
           BRANCH="chore-corpus-samples-$SHA_SHORT"
           MESSAGE="chore: Add new fuzzing corpus samples
 
-          A periodic run of the test suite generated new fuzzing samples.
-          This PR adds them to the fuzzing corpus."
+          A periodic run of the test suite generated new fuzzing samples. This PR adds them to the fuzzing corpus."
           git checkout -b "$BRANCH"
           git add fuzz/corpus
           git commit -m "$MESSAGE"
           git push --set-upstream origin "$BRANCH"
-          gh pr create --draft --fill-verbose
+          gh pr create --fill-verbose

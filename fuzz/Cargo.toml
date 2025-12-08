@@ -99,3 +99,10 @@ path = "fuzz_targets/priority.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "wtframe"
+path = "fuzz_targets/wtframe.rs"
+test = false
+doc = false
+bench = false

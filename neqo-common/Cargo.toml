@@ -30,12 +30,11 @@ windows = { workspace = true, features = ["Win32_Media"] }
 
 [dev-dependencies]
 criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false }
-neqo-crypto = { path = "../neqo-crypto" }
 test-fixture = { path = "../test-fixture" }
 regex = { workspace = true }
 
 [features]
-bench = ["neqo-crypto/bench", "test-fixture/bench", "log/release_max_level_info"]
+bench = ["test-fixture/bench", "log/release_max_level_info"]
 build-fuzzing-corpus = ["hex/alloc", "sha1"]
 ci = []
 test-fixture = []
