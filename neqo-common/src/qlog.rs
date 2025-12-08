@@ -144,9 +144,9 @@ impl Qlog {
         if let Err(e) = f(&mut inner_inner.streamer) {
             log::error!("Qlog event generation failed with error {e}; closing qlog.");
 
-            // Remove the shared QLOG.
+            // Explicitly drop the RefCell borrow to release the mutable borrow.
             drop(borrow);
-            // Remove the reference to the shared QLOG.
+            // Set the outer Option to None to prevent future dereferences.
             self.inner = None;
         }
     }
