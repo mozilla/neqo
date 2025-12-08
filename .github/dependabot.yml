@@ -20,29 +20,32 @@ updates:
   - package-ecosystem: "github-actions"
     directories:
       - "/.github/actions/*"
-      - "/.github/workflows"
+      - "/"
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 10
-      semver-major-days: 20
-      semver-minor-days: 10
-      semver-patch-days: 5
+      # "semver" not supported for github-actions; see https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#configuration-of-cooldown
+      # semver-major-days: 20
+      # semver-minor-days: 10
+      # semver-patch-days: 5
   - package-ecosystem: "docker"
     directory: "/qns"
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 10
-      semver-major-days: 20
-      semver-minor-days: 10
-      semver-patch-days: 5
+      # "semver" not supported for docker; see https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#configuration-of-cooldown
+      # semver-major-days: 20
+      # semver-minor-days: 10
+      # semver-patch-days: 5
   - package-ecosystem: docker
     directory: /taskcluster/docker/linux
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 10
-      semver-major-days: 20
-      semver-minor-days: 10
-      semver-patch-days: 5
+      # "semver" not supported for docker; see https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#configuration-of-cooldown
+      # semver-major-days: 20
+      # semver-minor-days: 10
+      # semver-patch-days: 5
