@@ -6,6 +6,8 @@
 
 use std::{cmp::min, fmt::Debug, time::Instant};
 
+#[cfg(feature = "build-fuzzing-corpus")]
+use neqo_common::Encoder;
 use neqo_common::{
     hex_snip_middle, hex_with_len, qtrace, Decoder, IncrementalDecoderBuffer,
     IncrementalDecoderIgnore, IncrementalDecoderUint,
@@ -18,6 +20,11 @@ use crate::{Error, RecvStream, Res};
 const MAX_READ_SIZE: usize = 2048; // Given a practical MTU of 1500 bytes, this seems reasonable.
 
 pub trait FrameDecoder<T> {
+    /// Fuzzing corpus name for this frame type. If `Some`, decoded frames will be
+    /// written to the fuzzing corpus with this name.
+    #[cfg(feature = "build-fuzzing-corpus")]
+    const FUZZING_CORPUS_NAME: Option<&'static str> = None;
+
     fn is_known_type(frame_type: HFrameType) -> bool;
 
     /// # Errors
@@ -282,6 +289,15 @@ impl FrameReader {
     }
 
     fn frame_data_decoded<T: FrameDecoder<T>>(&mut self, data: &[u8]) -> Res<Option<T>> {
+        #[cfg(feature = "build-fuzzing-corpus")]
+        if let Some(corpus_name) = T::FUZZING_CORPUS_NAME {
+            let mut enc = Encoder::default();
+            enc.encode_varint(self.frame_type.0);
+            enc.encode_varint(self.frame_len);
+            enc.encode(data);
+            neqo_common::write_item_to_fuzzing_corpus(corpus_name, enc.as_ref());
+        }
+
         let res = T::decode(self.frame_type, self.frame_len, Some(data))?;
         self.reset();
         Ok(res)
