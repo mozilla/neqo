@@ -15,6 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use enum_map::EnumMap;
 use neqo_common::{qdebug, qtrace, Buffer, Role, MAX_VARINT};
 
 use crate::{
@@ -664,68 +665,52 @@ impl DerefMut for RemoteStreamLimit {
     }
 }
 
-pub struct RemoteStreamLimits {
-    bidirectional: RemoteStreamLimit,
-    unidirectional: RemoteStreamLimit,
-}
+pub struct RemoteStreamLimits(EnumMap<StreamType, RemoteStreamLimit>);
 
 impl RemoteStreamLimits {
-    pub const fn new(local_max_stream_bidi: u64, local_max_stream_uni: u64, role: Role) -> Self {
-        Self {
-            bidirectional: RemoteStreamLimit::new(StreamType::BiDi, local_max_stream_bidi, role),
-            unidirectional: RemoteStreamLimit::new(StreamType::UniDi, local_max_stream_uni, role),
-        }
+    pub fn new(local_max_stream_bidi: u64, local_max_stream_uni: u64, role: Role) -> Self {
+        Self(EnumMap::from_fn(|stream_type| match stream_type {
+            StreamType::BiDi => RemoteStreamLimit::new(stream_type, local_max_stream_bidi, role),
+            StreamType::UniDi => RemoteStreamLimit::new(stream_type, local_max_stream_uni, role),
+        }))
     }
 }
 
-impl Index<StreamType> for RemoteStreamLimits {
-    type Output = RemoteStreamLimit;
+impl Deref for RemoteStreamLimits {
+    type Target = EnumMap<StreamType, RemoteStreamLimit>;
 
-    fn index(&self, index: StreamType) -> &Self::Output {
-        match index {
-            StreamType::BiDi => &self.bidirectional,
-            StreamType::UniDi => &self.unidirectional,
-        }
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
-impl IndexMut<StreamType> for RemoteStreamLimits {
-    fn index_mut(&mut self, index: StreamType) -> &mut Self::Output {
-        match index {
-            StreamType::BiDi => &mut self.bidirectional,
-            StreamType::UniDi => &mut self.unidirectional,
-        }
+impl DerefMut for RemoteStreamLimits {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
 pub struct LocalStreamLimits {
-    bidirectional: SenderFlowControl<StreamType>,
-    unidirectional: SenderFlowControl<StreamType>,
+    limits: EnumMap<StreamType, SenderFlowControl<StreamType>>,
     role_bit: u64,
 }
 
 impl LocalStreamLimits {
-    pub const fn new(role: Role) -> Self {
+    pub fn new(role: Role) -> Self {
         Self {
-            bidirectional: SenderFlowControl::new(StreamType::BiDi, 0),
-            unidirectional: SenderFlowControl::new(StreamType::UniDi, 0),
+            limits: EnumMap::from_fn(|stream_type| SenderFlowControl::new(stream_type, 0)),
             role_bit: StreamId::role_bit(role),
         }
     }
 
     pub fn take_stream_id(&mut self, stream_type: StreamType) -> Option<StreamId> {
-        let fc = match stream_type {
-            StreamType::BiDi => &mut self.bidirectional,
-            StreamType::UniDi => &mut self.unidirectional,
-        };
+        let fc = &mut self.limits[stream_type];
         if fc.available() > 0 {
             let new_stream = fc.used();
             fc.consume(1);
-            let type_bit = match stream_type {
-                StreamType::BiDi => 0,
-                StreamType::UniDi => 2,
-            };
-            Some(StreamId::from((new_stream << 2) + type_bit + self.role_bit))
+            Some(StreamId::from(
+                (new_stream << 2) + stream_type as u64 + self.role_bit,
+            ))
         } else {
             fc.blocked();
             None
@@ -737,19 +722,13 @@ impl Index<StreamType> for LocalStreamLimits {
     type Output = SenderFlowControl<StreamType>;
 
     fn index(&self, index: StreamType) -> &Self::Output {
-        match index {
-            StreamType::BiDi => &self.bidirectional,
-            StreamType::UniDi => &self.unidirectional,
-        }
+        &self.limits[index]
     }
 }
 
 impl IndexMut<StreamType> for LocalStreamLimits {
     fn index_mut(&mut self, index: StreamType) -> &mut Self::Output {
-        match index {
-            StreamType::BiDi => &mut self.bidirectional,
-            StreamType::UniDi => &mut self.unidirectional,
-        }
+        &mut self.limits[index]
     }
 }
 
