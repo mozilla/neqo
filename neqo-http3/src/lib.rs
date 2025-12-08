@@ -142,6 +142,9 @@ mod connection_server;
 mod control_stream_local;
 mod control_stream_remote;
 pub mod features;
+#[cfg(fuzzing)]
+pub mod frames;
+#[cfg(not(fuzzing))]
 mod frames;
 mod headers_checks;
 mod priority;

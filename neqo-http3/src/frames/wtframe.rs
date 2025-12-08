@@ -28,15 +28,24 @@ impl WebTransportFrame {
     const CLOSE_MAX_MESSAGE_SIZE: u64 = 1024;
 
     pub fn encode(&self, enc: &mut Encoder) {
+        #[cfg(feature = "build-fuzzing-corpus")]
+        let start = enc.len();
+
         enc.encode_varint(Self::CLOSE_SESSION);
         let Self::CloseSession { error, message } = &self;
         enc.encode_varint(4 + message.len() as u64);
         enc.encode_uint(4, *error);
         enc.encode(message.as_bytes());
+
+        #[cfg(feature = "build-fuzzing-corpus")]
+        neqo_common::write_item_to_fuzzing_corpus("wtframe", &enc.as_ref()[start..]);
     }
 }
 
 impl FrameDecoder<Self> for WebTransportFrame {
+    #[cfg(feature = "build-fuzzing-corpus")]
+    const FUZZING_CORPUS_NAME: Option<&'static str> = Some("wtframe");
+
     fn decode(frame_type: HFrameType, frame_len: u64, data: Option<&[u8]>) -> Res<Option<Self>> {
         if let Some(payload) = data {
             let mut dec = Decoder::from(payload);
