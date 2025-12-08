@@ -26,7 +26,7 @@ pub struct Qlog {
     /// on failure. The inner `None` will disable qlog for all other
     /// references (correctness). The outer `None` will prevent
     /// the local instance from de-referencing the `Rc` again
-    /// (performance). 
+    /// (performance).
     inner: Option<Rc<RefCell<Option<SharedStreamer>>>>,
 }
 
@@ -145,9 +145,9 @@ impl Qlog {
             log::error!("Qlog event generation failed with error {e}; closing qlog.");
 
             // Remove the shared QLOG.
-            borrow.take();
+            drop(borrow);
             // Remove the reference to the shared QLOG.
-            inner.take();
+            self.inner = None;
         }
     }
 }
