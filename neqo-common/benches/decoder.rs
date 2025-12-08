@@ -19,7 +19,7 @@ use neqo_common::Decoder;
 fn fill_buffer(n: usize, mask: u8) -> Vec<u8> {
     let mut buf = vec![0; n];
     for (i, x) in buf.iter_mut().enumerate() {
-        *x = (i % 256) as u8 & mask;
+        *x = u8::try_from(i % usize::from(u8::MAX)).unwrap() & mask;
     }
     buf
 }
