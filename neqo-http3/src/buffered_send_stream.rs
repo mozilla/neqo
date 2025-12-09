@@ -83,6 +83,22 @@ impl BufferedStream {
         Ok(sent)
     }
 
+    /// Flush the buffer and return the stream ID and buffer if ready to send atomically.
+    fn prepare_atomic_send(
+        &mut self,
+        conn: &mut Connection,
+        now: Instant,
+    ) -> Res<Option<(StreamId, &mut Vec<u8>)>> {
+        self.send_buffer(conn, now)?;
+        let Self::Initialized { stream_id, buf } = self else {
+            return Ok(None);
+        };
+        if !buf.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some((*stream_id, buf)))
+    }
+
     /// # Errors
     ///
     /// Returns `neqo_transport` errors.
@@ -92,13 +108,14 @@ impl BufferedStream {
         to_send: &[u8],
         now: Instant,
     ) -> Res<bool> {
-        self.send_atomic_with(
-            conn,
-            |e| {
-                e.encode(to_send);
-            },
-            now,
-        )
+        let Some((stream_id, _)) = self.prepare_atomic_send(conn, now)? else {
+            return Ok(false);
+        };
+        let res = conn.stream_send_atomic(stream_id, to_send)?;
+        if res {
+            qlog::h3_data_moved_down(conn.qlog_mut(), stream_id, to_send.len(), now);
+        }
+        Ok(res)
     }
 
     /// Encode data using the provided closure and send it atomically.
@@ -115,23 +132,18 @@ impl BufferedStream {
         f: F,
         now: Instant,
     ) -> Res<bool> {
-        // First try to send anything that is in the buffer.
-        self.send_buffer(conn, now)?;
-        let Self::Initialized { stream_id, buf } = self else {
+        let Some((stream_id, buf)) = self.prepare_atomic_send(conn, now)? else {
             return Ok(false);
         };
-        if !buf.is_empty() {
-            return Ok(false);
-        }
-        // Use the internal buffer as scratch space for encoding.
         f(&mut Encoder::new_borrowed_vec(buf));
-        let res = conn.stream_send_atomic(*stream_id, buf)?;
         let len = buf.len();
+        let res = conn.stream_send_atomic(stream_id, buf);
         buf.clear();
-        if res {
-            qlog::h3_data_moved_down(conn.qlog_mut(), *stream_id, len, now);
+        let sent = res?;
+        if sent {
+            qlog::h3_data_moved_down(conn.qlog_mut(), stream_id, len, now);
         }
-        Ok(res)
+        Ok(sent)
     }
 
     #[must_use]
