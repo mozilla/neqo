@@ -4,7 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used, reason = "OK in a bench.")]
 #![expect(
     clippy::significant_drop_tightening,
     reason = "Inherent in codspeed criterion_group! macro."
@@ -18,8 +17,9 @@ use neqo_common::Decoder;
 /// Fill the buffer with sequentially increasing values, wrapping at 255.
 fn fill_buffer(n: usize, mask: u8) -> Vec<u8> {
     let mut buf = vec![0; n];
+    #[expect(clippy::cast_possible_truncation, reason = "% makes this safe")]
     for (i, x) in buf.iter_mut().enumerate() {
-        *x = u8::try_from(i % usize::from(u8::MAX)).unwrap() & mask;
+        *x = (i % 256) as u8 & mask;
     }
     buf
 }
