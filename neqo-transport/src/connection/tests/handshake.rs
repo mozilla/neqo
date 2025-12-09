@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::missing_asserts_for_indexing, reason = "OK in tests")]
+
 use std::{
     cell::RefCell,
     net::{IpAddr, Ipv6Addr, SocketAddr},

@@ -412,7 +412,7 @@ impl PushController {
         }
     }
 
-    pub fn handle_zero_rtt_rejected(&mut self) {
+    pub const fn handle_zero_rtt_rejected(&mut self) {
         self.current_max_push_id = PushId::new(0);
     }
 

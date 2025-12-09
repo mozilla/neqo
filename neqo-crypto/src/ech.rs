@@ -71,13 +71,13 @@ pub fn convert_ech_error(fd: *mut PRFileDesc, err: Error) -> Error {
     } = &err
     {
         let mut item = Item::make_empty();
-        if unsafe { SSL_GetEchRetryConfigs(fd, &mut item).is_err() } {
+        if unsafe { SSL_GetEchRetryConfigs(fd, &raw mut item).is_err() } {
             return Error::Internal;
         }
         let buf = unsafe {
             let slc = null_safe_slice(item.data, item.len);
             let buf = Vec::from(slc);
-            SECITEM_FreeItem(&mut item, PRBool::from(false));
+            SECITEM_FreeItem(&raw mut item, PRBool::from(false));
             buf
         };
         Error::EchRetry(buf)
@@ -116,7 +116,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
                 *slot,
                 p11::CK_MECHANISM_TYPE::from(p11::CKM_EC_KEY_PAIR_GEN),
                 addr_of_mut!(param_item).cast(),
-                &mut public_ptr,
+                &raw mut public_ptr,
                 p11::PK11_ATTR_SESSION | p11::PK11_ATTR_INSENSITIVE | p11::PK11_ATTR_PUBLIC,
                 p11::CK_FLAGS::from(p11::CKF_DERIVE),
                 p11::CK_FLAGS::from(p11::CKF_DERIVE),
@@ -133,7 +133,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
                 *slot,
                 p11::CK_MECHANISM_TYPE::from(p11::CKM_EC_KEY_PAIR_GEN),
                 addr_of_mut!(param_item).cast(),
-                &mut public_ptr,
+                &raw mut public_ptr,
                 p11::PK11_ATTR_SESSION | p11::PK11_ATTR_SENSITIVE | p11::PK11_ATTR_PRIVATE,
                 p11::CK_FLAGS::from(p11::CKF_DERIVE),
                 p11::CK_FLAGS::from(p11::CKF_DERIVE),
@@ -192,7 +192,7 @@ pub fn encode_config(config: u8, public_name: &str, pk: &PublicKey) -> Res<Vec<u
             SUITES.as_ptr(),
             c_uint::try_from(SUITES.len())?,
             encoded.as_mut_ptr(),
-            &mut encoded_len,
+            &raw mut encoded_len,
             c_uint::try_from(encoded.len())?,
         )?;
     }

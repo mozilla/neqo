@@ -64,7 +64,7 @@ impl AntiReplay {
                 Interval::from(window).try_into()?,
                 c_uint::try_from(k)?,
                 c_uint::try_from(bits)?,
-                &mut ctx,
+                &raw mut ctx,
             )
         }?;
 

@@ -29,7 +29,7 @@ license = "MIT OR Apache-2.0"
 # https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
 # In addition, currently Mozilla CI uses a Rust fork before the official Rust 1.82.0 release, thus stay on 1.81.0 for now.
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1968057#c1
-rust-version = "1.81.0"
+rust-version = "1.87.0"
 
 [workspace.dependencies]
 enum-map = { version = "2.7", default-features = false }
@@ -49,16 +49,12 @@ windows = { version = ">=0.60,<0.63", default-features = false }
 
 [workspace.lints.rust]
 absolute_paths_not_starting_with_crate = "warn"
-# TODO: Re-activate with MSRV 1.82.0. See
-# https://github.com/mozilla/neqo/pull/2661 for details.
-# ambiguous_negative_literals = "warn"
+ambiguous_negative_literals = "warn"
 explicit_outlives_requirements = "warn"
 macro_use_extern_crate = "warn"
 missing_abi = "warn"
 non_ascii_idents = "warn"
-# TODO: Re-activate with MSRV 1.82.0. See
-# https://github.com/mozilla/neqo/pull/2661 for details.
-# redundant_imports = "warn"
+redundant_imports = "warn"
 redundant_lifetimes = "warn"
 trivial_numeric_casts = "warn"
 unit_bindings = "warn"
@@ -86,15 +82,13 @@ float_cmp_const = "warn"
 fn_to_numeric_cast_any = "warn"
 get_unwrap = "warn"
 if_then_some_else_none = "warn"
-# TODO: Re-activate with MSRV 1.82.0. See
-# https://github.com/mozilla/neqo/pull/2661 for details.
-# impl_trait_in_params = "warn"
+impl_trait_in_params = "warn"
 infinite_loop = "warn"
 iter_over_hash_type = "warn"
 large_include_file = "warn"
 let_underscore_must_use = "warn"
 let_underscore_untyped = "warn"
-literal_string_with_formatting_args = "allow" # FIXME: Re-enable "warn" when MSRV is > 1.87. See https://github.com/rust-lang/rust-clippy/pull/13953#issuecomment-2676336899
+literal_string_with_formatting_args = "warn"
 lossy_float_literal = "warn"
 map_with_unused_argument_over_ranges = "warn"
 mem_forget = "warn"
@@ -114,7 +108,7 @@ precedence_bits = "warn"
 pub_without_shorthand = "warn"
 rc_buffer = "warn"
 rc_mutex = "warn"
-redundant_test_prefix = "warn"
+# redundant_test_prefix = "warn" # TODO: Re-activate with MSRV >= 1.88.0
 redundant_type_annotations = "warn"
 ref_patterns = "warn"
 renamed_function_params = "warn"

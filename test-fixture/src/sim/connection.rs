@@ -69,7 +69,7 @@ impl Node {
         goals: I1,
     ) -> Self {
         Self {
-            c: crate::new_server::<EmptyConnectionIdGenerator>(
+            c: crate::new_server::<EmptyConnectionIdGenerator, &str>(
                 crate::DEFAULT_ALPN,
                 params.randomize_first_pn(false),
             ),

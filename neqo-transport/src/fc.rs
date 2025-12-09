@@ -129,7 +129,7 @@ where
 
     /// Mark flow control as blocked.
     /// This only does something if the current limit exceeds the last reported blocking limit.
-    pub fn blocked(&mut self) {
+    pub const fn blocked(&mut self) {
         if self.limit >= self.blocked_at {
             self.blocked_at = self.limit + 1;
             self.blocked_frame = true;
@@ -145,14 +145,14 @@ where
     }
 
     /// Clear the need to send a blocked frame.
-    fn blocked_sent(&mut self) {
+    const fn blocked_sent(&mut self) {
         self.blocked_frame = false;
     }
 
     /// Mark a blocked frame as having been lost.
     /// Only send again if value of `self.blocked_at` hasn't increased since sending.
     /// That would imply that the limit has since increased.
-    pub fn frame_lost(&mut self, limit: u64) {
+    pub const fn frame_lost(&mut self, limit: u64) {
         if self.blocked_at == limit + 1 {
             self.blocked_frame = true;
         }
@@ -277,7 +277,7 @@ where
 
     /// Retire some items and maybe send flow control
     /// update.
-    pub fn retire(&mut self, retired: u64) {
+    pub const fn retire(&mut self, retired: u64) {
         if retired <= self.retired {
             return;
         }
@@ -290,7 +290,7 @@ where
 
     /// This function is called when `STREAM_DATA_BLOCKED` frame is received.
     /// The flow control will try to send an update if possible.
-    pub fn send_flowc_update(&mut self) {
+    pub const fn send_flowc_update(&mut self) {
         if self.retired + self.max_active > self.max_allowed {
             self.frame_pending = true;
         }
@@ -318,18 +318,18 @@ where
         self.max_active
     }
 
-    pub fn frame_lost(&mut self, maximum_data: u64) {
+    pub const fn frame_lost(&mut self, maximum_data: u64) {
         if maximum_data == self.max_allowed {
             self.frame_pending = true;
         }
     }
 
-    fn frame_sent(&mut self, new_max: u64) {
+    const fn frame_sent(&mut self, new_max: u64) {
         self.max_allowed = new_max;
         self.frame_pending = false;
     }
 
-    pub fn set_max_active(&mut self, max: u64) {
+    pub const fn set_max_active(&mut self, max: u64) {
         // If max_active has been increased, send an update immediately.
         self.frame_pending |= self.max_active < max;
         self.max_active = max;
@@ -433,12 +433,11 @@ where
         let increase = self.max_active - prev_max_active;
         if increase > 0 {
             qdebug!(
-                "Increasing max {subject} receive window by {} B, \
+                "Increasing max {subject} receive window by {increase} B, \
                 previous max_active: {} MiB, \
                 new max_active: {} MiB, \
                 last update: {:?}, \
                 rtt: {rtt:?}",
-                increase,
                 prev_max_active / 1024 / 1024,
                 self.max_active / 1024 / 1024,
                 now - max_allowed_sent_at,
@@ -610,7 +609,7 @@ impl ReceiverFlowControl<StreamType> {
 
     /// Retire given amount of additional data.
     /// This function will send flow updates immediately.
-    pub fn add_retired(&mut self, count: u64) {
+    pub const fn add_retired(&mut self, count: u64) {
         self.retired += count;
         if count > 0 {
             self.send_flowc_update();

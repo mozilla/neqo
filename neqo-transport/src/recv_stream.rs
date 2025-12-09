@@ -539,10 +539,9 @@ impl RecvStream {
             mem::discriminant(&new_state)
         );
         qtrace!(
-            "RecvStream {} state {} -> {}",
+            "RecvStream {} state {} -> {new_state}",
             self.stream_id.as_u64(),
-            self.state,
-            new_state
+            self.state
         );
 
         match new_state {
@@ -743,13 +742,13 @@ impl RecvStream {
     /// Send a flow control update.
     /// This is used when a peer declares that they are blocked.
     /// This sends `MAX_STREAM_DATA` if there is any increase possible.
-    pub fn send_flowc_update(&mut self) {
+    pub const fn send_flowc_update(&mut self) {
         if let RecvStreamState::Recv { fc, .. } = &mut self.state {
             fc.send_flowc_update();
         }
     }
 
-    pub fn set_stream_max_data(&mut self, max_data: u64) {
+    pub const fn set_stream_max_data(&mut self, max_data: u64) {
         if let RecvStreamState::Recv { fc, .. } = &mut self.state {
             fc.set_max_active(max_data);
         }
@@ -906,13 +905,13 @@ impl RecvStream {
         }
     }
 
-    pub fn max_stream_data_lost(&mut self, maximum_data: u64) {
+    pub const fn max_stream_data_lost(&mut self, maximum_data: u64) {
         if let RecvStreamState::Recv { fc, .. } = &mut self.state {
             fc.frame_lost(maximum_data);
         }
     }
 
-    pub fn stop_sending_lost(&mut self) {
+    pub const fn stop_sending_lost(&mut self) {
         if let RecvStreamState::AbortReading { frame_needed, .. } = &mut self.state {
             *frame_needed = true;
         }

@@ -122,17 +122,12 @@ fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     );
 }
 
-#[allow(
-    clippy::allow_attributes,
-    clippy::similar_names,
-    reason = "FIXME: 'new and now are similar' hits on MSRV <1.91."
-)]
-pub fn connection_state_updated(qlog: &mut Qlog, new: &State, now: Instant) {
+pub fn connection_state_updated(qlog: &mut Qlog, new_state: &State, now: Instant) {
     qlog.add_event_at(
         || {
             let ev_data = EventData::ConnectionStateUpdated(ConnectionStateUpdated {
                 old: None,
-                new: match new {
+                new: match new_state {
                     State::Init | State::WaitInitial => ConnectionState::Attempted,
                     State::WaitVersion | State::Handshaking => ConnectionState::HandshakeStarted,
                     State::Connected => ConnectionState::HandshakeCompleted,

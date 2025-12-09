@@ -144,7 +144,7 @@ mod test {
 
     impl PartialEq<NameMtu<'_>> for (String, usize) {
         fn eq(&self, other: &NameMtu<'_>) -> bool {
-            other.0.map_or(true, |name| name == self.0) && other.1 == self.1
+            other.0.is_none_or(|name| name == self.0) && other.1 == self.1
         }
     }
 

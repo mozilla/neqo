@@ -101,7 +101,7 @@ impl StreamId {
         self.is_uni() && self.is_remote_initiated(my_role)
     }
 
-    pub fn next(&mut self) {
+    pub const fn next(&mut self) {
         self.0 += 4;
     }
 

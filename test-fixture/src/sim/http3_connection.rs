@@ -309,7 +309,7 @@ impl Requests {
             }
             status = GoalStatus::Active;
             *remaining -= sent;
-            qtrace!("sent {sent} remaining {}", remaining);
+            qtrace!("sent {sent} remaining {remaining}");
             if *remaining == 0 {
                 c.stream_close_send(stream_id, now).unwrap();
                 self.remaining.remove(&stream_id);
@@ -411,7 +411,7 @@ impl Goal for Responses {
                 let remaining = self.remaining.get_mut(&stream_id).unwrap();
 
                 *remaining -= len;
-                qtrace!("received {} remaining {}", len, remaining);
+                qtrace!("received {len} remaining {remaining}");
                 if *remaining == 0 {
                     assert!(fin);
                     stream

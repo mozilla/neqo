@@ -130,7 +130,7 @@ impl RealAead {
             secret,
             p.as_ptr().cast(),
             c_uint::try_from(p.len())?,
-            &mut ctx,
+            &raw mut ctx,
         )?;
         Ok(Self {
             ctx: AeadContext::from_ptr(ctx)?,
@@ -165,7 +165,7 @@ impl Aead for RealAead {
                 input.as_ptr(),
                 c_uint::try_from(input.len())?,
                 output.as_mut_ptr(),
-                &mut l,
+                &raw mut l,
                 c_uint::try_from(output.len())?,
             )
         }?;
@@ -187,7 +187,7 @@ impl Aead for RealAead {
                 data.as_ptr(),
                 c_uint::try_from(data.len() - self.expansion())?,
                 data.as_mut_ptr(),
-                &mut l,
+                &raw mut l,
                 c_uint::try_from(data.len())?,
             )
         }?;
@@ -215,7 +215,7 @@ impl Aead for RealAead {
                 input.as_ptr(),
                 c_uint::try_from(input.len())?,
                 output.as_mut_ptr(),
-                &mut l,
+                &raw mut l,
                 c_uint::try_from(output.len())?,
             )
         }?;
@@ -236,7 +236,7 @@ impl Aead for RealAead {
                 data.as_ptr(),
                 c_uint::try_from(data.len())?,
                 data.as_mut_ptr(),
-                &mut l,
+                &raw mut l,
                 c_uint::try_from(data.len())?,
             )
         }?;

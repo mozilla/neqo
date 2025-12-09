@@ -58,7 +58,7 @@ impl HeaderEncoder {
             .encode_prefixed_encoded_int(HEADER_FIELD_INDEX_STATIC, index);
     }
 
-    fn new_ref(&mut self, index: u64) {
+    const fn new_ref(&mut self, index: u64) {
         if let Some(r) = self.max_dynamic_index_ref {
             if r < index {
                 self.max_dynamic_index_ref = Some(index);

@@ -39,11 +39,11 @@ impl DynamicTableEntry {
         self.refs == 0 && self.base < first_not_acked
     }
 
-    pub fn size(&self) -> usize {
+    pub const fn size(&self) -> usize {
         self.name.len() + self.value.len() + ADDITIONAL_TABLE_ENTRY_SIZE
     }
 
-    pub fn add_ref(&mut self) {
+    pub const fn add_ref(&mut self) {
         self.refs += 1;
     }
 

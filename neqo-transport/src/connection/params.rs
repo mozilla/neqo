@@ -200,7 +200,7 @@ impl ConnectionParameters {
         &self.versions
     }
 
-    pub(crate) fn get_versions_mut(&mut self) -> &mut version::Config {
+    pub(crate) const fn get_versions_mut(&mut self) -> &mut version::Config {
         &mut self.versions
     }
 

@@ -475,11 +475,9 @@ impl Server {
                     self.conn_params.get_versions().all(),
                 );
                 qdebug!(
-                    "[{self}] type={:?} path:{} {}->{} {:?} len {}",
+                    "[{self}] type={:?} path:{} {destination}->{source} {:?} len {}",
                     packet::Type::VersionNegotiation,
                     packet.dcid(),
-                    destination,
-                    source,
                     Tos::default(),
                     vn.len(),
                 );
@@ -592,6 +590,11 @@ impl Server {
         }
 
         // Process output datagrams.
+        #[allow(
+            clippy::allow_attributes,
+            clippy::needless_match,
+            reason = "FIXME: false positive with MSRV 1.87 (and later?)"
+        )]
         let maybe_callback = match self.process_next_output(now, max_datagrams) {
             // Return immediately. Do any maintenance on next call.
             o @ OutputBatch::DatagramBatch(_) => return o,

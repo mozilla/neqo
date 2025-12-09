@@ -53,7 +53,7 @@ impl Reader for ReceiverConnWrapper<'_> {
 }
 
 impl<'a> ReceiverConnWrapper<'a> {
-    pub fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
+    pub const fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
         Self { conn, stream_id }
     }
 }
