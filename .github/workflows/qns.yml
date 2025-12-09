@@ -26,7 +26,6 @@ env:
 jobs:
   docker-image:
     name: Build Docker image
-    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     outputs:
       imageID: ${{ steps.docker_build_and_push.outputs.imageID }}

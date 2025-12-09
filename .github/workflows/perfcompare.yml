@@ -3,7 +3,6 @@ on:
   workflow_call:
   pull_request:
     branches: ["main"]
-  merge_group:
   workflow_dispatch:
     inputs:
       bencher:
