@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: ["main"]
   merge_group:
+  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -21,13 +22,13 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0 # We need the full history to compare against `main` for semver changes.
-      - uses: ./.github/actions/rust
+      - uses: mozilla/neqo/.github/actions/rust@main
         with:
           tools: cargo-semver-checks
           token: ${{ secrets.GITHUB_TOKEN }}
       - id: nss-version
         run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/nss
+      - uses: mozilla/neqo/.github/actions/nss@main
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 

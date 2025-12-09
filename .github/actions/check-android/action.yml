@@ -43,14 +43,14 @@ runs:
         WD: ${{ inputs.working-directory }}
       run: cd "$WD" && sdkmanager --install "ndk;$NDK_VERSION"
 
-    - uses: ./.github/actions/rust
+    - uses: mozilla/neqo/.github/actions/rust@main
       with:
         version: stable
         targets: ${{ inputs.target }}
         tools: cargo-ndk@^4
         token: ${{ inputs.github-token }}
 
-    - uses: ./.github/actions/nss
+    - uses: mozilla/neqo/.github/actions/nss@main
       if: ${{ inputs.minimum-nss-version != '' }}
       with:
         minimum-version: ${{ inputs.minimum-nss-version }}

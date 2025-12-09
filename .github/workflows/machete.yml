@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: ["main"]
   merge_group:
+  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -22,7 +23,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: ./.github/actions/rust
+        uses: mozilla/neqo/.github/actions/rust@main
         with:
           tools: cargo-hack, cargo-machete
           token: ${{ secrets.GITHUB_TOKEN }}
