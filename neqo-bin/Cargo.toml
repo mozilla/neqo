@@ -11,6 +11,7 @@ license.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme.workspace = true
+autobenches = false
 
 [[bin]]
 name = "neqo-client"

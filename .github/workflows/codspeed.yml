@@ -36,31 +36,23 @@ jobs:
         run: |
           # Create a GitHub matrix where each entry is a bench with its
           # associated crate and benchmarking mode taken from the Cargo
-          # metadata.
+          # metadata. Only include benchmarks that are explicitly declared
+          # in [[bench]] sections (i.e., have required-features), not
+          # auto-discovered ones.
           {
-            echo -n "benches=["
-            first=true
-            while IFS=: read -r crate manifest_path; do
-              dir=$(dirname "$manifest_path")
-              if [ -e "$dir/benches" ]; then
-                for bench in "$dir/benches"/*.rs; do
-                  bench=$(basename -s .rs "$bench")
-                  # Set measurement mode from Cargo.toml metadata, default to "instrumentation".
-                  # The following jq pipeline:
-                  # - Selects the package with name == $crate
-                  # - Looks up .metadata.bench[$bench].codspeed.mode for the benchmark
-                  # - If not set, defaults to "instrumentation"
-                  mode=$(cargo metadata --no-deps --format-version 1 | jq -r --arg crate "$crate" --arg bench "$bench" '.packages[] | select(.name == $crate) | .metadata.bench[$bench].codspeed.mode // "instrumentation"')
-                  if [ "$first" = true ]; then
-                    first=false
-                  else
-                    echo -n ","
-                  fi
-                  echo -n "{\"crate\":\"$crate\",\"bench\":\"$bench\",\"mode\":\"$mode\"}"
-                done
-              fi
-            done < <(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | .name + ":" + .manifest_path')
-            echo -n "]"
+            echo -n "benches="
+            cargo metadata --no-deps --format-version 1 | jq -c '
+              [.packages[] |
+                . as $pkg |
+                .targets[] |
+                select(.kind[] == "bench") |
+                select(has("required-features")) |
+                {
+                  crate: $pkg.name,
+                  bench: .name,
+                  mode: ($pkg.metadata.bench[.name].codspeed.mode // "instrumentation")
+                }
+              ]'
           } >> "${GITHUB_OUTPUT}"
 
   benchmarks:
