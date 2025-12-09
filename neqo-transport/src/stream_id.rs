@@ -10,11 +10,10 @@ use std::fmt::{self, Display, Formatter};
 
 use enum_map::Enum;
 use neqo_common::Role;
-use strum::FromRepr;
 
 /// The type of stream, either Bi-Directional or Uni-Directional.
 /// The discriminant values match the QUIC stream type bits.
-#[derive(PartialEq, Debug, Copy, Clone, PartialOrd, Eq, Ord, Hash, Enum, FromRepr)]
+#[derive(PartialEq, Debug, Copy, Clone, PartialOrd, Eq, Ord, Hash, Enum)]
 #[repr(u64)]
 pub enum StreamType {
     BiDi = 0,

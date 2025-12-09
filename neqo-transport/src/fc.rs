@@ -677,17 +677,17 @@ impl RemoteStreamLimits {
     }
 }
 
-impl Deref for RemoteStreamLimits {
-    type Target = EnumMap<StreamType, RemoteStreamLimit>;
+impl Index<StreamType> for RemoteStreamLimits {
+    type Output = RemoteStreamLimit;
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    fn index(&self, index: StreamType) -> &Self::Output {
+        &self.0[index]
     }
 }
 
-impl DerefMut for RemoteStreamLimits {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl IndexMut<StreamType> for RemoteStreamLimits {
+    fn index_mut(&mut self, index: StreamType) -> &mut Self::Output {
+        &mut self.0[index]
     }
 }
 
