@@ -92,6 +92,29 @@ impl BufferedStream {
         to_send: &[u8],
         now: Instant,
     ) -> Res<bool> {
+        self.send_atomic_with(
+            conn,
+            |e| {
+                e.encode(to_send);
+            },
+            now,
+        )
+    }
+
+    /// Encode data using the provided closure and send it atomically.
+    ///
+    /// This avoids allocating a temporary encoder at the call site by reusing
+    /// the stream's internal buffer as scratch space.
+    ///
+    /// # Errors
+    ///
+    /// Returns `neqo_transport` errors.
+    pub fn send_atomic_with<F: FnOnce(&mut Encoder<&mut Vec<u8>>)>(
+        &mut self,
+        conn: &mut Connection,
+        f: F,
+        now: Instant,
+    ) -> Res<bool> {
         // First try to send anything that is in the buffer.
         self.send_buffer(conn, now)?;
         let Self::Initialized { stream_id, buf } = self else {
@@ -100,9 +123,13 @@ impl BufferedStream {
         if !buf.is_empty() {
             return Ok(false);
         }
-        let res = conn.stream_send_atomic(*stream_id, to_send)?;
+        // Use the internal buffer as scratch space for encoding.
+        f(&mut Encoder::new_borrowed_vec(buf));
+        let res = conn.stream_send_atomic(*stream_id, buf)?;
+        let len = buf.len();
+        buf.clear();
         if res {
-            qlog::h3_data_moved_down(conn.qlog_mut(), *stream_id, to_send.len(), now);
+            qlog::h3_data_moved_down(conn.qlog_mut(), *stream_id, len, now);
         }
         Ok(res)
     }
