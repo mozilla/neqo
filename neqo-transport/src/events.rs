@@ -163,33 +163,28 @@ impl ConnectionEvents {
         self.remove(|evt| matches!(evt, ConnectionEvent::RecvStreamReadable { stream_id: x } if *x == stream_id.as_u64()));
     }
 
-    // The number of datagrams in the events queue is limited to max_queued_datagrams.
-    // This function ensure this and deletes the oldest datagrams (head-drop) if needed.
-    fn check_datagram_queued(&self, max_queued_datagrams: usize, stats: &mut Stats) {
-        let mut queue = self.events.borrow_mut();
-        let count = queue
-            .iter()
-            .filter(|evt| matches!(evt, ConnectionEvent::Datagram(_)))
-            .count();
-        if count < max_queued_datagrams {
-            // Below the limit. No action needed.
-            return;
-        }
-        let first = queue
-            .iter_mut()
-            .find(|evt| matches!(evt, ConnectionEvent::Datagram(_)))
-            .expect("Checked above");
-        // Remove the oldest (head-drop), replacing it with an
-        // IncomingDatagramDropped placeholder.
-        *first = ConnectionEvent::IncomingDatagramDropped;
-        stats.incoming_datagram_dropped += 1;
-    }
-
     pub fn add_datagram(&self, max_queued_datagrams: usize, data: &[u8], stats: &mut Stats) {
-        self.check_datagram_queued(max_queued_datagrams, stats);
-        self.events
-            .borrow_mut()
-            .push_back(ConnectionEvent::Datagram(data.to_vec()));
+        let mut q = self.events.borrow_mut();
+        // The number of datagrams in the events queue is limited to max_queued_datagrams.
+        // Delete the oldest datagram (head-drop) if needed.
+        let mut first_idx = None;
+        let mut datagrams_remaining = max_queued_datagrams;
+        for (i, evt) in q.iter().enumerate() {
+            if matches!(evt, ConnectionEvent::Datagram(_)) {
+                first_idx.get_or_insert(i);
+                datagrams_remaining = datagrams_remaining.saturating_sub(1);
+                if datagrams_remaining == 0 {
+                    // Replace the oldest datagram with an `IncomingDatagramDropped` placeholder.
+                    let Some(first_idx) = first_idx else {
+                        unreachable!("first_idx is Some when datagrams_remaining is 0");
+                    };
+                    q[first_idx] = ConnectionEvent::IncomingDatagramDropped;
+                    stats.incoming_datagram_dropped += 1;
+                    break;
+                }
+            }
+        }
+        q.push_back(ConnectionEvent::Datagram(data.to_vec()));
     }
 
     pub fn datagram_outcome(
