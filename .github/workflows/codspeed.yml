@@ -57,7 +57,7 @@ jobs:
 
   benchmarks:
     name: Run bench
-    runs-on: ${{ matrix.bench.mode == 'walltime' && 'codspeed-macro' || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.bench.mode == 'walltime' && 'Neqo' || 'ubuntu-24.04' }}
     strategy:
       matrix:
         bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}

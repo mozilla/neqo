@@ -35,7 +35,7 @@ permissions:
 jobs:
   perfcompare:
     name: Performance comparison
-    runs-on: ${{ (inputs.bencher || 'codspeed') == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || (inputs.bencher || 'codspeed') == 'codspeed' && 'codspeed-macro' || 'self-hosted' }}
+    runs-on: ${{ (inputs.bencher || 'codspeed') == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || (inputs.bencher || 'codspeed') == 'codspeed' && 'Neqo' || 'self-hosted' }}
     defaults:
       run:
         shell: bash
