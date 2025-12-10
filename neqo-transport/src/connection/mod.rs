@@ -2547,7 +2547,7 @@ impl Connection {
         max_datagrams: NonZeroUsize,
     ) -> Res<SendOptionBatch> {
         let packet_tos = path.borrow().tos();
-        let mut send_buffer = Vec::new(); // TODO: Investigate is `with_capacity` is beneficial here.
+        let mut send_buffer = Vec::new();
         let mut max_datagram_size = None;
         let mut num_datagrams = 0;
         let mtu = path.borrow().plpmtu();
