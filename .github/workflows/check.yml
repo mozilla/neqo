@@ -104,8 +104,8 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
-          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }}
+          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful ' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -128,6 +128,8 @@ jobs:
           RUST_TEST_TIME_INTEGRATION: 10,30
           RUST_TEST_TIME_DOCTEST: 10,30
           TOOLCHAIN: ${{ matrix.rust-toolchain }}
+          # FIXME: cargo-careful at the moment only works on amd64 Ubuntu
+          CAREFUL: ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'careful' || '' }}
         run: |
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
@@ -135,7 +137,11 @@ jobs:
           if [ "$TOOLCHAIN" == "stable" ]; then
             cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
-            cargo test $BUILD_TYPE --locked --features ci
+            if [ -n "$CAREFUL" ]; then
+              # FIXME: Rust 1.81 doesn't have the ability to print host-tuple
+              TRIPLE="--target $(rustc --print host-tuple)"
+            fi
+            cargo $CAREFUL test $BUILD_TYPE --locked --features ci $TRIPLE
           fi
 
       - name: Run client/server transfer
