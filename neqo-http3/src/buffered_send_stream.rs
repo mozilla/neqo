@@ -111,11 +111,11 @@ impl BufferedStream {
         let Some((stream_id, _)) = self.prepare_atomic_send(conn, now)? else {
             return Ok(false);
         };
-        let res = conn.stream_send_atomic(stream_id, to_send)?;
-        if res {
+        let sent = conn.stream_send_atomic(stream_id, to_send)?;
+        if sent {
             qlog::h3_data_moved_down(conn.qlog_mut(), stream_id, to_send.len(), now);
         }
-        Ok(res)
+        Ok(sent)
     }
 
     /// Encode data using the provided closure and send it atomically.
