@@ -5,7 +5,6 @@ on:
   pull_request:
     branches: ["main"]
     types: [opened, synchronize, reopened, ready_for_review]
-  merge_group:
   workflow_dispatch:
   schedule:
     # Run at 1 AM each day, so the interop-runner has a current image
@@ -98,7 +97,7 @@ jobs:
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
           platforms: ${{ github.event_name != 'pull_request' && 'linux/amd64, linux/arm64' || 'linux/amd64' }}
-          outputs: type=docker,dest=/tmp/${{ format('{0}.tar', matrix.name) }}
+          outputs: type=oci,dest=/tmp/${{ format('{0}.tar', matrix.name) }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
