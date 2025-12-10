@@ -33,10 +33,13 @@ impl Priority {
     #[must_use]
     pub fn new(urgency: u8, incremental: bool) -> Self {
         assert!(urgency < 8);
-        Self {
+        let priority = Self {
             urgency,
             incremental,
-        }
+        };
+        #[cfg(feature = "build-fuzzing-corpus")]
+        neqo_common::write_item_to_fuzzing_corpus("priority", priority.to_string().as_bytes());
+        priority
     }
 
     /// Constructs a priority from raw bytes (either a field value of frame content).
@@ -45,6 +48,9 @@ impl Priority {
     ///
     /// When the contained syntax is invalid.
     pub fn from_bytes(bytes: &[u8]) -> Res<Self> {
+        #[cfg(feature = "build-fuzzing-corpus")]
+        neqo_common::write_item_to_fuzzing_corpus("priority", bytes);
+
         let dict: Dictionary = Parser::new(bytes).parse().map_err(|_| Error::HttpFrame)?;
         let urgency = match dict.get("u") {
             Some(ListEntry::Item(Item {
@@ -145,6 +151,7 @@ impl PriorityHandler {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use neqo_transport::StreamId;
 

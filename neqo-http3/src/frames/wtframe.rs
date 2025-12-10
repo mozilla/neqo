@@ -11,30 +11,46 @@ use crate::{frames::reader::FrameDecoder, Error, Res};
 
 pub type WebTransportFrameType = u64;
 
-const WT_FRAME_CLOSE_SESSION: WebTransportFrameType = 0x2843;
-const WT_FRAME_CLOSE_MAX_MESSAGE_SIZE: u64 = 1024;
-
 #[derive(PartialEq, Eq, Debug)]
 pub enum WebTransportFrame {
     CloseSession { error: u32, message: String },
 }
 
 impl WebTransportFrame {
+    /// The frame type for WebTransport `CLOSE_SESSION`, as defined in
+    /// [WebTransport over HTTP/3 (RFC 9297, Section 4.6)](https://datatracker.ietf.org/doc/html/rfc9297#section-4.6).
+    /// The value 0x2843 is assigned for `CLOSE_SESSION`.
+    const CLOSE_SESSION: WebTransportFrameType = 0x2843;
+
+    /// The maximum allowed message size for `CLOSE_SESSION` messages, as recommended
+    /// in [WebTransport over HTTP/3 (RFC 9297, Section 4.6)](https://datatracker.ietf.org/doc/html/rfc9297#section-4.6).
+    /// The value 1024 is used to limit the message size for security and interoperability.
+    const CLOSE_MAX_MESSAGE_SIZE: u64 = 1024;
+
     pub fn encode(&self, enc: &mut Encoder) {
-        enc.encode_varint(WT_FRAME_CLOSE_SESSION);
+        #[cfg(feature = "build-fuzzing-corpus")]
+        let start = enc.len();
+
+        enc.encode_varint(Self::CLOSE_SESSION);
         let Self::CloseSession { error, message } = &self;
         enc.encode_varint(4 + message.len() as u64);
         enc.encode_uint(4, *error);
         enc.encode(message.as_bytes());
+
+        #[cfg(feature = "build-fuzzing-corpus")]
+        neqo_common::write_item_to_fuzzing_corpus("wtframe", &enc.as_ref()[start..]);
     }
 }
 
 impl FrameDecoder<Self> for WebTransportFrame {
+    #[cfg(feature = "build-fuzzing-corpus")]
+    const FUZZING_CORPUS_NAME: Option<&'static str> = Some("wtframe");
+
     fn decode(frame_type: HFrameType, frame_len: u64, data: Option<&[u8]>) -> Res<Option<Self>> {
         if let Some(payload) = data {
             let mut dec = Decoder::from(payload);
-            if frame_type == HFrameType(WT_FRAME_CLOSE_SESSION) {
-                if frame_len > WT_FRAME_CLOSE_MAX_MESSAGE_SIZE + 4 {
+            if frame_type == HFrameType(Self::CLOSE_SESSION) {
+                if frame_len > Self::CLOSE_MAX_MESSAGE_SIZE + 4 {
                     return Err(Error::HttpMessage);
                 }
                 let error = dec.decode_uint().ok_or(Error::HttpMessage)?;
@@ -51,6 +67,6 @@ impl FrameDecoder<Self> for WebTransportFrame {
     }
 
     fn is_known_type(frame_type: HFrameType) -> bool {
-        frame_type == HFrameType(WT_FRAME_CLOSE_SESSION)
+        frame_type == HFrameType(Self::CLOSE_SESSION)
     }
 }

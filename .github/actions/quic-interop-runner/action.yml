@@ -29,7 +29,7 @@ runs:
   using: "composite"
   steps:
     - name: Checkout quic-interop/quic-interop-runner repository
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       with:
         repository: 'quic-interop/quic-interop-runner'
         path: 'quic-interop-runner'
@@ -48,7 +48,7 @@ runs:
 
     - name: Checkout linuxquic repository
       if: ${{ inputs.server == 'linuxquic' || inputs.client == 'linuxquic' }}
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       with:
         repository: 'lxin/quic'
         path: 'linuxquic'
@@ -63,11 +63,14 @@ runs:
         cd ../ && rm -r linuxquic
       shell: bash
 
-    - uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
+    - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+      # FIXME: Turning caching on causes this error:
+      # `Failed to save: <h2>Our services aren't available right now</h2><p>We're working to restore all services as soon as possible. Please check back soon.</p>`
+      # Since this happens for *each* parallel QNS run, it's simply too noisy.
       with:
         python-version: 3.12
-        cache: 'pip'
-        cache-dependency-path: 'quic-interop-runner/requirements.txt'
+        # cache: 'pip'
+        # cache-dependency-path: 'quic-interop-runner/requirements.txt'
 
     - name: Install Python packages
       run: |
@@ -124,7 +127,7 @@ runs:
         exit $FAILED
       shell: bash
 
-    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+    - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
       if: ${{ always() }}
       id: upload-logs
       with:
@@ -141,7 +144,7 @@ runs:
         mv result.json.tmp result.json
       shell: bash
 
-    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+    - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
       if: ${{ always() }}
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} results'

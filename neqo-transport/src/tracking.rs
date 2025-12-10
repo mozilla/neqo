@@ -16,14 +16,14 @@ use std::{
 use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use log::{log_enabled, Level};
-use neqo_common::{qdebug, qinfo, qtrace, qwarn, Buffer, Ecn, MAX_VARINT};
+use neqo_common::{qdebug, qtrace, qwarn, Buffer, Ecn, MAX_VARINT};
 use neqo_crypto::Epoch;
 use smallvec::SmallVec;
 use strum::{Display, EnumIter};
 
 use crate::{
     ecn,
-    frame::FrameType,
+    frame::{FrameEncoder as _, FrameType},
     packet,
     recovery::{self},
     stats::FrameStats,
@@ -136,7 +136,7 @@ impl PacketRange {
 
     /// Maybe merge a higher-numbered range into this.
     fn merge_larger(&mut self, other: &Self) {
-        qinfo!("[{self}] Merging {other}");
+        qdebug!("[{self}] Merging {other}");
         // This only works if they are immediately adjacent.
         assert_eq!(self.largest + 1, other.smallest);
 
@@ -457,14 +457,8 @@ impl RecvdPackets {
             return;
         }
 
-        builder.encode_varint(if self.ecn_count.is_some() {
-            FrameType::AckEcn
-        } else {
-            FrameType::Ack
-        });
         let mut iter = ranges.iter();
         let Some(first) = iter.next() else { return };
-        builder.encode_varint(first.largest);
         stats.largest_acknowledged = first.largest;
         stats.ack += 1;
 
@@ -475,27 +469,38 @@ impl RecvdPackets {
         // We use the default exponent, so delay is in multiples of 8 microseconds.
         let ack_delay = u64::try_from(elapsed.as_micros() / 8).unwrap_or(u64::MAX);
         let ack_delay = min(MAX_VARINT, ack_delay);
-        builder.encode_varint(ack_delay);
         let Ok(extra_ranges) = u64::try_from(ranges.len() - 1) else {
             return;
         };
-        builder.encode_varint(extra_ranges); // extra ranges
-        builder.encode_varint(first.len() - 1); // first range
 
-        let mut last = first.smallest;
-        for r in iter {
-            // the difference must be at least 2 because 0-length gaps,
-            // (difference 1) are illegal.
-            builder.encode_varint(last - r.largest - 2); // Gap
-            builder.encode_varint(r.len() - 1); // Range
-            last = r.smallest;
-        }
+        builder.encode_frame(
+            if self.ecn_count.is_some() {
+                FrameType::AckEcn
+            } else {
+                FrameType::Ack
+            },
+            |b| {
+                b.encode_varint(first.largest);
+                b.encode_varint(ack_delay);
+                b.encode_varint(extra_ranges); // extra ranges
+                b.encode_varint(first.len() - 1); // first range
 
-        if self.ecn_count.is_some() {
-            builder.encode_varint(self.ecn_count[Ecn::Ect0]);
-            builder.encode_varint(self.ecn_count[Ecn::Ect1]);
-            builder.encode_varint(self.ecn_count[Ecn::Ce]);
-        }
+                let mut last = first.smallest;
+                for r in iter {
+                    // The difference must be at least 2 because 0-length gaps,
+                    // (difference 1) are illegal.
+                    b.encode_varint(last - r.largest - 2); // Gap
+                    b.encode_varint(r.len() - 1); // Range
+                    last = r.smallest;
+                }
+
+                if self.ecn_count.is_some() {
+                    b.encode_varint(self.ecn_count[Ecn::Ect0]);
+                    b.encode_varint(self.ecn_count[Ecn::Ect1]);
+                    b.encode_varint(self.ecn_count[Ecn::Ce]);
+                }
+            },
+        );
 
         // We've sent an ACK, reset the timer.
         self.ack_time = None;
@@ -619,6 +624,7 @@ impl Default for AckTracker {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::HashSet;
 
@@ -630,7 +636,7 @@ mod tests {
     };
     use crate::{
         frame::Frame,
-        packet::{self, PACKET_LIMIT},
+        packet,
         recovery::{self},
         stats::FrameStats,
         Stats,
@@ -769,7 +775,7 @@ mod tests {
 
     fn write_frame_at(rp: &mut RecvdPackets, now: Instant) {
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
         let mut stats = FrameStats::default();
         let mut tokens = recovery::Tokens::new();
         rp.write_frame(now, RTT, &mut builder, &mut tokens, &mut stats);
@@ -929,7 +935,7 @@ mod tests {
         let mut stats = Stats::default();
         let mut tracker = AckTracker::default();
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
         tracker
             .get_mut(PacketNumberSpace::Initial)
             .unwrap()
@@ -998,7 +1004,7 @@ mod tests {
             .is_some());
 
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
         builder.set_limit(10);
 
         let mut stats = FrameStats::default();
@@ -1033,7 +1039,7 @@ mod tests {
             .is_some());
 
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
         // The code pessimistically assumes that each range needs 16 bytes to express.
         // So this won't be enough for a second range.
         builder.set_limit(RecvdPackets::USEFUL_ACK_LEN + 8);

@@ -1,0 +1,33 @@
+name: Check semver
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  semver:
+    name: Check semver
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # We need the full history to compare against `main` for semver changes.
+      - uses: ./.github/actions/rust
+        with:
+          tools: cargo-semver-checks
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/nss
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+
+      - run: cargo semver-checks --default-features --baseline-rev origin/main -p mtu

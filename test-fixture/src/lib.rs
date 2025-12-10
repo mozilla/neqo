@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(clippy::unwrap_used, reason = "This is test code.")]
 
 use std::{
@@ -26,7 +27,7 @@ use neqo_common::{
     qtrace, Datagram, Decoder, Ecn, Role,
 };
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
-use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
+use neqo_http3::{Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State};
 use neqo_transport::{
     version, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
     ConnectionIdRef, ConnectionParameters, State, Version,
@@ -171,12 +172,15 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 ///
 /// If this doesn't work.
 #[must_use]
-pub fn new_client(params: ConnectionParameters) -> Connection {
+pub fn new_client<G>(params: ConnectionParameters) -> Connection
+where
+    G: ConnectionIdGenerator + Default + 'static,
+{
     fixture_init();
     let mut client = Connection::new_client(
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(G::default())),
         DEFAULT_ADDR,
         DEFAULT_ADDR,
         params,
@@ -193,6 +197,7 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
                 Some("Neqo client qlog".to_string()),
                 Some("Neqo client qlog".to_string()),
                 format!("client-{cid}"),
+                now(),
             )
             .unwrap(),
         );
@@ -206,19 +211,19 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
 /// Create a transport client with default configuration.
 #[must_use]
 pub fn default_client() -> Connection {
-    new_client(ConnectionParameters::default())
+    new_client::<CountingConnectionIdGenerator>(ConnectionParameters::default())
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server() -> Connection {
-    new_server(DEFAULT_ALPN, ConnectionParameters::default())
+    new_server::<CountingConnectionIdGenerator>(DEFAULT_ALPN, ConnectionParameters::default())
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server_h3() -> Connection {
-    new_server(
+    new_server::<CountingConnectionIdGenerator>(
         DEFAULT_ALPN_H3,
         ConnectionParameters::default().pacing(false),
     )
@@ -230,23 +235,29 @@ pub fn default_server_h3() -> Connection {
 ///
 /// If this doesn't work.
 #[must_use]
-pub fn new_server<A: AsRef<str>>(alpn: &[A], params: ConnectionParameters) -> Connection {
+pub fn new_server<G>(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection
+where
+    G: ConnectionIdGenerator + Default + 'static,
+{
     fixture_init();
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
         alpn,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(G::default())),
         params,
     )
     .expect("create a server");
     if let Ok(dir) = std::env::var("QLOGDIR") {
+        // Use random bytes to generate a unique name
+        let unique_name = format!("server-{}", hex(random::<10>()));
         c.set_qlog(
             Qlog::enabled_with_file(
                 dir.parse().unwrap(),
                 Role::Server,
                 Some("Neqo server qlog".to_string()),
                 Some("Neqo server qlog".to_string()),
-                "server".to_string(),
+                unique_name,
+                now(),
             )
             .unwrap(),
         );
@@ -393,6 +404,34 @@ pub fn exchange_packets(
             break;
         }
     }
+}
+
+/// # Panics
+///
+/// When connection establishment fails.
+pub fn connect_peers(hconn_c: &mut Http3Client, hconn_s: &mut Http3Server) -> Option<Datagram> {
+    assert_eq!(hconn_c.state(), Http3State::Initializing);
+    let out = hconn_c.process_output(now()); // Initial
+    let out2 = hconn_c.process_output(now()); // Initial
+    _ = hconn_s.process(out.dgram(), now()); // ACK
+    let out = hconn_s.process(out2.dgram(), now()); // Initial + Handshake
+    let out = hconn_c.process(out.dgram(), now());
+    let out = hconn_s.process(out.dgram(), now());
+    let out = hconn_c.process(out.dgram(), now());
+    drop(hconn_s.process(out.dgram(), now())); // consume ACK
+    let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
+    assert!(hconn_c.events().any(authentication_needed));
+    hconn_c.authenticated(AuthenticationStatus::Ok, now());
+    let out = hconn_c.process_output(now()); // Handshake
+    assert_eq!(hconn_c.state(), Http3State::Connected);
+    let out = hconn_s.process(out.dgram(), now()); // Handshake
+    let out = hconn_c.process(out.dgram(), now());
+    let out = hconn_s.process(out.dgram(), now());
+    // assert!(hconn_s.settings_received);
+    let out = hconn_c.process(out.dgram(), now());
+    // assert!(hconn_c.settings_received);
+
+    out.dgram()
 }
 
 /// Split the first packet off a coalesced packet.

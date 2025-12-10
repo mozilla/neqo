@@ -26,32 +26,46 @@ neqo-crypto = { path = "./../neqo-crypto" }
 neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
 qlog = { workspace = true }
-rustc-hash = { workspace = true}
+rustc-hash = { workspace = true }
 sfv = { version = "0.14", default-features = false, features = ["parsed-types"] }
-strum = { workspace = true}
+strum = { workspace = true }
+thiserror = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "0.6", default-features = false, features = ["cargo_bench_support"] }
+criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false }
 neqo-http3 = { path = ".", features = ["draft-29"] }
-neqo-transport = { path = "./../neqo-transport", features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]
-bench = ["neqo-common/bench", "neqo-crypto/bench", "neqo-qpack/bench", "neqo-transport/bench"]
+bench = [
+        "neqo-common/bench",
+        "neqo-crypto/bench",
+        "neqo-qpack/bench",
+        "neqo-transport/bench",
+        "log/release_max_level_info",
+]
+build-fuzzing-corpus = [
+        "neqo-common/build-fuzzing-corpus",
+        "neqo-transport/disable-encryption",
+        "neqo-crypto/disable-encryption",
+        "neqo-crypto/disable-random",
+        "test-fixture/disable-random",
+]
 disable-encryption = ["neqo-transport/disable-encryption", "neqo-crypto/disable-encryption"]
-draft-29 = []
+draft-29 = ["neqo-transport/draft-29"]
 
 [package.metadata.cargo-machete]
-ignored = ["log"]
+ignored = ["criterion", "log"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
 
-# FIXME: These benches have a high rate of variability and are hence not very useful
-# in their current form. See https://github.com/mozilla/neqo/issues/2804
-# [[bench]]
-# name = "streams"
-# harness = false
-# required-features = ["bench"]
+[package.metadata.bench.streams]
+codspeed.mode = "walltime" # Use "walltime" mode for "streams" bench with codspeed.
+
+[[bench]]
+name = "streams"
+harness = false
+required-features = ["bench"]

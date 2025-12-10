@@ -2,9 +2,6 @@ name: Install NSS
 description: Install NSS
 
 inputs:
-  type:
-    description: "When building, whether to do a debug or release build of NSS"
-    default: "Release"
   minimum-version:
     description: "Minimum required version of NSS"
     required: true
@@ -70,7 +67,7 @@ runs:
       # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
       # is too small for this to be effective there.
       if: ${{ env.SCCACHE_ENABLED != '1' && !steps.system_nss.outputs.suitable && runner.environment != 'github-hosted' }}
-      uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
+      uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
     - name: Enable sscache
       if: ${{ !steps.system_nss.outputs.suitable && runner.environment != 'github-hosted' }}
@@ -93,7 +90,7 @@ runs:
 
     - name: Checkout NSS
       if: ${{ !steps.system_nss.outputs.suitable }}
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       with:
         repository: nss-dev/nss
         path: nss
@@ -104,7 +101,7 @@ runs:
       if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
       env:
-        NSPR_VERSION: 4.37 # This changes so rarely that we can hardcode it.
+        NSPR_VERSION: 4.38.2 # This changes so rarely that we can hardcode it.
       run: |
         curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz |
           tar xz --strip-components=1
@@ -121,7 +118,7 @@ runs:
     - name: Cache NSS
       id: cache
       if: ${{ !steps.system_nss.outputs.suitable && runner.environment == 'github-hosted' }}
-      uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: dist
         key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
@@ -191,17 +188,14 @@ runs:
       shell: bash
       if: ${{ !steps.system_nss.outputs.suitable }}
       env:
-        NSS_TARGET: ${{ inputs.type }}
-        NSS_TYPE: ${{ inputs.type }}
         NSS_DIR: ${{ github.workspace }}/nss
         RUNNER_OS: ${{ runner.os }}
         WORKSPACE: ${{ github.workspace }}
       run: | # zizmor: ignore[github-env] We need to write to GITHUB_PATH on Windows.
-        NSS_OUT="$WORKSPACE/dist/$NSS_TARGET"
+        NSS_OUT="$WORKSPACE/dist/Release"
         {
           echo "LD_LIBRARY_PATH=$NSS_OUT/lib"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib"
-          echo "NSS_TARGET=$NSS_TARGET"
           echo "NSS_DIR=$NSS_DIR"
           echo "NSS_PREBUILT=1"
         } >> "$GITHUB_ENV"
@@ -216,13 +210,10 @@ runs:
         TARGET_PLATFORM: ${{ inputs.target }}
         RUNNER_OS: ${{ runner.os }}
       run: |
-        if [ "$NSS_TARGET" != "Debug" ]; then
-          # We want to do an optimized build for accurate CPU profiling, but
-          # we also want debug symbols and frame pointers for that, which the normal optimized NSS
-          # build process doesn't provide.
-          OPT="-o"
-          [ "$RUNNER_OS" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
-        fi
+        # We want to do an optimized build for accurate CPU profiling, but
+        # we also want debug symbols and frame pointers for that, which the normal optimized NSS
+        # build process doesn't provide.
+        [ "$RUNNER_OS" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         if [[ $TARGET_PLATFORM == *-android* ]]; then
           for file in build-nss-android.sh build-android-common.sh; do
             curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/tags/v137.0/libs/$file"
@@ -238,12 +229,12 @@ runs:
           find /tmp/tmp.* > tmp
           CERTUTIL="$(grep certutil tmp)"
           TARGET_DIR="$(dirname $(dirname $CERTUTIL))"
-          mkdir -p "dist/$NSS_TARGET"
-          cp -vaL "$TARGET_DIR"/* "dist/$NSS_TARGET/"
+          mkdir -p "dist/Release"
+          cp -vaL "$TARGET_DIR"/* "dist/Release/"
           NSPR_H="$(grep nspr.h tmp)"
           INCLUDE_DIR="$(dirname $NSPR_H)"
-          mkdir -p "dist/$NSS_TARGET/include/nspr"
-          cp -vaL "$INCLUDE_DIR"/* "dist/$NSS_TARGET/include/nspr"
+          mkdir -p "dist/Release/include/nspr"
+          cp -vaL "$INCLUDE_DIR"/* "dist/Release/include/nspr"
           CHACHA="$(grep chacha20poly1305.h tmp)"
           PRIVATE_DIR="$(dirname $(dirname $CHACHA))"
           mkdir -p "dist/private"
@@ -254,9 +245,9 @@ runs:
           cp -vaL "$PUBLIC_DIR"/* "dist/"
           LIBNSPR4="$(grep lib/libnspr4.a tmp)"
           LIB_DIR="$(dirname $LIBNSPR4)"
-          mkdir -p "dist/$NSS_TARGET/lib"
-          cp -vaL "$LIB_DIR"/* "dist/$NSS_TARGET/lib"
+          mkdir -p "dist/Release/lib"
+          cp -vaL "$LIB_DIR"/* "dist/Release/lib"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-          $NSS_DIR/build.sh -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 $OPT --static
+          $NSS_DIR/build.sh -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static
         fi

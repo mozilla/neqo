@@ -15,7 +15,7 @@ use std::{
 
 use common::{assert_dscp, connected_server, default_server, generate_ticket};
 use neqo_common::{hex_with_len, qdebug, qtrace, Datagram, Encoder, Role};
-use neqo_crypto::{generate_ech_keys, AuthenticationStatus};
+use neqo_crypto::{generate_ech_keys, AeadTrait as _, AuthenticationStatus};
 use neqo_transport::{
     server::ValidateAddress, CloseReason, ConnectionParameters, Error, State, StreamType,
     MIN_INITIAL_PACKET_SIZE,
@@ -23,7 +23,7 @@ use neqo_transport::{
 use test_fixture::{
     assertions, damage_ech_config, datagram, default_client,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
-    now,
+    now, CountingConnectionIdGenerator,
 };
 
 #[test]
@@ -413,7 +413,7 @@ fn vn_after_retry() {
 
     let mut encoder = Encoder::default();
     encoder.encode_byte(0x80);
-    encoder.encode(&[0; 4]); // Zero version == VN.
+    encoder.encode([0; 4]); // Zero version == VN.
     encoder.encode_vec(1, &client.odcid().unwrap()[..]);
     encoder.encode_vec(1, &[]);
     encoder.encode_uint(4, 0x5a5a_6a6a_u64);
@@ -440,7 +440,9 @@ fn vn_after_retry() {
 fn mitm_retry() {
     // This test decrypts packets and hence does not work with MLKEM and packet number randomization
     // enabled.
-    let mut client = test_fixture::new_client(ConnectionParameters::default().mlkem(false));
+    let mut client = test_fixture::new_client::<CountingConnectionIdGenerator>(
+        ConnectionParameters::default().mlkem(false),
+    );
     let mut retry_server = default_server();
     retry_server.set_validation(ValidateAddress::Always);
     let mut server = default_server();

@@ -3,6 +3,8 @@
 
 version: 2
 updates:
+  # We don't really use Dependabot for Rust dependencies, since we are tracking Gecko,
+  # but we do want to be notified of security vulnerabilities.
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
@@ -10,15 +12,30 @@ updates:
     # Disable all non-security updates.
     # <https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#open-pull-requests-limit>
     open-pull-requests-limit: 0
+    cooldown:
+      default-days: 10
+      semver-major-days: 20
+      semver-minor-days: 10
+      semver-patch-days: 5
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/.github/actions/*"
+      - "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 10
+      # "semver" not supported for github-actions; see https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#configuration-of-cooldown
+      # semver-major-days: 20
+      # semver-minor-days: 10
+      # semver-patch-days: 5
   - package-ecosystem: "docker"
     directory: "/qns"
     schedule:
       interval: "weekly"
-  - package-ecosystem: docker
-    directory: /taskcluster/docker/linux
-    schedule:
-      interval: "weekly"
+    cooldown:
+      default-days: 10
+      # "semver" not supported for docker; see https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#configuration-of-cooldown
+      # semver-major-days: 20
+      # semver-minor-days: 10
+      # semver-patch-days: 5

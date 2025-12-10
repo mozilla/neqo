@@ -1,0 +1,47 @@
+[package]
+name = "mtu"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+version = "0.2.9"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+description = "Obtain the local network interface MTU towards a given IP address."
+keywords = ["mozilla", "interface", "mtu"]
+categories.workspace = true
+readme.workspace = true
+
+[lints]
+workspace = true
+
+[badges]
+maintenance = { status = "actively-developed", branch = "main" }
+
+[dependencies]
+libc = { workspace = true }
+static_assertions = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_NetworkManagement_IpHelper",
+  "Win32_NetworkManagement_Ndis",
+  "Win32_Networking_WinSock",
+] }
+
+[build-dependencies]
+cfg_aliases = { version = "0.2", default-features = false }
+mozbuild = { version = "0.1", default-features = false, optional = true }
+bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
+
+[package.metadata.cargo-machete]
+ignored = ["bindgen", "cfg_aliases"]
+
+[features]
+gecko = ["dep:mozbuild"]
+
+[lib]
+# See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
+bench = false
+

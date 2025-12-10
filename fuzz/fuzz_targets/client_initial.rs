@@ -6,14 +6,15 @@ use libfuzzer_sys::fuzz_target;
 #[cfg(all(fuzzing, not(windows)))]
 fuzz_target!(|data: &[u8]| {
     use neqo_common::{Datagram, Encoder, Role};
-    use neqo_crypto::Aead;
+    use neqo_crypto::AeadTrait as _;
     use neqo_transport::{packet::MIN_INITIAL_PACKET_SIZE, ConnectionParameters, Version};
     use test_fixture::{
         header_protection::{self, decode_initial_header, initial_aead_and_hp},
-        new_client, new_server, now, DEFAULT_ALPN,
+        new_client, new_server, now, CountingConnectionIdGenerator, DEFAULT_ALPN,
     };
 
-    let mut client = new_client(ConnectionParameters::default().mlkem(false));
+    let mut client =
+        new_client::<CountingConnectionIdGenerator>(ConnectionParameters::default().mlkem(false));
     let ci = client.process_output(now()).dgram().expect("a datagram");
     let Some((header, d_cid, s_cid, payload)) = decode_initial_header(&ci, Role::Client) else {
         return;
@@ -32,11 +33,11 @@ fuzz_target!(|data: &[u8]| {
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload_enc.len() + Aead::expansion() + 1).unwrap())
+        .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + 1).unwrap())
         .encode_uint(2, u16::try_from(pn).unwrap());
 
     let mut ciphertext = header_enc.as_ref().to_vec();
-    ciphertext.resize(header_enc.len() + payload_enc.len() + Aead::expansion(), 0);
+    ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
     let v = aead
         .encrypt(
             pn,
@@ -56,7 +57,10 @@ fuzz_target!(|data: &[u8]| {
     );
     let fuzzed_ci = Datagram::new(ci.source(), ci.destination(), ci.tos(), ciphertext);
 
-    let mut server = new_server(DEFAULT_ALPN, ConnectionParameters::default().mlkem(false));
+    let mut server = new_server::<CountingConnectionIdGenerator>(
+        DEFAULT_ALPN,
+        ConnectionParameters::default().mlkem(false),
+    );
     let _response = server.process(Some(fuzzed_ci), now());
 });
 

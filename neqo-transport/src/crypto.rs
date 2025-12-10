@@ -18,16 +18,16 @@ use enum_map::EnumMap;
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Buffer, Encoder, Role};
 pub use neqo_crypto::Epoch;
 use neqo_crypto::{
-    hkdf, hp, random, Aead, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState,
-    PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker,
-    TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE,
-    TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519,
-    TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
+    hkdf, hp, random, Aead, AeadTrait as _, Agent, AntiReplay, Cipher, Error as CryptoError,
+    HandshakeState, PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey,
+    ZeroRttChecker, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
+    TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1,
+    TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
 };
 
 use crate::{
     cid::ConnectionIdRef,
-    frame::FrameType,
+    frame::{FrameEncoder as _, FrameType},
     packet::{self},
     recovery,
     recv_stream::RxStreamOrderer,
@@ -188,6 +188,10 @@ impl Crypto {
         data: Option<&[u8]>,
     ) -> Res<&HandshakeState> {
         let input = data.map(|d| {
+            #[cfg(feature = "build-fuzzing-corpus")]
+            if space == PacketNumberSpace::Initial && matches!(self.tls, Agent::Server(_)) {
+                neqo_common::write_item_to_fuzzing_corpus("find_sni", d);
+            }
             let rec = Record {
                 ct: TLS_CT_HANDSHAKE,
                 epoch: space.into(),
@@ -653,7 +657,10 @@ impl CryptoDxState {
         )
     }
 
-    pub fn compute_mask(&self, sample: &[u8]) -> Res<[u8; hp::Key::SAMPLE_SIZE]> {
+    pub fn compute_mask(
+        &self,
+        sample: &[u8; hp::Key::SAMPLE_SIZE],
+    ) -> Res<[u8; hp::Key::SAMPLE_SIZE]> {
         let mask = self.hpkey.mask(sample)?;
         qtrace!("[{self}] HP sample={} mask={}", hex(sample), hex(mask));
         Ok(mask)
@@ -664,12 +671,12 @@ impl CryptoDxState {
         self.used_pn.end
     }
 
-    pub fn encrypt<'a>(
+    pub fn encrypt(
         &mut self,
         pn: packet::Number,
         hdr: Range<usize>,
-        data: &'a mut [u8],
-    ) -> Res<&'a mut [u8]> {
+        data: &mut [u8],
+    ) -> Res<usize> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
         qtrace!(
             "[{self}] encrypt_in_place pn={pn} hdr={} body={}",
@@ -679,7 +686,7 @@ impl CryptoDxState {
 
         // The numbers in `Self::limit` assume a maximum packet size of `LIMIT`.
         // Adjust them as we encounter larger packets.
-        let body_len = data.len() - hdr.len() - Aead::expansion();
+        let body_len = data.len() - hdr.len() - self.aead.expansion();
         debug_assert!(body_len <= u16::MAX.into());
         if body_len > self.largest_packet_len {
             let new_bits = usize::leading_zeros(self.largest_packet_len - 1)
@@ -692,25 +699,25 @@ impl CryptoDxState {
         let (prev, data) = data.split_at_mut(hdr.end);
         // `prev` may have already-encrypted packets this one is being coalesced with.
         // Use only the actual current header for AAD.
-        let data = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
+        let len = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
 
-        qtrace!("[{self}] encrypt ct={}", hex(&data));
+        qtrace!("[{self}] encrypt ct={}", hex(&data[..len]));
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
-        Ok(data)
+        Ok(len)
     }
 
     #[must_use]
-    pub const fn expansion() -> usize {
-        Aead::expansion()
+    pub fn expansion(&self) -> usize {
+        self.aead.expansion()
     }
 
-    pub fn decrypt<'a>(
+    pub fn decrypt(
         &mut self,
         pn: packet::Number,
         hdr: Range<usize>,
-        data: &'a mut [u8],
-    ) -> Res<&'a mut [u8]> {
+        data: &mut [u8],
+    ) -> Res<usize> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
         qtrace!(
             "[{self}] decrypt_in_place pn={pn} hdr={} body={}",
@@ -719,9 +726,9 @@ impl CryptoDxState {
         );
         self.invoked()?;
         let (hdr, data) = data.split_at_mut(hdr.end);
-        let data = self.aead.decrypt_in_place(pn, hdr, data)?;
+        let len = self.aead.decrypt_in_place(pn, hdr, data)?;
         self.used(pn)?;
-        Ok(data)
+        Ok(len)
     }
 
     #[cfg(not(feature = "disable-encryption"))]
@@ -742,8 +749,8 @@ impl CryptoDxState {
     /// Get the amount of extra padding packets protected with this profile need.
     /// This is the difference between the size of the header protection sample
     /// and the AEAD expansion.
-    pub const fn extra_padding() -> usize {
-        hp::Key::SAMPLE_SIZE.saturating_sub(Aead::expansion())
+    pub fn extra_padding(&self) -> usize {
+        hp::Key::SAMPLE_SIZE.saturating_sub(self.expansion())
     }
 }
 
@@ -1602,9 +1609,10 @@ impl CryptoStreams {
                 Encoder::varint_len(u64::try_from(length).expect("usize fits in u64")) - 1;
             let length = min(data.len(), builder.remaining() - header_len);
 
-            builder.encode_varint(FrameType::Crypto);
-            builder.encode_varint(offset);
-            builder.encode_vvec(&data[..length]);
+            builder.encode_frame(FrameType::Crypto, |b| {
+                b.encode_varint(offset);
+                b.encode_vvec(&data[..length]);
+            });
             Some((offset, length))
         }
 
@@ -1659,6 +1667,10 @@ impl CryptoStreams {
             return;
         };
         while let Some((offset, data)) = cs.tx.next_bytes() {
+            #[cfg(feature = "build-fuzzing-corpus")]
+            if offset == 0 {
+                neqo_common::write_item_to_fuzzing_corpus("find_sni", data);
+            }
             let written = if sni_slicing && offset == 0 {
                 if let Some(sni) = find_sni(data) {
                     // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.

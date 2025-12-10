@@ -12,8 +12,8 @@ use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
-    Http3ServerEvent, Http3State, WebTransportEvent, WebTransportRequest, WebTransportServerEvent,
-    WebTransportSessionAcceptAction,
+    Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent, WebTransportRequest,
+    WebTransportServerEvent,
 };
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use test_fixture::{
@@ -79,7 +79,7 @@ fn connect() -> (Http3Client, Http3Server) {
 
 fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebTransportRequest {
     let wt_session_id = client
-        .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
+        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
         .unwrap();
     exchange_packets(client, server, false, None);
 
@@ -95,7 +95,7 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
                         && headers.contains_header(":protocol", "webtransport")
                 );
                 session
-                    .response(&WebTransportSessionAcceptAction::Accept)
+                    .response(&SessionAcceptAction::Accept, now())
                     .unwrap();
                 wt_server_session = Some(session);
             }
@@ -135,7 +135,10 @@ fn send_data_client(
     wt_stream_id: StreamId,
     data: &[u8],
 ) {
-    assert_eq!(client.send_data(wt_stream_id, data).unwrap(), data.len());
+    assert_eq!(
+        client.send_data(wt_stream_id, data, now()).unwrap(),
+        data.len()
+    );
     exchange_packets(client, server, false, None);
 }
 
@@ -145,7 +148,7 @@ fn send_data_server(
     wt_stream: &Http3OrWebTransportStream,
     data: &[u8],
 ) {
-    assert_eq!(wt_stream.send_data(data).unwrap(), data.len());
+    assert_eq!(wt_stream.send_data(data, now()).unwrap(), data.len());
     exchange_packets(client, server, false, None);
 }
 
@@ -325,4 +328,172 @@ fn wt_server_stream_bidi() {
         .stream_id(),
         wt_server_stream.stream_id()
     );
+}
+
+#[test]
+fn wt_race_condition_server_stream_before_confirmation() {
+    let now = now();
+
+    for in_order in [true, false] {
+        let (mut client, mut server) = connect();
+
+        // Client creates a WebTransport session.
+        client
+            .webtransport_create_session(now, ("https", "something.com", "/"), &[])
+            .unwrap();
+        exchange_packets(&mut client, &mut server, false, None);
+        assert_eq!(server.process_output(now).dgram(), None);
+        while client.next_event().is_some() {}
+
+        // Server accepts the session, but hold back the UDP datagram.
+        let wt_server_session = server
+            .events()
+            .find_map(|event| {
+                if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
+                    session,
+                    ..
+                }) = event
+                {
+                    Some(session)
+                } else {
+                    None
+                }
+            })
+            .expect("Should receive WebTransport session request");
+        wt_server_session
+            .response(&SessionAcceptAction::Accept, now)
+            .unwrap();
+        let server_accept_dgram = server
+            .process_output(now)
+            .dgram()
+            .expect("Expected server to produce session acceptance datagram");
+        assert_eq!(server.process_output(now).dgram(), None);
+
+        // Server creates a stream, but hold back the UDP datagram.
+        let wt_server_stream = wt_server_session.create_stream(StreamType::UniDi).unwrap();
+        assert_eq!(wt_server_stream.send_data(&[42], now).unwrap(), 1);
+        let server_stream_dgram = server
+            .process_output(now)
+            .dgram()
+            .expect("Expected server to produce a datagram with stream data");
+
+        if in_order {
+            // Client processes the server UDP datagrams in order, i.e. the
+            // session acceptance before the stream data.
+            client.process_input(server_accept_dgram, now);
+            assert!(
+                matches!(
+                    client.events().next(),
+                    Some(Http3ClientEvent::WebTransport(
+                        WebTransportEvent::NewSession { .. }
+                    ))
+                ),
+                "Should receive session acceptance event"
+            );
+            client.process_input(server_stream_dgram, now);
+        } else {
+            // Client processes the server UDP datagrams out-of-order, i.e. the
+            // stream data before the session acceptance.
+            client.process_input(server_stream_dgram, now);
+            client.process_input(server_accept_dgram, now);
+            assert!(
+                matches!(
+                    client.events().next(),
+                    Some(Http3ClientEvent::WebTransport(
+                        WebTransportEvent::NewSession { .. }
+                    ))
+                ),
+                "Should receive session acceptance event"
+            );
+        }
+
+        let mut events = client.events();
+        assert!(
+            matches!(
+            events.next(),
+            Some(Http3ClientEvent::WebTransport(
+                WebTransportEvent::NewStream {
+                stream_id,
+                session_id,
+                }
+            )) if stream_id == wt_server_stream.stream_id() && session_id == wt_server_session.stream_id()
+            ),
+            "Should receive early stream event"
+        );
+
+        assert_eq!(
+            events.next(),
+            Some(Http3ClientEvent::DataReadable {
+                stream_id: wt_server_stream.stream_id()
+            }),
+            "Should receive data readable event for early stream"
+        );
+
+        assert_eq!(events.next(), None);
+    }
+}
+
+#[test]
+fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
+    fixture_init();
+    let now = now();
+
+    let (mut client, mut server) = connect();
+
+    // Client creates a WebTransport session.
+    client
+        .webtransport_create_session(now, ("https", "something.com", "/"), &[])
+        .unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+    assert_eq!(server.process_output(now).dgram(), None);
+    while client.next_event().is_some() {}
+
+    // Server accepts the session, and sends a WebTransport datagram, all in the same UDP datagram.
+    let wt_server_session = server
+        .events()
+        .find_map(|event| {
+            if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
+                session,
+                ..
+            }) = event
+            {
+                Some(session)
+            } else {
+                None
+            }
+        })
+        .expect("Should receive WebTransport session request");
+    wt_server_session
+        .response(&SessionAcceptAction::Accept, now)
+        .unwrap();
+    wt_server_session.send_datagram(b"PING", None).unwrap();
+    let accept_and_wt_datagram = server
+        .process_output(now)
+        .dgram()
+        .expect("Expected server to produce session acceptance datagram");
+    assert_eq!(server.process_output(now).dgram(), None);
+
+    // Client processes the server's UDP datagram, first the session acceptance,
+    // then the WebTransport datagram.
+    client.process_input(accept_and_wt_datagram, now);
+    assert!(
+        matches!(
+            client.events().next(),
+            Some(Http3ClientEvent::WebTransport(
+                WebTransportEvent::NewSession { .. }
+            ))
+        ),
+        "Should receive session acceptance event"
+    );
+    assert!(
+        matches!(
+            client.events().next(),
+            Some(Http3ClientEvent::WebTransport(
+                WebTransportEvent::Datagram{ session_id, datagram }
+            )) if session_id == wt_server_session.stream_id() && &datagram == b"PING",
+        ),
+        "Should receive datagram"
+    );
+
+    assert_eq!(client.events().next(), None);
 }

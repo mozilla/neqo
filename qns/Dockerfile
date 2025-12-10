@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef@sha256:116399b1296ed6fc9fb2e530650e229caeb0e1883e68c7f2a82f2b0b9b639a9e AS chef
+FROM lukemathwalker/cargo-chef@sha256:9e564338159930326c71b6c3df9ed5e5b60b0437b84861c6bb6767b1964a0fd4 AS chef
 
 WORKDIR /app
 
@@ -21,7 +21,7 @@ ENV NSS_DIR=/nss \
     NSS_PREBUILT=1 \
     NSPR_DIR=/nspr \
     LD_LIBRARY_PATH=/dist/Release/lib \
-    NSPR_VERSION=4.37
+    NSPR_VERSION=4.38.2
 
 RUN set -eux; \
     mkdir -p "$NSPR_DIR"; \
@@ -41,7 +41,7 @@ RUN set -eux; \
 
 # Copy only binaries to the final image to keep it small.
 
-FROM martenseemann/quic-network-simulator-endpoint@sha256:3c373d0bac88ac0a005c56628e551fe980e44bf2dd50b9c6904d58d7f8d54089
+FROM martenseemann/quic-network-simulator-endpoint@sha256:3b2b9e6fa317da238c8140a7b6d2bf8d4d45a8464b873eecac3ff2a32520b71a
 
 ENV LD_LIBRARY_PATH=/neqo/lib
 COPY --from=builder /neqo/target/release/neqo-client /neqo/target/release/neqo-server /neqo/bin/

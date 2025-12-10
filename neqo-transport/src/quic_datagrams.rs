@@ -8,14 +8,25 @@
 
 use std::{cmp::min, collections::VecDeque};
 
-use neqo_common::{Buffer, Encoder};
+use neqo_common::{qdebug, Buffer, Encoder};
 
 use crate::{
-    events::OutgoingDatagramOutcome, frame::FrameType, packet, recovery, ConnectionEvents, Error,
-    Res, Stats,
+    events::OutgoingDatagramOutcome,
+    frame::{FrameEncoder as _, FrameType},
+    packet, recovery, ConnectionEvents, Error, Res, Stats,
 };
 
-pub const MAX_QUIC_DATAGRAM: u64 = 65535;
+/// Length of a [`FrameType::Datagram`] or [`FrameType::DatagramWithLen`] in
+/// QUIC varint encoding.
+pub const DATAGRAM_FRAME_TYPE_VARINT_LEN: usize = 1;
+static_assertions::const_assert_eq!(
+    Encoder::varint_len(FrameType::Datagram as u64),
+    DATAGRAM_FRAME_TYPE_VARINT_LEN
+);
+static_assertions::const_assert_eq!(
+    Encoder::varint_len(FrameType::DatagramWithLen as u64),
+    DATAGRAM_FRAME_TYPE_VARINT_LEN
+);
 
 #[derive(Debug, Clone, Copy)]
 pub enum DatagramTracking {
@@ -29,12 +40,14 @@ impl From<Option<u64>> for DatagramTracking {
     }
 }
 
-struct QuicDatagram {
+pub struct QuicDatagram {
     data: Vec<u8>,
     tracking: DatagramTracking,
 }
 
 impl QuicDatagram {
+    pub const MAX_SIZE: u64 = 65535;
+
     const fn tracking(&self) -> &DatagramTracking {
         &self.tracking
     }
@@ -82,7 +95,7 @@ impl QuicDatagrams {
     }
 
     pub fn set_remote_datagram_size(&mut self, v: u64) {
-        self.remote_datagram_size = min(v, MAX_QUIC_DATAGRAM);
+        self.remote_datagram_size = min(v, QuicDatagram::MAX_SIZE);
     }
 
     /// This function tries to write a datagram frame into a packet. If the
@@ -96,18 +109,24 @@ impl QuicDatagrams {
     ) {
         while let Some(dgram) = self.datagrams.pop_front() {
             let len = dgram.as_ref().len();
-            if builder.remaining() > len {
-                // We need 1 more than `len` for the Frame type.
+            if len + DATAGRAM_FRAME_TYPE_VARINT_LEN <= builder.remaining() {
+                // The datagram fits into the packet.
                 let length_len =
                     Encoder::varint_len(u64::try_from(len).expect("usize fits in u64"));
                 // Include a length if there is space for another frame after this one.
-                if builder.remaining() >= 1 + length_len + len + packet::Builder::MINIMUM_FRAME_SIZE
+                if builder.remaining()
+                    >= DATAGRAM_FRAME_TYPE_VARINT_LEN
+                        + length_len
+                        + len
+                        + packet::Builder::MINIMUM_FRAME_SIZE
                 {
-                    builder.encode_varint(FrameType::DatagramWithLen);
-                    builder.encode_vvec(dgram.as_ref());
+                    builder.encode_frame(FrameType::DatagramWithLen, |b| {
+                        b.encode_vvec(dgram.as_ref());
+                    });
                 } else {
-                    builder.encode_varint(FrameType::Datagram);
-                    builder.encode(dgram.as_ref());
+                    builder.encode_frame(FrameType::Datagram, |b| {
+                        b.encode(dgram.as_ref());
+                    });
                     builder.mark_full();
                 }
                 debug_assert!(builder.len() <= builder.limit());
@@ -117,6 +136,7 @@ impl QuicDatagrams {
                 // If the packet is empty, except packet headers, and the
                 // datagram cannot fit, drop it.
                 // Also continue trying to write the next QuicDatagram.
+                qdebug!("QUIC datagram ({}) does not fit MTU.", dgram.data.len());
                 self.conn_events
                     .datagram_outcome(dgram.tracking(), OutgoingDatagramOutcome::DroppedTooBig);
                 stats.datagram_tx.dropped_too_big += 1;
@@ -144,9 +164,15 @@ impl QuicDatagrams {
         stats: &mut Stats,
     ) -> Res<()> {
         if u64::try_from(data.len())? > self.remote_datagram_size {
+            qdebug!(
+                "QUIC datagram exceeds remote limit, dropping it, datagram size {}, remote datagram size limit {}.",
+                data.len(),
+                self.remote_datagram_size
+            );
             return Err(Error::TooMuchData);
         }
         if self.datagrams.len() == self.max_queued_outgoing_datagrams {
+            qdebug!("QUIC datagram queue full, dropping first datagram in queue (head-drop).");
             self.conn_events.datagram_outcome(
                 self.datagrams
                     .pop_front()

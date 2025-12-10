@@ -41,7 +41,7 @@ use crate::{
     version::{self, Version},
 };
 
-pub fn connection_tparams_set(qlog: &Qlog, tph: &TransportParametersHandler, now: Instant) {
+pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
             let remote = tph.remote();
@@ -89,15 +89,15 @@ pub fn connection_tparams_set(qlog: &Qlog, tph: &TransportParametersHandler, now
     );
 }
 
-pub fn server_connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
+pub fn server_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     connection_started(qlog, path, now);
 }
 
-pub fn client_connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
+pub fn client_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     connection_started(qlog, path, now);
 }
 
-fn connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
+fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
             let p = path.deref().borrow();
@@ -122,8 +122,12 @@ fn connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
     );
 }
 
-#[expect(clippy::similar_names, reason = "new and now are similar.")]
-pub fn connection_state_updated(qlog: &Qlog, new: &State, now: Instant) {
+#[allow(
+    clippy::allow_attributes,
+    clippy::similar_names,
+    reason = "FIXME: 'new and now are similar' hits on MSRV <1.91."
+)]
+pub fn connection_state_updated(qlog: &mut Qlog, new: &State, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
             let ev_data = EventData::ConnectionStateUpdated(ConnectionStateUpdated {
@@ -146,7 +150,7 @@ pub fn connection_state_updated(qlog: &Qlog, new: &State, now: Instant) {
 }
 
 pub fn client_version_information_initiated(
-    qlog: &Qlog,
+    qlog: &mut Qlog,
     version_config: &version::Config,
     now: Instant,
 ) {
@@ -169,7 +173,7 @@ pub fn client_version_information_initiated(
 }
 
 pub fn client_version_information_negotiated(
-    qlog: &Qlog,
+    qlog: &mut Qlog,
     client: &[Version],
     server: &[version::Wire],
     chosen: Version,
@@ -193,7 +197,7 @@ pub fn client_version_information_negotiated(
 }
 
 pub fn server_version_information_failed(
-    qlog: &Qlog,
+    qlog: &mut Qlog,
     server: &[Version],
     client: version::Wire,
     now: Instant,
@@ -215,7 +219,7 @@ pub fn server_version_information_failed(
     );
 }
 
-pub fn packet_io(qlog: &Qlog, meta: packet::MetaData, now: Instant) {
+pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
             let mut d = Decoder::from(meta.payload());
@@ -253,14 +257,13 @@ pub fn packet_io(qlog: &Qlog, meta: packet::MetaData, now: Instant) {
         now,
     );
 }
-
-pub fn packet_dropped(qlog: &Qlog, public_packet: &packet::Public, now: Instant) {
+pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
             let header =
-                PacketHeader::with_type(public_packet.packet_type().into(), None, None, None, None);
+                PacketHeader::with_type(decrypt_err.packet_type().into(), None, None, None, None);
             let raw = RawInfo {
-                length: Some(public_packet.len() as u64),
+                length: Some(decrypt_err.len() as u64),
                 ..Default::default()
             };
 
@@ -276,7 +279,7 @@ pub fn packet_dropped(qlog: &Qlog, public_packet: &packet::Public, now: Instant)
     );
 }
 
-pub fn packets_lost(qlog: &Qlog, pkts: &[sent::Packet], now: Instant) {
+pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
     qlog.add_event_with_stream(|stream| {
         for pkt in pkts {
             let header =
@@ -294,7 +297,7 @@ pub fn packets_lost(qlog: &Qlog, pkts: &[sent::Packet], now: Instant) {
 }
 
 #[expect(dead_code, reason = "TODO: Construct all variants.")]
-pub enum QlogMetric {
+pub enum Metric {
     MinRtt(Duration),
     SmoothedRtt(Duration),
     LatestRtt(Duration),
@@ -309,7 +312,7 @@ pub enum QlogMetric {
     PacingRate(u64),
 }
 
-pub fn metrics_updated(qlog: &Qlog, updated_metrics: &[QlogMetric], now: Instant) {
+pub fn metrics_updated(qlog: &mut Qlog, updated_metrics: &[Metric], now: Instant) {
     debug_assert!(!updated_metrics.is_empty());
 
     qlog.add_event_data_with_instant(
@@ -327,24 +330,24 @@ pub fn metrics_updated(qlog: &Qlog, updated_metrics: &[QlogMetric], now: Instant
 
             for metric in updated_metrics {
                 match metric {
-                    QlogMetric::MinRtt(v) => min_rtt = Some(v.as_secs_f32() * 1000.0),
-                    QlogMetric::SmoothedRtt(v) => smoothed_rtt = Some(v.as_secs_f32() * 1000.0),
-                    QlogMetric::LatestRtt(v) => latest_rtt = Some(v.as_secs_f32() * 1000.0),
-                    QlogMetric::RttVariance(v) => rtt_variance = Some(v.as_secs_f32() * 1000.0),
-                    QlogMetric::PtoCount(v) => {
+                    Metric::MinRtt(v) => min_rtt = Some(v.as_secs_f32() * 1000.0),
+                    Metric::SmoothedRtt(v) => smoothed_rtt = Some(v.as_secs_f32() * 1000.0),
+                    Metric::LatestRtt(v) => latest_rtt = Some(v.as_secs_f32() * 1000.0),
+                    Metric::RttVariance(v) => rtt_variance = Some(v.as_secs_f32() * 1000.0),
+                    Metric::PtoCount(v) => {
                         pto_count = Some(u16::try_from(*v).expect("fits in u16"));
                     }
-                    QlogMetric::CongestionWindow(v) => {
+                    Metric::CongestionWindow(v) => {
                         congestion_window = Some(u64::try_from(*v).expect("fits in u64"));
                     }
-                    QlogMetric::BytesInFlight(v) => {
+                    Metric::BytesInFlight(v) => {
                         bytes_in_flight = Some(u64::try_from(*v).expect("fits in u64"));
                     }
-                    QlogMetric::SsThresh(v) => {
+                    Metric::SsThresh(v) => {
                         ssthresh = Some(u64::try_from(*v).expect("fits in u64"));
                     }
-                    QlogMetric::PacketsInFlight(v) => packets_in_flight = Some(*v),
-                    QlogMetric::PacingRate(v) => pacing_rate = Some(*v),
+                    Metric::PacketsInFlight(v) => packets_in_flight = Some(*v),
+                    Metric::PacingRate(v) => pacing_rate = Some(*v),
                     _ => (),
                 }
             }

@@ -14,9 +14,9 @@
 
 use std::{
     cell::RefCell,
-    fmt::{self, Display},
+    fmt::Display,
     fs,
-    future::Future,
+    future::{poll_fn, Future},
     io::{self},
     net::{SocketAddr, ToSocketAddrs as _},
     num::NonZeroUsize,
@@ -24,6 +24,7 @@ use std::{
     pin::Pin,
     process::exit,
     rc::Rc,
+    task::{Context, Poll},
     time::{Duration, Instant},
 };
 
@@ -39,6 +40,7 @@ use neqo_crypto::{
 };
 use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version};
 use neqo_udp::{DatagramIter, RecvBuf};
+use thiserror::Error;
 use tokio::time::Sleep;
 
 use crate::SharedArgs;
@@ -48,54 +50,21 @@ const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 pub mod http09;
 pub mod http3;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("invalid argument: {0}")]
     Argument(&'static str),
-    Http3(neqo_http3::Error),
-    Io(io::Error),
-    Qlog,
-    Transport(neqo_transport::Error),
-    Crypto(neqo_crypto::Error),
+    #[error(transparent)]
+    Http3(#[from] neqo_http3::Error),
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error(transparent)]
+    Qlog(#[from] qlog::Error),
+    #[error(transparent)]
+    Transport(#[from] neqo_transport::Error),
+    #[error(transparent)]
+    Crypto(#[from] neqo_crypto::Error),
 }
-
-impl From<neqo_crypto::Error> for Error {
-    fn from(err: neqo_crypto::Error) -> Self {
-        Self::Crypto(err)
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Self {
-        Self::Io(err)
-    }
-}
-
-impl From<neqo_http3::Error> for Error {
-    fn from(err: neqo_http3::Error) -> Self {
-        Self::Http3(err)
-    }
-}
-
-impl From<qlog::Error> for Error {
-    fn from(_err: qlog::Error) -> Self {
-        Self::Qlog
-    }
-}
-
-impl From<neqo_transport::Error> for Error {
-    fn from(err: neqo_transport::Error) -> Self {
-        Self::Transport(err)
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error: {self:?}")?;
-        Ok(())
-    }
-}
-
-impl std::error::Error for Error {}
 
 pub type Res<T> = Result<T, Error>;
 
@@ -258,6 +227,15 @@ pub trait HttpServer: Display {
     ) -> OutputBatch;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
+    /// Enables an [`HttpServer`] to drive asynchronous operations.
+    ///
+    /// Needed in Firefox's HTTP/3 proxy test server implementation to drive TCP
+    /// and UDP sockets to the proxy target.
+    ///
+    /// <https://github.com/mozilla-firefox/firefox/blob/main/netwerk/test/http3server/src/main.rs>
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<()> {
+        Poll::Pending
+    }
 }
 
 pub struct Runner<S> {
@@ -268,7 +246,7 @@ pub struct Runner<S> {
     recv_buf: RecvBuf,
 }
 
-impl<S: HttpServer> Runner<S> {
+impl<S: HttpServer + Unpin> Runner<S> {
     #[must_use]
     pub fn new(
         server: S,
@@ -349,6 +327,14 @@ impl<S: HttpServer> Runner<S> {
                                 socket.writable().await?;
                                 // Now try again.
                             }
+                            Err(e)
+                                if e.raw_os_error() == Some(libc::EIO)
+                                    && dgram.num_datagrams() > 1 =>
+                            {
+                                qinfo!("`libc::sendmsg` failed with {e}; quinn-udp will halt segmentation offload");
+                                // Drop the packets and let QUIC handle retransmission.
+                                break;
+                            }
                             e @ Err(_) => return e,
                         }
                     }
@@ -406,12 +392,22 @@ impl<S: HttpServer> Runner<S> {
             Ok(()) => Ok(Ready::Socket(inx)),
             Err(e) => Err(e),
         });
+
         let timeout_ready = self
             .timeout
             .as_mut()
             .map_or_else(|| Either::Right(futures::future::pending()), Either::Left)
             .map(|()| Ok(Ready::Timeout));
-        select(sockets_ready, timeout_ready).await.factor_first().0
+
+        let server_ready =
+            poll_fn(|cx| Pin::new(&mut self.server).poll(cx)).map(|()| Ok(Ready::Server));
+
+        select(
+            select(sockets_ready, timeout_ready).map(|either| either.factor_first().0),
+            server_ready,
+        )
+        .map(|either| either.factor_first().0)
+        .await
     }
 
     pub async fn run(mut self) -> Res<()> {
@@ -431,6 +427,9 @@ impl<S: HttpServer> Runner<S> {
                     self.timeout = None;
                     self.process().await?;
                 }
+                Ready::Server => {
+                    // Processing server at top of the loop.
+                }
             }
         }
     }
@@ -439,6 +438,7 @@ impl<S: HttpServer> Runner<S> {
 enum Ready {
     Socket(usize),
     Timeout,
+    Server,
 }
 
 #[expect(clippy::type_complexity, reason = "pinned and boxed future")]
@@ -478,8 +478,7 @@ pub fn run(
         .collect::<Result<_, io::Error>>()?;
 
     // Note: this is the exception to the case where we use `Args::now`.
-    let anti_replay = AntiReplay::new(Instant::now(), ANTI_REPLAY_WINDOW, 7, 14)
-        .expect("unable to setup anti-replay");
+    let anti_replay = AntiReplay::new(Instant::now(), ANTI_REPLAY_WINDOW, 7, 14)?;
     let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
 
     if args.shared.alpn == "h3" {
@@ -492,7 +491,7 @@ pub fn run(
         Ok((Box::pin(runner.run()), local_addrs))
     } else {
         let runner = Runner::new(
-            http09::HttpServer::new(&args, anti_replay, cid_mgr).expect("We cannot make a server!"),
+            http09::HttpServer::new(&args, anti_replay, cid_mgr)?,
             Box::new(move || args.now()),
             sockets,
         );
