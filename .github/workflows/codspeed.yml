@@ -57,7 +57,9 @@ jobs:
 
   benchmarks:
     name: Run bench
-    runs-on: ${{ matrix.bench.mode == 'walltime' && 'Neqo' || 'ubuntu-24.04' }}
+    runs-on: # zizmor: ignore[self-hosted-runner]
+      group: ${{ matrix.bench.mode == 'walltime' && 'Neqo' || '' }}
+      labels: ${{ matrix.bench.mode == 'walltime' && '' || 'ubuntu-24.04' }}
     strategy:
       matrix:
         bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
