@@ -15,7 +15,7 @@ env:
   RUST_TEST_TIME_DOCTEST: 10,30
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -32,7 +32,7 @@ jobs:
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           sparse-checkout: Cargo.toml
           persist-credentials: false
@@ -82,7 +82,7 @@ jobs:
           # - os: ubuntu-22.04
           #   rust-toolchain: stable
           #   type: debug
-          - os: macos-13
+          - os: macos-14
             rust-toolchain: stable
             type: debug
           - os: windows-2022
@@ -103,7 +103,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
 
@@ -180,7 +180,7 @@ jobs:
 
       - name: Save simulation seeds artifact
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
           path: simulation-seeds
@@ -190,7 +190,7 @@ jobs:
     name: Ensure `Cargo.lock` contains all required dependencies
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/rust
@@ -204,13 +204,12 @@ jobs:
 
   check-android:
     name: Check Android
-    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     strategy:
       matrix:
         target: ['x86_64-linux-android', 'i686-linux-android'] # 'aarch64-linux-android' not currently working
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
       - id: nss-version
@@ -223,14 +222,13 @@ jobs:
 
   check-vm:
     name: Run checks for VM-only platforms
-    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         os: [ freebsd, openbsd, netbsd ] # NSS package on 'solaris' is too old.
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/check-vm

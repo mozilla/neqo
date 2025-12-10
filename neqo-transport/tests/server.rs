@@ -11,7 +11,8 @@ use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
 use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
 use neqo_common::{qtrace, Datagram, Decoder, Encoder, Role};
 use neqo_crypto::{
-    generate_ech_keys, Aead, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
+    generate_ech_keys, AeadTrait as _, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult,
+    ZeroRttChecker,
 };
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
@@ -448,7 +449,7 @@ fn bad_client_initial() {
         .unwrap();
 
     let mut payload_enc = Encoder::from(plaintext);
-    payload_enc.encode(&[0x08, 0x02, 0x00, 0x00]); // Add a stream frame.
+    payload_enc.encode([0x08, 0x02, 0x00, 0x00]); // Add a stream frame.
 
     // Make a new header with a 1 byte packet number length.
     let mut header_enc = Encoder::new();
@@ -458,12 +459,12 @@ fn bad_client_initial() {
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload_enc.len() + Aead::expansion() + PN_LEN).unwrap())
+        .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + PN_LEN).unwrap())
         .encode_byte(u8::try_from(pn >> 8).unwrap())
         .encode_byte(u8::try_from(pn & 0xff).unwrap());
 
     let mut ciphertext = header_enc.as_ref().to_vec();
-    ciphertext.resize(header_enc.len() + payload_enc.len() + Aead::expansion(), 0);
+    ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
     let v = aead
         .encrypt(
             pn,
@@ -540,7 +541,7 @@ fn bad_client_initial_connection_close() {
     let (_, pn) = header_protection::remove(&hp, header, payload);
 
     let mut payload_enc = Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE);
-    payload_enc.encode(&[0x1c, 0x01, 0x00, 0x00]); // Add a CONNECTION_CLOSE frame.
+    payload_enc.encode([0x1c, 0x01, 0x00, 0x00]); // Add a CONNECTION_CLOSE frame.
 
     // Make a new header with a 1 byte packet number length.
     let mut header_enc = Encoder::new();
@@ -550,11 +551,11 @@ fn bad_client_initial_connection_close() {
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload_enc.len() + Aead::expansion() + 1).unwrap())
+        .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + 1).unwrap())
         .encode_byte(u8::try_from(pn).unwrap());
 
     let mut ciphertext = header_enc.as_ref().to_vec();
-    ciphertext.resize(header_enc.len() + payload_enc.len() + Aead::expansion(), 0);
+    ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
     let v = aead
         .encrypt(
             pn,

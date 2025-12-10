@@ -55,45 +55,15 @@ pub enum Error {
     #[error("invalid argument: {0}")]
     Argument(&'static str),
     #[error(transparent)]
-    Http3(neqo_http3::Error),
+    Http3(#[from] neqo_http3::Error),
     #[error(transparent)]
-    Io(io::Error),
-    #[error("qlog error")]
-    Qlog,
+    Io(#[from] io::Error),
     #[error(transparent)]
-    Transport(neqo_transport::Error),
+    Qlog(#[from] qlog::Error),
     #[error(transparent)]
-    Crypto(neqo_crypto::Error),
-}
-
-impl From<neqo_crypto::Error> for Error {
-    fn from(err: neqo_crypto::Error) -> Self {
-        Self::Crypto(err)
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Self {
-        Self::Io(err)
-    }
-}
-
-impl From<neqo_http3::Error> for Error {
-    fn from(err: neqo_http3::Error) -> Self {
-        Self::Http3(err)
-    }
-}
-
-impl From<qlog::Error> for Error {
-    fn from(_err: qlog::Error) -> Self {
-        Self::Qlog
-    }
-}
-
-impl From<neqo_transport::Error> for Error {
-    fn from(err: neqo_transport::Error) -> Self {
-        Self::Transport(err)
-    }
+    Transport(#[from] neqo_transport::Error),
+    #[error(transparent)]
+    Crypto(#[from] neqo_crypto::Error),
 }
 
 pub type Res<T> = Result<T, Error>;
@@ -356,6 +326,14 @@ impl<S: HttpServer + Unpin> Runner<S> {
                             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                                 socket.writable().await?;
                                 // Now try again.
+                            }
+                            Err(e)
+                                if e.raw_os_error() == Some(libc::EIO)
+                                    && dgram.num_datagrams() > 1 =>
+                            {
+                                qinfo!("`libc::sendmsg` failed with {e}; quinn-udp will halt segmentation offload");
+                                // Drop the packets and let QUIC handle retransmission.
+                                break;
                             }
                             e @ Err(_) => return e,
                         }

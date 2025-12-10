@@ -3,7 +3,6 @@ on:
   workflow_call:
   pull_request:
     branches: ["main"]
-  merge_group:
   workflow_dispatch:
     inputs:
       bencher:
@@ -27,7 +26,7 @@ env:
   WORKSPACE: ${{ github.workspace}}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -43,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout mozilla/neqo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           repository: mozilla/neqo
           path: neqo
@@ -169,29 +168,32 @@ jobs:
         run: |
           SHA=$(cd neqo && git log origin/main -1 --format=%H)
           echo "$SHA" > main-sha.txt
+          python3 neqo/.github/scripts/format-bench-results.py results.txt
+          # Build final markdown output
           {
             echo "### Benchmark results"
             echo
-            echo "Performance differences relative to $SHA."
+            if [ -s significant-results.md ]; then
+              echo "Significant performance differences relative to $SHA."
+              cat significant-results.md
+            else
+              echo "No significant performance differences relative to $SHA."
+            fi
             echo
-            sed -E -e 's/^                 //gi' \
-                  -e '/cset:.*last message/d' \
-                  -e '/Criterion.rs ERROR: Error in Gnuplot:.*$/d' \
-                  -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
-              perl -p0e 's/(Change within noise threshold\.|No change in performance detected\.|Performance has regressed\.|Performance has improved\.)\n([a-zA-Z0-9][^F][^\s]*[\-\/])/$1\n\n$2/g' |\
-              perl -p -0777 -e 's/(.*?)\n(.*?)(((No change|Change within|Performance has).*?)(\nFound .*?)?)?\n\n/<details><summary>$1: $4<\/summary><pre>\n$2$6<\/pre><\/details>\n/gs' |\
-              sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
-                    -e 's/(Performance has improved.)/:green_heart: <b>\1<\/b>/gi' \
-                    -e 's/^ +((<\/pre>|Found).*)/\1/gi' \
-                    -e 's/^<details>(.*Performance has.*)/<details open>\1/gi'
-          } >> results.md
+            echo "<details><summary>All results</summary>"
+            echo
+            cat all-bench-results.md
+            echo
+            echo "</details>"
+          } > results.md
+          rm -f all-bench-results.md significant-results.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
           echo "$TESTBED" > testbed.txt
           cp "$EVENT_PATH" event.json
 
       - name: Export profiler.firefox.com data
         id: export_samply
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-samply
           path: |
@@ -202,7 +204,7 @@ jobs:
 
       - name: Export performance data
         id: export_perf
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-perf
           path: |

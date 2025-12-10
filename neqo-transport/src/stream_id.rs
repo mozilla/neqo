@@ -8,13 +8,16 @@
 
 use std::fmt::{self, Display, Formatter};
 
+use enum_map::Enum;
 use neqo_common::Role;
 
 /// The type of stream, either Bi-Directional or Uni-Directional.
-#[derive(PartialEq, Debug, Copy, Clone, PartialOrd, Eq, Ord, Hash)]
+/// The discriminant values match the QUIC stream type bits.
+#[derive(PartialEq, Debug, Copy, Clone, PartialOrd, Eq, Ord, Hash, Enum)]
+#[repr(u64)]
 pub enum StreamType {
-    BiDi,
-    UniDi,
+    BiDi = 0,
+    UniDi = 2,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Ord, PartialOrd, Hash, Default)]
@@ -28,11 +31,7 @@ impl StreamId {
 
     #[must_use]
     pub const fn init(stream_type: StreamType, role: Role) -> Self {
-        let type_val = match stream_type {
-            StreamType::BiDi => 0,
-            StreamType::UniDi => 2,
-        };
-        Self(type_val + Self::role_bit(role))
+        Self(stream_type as u64 + Self::role_bit(role))
     }
 
     #[must_use]

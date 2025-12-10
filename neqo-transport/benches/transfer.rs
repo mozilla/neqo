@@ -4,6 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(
+    clippy::significant_drop_tightening,
+    reason = "Inherent in codspeed criterion_group! macro."
+)]
+
 use std::{hint::black_box, time::Duration};
 
 use criterion::{criterion_group, criterion_main, BatchSize::SmallInput, Criterion};
@@ -12,13 +17,12 @@ use test_fixture::{
     boxed,
     sim::{
         connection::{Node, ReachState, ReceiveData, SendData},
-        network::{RandomDelay, TailDrop},
+        network::{Delay, TailDrop},
         Simulator,
     },
 };
 
-const ZERO: Duration = Duration::from_millis(0);
-const JITTER: Duration = Duration::from_millis(10);
+const DELAY: Duration = Duration::from_millis(10);
 const TRANSFER_AMOUNT: usize = 1 << 22; // 4Mbyte
 
 #[expect(
@@ -38,7 +42,7 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
                     boxed![SendData::new(TRANSFER_AMOUNT)]
                 ),
                 TailDrop::dsl_uplink(),
-                RandomDelay::new(ZERO..JITTER),
+                Delay::new(DELAY),
                 Node::new_server(
                     ConnectionParameters::default()
                         .pmtud(true)
@@ -48,7 +52,7 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
                     boxed![ReceiveData::new(TRANSFER_AMOUNT)]
                 ),
                 TailDrop::dsl_downlink(),
-                RandomDelay::new(ZERO..JITTER),
+                Delay::new(DELAY),
             ];
             let mut sim = Simulator::new(label, nodes);
             if let Some(seed) = &seed {

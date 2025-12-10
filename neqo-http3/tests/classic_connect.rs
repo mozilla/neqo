@@ -26,7 +26,7 @@ fn classic_connect() {
     let stream_id = client
         .connect(now(), AUTHORITY, &[], Priority::default())
         .unwrap();
-    client.send_data(stream_id, b"ping").unwrap();
+    client.send_data(stream_id, b"ping", now()).unwrap();
     exchange_packets(&mut client, &mut server, false, None);
 
     let Some(Http3ServerEvent::Headers { headers, .. }) = server.next_event() else {
@@ -34,11 +34,11 @@ fn classic_connect() {
     };
     assert_eq!(
         headers.find_header(":method").map(Header::value),
-        Some("CONNECT")
+        Some(b"CONNECT".as_ref())
     );
     assert_eq!(
         headers.find_header(":authority").map(Header::value),
-        Some(AUTHORITY)
+        Some(AUTHORITY.as_bytes())
     );
     // > The :scheme and :path pseudo-header fields are omitted
     //
@@ -56,7 +56,7 @@ fn classic_connect() {
     stream
         .send_headers(&[Header::new(":status", "200")])
         .unwrap();
-    stream.send_data(b"pong").unwrap();
+    stream.send_data(b"pong", now()).unwrap();
     exchange_packets(&mut client, &mut server, false, None);
 
     // Ignore some client events.
@@ -83,7 +83,7 @@ fn classic_connect() {
     assert_eq!(stream_id, stream.stream_id());
     assert_eq!(
         headers.find_header(":status").map(Header::value),
-        Some("200")
+        Some(b"200".as_ref())
     );
 
     let Some(Http3ClientEvent::DataReadable { stream_id }) = client.next_event() else {

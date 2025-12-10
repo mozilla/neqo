@@ -9,6 +9,7 @@ use std::mem;
 use neqo_common::{hex, qinfo, qtrace, Encoder};
 
 use crate::{
+    aead::Aead as _,
     constants::{Cipher, Version},
     err::{Error, Res},
     hkdf,
@@ -84,12 +85,12 @@ impl SelfEncrypt {
         // AAD covers the entire header, plus the value of the AAD parameter that is provided.
         let salt = random::<{ Self::SALT_LENGTH }>();
         let cipher = self.make_aead(&self.key, &salt)?;
-        let encoded_len = 2 + salt.len() + plaintext.len() + Aead::expansion();
+        let encoded_len = 2 + salt.len() + plaintext.len() + cipher.expansion();
 
         let mut enc = Encoder::with_capacity(encoded_len);
         enc.encode_byte(Self::VERSION);
         enc.encode_byte(self.key_id);
-        enc.encode(&salt);
+        enc.encode(salt);
 
         let mut extended_aad = enc.clone();
         extended_aad.encode(aad);

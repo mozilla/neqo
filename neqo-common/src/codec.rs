@@ -211,7 +211,6 @@ impl<'b> PartialEq<Decoder<'b>> for Decoder<'_> {
 }
 
 /// Encoder is good for building data structures.
-#[derive(Clone, PartialEq, Eq)]
 pub struct Encoder<B = Vec<u8>> {
     buf: B,
     /// Tracks the starting position of the buffer when the [`Encoder`] is created.
@@ -219,6 +218,23 @@ pub struct Encoder<B = Vec<u8>> {
     /// encoding began and those written by the [`Encoder`] itself.
     start: usize,
 }
+
+impl Clone for Encoder {
+    fn clone(&self) -> Self {
+        Self {
+            buf: self.as_ref().to_vec(),
+            start: 0,
+        }
+    }
+}
+
+impl<B: Buffer> PartialEq for Encoder<B> {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ref() == other.as_ref()
+    }
+}
+
+impl<B: Buffer> Eq for Encoder<B> {}
 
 impl<B: Buffer> Encoder<B> {
     /// Get the length of the [`Encoder`].
@@ -239,7 +255,7 @@ impl<B: Buffer> Encoder<B> {
     /// Note: for a view of a slice, use `Decoder::new(&enc[s..e])`
     #[must_use]
     pub fn as_decoder(&self) -> Decoder<'_> {
-        Decoder::new(self.buf.as_slice())
+        Decoder::new(self.as_ref())
     }
 
     /// Generic encode routine for arbitrary data.
@@ -247,9 +263,9 @@ impl<B: Buffer> Encoder<B> {
     /// # Panics
     ///
     /// When writing to the underlying buffer fails.
-    pub fn encode(&mut self, data: &[u8]) -> &mut Self {
+    pub fn encode(&mut self, data: impl AsRef<[u8]>) -> &mut Self {
         self.buf
-            .write_all(data)
+            .write_all(data.as_ref())
             .expect("Buffer has enough capacity.");
         self
     }
@@ -292,9 +308,9 @@ impl<B: Buffer> Encoder<B> {
         #[expect(clippy::cast_possible_truncation, reason = "This is intentional.")]
         match () {
             () if v < (1 << 6) => self.encode_byte(v as u8),
-            () if v < (1 << 14) => self.encode(&((v as u16 | (1 << 14)).to_be_bytes())),
-            () if v < (1 << 30) => self.encode(&((v as u32 | (2 << 30)).to_be_bytes())),
-            () if v < (1 << 62) => self.encode(&(v | (3 << 62)).to_be_bytes()),
+            () if v < (1 << 14) => self.encode((v as u16 | (1 << 14)).to_be_bytes()),
+            () if v < (1 << 30) => self.encode((v as u32 | (2 << 30)).to_be_bytes()),
+            () if v < (1 << 62) => self.encode((v | (3 << 62)).to_be_bytes()),
             () => panic!("Varint value too large"),
         }
     }
@@ -409,6 +425,17 @@ impl Encoder<Vec<u8>> {
         Self::default()
     }
 
+    /// Skip the first `n` bytes from the encoder buffer without copying.
+    /// This advances the internal offset, making those bytes inaccessible.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `n` is greater than the current length of the encoder.
+    pub fn skip(&mut self, n: usize) {
+        assert!(n <= self.len(), "Cannot skip beyond buffer length");
+        self.start += n;
+    }
+
     /// Static helper function for previewing the results of encoding without doing it.
     ///
     /// # Panics
@@ -504,8 +531,11 @@ impl From<&[u8]> for Encoder {
 }
 
 impl From<Encoder> for Vec<u8> {
-    fn from(buf: Encoder) -> Self {
-        buf.buf
+    fn from(mut enc: Encoder) -> Self {
+        if enc.start > 0 {
+            enc.buf.drain(..enc.start);
+        }
+        enc.buf
     }
 }
 
@@ -927,7 +957,7 @@ mod tests {
     #[test]
     fn encode() {
         let mut enc = Encoder::default();
-        enc.encode(&[1, 2, 3]);
+        enc.encode([1, 2, 3]);
         assert_eq!(enc, Encoder::from_hex("010203"));
     }
 
@@ -1036,7 +1066,7 @@ mod tests {
     fn encode_vec_with_overflow() {
         let mut enc = Encoder::default();
         enc.encode_vec_with(1, |enc_inner| {
-            enc_inner.encode(&[0xb0; 256]);
+            enc_inner.encode([0xb0; 256]);
         });
     }
 
@@ -1060,7 +1090,7 @@ mod tests {
     fn encode_vvec_with_longer() {
         let mut enc = Encoder::default();
         enc.encode_vvec_with(|enc_inner| {
-            enc_inner.encode(&[0xa5; 65]);
+            enc_inner.encode([0xa5; 65]);
         });
         let v: Vec<u8> = enc.into();
         assert_eq!(&v[..3], &[0x40, 0x41, 0xa5]);
@@ -1193,5 +1223,77 @@ mod tests {
         let mut a = [0; 16];
         let buf = Cursor::new(&mut a[..]);
         assert_eq!(Buffer::position(&buf), 0);
+    }
+
+    #[test]
+    fn encoder_skip() {
+        let mut enc = Encoder::from_hex("010203040506");
+
+        enc.skip(2);
+        assert_eq!(enc.len(), 4);
+        assert_eq!(enc.as_ref(), &[0x03, 0x04, 0x05, 0x06]);
+
+        enc.skip(4);
+        assert_eq!(enc.len(), 0);
+        assert!(enc.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "Cannot skip beyond buffer length")]
+    fn encoder_skip_too_much() {
+        let mut enc = Encoder::from_hex("0102");
+        enc.skip(3);
+    }
+
+    /// [`Encoder::as_decoder`] should only expose the bytes actively encoded through this
+    /// [`Encoder`], not all bytes of the underlying [`Buffer`].
+    #[test]
+    fn as_decoder_exposes_encoded_bytes_only_not_whole_buffer() {
+        let mut buffer = vec![1, 2, 3, 4];
+        let mut enc = Encoder::new_borrowed_vec(&mut buffer);
+        enc.encode([5, 6, 7]);
+
+        let decoder = enc.as_decoder();
+        assert_eq!(decoder.as_ref().len(), 3);
+        assert_eq!(decoder.as_ref(), &[5, 6, 7]);
+        assert_eq!(buffer, &[1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    /// Converting an [`Encoder`] to [`Vec<u8>`] should respect the `start` offset.
+    #[test]
+    fn into_vec_respects_skip() {
+        let mut enc = Encoder::from_hex("010203040506");
+        enc.skip(2);
+        let v: Vec<u8> = enc.into();
+        assert_eq!(v, vec![0x03, 0x04, 0x05, 0x06]);
+    }
+
+    /// Converting an [`Encoder`] without skip should return the full buffer.
+    #[test]
+    fn into_vec_without_skip() {
+        let enc = Encoder::from_hex("010203");
+        let v: Vec<u8> = enc.into();
+        assert_eq!(v, vec![0x01, 0x02, 0x03]);
+    }
+
+    /// [`PartialEq`] should compare the logical view.
+    #[test]
+    fn partial_eq_respects_skip() {
+        let mut enc1 = Encoder::from_hex("010203040506");
+        enc1.skip(2);
+        let enc2 = Encoder::from_hex("03040506");
+        assert_eq!(enc1, enc2);
+    }
+
+    /// [`Clone`] should not clone skipped bytes.
+    #[test]
+    fn clone_respects_skip() {
+        let mut enc = Encoder::from_hex("010203040506");
+        enc.skip(2);
+        let cloned = enc.clone();
+        assert_eq!(cloned.as_ref(), &[0x03, 0x04, 0x05, 0x06]);
+        assert_eq!(cloned.len(), 4);
+        let v: Vec<u8> = cloned.into();
+        assert_eq!(v, vec![0x03, 0x04, 0x05, 0x06]);
     }
 }

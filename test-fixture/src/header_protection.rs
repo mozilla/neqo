@@ -16,7 +16,7 @@ use std::ops::Range;
 use neqo_common::{hex_with_len, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-    hkdf, hp, Aead,
+    hkdf, hp, Aead, AeadTrait as _,
 };
 
 pub use crate::{default_client, now, CountingConnectionIdGenerator};
@@ -108,7 +108,7 @@ pub fn remove(hp: &hp::Key, header: &[u8], payload: &[u8]) -> (Vec<u8>, u64) {
     fixed_header.extend_from_slice(&payload[..4]);
 
     // Sample for masking and apply the mask.
-    let mask = hp.mask(&payload[4..20]).unwrap();
+    let mask = hp.mask(payload[4..20].try_into().unwrap()).unwrap();
     fixed_header[0] ^= mask[0] & 0xf;
     let pn_len = 1 + usize::from(fixed_header[0] & 0x3);
     for i in 0..pn_len {
@@ -126,7 +126,13 @@ pub fn remove(hp: &hp::Key, header: &[u8], payload: &[u8]) -> (Vec<u8>, u64) {
 pub fn apply(hp: &hp::Key, packet: &mut [u8], pn_bytes: Range<usize>) {
     let sample_start = pn_bytes.start + 4;
     let sample_end = sample_start + 16;
-    let mask = hp.mask(&packet[sample_start..sample_end]).unwrap();
+    let mask = hp
+        .mask(
+            packet[sample_start..sample_end]
+                .try_into()
+                .expect("Failed to convert sample slice to array for header protection mask"),
+        )
+        .expect("Failed to generate header protection mask");
     qtrace!(
         "sample={} mask={}",
         hex_with_len(&packet[sample_start..sample_end]),

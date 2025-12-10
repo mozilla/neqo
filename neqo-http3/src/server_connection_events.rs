@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-use neqo_common::{header::HeadersExt as _, Header};
+use neqo_common::{header::HeadersExt as _, Bytes, Header};
 use neqo_transport::{AppError, StreamId};
 
 use crate::{
@@ -64,7 +64,7 @@ pub enum WebTransportEvent {
     NewStream(Http3StreamInfo),
     Datagram {
         session_id: StreamId,
-        datagram: Vec<u8>,
+        datagram: Bytes,
     },
 }
 
@@ -81,7 +81,7 @@ pub enum ConnectUdpEvent {
     },
     Datagram {
         session_id: StreamId,
-        datagram: Vec<u8>,
+        datagram: Bytes,
     },
 }
 
@@ -148,12 +148,12 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
 
     fn extended_connect_new_session(&self, stream_id: StreamId, headers: Vec<Header>) {
         match headers.find_header(":protocol").map(Header::value) {
-            Some("webtransport") => {
+            Some(b"webtransport") => {
                 self.insert(Http3ServerConnEvent::WebTransport(
                     WebTransportEvent::Session { stream_id, headers },
                 ));
             }
-            Some("connect-udp") => {
+            Some(b"connect-udp") => {
                 self.insert(Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::Session {
                     stream_id,
                     headers,
@@ -220,7 +220,7 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
     fn new_datagram(
         &self,
         session_id: StreamId,
-        datagram: Vec<u8>,
+        datagram: Bytes,
         connect_type: ExtendedConnectType,
     ) {
         let event = match connect_type {

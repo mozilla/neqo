@@ -15,7 +15,7 @@ pub use connect_udp_frame::Frame as ConnectUdpFrame;
     unused_imports,
     reason = "These are exported."
 )]
-pub use hframe::{HFrame, H3_FRAME_TYPE_HEADERS, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
+pub use hframe::{HFrame, HFrameType};
 pub use reader::{FrameReader, StreamReaderConnectionWrapper, StreamReaderRecvStreamWrapper};
 pub use wtframe::WebTransportFrame;
 

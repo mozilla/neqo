@@ -94,7 +94,9 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
                     headers.contains_header(":method", "CONNECT")
                         && headers.contains_header(":protocol", "webtransport")
                 );
-                session.response(&SessionAcceptAction::Accept).unwrap();
+                session
+                    .response(&SessionAcceptAction::Accept, now())
+                    .unwrap();
                 wt_server_session = Some(session);
             }
             Http3ServerEvent::Data { .. } => {
@@ -133,7 +135,10 @@ fn send_data_client(
     wt_stream_id: StreamId,
     data: &[u8],
 ) {
-    assert_eq!(client.send_data(wt_stream_id, data).unwrap(), data.len());
+    assert_eq!(
+        client.send_data(wt_stream_id, data, now()).unwrap(),
+        data.len()
+    );
     exchange_packets(client, server, false, None);
 }
 
@@ -143,7 +148,7 @@ fn send_data_server(
     wt_stream: &Http3OrWebTransportStream,
     data: &[u8],
 ) {
-    assert_eq!(wt_stream.send_data(data).unwrap(), data.len());
+    assert_eq!(wt_stream.send_data(data, now()).unwrap(), data.len());
     exchange_packets(client, server, false, None);
 }
 
@@ -356,7 +361,7 @@ fn wt_race_condition_server_stream_before_confirmation() {
             })
             .expect("Should receive WebTransport session request");
         wt_server_session
-            .response(&SessionAcceptAction::Accept)
+            .response(&SessionAcceptAction::Accept, now)
             .unwrap();
         let server_accept_dgram = server
             .process_output(now)
@@ -366,7 +371,7 @@ fn wt_race_condition_server_stream_before_confirmation() {
 
         // Server creates a stream, but hold back the UDP datagram.
         let wt_server_stream = wt_server_session.create_stream(StreamType::UniDi).unwrap();
-        assert_eq!(wt_server_stream.send_data(&[42]).unwrap(), 1);
+        assert_eq!(wt_server_stream.send_data(&[42], now).unwrap(), 1);
         let server_stream_dgram = server
             .process_output(now)
             .dgram()
@@ -459,7 +464,7 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
         })
         .expect("Should receive WebTransport session request");
     wt_server_session
-        .response(&SessionAcceptAction::Accept)
+        .response(&SessionAcceptAction::Accept, now)
         .unwrap();
     wt_server_session.send_datagram(b"PING", None).unwrap();
     let accept_and_wt_datagram = server
@@ -485,7 +490,7 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
             client.events().next(),
             Some(Http3ClientEvent::WebTransport(
                 WebTransportEvent::Datagram{ session_id, datagram }
-            )) if session_id == wt_server_session.stream_id() && datagram == b"PING",
+            )) if session_id == wt_server_session.stream_id() && &datagram == b"PING",
         ),
         "Should receive datagram"
     );

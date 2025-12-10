@@ -33,21 +33,6 @@ use crate::{
     AppError, Error, Res,
 };
 
-pub const INITIAL_RECV_WINDOW_SIZE: usize = 1024 * 1024;
-
-/// Limit for the maximum amount of bytes active on a single stream, i.e. limit
-/// for the size of the stream receive window.
-///
-/// A value of 10 MiB allows for:
-///
-/// - 10ms rtt and 8.3 GBit/s
-/// - 20ms rtt and 4.2 GBit/s
-/// - 40ms rtt and 2.1 GBit/s
-/// - 100ms rtt and 0.8 GBit/s
-///
-/// Keep in sync with [`crate::send_stream::MAX_SEND_BUFFER_SIZE`].
-pub const MAX_RECV_WINDOW_SIZE: u64 = 10 * 1024 * 1024;
-
 #[derive(Debug, Default)]
 pub struct RecvStreams {
     streams: BTreeMap<StreamId, RecvStream>,
@@ -1005,11 +990,10 @@ mod tests {
     use super::RecvStream;
     use crate::{
         fc::{ReceiverFlowControl, WINDOW_UPDATE_FRACTION},
-        packet::{self, PACKET_LIMIT},
-        recovery,
+        packet, recovery,
         recv_stream::RxStreamOrderer,
         stats::FrameStats,
-        ConnectionEvents, Error, StreamId, INITIAL_RECV_WINDOW_SIZE,
+        ConnectionEvents, Error, StreamId, INITIAL_LOCAL_MAX_STREAM_DATA,
     };
 
     const SESSION_WINDOW: usize = 1024;
@@ -1459,14 +1443,17 @@ mod tests {
 
     #[test]
     fn stream_flowc_update() {
-        let mut s = create_stream(1024 * INITIAL_RECV_WINDOW_SIZE as u64);
-        let mut buf = vec![0u8; INITIAL_RECV_WINDOW_SIZE + 100]; // Make it overlarge
+        let mut s = create_stream(1024 * INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+        let mut buf = vec![0u8; INITIAL_LOCAL_MAX_STREAM_DATA + 100]; // Make it overlarge
 
         assert!(!s.has_frames_to_write());
-        let big_buf = vec![0; INITIAL_RECV_WINDOW_SIZE];
+        let big_buf = vec![0; INITIAL_LOCAL_MAX_STREAM_DATA];
         s.inbound_stream_frame(false, 0, &big_buf).unwrap();
         assert!(!s.has_frames_to_write());
-        assert_eq!(s.read(&mut buf).unwrap(), (INITIAL_RECV_WINDOW_SIZE, false));
+        assert_eq!(
+            s.read(&mut buf).unwrap(),
+            (INITIAL_LOCAL_MAX_STREAM_DATA, false)
+        );
         assert!(!s.data_ready());
 
         // flow msg generated!
@@ -1474,7 +1461,7 @@ mod tests {
 
         // consume it
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
         s.write_frame(
             &mut builder,
@@ -1492,7 +1479,7 @@ mod tests {
         let conn_events = ConnectionEvents::default();
         RecvStream::new(
             StreamId::from(67),
-            INITIAL_RECV_WINDOW_SIZE as u64,
+            INITIAL_LOCAL_MAX_STREAM_DATA as u64,
             Rc::new(RefCell::new(ReceiverFlowControl::new((), session_fc))),
             conn_events,
         )
@@ -1500,11 +1487,11 @@ mod tests {
 
     #[test]
     fn stream_max_stream_data() {
-        let mut s = create_stream(1024 * INITIAL_RECV_WINDOW_SIZE as u64);
+        let mut s = create_stream(1024 * INITIAL_LOCAL_MAX_STREAM_DATA as u64);
         assert!(!s.has_frames_to_write());
-        let big_buf = vec![0; INITIAL_RECV_WINDOW_SIZE];
+        let big_buf = vec![0; INITIAL_LOCAL_MAX_STREAM_DATA];
         s.inbound_stream_frame(false, 0, &big_buf).unwrap();
-        s.inbound_stream_frame(false, INITIAL_RECV_WINDOW_SIZE as u64, &[1; 1])
+        s.inbound_stream_frame(false, INITIAL_LOCAL_MAX_STREAM_DATA as u64, &[1; 1])
             .unwrap_err();
     }
 
@@ -1545,14 +1532,14 @@ mod tests {
 
     #[test]
     fn no_stream_flowc_event_after_exiting_recv() {
-        let mut s = create_stream(1024 * INITIAL_RECV_WINDOW_SIZE as u64);
-        let mut buf = vec![0; INITIAL_RECV_WINDOW_SIZE];
+        let mut s = create_stream(1024 * INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+        let mut buf = vec![0; INITIAL_LOCAL_MAX_STREAM_DATA];
         // Write from buf at first.
         s.inbound_stream_frame(false, 0, &buf).unwrap();
         // Then read into it.
         s.read(&mut buf).unwrap();
         assert!(s.has_frames_to_write());
-        s.inbound_stream_frame(true, INITIAL_RECV_WINDOW_SIZE as u64, &[])
+        s.inbound_stream_frame(true, INITIAL_LOCAL_MAX_STREAM_DATA as u64, &[])
             .unwrap();
         assert!(!s.has_frames_to_write());
     }
@@ -1570,13 +1557,13 @@ mod tests {
     }
 
     fn create_stream_session_flow_control() -> (RecvStream, Rc<RefCell<ReceiverFlowControl<()>>>) {
-        static_assertions::const_assert!(INITIAL_RECV_WINDOW_SIZE > SESSION_WINDOW);
+        static_assertions::const_assert!(INITIAL_LOCAL_MAX_STREAM_DATA > SESSION_WINDOW);
         let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
             (),
             u64::try_from(SESSION_WINDOW).unwrap(),
         )));
         (
-            create_stream_with_fc(Rc::clone(&session_fc), INITIAL_RECV_WINDOW_SIZE as u64),
+            create_stream_with_fc(Rc::clone(&session_fc), INITIAL_LOCAL_MAX_STREAM_DATA as u64),
             session_fc,
         )
     }
@@ -1595,11 +1582,15 @@ mod tests {
         assert!(session_fc.borrow().frame_needed());
         // consume it
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
-        session_fc
-            .borrow_mut()
-            .write_frames(&mut builder, &mut token, &mut FrameStats::default());
+        session_fc.borrow_mut().write_frames(
+            &mut builder,
+            &mut token,
+            &mut FrameStats::default(),
+            Instant::now(),
+            Duration::from_millis(100),
+        );
 
         // Switch to SizeKnown state
         s.inbound_stream_frame(true, 2 * u64::try_from(SESSION_WINDOW).unwrap() - 1, &[0])
@@ -1617,11 +1608,15 @@ mod tests {
         assert!(session_fc.borrow().frame_needed());
         // consume it
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
-        session_fc
-            .borrow_mut()
-            .write_frames(&mut builder, &mut token, &mut FrameStats::default());
+        session_fc.borrow_mut().write_frames(
+            &mut builder,
+            &mut token,
+            &mut FrameStats::default(),
+            Instant::now(),
+            Duration::from_millis(100),
+        );
 
         // Test DataRecvd state
         let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
@@ -1630,7 +1625,7 @@ mod tests {
         )));
         let mut s = RecvStream::new(
             StreamId::from(567),
-            INITIAL_RECV_WINDOW_SIZE as u64,
+            INITIAL_LOCAL_MAX_STREAM_DATA as u64,
             Rc::clone(&session_fc),
             ConnectionEvents::default(),
         );
@@ -1922,11 +1917,16 @@ mod tests {
 
         // Write the fc update frame
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
         let mut stats = FrameStats::default();
-        fc.borrow_mut()
-            .write_frames(&mut builder, &mut token, &mut stats);
+        fc.borrow_mut().write_frames(
+            &mut builder,
+            &mut token,
+            &mut stats,
+            Instant::now(),
+            Duration::from_millis(100),
+        );
         assert_eq!(stats.max_data, 0);
         s.write_frame(
             &mut builder,
@@ -1953,8 +1953,13 @@ mod tests {
         );
         assert!(fc.borrow().frame_needed());
         assert!(!s.fc().unwrap().frame_needed());
-        fc.borrow_mut()
-            .write_frames(&mut builder, &mut token, &mut stats);
+        fc.borrow_mut().write_frames(
+            &mut builder,
+            &mut token,
+            &mut stats,
+            Instant::now(),
+            Duration::from_millis(100),
+        );
         assert_eq!(stats.max_data, 1);
         s.write_frame(
             &mut builder,

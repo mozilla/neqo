@@ -67,17 +67,3 @@ fn chacha20_ctr() {
 
     hp_test(TLS_CHACHA20_POLY1305_SHA256, EXPECTED);
 }
-
-#[test]
-#[should_panic(expected = "out of range")]
-fn aes_short() {
-    let hp = make_hp(TLS_AES_128_GCM_SHA256);
-    drop(hp.mask(&[0; 15]));
-}
-
-#[test]
-#[should_panic(expected = "out of range")]
-fn chacha20_short() {
-    let hp = make_hp(TLS_CHACHA20_POLY1305_SHA256);
-    drop(hp.mask(&[0; 15]));
-}

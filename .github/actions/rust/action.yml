@@ -30,7 +30,7 @@ runs:
 
     - name: Install Rust
       # TODO: Manually upate this, Dependabot will skip it because no tags associated with SHA:
-      uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # zizmor: ignore[stale-action-refs]
+      uses: dtolnay/rust-toolchain@0b1efabc08b657293548b77fb76cc02d26091c7e # zizmor: ignore[stale-action-refs]
       with:
         toolchain: ${{ inputs.version  }}
         components: ${{ inputs.components }}
@@ -44,7 +44,7 @@ runs:
       # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
       # is too small for this to be effective there.
       if: ${{ env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted' }}
-      uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
+      uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
     # See https://corrode.dev/blog/tips-for-faster-ci-builds/
     - name: Set up build environment
@@ -69,15 +69,18 @@ runs:
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
 
-    - name: Enable Rust cache
-      uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
-      with:
-        cache-bin: ${{ runner.environment != 'github-hosted' }}
-        cache-all-crates: true
-        key: ${{ inputs.targets != '' && format('{0}-', inputs.targets) || '' }}${{ runner.os }}
-        workspaces: ${{ inputs.workspaces }}
-         # Only create the cache when we push to `main` (also via a merge group).
-        save-if: ${{ github.ref == 'refs/heads/main' || github.event.merge_group.base_ref == 'refs/heads/main' }}
+    # Enabling the Rust cache causes too much pressure on the cache.
+    # Leaving this here in case we ever move to a paid GitHub tier.
+    #
+    # - name: Enable Rust cache
+    #   uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+    #   with:
+    #     cache-bin: ${{ runner.environment != 'github-hosted' }}
+    #     cache-all-crates: true
+    #     key: ${{ inputs.targets != '' && format('{0}-', inputs.targets) || '' }}${{ runner.os }}
+    #     workspaces: ${{ inputs.workspaces }}
+    #      # Only create the cache when we push to `main` (also via a merge group).
+    #     save-if: ${{ github.ref == 'refs/heads/main' || github.event.merge_group.base_ref == 'refs/heads/main' }}
 
     - name: Set up MSVC (Windows)
       if: ${{ runner.os == 'Windows' }}

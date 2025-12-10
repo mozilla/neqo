@@ -16,8 +16,7 @@ use super::{
     AT_LEAST_PTO, DEFAULT_STREAM_DATA,
 };
 use crate::{
-    packet::{self, PACKET_LIMIT},
-    recovery,
+    packet, recovery,
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     tparams::{TransportParameter, TransportParameterId},
@@ -190,7 +189,7 @@ fn idle_send_packet1() {
 
     // Still connected after 39 seconds because idle timer reset by the
     // outgoing packet.
-    now += default_timeout() - DELTA;
+    now += default_timeout().checked_sub(DELTA).unwrap();
     let dgram = client.process_output(now).dgram();
     assert!(dgram.is_some()); // PTO
     assert!(client.state().connected());
@@ -225,7 +224,7 @@ fn idle_send_packet2() {
     assert!((GAP * 2 + DELTA) < default_timeout());
 
     // Still connected just before GAP + default_timeout().
-    now += default_timeout() - DELTA;
+    now += default_timeout().checked_sub(DELTA).unwrap();
     let dgram = client.process_output(now).dgram();
     assert!(dgram.is_some()); // PTO
     assert!(matches!(client.state(), State::Confirmed));
@@ -268,7 +267,7 @@ fn idle_recv_packet() {
     assert!(matches!(client.state(), State::Confirmed));
 
     // Add a little less than the idle timeout and we're still connected.
-    now += default_timeout() - FUDGE;
+    now += default_timeout().checked_sub(FUDGE).unwrap();
     drop(client.process_output(now));
     assert!(matches!(client.state(), State::Confirmed));
 
@@ -286,7 +285,7 @@ fn idle_caching() {
     let mut client = default_client();
     let mut server = default_server();
     let start = now();
-    let mut builder = packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+    let mut builder = packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
 
     // Perform the first round trip, but drop the Initial from the server.
     // The client then caches the Handshake packet.
@@ -476,7 +475,11 @@ fn keep_alive_lost() {
     // return some small timeout for the recovery although it does not have
     // any outstanding data. Therefore we call it after AT_LEAST_PTO.
     now += AT_LEAST_PTO;
-    assert_idle(&mut server, now, keep_alive_timeout() - AT_LEAST_PTO);
+    assert_idle(
+        &mut server,
+        now,
+        keep_alive_timeout().checked_sub(AT_LEAST_PTO).unwrap(),
+    );
 }
 
 /// The other peer can also keep it alive.
@@ -714,11 +717,11 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     // The next callback should be for an idle PING.
     assert_eq!(
         client.process_output(now).callback(),
-        IDLE_TIMEOUT / 2 - pto
+        (IDLE_TIMEOUT / 2).checked_sub(pto).unwrap()
     );
 
     // Wait that long and the client should send a PING frame.
-    now += IDLE_TIMEOUT / 2 - pto;
+    now += (IDLE_TIMEOUT / 2).checked_sub(pto).unwrap();
     let pings_before = client.stats().frame_tx.ping;
     let ping = client.process_output(now).dgram();
     assert!(ping.is_some());
@@ -736,10 +739,10 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     // The next callback will be an idle timeout.
     assert_eq!(
         client.process_output(now).callback(),
-        IDLE_TIMEOUT / 2 - 2 * pto
+        (IDLE_TIMEOUT / 2).checked_sub(2 * pto).unwrap()
     );
 
-    now += IDLE_TIMEOUT / 2 - 2 * pto;
+    now += (IDLE_TIMEOUT / 2).checked_sub(2 * pto).unwrap();
     let out = client.process_output(now);
     assert!(matches!(out, Output::None));
     assert!(matches!(client.state(), State::Closed(_)));

@@ -15,7 +15,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+    - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
       with:
         run-id: ${{ github.event.workflow_run.id }}
         name: ${{ inputs.name }}
@@ -32,9 +32,9 @@ runs:
           cat log-md
         } >> contents || true
 
-    - uses: thollander/actions-comment-pull-request@fabd468d3a1a0b97feee5f6b9e499eab0dd903f6 # v2.5.0
+    - uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3.0.1
       with:
-        filePath: contents
+        file-path: contents
         mode: ${{ inputs.mode }}
-        pr_number: ${{ steps.pr-number.outputs.number }}
-        comment_tag: ${{ inputs.name }}-comment
+        pr-number: ${{ steps.pr-number.outputs.number }}
+        comment-tag: ${{ inputs.name }}-comment

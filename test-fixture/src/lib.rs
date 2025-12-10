@@ -197,6 +197,7 @@ where
                 Some("Neqo client qlog".to_string()),
                 Some("Neqo client qlog".to_string()),
                 format!("client-{cid}"),
+                now(),
             )
             .unwrap(),
         );
@@ -247,13 +248,16 @@ where
     )
     .expect("create a server");
     if let Ok(dir) = std::env::var("QLOGDIR") {
+        // Use random bytes to generate a unique name
+        let unique_name = format!("server-{}", hex(random::<10>()));
         c.set_qlog(
             Qlog::enabled_with_file(
                 dir.parse().unwrap(),
                 Role::Server,
                 Some("Neqo server qlog".to_string()),
                 Some("Neqo server qlog".to_string()),
-                "server".to_string(),
+                unique_name,
+                now(),
             )
             .unwrap(),
         );

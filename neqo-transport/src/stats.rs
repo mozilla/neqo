@@ -20,8 +20,6 @@ use strum::IntoEnumIterator as _;
 
 use crate::{ecn, packet};
 
-pub const MAX_PTO_COUNTS: usize = 16;
-
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct FrameStats {
     pub ack: usize,
@@ -136,6 +134,20 @@ pub struct DatagramStats {
     pub dropped_queue_full: usize,
 }
 
+/// Congestion Control stats
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct CongestionControlStats {
+    /// Total number of congestion events caused by packet loss.
+    pub congestion_events_loss: usize,
+    /// Total number of congestion events caused by ECN-CE marked packets.
+    pub congestion_events_ecn: usize,
+    /// Number of spurious congestion events, where congestion was incorrectly inferred due to
+    /// packets initially considered lost but subsequently acknowledged. This indicates
+    /// instances where the congestion control algorithm overreacted to perceived losses.
+    pub congestion_events_spurious: usize,
+    /// Whether this connection has exited slow start.
+    pub slow_start_exited: bool,
+}
 /// ECN counts by QUIC [`packet::Type`].
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct EcnCount(EnumMap<packet::Type, ecn::Count>);
@@ -264,8 +276,6 @@ pub struct Stats {
     pub pmtud_ack: usize,
     /// Number of PMTUD probes lost.
     pub pmtud_lost: usize,
-    /// Number of times a path MTU changed unexpectedly.
-    pub pmtud_change: usize,
     /// MTU of the local interface used for the most recent path.
     pub pmtud_iface_mtu: usize,
     /// Probed PMTU of the current path.
@@ -283,7 +293,7 @@ pub struct Stats {
 
     /// Count PTOs. Single PTOs, 2 PTOs in a row, 3 PTOs in row, etc. are counted
     /// separately.
-    pub pto_counts: [usize; MAX_PTO_COUNTS],
+    pub pto_counts: [usize; Self::MAX_PTO_COUNTS],
 
     /// Count frames received.
     pub frame_rx: FrameStats,
@@ -295,6 +305,8 @@ pub struct Stats {
     pub incoming_datagram_dropped: usize,
 
     pub datagram_tx: DatagramStats,
+
+    pub cc: CongestionControlStats,
 
     /// ECN path validation count, indexed by validation outcome.
     pub ecn_path_validation: ecn::ValidationCount,
@@ -325,6 +337,8 @@ pub struct Stats {
 }
 
 impl Stats {
+    pub const MAX_PTO_COUNTS: usize = 16;
+
     pub fn init(&mut self, info: String) {
         self.info = info;
     }
@@ -344,7 +358,7 @@ impl Stats {
     /// When preconditions are violated.
     pub fn add_pto_count(&mut self, count: usize) {
         debug_assert!(count > 0);
-        if count >= MAX_PTO_COUNTS {
+        if count >= Self::MAX_PTO_COUNTS {
             // We can't move this count any further, so stop.
             return;
         }
@@ -371,13 +385,16 @@ impl Debug for Stats {
         )?;
         writeln!(
             f,
-            "  pmtud: {} sent {} acked {} lost {} change {} iface_mtu {} pmtu",
-            self.pmtud_tx,
-            self.pmtud_ack,
-            self.pmtud_lost,
-            self.pmtud_change,
-            self.pmtud_iface_mtu,
-            self.pmtud_pmtu
+            "  cc: ce_loss {} ce_ecn {} ce_spurious {}",
+            self.cc.congestion_events_loss,
+            self.cc.congestion_events_ecn,
+            self.cc.congestion_events_spurious,
+        )?;
+        writeln!(f, "  ss_exit: {}", self.cc.slow_start_exited)?;
+        writeln!(
+            f,
+            "  pmtud: {} sent {} acked {} lost {} iface_mtu {} pmtu",
+            self.pmtud_tx, self.pmtud_ack, self.pmtud_lost, self.pmtud_iface_mtu, self.pmtud_pmtu
         )?;
         writeln!(f, "  resumed: {}", self.resumed)?;
         writeln!(f, "  frames rx:")?;
