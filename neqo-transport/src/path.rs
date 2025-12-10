@@ -13,9 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{
-    hex, qdebug, qinfo, qlog::Qlog, qtrace, qwarn, Buffer, DatagramBatch, Encoder, Tos,
-};
+use neqo_common::{datagram, hex, qdebug, qinfo, qlog::Qlog, qtrace, qwarn, Buffer, Encoder, Tos};
 use neqo_crypto::random;
 
 use crate::{
@@ -730,12 +728,12 @@ impl Path {
         num_datagrams: usize,
         datagram_size: usize,
         stats: &mut Stats,
-    ) -> DatagramBatch {
+    ) -> datagram::Batch {
         // Make sure to use the TOS value from before calling ecn::Info::on_packet_sent, which may
         // update the ECN state and can hence change it - this packet should still be sent
         // with the current value.
         self.ecn_info.on_packet_sent(num_datagrams, stats);
-        DatagramBatch::new(
+        datagram::Batch::new(
             self.local,
             self.remote,
             tos,
