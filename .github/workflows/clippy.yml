@@ -45,7 +45,6 @@ jobs:
           # use Rust 1.82.0 here for now.
           - os: windows-2025
             rust-toolchain: 1.82.0
-            type: debug
         exclude:
           # TODO: Remove once Neqo's MSRV is increased to 1.82.0. NSS build
           # fails on Windows with Rust 1.81.0. Firefox does not use Rust 1.81.0
@@ -55,7 +54,6 @@ jobs:
           # use Rust 1.82.0 here for now.
           - os: windows-2025
             rust-toolchain: 1.81.0
-            type: debug
     runs-on: ${{ matrix.os }}
     defaults:
       run:
