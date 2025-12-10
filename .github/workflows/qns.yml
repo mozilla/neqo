@@ -1,7 +1,5 @@
 name: QNS
 on:
-  push:
-    branches: ["main"]
   pull_request:
     branches: ["main"]
     types: [opened, synchronize, reopened, ready_for_review]
@@ -37,11 +35,13 @@ jobs:
         run: |
           {
             echo "matrix<<EOF"
-            echo -n '{"include": [{"name": "pr","ref": "'"$HEAD_SHA"'"}'
             if [ "$GITHUB_EVENT_NAME" == "pull_request" ]; then
-              echo -n ', {"name": "main", "ref": "'"$BASE_SHA"'"}'
+              # For PRs, build images for both the PR head and the base branch
+              echo '{"include": [{"name": "pr","ref": "'"$HEAD_SHA"'"}, {"name": "main", "ref": "'"$BASE_SHA"'"}]}'
+            else
+              # For schedule/workflow_dispatch, build a single image from main
+              echo '{"include": [{"name": "latest"}]}'
             fi
-            echo ']}'
             echo "EOF"
           } >> tmp
           cat tmp
@@ -76,11 +76,13 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
+          ref: ${{ matrix.ref }}
 
       - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         id: meta
         with:
-          images: ghcr.io/${{ github.repository }}-qns-${{ matrix.name }}
+          # For PRs, use neqo-qns-pr/neqo-qns-main; for schedule, use neqo-qns (expected by interop-runner)
+          images: ghcr.io/${{ github.repository }}-qns${{ github.event_name == 'pull_request' && format('-{0}', matrix.name) || '' }}
           tags: |
             # default
             type=schedule
@@ -97,19 +99,20 @@ jobs:
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
           platforms: ${{ github.event_name != 'pull_request' && 'linux/amd64, linux/arm64' || 'linux/amd64' }}
-          outputs: type=oci,dest=/tmp/${{ format('{0}.tar', matrix.name) }}
+          # For PRs, export single-platform image to Docker tarball; for schedule, push multi-platform to registry
+          outputs: ${{ github.event_name == 'pull_request' && format('type=docker,dest=/tmp/{0}.tar', matrix.name) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         if: ${{ github.event_name == 'pull_request' }}
         with:
-          name: ${{ format('{0} Docker image ', matrix.name) }}
-          path: /tmp/${{ format('{0}.tar', matrix.name) }}
+          name: ${{ matrix.name }} Docker image
+          path: /tmp/${{ matrix.name }}.tar
 
   implementations:
     name: Determine interop pairs
-    if: ${{ github.event_name != 'push' }}
+    if: ${{ github.event_name == 'pull_request' }}
     needs: docker-image
     runs-on: ubuntu-24.04
     outputs:
@@ -121,23 +124,15 @@ jobs:
     steps:
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
-          pattern: '*pr*'
+          pattern: '* Docker image'
           path: /tmp
-
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
-        if: ${{ github.event_name == 'pull_request' }}
-        with:
-          pattern: '*main*'
-          path: /tmp
+          merge-multiple: true
 
       - run: |
-          docker load --input "/tmp/pr.tar"
+          docker load --input /tmp/pr.tar
           PR_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep pr | head -1)
           echo "PR_IMAGE=$PR_IMAGE" >> "$GITHUB_ENV"
-
-      - if: ${{ github.event_name == 'pull_request' }}
-        run: |
-          docker load --input "/tmp/main.tar"
+          docker load --input /tmp/main.tar
           MAIN_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep main | head -1)
           echo "MAIN_IMAGE=$MAIN_IMAGE" >> "$GITHUB_ENV"
 
@@ -216,7 +211,7 @@ jobs:
 
   run-qns:
     name: Run QNS
-    if: ${{ github.event_name != 'push' }}
+    if: ${{ github.event_name == 'pull_request' }}
     needs: implementations
     strategy:
       fail-fast: false
@@ -239,13 +234,13 @@ jobs:
       - run: docker load --input "/tmp/pr.tar"
 
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
-        if: ${{ github.event_name == 'pull_request' && contains(matrix.pair, 'neqo-main') }}
+        if: ${{ contains(matrix.pair, 'neqo-main') }}
         with:
           name: 'main Docker image'
           path: /tmp
 
-      - if: ${{ github.event_name == 'pull_request' && contains(matrix.pair, 'neqo-main') }}
-        run: docker load --input "/tmp/main.tar"
+      - if: ${{ contains(matrix.pair, 'neqo-main') }}
+        run: docker load --input /tmp/main.tar
 
       - id: depair
         env:
@@ -276,7 +271,7 @@ jobs:
 
   report:
     name: Report results
-    if: ${{ !cancelled() && github.event_name != 'push' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
     needs: [docker-image, run-qns, implementations]
     runs-on: ubuntu-24.04
     steps:
