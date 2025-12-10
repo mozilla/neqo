@@ -141,7 +141,7 @@ jobs:
               # FIXME: Rust 1.81 doesn't have the ability to print host-tuple
               TRIPLE="--target $(rustc --print host-tuple)"
             fi
-            cargo $CAREFUL test $BUILD_TYPE --locked --features ci "$TRIPLE"
+            cargo $CAREFUL test $BUILD_TYPE --locked --features ci $TRIPLE
           fi
 
       - name: Run client/server transfer
