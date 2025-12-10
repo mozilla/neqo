@@ -9,7 +9,6 @@
 use std::{
     cmp::min,
     fmt,
-    mem::size_of,
     ops::{Deref, DerefMut, Range},
     time::Instant,
 };
