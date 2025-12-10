@@ -42,22 +42,19 @@ fn peer_certificate_chain(fd: *mut PRFileDesc) -> Option<ItemArray> {
 // 2^24 items. Casting its length is therefore safe even on 32 bits targets.
 fn stapled_ocsp_responses(fd: *mut PRFileDesc) -> Option<Vec<Vec<u8>>> {
     let ocsp_nss = unsafe { SSL_PeerStapledOCSPResponses(fd) };
-    match NonNull::new(ocsp_nss as *mut SECItemArray) {
-        Some(ocsp_ptr) => {
-            let mut ocsp_helper: Vec<Vec<u8>> = Vec::new();
-            let Ok(len) = isize::try_from(unsafe { ocsp_ptr.as_ref().len }) else {
-                qerror!("[{fd:p}] Received illegal OSCP length");
-                return None;
-            };
-            for idx in 0..len {
-                let itemp: *const SECItem = unsafe { ocsp_ptr.as_ref().items.offset(idx).cast() };
-                let item = unsafe { null_safe_slice((*itemp).data, (*itemp).len) };
-                ocsp_helper.push(item.to_owned());
-            }
-            Some(ocsp_helper)
-        }
-        None => None,
-    }
+    let ocsp_ptr = NonNull::new(ocsp_nss as *mut SECItemArray)?;
+    let Ok(len) = usize::try_from(unsafe { ocsp_ptr.as_ref().len }) else {
+        qerror!("[{fd:p}] Received illegal OCSP length");
+        return None;
+    };
+    Some(
+        (0..len)
+            .map(|idx| {
+                let itemp: *const SECItem = unsafe { ocsp_ptr.as_ref().items.add(idx).cast() };
+                unsafe { null_safe_slice((*itemp).data, (*itemp).len) }.to_owned()
+            })
+            .collect(),
+    )
 }
 
 fn signed_cert_timestamp(fd: *mut PRFileDesc) -> Option<Vec<u8>> {
