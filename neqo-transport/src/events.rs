@@ -127,9 +127,12 @@ impl ConnectionEvents {
     }
 
     pub fn send_stream_complete(&self, stream_id: StreamId) {
-        self.remove(|evt| matches!(evt, ConnectionEvent::SendStreamWritable { stream_id: x } if *x == stream_id));
-
-        self.remove(|evt| matches!(evt, ConnectionEvent::SendStreamStopSending { stream_id: x, .. } if *x == stream_id.as_u64()));
+        self.remove(|evt| {
+            matches!(evt,
+                ConnectionEvent::SendStreamWritable { stream_id: x } |
+                ConnectionEvent::SendStreamStopSending { stream_id: x, .. }
+                if *x == stream_id)
+        });
 
         self.insert(ConnectionEvent::SendStreamComplete { stream_id });
     }
