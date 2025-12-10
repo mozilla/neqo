@@ -561,7 +561,7 @@ impl Loss {
 
     /// Record an RTT sample.
     fn rtt_sample(
-        &self,
+        &mut self,
         rtt: &mut RttEstimate,
         send_time: Instant,
         now: Instant,
@@ -573,7 +573,7 @@ impl Loss {
             RttSource::Ack
         };
         if let Some(sample) = now.checked_duration_since(send_time) {
-            rtt.update(&self.qlog, sample, ack_delay, source, now);
+            rtt.update(&mut self.qlog, sample, ack_delay, source, now);
         }
     }
 
@@ -853,7 +853,7 @@ impl Loss {
 
         if let Some(st) = &mut self.pto_state {
             st.count_pto(&mut self.stats.borrow_mut());
-            qlog::metrics_updated(&self.qlog, &[qlog::Metric::PtoCount(st.count())], now);
+            qlog::metrics_updated(&mut self.qlog, &[qlog::Metric::PtoCount(st.count())], now);
         }
     }
 
