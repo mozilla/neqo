@@ -36,9 +36,7 @@ jobs:
         run: |
           # Create a GitHub matrix where each entry is a bench with its
           # associated crate and benchmarking mode taken from the Cargo
-          # metadata. Only include benchmarks that are explicitly declared
-          # in [[bench]] sections (i.e., have required-features), not
-          # auto-discovered ones.
+          # metadata.
           {
             echo -n "benches="
             cargo metadata --no-deps --format-version 1 | jq -c '
@@ -58,7 +56,7 @@ jobs:
   benchmarks:
     name: Run bench
     runs-on:
-      group: Neqo # zizmor: ignore[self-hosted-runner]
+      group: codspeed # zizmor: ignore[self-hosted-runner]
     strategy:
       matrix:
         bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
