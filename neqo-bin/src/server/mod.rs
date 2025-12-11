@@ -5,7 +5,6 @@
 // except according to those terms.
 
 #![expect(
-    clippy::unwrap_used,
     clippy::future_not_send,
     clippy::missing_errors_doc,
     clippy::missing_panics_doc,
