@@ -127,13 +127,13 @@ jobs:
           path: /tmp
           merge-multiple: true
 
-      - run: |
-          docker load --input /tmp/pr.tar
-          PR_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep pr | head -1)
-          echo "PR_IMAGE=$PR_IMAGE" >> "$GITHUB_ENV"
-          docker load --input /tmp/main.tar
-          MAIN_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep main | head -1)
-          echo "MAIN_IMAGE=$MAIN_IMAGE" >> "$GITHUB_ENV"
+      - env:
+          REPO: ${{ github.repository }}
+        run: |
+          for IMAGE in pr main; do
+            docker load --input "/tmp/$IMAGE.tar"
+            echo "${IMAGE^^}_IMAGE=ghcr.io/$REPO-qns-$IMAGE" >> "$GITHUB_ENV"
+          done
 
       - id: config
         run: |
