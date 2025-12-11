@@ -298,7 +298,10 @@ jobs:
               continue
             fi
             for BRANCH in "$RUN" "$MAIN_RUN"; do
-              [ ! -e "$BRANCH/result.json" ] && continue
+              if [ ! -e "$BRANCH/result.json" ]; then
+                echo "* $PAIR: $BRANCH result missing" >> "$ROLE.failed.md"
+                continue
+              fi
               jq < "$BRANCH/result.json" '
                   . as $data |
                   .results[][].result //= "failed" |
