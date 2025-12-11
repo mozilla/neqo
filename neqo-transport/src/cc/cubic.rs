@@ -13,7 +13,7 @@ use std::{
 
 use neqo_common::qtrace;
 
-use crate::cc::classic_cc::WindowAdjustment;
+use crate::cc::{classic_cc::WindowAdjustment, CongestionEvent};
 
 /// Convert an integer congestion window value into a floating point value.
 /// This has the effect of reducing larger values to `1<<53`.
@@ -396,7 +396,7 @@ impl WindowAdjustment for Cubic {
         curr_cwnd: usize,
         acked_bytes: usize,
         max_datagram_size: usize,
-        ecn: bool,
+        congestion_event: CongestionEvent,
     ) -> (usize, usize) {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
         // Fast Convergence
@@ -423,17 +423,15 @@ impl WindowAdjustment for Cubic {
 
         // Reducing the congestion window and resetting time
         self.t_epoch = None;
-        if ecn {
-            (
-                curr_cwnd * Self::BETA_USIZE_DIVIDEND_ECN / Self::BETA_USIZE_DIVISOR,
-                acked_bytes * Self::BETA_USIZE_DIVIDEND_ECN / Self::BETA_USIZE_DIVISOR,
-            )
+        let m = if congestion_event == CongestionEvent::Ecn {
+            Self::BETA_USIZE_DIVIDEND_ECN
         } else {
-            (
-                curr_cwnd * Self::BETA_USIZE_DIVIDEND / Self::BETA_USIZE_DIVISOR,
-                acked_bytes * Self::BETA_USIZE_DIVIDEND / Self::BETA_USIZE_DIVISOR,
-            )
-        }
+            Self::BETA_USIZE_DIVIDEND
+        };
+        (
+            curr_cwnd * m / Self::BETA_USIZE_DIVISOR,
+            acked_bytes * m / Self::BETA_USIZE_DIVISOR,
+        )
     }
 
     fn on_app_limited(&mut self) {

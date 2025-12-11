@@ -22,7 +22,7 @@ use crate::{
     cc::{
         classic_cc::ClassicCongestionControl,
         cubic::{convert_to_f64, Cubic},
-        CongestionControl as _,
+        CongestionControl as _, CongestionEvent,
     },
     packet,
     pmtud::Pmtud,
@@ -290,7 +290,7 @@ fn congestion_event_slow_start() {
         cubic.cwnd(),
         cwnd_after_loss_slow_start(cubic.cwnd_initial(), cubic.max_datagram_size())
     );
-    assert_eq!(cc_stats.congestion_events_loss, 1);
+    assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
 }
 
 #[test]
@@ -319,7 +319,7 @@ fn congestion_event_congestion_avoidance() {
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
     assert_within(cubic.cc_algorithm().w_max(), cwnd_initial_f64, f64::EPSILON);
     assert_eq!(cubic.cwnd(), cwnd_after_loss(cubic.cwnd_initial()));
-    assert_eq!(cc_stats.congestion_events_loss, 1);
+    assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
 }
 
 #[test]
@@ -353,7 +353,7 @@ fn congestion_event_congestion_avoidance_fast_convergence() {
         f64::EPSILON,
     );
     assert_eq!(cubic.cwnd(), cwnd_after_loss(cubic.cwnd_initial()));
-    assert_eq!(cc_stats.congestion_events_loss, 1);
+    assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
 }
 
 #[test]
