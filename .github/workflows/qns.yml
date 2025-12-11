@@ -20,45 +20,14 @@ env:
   TIMEOUT: 20
 
 jobs:
-  branches:
-    name: Determine branches
-    if: github.actor != 'dependabot[bot]'
-    runs-on: ubuntu-24.04
-    outputs:
-      matrix: ${{ steps.matrix.outputs.matrix }}
-    steps:
-      - id: matrix
-        env:
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          {
-            echo "matrix<<EOF"
-            if [ "$GITHUB_EVENT_NAME" == "pull_request" ]; then
-              # For PRs, build images for both the PR head and the base branch
-              echo '{"include": [{"name": "pr","ref": "'"$HEAD_SHA"'"}, {"name": "main", "ref": "'"$BASE_SHA"'"}]}'
-            else
-              # For schedule/workflow_dispatch, build a single image from main
-              echo '{"include": [{"name": "latest"}]}'
-            fi
-            echo "EOF"
-          } >> tmp
-          cat tmp
-          cat tmp >> "$GITHUB_OUTPUT"
-
   docker-image:
-    name: Build Docker images
-    if: github.actor != 'dependabot[bot]'
-    needs: branches
+    name: Build and push Docker image for registry upload
+    if: github.event_name != 'pull_request' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
-    strategy:
-      matrix: ${{ fromJson(needs.branches.outputs.matrix) }}
     permissions:
       packages: write # This permission is required to push to GitHub Container Registry.
     steps:
-      - if: ${{ github.event_name != 'pull_request' }}
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
           platforms: arm64
           cache-image: true
@@ -76,44 +45,74 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
+
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}-qns
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          file: qns/Dockerfile
+          build-args: RUST_VERSION=stable
+          platforms: linux/amd64, linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  docker-image-pr:
+    name: Build Docker images for QNS
+    if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - name: pr
+            ref: ${{ github.event.pull_request.head.sha }}
+          - name: main
+            ref: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        with:
+          cache-binary: true
+
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
           ref: ${{ matrix.ref }}
 
       - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         id: meta
         with:
-          # For PRs, use neqo-qns-pr/neqo-qns-main; for schedule, use neqo-qns (expected by interop-runner)
-          images: ghcr.io/${{ github.repository }}-qns${{ github.event_name == 'pull_request' && format('-{0}', matrix.name) || '' }}
-          tags: |
-            # default
-            type=schedule
-            type=ref,event=branch
-            type=ref,event=tag
-            type=ref,event=pr
-            # set latest tag for default branch
-            type=raw,value=latest,enable={{is_default_branch}}
+          images: ghcr.io/${{ github.repository }}-qns-${{ matrix.name }}
+          tags: type=ref,event=pr
 
       - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
-          push: ${{ github.event_name != 'pull_request' }}
+          push: false
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
-          platforms: ${{ github.event_name != 'pull_request' && 'linux/amd64, linux/arm64' || 'linux/amd64' }}
-          # For PRs, export single-platform image to Docker tarball; for schedule, push multi-platform to registry
-          outputs: ${{ github.event_name == 'pull_request' && format('type=docker,dest=/tmp/{0}.tar', matrix.name) || '' }}
+          platforms: linux/amd64
+          outputs: type=docker,dest=/tmp/${{ matrix.name }}.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
-        if: ${{ github.event_name == 'pull_request' }}
         with:
           name: ${{ matrix.name }} Docker image
           path: /tmp/${{ matrix.name }}.tar
 
   implementations:
     name: Determine interop pairs
-    if: ${{ github.event_name == 'pull_request' }}
-    needs: docker-image
+    if: github.event_name == 'pull_request'
+    needs: docker-image-pr
     runs-on: ubuntu-24.04
     outputs:
       pairs: ${{ steps.config.outputs.pairs }}
@@ -138,7 +137,7 @@ jobs:
 
       - id: config
         run: |
-          # Add neqo-pr and some non-default implementations
+          # Add neqo-pr, neqo-main, and some non-default implementations
           # tquic: https://github.com/quic-interop/quic-interop-runner/pull/385/files
           # openssl: https://github.com/quic-interop/quic-interop-runner/pull/402/files
           # linuxquic: https://github.com/quic-interop/quic-interop-runner/pull/428
@@ -146,6 +145,11 @@ jobs:
           {
             "neqo-pr": {
               "image": "$PR_IMAGE",
+              "url": "$URL",
+              "role": "$ROLE"
+            },
+            "neqo-main": {
+              "image": "$MAIN_IMAGE",
               "url": "$URL",
               "role": "$ROLE"
             },
@@ -166,20 +170,6 @@ jobs:
             }
           }
           EOF
-          if [ -n "$MAIN_IMAGE" ]; then
-            # Add neqo-main
-            cat <<EOF > neqo-main.json
-            {
-              "neqo-main": {
-                "image": "$MAIN_IMAGE",
-                "url": "$URL",
-                "role": "$ROLE"
-              }
-            }
-          EOF
-            jq '. += input' neqo-main.json additional.json > temp.json
-            mv temp.json additional.json
-          fi
           curl -o runner.json https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json
           jq '. += input' runner.json additional.json > implementations.json
           {
@@ -187,22 +177,16 @@ jobs:
             cat implementations.json
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          # Determine valid interop pairs
-          if [ -n "$MAIN_IMAGE" ]; then
-            # shellcheck disable=SC2016
-            CONDITION='select(contains("neqo-pr") != contains("neqo-main") and $client != $server)'
-          else
-            # shellcheck disable=SC2016
-            CONDITION='select(contains("neqo-pr") and $client != $server)'
-          fi
-          jq < implementations.json "[
-            [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers |
-            [to_entries[] | select(.value.role==\"client\" or .value.role==\"both\").key] as \$clients |
-            \$clients[] as \$client |
-            \$servers[] as \$server |
-            \$client + \" $DELIM \" + \$server |
-            $CONDITION
-          ]" > pairs.json
+          # Determine valid interop pairs: all combinations involving neqo-pr or neqo-main
+          # shellcheck disable=SC2016
+          jq < implementations.json '[
+            [to_entries[] | select(.value.role=="server" or .value.role=="both").key] as $servers |
+            [to_entries[] | select(.value.role=="client" or .value.role=="both").key] as $clients |
+            $clients[] as $client |
+            $servers[] as $server |
+            $client + " '"$DELIM"' " + $server |
+            select((contains("neqo-pr") or contains("neqo-main")) and ($client != $server))
+          ]' > pairs.json
           {
             echo "pairs<<EOF"
             cat pairs.json
@@ -211,7 +195,7 @@ jobs:
 
   run-qns:
     name: Run QNS
-    if: ${{ github.event_name == 'pull_request' }}
+    if: github.event_name == 'pull_request'
     needs: implementations
     strategy:
       fail-fast: false
@@ -234,12 +218,12 @@ jobs:
       - run: docker load --input "/tmp/pr.tar"
 
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
-        if: ${{ contains(matrix.pair, 'neqo-main') }}
+        if: contains(matrix.pair, 'neqo-main')
         with:
           name: 'main Docker image'
           path: /tmp
 
-      - if: ${{ contains(matrix.pair, 'neqo-main') }}
+      - if: contains(matrix.pair, 'neqo-main')
         run: docker load --input /tmp/main.tar
 
       - id: depair
@@ -264,7 +248,7 @@ jobs:
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
 
-      - if: ${{ always() }}
+      - if: always()
         env:
           RESULT: ${{ steps.run.outputs.result }}
         run: test "$RESULT" != "error"
@@ -272,7 +256,7 @@ jobs:
   report:
     name: Report results
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-    needs: [docker-image, run-qns, implementations]
+    needs: [docker-image-pr, run-qns, implementations]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -308,7 +292,13 @@ jobs:
               echo "* $PAIR: run cancelled after $TIMEOUT min" >> "$ROLE.failed.md"
               continue
             fi
-            for BRANCH in "$RUN" "${RUN/$PR/neqo-main}"; do
+            MAIN_RUN="${RUN/$PR/neqo-main}"
+            if [ ! -e "$MAIN_RUN/result.json" ]; then
+              echo "* $PAIR: baseline upload failed" >> "$ROLE.failed.md"
+              continue
+            fi
+            for BRANCH in "$RUN" "$MAIN_RUN"; do
+              [ ! -e "$BRANCH/result.json" ] && continue
               jq < "$BRANCH/result.json" '
                   . as $data |
                   .results[][].result //= "failed" |
@@ -324,11 +314,11 @@ jobs:
               for GROUP in $(jq -r < "$RUN/$ROLE.grouped.json" '.results | keys[]'); do
                 PR_RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
                 LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
-                # Get baseline from neqo-main if PR, otherwise no baseline
+                # Get baseline from neqo-main if available
                 BASELINE=$(mktemp)
-                MAIN_RUN="${RUN/$PR/neqo-main}/$ROLE.grouped.json"
-                if [ -e "$MAIN_RUN" ]; then
-                  jq < "$MAIN_RUN" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE"
+                MAIN_GROUPED="$MAIN_RUN/$ROLE.grouped.json"
+                if [ -e "$MAIN_GROUPED" ]; then
+                  jq < "$MAIN_GROUPED" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE"
                 fi
                 [ -n "$PR_RESULT" ] || continue
                 DIFF=$(wdiff -n "$BASELINE" - <<< "$PR_RESULT" || true)
