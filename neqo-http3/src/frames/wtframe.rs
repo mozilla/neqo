@@ -44,7 +44,7 @@ impl WebTransportFrame {
 
 impl FrameDecoder<Self> for WebTransportFrame {
     #[cfg(feature = "build-fuzzing-corpus")]
-    const FUZZING_CORPUS_NAME: Option<&'static str> = Some("wtframe");
+    const FUZZING_CORPUS: Option<&'static str> = Some("wtframe");
 
     fn decode(frame_type: HFrameType, frame_len: u64, data: Option<&[u8]>) -> Res<Option<Self>> {
         if let Some(payload) = data {
