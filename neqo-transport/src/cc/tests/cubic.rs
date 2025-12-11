@@ -114,6 +114,23 @@ fn packet_lost(
     cc.on_packets_lost(None, None, PTO, &[p_lost], now(), cc_stats);
 }
 
+fn ecn_ce(
+    cc: &mut ClassicCongestionControl<Cubic>,
+    pn: u64,
+    now: Instant,
+    cc_stats: &mut CongestionControlStats,
+) {
+    let p_ce = sent::Packet::new(
+        packet::Type::Short,
+        pn,
+        now,
+        true,
+        recovery::Tokens::new(),
+        cc.max_datagram_size(),
+    );
+    cc.on_ecn_ce_received(&p_ce, now, cc_stats);
+}
+
 fn expected_tcp_acks(cwnd_rtt_start: usize, mtu: usize) -> u64 {
     (f64::from(i32::try_from(cwnd_rtt_start).unwrap())
         / f64::from(i32::try_from(mtu).unwrap())
@@ -333,8 +350,11 @@ fn congestion_event_congestion_avoidance() {
     assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
 }
 
-#[test]
-fn acked_bytes_reduced_on_congestion_event() {
+/// Verify that `acked_bytes` is correctly reduced on a congestion event.
+fn acked_bytes_reduced_on_congestion_event(
+    trigger: impl FnOnce(&mut ClassicCongestionControl<Cubic>, Instant, &mut CongestionControlStats),
+    beta: usize,
+) {
     let (mut cubic, mut cc_stats) = setup_congestion_avoidance(false);
 
     // The helper acked packet 0. Ack one more to accumulate acked_bytes.
@@ -348,13 +368,28 @@ fn acked_bytes_reduced_on_congestion_event() {
     let acked_bytes_before = cubic.acked_bytes();
     assert!(acked_bytes_before > 0);
 
-    // Trigger a congestion event (loss).
-    packet_lost(&mut cubic, 2, &mut cc_stats);
+    // Trigger the congestion event.
+    trigger(&mut cubic, now, &mut cc_stats);
 
     // Verify acked_bytes was reduced by the correct factor.
-    let expected_acked_bytes =
-        acked_bytes_before * Cubic::BETA_USIZE_DIVIDEND / Cubic::BETA_USIZE_DIVISOR;
-    assert_eq!(cubic.acked_bytes(), expected_acked_bytes);
+    let expected = acked_bytes_before * beta / Cubic::BETA_USIZE_DIVISOR;
+    assert_eq!(cubic.acked_bytes(), expected);
+}
+
+#[test]
+fn acked_bytes_reduced_on_loss() {
+    acked_bytes_reduced_on_congestion_event(
+        |cc, _, stats| packet_lost(cc, 2, stats),
+        Cubic::BETA_USIZE_DIVIDEND,
+    );
+}
+
+#[test]
+fn acked_bytes_reduced_on_ecn_ce() {
+    acked_bytes_reduced_on_congestion_event(
+        |cc, now, stats| ecn_ce(cc, 2, now, stats),
+        Cubic::BETA_USIZE_DIVIDEND_ECN,
+    );
 }
 
 #[test]

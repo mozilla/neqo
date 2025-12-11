@@ -423,14 +423,14 @@ impl WindowAdjustment for Cubic {
 
         // Reducing the congestion window and resetting time
         self.t_epoch = None;
-        let m = if congestion_event == CongestionEvent::Ecn {
+        let beta_dividend = if congestion_event == CongestionEvent::Ecn {
             Self::BETA_USIZE_DIVIDEND_ECN
         } else {
             Self::BETA_USIZE_DIVIDEND
         };
         (
-            curr_cwnd * m / Self::BETA_USIZE_DIVISOR,
-            acked_bytes * m / Self::BETA_USIZE_DIVISOR,
+            curr_cwnd * beta_dividend / Self::BETA_USIZE_DIVISOR,
+            acked_bytes * beta_dividend / Self::BETA_USIZE_DIVISOR,
         )
     }
 
