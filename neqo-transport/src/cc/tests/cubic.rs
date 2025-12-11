@@ -39,6 +39,31 @@ const fn cwnd_after_loss_slow_start(cwnd: usize, mtu: usize) -> usize {
     (cwnd + mtu) * Cubic::BETA_USIZE_DIVIDEND / Cubic::BETA_USIZE_DIVISOR
 }
 
+/// Sets up a Cubic congestion controller in congestion avoidance phase.
+///
+/// If `fast_convergence` is true, sets `w_max` higher than cwnd to trigger fast convergence.
+/// If false, sets `w_max` lower than cwnd to prevent fast convergence.
+fn setup_congestion_avoidance(
+    fast_convergence: bool,
+) -> (ClassicCongestionControl<Cubic>, CongestionControlStats) {
+    let mut cc = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
+    let mut cc_stats = CongestionControlStats::default();
+    // Enter congestion avoidance phase.
+    cc.set_ssthresh(1);
+    // Configure fast convergence behavior.
+    let cwnd_f64 = convert_to_f64(cc.cwnd_initial());
+    let w_max = if fast_convergence {
+        cwnd_f64 * 10.0
+    } else {
+        convert_to_f64(cc.max_datagram_size()) * 3.0
+    };
+    cc.cc_algorithm_mut().set_w_max(w_max);
+    // Fill cwnd and ack one packet to establish baseline.
+    _ = fill_cwnd(&mut cc, 0, now());
+    ack_packet(&mut cc, 0, now(), &mut cc_stats);
+    (cc, cc_stats)
+}
+
 fn fill_cwnd(cc: &mut ClassicCongestionControl<Cubic>, mut next_pn: u64, now: Instant) -> u64 {
     while cc.bytes_in_flight() < cc.cwnd() {
         let sent = sent::Packet::new(
@@ -295,21 +320,7 @@ fn congestion_event_slow_start() {
 
 #[test]
 fn congestion_event_congestion_avoidance() {
-    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
-    let mut cc_stats = CongestionControlStats::default();
-
-    // Set ssthresh to something small to make sure that cc is in the congection avoidance phase.
-    cubic.set_ssthresh(1);
-
-    // Set w_max to something smaller than cwnd so that the fast convergence is not
-    // triggered.
-    let max_datagram_size_f64 = convert_to_f64(cubic.max_datagram_size());
-    cubic
-        .cc_algorithm_mut()
-        .set_w_max(3.0 * max_datagram_size_f64);
-
-    _ = fill_cwnd(&mut cubic, 0, now());
-    ack_packet(&mut cubic, 0, now(), &mut cc_stats);
+    let (mut cubic, mut cc_stats) = setup_congestion_avoidance(false);
 
     assert_eq!(cubic.cwnd(), cubic.cwnd_initial());
 
@@ -323,20 +334,34 @@ fn congestion_event_congestion_avoidance() {
 }
 
 #[test]
+fn acked_bytes_reduced_on_congestion_event() {
+    let (mut cubic, mut cc_stats) = setup_congestion_avoidance(false);
+
+    // The helper acked packet 0. Ack one more to accumulate acked_bytes.
+    let now = now() + RTT / 10;
+    _ = fill_cwnd(&mut cubic, 10, now);
+    ack_packet(&mut cubic, 1, now, &mut cc_stats);
+
+    // Verify cwnd hasn't increased (so acked_bytes wasn't reset).
+    assert_eq!(cubic.cwnd(), cubic.cwnd_initial());
+
+    let acked_bytes_before = cubic.acked_bytes();
+    assert!(acked_bytes_before > 0);
+
+    // Trigger a congestion event (loss).
+    packet_lost(&mut cubic, 2, &mut cc_stats);
+
+    // Verify acked_bytes was reduced by the correct factor.
+    let expected_acked_bytes =
+        acked_bytes_before * Cubic::BETA_USIZE_DIVIDEND / Cubic::BETA_USIZE_DIVISOR;
+    assert_eq!(cubic.acked_bytes(), expected_acked_bytes);
+}
+
+#[test]
 fn congestion_event_congestion_avoidance_fast_convergence() {
-    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
-    let mut cc_stats = CongestionControlStats::default();
+    let (mut cubic, mut cc_stats) = setup_congestion_avoidance(true);
 
-    // Set ssthresh to something small to make sure that cc is in the congection avoidance phase.
-    cubic.set_ssthresh(1);
-
-    // Set w_max to something higher than cwnd so that the fast convergence is triggered.
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
-    cubic.cc_algorithm_mut().set_w_max(cwnd_initial_f64 * 10.0);
-
-    _ = fill_cwnd(&mut cubic, 0, now());
-    ack_packet(&mut cubic, 0, now(), &mut cc_stats);
-
     assert_within(
         cubic.cc_algorithm().w_max(),
         cwnd_initial_f64 * 10.0,
