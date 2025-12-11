@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use enum_map::Enum;
 use neqo_common::qlog::Qlog;
 
 use crate::{recovery::sent, rtt::RttEstimate, stats::CongestionControlStats, Error, Pmtud};
@@ -25,6 +26,13 @@ pub use classic_cc::ClassicCongestionControl;
 pub use classic_cc::CWND_INITIAL_PKTS;
 pub use cubic::Cubic;
 pub use new_reno::NewReno;
+
+#[derive(Clone, Copy, PartialEq, Eq, Enum, Debug)]
+pub enum CongestionEvent {
+    Loss,
+    Ecn,
+    Spurious,
+}
 
 pub trait CongestionControl: Display + Debug {
     fn set_qlog(&mut self, qlog: Qlog);

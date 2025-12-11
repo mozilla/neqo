@@ -18,7 +18,7 @@ use rustc_hash::FxHashMap as HashMap;
 
 use super::CongestionControl;
 use crate::{
-    packet, qlog, recovery::sent, rtt::RttEstimate, sender::PACING_BURST_SIZE,
+    cc::CongestionEvent, packet, qlog, recovery::sent, rtt::RttEstimate, sender::PACING_BURST_SIZE,
     stats::CongestionControlStats, Pmtud,
 };
 
@@ -94,6 +94,7 @@ pub trait WindowAdjustment: Display + Debug {
         curr_cwnd: usize,
         acked_bytes: usize,
         max_datagram_size: usize,
+        congestion_event: CongestionEvent,
     ) -> (usize, usize);
     /// Cubic needs this signal to reset its epoch.
     fn on_app_limited(&mut self);
@@ -344,7 +345,8 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             return false;
         };
 
-        let congestion = self.on_congestion_event(last_lost_packet, false, now, cc_stats);
+        let congestion =
+            self.on_congestion_event(last_lost_packet, CongestionEvent::Loss, now, cc_stats);
         let persistent_congestion = self.detect_persistent_congestion(
             first_rtt_sample_time,
             prev_largest_acked_sent,
@@ -371,7 +373,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) -> bool {
-        self.on_congestion_event(largest_acked_pkt, true, now, cc_stats)
+        self.on_congestion_event(largest_acked_pkt, CongestionEvent::Ecn, now, cc_stats)
     }
 
     fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
@@ -530,7 +532,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
         // If all of them have been removed we detected a spurious congestion event.
         if self.maybe_lost_packets.is_empty() {
-            cc_stats.congestion_events_spurious += 1;
+            cc_stats.congestion_events[CongestionEvent::Spurious] += 1;
             // TODO: Implement spurious congestion event handling: <https://github.com/mozilla/neqo/issues/2694>
         }
     }
@@ -620,7 +622,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     fn on_congestion_event(
         &mut self,
         last_packet: &sent::Packet,
-        ecn: bool,
+        congestion_event: CongestionEvent,
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) -> bool {
@@ -634,6 +636,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             self.congestion_window,
             self.acked_bytes,
             self.max_datagram_size(),
+            congestion_event,
         );
         self.congestion_window = max(cwnd, self.cwnd_min());
         self.acked_bytes = acked_bytes;
@@ -644,11 +647,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             self.ssthresh
         );
 
-        if ecn {
-            cc_stats.congestion_events_ecn += 1;
-        } else {
-            cc_stats.congestion_events_loss += 1;
-        }
+        cc_stats.congestion_events[congestion_event] += 1;
         cc_stats.slow_start_exited |= self.state.in_slow_start();
 
         qlog::metrics_updated(
@@ -696,7 +695,7 @@ mod tests {
             cubic::Cubic,
             new_reno::NewReno,
             tests::{IP_ADDR, MTU, RTT},
-            CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS,
+            CongestionControl, CongestionControlAlgorithm, CongestionEvent, CWND_INITIAL_PKTS,
         },
         packet,
         recovery::{self, sent},
@@ -1379,7 +1378,7 @@ mod tests {
     #[test]
     fn ecn_ce() {
         let now = now();
-        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
+        let mut cc = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
         let mut cc_stats = CongestionControlStats::default();
         let p_ce = sent::Packet::new(
             packet::Type::Short,
@@ -1390,15 +1389,17 @@ mod tests {
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&p_ce, now);
-        cwnd_is_default(&cc);
+        assert_eq!(cc.cwnd(), cc.cwnd_initial());
+        assert_eq!(cc.ssthresh(), usize::MAX);
         assert_eq!(cc.state, State::SlowStart);
-        assert_eq!(cc_stats.congestion_events_ecn, 0);
+        assert_eq!(cc_stats.congestion_events[CongestionEvent::Ecn], 0);
 
         // Signal congestion (ECN CE) and thus change state to recovery start.
         cc.on_ecn_ce_received(&p_ce, now, &mut cc_stats);
-        cwnd_is_halved(&cc);
+        assert_eq!(cc.cwnd(), cc.cwnd_initial() * 85 / 100);
+        assert_eq!(cc.ssthresh(), cc.cwnd_initial() * 85 / 100);
         assert_eq!(cc.state, State::RecoveryStart);
-        assert_eq!(cc_stats.congestion_events_ecn, 1);
+        assert_eq!(cc_stats.congestion_events[CongestionEvent::Ecn], 1);
     }
 
     /// This tests spurious congestion event detection and stat counting
@@ -1425,8 +1426,8 @@ mod tests {
 
         // Verify initial state
         assert_eq!(cc.state, State::SlowStart);
-        assert_eq!(cc_stats.congestion_events_loss, 0);
-        assert_eq!(cc_stats.congestion_events_spurious, 0);
+        assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 0);
+        assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 0);
 
         let mut lost_pkt1 = pkt1.clone();
         let mut lost_pkt2 = pkt2.clone();
@@ -1444,13 +1445,13 @@ mod tests {
 
         // Verify congestion event
         assert_eq!(cc.state, State::RecoveryStart);
-        assert_eq!(cc_stats.congestion_events_loss, 1);
+        assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
 
         let pkt3 = sent::make_packet(3, now, 1000);
         cc.on_packet_sent(&pkt3, now);
 
         assert_eq!(cc.state, State::Recovery);
-        assert_eq!(cc_stats.congestion_events_loss, 1);
+        assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
 
         cc.on_packets_acked(
             &[pkt3],
@@ -1460,7 +1461,7 @@ mod tests {
         );
 
         assert_eq!(cc.state, State::CongestionAvoidance);
-        assert_eq!(cc_stats.congestion_events_loss, 1);
+        assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
 
         cc.on_packets_acked(
             &[pkt1],
@@ -1470,8 +1471,8 @@ mod tests {
         );
 
         assert_eq!(cc.state, State::CongestionAvoidance);
-        assert_eq!(cc_stats.congestion_events_loss, 1);
-        assert_eq!(cc_stats.congestion_events_spurious, 0);
+        assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
+        assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 0);
 
         cc.on_packets_acked(
             &[pkt2],
@@ -1481,8 +1482,8 @@ mod tests {
         );
 
         assert_eq!(cc.state, State::CongestionAvoidance);
-        assert_eq!(cc_stats.congestion_events_loss, 1);
-        assert_eq!(cc_stats.congestion_events_spurious, 1);
+        assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
+        assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 1);
     }
 
     #[test]
@@ -1531,7 +1532,7 @@ mod tests {
         assert!(cc.maybe_lost_packets.is_empty());
     }
 
-    fn slow_start_exit_stats(ecn: bool) {
+    fn slow_start_exit_stats(congestion_event: CongestionEvent) {
         let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
         let now = now();
         let mut cc_stats = CongestionControlStats::default();
@@ -1542,10 +1543,14 @@ mod tests {
         let pkt1 = sent::make_packet(1, now, 1000);
         cc.on_packet_sent(&pkt1, now);
 
-        if ecn {
-            cc.on_ecn_ce_received(&pkt1, now, &mut cc_stats);
-        } else {
-            cc.on_packets_lost(Some(now), None, PTO, &[pkt1], now, &mut cc_stats);
+        match congestion_event {
+            CongestionEvent::Ecn => {
+                cc.on_ecn_ce_received(&pkt1, now, &mut cc_stats);
+            }
+            CongestionEvent::Loss => {
+                cc.on_packets_lost(Some(now), None, PTO, &[pkt1], now, &mut cc_stats);
+            }
+            CongestionEvent::Spurious => panic!("unsupported congestion event"),
         }
 
         assert!(!cc.state.in_slow_start());
@@ -1554,11 +1559,11 @@ mod tests {
 
     #[test]
     fn slow_start_exit_stats_loss() {
-        slow_start_exit_stats(false);
+        slow_start_exit_stats(CongestionEvent::Loss);
     }
 
     #[test]
     fn slow_start_exit_stats_ecn_ce() {
-        slow_start_exit_stats(true);
+        slow_start_exit_stats(CongestionEvent::Ecn);
     }
 }
