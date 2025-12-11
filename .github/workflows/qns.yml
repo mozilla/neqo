@@ -129,10 +129,11 @@ jobs:
 
       - env:
           REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           for IMAGE in pr main; do
             docker load --input "/tmp/$IMAGE.tar"
-            echo "${IMAGE^^}_IMAGE=ghcr.io/$REPO-qns-$IMAGE" >> "$GITHUB_ENV"
+            echo "${IMAGE^^}_IMAGE=ghcr.io/$REPO-qns-$IMAGE:pr-$PR_NUMBER" >> "$GITHUB_ENV"
           done
 
       - id: config
