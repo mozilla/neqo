@@ -294,7 +294,7 @@ jobs:
             fi
             MAIN_RUN="${RUN/$PR/neqo-main}"
             if [ ! -e "$MAIN_RUN/result.json" ]; then
-              echo "* $PAIR: baseline upload failed" >> "$ROLE.failed.md"
+              echo "* $PAIR: baseline result missing" >> "$ROLE.failed.md"
               continue
             fi
             for BRANCH in "$RUN" "$MAIN_RUN"; do
