@@ -320,7 +320,7 @@ jobs:
                 # Get baseline from neqo-main if available
                 BASELINE=$(mktemp)
                 MAIN_GROUPED="$MAIN_RUN/$ROLE.grouped.json"
-                if [ -e "$MAIN_GROUPED" ]; then
+                if [ -s "$MAIN_GROUPED" ]; then
                   jq < "$MAIN_GROUPED" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE"
                 fi
                 [ -n "$PR_RESULT" ] || continue
