@@ -276,8 +276,6 @@ pub struct Stats {
     pub pmtud_ack: usize,
     /// Number of PMTUD probes lost.
     pub pmtud_lost: usize,
-    /// Number of times a path MTU changed unexpectedly.
-    pub pmtud_change: usize,
     /// MTU of the local interface used for the most recent path.
     pub pmtud_iface_mtu: usize,
     /// Probed PMTU of the current path.
@@ -391,13 +389,8 @@ impl Debug for Stats {
         writeln!(f, "  ss_exit: {}", self.cc.slow_start_exited)?;
         writeln!(
             f,
-            "  pmtud: {} sent {} acked {} lost {} change {} iface_mtu {} pmtu",
-            self.pmtud_tx,
-            self.pmtud_ack,
-            self.pmtud_lost,
-            self.pmtud_change,
-            self.pmtud_iface_mtu,
-            self.pmtud_pmtu
+            "  pmtud: {} sent {} acked {} lost {} iface_mtu {} pmtu",
+            self.pmtud_tx, self.pmtud_ack, self.pmtud_lost, self.pmtud_iface_mtu, self.pmtud_pmtu
         )?;
         writeln!(f, "  resumed: {}", self.resumed)?;
         writeln!(f, "  frames rx:")?;

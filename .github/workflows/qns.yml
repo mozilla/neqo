@@ -1,14 +1,11 @@
 name: QNS
 on:
-  push:
-    branches: ["main"]
   pull_request:
     branches: ["main"]
     types: [opened, synchronize, reopened, ready_for_review]
-  merge_group:
   workflow_dispatch:
   schedule:
-    # Run at 1 AM each day, so there is a `main`-branch baseline in the cache.
+    # Run at 1 AM each day, so the interop-runner has a current image
     - cron: '0 1 * * *'
 
 concurrency:
@@ -19,28 +16,25 @@ permissions:
   contents: read
 
 env:
-  LATEST: neqo-latest
-  DELIM: ' vs. '
+  DELIM: 'vs.'
   TIMEOUT: 20
 
 jobs:
   docker-image:
-    name: Build Docker image
-    if: github.actor != 'dependabot[bot]'
+    name: Build and push Docker image
+    if: github.event_name != 'pull_request' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
-    outputs:
-      imageID: ${{ steps.docker_build_and_push.outputs.imageID }}
     permissions:
       packages: write # This permission is required to push to GitHub Container Registry.
     steps:
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
           platforms: arm64
-          cache-image: false
+          cache-image: true
 
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
         with:
-          cache-binary: false
+          cache-binary: true
 
       - uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
@@ -48,46 +42,77 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893 # v5.9.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}-qns
           tags: |
-            # default
             type=schedule
             type=ref,event=branch
             type=ref,event=tag
-            type=ref,event=pr
-            # set latest tag for default branch
             type=raw,value=latest,enable={{is_default_branch}}
 
       - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
-        if: ${{ github.event_name != 'pull_request' }}
         with:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
-          platforms: 'linux/amd64, linux/arm64'
+          platforms: linux/amd64, linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  docker-image-pr:
+    name: Build Docker images for QNS
+    if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - name: pr
+            ref: ${{ github.event.pull_request.head.sha }}
+          - name: main
+            ref: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        with:
+          cache-binary: true
+
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ matrix.ref }}
+
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}-qns-${{ matrix.name }}
+          tags: type=ref,event=pr
 
       - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
-        id: docker_build_and_push
         with:
+          push: false
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
-          platforms: 'linux/amd64'
-          outputs: type=docker,dest=/tmp/${{ env.LATEST }}.tar
+          platforms: linux/amd64
+          outputs: type=docker,dest=/tmp/${{ matrix.name }}.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
-          name: '${{ env.LATEST }} Docker image'
-          path: /tmp/${{ env.LATEST }}.tar
+          name: ${{ matrix.name }} Docker image
+          path: /tmp/${{ matrix.name }}.tar
 
   implementations:
     name: Determine interop pairs
-    if: ${{ github.event_name != 'push' }}
-    needs: docker-image
+    if: github.event_name == 'pull_request'
+    needs: docker-image-pr
     runs-on: ubuntu-24.04
     outputs:
       pairs: ${{ steps.config.outputs.pairs }}
@@ -95,18 +120,37 @@ jobs:
     env:
       URL: https://github.com/mozilla/neqo
       ROLE: both
-      IMAGE: ${{ needs.docker-image.outputs.imageID }}
     steps:
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          pattern: '* Docker image'
+          path: /tmp
+          merge-multiple: true
+
+      - env:
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          for IMAGE in pr main; do
+            docker load --input "/tmp/$IMAGE.tar"
+            echo "${IMAGE^^}_IMAGE=ghcr.io/$REPO-qns-$IMAGE:pr-$PR_NUMBER" >> "$GITHUB_ENV"
+          done
+
       - id: config
         run: |
-          # Add neqo-latest and some non-default implementations.
+          # Add neqo-pr, neqo-main, and some non-default implementations
           # tquic: https://github.com/quic-interop/quic-interop-runner/pull/385/files
           # openssl: https://github.com/quic-interop/quic-interop-runner/pull/402/files
           # linuxquic: https://github.com/quic-interop/quic-interop-runner/pull/428
           cat <<EOF > additional.json
           {
-            "neqo-latest": {
-              "image": "$IMAGE",
+            "neqo-pr": {
+              "image": "$PR_IMAGE",
+              "url": "$URL",
+              "role": "$ROLE"
+            },
+            "neqo-main": {
+              "image": "$MAIN_IMAGE",
               "url": "$URL",
               "role": "$ROLE"
             },
@@ -134,15 +178,16 @@ jobs:
             cat implementations.json
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          # Determine valid interop pairs that contain $LATEST
-          jq < implementations.json "[
-              [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers |
-              [to_entries[] | select(.value.role==\"client\" or .value.role==\"both\").key] as \$clients |
-              \$clients[] as \$client |
-              \$servers[] as \$server |
-              \$client + \"$DELIM\" + \$server |
-              select(contains(\"$LATEST\"))
-            ]" > pairs.json
+          # Determine valid interop pairs: all combinations involving neqo-pr or neqo-main
+          # shellcheck disable=SC2016
+          jq < implementations.json '[
+            [to_entries[] | select(.value.role=="server" or .value.role=="both").key] as $servers |
+            [to_entries[] | select(.value.role=="client" or .value.role=="both").key] as $clients |
+            $clients[] as $client |
+            $servers[] as $server |
+            $client + " '"$DELIM"' " + $server |
+            select((contains("neqo-pr") or contains("neqo-main")) and ($client != $server))
+          ]' > pairs.json
           {
             echo "pairs<<EOF"
             cat pairs.json
@@ -151,7 +196,7 @@ jobs:
 
   run-qns:
     name: Run QNS
-    if: ${{ github.event_name != 'push' }}
+    if: github.event_name == 'pull_request'
     needs: implementations
     strategy:
       fail-fast: false
@@ -162,26 +207,35 @@ jobs:
       # quic-interop-runner requires Docker v28.1. GitHub's ubuntu-24.04 comes
       # with v28.0.4. Install newer version.
       - name: Set up Docker
-        uses: docker/setup-docker-action@efe9e3891a4f7307e689f2100b33a155b900a608 # v4.5.0
+        uses: docker/setup-docker-action@e61617a16c407a86262fb923c35a616ddbe070b3 # v4.6.0
         with:
           version: 'v28.1.0'
 
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
-          name: '${{ env.LATEST }} Docker image'
+          name: 'pr Docker image'
           path: /tmp
 
-      - run: docker load --input "/tmp/$LATEST.tar"
+      - run: docker load --input "/tmp/pr.tar"
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        if: contains(matrix.pair, 'neqo-main')
+        with:
+          name: 'main Docker image'
+          path: /tmp
+
+      - if: contains(matrix.pair, 'neqo-main')
+        run: docker load --input /tmp/main.tar
 
       - id: depair
         env:
           PAIR: ${{ matrix.pair }}
         run: |
-          PAIR="${PAIR/$DELIM/%}"
+          PAIR="${PAIR/ $DELIM /%}"
           echo "client=$(echo "$PAIR" | cut -d% -f1)" >> "$GITHUB_OUTPUT"
           echo "server=$(echo "$PAIR" | cut -d% -f2)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
 
@@ -195,18 +249,18 @@ jobs:
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
 
-      - if: ${{ always() }}
+      - if: always()
         env:
           RESULT: ${{ steps.run.outputs.result }}
         run: test "$RESULT" != "error"
 
   report:
     name: Report results
-    if: ${{ !cancelled() && github.event_name != 'push' }}
-    needs: [run-qns, implementations]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    needs: [docker-image-pr, run-qns, implementations]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
@@ -214,23 +268,21 @@ jobs:
           pattern: '*results'
           path: results
 
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: results-main
-          key: qns-${{ github.sha }}
-          restore-keys: qns-
-
-      - run: sudo apt-get install -y --no-install-recommends wdiff
+      - run: sudo apt-get install -y --no-install-recommends wdiff cmark-gfm
       - env:
           PAIRS: ${{ needs.implementations.outputs.pairs }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR: 'neqo-pr'
         run: |
           # shellcheck disable=SC2153
           mapfile -t LIST < <(echo "$PAIRS" | jq '.[]' | sort)
           for PREFIX in "${LIST[@]}"; do
             PREFIX=$(echo "$PREFIX" | tr -d '"')
+            # Skip neqo-main results as they're only used as baseline
+            [[ "$PREFIX" == *"neqo-main"* ]] && continue
             CLIENT=$(echo "$PREFIX" | cut -f1 -d " ")
             SERVER=$(echo "$PREFIX" | cut -f3 -d " ")
-            if [ "$CLIENT" == "$LATEST" ]; then
+            if [ "$CLIENT" == "$PR" ]; then
               ROLE=client
             else
               ROLE=server
@@ -241,28 +293,43 @@ jobs:
               echo "* $PAIR: run cancelled after $TIMEOUT min" >> "$ROLE.failed.md"
               continue
             fi
-            jq < "$RUN/result.json" '
-                . as $data |
-                .results[][].result //= "failed" |
-                {
-                  results: [.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] |
-                  add
-                } |
-                . + {log_url: $data.log_url}
-              ' > "$RUN/$ROLE.grouped.json"
+            MAIN_RUN="${RUN/$PR/neqo-main}"
+            if [ ! -s "$MAIN_RUN/result.json" ]; then
+              echo "* $PAIR: baseline result missing" >> "$ROLE.failed.md"
+              continue
+            fi
+            for BRANCH in "$RUN" "$MAIN_RUN"; do
+              if [ ! -s "$BRANCH/result.json" ]; then
+                echo "* $PAIR: $BRANCH result missing" >> "$ROLE.failed.md"
+                continue 2
+              fi
+              jq < "$BRANCH/result.json" '
+                  . as $data |
+                  .results[][].result //= "failed" |
+                  {
+                    results: [.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] |
+                    add
+                  } |
+                  . + {log_url: $data.log_url}
+                ' > "$BRANCH/$ROLE.grouped.json"
+            done
             for ROLE in client server; do
               [ ! -e "$RUN/$ROLE.grouped.json" ] && continue
               for GROUP in $(jq -r < "$RUN/$ROLE.grouped.json" '.results | keys[]'); do
-                RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
+                PR_RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
                 LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
+                # Get baseline from neqo-main if available
                 BASELINE=$(mktemp)
-                if [ -e "results-main/${PREFIX} results/$ROLE.grouped.json" ]; then
-                  jq < "results-main/${PREFIX} results/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE"
-                else
-                  touch "$BASELINE"
+                MAIN_GROUPED="$MAIN_RUN/$ROLE.grouped.json"
+                if [ -s "$MAIN_GROUPED" ]; then
+                  jq < "$MAIN_GROUPED" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE"
                 fi
-                [ -n "$RESULT" ] || continue
-                DIFF=$(wdiff -n "$BASELINE" - <<< "$RESULT" || true)
+                [ -n "$PR_RESULT" ] || continue
+                DIFF=$(wdiff -n "$BASELINE" - <<< "$PR_RESULT" || true)
+                ADD=""
+                ADD_DELIM=""
+                DEL=""
+                DEL_DELIM=""
                 if [ "$GROUP" == "failed" ]; then
                   ADD=":warning:"
                   ADD_DELIM="\*\*"
@@ -273,11 +340,6 @@ jobs:
                   ADD_DELIM="~~"
                   DEL=":warning:"
                   DEL_DELIM="\*\*"
-                else
-                  ADD=""
-                  ADD_DELIM=""
-                  DEL=""
-                  DEL_DELIM=""
                 fi
                 RESULT=$(echo "$DIFF" | sed -E "s/\[-/ $DEL$DEL_DELIM/g; s/-\]/$DEL_DELIM /g; s/\{\+/ $ADD$ADD_DELIM/g; s/\+\}/$ADD_DELIM /g")
                 echo "* [$PAIR]($LOG): $RESULT" >> "$ROLE.$GROUP.md"
@@ -288,15 +350,21 @@ jobs:
             echo "### Failed Interop Tests"
             if [ -e client.failed.md ] || [ -e server.failed.md ]; then
               echo -n "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
-              SHA=$(cat results-main/baseline-sha.txt || true)
-              if [ -n "$SHA" ]; then
-                echo ", differences relative to $SHA."
+              if [ "$BASE_SHA" ]; then
+                echo -n ", differences relative to \`main\` at ${BASE_SHA}"
               fi
+              echo "."
               echo
-              echo "#### $LATEST as client"
-              cat client.failed.md || echo
-              echo "#### $LATEST as server"
-              cat server.failed.md || echo
+              echo "<table><tr><th align=\"left\">$PR as client</th><th align=\"left\">$PR as server</th></tr>"
+              echo -n "<tr><td valign=\"top\">"
+              if [ -e client.failed.md ]; then
+                cmark-gfm -e strikethrough -e autolink client.failed.md | tr -d '\n' | sed 's/<\/*ul>//g; s/<li>//g; s/<\/li>/<br>/g'
+              fi
+              echo -n "</td><td valign=\"top\">"
+              if [ -e server.failed.md ]; then
+                cmark-gfm -e strikethrough -e autolink server.failed.md | tr -d '\n' | sed 's/<\/*ul>//g; s/<li>//g; s/<\/li>/<br>/g'
+              fi
+              echo "</td></tr></table>"
             else
               echo -n "None "
               if [ -e "client.succeeded.md" ] || [ -e "server.succeeded.md" ] || [ -e "client.unsupported.md" ] || [ -e "server.unsupported.md" ]; then
@@ -311,9 +379,9 @@ jobs:
               echo "### ${GROUP^} Interop Tests"
               if [ -e "client.$GROUP.md" ] || [ -e "server.$GROUP.md" ]; then
                 echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
-                echo "#### $LATEST as client"
+                echo "#### $PR as client"
                 cat "client.$GROUP.md"
-                echo "#### $LATEST as server"
+                echo "#### $PR as server"
                 cat "server.$GROUP.md"
               else
                 echo "None :question:"
@@ -322,20 +390,6 @@ jobs:
             echo
             echo "</details>"
           } >> comment.md
-
-      - if: ${{ github.ref == 'refs/heads/main' }}
-        env:
-          SHA: ${{ github.sha }}
-        run: |
-          rm -rf results-main || true
-          mv results results-main
-          echo "$SHA" > results-main/baseline-sha.txt
-
-      - if: ${{ github.ref == 'refs/heads/main' }}
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: results-main
-          key: qns-${{ github.sha }}
 
       - uses: ./.github/actions/pr-comment-data-export
         with:

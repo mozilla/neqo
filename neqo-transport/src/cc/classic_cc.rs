@@ -228,7 +228,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
             if self.state.in_recovery() {
                 self.set_state(State::CongestionAvoidance, now);
-                qlog::metrics_updated(&self.qlog, &[qlog::Metric::InRecovery(false)], now);
+                qlog::metrics_updated(&mut self.qlog, &[qlog::Metric::InRecovery(false)], now);
             }
 
             new_acked += pkt.len();
@@ -282,7 +282,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             self.acked_bytes = min(bytes_for_increase, self.acked_bytes);
         }
         qlog::metrics_updated(
-            &self.qlog,
+            &mut self.qlog,
             &[
                 qlog::Metric::CongestionWindow(self.congestion_window),
                 qlog::Metric::BytesInFlight(self.bytes_in_flight),
@@ -328,15 +328,14 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         }
 
         qlog::metrics_updated(
-            &self.qlog,
+            &mut self.qlog,
             &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
 
-        let is_pmtud_probe = self.pmtud.is_probe_filter();
         let mut lost_packets = lost_packets
             .iter()
-            .filter(|pkt| !is_pmtud_probe(pkt))
+            .filter(|pkt| !pkt.is_pmtud_probe())
             .rev()
             .peekable();
 
@@ -380,7 +379,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             assert!(self.bytes_in_flight >= pkt.len());
             self.bytes_in_flight -= pkt.len();
             qlog::metrics_updated(
-                &self.qlog,
+                &mut self.qlog,
                 &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
                 now,
             );
@@ -391,7 +390,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     fn discard_in_flight(&mut self, now: Instant) {
         self.bytes_in_flight = 0;
         qlog::metrics_updated(
-            &self.qlog,
+            &mut self.qlog,
             &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
@@ -422,7 +421,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             pkt.len()
         );
         qlog::metrics_updated(
-            &self.qlog,
+            &mut self.qlog,
             &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
@@ -592,7 +591,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                     self.acked_bytes = 0;
                     self.set_state(State::PersistentCongestion, now);
                     qlog::metrics_updated(
-                        &self.qlog,
+                        &mut self.qlog,
                         &[qlog::Metric::CongestionWindow(self.congestion_window)],
                         now,
                     );
@@ -653,7 +652,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         cc_stats.slow_start_exited |= self.state.in_slow_start();
 
         qlog::metrics_updated(
-            &self.qlog,
+            &mut self.qlog,
             &[
                 qlog::Metric::CongestionWindow(self.congestion_window),
                 qlog::Metric::SsThresh(self.ssthresh),

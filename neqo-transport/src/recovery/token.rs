@@ -67,4 +67,6 @@ pub enum Token {
     Datagram(DatagramTracking),
     /// A packet marked with [`neqo_common::Ecn::Ect0`].
     EcnEct0,
+    /// A PMTUD probe packet.
+    PmtudProbe,
 }

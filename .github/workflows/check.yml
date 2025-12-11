@@ -32,7 +32,7 @@ jobs:
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
     steps:
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           sparse-checkout: Cargo.toml
           persist-credentials: false
@@ -76,7 +76,7 @@ jobs:
           # - os: ubuntu-22.04
           #   rust-toolchain: stable
           #   type: debug
-          - os: macos-13
+          - os: macos-14
             rust-toolchain: stable
             type: debug
           - os: windows-2022
@@ -97,15 +97,15 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
 
       - uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
-          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }}
+          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful ' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -128,6 +128,8 @@ jobs:
           RUST_TEST_TIME_INTEGRATION: 10,30
           RUST_TEST_TIME_DOCTEST: 10,30
           TOOLCHAIN: ${{ matrix.rust-toolchain }}
+          # FIXME: cargo-careful at the moment only works on amd64 Ubuntu
+          CAREFUL: ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'careful' || '' }}
         run: |
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
@@ -135,7 +137,11 @@ jobs:
           if [ "$TOOLCHAIN" == "stable" ]; then
             cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
-            cargo test $BUILD_TYPE --locked --features ci
+            if [ -n "$CAREFUL" ]; then
+              # FIXME: Rust 1.81 doesn't have the ability to print host-tuple
+              TRIPLE="--target $(rustc --print host-tuple)"
+            fi
+            cargo $CAREFUL test $BUILD_TYPE --locked --features ci $TRIPLE
           fi
 
       - name: Run client/server transfer
@@ -184,7 +190,7 @@ jobs:
     name: Ensure `Cargo.lock` contains all required dependencies
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/rust
@@ -198,13 +204,12 @@ jobs:
 
   check-android:
     name: Check Android
-    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     strategy:
       matrix:
         target: ['x86_64-linux-android', 'i686-linux-android'] # 'aarch64-linux-android' not currently working
     steps:
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
       - id: nss-version
@@ -217,14 +222,13 @@ jobs:
 
   check-vm:
     name: Run checks for VM-only platforms
-    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         os: [ freebsd, openbsd, netbsd ] # NSS package on 'solaris' is too old.
     steps:
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/check-vm
