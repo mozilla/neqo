@@ -300,7 +300,7 @@ jobs:
             for BRANCH in "$RUN" "$MAIN_RUN"; do
               if [ ! -s "$BRANCH/result.json" ]; then
                 echo "* $PAIR: $BRANCH result missing" >> "$ROLE.failed.md"
-                continue
+                continue 2
               fi
               jq < "$BRANCH/result.json" '
                   . as $data |
