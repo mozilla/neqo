@@ -293,7 +293,7 @@ jobs:
               continue
             fi
             MAIN_RUN="${RUN/$PR/neqo-main}"
-            if [ ! -e "$MAIN_RUN/result.json" ]; then
+            if [ ! -s "$MAIN_RUN/result.json" ]; then
               echo "* $PAIR: baseline result missing" >> "$ROLE.failed.md"
               continue
             fi
