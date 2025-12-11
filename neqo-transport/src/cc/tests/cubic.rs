@@ -24,9 +24,8 @@ use crate::{
         cubic::{convert_to_f64, Cubic},
         CongestionControl as _, CongestionEvent,
     },
-    packet,
     pmtud::Pmtud,
-    recovery::{self, sent},
+    recovery::sent,
     rtt::RttEstimate,
     stats::CongestionControlStats,
 };
@@ -66,15 +65,8 @@ fn setup_congestion_avoidance(
 
 fn fill_cwnd(cc: &mut ClassicCongestionControl<Cubic>, mut next_pn: u64, now: Instant) -> u64 {
     while cc.bytes_in_flight() < cc.cwnd() {
-        let sent = sent::Packet::new(
-            packet::Type::Short,
-            next_pn,
-            now,
-            true,
-            recovery::Tokens::new(),
-            cc.max_datagram_size(),
-        );
-        cc.on_packet_sent(&sent, now);
+        let pkt = sent::make_packet(next_pn, now, cc.max_datagram_size());
+        cc.on_packet_sent(&pkt, now);
         next_pn += 1;
     }
     next_pn
@@ -86,15 +78,8 @@ fn ack_packet(
     now: Instant,
     cc_stats: &mut CongestionControlStats,
 ) {
-    let acked = sent::Packet::new(
-        packet::Type::Short,
-        pn,
-        now,
-        true,
-        recovery::Tokens::new(),
-        cc.max_datagram_size(),
-    );
-    cc.on_packets_acked(&[acked], &RttEstimate::new(RTT), now, cc_stats);
+    let pkt = sent::make_packet(pn, now, cc.max_datagram_size());
+    cc.on_packets_acked(&[pkt], &RttEstimate::new(RTT), now, cc_stats);
 }
 
 fn packet_lost(
@@ -103,15 +88,9 @@ fn packet_lost(
     cc_stats: &mut CongestionControlStats,
 ) {
     const PTO: Duration = Duration::from_millis(120);
-    let p_lost = sent::Packet::new(
-        packet::Type::Short,
-        pn,
-        now(),
-        true,
-        recovery::Tokens::new(),
-        cc.max_datagram_size(),
-    );
-    cc.on_packets_lost(None, None, PTO, &[p_lost], now(), cc_stats);
+    let now = now();
+    let pkt = sent::make_packet(pn, now, cc.max_datagram_size());
+    cc.on_packets_lost(None, None, PTO, &[pkt], now, cc_stats);
 }
 
 fn ecn_ce(
@@ -120,15 +99,8 @@ fn ecn_ce(
     now: Instant,
     cc_stats: &mut CongestionControlStats,
 ) {
-    let p_ce = sent::Packet::new(
-        packet::Type::Short,
-        pn,
-        now,
-        true,
-        recovery::Tokens::new(),
-        cc.max_datagram_size(),
-    );
-    cc.on_ecn_ce_received(&p_ce, now, cc_stats);
+    let pkt = sent::make_packet(pn, now, cc.max_datagram_size());
+    cc.on_ecn_ce_received(&pkt, now, cc_stats);
 }
 
 fn expected_tcp_acks(cwnd_rtt_start: usize, mtu: usize) -> u64 {
