@@ -21,7 +21,7 @@ env:
 
 jobs:
   docker-image:
-    name: Build and push Docker image for registry upload
+    name: Build and push Docker image
     if: github.event_name != 'pull_request' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     permissions:
