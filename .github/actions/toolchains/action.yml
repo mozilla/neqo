@@ -1,0 +1,16 @@
+name: Determine Rust toolchains
+description: Determine Rust toolchains to test based on MSRV from Cargo.toml
+
+outputs:
+  toolchains:
+    description: JSON array of Rust toolchains to test
+    value: ${{ steps.toolchains.outputs.toolchains }}
+
+runs:
+  using: composite
+  steps:
+    - id: toolchains
+      shell: bash
+      run: |
+        msrv="$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].rust_version')"
+        echo "toolchains=[\"$msrv\", \"stable\", \"nightly\"]" >> "$GITHUB_OUTPUT"
