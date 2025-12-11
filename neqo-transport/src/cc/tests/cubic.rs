@@ -65,8 +65,8 @@ fn setup_congestion_avoidance(
 
 fn fill_cwnd(cc: &mut ClassicCongestionControl<Cubic>, mut next_pn: u64, now: Instant) -> u64 {
     while cc.bytes_in_flight() < cc.cwnd() {
-        let pkt = sent::make_packet(next_pn, now, cc.max_datagram_size());
-        cc.on_packet_sent(&pkt, now);
+        let sent = sent::make_packet(next_pn, now, cc.max_datagram_size());
+        cc.on_packet_sent(&sent, now);
         next_pn += 1;
     }
     next_pn
@@ -78,8 +78,8 @@ fn ack_packet(
     now: Instant,
     cc_stats: &mut CongestionControlStats,
 ) {
-    let pkt = sent::make_packet(pn, now, cc.max_datagram_size());
-    cc.on_packets_acked(&[pkt], &RttEstimate::new(RTT), now, cc_stats);
+    let acked = sent::make_packet(pn, now, cc.max_datagram_size());
+    cc.on_packets_acked(&[acked], &RttEstimate::new(RTT), now, cc_stats);
 }
 
 fn packet_lost(
@@ -89,8 +89,8 @@ fn packet_lost(
 ) {
     const PTO: Duration = Duration::from_millis(120);
     let now = now();
-    let pkt = sent::make_packet(pn, now, cc.max_datagram_size());
-    cc.on_packets_lost(None, None, PTO, &[pkt], now, cc_stats);
+    let p_lost = sent::make_packet(pn, now, cc.max_datagram_size());
+    cc.on_packets_lost(None, None, PTO, &[p_lost], now, cc_stats);
 }
 
 fn ecn_ce(
