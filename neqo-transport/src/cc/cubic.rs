@@ -134,7 +134,7 @@ impl Cubic {
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-principle-4-for-the-cubic-d>
     ///
     /// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing.
-    /// The divisor is set to `100` to also accomodate the `0.85` beta value for ECN induced
+    /// The divisor is set to `100` to also accommodate the `0.85` beta value for ECN induced
     /// congestion events.
     pub const BETA_USIZE_DIVISOR: usize = 100;
 
