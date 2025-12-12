@@ -73,7 +73,7 @@ pub use self::{
         },
         Connection, Output, OutputBatch, State, ZeroRttState,
     },
-    events::{ConnectionEvent, ConnectionEvents},
+    events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::CloseError,
     packet::MIN_INITIAL_PACKET_SIZE,
     pmtud::Pmtud,
