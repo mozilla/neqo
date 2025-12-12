@@ -101,6 +101,10 @@ runs:
         GITHUB_TOKEN: ${{ inputs.token }}
         TOOLS: ${{ inputs.tools }}
       run: |
+        # On Linux, add wild to TOOLS
+        if [ "$RUNNER_OS" == "Linux" ]; then
+          TOOLS="$TOOLS,wild"
+        fi
         for tool in $(echo $TOOLS | tr -d ","); do
           if [ "$tool" == "samply" ]; then
             # TODO: Install released version once `--presymbolicate` (https://github.com/mstange/samply/pull/634) is released.
@@ -113,3 +117,11 @@ runs:
             cargo install --locked --force "$tool"
           fi
         done
+
+    - name: Link with wild (Linux)
+      if: ${{ runner.os == 'Linux' }}
+      shell: bash
+      run: |
+        mkdir -p "$HOME/.cargo"
+        TUPLE=$(rustc --print host-tuple)
+        echo -e "[target.${TUPLE}-${libc}]\nlinker = \"clang\"\nrustflags = [\"-Clink-arg=--ld-path=wild\"]\n" >>"$HOME/.cargo/config.toml"
