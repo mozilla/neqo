@@ -207,4 +207,24 @@ mod test {
         };
         assert_eq!(p.maybe_encode_frame(StreamId::new(4)), Some(expected));
     }
+
+    #[test]
+    fn priority_update_sent_clears_pending() {
+        let mut p = PriorityHandler::new(false, Priority::new(5, false));
+        assert!(p.maybe_update_priority(Priority::new(6, false)));
+        assert!(p.maybe_encode_frame(StreamId::new(4)).is_some());
+        p.priority_update_sent();
+        // After sending, no more pending update.
+        assert!(p.maybe_encode_frame(StreamId::new(4)).is_none());
+    }
+
+    #[test]
+    fn from_bytes_invalid_urgency_defaults() {
+        // Urgency outside 0-7 should default to 3.
+        let p = Priority::from_bytes(b"u=8").unwrap();
+        assert_eq!(p, Priority::default());
+
+        let p = Priority::from_bytes(b"u=-1").unwrap();
+        assert_eq!(p, Priority::default());
+    }
 }

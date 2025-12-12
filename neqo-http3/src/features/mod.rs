@@ -100,3 +100,21 @@ pub(crate) enum ConnectType {
     /// Extended CONNECT see <https://www.rfc-editor.org/rfc/rfc9220>.
     Extended(ExtendedConnectType),
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use crate::{features::NegotiationState, settings::HSettingType};
+
+    #[test]
+    fn negotiation_state_locally_enabled() {
+        let disabled = NegotiationState::new(false, HSettingType::EnableWebTransport);
+        assert!(!disabled.locally_enabled());
+
+        let negotiating = NegotiationState::new(true, HSettingType::EnableWebTransport);
+        assert!(negotiating.locally_enabled());
+
+        assert!(NegotiationState::Negotiated.locally_enabled());
+        assert!(NegotiationState::Failed.locally_enabled());
+    }
+}

@@ -503,3 +503,19 @@ impl HttpRecvStreamEvents for RecvPushEvents {
         );
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::{Http3ClientEvents, PushController};
+
+    #[test]
+    fn can_receive_push() {
+        let events = Http3ClientEvents::default();
+        let disabled = PushController::new(0, events.clone());
+        assert!(!disabled.can_receive_push());
+
+        let enabled = PushController::new(1, events);
+        assert!(enabled.can_receive_push());
+    }
+}
