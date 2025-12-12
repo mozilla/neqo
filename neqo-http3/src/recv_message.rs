@@ -441,6 +441,14 @@ impl RecvStream for RecvMessage {
                     self.set_closed();
                     break Ok((written, true));
                 }
+                RecvMessageState::ExtendedConnect => {
+                    let (amount, fin) = conn
+                        .stream_recv(self.stream_id, &mut buf[written..])
+                        .map_err(|e| Error::map_stream_recv_errors(&Error::from(e)))?;
+                    qlog::h3_data_moved_up(conn.qlog_mut(), self.stream_id, amount, now);
+                    written += amount;
+                    break Ok((written, fin));
+                }
                 _ => break Ok((written, false)),
             }
         }

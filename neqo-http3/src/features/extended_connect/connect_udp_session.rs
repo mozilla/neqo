@@ -17,8 +17,8 @@ use crate::{
         session::{DgramContextIdError, State},
         CloseReason, ExtendedConnectEvents, ExtendedConnectType, Protocol,
     },
-    frames::{ConnectUdpFrame, FrameReader, StreamReaderRecvStreamWrapper},
-    Error, RecvStream, Res,
+    frames::{capsule::Capsule, FrameReader, StreamReaderRecvStreamWrapper},
+    Error, RecvStream, Res, SendStream,
 };
 
 #[derive(Debug)]
@@ -55,32 +55,39 @@ impl Protocol for Session {
         control_stream_recv: &mut Box<dyn RecvStream>,
         now: Instant,
     ) -> Res<Option<State>> {
-        let (f, fin) = self
-            .frame_reader
-            .receive::<ConnectUdpFrame>(
-                &mut StreamReaderRecvStreamWrapper::new(conn, control_stream_recv),
-                now,
-            )
-            .map_err(|_| Error::HttpGeneralProtocolStream)?;
+        loop {
+            let (f, fin) = self
+                .frame_reader
+                .receive::<Capsule>(
+                    &mut StreamReaderRecvStreamWrapper::new(conn, control_stream_recv),
+                    now,
+                )
+                .map_err(|_| Error::HttpGeneralProtocolStream)?;
 
-        if let Some(f) = f {
-            // TODO: Implement HTTP Datagram <https://github.com/mozilla/neqo/issues/2843>.
-            match f {}
-        }
-
-        if fin {
-            events.session_end(
-                ExtendedConnectType::ConnectUdp,
-                self.session_id,
-                CloseReason::Clean {
-                    error: 0,
-                    message: String::new(),
-                },
-                None,
-            );
-            Ok(Some(State::Done))
-        } else {
-            Ok(None)
+            if let Some(f) = f {
+                match f {
+                    Capsule::Datagram { payload } => {
+                        events.new_datagram(
+                            self.session_id,
+                            payload,
+                            ExtendedConnectType::ConnectUdp,
+                        );
+                    }
+                }
+            } else if fin {
+                events.session_end(
+                    ExtendedConnectType::ConnectUdp,
+                    self.session_id,
+                    CloseReason::Clean {
+                        error: 0,
+                        message: String::new(),
+                    },
+                    None,
+                );
+                return Ok(Some(State::Done));
+            } else {
+                return Ok(None);
+            }
         }
     }
 
@@ -103,6 +110,23 @@ impl Protocol for Session {
                 Err(DgramContextIdError::MissingIdentifier)
             }
         }
+    }
+
+    fn write_datagram_capsule(
+        &self,
+        control_stream_send: &mut Box<dyn SendStream>,
+        conn: &mut Connection,
+        buf: &[u8],
+        now: Instant,
+    ) -> Res<bool> {
+        let capsule = Capsule::Datagram {
+            payload: Bytes::from(buf.to_vec()),
+        };
+        let mut enc = Encoder::default();
+        capsule.encode(&mut enc);
+        let encoded = enc.as_ref();
+        control_stream_send.send_data_atomic(conn, encoded, now)?;
+        Ok(true)
     }
 }
 
