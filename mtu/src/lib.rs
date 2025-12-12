@@ -200,6 +200,21 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn aligned_by() {
+        for (size, align, expected) in [
+            (0, 8, 8),
+            (1, 8, 8),
+            (7, 8, 8),
+            (8, 8, 8),
+            (9, 8, 16),
+            (17, 8, 24),
+        ] {
+            assert_eq!(crate::aligned_by(size, align), expected);
+        }
+    }
+
+    #[test]
     fn inet_v6() {
         let res = interface_and_mtu(IpAddr::V6(Ipv6Addr::new(
             0x2606, 0x4700, 0, 0, 0, 0, 0x6810, 0x84e5, // cloudflare.com

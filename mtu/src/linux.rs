@@ -161,6 +161,9 @@ impl TryFrom<&[u8]> for nlmsghdr {
 }
 
 fn parse_c_int(buf: &[u8]) -> Result<c_int> {
+    if buf.len() < size_of::<c_int>() {
+        return Err(default_err());
+    }
     let bytes = <&[u8] as TryInto<[u8; size_of::<c_int>()]>>::try_into(&buf[..size_of::<c_int>()])
         .map_err(|_| default_err())?;
     Ok(c_int::from_ne_bytes(bytes))
@@ -348,4 +351,75 @@ pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
     let mut fd = RouteSocket::new(AF_NETLINK, NETLINK_ROUTE)?;
     let if_index = if_index(remote, &mut fd)?;
     if_name_mtu(if_index, &mut fd)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod test {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    use super::*;
+
+    #[test]
+    fn nlmsghdr_try_from() {
+        assert!(nlmsghdr::try_from([0u8; 4].as_slice()).is_err());
+        let mut buf = [0u8; 32];
+        buf[0..4].copy_from_slice(&20u32.to_ne_bytes());
+        assert_eq!(nlmsghdr::try_from(buf.as_slice()).unwrap().nlmsg_len, 20);
+    }
+
+    #[test]
+    fn rtattr_try_from() {
+        assert!(rtattr::try_from([0u8; 2].as_slice()).is_err());
+        let mut buf = [0u8; 8];
+        buf[0..2].copy_from_slice(&8u16.to_ne_bytes());
+        buf[2..4].copy_from_slice(&3u16.to_ne_bytes());
+        let attr = rtattr::try_from(buf.as_slice()).unwrap();
+        assert_eq!((attr.rta_len, attr.rta_type), (8, 3));
+    }
+
+    #[test]
+    fn rtattrs_iteration() {
+        assert_eq!(RtAttrs(&[]).count(), 0);
+        assert_eq!(RtAttrs(&[0u8; 2]).count(), 0);
+
+        let mut buf = [0u8; 16];
+        for (offset, rta_type) in [(0, 1u16), (8, 2u16)] {
+            buf[offset..offset + 2].copy_from_slice(&8u16.to_ne_bytes());
+            buf[offset + 2..offset + 4].copy_from_slice(&rta_type.to_ne_bytes());
+        }
+        let types: Vec<_> = RtAttrs(&buf).map(|a| a.hdr.rta_type).collect();
+        assert_eq!(types, [1, 2]);
+    }
+
+    #[test]
+    fn addr_bytes() {
+        assert_eq!(AddrBytes::new(IpAddr::V4(Ipv4Addr::LOCALHOST)).len(), 4);
+        assert_eq!(AddrBytes::new(IpAddr::V6(Ipv6Addr::LOCALHOST)).len(), 16);
+
+        let v4: [u8; 16] = AddrBytes::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4))).into();
+        assert_eq!(v4, [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn parse_c_int_valid_and_invalid() {
+        assert!(parse_c_int(&[0u8; 2]).is_err());
+        assert_eq!(parse_c_int(&42i32.to_ne_bytes()).unwrap(), 42);
+    }
+
+    #[test]
+    fn if_index_msg_len_and_slice() {
+        let msg = IfIndexMsg::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1);
+        assert!(msg.len() > 0);
+        let slice: &[u8] = (&msg).into();
+        assert_eq!(slice.len(), msg.len());
+    }
+
+    #[test]
+    fn if_info_msg_len_and_slice() {
+        let msg = IfInfoMsg::new(1, 1);
+        assert!(msg.len() > 0);
+        let slice: &[u8] = (&msg).into();
+        assert_eq!(slice.len(), msg.len());
+    }
 }
