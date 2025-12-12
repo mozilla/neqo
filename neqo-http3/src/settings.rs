@@ -384,4 +384,78 @@ mod tests {
             Err(Error::NotEnoughData)
         );
     }
+
+    #[test]
+    fn datagram_settings() {
+        for setting in [SETTINGS_H3_DATAGRAM, SETTINGS_H3_DATAGRAM_DRAFT04] {
+            // Valid value accepted.
+            let mut enc = Encoder::new();
+            enc.encode_varint(setting).encode_varint(1u64);
+            let mut s = HSettings::new(&[]);
+            s.decode_frame_contents(&mut enc.as_decoder()).unwrap();
+            assert_eq!(s.get(HSettingType::EnableH3Datagram), 1);
+
+            // Invalid value rejected.
+            enc = Encoder::new();
+            enc.encode_varint(setting).encode_varint(2u64);
+            let mut s = HSettings::new(&[]);
+            assert_eq!(
+                s.decode_frame_contents(&mut enc.as_decoder()),
+                Err(Error::HttpSettings)
+            );
+        }
+
+        // Duplicate: first wins.
+        let mut enc = Encoder::new();
+        enc.encode_varint(SETTINGS_H3_DATAGRAM).encode_varint(1u64);
+        enc.encode_varint(SETTINGS_H3_DATAGRAM_DRAFT04)
+            .encode_varint(0u64);
+        let mut s = HSettings::new(&[]);
+        s.decode_frame_contents(&mut enc.as_decoder()).unwrap();
+        assert_eq!(s.get(HSettingType::EnableH3Datagram), 1);
+    }
+
+    fn make_0rtt_token(settings: &[(u64, u64)]) -> Vec<u8> {
+        let mut enc = Encoder::new();
+        enc.encode_varint(SETTINGS_ZERO_RTT_VERSION);
+        for (k, v) in settings {
+            enc.encode_varint(*k).encode_varint(*v);
+        }
+        enc.into()
+    }
+
+    #[test]
+    fn zero_rtt_checker() {
+        use neqo_crypto::{ZeroRttCheckResult, ZeroRttChecker as _};
+        use neqo_transport::ConnectionParameters;
+
+        use crate::Http3Parameters;
+
+        // Server with datagram enabled, connect disabled.
+        let params = Http3Parameters::default()
+            .connection_parameters(ConnectionParameters::default().datagram_size(1200));
+        let checker = HttpZeroRttChecker::new(params);
+
+        // Token requests datagram=1: accepted (server has it).
+        let token = make_0rtt_token(&[(SETTINGS_H3_DATAGRAM, 1)]);
+        assert_eq!(checker.check(&token), ZeroRttCheckResult::Accept);
+
+        // Token requests datagram=0: accepted (not requesting feature).
+        let token = make_0rtt_token(&[(SETTINGS_H3_DATAGRAM, 0)]);
+        assert_eq!(checker.check(&token), ZeroRttCheckResult::Accept);
+
+        // Token with invalid datagram value (>1): fails decode.
+        let token = make_0rtt_token(&[(SETTINGS_H3_DATAGRAM, 2)]);
+        assert_eq!(checker.check(&token), ZeroRttCheckResult::Fail);
+
+        // Token requests connect=1 but server doesn't have it: rejected.
+        let token = make_0rtt_token(&[(SETTINGS_ENABLE_CONNECT_PROTOCOL, 1)]);
+        assert_eq!(checker.check(&token), ZeroRttCheckResult::Reject);
+
+        // Server with connect enabled.
+        let params = Http3Parameters::default().connect(true);
+        let checker = HttpZeroRttChecker::new(params);
+        let token = make_0rtt_token(&[(SETTINGS_ENABLE_CONNECT_PROTOCOL, 1)]);
+        assert_eq!(checker.check(&token), ZeroRttCheckResult::Accept);
+    }
 }

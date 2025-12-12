@@ -255,4 +255,76 @@ mod tests {
         let headers = vec![Header::new(":status", "not-a-number")];
         assert!(is_interim(&headers).is_err());
     }
+
+    #[test]
+    fn protocol_requires_connect_method() {
+        // :protocol is only valid with CONNECT method.
+        let headers = vec![
+            Header::new(":method", "GET"),
+            Header::new(":protocol", "webtransport"),
+            Header::new(":scheme", "https"),
+            Header::new(":authority", "something.com"),
+            Header::new(":path", "/here"),
+        ];
+        assert!(headers_valid(&headers, MessageType::Request).is_err());
+    }
+
+    #[test]
+    fn classic_connect_valid() {
+        // Classic CONNECT only requires :method and :authority.
+        let headers = vec![
+            Header::new(":method", "CONNECT"),
+            Header::new(":authority", "proxy.example.com:443"),
+        ];
+        assert!(headers_valid(&headers, MessageType::Request).is_ok());
+    }
+
+    #[test]
+    fn response_requires_status() {
+        let headers = vec![Header::new(":status", "200")];
+        assert!(headers_valid(&headers, MessageType::Response).is_ok());
+    }
+
+    #[test]
+    fn response_missing_status() {
+        let headers: Vec<Header> = vec![];
+        assert!(headers_valid(&headers, MessageType::Response).is_err());
+    }
+
+    #[test]
+    fn regular_request_valid() {
+        let headers = vec![
+            Header::new(":method", "GET"),
+            Header::new(":scheme", "https"),
+            Header::new(":path", "/index.html"),
+        ];
+        assert!(headers_valid(&headers, MessageType::Request).is_ok());
+    }
+
+    #[test]
+    fn regular_request_missing_method() {
+        let headers = vec![
+            Header::new(":scheme", "https"),
+            Header::new(":path", "/index.html"),
+        ];
+        assert!(headers_valid(&headers, MessageType::Request).is_err());
+    }
+
+    #[test]
+    fn regular_request_missing_scheme() {
+        let headers = vec![
+            Header::new(":method", "GET"),
+            Header::new(":path", "/index.html"),
+        ];
+        assert!(headers_valid(&headers, MessageType::Request).is_err());
+    }
+
+    #[test]
+    fn regular_request_missing_path() {
+        let headers = vec![
+            Header::new(":method", "GET"),
+            Header::new(":scheme", "https"),
+        ];
+        assert!(headers_valid(&headers, MessageType::Request).is_err());
+    }
 }
