@@ -983,6 +983,7 @@ mod tests {
         let enc = Encoder::from_hex("010203");
         let buf = &[1, 2, 3];
         assert_eq!(enc.as_decoder(), Decoder::new(buf));
+        assert_ne!(enc.as_decoder(), Decoder::new(&[9, 9, 9]));
     }
 
     struct UintTestCase {
@@ -1134,13 +1135,27 @@ mod tests {
     }
 
     #[test]
+    fn truncate() {
+        let mut enc = Encoder::from_hex("0102030405");
+        enc.truncate(3);
+        assert_eq!(enc, Encoder::from_hex("010203"));
+    }
+
+    #[test]
+    fn with_capacity() {
+        let mut enc = Encoder::with_capacity(10);
+        enc.encode_byte(1);
+        assert_eq!(enc.as_ref(), &[1]);
+    }
+
+    #[test]
     fn buffer_write_zeroes() {
         fn check_write_zeroes<B: Buffer>(mut buf: B) {
             const NUM_BYTES: usize = 5;
 
             assert!(buf.is_empty());
-
             buf.pad_to(NUM_BYTES, 0);
+            assert!(!buf.is_empty());
 
             assert_eq!(buf.position(), NUM_BYTES);
             let written = &buf.as_slice()[..NUM_BYTES];
@@ -1154,6 +1169,25 @@ mod tests {
 
         let mut buf = [0; 16];
         check_write_zeroes(Cursor::new(&mut buf[..]));
+    }
+
+    #[test]
+    fn buffer_truncate() {
+        fn check_truncate<B: Buffer>(mut buf: B) {
+            buf.write_all(&[1, 2, 3, 4, 5]).unwrap();
+            assert_eq!(buf.position(), 5);
+            buf.truncate(3);
+            assert_eq!(buf.position(), 3);
+            assert_eq!(buf.as_slice(), &[1, 2, 3]);
+        }
+
+        check_truncate(Vec::<u8>::new());
+
+        let mut buf = Vec::<u8>::new();
+        check_truncate(&mut buf);
+
+        let mut buf = [0; 16];
+        check_truncate(Cursor::new(&mut buf[..]));
     }
 
     #[test]
@@ -1207,6 +1241,7 @@ mod tests {
         let mut enc = Encoder::new_borrowed_vec(&mut non_empty_vec);
         assert!(enc.is_empty());
         enc.encode_byte(5);
+        assert!(!enc.is_empty());
         assert_eq!(enc.len(), 1);
 
         assert_eq!(non_empty_vec.len(), 5);
@@ -1276,13 +1311,13 @@ mod tests {
         assert_eq!(v, vec![0x01, 0x02, 0x03]);
     }
 
-    /// [`PartialEq`] should compare the logical view.
     #[test]
     fn partial_eq_respects_skip() {
         let mut enc1 = Encoder::from_hex("010203040506");
         enc1.skip(2);
         let enc2 = Encoder::from_hex("03040506");
         assert_eq!(enc1, enc2);
+        assert_ne!(enc1, Encoder::from_hex("ffffff"));
     }
 
     /// [`Clone`] should not clone skipped bytes.
