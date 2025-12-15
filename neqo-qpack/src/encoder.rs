@@ -20,7 +20,6 @@ use crate::{
     encoder_instructions::EncoderInstruction,
     header_block::HeaderEncoder,
     qlog,
-    qpack_send_buf::Data,
     reader::ReceiverConnWrapper,
     stats::Stats,
     table::{HeaderTable, LookupResult, ADDITIONAL_TABLE_ENTRY_SIZE},
@@ -225,7 +224,7 @@ impl Encoder {
     fn call_instruction(
         &mut self,
         instruction: DecoderInstruction,
-        qlog: &Qlog,
+        qlog: &mut Qlog,
         now: Instant,
     ) -> Res<()> {
         qdebug!("[{self}] call instruction {instruction:?}");
@@ -281,14 +280,14 @@ impl Encoder {
             return Err(Error::DynamicTableFull);
         }
 
-        let mut buf = Data::default();
+        let mut buf = neqo_common::Encoder::default();
         EncoderInstruction::InsertWithNameLiteral { name, value }
             .marshal(&mut buf, self.use_huffman);
 
         let stream_id = self.local_stream.stream_id().ok_or(Error::Internal)?;
 
         let sent = conn
-            .stream_send_atomic(stream_id, &buf)
+            .stream_send_atomic(stream_id, buf.as_ref())
             .map_err(|e| map_stream_send_atomic_error(&e))?;
         if !sent {
             return Err(Error::EncoderStreamBlocked);
@@ -321,9 +320,9 @@ impl Encoder {
             if cap < self.table.capacity() && !self.table.can_evict_to(cap) {
                 return Err(Error::DynamicTableFull);
             }
-            let mut buf = Data::default();
+            let mut buf = neqo_common::Encoder::default();
             EncoderInstruction::Capacity { value: cap }.marshal(&mut buf, self.use_huffman);
-            if !conn.stream_send_atomic(stream_id, &buf)? {
+            if !conn.stream_send_atomic(stream_id, buf.as_ref())? {
                 return Err(Error::EncoderStreamBlocked);
             }
             if self.table.set_capacity(cap).is_err() {
@@ -351,9 +350,9 @@ impl Encoder {
                 Ok(())
             }
             LocalStreamState::Uninitialized(stream_id) => {
-                let mut buf = Data::default();
+                let mut buf = neqo_common::Encoder::default();
                 buf.encode_varint(QPACK_UNI_STREAM_TYPE_ENCODER);
-                if !conn.stream_send_atomic(stream_id, &buf[..])? {
+                if !conn.stream_send_atomic(stream_id, buf.as_ref())? {
                     return Err(Error::EncoderStreamBlocked);
                 }
                 self.local_stream = LocalStreamState::Initialized(stream_id);
@@ -596,7 +595,7 @@ mod tests {
             let buf = self
                 .encoder
                 .encode_header_block(&mut self.conn, headers, stream_id);
-            assert_eq!(&buf[..], expected_encoding);
+            assert_eq!(buf.as_ref(), expected_encoding);
             self.send_instructions(inst);
         }
 
@@ -822,7 +821,7 @@ mod tests {
             let buf = encoder
                 .encoder
                 .encode_header_block(&mut encoder.conn, &t.headers, STREAM_1);
-            assert_eq!(&buf[..], t.header_block);
+            assert_eq!(buf.as_ref(), t.header_block);
             encoder.send_instructions(t.encoder_inst);
         }
     }
@@ -896,7 +895,7 @@ mod tests {
             let buf = encoder
                 .encoder
                 .encode_header_block(&mut encoder.conn, &t.headers, STREAM_1);
-            assert_eq!(&buf[..], t.header_block);
+            assert_eq!(buf.as_ref(), t.header_block);
             encoder.send_instructions(t.encoder_inst);
         }
     }
@@ -968,7 +967,7 @@ mod tests {
             &[Header::new("content-length", "1234")],
             STREAM_1,
         );
-        assert_eq!(&buf[..], ENCODE_INDEXED_REF_DYNAMIC);
+        assert_eq!(buf.as_ref(), ENCODE_INDEXED_REF_DYNAMIC);
         encoder.send_instructions(&[]);
 
         // insert "content-length: 12345 which will fail because the entry in the table cannot be

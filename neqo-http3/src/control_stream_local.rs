@@ -10,7 +10,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qtrace, Encoder};
+use neqo_common::qtrace;
 use neqo_transport::{Connection, StreamId, StreamType};
 use rustc_hash::FxHashMap as HashMap;
 
@@ -82,9 +82,10 @@ impl ControlStreamLocal {
 
             // in case multiple priority_updates were issued, ignore now irrelevant
             if let Some(hframe) = stream.priority_update_frame() {
-                let mut enc = Encoder::new();
-                hframe.encode(&mut enc);
-                if self.stream.send_atomic(conn, enc.as_ref(), now)? {
+                if self
+                    .stream
+                    .send_atomic_with(conn, |e| hframe.encode(e), now)?
+                {
                     stream.priority_update_sent()?;
                 } else {
                     self.outstanding_priority_update.push_front(update_id);

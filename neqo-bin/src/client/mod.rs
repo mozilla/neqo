@@ -49,47 +49,17 @@ pub enum Error {
     #[error("argument error: {0}")]
     Argument(&'static str),
     #[error(transparent)]
-    Http3(neqo_http3::Error),
+    Http3(#[from] neqo_http3::Error),
     #[error(transparent)]
-    Io(io::Error),
+    Io(#[from] io::Error),
     #[error(transparent)]
-    Qlog(qlog::Error),
+    Qlog(#[from] qlog::Error),
     #[error(transparent)]
-    Transport(neqo_transport::Error),
+    Transport(#[from] neqo_transport::Error),
     #[error("application error: {0}")]
     Application(AppError),
     #[error(transparent)]
-    Crypto(neqo_crypto::Error),
-}
-
-impl From<neqo_crypto::Error> for Error {
-    fn from(err: neqo_crypto::Error) -> Self {
-        Self::Crypto(err)
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Self {
-        Self::Io(err)
-    }
-}
-
-impl From<neqo_http3::Error> for Error {
-    fn from(err: neqo_http3::Error) -> Self {
-        Self::Http3(err)
-    }
-}
-
-impl From<qlog::Error> for Error {
-    fn from(err: qlog::Error) -> Self {
-        Self::Qlog(err)
-    }
-}
-
-impl From<neqo_transport::Error> for Error {
-    fn from(err: neqo_transport::Error) -> Self {
-        Self::Transport(err)
-    }
+    Crypto(#[from] neqo_crypto::Error),
 }
 
 impl From<CloseReason> for Error {
