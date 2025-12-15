@@ -182,6 +182,8 @@ pub use server_events::{
     ConnectUdpRequest, ConnectUdpServerEvent, Http3OrWebTransportStream, Http3ServerEvent,
     WebTransportRequest, WebTransportServerEvent,
 };
+#[cfg(fuzzing)]
+pub use settings::HSettings;
 use stream_type_reader::NewStreamType;
 use thiserror::Error;
 

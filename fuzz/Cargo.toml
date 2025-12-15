@@ -106,3 +106,10 @@ path = "fuzz_targets/wtframe.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "hsettings"
+path = "fuzz_targets/hsettings.rs"
+test = false
+doc = false
+bench = false

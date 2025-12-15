@@ -95,6 +95,9 @@ impl HSettings {
 
     pub fn encode_frame_contents<B: Buffer>(&self, enc: &mut Encoder<B>) {
         enc.encode_vvec_with(|enc_inner| {
+            #[cfg(feature = "build-fuzzing-corpus")]
+            let start = enc_inner.len();
+
             for iter in &self.settings {
                 match iter.setting_type {
                     HSettingType::MaxHeaderListSize => {
@@ -129,6 +132,9 @@ impl HSettings {
                     }
                 }
             }
+
+            #[cfg(feature = "build-fuzzing-corpus")]
+            neqo_common::write_item_to_fuzzing_corpus("hsettings", &enc_inner.as_ref()[start..]);
         });
     }
 
@@ -136,6 +142,9 @@ impl HSettings {
     ///
     /// Returns an error if settings types are reserved of settings value are not permitted.
     pub fn decode_frame_contents(&mut self, dec: &mut Decoder) -> Res<()> {
+        #[cfg(feature = "build-fuzzing-corpus")]
+        neqo_common::write_item_to_fuzzing_corpus("hsettings", dec.as_ref());
+
         while dec.remaining() > 0 {
             let t = dec.decode_varint();
             let v = dec.decode_varint();
