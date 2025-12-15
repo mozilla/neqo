@@ -57,6 +57,7 @@ jobs:
     name: Run bench
     runs-on:
       group: codspeed # zizmor: ignore[self-hosted-runner]
+      labels: codspeed-macro
     strategy:
       matrix:
         bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
