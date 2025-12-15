@@ -263,4 +263,19 @@ mod tests {
             assert!(res);
         }
     }
+
+    #[test]
+    fn decoding_in_progress() {
+        let mut dec = IncrementalDecoderUint::default();
+        assert!(!dec.decoding_in_progress());
+        let mut dv = Decoder::new(&[0x40]); // Start of 2-byte varint
+        assert!(dec.consume(&mut dv).is_none());
+        assert!(dec.decoding_in_progress());
+    }
+
+    #[test]
+    fn buffer_min_remaining() {
+        let dec = IncrementalDecoderBuffer::new(5);
+        assert_eq!(dec.min_remaining(), 5);
+    }
 }
