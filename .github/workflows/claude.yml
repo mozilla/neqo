@@ -1,7 +1,9 @@
 name: Claude Code Review
 
 on:
-  pull_request:
+  # Use pull_request_target to allow secrets access for fork PRs.
+  # CI only runs after manual approval for neqo, for non-members of the repo.
+  pull_request_target: # zizmor: ignore[dangerous-triggers] See rationale above.
     branches: ["main"]
     types: [opened, synchronize, ready_for_review, reopened]
   workflow_dispatch:
@@ -16,16 +18,22 @@ permissions:
 jobs:
   claude-review:
     name: Claude Code Review
+    # Require approval before running on fork PRs to prevent secret exfiltration.
+    environment: claude-review
 
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       pull-requests: write # Required to write PR details.
+      id-token: write # Required for OIDC authentication.
 
     steps:
-      - name: Checkout repository
+      # With pull_request_target, checkout defaults to the base branch.
+      # Explicitly check out the PR head to review the actual changes.
+      - name: Checkout PR head
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
           persist-credentials: false
 
