@@ -56,8 +56,7 @@ impl Qlog {
             // As a server, the original DCID is chosen by the client. Using
             // create_new() prevents attackers from overwriting existing logs.
             .create_new(true)
-            .open(&qlog_path)
-            .map_err(qlog::Error::IoError)?;
+            .open(&qlog_path)?;
 
         let streamer = QlogStreamer::new(
             qlog::QLOG_VERSION.to_string(),
@@ -98,20 +97,7 @@ impl Qlog {
     }
 
     /// If logging enabled, closure may generate an event to be logged.
-    pub fn add_event_with_instant<F>(&mut self, f: F, now: Instant)
-    where
-        F: FnOnce() -> Option<qlog::events::Event>,
-    {
-        self.add_event_with_stream(|s| {
-            if let Some(evt) = f() {
-                s.add_event_with_instant(evt, now)?;
-            }
-            Ok(())
-        });
-    }
-
-    /// If logging enabled, closure may generate an event to be logged.
-    pub fn add_event_data_with_instant<F>(&mut self, f: F, now: Instant)
+    pub fn add_event_at<F>(&mut self, f: F, now: Instant)
     where
         F: FnOnce() -> Option<qlog::events::EventData>,
     {
@@ -198,7 +184,6 @@ pub fn new_trace(role: Role) -> TraceSeq {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
-    use qlog::events::Event;
     use regex::Regex;
     use test_fixture::EXPECTED_LOG_HEADER;
 
@@ -220,9 +205,9 @@ mod test {
     }
 
     #[test]
-    fn add_event_with_instant() {
+    fn add_event_at() {
         let (mut log, contents) = test_fixture::new_neqo_qlog();
-        log.add_event_with_instant(|| Some(Event::with_time(0.0, EV_DATA)), test_fixture::now());
+        log.add_event_at(|| Some(EV_DATA), test_fixture::now());
         assert_eq!(
             Regex::new("\"time\":[0-9]+.[0-9]+,")
                 .unwrap()

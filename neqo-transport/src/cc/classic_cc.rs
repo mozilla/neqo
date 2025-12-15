@@ -488,7 +488,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         if self.state != state {
             qdebug!("[{self}] state -> {state:?}");
             let old_state = self.state;
-            self.qlog.add_event_data_with_instant(
+            self.qlog.add_event_at(
                 || {
                     // No need to tell qlog about exit from transient states.
                     if old_state.transient() {

@@ -20,7 +20,7 @@ pub fn qpack_read_insert_count_increment_instruction(
     data: &[u8],
     now: Instant,
 ) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             let raw = RawInfo {
                 length: Some(8),
