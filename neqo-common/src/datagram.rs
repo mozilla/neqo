@@ -399,4 +399,37 @@ mod tests {
         assert_eq!(datagrams[1].d, &[41, 51, 61]);
         assert_eq!(datagrams[2].d, &[71]);
     }
+
+    #[test]
+    fn datagram_len_and_accessors() {
+        let mut d = Datagram::new(DEFAULT_ADDR, DEFAULT_ADDR, Tos::default(), vec![1, 2, 3]);
+        assert_eq!(d.len(), 3);
+        assert!(!d.is_empty());
+        assert_eq!(d.as_ref(), &[1, 2, 3]);
+        d.as_mut()[0] = 9;
+        assert_eq!(d.as_ref(), &[9, 2, 3]);
+        d.set_tos(Ecn::Ce.into());
+        assert_eq!(d.tos(), Ecn::Ce.into());
+    }
+
+    #[test]
+    fn batch_data_and_try_from() {
+        let d = Datagram::new(DEFAULT_ADDR, DEFAULT_ADDR, Tos::default(), vec![1, 2, 3]);
+        let batch = DatagramBatch::from(d);
+        assert_eq!(batch.data(), &[1, 2, 3]);
+        let d2: Datagram = batch.try_into().unwrap();
+        assert_eq!(d2.as_ref(), &[1, 2, 3]);
+    }
+
+    #[test]
+    fn batch_try_from_multiple_fails() {
+        let batch = DatagramBatch::new(
+            DEFAULT_ADDR,
+            DEFAULT_ADDR,
+            Tos::default(),
+            NonZeroUsize::new(2).unwrap(),
+            vec![1, 2, 3, 4],
+        );
+        assert!(Datagram::try_from(batch).is_err());
+    }
 }

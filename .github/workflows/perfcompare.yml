@@ -3,7 +3,6 @@ on:
   workflow_call:
   pull_request:
     branches: ["main"]
-  merge_group:
   workflow_dispatch:
     inputs:
       bencher:
@@ -57,7 +56,7 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           repository: microsoft/msquic
-          ref: v2.5.3
+          ref: v2.5.5
           path: msquic
           submodules: 'recursive'
           persist-credentials: false
@@ -67,7 +66,7 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           repository: google/quiche
-          ref: 1c35d630893fc2adacfffeb91bcb0561240cf5f1 # Google doesn't tag release, just update the hash occasionally
+          ref: f9f012c06eeabf39ccfbaaf6ea4bf5bda932d25b # Google doesn't tag release, just update the hash occasionally
           path: google-quiche
           submodules: 'recursive'
           persist-credentials: false
@@ -87,7 +86,7 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           repository: aws/s2n-quic
-          ref: v1.63.0
+          ref: v1.69.0
           path: s2n-quic
           submodules: 'recursive'
           persist-credentials: false
@@ -145,7 +144,7 @@ jobs:
           mkdir -p msquic/build
           cd msquic/build
           rm -f CMakeCache.txt # This seems to be needed now to avoid a spurious warning about "QUIC_TLS"...
-          cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
+          cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 -DQUIC_OPTIMIZE_LOCAL=1 -DQUIC_HIGH_RES_TIMERS=1 ..
           cmake --build .
 
       - name: Build google/quiche

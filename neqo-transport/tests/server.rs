@@ -157,7 +157,7 @@ fn duplicate_initial_new_path() {
     assert_eq!(*client.state(), State::Init);
     let initial = client.process_output(now()).dgram().unwrap();
     let other = Datagram::new(
-        SocketAddr::new(initial.source().ip(), initial.source().port() ^ 23),
+        SocketAddr::new(initial.source().ip(), initial.source().port() ^ 0b1_01110), // 23
         initial.destination(),
         initial.tos(),
         &initial[..],

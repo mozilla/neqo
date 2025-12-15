@@ -369,13 +369,27 @@ mod tests {
 
     #[test]
     fn tos_is_ecn_marked() {
-        let tos: Tos = (Dscp::Af41, Ecn::Ce).into();
-        assert!(tos.is_ecn_marked());
+        assert!(Tos::from((Dscp::Af41, Ecn::Ce)).is_ecn_marked());
+        assert!(!Tos::from((Dscp::Af41, Ecn::NotEct)).is_ecn_marked());
     }
 
     #[test]
     fn ecn_is_ecn_marked() {
         assert!(Ecn::Ce.is_marked());
         assert!(!Ecn::NotEct.is_marked());
+    }
+
+    #[test]
+    fn ecn_is_ect() {
+        assert!(Ecn::Ect0.is_ect());
+        assert!(Ecn::Ect1.is_ect());
+        assert!(!Ecn::Ce.is_ect());
+        assert!(!Ecn::NotEct.is_ect());
+    }
+
+    #[test]
+    fn dscp_into_tos_non_default() {
+        let tos: Tos = Dscp::Af41.into();
+        assert_eq!(u8::from(tos), u8::from(Dscp::Af41));
     }
 }
