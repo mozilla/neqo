@@ -38,7 +38,8 @@ use crate::{
     stats::FrameStats,
     tparams::{TransportParameter, TransportParameterId::*},
     tracking::DEFAULT_LOCAL_ACK_DELAY,
-    CloseReason, ConnectionParameters, Error, Pmtud, StreamType, Version,
+    CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
+    Version,
 };
 
 const ECH_CONFIG_ID: u8 = 7;
@@ -1563,4 +1564,44 @@ fn zero_rtt_with_ech() {
     assert!(server.tls_info().unwrap().ech_accepted());
     assert!(client.tls_info().unwrap().early_data_accepted());
     assert!(server.tls_info().unwrap().early_data_accepted());
+}
+
+/// RFC 9287 Section 3.1 states: "A server MUST NOT remember that a client negotiated
+/// the extension in a previous connection and set the QUIC Bit to 0 based on that information."
+///
+/// This test verifies that the client complies with RFC 9287 Section 3.1 by ensuring
+/// it does not grease the QUIC Bit based on cached (0-RTT) transport parameters.
+/// Regression test for the `handshakeloss` interop test failure, where client Initial
+/// packets with the fixed bit cleared (due to cached parameters) were discarded by the server.
+#[test]
+fn grease_quic_bit_respects_current_handshake() {
+    fixture_init();
+
+    // Create a client connection.
+    let client = Connection::new_client(
+        test_fixture::DEFAULT_SERVER_NAME,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
+        ConnectionParameters::default(),
+        now(),
+    )
+    .unwrap();
+
+    // Simulate having cached 0-RTT transport parameters that include grease_quic_bit.
+    // In reality, this would come from a previous connection's session ticket.
+    let mut tp = crate::tparams::TransportParameters::default();
+    tp.set_empty(GreaseQuicBit);
+    client.tps.borrow_mut().set_remote_0rtt(Some(tp));
+
+    // At this point:
+    // - We have remote_0rtt params with GreaseQuicBit
+    // - We do NOT have remote_handshake params (no current handshake confirmation)
+
+    // With only cached 0-RTT params, no greasing is allowed.
+    assert!(
+        !client.can_grease_quic_bit(),
+        "Must not grease with only cached 0-RTT params (RFC 9287 Section 3.1)"
+    );
 }

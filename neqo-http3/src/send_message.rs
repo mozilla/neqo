@@ -209,11 +209,9 @@ impl SendStream for SendMessage {
         let data_frame = HFrame::Data {
             len: to_send as u64,
         };
-        let mut enc = Encoder::default();
-        data_frame.encode(&mut enc);
         let sent_fh = self
             .stream
-            .send_atomic(conn, enc.as_ref(), now)
+            .send_atomic_with(conn, |e| data_frame.encode(e), now)
             .map_err(|e| Error::map_stream_send_errors(&e))?;
         debug_assert!(sent_fh);
 

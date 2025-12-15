@@ -1,7 +1,5 @@
 name: Sanitize
 on:
-  push:
-    branches: ["main"]
   pull_request:
     branches: ["main"]
   merge_group:
@@ -23,7 +21,6 @@ defaults:
 jobs:
   sanitize:
     name: Sanitize
-    if: github.actor != 'dependabot[bot]'
     strategy:
       fail-fast: false
       matrix:

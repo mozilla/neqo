@@ -1,9 +1,9 @@
 name: Check README.md
 on:
-  workflow_dispatch:
   pull_request:
     branches: ["main"]
   merge_group:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

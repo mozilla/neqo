@@ -3,7 +3,6 @@ on:
   workflow_dispatch:
   pull_request:
     branches: ["main"]
-  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -15,7 +14,6 @@ permissions:
 jobs:
   check-android:
     name: Check Android
-    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -32,7 +30,6 @@ jobs:
 
   check-vm:
     name: Run checks for VM-only platforms
-    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false

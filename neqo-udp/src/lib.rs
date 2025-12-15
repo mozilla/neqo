@@ -241,7 +241,7 @@ impl<S: SocketRef> Socket<S> {
         send_inner(&self.state, (&self.inner).into(), d)
     }
 
-    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
+    /// Returns the maximum number of GSO segments supported by this socket.
     pub fn max_gso_segments(&self) -> usize {
         self.state.max_gso_segments()
     }
@@ -349,6 +349,55 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    #[cfg(unix)]
+    fn is_emsgsize_true_for_emsgsize() {
+        let err = io::Error::from_raw_os_error(libc::EMSGSIZE);
+        assert!(is_emsgsize(&err));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn is_emsgsize_false_for_other_errors() {
+        let err = io::Error::from_raw_os_error(libc::EAGAIN);
+        assert!(!is_emsgsize(&err));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn is_emsgsize_true_for_wsaemsgsize() {
+        let err = io::Error::from_raw_os_error(windows::Win32::Networking::WinSock::WSAEMSGSIZE.0);
+        assert!(is_emsgsize(&err));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn is_emsgsize_true_for_wsaeinval() {
+        let err = io::Error::from_raw_os_error(windows::Win32::Networking::WinSock::WSAEINVAL.0);
+        assert!(is_emsgsize(&err));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn is_emsgsize_false_for_other_windows_errors() {
+        let err =
+            io::Error::from_raw_os_error(windows::Win32::Networking::WinSock::WSAEWOULDBLOCK.0);
+        assert!(!is_emsgsize(&err));
+    }
+
+    #[test]
+    fn is_emsgsize_false_for_non_os_error() {
+        let err = io::Error::other("test error");
+        assert!(!is_emsgsize(&err));
+    }
+
+    #[test]
+    fn max_gso_segments_returns_at_least_one() -> Result<(), io::Error> {
+        let s = socket()?;
+        assert!(s.max_gso_segments() >= 1);
+        Ok(())
+    }
+
     /// Expect [`Socket::recv`] to handle multiple [`Datagram`]s on GRO read.
     #[test]
     #[cfg_attr(
@@ -364,7 +413,7 @@ mod tests {
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        let max_gso_segments = sender.state.max_gso_segments();
+        let max_gso_segments = sender.max_gso_segments();
         let msg = vec![0xAB; SEGMENT_SIZE * max_gso_segments];
         let batch = DatagramBatch::new(
             sender.inner.local_addr()?,

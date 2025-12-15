@@ -1,9 +1,11 @@
 name: Claude Code Review
 
 on:
-#  pull_request:
-#    branches: ["main"]
-#    types: [opened, synchronize, ready_for_review, reopened]
+  # Use pull_request_target to allow secrets access for fork PRs.
+  # CI only runs after manual approval for neqo, for non-members of the repo.
+  pull_request_target: # zizmor: ignore[dangerous-triggers] See rationale above.
+    branches: ["main"]
+    types: [opened, synchronize, ready_for_review, reopened]
   workflow_dispatch:
 
 concurrency:
@@ -16,6 +18,8 @@ permissions:
 jobs:
   claude-review:
     name: Claude Code Review
+    # Require approval before running on fork PRs to prevent secret exfiltration.
+    environment: claude-review
 
     runs-on: ubuntu-24.04
     permissions:
@@ -24,10 +28,14 @@ jobs:
       id-token: write # Required for OIDC authentication.
 
     steps:
-      - name: Checkout repository
+      # With pull_request_target, checkout defaults to the base branch.
+      # Check out from the PR's head repository to handle fork PRs correctly.
+      - name: Checkout PR head
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
-          fetch-depth: 1
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Run Claude Code Review
@@ -35,8 +43,10 @@ jobs:
         # TODO: Would like to pin this, but the Mozilla org allowlist requires "anthropics/claude-code-action@v1"
         uses: anthropics/claude-code-action@v1 # zizmor: ignore[unpinned-uses]
         with:
-          track_progress: true
+          track_progress: ${{ github.event_name != 'workflow_dispatch' }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Use a PAT to allow the action to work on fork PRs.
+          github_token: ${{ secrets.NEQO_CI }}
           use_sticky_comment: true
           use_commit_signing: true
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md

@@ -1587,7 +1587,7 @@ mod tests {
 
         let mut damaged_retry = SAMPLE_RETRY_V1.to_vec();
         let last = damaged_retry.len() - 1;
-        damaged_retry[last] ^= 66;
+        damaged_retry[last] ^= 0b100_0010; // 66
         let (packet, remainder) = Public::decode(&mut damaged_retry, &cid_mgr).unwrap();
         assert!(remainder.is_empty());
         assert!(!packet.is_valid_retry(&odcid));
