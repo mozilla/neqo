@@ -123,13 +123,15 @@ impl Qlog {
 
         let Some(shared_streamer) = borrow.as_mut() else {
             drop(borrow);
+            // Set the outer Option to None to prevent future dereferences.
             self.inner = None;
             return;
         };
 
         if let Err(e) = f(&mut shared_streamer.streamer) {
             log::error!("Qlog event generation failed with error {e}; closing qlog.");
-
+            // Set the inner Option to None to disable future logging for other references.
+            *borrow = None;
             // Explicitly drop the RefCell borrow to release the mutable borrow.
             drop(borrow);
             // Set the outer Option to None to prevent future dereferences.
