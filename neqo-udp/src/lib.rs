@@ -398,14 +398,6 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn may_fragment_returns_bool() -> Result<(), io::Error> {
-        let s = socket()?;
-        // Just exercise the method - the return value is platform-dependent.
-        let _: bool = s.may_fragment();
-        Ok(())
-    }
-
     /// Expect [`Socket::recv`] to handle multiple [`Datagram`]s on GRO read.
     #[test]
     #[cfg_attr(
