@@ -209,17 +209,9 @@ mod tests {
 
     #[test]
     fn invalid_scheme_webtransport_connect() {
-        assert!(headers_valid(
-            &[
-                Header::new(":method", "CONNECT"),
-                Header::new(":protocol", "webtransport"),
-                Header::new(":authority", "something.com"),
-                Header::new(":scheme", "http"),
-                Header::new(":path", "/here"),
-            ],
-            MessageType::Request
-        )
-        .is_err());
+        let mut headers = create_connect_headers();
+        headers[2] = Header::new(":scheme", "http");
+        assert!(headers_valid(&headers, MessageType::Request).is_err());
     }
 
     #[test]
@@ -259,13 +251,8 @@ mod tests {
     #[test]
     fn protocol_requires_connect_method() {
         // :protocol is only valid with CONNECT method.
-        let headers = vec![
-            Header::new(":method", "GET"),
-            Header::new(":protocol", "webtransport"),
-            Header::new(":scheme", "https"),
-            Header::new(":authority", "something.com"),
-            Header::new(":path", "/here"),
-        ];
+        let mut headers = create_connect_headers();
+        headers[0] = Header::new(":method", "GET");
         assert!(headers_valid(&headers, MessageType::Request).is_err());
     }
 

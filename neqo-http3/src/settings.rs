@@ -406,13 +406,17 @@ mod tests {
         }
 
         // Duplicate: first wins.
-        let mut enc = Encoder::new();
-        enc.encode_varint(SETTINGS_H3_DATAGRAM).encode_varint(1u64);
-        enc.encode_varint(SETTINGS_H3_DATAGRAM_DRAFT04)
-            .encode_varint(0u64);
-        let mut s = HSettings::new(&[]);
-        s.decode_frame_contents(&mut enc.as_decoder()).unwrap();
-        assert_eq!(s.get(HSettingType::EnableH3Datagram), 1);
+        for (first, second, expected) in [
+            (SETTINGS_H3_DATAGRAM, SETTINGS_H3_DATAGRAM_DRAFT04, 1),
+            (SETTINGS_H3_DATAGRAM_DRAFT04, SETTINGS_H3_DATAGRAM, 0),
+        ] {
+            let mut enc = Encoder::new();
+            enc.encode_varint(first).encode_varint(expected);
+            enc.encode_varint(second).encode_varint(1 - expected);
+            let mut s = HSettings::new(&[]);
+            s.decode_frame_contents(&mut enc.as_decoder()).unwrap();
+            assert_eq!(s.get(HSettingType::EnableH3Datagram), expected);
+        }
     }
 
     fn make_0rtt_token(settings: &[(u64, u64)]) -> Vec<u8> {
@@ -457,5 +461,11 @@ mod tests {
         let checker = HttpZeroRttChecker::new(params);
         let token = make_0rtt_token(&[(SETTINGS_ENABLE_CONNECT_PROTOCOL, 1)]);
         assert_eq!(checker.check(&token), ZeroRttCheckResult::Accept);
+
+        // Invalid token (truncated): rejected (remaining bytes interpreted as wrong version).
+        assert_eq!(checker.check(&token[1..]), ZeroRttCheckResult::Reject);
+
+        // Empty token: fails.
+        assert_eq!(checker.check(&[]), ZeroRttCheckResult::Fail);
     }
 }
