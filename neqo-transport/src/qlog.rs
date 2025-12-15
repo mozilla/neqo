@@ -42,7 +42,7 @@ use crate::{
 };
 
 pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler, now: Instant) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             let remote = tph.remote();
             #[expect(clippy::cast_possible_truncation, reason = "These are OK.")]
@@ -98,7 +98,7 @@ pub fn client_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) 
 }
 
 fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             let p = path.deref().borrow();
             let ev_data = EventData::ConnectionStarted(ConnectionStarted {
@@ -128,7 +128,7 @@ fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     reason = "FIXME: 'new and now are similar' hits on MSRV <1.91."
 )]
 pub fn connection_state_updated(qlog: &mut Qlog, new: &State, now: Instant) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             let ev_data = EventData::ConnectionStateUpdated(ConnectionStateUpdated {
                 old: None,
@@ -154,7 +154,7 @@ pub fn client_version_information_initiated(
     version_config: &version::Config,
     now: Instant,
 ) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             Some(EventData::VersionInformation(VersionInformation {
                 client_versions: Some(
@@ -179,7 +179,7 @@ pub fn client_version_information_negotiated(
     chosen: Version,
     now: Instant,
 ) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             Some(EventData::VersionInformation(VersionInformation {
                 client_versions: Some(
@@ -202,7 +202,7 @@ pub fn server_version_information_failed(
     client: version::Wire,
     now: Instant,
 ) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             Some(EventData::VersionInformation(VersionInformation {
                 client_versions: Some(vec![format!("{client:02x}")]),
@@ -220,7 +220,7 @@ pub fn server_version_information_failed(
 }
 
 pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             let mut d = Decoder::from(meta.payload());
             let raw = RawInfo {
@@ -258,7 +258,7 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
     );
 }
 pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, now: Instant) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             let header =
                 PacketHeader::with_type(decrypt_err.packet_type().into(), None, None, None, None);
@@ -315,7 +315,7 @@ pub enum Metric {
 pub fn metrics_updated(qlog: &mut Qlog, updated_metrics: &[Metric], now: Instant) {
     debug_assert!(!updated_metrics.is_empty());
 
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             let mut min_rtt: Option<f32> = None;
             let mut smoothed_rtt: Option<f32> = None;
