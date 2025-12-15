@@ -115,13 +115,22 @@ runs:
         NSS_HEAD=$(git -C nss rev-parse HEAD)
         echo "version=$NSS_HEAD" >> "$GITHUB_OUTPUT"
 
+    - name: Store Ubuntu release code name (Linux)
+      id: ubuntu_release
+      shell: bash
+      if: ${{ runner.os == 'Linux' && !steps.system_nss.outputs.suitable && runner.environment == 'github-hosted' }}
+      run: |
+        # Store Ubuntu release codename for use in cache key.
+        . /etc/os-release
+        echo "codename=-$UBUNTU_CODENAME" >> "$GITHUB_OUTPUT"
+
     - name: Cache NSS
       id: cache
       if: ${{ !steps.system_nss.outputs.suitable && runner.environment == 'github-hosted' }}
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: dist
-        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ env.ImageOS }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
+        key: nss-${{ inputs.target && inputs.target || runner.os }}${{ steps.ubuntu_release.outputs.codename }}-${{ runner.arch }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
 
     - name: Check if build is needed
       id: check_build
