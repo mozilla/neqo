@@ -1605,3 +1605,24 @@ fn grease_quic_bit_respects_current_handshake() {
         "Must not grease with only cached 0-RTT params (RFC 9287 Section 3.1)"
     );
 }
+
+#[test]
+fn certificate_compression() {
+    use neqo_crypto::agent::CertificateCompressor;
+    struct Copy;
+    impl CertificateCompressor for Copy {
+        const ID: u16 = 0x1234;
+        const NAME: &std::ffi::CStr = c"copy";
+        const ENABLE_ENCODING: bool = true;
+        fn decode(input: &[u8], output: &mut [u8]) -> neqo_crypto::Res<()> {
+            output[..input.len()].copy_from_slice(input);
+            Ok(())
+        }
+        fn encode(input: &[u8], output: &mut [u8]) -> neqo_crypto::Res<usize> {
+            output[..input.len()].copy_from_slice(input);
+            Ok(input.len())
+        }
+    }
+    let mut client = default_client();
+    client.set_certificate_compression::<Copy>().unwrap();
+}

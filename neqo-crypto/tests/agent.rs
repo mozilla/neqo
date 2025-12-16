@@ -10,7 +10,7 @@ use neqo_crypto::{
     agent::CertificateCompressor, generate_ech_keys, AuthenticationStatus, Client, Error,
     HandshakeState, Res, SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,
     TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
-    TLS_VERSION_1_3,
+    TLS_SIG_ECDSA_SECP256R1_SHA256, TLS_VERSION_1_3,
 };
 
 mod handshake;
@@ -66,6 +66,10 @@ fn basic() {
     let client_info = client.info().expect("got info");
     assert_eq!(TLS_VERSION_1_3, client_info.version());
     assert_eq!(TLS_AES_128_GCM_SHA256, client_info.cipher_suite());
+    assert_eq!(
+        TLS_SIG_ECDSA_SECP256R1_SHA256,
+        client_info.signature_scheme()
+    );
 
     let bytes = server.handshake(now(), &bytes[..]).expect("finish");
     assert!(bytes.is_empty());
@@ -74,6 +78,10 @@ fn basic() {
     let server_info = server.info().expect("got info");
     assert_eq!(TLS_VERSION_1_3, server_info.version());
     assert_eq!(TLS_AES_128_GCM_SHA256, server_info.cipher_suite());
+    assert_eq!(
+        TLS_SIG_ECDSA_SECP256R1_SHA256,
+        server_info.signature_scheme()
+    );
 }
 
 fn check_client_preinfo(client_preinfo: &SecretAgentPreInfo) {
@@ -134,6 +142,8 @@ fn raw() {
     // The client should have one certificate for the server.
     let certs = client.peer_certificate().unwrap();
     assert_eq!(1, certs.into_iter().count());
+    assert!(certs.stapled_ocsp_responses().unwrap().is_empty());
+    assert!(certs.signed_cert_timestamp().unwrap().is_empty());
 
     // The server shouldn't have a client certificate.
     assert!(server.peer_certificate().is_none());
