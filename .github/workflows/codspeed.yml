@@ -33,8 +33,9 @@ jobs:
       - id: benches
         run: |
           # Create a GitHub matrix where each entry is a bench with its
-          # associated crate and benchmarking mode taken from the Cargo
-          # metadata.
+          # associated crate, benchmarking mode, and runner taken from the
+          # Cargo metadata. Walltime benchmarks run on Codspeed runners,
+          # instrumentation benchmarks run on GitHub runners.
           {
             echo -n "benches="
             cargo metadata --no-deps --format-version 1 | jq -c '
@@ -43,19 +44,19 @@ jobs:
                 .targets[] |
                 select(.kind[] == "bench") |
                 select(has("required-features")) |
+                ($pkg.metadata.bench[.name].codspeed.mode // "instrumentation") as $mode |
                 {
                   crate: $pkg.name,
                   bench: .name,
-                  mode: ($pkg.metadata.bench[.name].codspeed.mode // "instrumentation")
+                  mode: $mode,
+                  runner: (if $mode == "walltime" then {group: "codspeed", labels: "codspeed-macro"} else "ubuntu-24.04" end)
                 }
               ]'
           } >> "${GITHUB_OUTPUT}"
 
   benchmarks:
     name: Run bench
-    runs-on:
-      group: codspeed # zizmor: ignore[self-hosted-runner]
-      labels: codspeed-macro
+    runs-on: ${{ matrix.bench.runner }}
     strategy:
       matrix:
         bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
