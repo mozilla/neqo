@@ -1,4 +1,7 @@
-name: QNS
+# Publish a Docker image for QNS (QUIC Network Simulator) to GitHub Container Registry.
+# https://interop.seemann.io/ uses this image to run interop tests.
+
+name: Publish QNS Docker Image
 on:
   workflow_dispatch:
   schedule:

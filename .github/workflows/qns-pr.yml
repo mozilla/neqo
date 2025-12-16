@@ -1,3 +1,6 @@
+# Run QNS (QUIC Network Simulator) on PRs to test interop between the
+# changes in the PR and the main branch.
+
 name: QNS PR
 on:
   pull_request:
