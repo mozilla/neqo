@@ -55,6 +55,7 @@ jobs:
           cargo mutants --in-diff pr.diff $MUTANTS_ARGS 2>&1 | tee results.txt
 
       - name: Post step summary
+        if: always()
         run: |
           {
             echo "### Incremental Mutants"
@@ -66,6 +67,7 @@ jobs:
           } > "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        if: always()
         with:
           name: mutants.out
           path: mutants.out
@@ -139,6 +141,7 @@ jobs:
           cargo mutants --shard "$SHARD" --baseline=skip --timeout "$TIMEOUT" $MUTANTS_ARGS 2>&1 | tee results.txt
 
       - name: Post step summary
+        if: always()
         env:
           SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
         run: |
@@ -151,6 +154,7 @@ jobs:
           } > "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        if: always()
         with:
           name: mutants.out-${{ matrix.shard }}
           path: mutants.out
@@ -158,7 +162,7 @@ jobs:
 
   merge-artifacts:
     name: Merge artifacts
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     needs: full-mutants
     runs-on: ubuntu-24.04
     steps:
