@@ -59,7 +59,7 @@ jobs:
       - run: |
           set -o pipefail
           # shellcheck disable=SC2086
-          cargo mutants -vV --in-diff pr.diff $MUTANTS_ARGS 2>&1 | tee results.txt || true
+          cargo mutants --in-diff pr.diff $MUTANTS_ARGS 2>&1 | tee results.txt
 
       - name: Post step summary
         run: |
@@ -134,7 +134,7 @@ jobs:
         run: |
           set -o pipefail
           # shellcheck disable=SC2086
-          cargo mutants -vV --shard "$SHARD" --baseline=skip $MUTANTS_ARGS 2>&1 | tee results.txt || true
+          cargo mutants --shard "$SHARD" --baseline=skip $MUTANTS_ARGS 2>&1 | tee results.txt
 
       - name: Post step summary
         env:
