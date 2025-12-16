@@ -1,14 +1,11 @@
 name: Find mutants
 on:
-  pull_request:
-    branches: ["main"]
-  merge_group:
   # schedule:
   #   - cron: "0 0 * * 0" # Weekly on Sunday at midnight UTC
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -19,64 +16,8 @@ env:
   MUTANTS_ARGS: --no-shuffle --in-place --profile mutants -- --all-targets -- -Zunstable-options --fail-fast
 
 jobs:
-  pr-mutants:
-    name: Find PR mutants
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - id: nss-version
-        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
-
-      - uses: ./.github/actions/nss
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
-
-      - uses: ./.github/actions/rust
-        with:
-          version: nightly
-          tools: cargo-mutants
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - env:
-          BASE_REF: ${{ github.base_ref || github.event.merge_group.base_ref }}
-        run: |
-          # Strip refs/heads/ prefix if present (merge_group events use full ref).
-          BASE_REF="${BASE_REF#refs/heads/}"
-          git diff "origin/${BASE_REF}.." > pr.diff
-
-      - run: |
-          set -o pipefail
-          # shellcheck disable=SC2086
-          # Exit codes: 0=ok, 2=missed, 3=timeout, 4=unviable (all expected).
-          cargo mutants --in-diff pr.diff $MUTANTS_ARGS 2>&1 | tee results.txt \
-            || { ec=$?; [ $ec -le 4 ] && exit 0; exit $ec; }
-
-      - name: Post step summary
-        if: always()
-        run: |
-          {
-            echo "### Incremental Mutants"
-            echo "Mutants found in files changed by this PR."
-            echo "See https://mutants.rs/using-results.html for more information."
-            echo '```'
-            sed 's/\x1b\[[0-9;]*[mGKHF]//g' results.txt || true
-            echo '```'
-          } > "$GITHUB_STEP_SUMMARY"
-
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
-        if: always()
-        with:
-          name: mutants.out.zip
-          path: mutants.out
-
   baseline:
     name: Baseline test
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     outputs:
       timeout: ${{ steps.baseline.outputs.timeout }}
@@ -110,9 +51,8 @@ jobs:
             echo "max_shard=$((SHARDS - 1))"
           } >> "$GITHUB_OUTPUT"
 
-  full-mutants:
+  mutants:
     name: Find mutants (shard ${{ matrix.shard }}/${{ needs.baseline.outputs.max_shard }})
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: baseline
     runs-on: ubuntu-24.04
     strategy:
@@ -155,10 +95,10 @@ jobs:
           path: mutants.out
           retention-days: 1
 
-  merge-artifacts:
-    name: Merge artifacts
-    if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
-    needs: full-mutants
+  results:
+    name: Results
+    if: ${{ !cancelled() }}
+    needs: mutants
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
