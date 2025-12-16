@@ -17,12 +17,14 @@ use neqo_common::qlog::Qlog;
 use crate::{recovery::sent, rtt::RttEstimate, stats::CongestionControlStats, Pmtud};
 
 mod classic_cc;
+mod classic_slow_start;
 mod cubic;
 mod new_reno;
 
 pub use classic_cc::ClassicCongestionControl;
 #[cfg(test)]
 pub use classic_cc::CWND_INITIAL_PKTS;
+pub use classic_slow_start::ClassicSlowStart;
 pub use cubic::Cubic;
 pub use new_reno::NewReno;
 
