@@ -430,6 +430,7 @@ mod tests {
             NonZeroUsize::new(2).unwrap(),
             vec![1, 2, 3, 4],
         );
+        assert!(format!("{batch:?}").starts_with("DatagramBatch"));
         assert!(Datagram::try_from(batch).is_err());
     }
 }

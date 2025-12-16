@@ -56,3 +56,8 @@ impl Add<u64> for PushId {
         Self(self.0 + rhs)
     }
 }
+
+#[test]
+fn push_id_display() {
+    assert_eq!(PushId::new(42).to_string(), "42");
+}

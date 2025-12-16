@@ -110,3 +110,9 @@ impl ControlStreamLocal {
         (&self.stream).into()
     }
 }
+
+#[test]
+fn control_stream_local_display() {
+    let stream = ControlStreamLocal::new();
+    assert!(stream.to_string().starts_with("Local control stream"));
+}

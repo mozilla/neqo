@@ -183,4 +183,9 @@ mod test {
         assert!(id2.is_recv_only(Role::Client));
         assert_eq!(id2.as_u64(), 35);
     }
+
+    #[test]
+    fn stream_id_display() {
+        assert_eq!(StreamId::new(123).to_string(), "123");
+    }
 }
