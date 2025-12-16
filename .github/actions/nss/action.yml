@@ -130,7 +130,7 @@ runs:
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: dist
-        key: nss-${{ inputs.target && inputs.target || runner.os }}${{ steps.ubuntu_release.outputs.codename }}-${{ runner.arch }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
+        key: nss-${{ inputs.target || runner.os }}${{ steps.ubuntu_release.outputs.codename }}-${{ runner.arch }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
 
     - name: Check if build is needed
       id: check_build

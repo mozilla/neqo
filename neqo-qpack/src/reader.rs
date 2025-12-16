@@ -395,13 +395,14 @@ pub(crate) mod test_receiver {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
+    use neqo_common::Encoder;
     use test_receiver::TestReceiver;
 
     use super::{
         huffman, test_receiver, Error, IntReader, LiteralReader, ReadByte as _,
         ReceiverBufferWrapper, Res,
     };
-    use crate::{prefix::Prefix, qpack_send_buf::Data};
+    use crate::{prefix::Prefix, qpack_send_buf::Encoder as _};
 
     const TEST_CASES_NUMBERS: [(&[u8], u8, u64); 7] = [
         (&[0xEA], 3, 10),
@@ -656,15 +657,15 @@ mod tests {
     /// Create a [`LiteralReader`] and [`TestReceiver`] for a literal with the given length.
     fn literal_reader_for_test(literal_len: usize) -> (LiteralReader, TestReceiver) {
         const PREFIX_LEN: u8 = 3;
-        let mut data = Data::default();
+        let mut data = Encoder::default();
         data.encode_literal(
             false,
             Prefix::new(0x00, PREFIX_LEN),
             &vec![b'a'; literal_len],
         );
-        let reader = LiteralReader::new_with_first_byte(data[0], PREFIX_LEN);
+        let reader = LiteralReader::new_with_first_byte(data.as_ref()[0], PREFIX_LEN);
         let mut test_receiver = TestReceiver::default();
-        test_receiver.write(&data[1..]);
+        test_receiver.write(&data.as_ref()[1..]);
         (reader, test_receiver)
     }
 
