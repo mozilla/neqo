@@ -96,13 +96,10 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: nightly
-          tools: cargo-mutants
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run baseline test
-        run: |
-          # shellcheck disable=SC2086
-          cargo mutants --baseline=run --no-mutants $MUTANTS_ARGS
+        run: cargo test --all-targets -- -Zunstable-options --fail-fast
 
   full-mutants:
     name: Find mutants (shard ${{ matrix.shard }}/${{ strategy.job-total }})
