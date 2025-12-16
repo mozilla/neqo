@@ -79,6 +79,7 @@ jobs:
     outputs:
       timeout: ${{ steps.baseline.outputs.timeout }}
       shards: ${{ steps.baseline.outputs.shards }}
+      max_shard: ${{ steps.baseline.outputs.max_shard }}
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
@@ -101,11 +102,14 @@ jobs:
         run: |
           SECONDS=0
           cargo test --all-targets -- -Zunstable-options --fail-fast
-          echo "timeout=$(( SECONDS * 3 < 60 ? 60 : SECONDS * 3 ))" >> "$GITHUB_OUTPUT"
-          echo "shards=$(jq -nc '[$ARGS.positional[] | tonumber]' --args $(seq 0 $((SHARDS - 1))))" >> "$GITHUB_OUTPUT"
+          {
+            echo "timeout=$(( SECONDS * 3 < 60 ? 60 : SECONDS * 3 ))"
+            echo "shards=$(jq -nc '[$ARGS.positional[] | tonumber]' --args $(seq 0 $((SHARDS - 1))))"
+            echo "max_shard=$((SHARDS - 1))"
+          } >> "$GITHUB_OUTPUT"
 
   full-mutants:
-    name: Find mutants (shard ${{ matrix.shard }}/${{ strategy.job-total }})
+    name: Find mutants (shard ${{ matrix.shard }}/${{ needs.baseline.outputs.max_shard }})
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: baseline
     runs-on: ubuntu-24.04
@@ -140,19 +144,6 @@ jobs:
           # shellcheck disable=SC2086
           cargo mutants --shard "$SHARD" --baseline=skip --timeout "$TIMEOUT" $MUTANTS_ARGS 2>&1 | tee results.txt
 
-      - name: Post step summary
-        if: always()
-        env:
-          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
-        run: |
-          {
-            echo "### All Mutants (Shard $SHARD)"
-            echo "See https://mutants.rs/using-results.html for more information."
-            echo '```'
-            sed 's/\x1b\[[0-9;]*[mGKHF]//g' results.txt || true
-            echo '```'
-          } > "$GITHUB_STEP_SUMMARY"
-
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         if: always()
         with:
@@ -182,6 +173,28 @@ jobs:
           for txt in caught missed timeout unviable; do
             cat mutants.out/shard-*/"$txt.txt" 2>/dev/null | sort -u > "mutants.out/$txt.txt" || true
           done
+
+      - name: Post step summary
+        run: |
+          {
+            echo "## Mutation Testing Results"
+            echo "| Category | Count |"
+            echo "|----------|------:|"
+            for txt in caught missed timeout unviable; do
+              count=$(wc -l < "mutants.out/$txt.txt" 2>/dev/null | tr -d ' ' || echo 0)
+              echo "| $txt | $count |"
+            done
+            echo ""
+            for txt in missed timeout; do
+              if [ -s "mutants.out/$txt.txt" ]; then
+                echo "### Files with most $txt mutants"
+                echo '```'
+                # Group by file, count occurrences, show top 10.
+                cut -d: -f1 "mutants.out/$txt.txt" | sort | uniq -c | sort -rn | head -10
+                echo '```'
+              fi
+            done
+          } > "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
