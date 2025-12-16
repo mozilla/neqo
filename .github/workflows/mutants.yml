@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  SHARDS: 32
+  SHARDS: 64
   MUTANTS_ARGS: --no-shuffle --in-place --profile mutants -- --all-targets -- -Zunstable-options --fail-fast
 
 jobs:
@@ -69,7 +69,7 @@ jobs:
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         if: always()
         with:
-          name: mutants.out
+          name: mutants.out.zip
           path: mutants.out
 
   baseline:
@@ -156,7 +156,7 @@ jobs:
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         if: always()
         with:
-          name: mutants.out-${{ matrix.shard }}
+          name: mutants.out-${{ matrix.shard }}.zip
           path: mutants.out
           retention-days: 1
 
@@ -168,11 +168,23 @@ jobs:
     steps:
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
-          pattern: mutants.out-*
-          path: mutants.out
-          merge-multiple: true
+          pattern: mutants.out-*.zip
+          path: shards
+
+      - name: Merge shard results
+        run: |
+          mkdir -p mutants.out
+          # Move each shard to a subfolder and concatenate txt files.
+          for dir in shards/mutants.out-*.zip; do
+            shard="${dir##*-}"; shard="${shard%.zip}"
+            mv "$dir" "mutants.out/shard-$shard"
+          done
+          for txt in caught missed timeout unviable; do
+            cat mutants.out/shard-*/"$txt.txt" 2>/dev/null | sort -u > "mutants.out/$txt.txt" || true
+          done
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
-          name: mutants.out
+          name: mutants.out.zip
           path: mutants.out
+          compression-level: 9
