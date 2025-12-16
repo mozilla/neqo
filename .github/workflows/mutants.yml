@@ -15,14 +15,8 @@ permissions:
   contents: read
 
 env:
-  MUTANTS_ARGS: >-
-    --no-shuffle
-    --in-place
-    --caught
-    --unviable
-    --profile mutants
-    -- --all-targets
-    -- -Zunstable-options --fail-fast
+  SHARDS: 32
+  MUTANTS_ARGS: --no-shuffle --in-place --profile mutants -- --all-targets -- -Zunstable-options --fail-fast
 
 jobs:
   pr-mutants:
@@ -80,6 +74,9 @@ jobs:
     name: Baseline test
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
+    outputs:
+      timeout: ${{ steps.baseline.outputs.timeout }}
+      shards: ${{ steps.baseline.outputs.shards }}
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
@@ -98,7 +95,12 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run baseline test
-        run: cargo test --all-targets -- -Zunstable-options --fail-fast
+        id: baseline
+        run: |
+          SECONDS=0
+          cargo test --all-targets -- -Zunstable-options --fail-fast
+          echo "timeout=$(( SECONDS * 3 < 60 ? 60 : SECONDS * 3 ))" >> "$GITHUB_OUTPUT"
+          echo "shards=$(jq -nc '[$ARGS.positional[] | tonumber]' --args $(seq 0 $((SHARDS - 1))))" >> "$GITHUB_OUTPUT"
 
   full-mutants:
     name: Find mutants (shard ${{ matrix.shard }}/${{ strategy.job-total }})
@@ -108,7 +110,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        shard: ${{ fromJSON(needs.baseline.outputs.shards) }}
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
@@ -130,10 +132,11 @@ jobs:
       - name: Find mutants
         env:
           SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+          TIMEOUT: ${{ needs.baseline.outputs.timeout }}
         run: |
           set -o pipefail
           # shellcheck disable=SC2086
-          cargo mutants --shard "$SHARD" --baseline=skip $MUTANTS_ARGS 2>&1 | tee results.txt
+          cargo mutants --shard "$SHARD" --baseline=skip --timeout "$TIMEOUT" $MUTANTS_ARGS 2>&1 | tee results.txt
 
       - name: Post step summary
         env:
