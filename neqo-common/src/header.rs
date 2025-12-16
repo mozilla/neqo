@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn headers_ext() {
-        let headers = vec![
+        let headers = [
             Header::new("content-type", "text/html"),
             Header::new("x-custom", "value"),
         ];

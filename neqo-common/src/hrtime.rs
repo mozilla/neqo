@@ -435,8 +435,8 @@ mod unit_tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn period_scaled() {
-        assert_eq!(Period(5).scaled(2.0), 10.0);
-        assert_eq!(Period(4).scaled(0.5), 2.0);
+        assert_eq!(Period(5).scaled(2.0).to_bits(), 10.0_f64.to_bits());
+        assert_eq!(Period(4).scaled(0.5).to_bits(), 2.0_f64.to_bits());
     }
 
     #[cfg(windows)]
