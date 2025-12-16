@@ -13,6 +13,7 @@ permissions:
 
 env:
   SHARDS: 64
+  RUST_BACKTRACE: 1
   MUTANTS_ARGS: --no-shuffle --in-place --profile mutants -- --all-targets -- -Zunstable-options --fail-fast
 
 jobs:
@@ -118,7 +119,16 @@ jobs:
             cat mutants.out/shard-*/"$txt.txt" 2>/dev/null | sort -u > "mutants.out/$txt.txt" || true
           done
 
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        id: upload
+        with:
+          name: mutants.out.zip
+          path: mutants.out
+          compression-level: 9
+
       - name: Post step summary
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
         run: |
           {
             echo "## Mutation Testing Results"
@@ -138,10 +148,6 @@ jobs:
                 echo '```'
               fi
             done
-          } > "$GITHUB_STEP_SUMMARY"
-
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
-        with:
-          name: mutants.out.zip
-          path: mutants.out
-          compression-level: 9
+            echo ""
+            echo "[Download full results]($ARTIFACT_URL)"
+          } >> "$GITHUB_STEP_SUMMARY"

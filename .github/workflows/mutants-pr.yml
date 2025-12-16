@@ -12,6 +12,7 @@ permissions:
   contents: read
 
 env:
+  RUST_BACKTRACE: 1
   MUTANTS_ARGS: --no-shuffle --in-place --profile mutants -- --all-targets -- -Zunstable-options --fail-fast
 
 jobs:
