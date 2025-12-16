@@ -17,7 +17,6 @@ permissions:
 env:
   MUTANTS_ARGS: >-
     --no-shuffle
-    --jobs 2
     --in-place
     --caught
     --unviable
