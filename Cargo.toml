@@ -151,3 +151,8 @@ debug = true
 [profile.profiling]
 inherits = "release"
 debug = true
+
+# Profile for mutation testing: skip debug symbols for faster builds.
+[profile.mutants]
+inherits = "test"
+debug = "none"
