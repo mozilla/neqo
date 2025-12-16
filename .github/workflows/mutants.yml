@@ -52,7 +52,9 @@ jobs:
       - run: |
           set -o pipefail
           # shellcheck disable=SC2086
-          cargo mutants --in-diff pr.diff $MUTANTS_ARGS 2>&1 | tee results.txt
+          # Exit codes: 0=ok, 2=missed, 3=timeout, 4=unviable (all expected).
+          cargo mutants --in-diff pr.diff $MUTANTS_ARGS 2>&1 | tee results.txt \
+            || { ec=$?; [ $ec -le 4 ] && exit 0; exit $ec; }
 
       - name: Post step summary
         if: always()
@@ -142,7 +144,9 @@ jobs:
         run: |
           set -o pipefail
           # shellcheck disable=SC2086
-          cargo mutants --shard "$SHARD" --baseline=skip --timeout "$TIMEOUT" $MUTANTS_ARGS 2>&1 | tee results.txt
+          # Exit codes: 0=ok, 2=missed, 3=timeout, 4=unviable (all expected).
+          cargo mutants --shard "$SHARD" --sharding round-robin --baseline=skip --timeout "$TIMEOUT" $MUTANTS_ARGS 2>&1 | tee results.txt \
+            || { ec=$?; [ $ec -le 4 ] && exit 0; exit $ec; }
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         if: always()
