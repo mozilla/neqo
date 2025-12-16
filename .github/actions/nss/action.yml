@@ -14,7 +14,7 @@ runs:
   steps:
     - name: Install system NSS (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && inputs.target == '' }}
+      if: ${{ runner.os == 'Linux' && inputs.target == '' }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -23,7 +23,7 @@ runs:
 
     - name: Install system NSS (MacOS)
       shell: bash
-      if: ${{ runner.os == 'MacOS' && runner.environment == 'github-hosted' && inputs.target == '' }}
+      if: ${{ runner.os == 'MacOS' && inputs.target == '' }}
       run: |
         [ "$BREW_UPDATED" ] || brew update && echo "BREW_UPDATED=1" >> "$GITHUB_ENV"
         brew install nss
@@ -118,7 +118,7 @@ runs:
     - name: Store Ubuntu release code name (Linux)
       id: ubuntu_release
       shell: bash
-      if: ${{ runner.os == 'Linux' && !steps.system_nss.outputs.suitable && runner.environment == 'github-hosted' }}
+      if: ${{ runner.os == 'Linux' && !steps.system_nss.outputs.suitable }}
       run: |
         # Store Ubuntu release codename for use in cache key.
         . /etc/os-release
@@ -148,7 +148,7 @@ runs:
 
     - name: Install build dependencies (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && steps.check_build.outputs.build_nss && runner.environment == 'github-hosted' }}
+      if: ${{ runner.os == 'Linux' && steps.check_build.outputs.build_nss }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: sudo apt-get install -y --no-install-recommends gyp ninja-build
