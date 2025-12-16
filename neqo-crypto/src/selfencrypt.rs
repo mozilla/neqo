@@ -136,9 +136,7 @@ impl SelfEncrypt {
         let Some(key) = self.select_key(*ciphertext.get(1).ok_or(Error::SelfEncrypt)?) else {
             return Err(Error::SelfEncrypt);
         };
-        let salt = ciphertext
-            .get(2..OFFSET)
-            .ok_or(Error::SelfEncrypt)?;
+        let salt = ciphertext.get(2..OFFSET).ok_or(Error::SelfEncrypt)?;
 
         let mut extended_aad = Encoder::with_capacity(OFFSET + aad.len());
         extended_aad.encode(&ciphertext[..OFFSET]);
