@@ -13,7 +13,7 @@ use std::{
     cell::RefCell,
     ffi::{CStr, CString},
     fmt::{self, Debug, Display, Formatter},
-    mem::MaybeUninit,
+    mem::{size_of, MaybeUninit},
     ops::{Deref, DerefMut},
     os::raw::{c_uint, c_void},
     pin::Pin,
@@ -1255,6 +1255,17 @@ pub struct Server {
     zero_rtt_check: Option<Pin<Box<ZeroRttCheckState>>>,
 }
 
+fn load_cert_and_key(name: &str) -> Res<(p11::Certificate, PrivateKey)> {
+    let c = CString::new(name)?;
+    let cert = p11::Certificate::from_ptr(unsafe {
+        p11::PK11_FindCertFromNickname(c.as_ptr(), null_mut())
+    })
+    .map_err(|_| Error::CertificateLoading)?;
+    let key = PrivateKey::from_ptr(unsafe { p11::PK11_FindKeyByAnyCert(*cert, null_mut()) })
+        .map_err(|_| Error::CertificateLoading)?;
+    Ok((cert, key))
+}
+
 impl Server {
     /// Create a new server agent.
     ///
@@ -1263,22 +1274,59 @@ impl Server {
     /// Errors returned when NSS fails.
     pub fn new<A: AsRef<str>>(certificates: &[A]) -> Res<Self> {
         let mut agent = SecretAgent::new()?;
-
         for n in certificates {
-            let c = CString::new(n.as_ref())?;
-            let cert_ptr = unsafe { p11::PK11_FindCertFromNickname(c.as_ptr(), null_mut()) };
-            let Ok(cert) = p11::Certificate::from_ptr(cert_ptr) else {
-                return Err(Error::CertificateLoading);
-            };
-            let key_ptr = unsafe { p11::PK11_FindKeyByAnyCert(*cert, null_mut()) };
-            let Ok(key) = PrivateKey::from_ptr(key_ptr) else {
-                return Err(Error::CertificateLoading);
-            };
+            let (cert, key) = load_cert_and_key(n.as_ref())?;
             secstatus_to_res(unsafe {
                 ssl::SSL_ConfigServerCert(agent.fd, (*cert).cast(), (*key).cast(), null(), 0)
             })?;
         }
+        agent.ready(true, true)?;
+        Ok(Self {
+            agent,
+            zero_rtt_check: None,
+        })
+    }
 
+    /// Create a server with OCSP responses and SCTs configured.
+    ///
+    /// # Errors
+    ///
+    /// Errors returned when NSS fails.
+    pub fn new_with_ocsp_and_scts<A: AsRef<str>>(
+        certificates: &[A],
+        ocsp_responses: &[&[u8]],
+        scts: &[u8],
+    ) -> Res<Self> {
+        let mut agent = SecretAgent::new()?;
+        for n in certificates {
+            let (cert, key) = load_cert_and_key(n.as_ref())?;
+            let ocsp_items: Vec<p11::SECItem> = ocsp_responses
+                .iter()
+                .map(|b| p11::Item::wrap(b))
+                .collect::<Res<_>>()?;
+            let ocsp_array = ssl::SECItemArrayStr {
+                items: ocsp_items.as_ptr().cast::<ssl::SECItem>().cast_mut(),
+                len: c_uint::try_from(ocsp_items.len())?,
+            };
+            let sct_item = p11::Item::wrap(scts)?;
+            let extra = ssl::SSLExtraServerCertDataStr {
+                authType: ssl::SSLAuthType::ssl_auth_null,
+                certChain: null(),
+                stapledOCSPResponses: &ocsp_array,
+                signedCertTimestamps: std::ptr::from_ref(&sct_item).cast(),
+                delegCred: null(),
+                delegCredPrivKey: null(),
+            };
+            secstatus_to_res(unsafe {
+                ssl::SSL_ConfigServerCert(
+                    agent.fd,
+                    (*cert).cast(),
+                    (*key).cast(),
+                    &extra,
+                    c_uint::try_from(size_of::<ssl::SSLExtraServerCertDataStr>())?,
+                )
+            })?;
+        }
         agent.ready(true, true)?;
         Ok(Self {
             agent,

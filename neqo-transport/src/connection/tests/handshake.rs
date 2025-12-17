@@ -1608,21 +1608,42 @@ fn grease_quic_bit_respects_current_handshake() {
 
 #[test]
 fn certificate_compression() {
+    use std::sync::Mutex;
+
     use neqo_crypto::agent::CertificateCompressor;
-    struct Copy;
-    impl CertificateCompressor for Copy {
+
+    static ORIGINAL: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+    static DECODED: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+
+    struct Xor;
+    impl CertificateCompressor for Xor {
         const ID: u16 = 0x1234;
-        const NAME: &std::ffi::CStr = c"copy";
+        const NAME: &std::ffi::CStr = c"xor";
         const ENABLE_ENCODING: bool = true;
         fn decode(input: &[u8], output: &mut [u8]) -> neqo_crypto::Res<()> {
-            output[..input.len()].copy_from_slice(input);
+            output
+                .iter_mut()
+                .zip(input)
+                .for_each(|(o, &i)| *o = i ^ 0xAA);
+            *DECODED.lock().unwrap() = output[..input.len()].to_vec();
             Ok(())
         }
         fn encode(input: &[u8], output: &mut [u8]) -> neqo_crypto::Res<usize> {
-            output[..input.len()].copy_from_slice(input);
+            *ORIGINAL.lock().unwrap() = input.to_vec();
+            output
+                .iter_mut()
+                .zip(input)
+                .for_each(|(o, &i)| *o = i ^ 0xAA);
             Ok(input.len())
         }
     }
+
     let mut client = default_client();
-    client.set_certificate_compression::<Copy>().unwrap();
+    client.set_certificate_compression::<Xor>().unwrap();
+    let mut server = default_server();
+    server.set_certificate_compression::<Xor>().unwrap();
+    connect(&mut client, &mut server);
+
+    assert!(!ORIGINAL.lock().unwrap().is_empty());
+    assert_eq!(*ORIGINAL.lock().unwrap(), *DECODED.lock().unwrap());
 }

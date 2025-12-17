@@ -150,6 +150,30 @@ fn raw() {
 }
 
 #[test]
+fn ocsp_stapling_and_signed_cert_timestamps() {
+    use neqo_crypto::Opt;
+
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    client
+        .set_option(Opt::SignedCertificateTimestamps, true)
+        .unwrap();
+    let ocsp_response = b"fake ocsp response";
+    let scts = b"fake signed certificate timestamps";
+    let mut server = Server::new_with_ocsp_and_scts(&["key"], &[&ocsp_response[..]], scts)
+        .expect("should create server");
+
+    connect(&mut client, &mut server);
+
+    let certs = client.peer_certificate().unwrap();
+    assert_eq!(1, certs.into_iter().count());
+    let ocsp = certs.stapled_ocsp_responses().unwrap();
+    assert_eq!(ocsp.len(), 1);
+    assert_eq!(ocsp[0], ocsp_response);
+    assert_eq!(certs.signed_cert_timestamp().unwrap(), scts);
+}
+
+#[test]
 fn chacha_client() {
     fixture_init();
     let mut client = Client::new("server.example", true).expect("should create client");
