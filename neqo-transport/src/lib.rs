@@ -269,3 +269,17 @@ impl CloseReason {
 }
 
 pub type Res<T> = Result<T, Error>;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::{CloseReason, Error};
+
+    #[test]
+    fn close_reason_is_error() {
+        assert!(!CloseReason::Transport(Error::None).is_error());
+        assert!(!CloseReason::Application(0).is_error());
+        assert!(CloseReason::Transport(Error::Internal).is_error());
+        assert!(CloseReason::Application(1).is_error());
+    }
+}

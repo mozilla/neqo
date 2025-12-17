@@ -354,3 +354,21 @@ impl Info {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::Count;
+
+    #[test]
+    fn count_predicates() {
+        assert!(Count::default().is_empty());
+        assert!(!Count::default().is_some());
+        assert!(!Count::new(0, 1, 0, 0).is_empty());
+        assert!(Count::new(0, 1, 0, 0).is_some()); // ect1 > 0
+        assert!(Count::new(0, 0, 1, 0).is_some()); // ect0 > 0
+        assert!(Count::new(0, 0, 0, 1).is_some()); // ce > 0
+        assert!(!Count::new(1, 0, 0, 0).is_empty());
+        assert!(!Count::new(1, 0, 0, 0).is_some()); // not_ect alone
+    }
+}

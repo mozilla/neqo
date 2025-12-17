@@ -2388,6 +2388,7 @@ mod tests {
         let conn_events = ConnectionEvents::default();
 
         let mut s = SendStream::new(4.into(), 1024, Rc::clone(&conn_fc), conn_events);
+        assert_eq!(s.to_string(), "SendStream 4");
 
         let res = s.send(&[4; 100]).unwrap();
         assert_eq!(res, 100);
@@ -2571,7 +2572,9 @@ mod tests {
         s.close();
 
         let mut ss = SendStreams::default();
+        assert!(!ss.exists(StreamId::from(0)));
         ss.insert(StreamId::from(0), s);
+        assert!(ss.exists(StreamId::from(0)));
 
         let mut tokens = recovery::Tokens::new();
         let mut builder =

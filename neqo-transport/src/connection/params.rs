@@ -556,3 +556,25 @@ impl ConnectionParameters {
         Ok(tps)
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::ConnectionParameters;
+
+    #[test]
+    fn grease_default() {
+        let params = ConnectionParameters::default();
+        assert!(params.is_greasing());
+        let params = params.grease(false);
+        assert!(!params.is_greasing());
+    }
+
+    #[test]
+    fn pmtud_iface_mtu() {
+        let params = ConnectionParameters::default();
+        assert!(params.pmtud_iface_mtu_enabled());
+        let params = params.pmtud_iface_mtu(false);
+        assert!(!params.pmtud_iface_mtu_enabled());
+    }
+}

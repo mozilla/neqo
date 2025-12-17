@@ -1118,4 +1118,10 @@ mod tests {
         e.pad_to(u16::MAX as usize + 1, 0);
         assert_eq!(Frame::decode(&mut e.as_decoder()), Err(Error::TooMuchData));
     }
+
+    #[test]
+    fn frame_type_to_u8() {
+        assert_eq!(u8::from(FrameType::Padding), 0);
+        assert_eq!(u8::from(FrameType::Ping), 1);
+    }
 }
