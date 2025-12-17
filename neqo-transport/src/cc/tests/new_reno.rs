@@ -251,3 +251,8 @@ fn issue_1465() {
     cc.on_packets_lost(Some(now), None, PTO, &[p6], now, &mut cc_stats);
     assert_eq!(cc.cwnd(), cur_cwnd / 2);
 }
+
+#[test]
+fn new_reno_display() {
+    assert_eq!(NewReno::default().to_string(), "NewReno");
+}

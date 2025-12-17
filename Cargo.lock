@@ -903,6 +903,7 @@ dependencies = [
  "quinn-udp",
  "regex",
  "rustc-hash",
+ "strum",
  "thiserror",
  "tokio",
  "url",

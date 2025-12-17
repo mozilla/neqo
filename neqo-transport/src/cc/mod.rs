@@ -8,14 +8,13 @@
 
 use std::{
     fmt::{Debug, Display},
-    str::FromStr,
     time::{Duration, Instant},
 };
 
 use enum_map::Enum;
 use neqo_common::qlog::Qlog;
 
-use crate::{recovery::sent, rtt::RttEstimate, stats::CongestionControlStats, Error, Pmtud};
+use crate::{recovery::sent, rtt::RttEstimate, stats::CongestionControlStats, Pmtud};
 
 mod classic_cc;
 mod cubic;
@@ -96,24 +95,14 @@ pub trait CongestionControl: Display + Debug {
     fn discard_in_flight(&mut self, now: Instant);
 }
 
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
+#[strum(ascii_case_insensitive)]
 pub enum CongestionControlAlgorithm {
+    #[strum(serialize = "newreno", serialize = "reno")]
     NewReno,
+    #[strum(serialize = "cubic")]
     #[default]
     Cubic,
-}
-
-// A `FromStr` implementation so that this can be used in command-line interfaces.
-impl FromStr for CongestionControlAlgorithm {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "newreno" | "reno" => Ok(Self::NewReno),
-            "cubic" => Ok(Self::Cubic),
-            _ => Err(Error::InvalidInput),
-        }
-    }
 }
 
 #[cfg(test)]

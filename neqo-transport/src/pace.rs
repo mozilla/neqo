@@ -227,4 +227,11 @@ mod tests {
         // We expect _some_ time to have progressed after sending all the packets.
         assert!(n - start > Duration::ZERO);
     }
+
+    #[test]
+    fn pacer_display_and_debug() {
+        let p = Pacer::new(true, now(), PACKET, PACKET);
+        assert_eq!(p.to_string(), "Pacer 1000/1000");
+        assert!(format!("{p:?}").starts_with("Pacer@"));
+    }
 }

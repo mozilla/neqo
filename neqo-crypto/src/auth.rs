@@ -63,6 +63,10 @@ mod tests {
         );
         assert_eq!(AuthenticationStatus::from(0), AuthenticationStatus::Ok);
         assert_eq!(
+            AuthenticationStatus::from(12345),
+            AuthenticationStatus::Unknown
+        );
+        assert_eq!(
             AuthenticationStatus::from(i32::MIN),
             AuthenticationStatus::Unknown
         );
