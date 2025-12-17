@@ -226,11 +226,12 @@ mod test {
 
     #[test]
     fn add_event_with_stream_error_disables_logging() {
-        let (mut log, _contents) = test_fixture::new_neqo_qlog();
+        let (mut log, contents) = test_fixture::new_neqo_qlog();
         let mut log_clone = log.clone();
-        // Trigger the error path by returning an error from the closure.
+        let before_error = contents.to_string();
         log.add_event_with_stream(|_| Err(qlog::Error::IoError(std::io::Error::other("e"))));
         // The cloned instance still has inner=Some, but the RefCell contains None.
         log_clone.add_event_at(|| Some(EV_DATA), test_fixture::now());
+        assert_eq!(contents.to_string(), before_error);
     }
 }
