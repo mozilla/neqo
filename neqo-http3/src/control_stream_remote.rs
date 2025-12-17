@@ -78,3 +78,12 @@ impl RecvStream for ControlStreamRemote {
         }
     }
 }
+
+#[test]
+fn control_stream_remote_display() {
+    let stream = ControlStreamRemote::new(StreamId::new(2));
+    assert_eq!(
+        stream.to_string(),
+        "Http3 remote control stream StreamId(2)"
+    );
+}

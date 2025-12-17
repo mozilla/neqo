@@ -227,4 +227,17 @@ mod test {
         let p = Priority::from_bytes(b"u=-1").unwrap();
         assert_eq!(p, Priority::default());
     }
+
+    #[test]
+    fn priority_display_urgency_and_incremental() {
+        assert_eq!(Priority::new(5, true).to_string(), "u=5,i");
+    }
+
+    #[test]
+    fn priority_update_push_stream() {
+        let mut p = PriorityHandler::new(true, Priority::new(5, false));
+        assert!(p.maybe_update_priority(Priority::new(6, false)));
+        let frame = p.maybe_encode_frame(StreamId::new(4));
+        assert!(matches!(frame, Some(HFrame::PriorityUpdatePush { .. })));
+    }
 }

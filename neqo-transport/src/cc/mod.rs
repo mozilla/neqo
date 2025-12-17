@@ -95,8 +95,7 @@ pub trait CongestionControl: Display + Debug {
     fn discard_in_flight(&mut self, now: Instant);
 }
 
-/// Congestion control algorithm selector for command-line interfaces.
-#[derive(Debug, Copy, Clone, Default, strum::EnumString, strum::VariantNames)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
 #[strum(ascii_case_insensitive)]
 pub enum CongestionControlAlgorithm {
     #[strum(serialize = "newreno", serialize = "reno")]

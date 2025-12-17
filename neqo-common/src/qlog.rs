@@ -217,4 +217,21 @@ mod test {
             format!("{EXPECTED_LOG_HEADER}{EXPECTED_LOG_EVENT}"),
         );
     }
+
+    #[test]
+    fn shared_streamer_debug() {
+        let (log, _contents) = test_fixture::new_neqo_qlog();
+        assert!(format!("{log:?}").contains("Qlog writing to"));
+    }
+
+    #[test]
+    fn add_event_with_stream_error_disables_logging() {
+        let (mut log, contents) = test_fixture::new_neqo_qlog();
+        let mut log_clone = log.clone();
+        let before_error = contents.to_string();
+        log.add_event_with_stream(|_| Err(qlog::Error::IoError(std::io::Error::other("e"))));
+        // The cloned instance still has inner=Some, but the RefCell contains None.
+        log_clone.add_event_at(|| Some(EV_DATA), test_fixture::now());
+        assert_eq!(contents.to_string(), before_error);
+    }
 }
