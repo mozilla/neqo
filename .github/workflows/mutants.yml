@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  SHARDS: 64
+  SHARDS: 32
   RUST_BACKTRACE: 1
   MUTANTS_ARGS: --no-shuffle --in-place --profile mutants -- --all-targets -- -Zunstable-options --fail-fast
 
@@ -83,16 +83,19 @@ jobs:
           SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
           TIMEOUT: ${{ needs.baseline.outputs.timeout }}
         run: |
-          set -o pipefail
           # shellcheck disable=SC2086
-          # Exit codes: 0=ok, 2=missed, 3=timeout, 4=unviable (all expected).
-          cargo mutants --shard "$SHARD" --sharding round-robin --baseline=skip --timeout "$TIMEOUT" $MUTANTS_ARGS 2>&1 | tee results.txt \
-            || { ec=$?; [ $ec -le 4 ] && exit 0; exit $ec; }
+          # Exit codes: 0=success, 1=build/test failure (fail workflow),
+          # 2=missed, 3=timeout, 4=unviable (suppress, report in summary).
+          (cargo mutants --shard "$SHARD" --sharding round-robin --baseline=skip --timeout "$TIMEOUT" $MUTANTS_ARGS 2>&1 \
+            || { ec=$?; [ $ec -ge 2 ] && [ $ec -le 4 ] && exit 0; exit $ec; }) | tee results.txt
+          # Some sharded runs get killed by GitHub with error code 143.
+          # This seems to be a GitHub-internal protection feature that we can't control:
+          # https://github.com/actions/runner-images/issues/6680
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         if: always()
         with:
-          name: mutants.out-${{ matrix.shard }}.zip
+          name: mutants.out-${{ matrix.shard }}
           path: mutants.out
           retention-days: 1
 
@@ -104,25 +107,26 @@ jobs:
     steps:
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
-          pattern: mutants.out-*.zip
+          pattern: mutants.out-*
           path: shards
 
       - name: Merge shard results
         run: |
           mkdir -p mutants.out
-          # Move each shard to a subfolder and concatenate txt files.
-          for dir in shards/mutants.out-*.zip; do
-            shard="${dir##*-}"; shard="${shard%.zip}"
+          # Move each shard to a subfolder and concatenate result files.
+          for dir in shards/mutants.out-*; do
+            shard="${dir##*-}"
             mv "$dir" "mutants.out/shard-$shard"
           done
-          for txt in caught missed timeout unviable; do
-            cat mutants.out/shard-*/"$txt.txt" 2>/dev/null | sort -u > "mutants.out/$txt.txt" || true
+          for category in caught missed timeout unviable; do
+            cat mutants.out/shard-*/"$category.txt" 2>/dev/null | sort -u > "mutants.out/$category.txt" || true
+            rm -f mutants.out/shard-*/"$category.txt"
           done
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         id: upload
         with:
-          name: mutants.out.zip
+          name: mutants.out
           path: mutants.out
           compression-level: 9
 
@@ -134,17 +138,17 @@ jobs:
             echo "## Mutation Testing Results"
             echo "| Category | Count |"
             echo "|----------|------:|"
-            for txt in caught missed timeout unviable; do
-              count=$(wc -l < "mutants.out/$txt.txt" 2>/dev/null | tr -d ' ' || echo 0)
-              echo "| $txt | $count |"
+            for category in caught missed timeout unviable; do
+              count=$(wc -l < "mutants.out/$category.txt" 2>/dev/null | tr -d ' ' || echo 0)
+              echo "| $category | $count |"
             done
             echo ""
-            for txt in missed timeout; do
-              if [ -s "mutants.out/$txt.txt" ]; then
-                echo "### Files with most $txt mutants"
+            for category in missed timeout; do
+              if [ -s "mutants.out/$category.txt" ]; then
+                echo "### Files with most $category mutants"
                 echo '```'
                 # Group by file, count occurrences, show top 10.
-                cut -d: -f1 "mutants.out/$txt.txt" | sort | uniq -c | sort -rn | head -10
+                cut -d: -f1 "mutants.out/$category.txt" | sort | uniq -c | sort -rn | head -10
                 echo '```'
               fi
             done

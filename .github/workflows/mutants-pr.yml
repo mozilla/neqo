@@ -48,11 +48,11 @@ jobs:
 
       - name: Find mutants
         run: |
-          set -o pipefail
           # shellcheck disable=SC2086
-          # Exit codes: 0=ok, 2=missed, 3=timeout, 4=unviable (all expected).
-          cargo mutants --in-diff pr.diff $MUTANTS_ARGS 2>&1 | tee results.txt \
-            || { ec=$?; [ $ec -le 4 ] && exit 0; exit $ec; }
+          # Exit codes: 0=success, 1=build/test failure (fail workflow),
+          # 2=missed, 3=timeout, 4=unviable (suppress, report in summary).
+          (cargo mutants --in-diff pr.diff $MUTANTS_ARGS 2>&1 \
+            || { ec=$?; [ $ec -ge 2 ] && [ $ec -le 4 ] && exit 0; exit $ec; }) | tee results.txt
 
       - name: Post step summary
         if: always()
@@ -69,5 +69,5 @@ jobs:
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         if: always()
         with:
-          name: mutants.out.zip
+          name: mutants.out
           path: mutants.out
