@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  SHARDS: 32
+  SHARDS: 64
   RUST_BACKTRACE: 1
   MUTANTS_ARGS: --no-shuffle --in-place --profile mutants -- --all-targets -- -Zunstable-options --fail-fast
 
@@ -47,7 +47,8 @@ jobs:
           SECONDS=0
           cargo test --all-targets -- -Zunstable-options --fail-fast
           {
-            echo "timeout=$(( SECONDS * 3 < 60 ? 60 : SECONDS * 3 ))"
+            # Minimum timeout is 30s, maximum is 90s, otherwise 3x the baseline test time.
+            echo "timeout=$(( SECONDS * 3 < 30 ? 30 : SECONDS * 3 > 90 ? 90 : SECONDS * 3 ))"
             echo "shards=$(jq -nc '[$ARGS.positional[] | tonumber]' --args $(seq 0 $((SHARDS - 1))))"
             echo "max_shard=$((SHARDS - 1))"
           } >> "$GITHUB_OUTPUT"
