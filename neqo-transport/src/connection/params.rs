@@ -449,7 +449,6 @@ impl ConnectionParameters {
         self.pmtud_iface_mtu
     }
 
-    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn pmtud_iface_mtu(mut self, pmtud_iface_mtu: bool) -> Self {
         self.pmtud_iface_mtu = pmtud_iface_mtu;
@@ -560,7 +559,7 @@ impl ConnectionParameters {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::ConnectionParameters;
+    use super::*;
 
     #[test]
     fn grease_default() {
@@ -572,7 +571,7 @@ mod tests {
 
     #[test]
     fn pmtud_iface_mtu() {
-        let params = ConnectionParameters::default();
+        let params = ConnectionParameters::default().pmtud_iface_mtu(true);
         assert!(params.pmtud_iface_mtu_enabled());
         let params = params.pmtud_iface_mtu(false);
         assert!(!params.pmtud_iface_mtu_enabled());
