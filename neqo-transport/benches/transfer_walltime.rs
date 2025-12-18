@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Benchmark with wallclock time, i.e., measure the compute efficiency.
+//! Benchmark with walltime, i.e., measure the compute efficiency.
 
 #![expect(
     clippy::significant_drop_tightening,
@@ -13,22 +13,26 @@
 
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize::SmallInput};
 
-#[path = "common.rs"]
+#[path = "transfer_common.rs"]
 mod common;
 
-fn benchmark(c: &mut Criterion) {
-    common::benchmark(c, |group, streams, data_size| {
-        group.bench_function("wallclock-time", |b| {
+fn benchmark(c: &mut criterion::Criterion) {
+    common::benchmark(c, |group, label, seed, pacing| {
+        group.bench_function("walltime", |b| {
             b.iter_batched(
-                || common::setup(streams, data_size),
+                || common::setup(label, seed, pacing),
                 |sim| black_box(sim.run()),
-                criterion::BatchSize::SmallInput,
+                SmallInput,
             );
         });
     });
 }
 
-criterion_group!(benches, benchmark);
-criterion_main!(benches);
+criterion_group! {
+    name = transfer;
+    config = common::criterion_config();
+    targets = benchmark
+}
+criterion_main!(transfer);

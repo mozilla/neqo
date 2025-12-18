@@ -35,7 +35,7 @@ jobs:
           # Create a GitHub matrix where each entry is a bench with its
           # associated crate, benchmarking mode, and runner taken from the
           # Cargo metadata. Walltime benchmarks run on Codspeed runners,
-          # instrumentation benchmarks run on GitHub runners.
+          # simulation benchmarks run on GitHub runners.
           {
             echo -n "benches="
             cargo metadata --no-deps --format-version 1 | jq -c '
@@ -44,7 +44,7 @@ jobs:
                 .targets[] |
                 select(.kind[] == "bench") |
                 select(has("required-features")) |
-                ($pkg.metadata.bench[.name].codspeed.mode // "instrumentation") as $mode |
+                ($pkg.metadata.bench[.name].codspeed.mode // "simulation") as $mode |
                 {
                   crate: $pkg.name,
                   bench: .name,
