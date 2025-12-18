@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(clippy::unwrap_in_result, reason = "OK in tests")]
+
 use std::{
     cell::RefCell,
     net::{IpAddr, Ipv6Addr, SocketAddr},
@@ -1612,6 +1614,9 @@ fn certificate_compression() {
 
     use neqo_crypto::agent::CertificateCompressor;
 
+    // These statics work for concurrent test execution because the certificate is
+    // effectively a fixed value. A more robust approach would use a hash-based lookup,
+    // but that's unnecessary given the current test setup.
     static ORIGINAL: Mutex<Vec<u8>> = Mutex::new(Vec::new());
     static DECODED: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 

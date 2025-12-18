@@ -151,12 +151,10 @@ fn raw() {
 
 #[test]
 fn ocsp_stapling_and_signed_cert_timestamps() {
-    use neqo_crypto::Opt;
-
     fixture_init();
     let mut client = Client::new("server.example", true).expect("should create client");
     client
-        .set_option(Opt::SignedCertificateTimestamps, true)
+        .set_option(neqo_crypto::Opt::SignedCertificateTimestamps, true)
         .unwrap();
     let ocsp_response = b"fake ocsp response";
     let scts = b"fake signed certificate timestamps";

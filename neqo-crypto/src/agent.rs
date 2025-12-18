@@ -1288,6 +1288,9 @@ impl Server {
     }
 
     /// Create a server with OCSP responses and SCTs configured.
+    /// Not suitable for multiple certificates, because it configures the same OCSP/SCT for all
+    /// certificates. In other words, this is good for testing that the plumbing works, not for
+    /// a real server.
     ///
     /// # Errors
     ///
@@ -1310,6 +1313,7 @@ impl Server {
             };
             let sct_item = p11::Item::wrap(scts)?;
             let extra = ssl::SSLExtraServerCertDataStr {
+                // ssl_auth_null means "I don't care what sort of certificate this is".
                 authType: ssl::SSLAuthType::ssl_auth_null,
                 certChain: null(),
                 stapledOCSPResponses: &ocsp_array,
