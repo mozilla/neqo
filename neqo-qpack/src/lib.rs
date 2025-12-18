@@ -110,3 +110,47 @@ impl Error {
         })
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::Error;
+
+    #[test]
+    fn error_codes() {
+        assert_eq!(Error::Decompression.code(), 0x200);
+        assert_eq!(Error::EncoderStream.code(), 0x201);
+        assert_eq!(Error::DecoderStream.code(), 0x202);
+        assert_eq!(Error::ClosedCriticalStream.code(), 0x104);
+        for err in [
+            Error::Internal,
+            Error::NeedMoreData,
+            Error::HeaderLookup,
+            Error::HuffmanDecompression,
+            Error::BadUtf8,
+            Error::ChangeCapacity,
+            Error::DynamicTableFull,
+            Error::IncrementAck,
+            Error::IntegerOverflow,
+            Error::WrongStreamCount,
+            Error::Decoding,
+            Error::EncoderStreamBlocked,
+            Error::Transport(neqo_transport::Error::NoMoreData),
+            Error::Qlog,
+        ] {
+            assert_eq!(err.code(), 3);
+        }
+    }
+
+    #[test]
+    fn map_error() {
+        assert_eq!(
+            Error::map_error::<()>(Err(Error::ClosedCriticalStream), Error::Internal),
+            Err(Error::ClosedCriticalStream)
+        );
+        assert_eq!(
+            Error::map_error::<()>(Err(Error::Internal), Error::Decompression),
+            Err(Error::Decompression)
+        );
+    }
+}
