@@ -1,5 +1,7 @@
 name: CodSpeed
 on:
+  push:
+    branches: ["main"] # To generate a performance baseline.
   pull_request:
     branches: ["main"]
   merge_group:
