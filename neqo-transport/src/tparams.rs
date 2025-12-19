@@ -1286,4 +1286,9 @@ mod tests {
         assert!(!current.ok_for_0rtt(&remembered));
         assert!(!remembered.ok_for_0rtt(&current));
     }
+
+    #[test]
+    fn transport_parameter_id_display() {
+        assert_eq!(format!("{IdleTimeout}"), "IdleTimeout((0x01))");
+    }
 }

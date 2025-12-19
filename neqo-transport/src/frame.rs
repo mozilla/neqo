@@ -1118,4 +1118,164 @@ mod tests {
         e.pad_to(u16::MAX as usize + 1, 0);
         assert_eq!(Frame::decode(&mut e.as_decoder()), Err(Error::TooMuchData));
     }
+
+    #[test]
+    fn dump() {
+        let s = |id| StreamId::from(id);
+        assert_eq!(Frame::Padding(5).dump(), "Padding { len: 5 }");
+        assert_eq!(
+            Frame::Crypto {
+                offset: 1,
+                data: &[2, 3]
+            }
+            .dump(),
+            "Crypto { offset: 1, len: 2 }"
+        );
+        assert_eq!(
+            Frame::Stream {
+                stream_id: s(4),
+                offset: 10,
+                data: &[1],
+                fin: true,
+                fill: false
+            }
+            .dump(),
+            "Stream { stream_id: 4, offset: 10, len: 1, fin: true }"
+        );
+        assert_eq!(
+            Frame::Stream {
+                stream_id: s(4),
+                offset: 0,
+                data: &[1, 2],
+                fin: false,
+                fill: true
+            }
+            .dump(),
+            "Stream { stream_id: 4, offset: 0, len: >>2, fin: false }"
+        );
+        assert_eq!(
+            Frame::Datagram {
+                data: &[1, 2, 3],
+                fill: false
+            }
+            .dump(),
+            "Datagram { len: 3 }"
+        );
+        // Remaining frames use Debug format
+        assert_eq!(Frame::Ping.dump(), "Ping");
+        assert_eq!(
+            Frame::Ack {
+                largest_acknowledged: 1,
+                ack_delay: 2,
+                first_ack_range: 0,
+                ack_ranges: vec![],
+                ecn_count: None
+            }
+            .dump(),
+            "Ack { largest_acknowledged: 1, ack_delay: 2, first_ack_range: 0, ack_ranges: [], ecn_count: None }"
+        );
+        assert_eq!(
+            Frame::ResetStream {
+                stream_id: s(1),
+                application_error_code: 2,
+                final_size: 3
+            }
+            .dump(),
+            "ResetStream { stream_id: StreamId(1), application_error_code: 2, final_size: 3 }"
+        );
+        assert_eq!(
+            Frame::StopSending {
+                stream_id: s(1),
+                application_error_code: 2
+            }
+            .dump(),
+            "StopSending { stream_id: StreamId(1), application_error_code: 2 }"
+        );
+        assert_eq!(
+            Frame::NewToken { token: &[1] }.dump(),
+            "NewToken { token: [1] }"
+        );
+        assert_eq!(
+            Frame::MaxData { maximum_data: 100 }.dump(),
+            "MaxData { maximum_data: 100 }"
+        );
+        assert_eq!(
+            Frame::MaxStreamData {
+                stream_id: s(1),
+                maximum_stream_data: 100
+            }
+            .dump(),
+            "MaxStreamData { stream_id: StreamId(1), maximum_stream_data: 100 }"
+        );
+        assert_eq!(
+            Frame::MaxStreams {
+                stream_type: StreamType::BiDi,
+                maximum_streams: 10
+            }
+            .dump(),
+            "MaxStreams { stream_type: BiDi, maximum_streams: 10 }"
+        );
+        assert_eq!(
+            Frame::DataBlocked { data_limit: 50 }.dump(),
+            "DataBlocked { data_limit: 50 }"
+        );
+        assert_eq!(
+            Frame::StreamDataBlocked {
+                stream_id: s(1),
+                stream_data_limit: 50
+            }
+            .dump(),
+            "StreamDataBlocked { stream_id: StreamId(1), stream_data_limit: 50 }"
+        );
+        assert_eq!(
+            Frame::StreamsBlocked {
+                stream_type: StreamType::UniDi,
+                stream_limit: 5
+            }
+            .dump(),
+            "StreamsBlocked { stream_type: UniDi, stream_limit: 5 }"
+        );
+        assert_eq!(
+            Frame::NewConnectionId {
+                sequence_number: 1,
+                retire_prior: 0,
+                connection_id: &[1, 2],
+                stateless_reset_token: Srt::new([0; 16])
+            }
+            .dump(),
+            "NewConnectionId { sequence_number: 1, retire_prior: 0, connection_id: [1, 2], stateless_reset_token: Token([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) }"
+        );
+        assert_eq!(
+            Frame::RetireConnectionId { sequence_number: 1 }.dump(),
+            "RetireConnectionId { sequence_number: 1 }"
+        );
+        assert_eq!(
+            Frame::PathChallenge { data: [1; 8] }.dump(),
+            "PathChallenge { data: [1, 1, 1, 1, 1, 1, 1, 1] }"
+        );
+        assert_eq!(
+            Frame::PathResponse { data: [2; 8] }.dump(),
+            "PathResponse { data: [2, 2, 2, 2, 2, 2, 2, 2] }"
+        );
+        assert_eq!(
+            Frame::ConnectionClose {
+                error_code: CloseError::Transport(0),
+                frame_type: 0,
+                reason_phrase: String::new()
+            }
+            .dump(),
+            "ConnectionClose { error_code: Transport(0), frame_type: 0, reason_phrase: \"\" }"
+        );
+        assert_eq!(Frame::HandshakeDone.dump(), "HandshakeDone");
+        assert_eq!(
+            Frame::AckFrequency {
+                seqno: 1,
+                tolerance: 2,
+                delay: 3,
+                ignore_order: false
+            }
+            .dump(),
+            "AckFrequency { seqno: 1, tolerance: 2, delay: 3, ignore_order: false }"
+        );
+    }
 }
