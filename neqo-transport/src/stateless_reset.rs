@@ -13,7 +13,8 @@ use crate::Error;
 
 /// A stateless reset token is a 16-byte value that is used to identify
 /// a stateless reset packet.
-#[derive(Clone, Debug, Default, Eq)]
+#[derive(Clone, Debug, Default, Eq, derive_more::AsRef)]
+#[as_ref([u8])]
 pub struct Token([u8; Self::LEN]);
 
 impl Token {
@@ -66,12 +67,6 @@ impl TryFrom<&mut Decoder<'_>> for Token {
         Ok(Self(
             d.decode(Self::LEN).ok_or(Error::NoMoreData)?.try_into()?,
         ))
-    }
-}
-
-impl AsRef<[u8]> for Token {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
     }
 }
 

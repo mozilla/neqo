@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use std::{
-    fmt::{self, Debug, Formatter, Write},
+    fmt::{self, Write},
     io::{self, Cursor},
 };
 
@@ -14,6 +14,8 @@ use crate::hex_with_len;
 pub const MAX_VARINT: u64 = (1 << 62) - 1;
 
 /// Decoder is a view into a byte array that has a read offset.  Use it for parsing.
+#[derive(derive_more::Debug)]
+#[debug("{}", hex_with_len(self.as_ref()))]
 pub struct Decoder<'a> {
     buf: &'a [u8],
     offset: usize,
@@ -183,12 +185,6 @@ impl<'a> AsRef<[u8]> for Decoder<'a> {
     }
 }
 
-impl Debug for Decoder<'_> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        f.write_str(&hex_with_len(self.as_ref()))
-    }
-}
-
 impl<'a> From<&'a [u8]> for Decoder<'a> {
     fn from(buf: &'a [u8]) -> Self {
         Decoder::new(buf)
@@ -211,6 +207,9 @@ impl<'b> PartialEq<Decoder<'b>> for Decoder<'_> {
 }
 
 /// Encoder is good for building data structures.
+#[derive(derive_more::Debug)]
+#[debug(bounds(B: Buffer))]
+#[debug("{}", hex_with_len(self))]
 pub struct Encoder<B = Vec<u8>> {
     buf: B,
     /// Tracks the starting position of the buffer when the [`Encoder`] is created.
@@ -500,12 +499,6 @@ impl Default for Encoder {
             buf: Vec::new(),
             start: 0,
         }
-    }
-}
-
-impl Debug for Encoder {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        f.write_str(&hex_with_len(self))
     }
 }
 

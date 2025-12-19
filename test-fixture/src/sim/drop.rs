@@ -6,10 +6,7 @@
 
 #![expect(clippy::unwrap_used, reason = "This is test code.")]
 
-use std::{
-    fmt::{self, Debug},
-    time::Instant,
-};
+use std::time::Instant;
 
 use neqo_common::{qtrace, Datagram};
 use neqo_transport::Output;
@@ -17,6 +14,8 @@ use neqo_transport::Output;
 use super::{Node, Rng};
 
 /// A random dropper.
+#[derive(derive_more::Debug)]
+#[debug("drop")]
 pub struct Drop {
     threshold: u64,
     max: u64,
@@ -70,11 +69,5 @@ impl Node for Drop {
                 Output::Datagram(dgram)
             }
         })
-    }
-}
-
-impl Debug for Drop {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("drop")
     }
 }

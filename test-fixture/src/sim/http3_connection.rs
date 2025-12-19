@@ -6,12 +6,7 @@
 
 #![expect(clippy::unwrap_used, reason = "This is test code.")]
 
-use std::{
-    cmp::min,
-    collections::HashMap,
-    fmt::{self, Debug, Display},
-    time::Instant,
-};
+use std::{cmp::min, collections::HashMap, fmt::Debug, time::Instant};
 
 use neqo_common::{event::Provider as _, qdebug, qinfo, qtrace, Datagram};
 use neqo_crypto::AuthenticationStatus;
@@ -39,6 +34,8 @@ pub trait Goal: Debug {
     fn handle_event(&mut self, c: &mut Endpoint, e: &Event, now: Instant) -> GoalStatus;
 }
 
+#[derive(derive_more::Debug)]
+#[debug("{}", c)]
 pub struct Node {
     c: Endpoint,
     setup_goals: Vec<Box<dyn Goal>>,
@@ -46,18 +43,12 @@ pub struct Node {
 }
 
 #[expect(clippy::large_enum_variant, reason = "test code only")]
+#[derive(strum::Display)]
 pub enum Endpoint {
+    #[strum(to_string = "{0}")]
     Client(Http3Client),
+    #[strum(to_string = "{0}")]
     Server(Http3Server),
-}
-
-impl Display for Endpoint {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Client(c) => write!(f, "{c}"),
-            Self::Server(s) => write!(f, "{s}"),
-        }
-    }
 }
 
 impl Endpoint {
@@ -216,12 +207,6 @@ impl sim::Node for Node {
             Endpoint::Client(c) => qinfo!("{test_name}: {:?}", c.transport_stats()),
             Endpoint::Server(_) => qinfo!("{test_name}: Server (no stats available on server)"),
         }
-    }
-}
-
-impl Debug for Node {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        Display::fmt(&self.c, f)
     }
 }
 

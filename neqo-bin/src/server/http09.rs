@@ -6,15 +6,7 @@
 
 #![expect(clippy::unwrap_used, reason = "This is example code.")]
 
-use std::{
-    borrow::Cow,
-    cell::RefCell,
-    fmt::{self, Display, Formatter},
-    num::NonZeroUsize,
-    rc::Rc,
-    slice, str,
-    time::Instant,
-};
+use std::{borrow::Cow, cell::RefCell, num::NonZeroUsize, rc::Rc, slice, str, time::Instant};
 
 use neqo_common::{event::Provider as _, hex, qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay};
@@ -35,6 +27,8 @@ struct HttpStreamState {
     data_to_send: Option<SendData>,
 }
 
+#[derive(derive_more::Display)]
+#[display("Http 0.9 server ")]
 pub struct HttpServer {
     server: Server,
     write_state: HashMap<StreamId, HttpStreamState>,
@@ -253,11 +247,5 @@ impl super::HttpServer for HttpServer {
 
     fn has_events(&self) -> bool {
         self.server.has_active_connections()
-    }
-}
-
-impl Display for HttpServer {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Http 0.9 server ")
     }
 }

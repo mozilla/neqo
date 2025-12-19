@@ -10,7 +10,6 @@ use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
     collections::{btree_map::Entry, BTreeMap, VecDeque},
-    fmt::{self, Display, Formatter},
     mem,
     num::NonZeroUsize,
     ops::Add,
@@ -682,7 +681,8 @@ impl Stats {
 }
 
 /// Implement a QUIC send stream.
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("SendStream {stream_id}")]
 pub struct SendStream {
     stream_id: StreamId,
     state: State,
@@ -1361,12 +1361,6 @@ impl SendStream {
         }
 
         self.conn_events.send_stream_writable(self.stream_id);
-    }
-}
-
-impl Display for SendStream {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "SendStream {}", self.stream_id)
     }
 }
 

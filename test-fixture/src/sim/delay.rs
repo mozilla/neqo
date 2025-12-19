@@ -8,7 +8,6 @@
 
 use std::{
     collections::{BTreeMap, VecDeque},
-    fmt::{self, Debug},
     ops::Range,
     time::{Duration, Instant},
 };
@@ -51,6 +50,8 @@ impl RandomDelayIter {
     }
 }
 
+#[derive(derive_more::Debug)]
+#[debug("random_delay")]
 pub struct RandomDelay {
     random: RandomDelayIter,
     queue: BTreeMap<Instant, Datagram>,
@@ -95,12 +96,8 @@ impl Node for RandomDelay {
     }
 }
 
-impl Debug for RandomDelay {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("random_delay")
-    }
-}
-
+#[derive(derive_more::Debug)]
+#[debug("delay-{:?}", delay)]
 pub struct Delay {
     delay: Duration,
     queue: VecDeque<(Instant, Datagram)>,
@@ -138,11 +135,5 @@ impl Node for Delay {
         } else {
             Output::None
         }
-    }
-}
-
-impl Debug for Delay {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "delay-{:?}", self.delay)
     }
 }

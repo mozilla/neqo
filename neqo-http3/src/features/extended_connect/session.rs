@@ -7,7 +7,7 @@
 use std::{
     cell::RefCell,
     collections::HashSet,
-    fmt::{self, Debug, Display, Formatter},
+    fmt::{Debug, Display},
     rc::Rc,
     str::from_utf8,
     time::Instant,
@@ -49,7 +49,8 @@ impl From<CloseType> for CloseReason {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("{}-session={}", self.protocol.connect_type(), id)]
 pub(crate) struct Session {
     control_stream_recv: Box<dyn RecvStream>,
     control_stream_send: Box<dyn SendStream>,
@@ -73,12 +74,6 @@ pub(crate) enum State {
 impl State {
     pub(crate) const fn closing_state(self) -> bool {
         matches!(self, Self::FinPending | Self::Done)
-    }
-}
-
-impl Display for Session {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}-session={}", self.protocol.connect_type(), self.id)
     }
 }
 

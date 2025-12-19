@@ -35,6 +35,7 @@ clap = { version = "4.5", default-features = false, features = [
         "derive",
 ] }
 clap-verbosity-flag = { version = "3.0", default-features = false, features = ["log"] }
+derive_more = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = { workspace = true, features = ["std"] }
 libc = { workspace = true }

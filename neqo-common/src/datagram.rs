@@ -5,7 +5,6 @@
 // except according to those terms.
 
 use std::{
-    fmt::{self, Debug, Formatter},
     net::SocketAddr,
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
@@ -16,7 +15,9 @@ use crate::{hex_with_len, Bytes, Tos};
 /// A UDP datagram.
 ///
 /// Guaranteed to not be empty.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, derive_more::Debug)]
+#[debug(bounds(D: AsRef<[u8]>))]
+#[debug("Datagram {:?} {:?}->{:?}: {}", tos, src, dst, hex_with_len(d))]
 pub struct Datagram<D = Vec<u8>> {
     src: SocketAddr,
     dst: SocketAddr,
@@ -114,19 +115,6 @@ impl<D: AsRef<[u8]>> Deref for Datagram<D> {
     }
 }
 
-impl<D: AsRef<[u8]>> Debug for Datagram<D> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Datagram {:?} {:?}->{:?}: {}",
-            self.tos,
-            self.src,
-            self.dst,
-            hex_with_len(&self.d)
-        )
-    }
-}
-
 impl<'a> Datagram<&'a mut [u8]> {
     /// # Panics
     ///
@@ -159,27 +147,21 @@ impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
 ///
 /// Upholds Linux GSO requirement. That is, all but the last datagram in the
 /// batch have the same size. The last datagram may be equal or smaller.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, derive_more::Debug)]
+#[debug(
+    "DatagramBatch {:?} {:?}->{:?} {:?}: {}",
+    tos,
+    src,
+    dst,
+    datagram_size,
+    hex_with_len(d)
+)]
 pub struct DatagramBatch {
     src: SocketAddr,
     dst: SocketAddr,
     tos: Tos,
     datagram_size: NonZeroUsize,
     d: Vec<u8>,
-}
-
-impl Debug for DatagramBatch {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(
-            f,
-            "DatagramBatch {:?} {:?}->{:?} {:?}: {}",
-            self.tos,
-            self.src,
-            self.dst,
-            self.datagram_size,
-            hex_with_len(&self.d)
-        )
-    }
 }
 
 impl From<Datagram<Vec<u8>>> for DatagramBatch {
