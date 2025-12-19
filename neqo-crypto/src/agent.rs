@@ -446,7 +446,7 @@ pub struct SecretAgent {
 
 impl SecretAgent {
     fn new() -> Res<Self> {
-        let mut io = Box::pin(AgentIo::default());
+        let mut io = Box::pin(AgentIo::new());
         let fd = Self::create_fd(&mut io)?;
         Ok(Self {
             fd,
