@@ -31,7 +31,6 @@ windows = { workspace = true, features = ["Win32_Media"] }
 [dev-dependencies]
 criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false }
 test-fixture = { path = "../test-fixture" }
-regex = { workspace = true }
 
 [features]
 bench = ["test-fixture/bench", "log/release_max_level_info"]
