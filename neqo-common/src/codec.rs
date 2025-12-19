@@ -419,12 +419,6 @@ impl<B: Buffer> Encoder<B> {
 }
 
 impl Encoder<Vec<u8>> {
-    /// Default construction of an empty buffer.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Skip the first `n` bytes from the encoder buffer without copying.
     /// This advances the internal offset, making those bytes inaccessible.
     ///

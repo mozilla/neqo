@@ -312,7 +312,7 @@ impl FrameReader {
     fn write_item_to_fuzzing_corpus(&self, corpus: &str, data: Option<&[u8]>) {
         // We need to include the frame type and length varints before the data
         // to create a complete frame that the fuzzer can process.
-        let mut encoder = neqo_common::Encoder::default();
+        let mut encoder = neqo_common::Encoder::new();
         encoder.encode_varint(self.frame_type.0);
         encoder.encode_varint(self.frame_len);
         if let Some(d) = data {

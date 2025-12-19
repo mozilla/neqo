@@ -70,7 +70,7 @@ impl Encoder {
             table: HeaderTable::new(true),
             max_table_size: qpack_settings.max_table_size_encoder,
             max_entries: 0,
-            instruction_reader: DecoderInstructionReader::new(),
+            instruction_reader: DecoderInstructionReader::default(),
             local_stream: LocalStreamState::NoStream,
             max_blocked_streams: 0,
             unacked_header_blocks: HashMap::default(),

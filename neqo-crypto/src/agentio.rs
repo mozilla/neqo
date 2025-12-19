@@ -158,7 +158,7 @@ impl Drop for AgentIoInputContext<'_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct AgentIoInput {
     // input is data that is read by TLS.
     input: *const u8,
@@ -211,7 +211,7 @@ impl Display for AgentIoInput {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AgentIo {
     // input collects the input we might provide to TLS.
     input: AgentIoInput,
@@ -221,16 +221,6 @@ pub struct AgentIo {
 }
 
 impl AgentIo {
-    pub const fn new() -> Self {
-        Self {
-            input: AgentIoInput {
-                input: null(),
-                available: 0,
-            },
-            output: Vec::new(),
-        }
-    }
-
     unsafe fn borrow(fd: &mut PrFd) -> &mut Self {
         (**fd).secret.cast::<Self>().as_mut().unwrap()
     }
