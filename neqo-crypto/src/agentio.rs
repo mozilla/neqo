@@ -158,12 +158,23 @@ impl Drop for AgentIoInputContext<'_> {
     }
 }
 
+// TODO: Use `#[derive(Default)]` when MSRV reaches 1.88.0, as raw pointers implement Default
+// starting in that version. See: https://github.com/rust-lang/rust/pull/139535
 #[derive(Debug)]
 struct AgentIoInput {
     // input is data that is read by TLS.
     input: *const u8,
     // input_available is how much data is left for reading.
     available: usize,
+}
+
+impl Default for AgentIoInput {
+    fn default() -> Self {
+        Self {
+            input: null(),
+            available: 0,
+        }
+    }
 }
 
 impl AgentIoInput {
@@ -211,7 +222,7 @@ impl Display for AgentIoInput {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AgentIo {
     // input collects the input we might provide to TLS.
     input: AgentIoInput,
@@ -221,16 +232,6 @@ pub struct AgentIo {
 }
 
 impl AgentIo {
-    pub const fn new() -> Self {
-        Self {
-            input: AgentIoInput {
-                input: null(),
-                available: 0,
-            },
-            output: Vec::new(),
-        }
-    }
-
     unsafe fn borrow(fd: &mut PrFd) -> &mut Self {
         (**fd).secret.cast::<Self>().as_mut().unwrap()
     }
@@ -404,3 +405,60 @@ pub const METHODS: &prio::PRIOMethods = &prio::PRIOMethods {
     reserved_fn_1: None,
     reserved_fn_0: None,
 };
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::ptr::addr_of_mut;
+
+    use super::*;
+
+    #[test]
+    fn ingest_errors() {
+        let mut records = RecordList::default();
+        let data = [0u8];
+        unsafe {
+            assert_eq!(
+                RecordList::ingest(
+                    null_mut(),
+                    999,
+                    0x17,
+                    data.as_ptr(),
+                    1,
+                    addr_of_mut!(records).cast()
+                ),
+                ssl::SECFailure
+            );
+            assert_eq!(
+                RecordList::ingest(null_mut(), 0, 0x17, data.as_ptr(), 1, null_mut()),
+                ssl::SECFailure
+            );
+            // Test invalid content type (value outside u8 range)
+            assert_eq!(
+                RecordList::ingest(
+                    null_mut(),
+                    0,
+                    256,
+                    data.as_ptr(),
+                    1,
+                    addr_of_mut!(records).cast()
+                ),
+                ssl::SECFailure
+            );
+        }
+    }
+
+    #[test]
+    fn formatting() {
+        let record = Record::new(Epoch::ApplicationData, 0x17, &[1, 2, 3]);
+        let dbg = format!("{record:?}");
+        assert_eq!(&dbg[..6], "Record");
+
+        let input = AgentIoInput::default();
+        let disp = format!("{input}");
+        assert_eq!(&disp[..12], "AgentIoInput");
+
+        let io = AgentIo::default();
+        assert_eq!(format!("{io}"), "AgentIo");
+    }
+}
