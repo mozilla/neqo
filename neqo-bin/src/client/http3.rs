@@ -21,6 +21,7 @@ use std::{
     time::Instant,
 };
 
+use http::Uri;
 use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
@@ -29,7 +30,6 @@ use neqo_transport::{
     OutputBatch, RandomConnectionIdGenerator, StreamId,
 };
 use rustc_hash::FxHashMap as HashMap;
-use url::Url;
 
 use super::{get_output_file, qlog_new, Args, CloseState, Res};
 use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};
@@ -43,7 +43,7 @@ pub struct Handler {
 }
 
 impl Handler {
-    pub(crate) fn new(url_queue: VecDeque<Url>, args: Args) -> Self {
+    pub(crate) fn new(url_queue: VecDeque<Uri>, args: Args) -> Self {
         let output_read_data = args.output_read_data;
         let url_handler = UrlHandler {
             url_queue,
@@ -369,8 +369,8 @@ impl StreamHandler for UploadStreamHandler {
 }
 
 struct UrlHandler {
-    url_queue: VecDeque<Url>,
-    handled_urls: Vec<Url>,
+    url_queue: VecDeque<Uri>,
+    handled_urls: Vec<Uri>,
     stream_handlers: HashMap<StreamId, Box<dyn StreamHandler>>,
     all_paths: Vec<PathBuf>,
     args: Args,
