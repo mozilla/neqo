@@ -9,8 +9,9 @@ on:
         type: choice
         description: Which benchmarking testbed to run on.
         required: true
-        default: on-prem
+        default: codspeed
         options:
+          - codspeed
           - on-prem
           - gcp
 env:
@@ -35,7 +36,7 @@ permissions:
 jobs:
   bench:
     name: cargo bench
-    runs-on: ${{ inputs.bencher == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || 'self-hosted' }}
+    runs-on: ${{ (inputs.bencher || 'codspeed') == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || (inputs.bencher || 'codspeed') == 'codspeed' && 'Neqo' || 'self-hosted' }}
     defaults:
       run:
         shell: bash
@@ -164,7 +165,7 @@ jobs:
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          TESTBED: ${{ inputs.bencher == 'gcp' && 'GCP' || 'On-prem' }}
+          TESTBED: ${{ (inputs.bencher || 'codspeed') == 'gcp' && 'GCP' || (inputs.bencher || 'codspeed') == 'codspeed' && 'CodSpeed' || 'On-prem' }}
         run: |
           SHA=$(cd neqo && git log origin/main -1 --format=%H)
           echo "$SHA" > main-sha.txt
