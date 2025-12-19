@@ -1376,6 +1376,7 @@ impl EventProvider for Http3Client {
 mod tests {
     use std::time::Duration;
 
+    use http::Uri;
     use neqo_common::{event::Provider as _, qtrace, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack as qpack;
@@ -1388,7 +1389,6 @@ mod tests {
         CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
         DEFAULT_SERVER_NAME,
     };
-    use url::Url;
 
     use super::{
         AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
@@ -1834,7 +1834,7 @@ mod tests {
             .fetch(
                 now(),
                 "GET",
-                &Url::parse("https://something.com/").unwrap(),
+                &Uri::from_static("https://something.com/"),
                 headers,
                 Priority::default(),
             )

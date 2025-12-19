@@ -6,6 +6,7 @@
 
 #![cfg(test)]
 
+use http::Uri;
 use neqo_common::{event::Provider as _, header::HeadersExt as _, qinfo, Datagram, Tos};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
@@ -18,7 +19,6 @@ use test_fixture::{
     default_http3_client, default_http3_server, exchange_packets, fixture_init,
     http3_client_with_params, http3_server_with_params, now, DEFAULT_ADDR,
 };
-use url::Url;
 
 const PING: &[u8] = b"ping";
 const PONG: &[u8] = b"pong";
@@ -49,12 +49,9 @@ fn initiate_new_session() -> (Http3Client, Http3Server, neqo_http3::StreamId) {
     let connect_udp_session_id = client
         .connect_udp_create_session(
             now(),
-            &Url::parse(&format!(
-                "https://[{}]:{}/",
-                DEFAULT_ADDR.ip(),
-                DEFAULT_ADDR.port()
-            ))
-            .unwrap(),
+            &format!("https://[{}]:{}/", DEFAULT_ADDR.ip(), DEFAULT_ADDR.port())
+                .parse::<Uri>()
+                .unwrap(),
             &[],
         )
         .unwrap();
@@ -433,7 +430,7 @@ fn server_datagram_before_accept() {
 fn create_session_without_connect_setting() {
     let mut client = http3_client_with_params(Http3Parameters::default().connect(false));
     assert_eq!(
-        client.connect_udp_create_session(now(), &Url::parse("https://example.com/").unwrap(), &[]),
+        client.connect_udp_create_session(now(), &Uri::from_static("https://example.com/"), &[]),
         Err(Error::Unavailable)
     );
 }
