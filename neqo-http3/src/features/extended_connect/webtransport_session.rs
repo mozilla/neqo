@@ -4,12 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    collections::HashSet,
-    fmt::{self, Display, Formatter},
-    mem,
-    time::Instant,
-};
+use std::{collections::HashSet, mem, time::Instant};
 
 use neqo_common::{qtrace, Bytes, Encoder, Role};
 use neqo_transport::{Connection, StreamId};
@@ -23,7 +18,8 @@ use crate::{
     Error, Http3StreamInfo, Http3StreamType, RecvStream, Res,
 };
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("WebTransportSession")]
 pub struct Session {
     frame_reader: FrameReader,
     id: StreamId,
@@ -34,12 +30,6 @@ pub struct Session {
     ///
     /// [`HashSet`] size limited by QUIC connection stream limit.
     pending_streams: HashSet<StreamId>,
-}
-
-impl Display for Session {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "WebTransportSession")
-    }
 }
 
 impl Session {

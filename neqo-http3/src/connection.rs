@@ -4,13 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    cell::RefCell,
-    fmt::{self, Debug, Display, Formatter},
-    mem,
-    rc::Rc,
-    time::Instant,
-};
+use std::{cell::RefCell, fmt::Debug, mem, rc::Rc, time::Instant};
 
 use neqo_common::{
     qdebug, qerror, qinfo, qtrace, qwarn, Bytes, Decoder, Header, MessageType, Role,
@@ -284,7 +278,8 @@ impl Http3State {
 /// [`Http3ServerHandler`]: crate::connection_server::Http3ServerHandler
 /// [`ConnectionEvent::RecvStreamReadable`]: neqo_transport::ConnectionEvent::RecvStreamReadable
 /// [`ConnectionEvent::NewStream`]: neqo_transport::ConnectionEvent::NewStream
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("Http3 connection")]
 pub struct Http3Connection {
     role: Role,
     state: Http3State,
@@ -298,12 +293,6 @@ pub struct Http3Connection {
     recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
     webtransport: ExtendedConnectFeature,
     connect_udp: ExtendedConnectFeature,
-}
-
-impl Display for Http3Connection {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Http3 connection")
-    }
 }
 
 impl Http3Connection {

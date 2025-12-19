@@ -5,7 +5,6 @@
 // except according to those terms.
 
 use std::{
-    fmt::{self, Display, Formatter},
     mem,
     ops::{Deref, Div as _},
 };
@@ -26,19 +25,14 @@ use crate::{
     Error, Res,
 };
 
-#[derive(Default, Debug, PartialEq, Eq)]
+#[derive(Default, Debug, PartialEq, Eq, derive_more::Display)]
+#[display("HeaderEncoder")]
 pub struct HeaderEncoder {
     buf: neqo_common::Encoder,
     base: u64,
     use_huffman: bool,
     max_entries: u64,
     max_dynamic_index_ref: Option<u64>,
-}
-
-impl Display for HeaderEncoder {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "HeaderEncoder")
-    }
 }
 
 impl HeaderEncoder {
@@ -150,16 +144,12 @@ impl Deref for HeaderEncoder {
     }
 }
 
+#[derive(derive_more::Display)]
+#[display("HeaderDecoder")]
 pub struct HeaderDecoder<'a> {
     buf: ReceiverBufferWrapper<'a>,
     base: u64,
     req_insert_cnt: u64,
-}
-
-impl Display for HeaderDecoder<'_> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "HeaderDecoder")
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

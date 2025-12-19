@@ -6,10 +6,7 @@
 
 //! CUBIC congestion control (RFC 9438)
 
-use std::{
-    fmt::{self, Display},
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use neqo_common::qtrace;
 
@@ -27,7 +24,8 @@ pub fn convert_to_f64(v: usize) -> f64 {
     f_64
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, derive_more::Display)]
+#[display("Cubic [w_max: {w_max}, k: {k}, t_epoch: {t_epoch:?}]")]
 pub struct Cubic {
     /// > An estimate for the congestion window \[...\] in the Reno-friendly region -- that
     /// > is, an estimate for the congestion window of Reno.
@@ -80,17 +78,6 @@ pub struct Cubic {
     t_epoch: Option<Instant>,
     /// New and unused leftover acked bytes for calculating the reno region increases to `w_est`.
     reno_acked_bytes: f64,
-}
-
-impl Display for Cubic {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Cubic [w_max: {}, k: {}, t_epoch: {:?}]",
-            self.w_max, self.k, self.t_epoch
-        )?;
-        Ok(())
-    }
 }
 
 impl Cubic {

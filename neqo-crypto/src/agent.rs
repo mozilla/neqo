@@ -12,7 +12,7 @@
 use std::{
     cell::RefCell,
     ffi::{CStr, CString},
-    fmt::{self, Debug, Display, Formatter},
+    fmt::{self, Debug, Formatter},
     mem::{size_of, MaybeUninit},
     ops::{Deref, DerefMut},
     os::raw::{c_uint, c_void},
@@ -421,7 +421,8 @@ impl SecretAgentInfo {
 }
 
 /// `SecretAgent` holds the common parts of client and server.
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("Agent {fd:p}")]
 #[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub struct SecretAgent {
     fd: *mut ssl::PRFileDesc,
@@ -988,14 +989,9 @@ impl Drop for SecretAgent {
     }
 }
 
-impl Display for SecretAgent {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Agent {:p}", self.fd)
-    }
-}
-
-#[derive(PartialOrd, Ord, PartialEq, Eq, Clone)]
+#[derive(PartialOrd, Ord, PartialEq, Eq, Clone, derive_more::AsRef)]
 pub struct ResumptionToken {
+    #[as_ref([u8])]
     token: Vec<u8>,
     expiration_time: Instant,
 }
@@ -1006,12 +1002,6 @@ impl Debug for ResumptionToken {
             .field("token", &hex_snip_middle(&self.token))
             .field("expiration_time", &self.expiration_time)
             .finish()
-    }
-}
-
-impl AsRef<[u8]> for ResumptionToken {
-    fn as_ref(&self) -> &[u8] {
-        &self.token
     }
 }
 
@@ -1031,8 +1021,11 @@ impl ResumptionToken {
 }
 
 /// A TLS Client.
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display, derive_more::Deref, derive_more::DerefMut)]
+#[display("Client {:p}", "agent.fd")]
 pub struct Client {
+    #[deref]
+    #[deref_mut]
     agent: SecretAgent,
 
     /// The name of the server we're attempting a connection to.
@@ -1185,25 +1178,6 @@ impl Client {
     }
 }
 
-impl Deref for Client {
-    type Target = SecretAgent;
-    fn deref(&self) -> &SecretAgent {
-        &self.agent
-    }
-}
-
-impl DerefMut for Client {
-    fn deref_mut(&mut self) -> &mut SecretAgent {
-        &mut self.agent
-    }
-}
-
-impl Display for Client {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Client {:p}", self.agent.fd)
-    }
-}
-
 /// `ZeroRttCheckResult` encapsulates the options for handling a `ClientHello`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ZeroRttCheckResult {
@@ -1248,8 +1222,11 @@ impl ZeroRttCheckState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display, derive_more::Deref, derive_more::DerefMut)]
+#[display("Server {:p}", "agent.fd")]
 pub struct Server {
+    #[deref]
+    #[deref_mut]
     agent: SecretAgent,
     /// This holds the HRR callback context.
     zero_rtt_check: Option<Pin<Box<ZeroRttCheckState>>>,
@@ -1442,25 +1419,6 @@ impl Server {
         };
         self.ech_config = cfg;
         Ok(())
-    }
-}
-
-impl Deref for Server {
-    type Target = SecretAgent;
-    fn deref(&self) -> &SecretAgent {
-        &self.agent
-    }
-}
-
-impl DerefMut for Server {
-    fn deref_mut(&mut self) -> &mut SecretAgent {
-        &mut self.agent
-    }
-}
-
-impl Display for Server {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Server {:p}", self.agent.fd)
     }
 }
 

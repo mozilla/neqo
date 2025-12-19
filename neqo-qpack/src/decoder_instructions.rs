@@ -4,10 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    fmt::{self, Display, Formatter},
-    mem,
-};
+use std::mem;
 
 use neqo_common::{qdebug, qtrace};
 use neqo_transport::StreamId;
@@ -66,16 +63,11 @@ enum DecoderInstructionReaderState {
     ReadInt { reader: IntReader },
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("InstructionReader")]
 pub struct DecoderInstructionReader {
     state: DecoderInstructionReaderState,
     instruction: DecoderInstruction,
-}
-
-impl Display for DecoderInstructionReader {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "InstructionReader")
-    }
 }
 
 impl DecoderInstructionReader {

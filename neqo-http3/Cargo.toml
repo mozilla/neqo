@@ -19,6 +19,7 @@ autobenches = false
 workspace = true
 
 [dependencies]
+derive_more = { workspace = true }
 enumset = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
