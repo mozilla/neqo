@@ -158,12 +158,23 @@ impl Drop for AgentIoInputContext<'_> {
     }
 }
 
-#[derive(Debug, Default)]
+// TODO: Use `#[derive(Default)]` when MSRV reaches 1.88.0, as raw pointers implement Default
+// starting in that version. See: https://github.com/rust-lang/rust/pull/139535
+#[derive(Debug)]
 struct AgentIoInput {
     // input is data that is read by TLS.
     input: *const u8,
     // input_available is how much data is left for reading.
     available: usize,
+}
+
+impl Default for AgentIoInput {
+    fn default() -> Self {
+        Self {
+            input: null(),
+            available: 0,
+        }
+    }
 }
 
 impl AgentIoInput {
