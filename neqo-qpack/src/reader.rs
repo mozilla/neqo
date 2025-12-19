@@ -128,7 +128,9 @@ impl<'a> ReceiverBufferWrapper<'a> {
         let length: usize = int_reader
             .read(self)?
             .try_into()
-            .or(Err(Error::Decompression))?;
+            .ok()
+            .filter(|&l| l <= LiteralReader::MAX_LEN)
+            .ok_or(Error::Decompression)?;
         if use_huffman {
             huffman::decode(self.slice(length)?)
         } else {
@@ -137,11 +139,12 @@ impl<'a> ReceiverBufferWrapper<'a> {
     }
 
     fn slice(&mut self, len: usize) -> Res<&[u8]> {
-        if self.offset + len > self.buf.len() {
+        let end = self.offset.checked_add(len).ok_or(Error::Decompression)?;
+        if end > self.buf.len() {
             Err(Error::Decompression)
         } else {
             let start = self.offset;
-            self.offset += len;
+            self.offset = end;
             Ok(&self.buf[start..self.offset])
         }
     }
@@ -687,5 +690,29 @@ mod tests {
         let (mut reader, mut test_receiver) = literal_reader_for_test(LiteralReader::MAX_LEN);
         let result = reader.read(&mut test_receiver).unwrap();
         assert_eq!(result.len(), LiteralReader::MAX_LEN);
+    }
+
+    #[test]
+    fn buffer_wrapper_rejects_oversized_literal() {
+        const PREFIX_LEN: u8 = 3;
+        let mut data = Encoder::default();
+        data.encode_literal(
+            false,
+            Prefix::new(0x00, PREFIX_LEN),
+            &vec![b'a'; LiteralReader::MAX_LEN + 1],
+        );
+        let mut buffer = ReceiverBufferWrapper::new(data.as_ref());
+        assert_eq!(
+            buffer.read_literal_from_buffer(PREFIX_LEN),
+            Err(Error::Decompression)
+        );
+    }
+
+    #[test]
+    fn buffer_wrapper_slice_detects_overflow() {
+        let buf = [0u8; 10];
+        let mut wrapper = ReceiverBufferWrapper::new(&buf);
+        wrapper.offset = 5;
+        assert_eq!(wrapper.slice(usize::MAX), Err(Error::Decompression));
     }
 }
