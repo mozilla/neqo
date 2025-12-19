@@ -460,7 +460,12 @@ mod test {
         let pk_dbg = format!("{pk:?}");
         assert_eq!(&pk_dbg[..9], "PublicKey");
         let sk_dbg = format!("{sk:?}");
-        assert_eq!(&sk_dbg[..6], "Opaque");
+        // Private key debug output depends on whether key extraction is allowed by NSS.
+        // It could be either "PrivateKey [hex]" or "Opaque PrivateKey".
+        assert!(
+            sk_dbg.starts_with("PrivateKey") || sk_dbg.starts_with("Opaque"),
+            "unexpected private key debug format: {sk_dbg}"
+        );
 
         // Test cloning
         let pk2 = pk.clone();
