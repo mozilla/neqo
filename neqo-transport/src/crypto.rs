@@ -1728,3 +1728,18 @@ pub struct CryptoRecoveryToken {
     offset: u64,
     length: usize,
 }
+
+#[cfg(all(test, not(feature = "disable-encryption")))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use test_fixture::fixture_init;
+
+    use super::CryptoDxState;
+
+    #[test]
+    fn crypto_dx_state_display() {
+        fixture_init();
+        let dx = CryptoDxState::test_default();
+        assert_eq!(dx.to_string(), "epoch 0 Write");
+    }
+}

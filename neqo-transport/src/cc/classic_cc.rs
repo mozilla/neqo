@@ -1566,4 +1566,14 @@ mod tests {
     fn slow_start_exit_stats_ecn_ce() {
         slow_start_exit_stats(CongestionEvent::Ecn);
     }
+
+    #[test]
+    fn state_to_qlog() {
+        use super::State;
+        assert_eq!(State::SlowStart.to_qlog(), "slow_start");
+        assert_eq!(State::PersistentCongestion.to_qlog(), "slow_start");
+        assert_eq!(State::CongestionAvoidance.to_qlog(), "congestion_avoidance");
+        assert_eq!(State::Recovery.to_qlog(), "recovery");
+        assert_eq!(State::RecoveryStart.to_qlog(), "recovery");
+    }
 }

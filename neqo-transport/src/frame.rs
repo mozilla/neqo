@@ -1120,6 +1120,12 @@ mod tests {
     }
 
     #[test]
+    fn frame_type_to_u8() {
+        assert_eq!(u8::from(FrameType::Padding), 0);
+        assert_eq!(u8::from(FrameType::Ping), 1);
+    }
+
+    #[test]
     fn dump() {
         let s = |id| StreamId::from(id);
         assert_eq!(Frame::Padding(5).dump(), "Padding { len: 5 }");

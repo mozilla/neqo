@@ -247,3 +247,34 @@ impl StateSignaling {
         *self = Self::Reset;
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::time::Instant;
+
+    use super::State;
+    use crate::{CloseReason, Error};
+
+    #[test]
+    fn state_predicates() {
+        let now = Instant::now();
+        let err = CloseReason::Transport(Error::None);
+        let closing = State::Closing {
+            error: err.clone(),
+            timeout: now,
+        };
+        let draining = State::Draining {
+            error: err.clone(),
+            timeout: now,
+        };
+        let closed = State::Closed(err);
+
+        assert!(!State::Init.connected() && !State::Init.closed() && !State::Init.closing());
+        assert!(!State::WaitInitial.connected() && !State::Handshaking.connected());
+        assert!(State::Connected.connected() && State::Confirmed.connected());
+        assert!(closing.closing() && closing.closed() && closing.error().is_some());
+        assert!(draining.closing() && draining.closed());
+        assert!(!closed.closing() && closed.closed() && closed.error().is_some());
+    }
+}
