@@ -1120,6 +1120,12 @@ mod tests {
     }
 
     #[test]
+    fn frame_type_to_u8() {
+        assert_eq!(u8::from(FrameType::Padding), 0);
+        assert_eq!(u8::from(FrameType::Ping), 1);
+    }
+
+    #[test]
     #[expect(clippy::too_many_lines, reason = "OK in tests.")]
     fn dump() {
         let s = |id| StreamId::from(id);

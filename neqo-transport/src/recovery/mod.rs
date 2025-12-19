@@ -1831,4 +1831,41 @@ mod tests {
         lr.maybe_prime_handshake_pto(now());
         assert!(lr.spaces.get(PacketNumberSpace::Handshake).is_none());
     }
+
+    #[test]
+    fn loss_display() {
+        let lr = Fixture::default();
+        assert_eq!(lr.to_string(), "recovery::Loss");
+    }
+
+    #[test]
+    fn pto_state_count() {
+        let probe_set = PacketNumberSpaceSet::only(PacketNumberSpace::Initial);
+        let mut pto = PtoState::new(PacketNumberSpace::Initial, probe_set);
+        assert_eq!(pto.count(), 1);
+        pto.pto(PacketNumberSpace::Initial, probe_set);
+        assert_eq!(pto.count(), 2);
+    }
+
+    #[test]
+    fn send_profile_ack_only() {
+        let profile = SendProfile::new_limited(1200);
+        assert!(!profile.ack_only(PacketNumberSpace::Initial));
+        assert_eq!(profile.limit(), 1200);
+        assert!(!profile.paced());
+
+        let paced = SendProfile::new_paced();
+        assert!(paced.ack_only(PacketNumberSpace::Initial));
+        assert!(paced.paced());
+
+        let pto = SendProfile::new_pto(
+            PacketNumberSpace::Handshake,
+            1200,
+            PacketNumberSpaceSet::only(PacketNumberSpace::Handshake),
+        );
+        assert!(pto.ack_only(PacketNumberSpace::Initial));
+        assert!(!pto.ack_only(PacketNumberSpace::Handshake));
+        assert!(pto.should_probe(PacketNumberSpace::Handshake));
+        assert!(!pto.should_probe(PacketNumberSpace::Initial));
+    }
 }

@@ -653,4 +653,30 @@ mod tests {
             "couldn't write frame into too-short builder",
         );
     }
+
+    #[test]
+    fn random_cid_generator_empty() {
+        use crate::cid::{ConnectionIdGenerator as _, RandomConnectionIdGenerator};
+        fixture_init();
+        let mut gen_empty = RandomConnectionIdGenerator::new(0);
+        assert!(gen_empty.generates_empty_cids());
+        let empty_cid = gen_empty.generate_cid().unwrap();
+        assert_eq!(empty_cid.len(), 0);
+        assert_eq!(empty_cid.to_string(), "");
+        let mut gen_nonempty = RandomConnectionIdGenerator::new(8);
+        assert!(!gen_nonempty.generates_empty_cids());
+        let nonempty_cid = gen_nonempty.generate_cid().unwrap();
+        assert_eq!(nonempty_cid.len(), 8);
+        assert_eq!(nonempty_cid.to_string().len(), 16); // 8 bytes = 16 hex chars
+    }
+
+    #[test]
+    fn connection_id_ref_display() {
+        use super::ConnectionIdRef;
+        let bytes = [0x01, 0x02, 0x03];
+        let cid = ConnectionId::from(&bytes);
+        let cid_ref = ConnectionIdRef::from(&bytes);
+        assert_eq!(cid.to_string(), "010203");
+        assert_eq!(cid_ref.to_string(), cid.to_string());
+    }
 }
