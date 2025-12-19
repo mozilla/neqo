@@ -51,6 +51,8 @@ struct Stats {
 }
 
 impl Stats {
+    // Const constructor for compile-time initialization in TailDrop::new().
+    // Could derive Default if const was not required.
     const fn new() -> Self {
         Self {
             received: 0,
@@ -358,7 +360,7 @@ mod test {
     use crate::sim::{network::TailDrop, rng::Random, Node as _};
 
     fn mark_rate(used: usize, capacity: usize, trials: usize, salt: u64) -> usize {
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         enc.encode_uint(8, u64::try_from(used).unwrap());
         enc.encode_uint(8, u64::try_from(capacity).unwrap());
         enc.encode_uint(8, u64::try_from(trials).unwrap());

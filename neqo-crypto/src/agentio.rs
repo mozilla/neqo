@@ -158,6 +158,7 @@ impl Drop for AgentIoInputContext<'_> {
     }
 }
 
+// TODO: Derive Default when MSRV >= 1.88 (Default for raw pointers stabilized in 1.88).
 #[derive(Debug)]
 struct AgentIoInput {
     // input is data that is read by TLS.
@@ -211,6 +212,7 @@ impl Display for AgentIoInput {
     }
 }
 
+// TODO: Derive Default when MSRV >= 1.88 (Default for raw pointers stabilized in 1.88).
 #[derive(Debug)]
 pub struct AgentIo {
     // input collects the input we might provide to TLS.
