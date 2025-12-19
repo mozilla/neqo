@@ -276,10 +276,51 @@ mod tests {
     use super::{CloseReason, Error};
 
     #[test]
+    fn error_codes() {
+        for (err, code) in [
+            (Error::None, 0),
+            (Error::IdleTimeout, 0),
+            (Error::Peer(0), 0),
+            (Error::PeerApplication(0), 0),
+            (Error::ConnectionRefused, 2),
+            (Error::FlowControl, 3),
+            (Error::StreamLimit, 4),
+            (Error::StreamState, 5),
+            (Error::FinalSize, 6),
+            (Error::FrameEncoding, 7),
+            (Error::TransportParameter, 8),
+            (Error::ProtocolViolation, 10),
+            (Error::InvalidToken, 11),
+            (Error::KeysExhausted, 15),
+            (Error::Application, 12),
+            (Error::NoAvailablePath, 16),
+            (Error::CryptoBufferExceeded, 13),
+            (Error::CryptoAlert(0x2a), 0x12a),
+            (Error::EchRetry(vec![]), 0x179),
+            (Error::VersionNegotiation, 0x53f8),
+            (Error::Internal, 1),
+        ] {
+            assert_eq!(err.code(), code);
+        }
+    }
+
+    #[test]
     fn close_reason_is_error() {
         assert!(!CloseReason::Transport(Error::None).is_error());
         assert!(!CloseReason::Application(0).is_error());
         assert!(CloseReason::Transport(Error::Internal).is_error());
         assert!(CloseReason::Application(1).is_error());
+    }
+
+    #[test]
+    fn error_from_impls() {
+        assert_eq!(
+            Error::from(neqo_crypto::Error::EchRetry(vec![1, 2])),
+            Error::EchRetry(vec![1, 2])
+        );
+        assert!(matches!(
+            Error::from(u64::try_from(-1_i32).unwrap_err()),
+            Error::IntegerOverflow
+        ));
     }
 }

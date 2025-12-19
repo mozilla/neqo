@@ -1344,4 +1344,9 @@ mod tests {
         let v: Vec<u8> = cloned.into();
         assert_eq!(v, vec![0x03, 0x04, 0x05, 0x06]);
     }
+
+    #[test]
+    fn encoder_debug() {
+        assert_eq!(format!("{:?}", Encoder::from_hex("010203")), "[3]: 010203");
+    }
 }
