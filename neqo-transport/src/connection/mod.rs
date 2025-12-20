@@ -899,6 +899,25 @@ impl Connection {
         self.crypto.tls().peer_certificate()
     }
 
+    /// Export keying material per RFC 5705/8446.
+    ///
+    /// This can only be called after the handshake is complete.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if connection is not in a connected state or export fails.
+    pub fn export_keying_material(
+        &self,
+        label: &[u8],
+        context: Option<&[u8]>,
+        out_len: usize,
+    ) -> Res<Vec<u8>> {
+        self.crypto
+            .tls()
+            .export_keying_material(label, context, out_len)
+            .map_err(|_| Error::NotConnected)
+    }
+
     /// Call by application when the peer cert has been verified.
     ///
     /// This panics if there is no active peer.  It's OK to call this

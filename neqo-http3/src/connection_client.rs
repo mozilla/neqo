@@ -927,6 +927,30 @@ impl Http3Client {
             .stats(&mut self.conn)
     }
 
+    /// Export keying material per RFC 5705/8446.
+    ///
+    /// Note: The keying material is derived from the TLS connection, so it is
+    /// the same for all WebTransport sessions on this connection.
+    ///
+    /// # Arguments
+    /// * `label` - The exporter label
+    /// * `context` - Optional context data
+    /// * `out_len` - Length of output keying material
+    ///
+    /// # Errors
+    ///
+    /// Returns `TransportError` if the connection is not ready or export fails.
+    pub fn export_keying_material(
+        &self,
+        label: &[u8],
+        context: Option<&[u8]>,
+        out_len: usize,
+    ) -> Res<Vec<u8>> {
+        self.conn
+            .export_keying_material(label, context, out_len)
+            .map_err(Error::Transport)
+    }
+
     /// This function combines  `process_input` and `process_output` function.
     pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
