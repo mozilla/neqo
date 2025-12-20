@@ -137,6 +137,7 @@ impl WebTransportSendStream {
         events: Box<dyn SendStreamEvents>,
         session: Rc<RefCell<Session>>,
         local: bool,
+        send_group: Option<SendGroupId>,
     ) -> Self {
         Self {
             stream_id,
@@ -159,8 +160,13 @@ impl WebTransportSendStream {
             events,
             session_id,
             session,
-            send_group: None,
+            send_group,
         }
+    }
+
+    #[expect(dead_code, reason = "pending send group further integration")]
+    pub(crate) const fn send_group(&self) -> Option<SendGroupId> {
+        self.send_group
     }
 
     pub(crate) fn set_send_group(&mut self, send_group: Option<SendGroupId>) -> Res<()> {
