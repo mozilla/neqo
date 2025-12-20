@@ -20,7 +20,7 @@ use neqo_transport::{
 
 use crate::{
     Error, Http3Client, Http3OrWebTransportStream, Http3ServerEvent, Http3State, Http3StreamInfo,
-    Http3StreamType, Res, SessionAcceptAction,
+    Http3StreamType, Res, SendGroupId, SessionAcceptAction,
     connection::Http3Connection,
     connection_server::Http3ServerHandler,
     features::extended_connect,
@@ -71,6 +71,18 @@ pub trait ClientSession {
         &mut self,
         stream_id: StreamId,
         sendorder: Option<SendOrder>,
+    ) -> Res<()>;
+
+    /// Sets the [`SendGroupId`] for a given WebTransport stream.
+    ///
+    /// # Errors
+    ///
+    /// It may return [`Error::InvalidStreamId`] if a stream does not exist anymore,
+    /// or [`Error::Unavailable`] if the stream is not a WebTransport send stream.
+    fn webtransport_set_sendgroup(
+        &mut self,
+        stream_id: StreamId,
+        sendgroup: SendGroupId,
     ) -> Res<()>;
 
     /// Sets the `Fairness` for a given stream
@@ -199,6 +211,15 @@ impl ClientSession for Http3Client {
         sendorder: Option<SendOrder>,
     ) -> Res<()> {
         Http3Connection::stream_set_sendorder(self.connection_mut(), stream_id, sendorder)
+    }
+
+    fn webtransport_set_sendgroup(
+        &mut self,
+        stream_id: StreamId,
+        sendgroup: SendGroupId,
+    ) -> Res<()> {
+        let (_conn, handler) = self.connection_and_handler();
+        handler.stream_set_sendgroup(stream_id, sendgroup)
     }
 
     fn webtransport_set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {

@@ -171,6 +171,7 @@ pub use client_events::{ConnectUdpEvent, Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::{Http3State, SessionAcceptAction};
 pub use connection_client::Http3Client;
+pub use features::extended_connect::send_group::SendGroupId;
 use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;
@@ -438,6 +439,24 @@ trait Stream: Debug {
     fn session_protocol(&self) -> Option<String> {
         None
     }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn register_send_group(&mut self, _id: SendGroupId) -> Res<()> {
+        debug_assert!(
+            false,
+            "register_send_group called on a stream that does not support send groups"
+        );
+        Err(Error::InvalidStreamId)
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn validate_send_group(&self, _group_id: SendGroupId) -> bool {
+        debug_assert!(
+            false,
+            "validate_send_group called on a stream that does not support send groups"
+        );
+        false
+    }
 }
 
 trait RecvStream: Stream {
@@ -608,6 +627,13 @@ trait SendStream: Stream {
 
     /// This function is only implemented by `WebTransportSendStream`.
     fn stats(&mut self, _conn: &mut Connection) -> Res<send_stream::Stats> {
+        Err(Error::Unavailable)
+    }
+
+    /// This function is only implemented by
+    /// [`WebTransportSendStream`](crate::features::extended_connect::webtransport_streams::WebTransportSendStream).
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn set_send_group(&mut self, _send_group: SendGroupId) -> Res<()> {
         Err(Error::Unavailable)
     }
 }
