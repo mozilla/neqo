@@ -20,7 +20,8 @@ use crate::{
     CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
     SendStream, Stream,
     features::extended_connect::{
-        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
+        send_group::SendGroupId, ExtendedConnectEvents, ExtendedConnectType, HeaderListener,
+        Headers,
     },
     frames::HFrame,
     priority::PriorityHandler,
@@ -478,6 +479,14 @@ impl Stream for Rc<RefCell<Session>> {
     fn session_protocol(&self) -> Option<String> {
         self.borrow().protocol.protocol().map(|s| s.to_string())
     }
+
+    fn new_send_group(&mut self) -> Option<SendGroupId> {
+        self.borrow_mut().protocol.new_send_group()
+    }
+
+    fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        self.borrow().protocol.validate_send_group(group_id)
+    }
 }
 
 impl RecvStream for Rc<RefCell<Session>> {
@@ -617,6 +626,16 @@ pub(crate) trait Protocol: Debug + Display {
     fn protocol(&self) -> Option<&str> {
         // Default implementation returns None
         None
+    }
+
+    fn new_send_group(&mut self) -> Option<SendGroupId> {
+        // Default implementation returns None
+        None
+    }
+
+    fn validate_send_group(&self, _group_id: SendGroupId) -> bool {
+        // Default implementation returns false
+        false
     }
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);

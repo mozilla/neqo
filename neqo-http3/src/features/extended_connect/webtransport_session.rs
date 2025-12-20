@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fmt::{self, Display, Formatter},
     mem,
     time::Instant,
@@ -17,6 +17,7 @@ use neqo_transport::{Connection, StreamId};
 use crate::{
     Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
     features::extended_connect::{
+        send_group::{SendGroup, SendGroupId},
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
         session::{DgramContextIdError, Protocol, State},
     },
@@ -44,6 +45,8 @@ pub struct Session {
     draining: bool,
     /// The negotiated protocol from server response headers.
     negotiated_protocol: Option<String>,
+    /// Send groups for this session.
+    send_groups: HashMap<SendGroupId, SendGroup>,
 }
 
 impl Display for Session {
@@ -64,6 +67,7 @@ impl Session {
             pending_streams: HashSet::default(),
             draining: false,
             negotiated_protocol: None,
+            send_groups: HashMap::default(),
         }
     }
 
@@ -80,6 +84,23 @@ impl Session {
         self.draining
     }
 
+    /// Create a new send group for this session.
+    pub(crate) fn create_send_group(&mut self) -> SendGroupId {
+        let id = SendGroupId::new();
+        let group = SendGroup::new(id, self.id);
+        self.send_groups.insert(id, group);
+        id
+    }
+
+    /// Validate that a send group belongs to this session.
+    pub(crate) fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        self.send_groups.contains_key(&group_id)
+    }
+
+    /// Get the session ID for a send group.
+    pub(crate) fn send_group_session(&self, group_id: SendGroupId) -> Option<StreamId> {
+        self.send_groups.get(&group_id).map(|g| g.session_id())
+    }
 }
 
 impl Protocol for Session {
@@ -233,6 +254,14 @@ impl Protocol for Session {
 
     fn protocol(&self) -> Option<&str> {
         self.negotiated_protocol.as_deref()
+    }
+
+    fn new_send_group(&mut self) -> Option<SendGroupId> {
+        Some(self.create_send_group())
+    }
+
+    fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        self.validate_send_group(group_id)
     }
 
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {

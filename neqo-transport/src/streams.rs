@@ -34,6 +34,7 @@ use crate::{
 };
 
 pub type SendOrder = i64;
+pub type SendGroupId = u64;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct StreamOrder {
