@@ -265,4 +265,8 @@ impl SendStream for WebTransportSendStream {
             bytes_acked,
         ))
     }
+
+    fn set_send_group(&mut self, send_group: SendGroupId) -> Res<()> {
+        self.set_send_group(Some(send_group))
+    }
 }

@@ -28,7 +28,7 @@ use neqo_transport::{
 
 use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, PushId,
-    ReceiveOutput, Res,
+    ReceiveOutput, Res, SendGroupId,
     client_events::{Http3ClientEvent, Http3ClientEvents, WebTransportEvent},
     connection::{Http3Connection, Http3State, RequestDescription},
     features::ConnectType,
@@ -884,6 +884,19 @@ impl Http3Client {
         Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, sendorder)
     }
 
+    /// Sets the `SendGroup` for a given WebTransport stream
+    ///
+    /// # Errors
+    ///
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    pub fn webtransport_set_sendgroup(
+        &mut self,
+        stream_id: StreamId,
+        sendgroup: SendGroupId,
+    ) -> Res<()> {
+        self.base_handler.stream_set_sendgroup(stream_id, sendgroup)
+    }
+
     /// Sets the `Fairness` for a given stream
     ///
     /// # Errors
@@ -1396,6 +1409,26 @@ impl Http3Client {
     /// Returns error if the session ID is invalid.
     pub fn webtransport_session_protocol(&self, session_id: StreamId) -> Res<Option<String>> {
         self.base_handler.webtransport_session_protocol(session_id)
+    }
+
+    /// Create a new send group for a WebTransport session.
+    ///
+    /// Send groups allow organizing streams with shared prioritization.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_create_send_group(&mut self, session_id: StreamId) -> Res<SendGroupId> {
+        self.base_handler.webtransport_create_send_group(session_id)
+    }
+
+    /// Validate that a send group belongs to the specified WebTransport session.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_validate_send_group(&self, session_id: StreamId, group_id: SendGroupId) -> Res<bool> {
+        self.base_handler.webtransport_validate_send_group(session_id, group_id)
     }
 }
 

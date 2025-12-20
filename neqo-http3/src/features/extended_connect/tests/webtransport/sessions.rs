@@ -471,3 +471,67 @@ fn wt_session_protocol_negotiation() {
     assert!(protocol.is_ok());
     assert_eq!(protocol.unwrap(), None);
 }
+
+#[test]
+fn wt_create_send_group() {
+    // Test that we can create a send group for a WebTransport session.
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let group = wt.client.webtransport_create_send_group(session_id);
+    assert!(group.is_ok());
+    assert!(group.unwrap().as_u64() > 0);
+}
+
+#[test]
+fn wt_validate_send_group() {
+    // Test that we can validate a send group belongs to a session.
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let group = wt.client.webtransport_create_send_group(session_id).unwrap();
+
+    // Validate that the group belongs to this session
+    let valid = wt.client.webtransport_validate_send_group(session_id, group);
+    assert!(valid.is_ok());
+    assert!(valid.unwrap());
+}
+
+#[test]
+fn wt_cross_session_send_group_rejected() {
+    // Test that a send group from one session is not valid for another session.
+    let mut wt = WtTest::new();
+
+    // Create first session
+    let wt_session1 = wt.create_wt_session();
+    let session_id1 = wt_session1.stream_id();
+
+    // Create second session
+    let wt_session2_id = wt
+        .client
+        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+        .unwrap();
+    wt.exchange_packets();
+
+    // Accept second session
+    while let Some(event) = wt.server.next_event() {
+        if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
+            session,
+            ..
+        }) = event
+        {
+            session.response(&SessionAcceptAction::Accept, now()).unwrap();
+        }
+    }
+    wt.exchange_packets();
+
+    // Create send group for session 1
+    let group1 = wt.client.webtransport_create_send_group(session_id1).unwrap();
+
+    // Try to validate group1 with session2 - should return false
+    let valid = wt.client.webtransport_validate_send_group(wt_session2_id, group1);
+    assert!(valid.is_ok());
+    assert!(!valid.unwrap());
+}

@@ -169,6 +169,7 @@ pub use client_events::{ConnectUdpEvent, Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::{Http3State, SessionAcceptAction};
 pub use connection_client::Http3Client;
+pub use features::extended_connect::send_group::SendGroupId;
 use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;
@@ -437,6 +438,14 @@ trait Stream: Debug {
     fn session_protocol(&self) -> Option<String> {
         None
     }
+
+    fn create_send_group(&mut self) -> Option<SendGroupId> {
+        None
+    }
+
+    fn validate_send_group(&self, _group_id: SendGroupId) -> bool {
+        false
+    }
 }
 
 trait RecvStream: Stream {
@@ -607,6 +616,11 @@ trait SendStream: Stream {
 
     /// This function is only implemented by `WebTransportSendStream`.
     fn stats(&mut self, _conn: &mut Connection) -> Res<send_stream::Stats> {
+        Err(Error::Unavailable)
+    }
+
+    /// This function is only implemented by `WebTransportSendStream`.
+    fn set_send_group(&mut self, _send_group: SendGroupId) -> Res<()> {
         Err(Error::Unavailable)
     }
 }
