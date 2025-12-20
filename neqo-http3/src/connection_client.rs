@@ -29,7 +29,7 @@ use neqo_transport::{
 use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, PushId,
     ReceiveOutput, Res,
-    client_events::{Http3ClientEvent, Http3ClientEvents},
+    client_events::{Http3ClientEvent, Http3ClientEvents, WebTransportEvent},
     connection::{Http3Connection, Http3State, RequestDescription},
     features::ConnectType,
     frames::HFrame,
@@ -1356,6 +1356,15 @@ impl Http3Client {
                 Error::HttpRequestRejected.code(),
                 &mut self.conn,
             ));
+        }
+
+        // Emit draining events for WebTransport sessions affected by GOAWAY
+        for session_id in self.base_handler.webtransport_session_ids() {
+            if session_id >= goaway_stream_id {
+                self.events.insert(Http3ClientEvent::WebTransport(
+                    WebTransportEvent::Draining { session_id },
+                ));
+            }
         }
 
         self.events.goaway_received();

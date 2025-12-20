@@ -1377,6 +1377,20 @@ impl Http3Connection {
         self.extended_connect_close_session(conn, session_id, error, message, now)
     }
 
+    /// Get all WebTransport session stream IDs.
+    pub(crate) fn webtransport_session_ids(&self) -> Vec<StreamId> {
+        self.send_streams
+            .iter()
+            .filter_map(|(id, s)| {
+                if s.stream_type() == Http3StreamType::ExtendedConnect {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     pub(crate) fn connect_udp_close_session(
         &mut self,
         conn: &mut Connection,

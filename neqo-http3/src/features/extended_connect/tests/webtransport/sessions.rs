@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use neqo_common::{Encoder, event::Provider as _, header::HeadersExt as _};
-use neqo_transport::StreamType;
+use neqo_transport::{StreamId, StreamType};
 use test_fixture::now;
 
 use crate::{
@@ -427,4 +427,31 @@ fn wt_close_session_cannot_be_sent_at_once() {
         )),
     );
     wt.check_events_after_closing_session_server(&[], None, &[], None, None);
+}
+
+#[test]
+fn wt_draining_event_defined() {
+    // This test verifies that the Draining event is properly defined
+    // and can be constructed. The actual GOAWAY->Draining logic is
+    // tested via integration tests and manual testing.
+
+    let session_id = StreamId::new(0);
+
+    // Verify WebTransportEvent::Draining can be constructed
+    let event = WebTransportEvent::Draining { session_id };
+
+    // Verify it can be used in Http3ClientEvent
+    let client_event = Http3ClientEvent::WebTransport(event.clone());
+
+    // Verify pattern matching works
+    match client_event {
+        Http3ClientEvent::WebTransport(WebTransportEvent::Draining { session_id: sid }) => {
+            assert_eq!(sid, session_id);
+        }
+        _ => panic!("Event should be Draining"),
+    }
+
+    // Verify Clone and PartialEq work
+    let event2 = event.clone();
+    assert_eq!(event, event2);
 }

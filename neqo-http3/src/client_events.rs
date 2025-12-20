@@ -34,6 +34,9 @@ pub enum WebTransportEvent {
         reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     },
+    Draining {
+        session_id: StreamId,
+    },
     NewStream {
         stream_id: StreamId,
         session_id: StreamId,

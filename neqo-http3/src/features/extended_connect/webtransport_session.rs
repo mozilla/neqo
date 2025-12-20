@@ -34,6 +34,8 @@ pub struct Session {
     ///
     /// [`HashSet`] size limited by QUIC connection stream limit.
     pending_streams: HashSet<StreamId>,
+    /// Whether the session is draining (no new streams should be created).
+    draining: bool,
 }
 
 impl Display for Session {
@@ -52,7 +54,18 @@ impl Session {
             recv_streams: HashSet::default(),
             role,
             pending_streams: HashSet::default(),
+            draining: false,
         }
+    }
+
+    /// Mark session as draining.
+    pub(crate) fn set_draining(&mut self) {
+        self.draining = true;
+    }
+
+    /// Check if session is draining.
+    pub(crate) fn is_draining(&self) -> bool {
+        self.draining
     }
 }
 
