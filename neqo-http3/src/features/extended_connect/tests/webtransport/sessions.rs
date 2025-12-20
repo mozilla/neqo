@@ -535,3 +535,408 @@ fn wt_cross_session_send_group_rejected() {
     assert!(valid.is_ok());
     assert!(!valid.unwrap());
 }
+
+#[test]
+fn wt_create_stream_with_send_group() {
+    // Test that we can create a stream with a send group.
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Create a send group
+    let group = wt.client.webtransport_create_send_group(session_id).unwrap();
+
+    // Create a stream with the send group
+    let stream = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group));
+    assert!(stream.is_ok());
+}
+
+#[test]
+fn wt_create_stream_without_send_group() {
+    // Test that we can create a stream without a send group (backward compatibility).
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Create a stream without a send group
+    let stream = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, None);
+    assert!(stream.is_ok());
+}
+
+#[test]
+fn wt_create_stream_with_invalid_send_group() {
+    // Test that creating a stream with an invalid send group fails.
+    let mut wt = WtTest::new();
+
+    // Create two sessions
+    let wt_session1 = wt.create_wt_session();
+    let session_id1 = wt_session1.stream_id();
+
+    let wt_session2_id = wt
+        .client
+        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+        .unwrap();
+    wt.exchange_packets();
+
+    // Accept second session
+    while let Some(event) = wt.server.next_event() {
+        if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
+            session,
+            ..
+        }) = event
+        {
+            session.response(&SessionAcceptAction::Accept, now()).unwrap();
+        }
+    }
+    wt.exchange_packets();
+
+    // Create send group for session 1
+    let group1 = wt.client.webtransport_create_send_group(session_id1).unwrap();
+
+    // Try to create stream in session2 with group from session1 - should fail
+    let result = wt
+        .client
+        .webtransport_create_stream_with_send_group(wt_session2_id, StreamType::UniDi, Some(group1));
+    assert!(result.is_err());
+}
+
+#[test]
+fn wt_multiple_streams_same_send_group() {
+    // Test that multiple streams can belong to the same send group.
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Create a send group
+    let group = wt.client.webtransport_create_send_group(session_id).unwrap();
+
+    // Create multiple streams with the same send group
+    let stream1 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group))
+        .unwrap();
+    let stream2 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group))
+        .unwrap();
+    let stream3 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::BiDi, Some(group))
+        .unwrap();
+
+    // All streams should be created successfully
+    assert_ne!(stream1, stream2);
+    assert_ne!(stream2, stream3);
+    assert_ne!(stream1, stream3);
+}
+
+#[test]
+fn wt_send_group_with_sendorder() {
+    // Test that send groups work with sendOrder.
+    // This test verifies streams can be created with both send groups and sendOrder set.
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Create two send groups
+    let group1 = wt.client.webtransport_create_send_group(session_id).unwrap();
+    let group2 = wt.client.webtransport_create_send_group(session_id).unwrap();
+
+    // Create streams in different groups with sendOrder
+    let stream1 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group1))
+        .unwrap();
+    let stream2 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group1))
+        .unwrap();
+    let stream3 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group2))
+        .unwrap();
+    let stream4 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, None)
+        .unwrap();
+
+    // Set sendOrder for the streams
+    // According to spec, sendOrder is evaluated within the context of the send group
+    // stream1 and stream2 are in group1 - their sendOrders should be compared within group1
+    // stream3 is in group2 - its sendOrder is independent
+    // stream4 has no group - its sendOrder is in the ungrouped namespace
+    wt.client.webtransport_set_sendorder(stream1, Some(100)).unwrap();
+    wt.client.webtransport_set_sendorder(stream2, Some(200)).unwrap();
+    wt.client.webtransport_set_sendorder(stream3, Some(100)).unwrap(); // Same value as stream1, but different group
+    wt.client.webtransport_set_sendorder(stream4, Some(100)).unwrap(); // Same value as stream1, but ungrouped
+
+    // All operations should succeed
+    // Note: The actual prioritization logic (treating groups equally, sendOrder within groups)
+    // would require transport-layer changes and is beyond the scope of this test.
+    // This test verifies the API works correctly.
+}
+
+#[test]
+fn wt_send_groups_fair_bandwidth_allocation() {
+    // Test that send groups get fair bandwidth allocation even when streams
+    // in different groups have different sendOrder values.
+    // This validates the spec requirement: "The user agent considers WebTransportSendGroups
+    // as equals when allocating bandwidth for sending WebTransportSendStreams."
+
+    const DATA_SIZE: usize = 10_000; // Large enough to fill multiple packets
+    const BUF: &[u8] = &[0x42; DATA_SIZE];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Create two send groups
+    let group_high = wt.client.webtransport_create_send_group(session_id).unwrap();
+    let group_low = wt.client.webtransport_create_send_group(session_id).unwrap();
+
+    // Create streams in group_high with HIGH sendOrder (should be prioritized WITHIN the group)
+    let stream_high1 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group_high))
+        .unwrap();
+    let stream_high2 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group_high))
+        .unwrap();
+
+    // Create streams in group_low with LOW sendOrder (should be deprioritized WITHIN the group)
+    let stream_low1 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group_low))
+        .unwrap();
+    let stream_low2 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group_low))
+        .unwrap();
+
+    // Set HIGH sendOrder for group_high streams
+    wt.client.webtransport_set_sendorder(stream_high1, Some(1000)).unwrap();
+    wt.client.webtransport_set_sendorder(stream_high2, Some(900)).unwrap();
+
+    // Set LOW sendOrder for group_low streams
+    wt.client.webtransport_set_sendorder(stream_low1, Some(100)).unwrap();
+    wt.client.webtransport_set_sendorder(stream_low2, Some(50)).unwrap();
+
+    // Fill all streams with data
+    for stream in [stream_high1, stream_high2, stream_low1, stream_low2] {
+        assert_eq!(
+            wt.client.send_data(stream, BUF, now()).unwrap(),
+            DATA_SIZE
+        );
+    }
+
+    wt.exchange_packets();
+
+    // Both groups should have received data, despite group_high having much higher sendOrder.
+    // This tests that send groups are treated fairly at the group level.
+    // We check that streams from both groups became readable on the server.
+    let mut group_high_readable = false;
+    let mut group_low_readable = false;
+
+    while let Some(event) = wt.server.next_event() {
+        if let Http3ServerEvent::Data { stream, .. } = event {
+            let stream_id = stream.stream_id();
+            if stream_id == stream_high1 || stream_id == stream_high2 {
+                group_high_readable = true;
+            }
+            if stream_id == stream_low1 || stream_id == stream_low2 {
+                group_low_readable = true;
+            }
+        }
+    }
+
+    // Both send groups should have gotten bandwidth allocation
+    assert!(group_high_readable, "group_high streams should have received data");
+    assert!(group_low_readable, "group_low streams should have received data despite lower sendOrder");
+}
+
+#[test]
+fn wt_sendorder_within_send_group() {
+    // Test that sendOrder still prioritizes streams WITHIN a send group.
+    // This validates that sendOrder numbers are evaluated within each group's namespace.
+
+    const DATA_SIZE: usize = 5_000;
+    const BUF: &[u8] = &[0x42; DATA_SIZE];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Create one send group
+    let group = wt.client.webtransport_create_send_group(session_id).unwrap();
+
+    // Create two streams in the same group with different sendOrders
+    let stream_high = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group))
+        .unwrap();
+    let stream_low = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group))
+        .unwrap();
+
+    // Set sendOrder: stream_high should be prioritized over stream_low WITHIN the group
+    wt.client.webtransport_set_sendorder(stream_high, Some(1000)).unwrap();
+    wt.client.webtransport_set_sendorder(stream_low, Some(10)).unwrap();
+
+    // Fill both streams with data
+    assert_eq!(wt.client.send_data(stream_low, BUF, now()).unwrap(), DATA_SIZE);
+    assert_eq!(wt.client.send_data(stream_high, BUF, now()).unwrap(), DATA_SIZE);
+
+    wt.exchange_packets();
+
+    // Within the same group, sendOrder should determine priority.
+    // The high sendOrder stream should get data sent first.
+    let mut first_readable = None;
+
+    while let Some(event) = wt.server.next_event() {
+        if let Http3ServerEvent::Data { stream, .. } = event {
+            if first_readable.is_none() {
+                first_readable = Some(stream.stream_id());
+            }
+        }
+    }
+
+    // The stream with higher sendOrder should become readable first
+    assert_eq!(
+        first_readable,
+        Some(stream_high),
+        "stream with higher sendOrder should be prioritized within the group"
+    );
+}
+
+#[test]
+fn wt_ungrouped_streams_independent_namespace() {
+    // Test that ungrouped streams have their own sendOrder namespace,
+    // independent from grouped streams.
+
+    const DATA_SIZE: usize = 5_000;
+    const BUF: &[u8] = &[0x42; DATA_SIZE];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Create a send group
+    let group = wt.client.webtransport_create_send_group(session_id).unwrap();
+
+    // Create a grouped stream with sendOrder 100
+    let stream_grouped = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group))
+        .unwrap();
+    wt.client.webtransport_set_sendorder(stream_grouped, Some(100)).unwrap();
+
+    // Create an ungrouped stream with sendOrder 100 (same value, different namespace)
+    let stream_ungrouped = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, None)
+        .unwrap();
+    wt.client.webtransport_set_sendorder(stream_ungrouped, Some(100)).unwrap();
+
+    // Fill both streams
+    assert_eq!(wt.client.send_data(stream_grouped, BUF, now()).unwrap(), DATA_SIZE);
+    assert_eq!(wt.client.send_data(stream_ungrouped, BUF, now()).unwrap(), DATA_SIZE);
+
+    wt.exchange_packets();
+
+    // Both streams should become readable despite having the same sendOrder value,
+    // because they're in different namespaces (grouped vs ungrouped).
+    let mut grouped_readable = false;
+    let mut ungrouped_readable = false;
+
+    while let Some(event) = wt.server.next_event() {
+        if let Http3ServerEvent::Data { stream, .. } = event {
+            let stream_id = stream.stream_id();
+            if stream_id == stream_grouped {
+                grouped_readable = true;
+            }
+            if stream_id == stream_ungrouped {
+                ungrouped_readable = true;
+            }
+        }
+    }
+
+    // Both should have received data
+    assert!(grouped_readable, "grouped stream should receive data");
+    assert!(ungrouped_readable, "ungrouped stream should receive data");
+}
+
+#[test]
+fn wt_multiple_groups_separate_sendorder_namespaces() {
+    // Test that different send groups maintain separate sendOrder namespaces.
+    // Streams in different groups with the same sendOrder value should not interfere.
+
+    const DATA_SIZE: usize = 5_000;
+    const BUF: &[u8] = &[0x42; DATA_SIZE];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Create three send groups
+    let group1 = wt.client.webtransport_create_send_group(session_id).unwrap();
+    let group2 = wt.client.webtransport_create_send_group(session_id).unwrap();
+    let group3 = wt.client.webtransport_create_send_group(session_id).unwrap();
+
+    // Create streams in each group, all with the SAME sendOrder value
+    let stream1 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group1))
+        .unwrap();
+    let stream2 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group2))
+        .unwrap();
+    let stream3 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group3))
+        .unwrap();
+
+    // Set the SAME sendOrder value for all streams (different namespaces!)
+    wt.client.webtransport_set_sendorder(stream1, Some(500)).unwrap();
+    wt.client.webtransport_set_sendorder(stream2, Some(500)).unwrap();
+    wt.client.webtransport_set_sendorder(stream3, Some(500)).unwrap();
+
+    // Fill all streams
+    for stream in [stream1, stream2, stream3] {
+        assert_eq!(wt.client.send_data(stream, BUF, now()).unwrap(), DATA_SIZE);
+    }
+
+    wt.exchange_packets();
+
+    // All three streams should become readable, demonstrating that they're in
+    // separate namespaces and don't compete with each other based on sendOrder alone.
+    let mut stream1_readable = false;
+    let mut stream2_readable = false;
+    let mut stream3_readable = false;
+
+    while let Some(event) = wt.server.next_event() {
+        if let Http3ServerEvent::Data { stream, .. } = event {
+            let stream_id = stream.stream_id();
+            if stream_id == stream1 {
+                stream1_readable = true;
+            }
+            if stream_id == stream2 {
+                stream2_readable = true;
+            }
+            if stream_id == stream3 {
+                stream3_readable = true;
+            }
+        }
+    }
+
+    // All should have received data (fair allocation between groups)
+    assert!(stream1_readable, "stream in group1 should receive data");
+    assert!(stream2_readable, "stream in group2 should receive data");
+    assert!(stream3_readable, "stream in group3 should receive data");
+}

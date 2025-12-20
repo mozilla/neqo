@@ -1430,6 +1430,27 @@ impl Http3Client {
     pub fn webtransport_validate_send_group(&self, session_id: StreamId, group_id: SendGroupId) -> Res<bool> {
         self.base_handler.webtransport_validate_send_group(session_id, group_id)
     }
+
+    /// Create a WebTransport stream with a send group.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid, stream creation fails, or send group is invalid.
+    pub fn webtransport_create_stream_with_send_group(
+        &mut self,
+        session_id: StreamId,
+        stream_type: StreamType,
+        send_group: Option<SendGroupId>,
+    ) -> Res<StreamId> {
+        self.base_handler.webtransport_create_stream_local_with_send_group(
+            &mut self.conn,
+            session_id,
+            stream_type,
+            Box::new(self.events.clone()),
+            Box::new(self.events.clone()),
+            send_group,
+        )
+    }
 }
 
 impl EventProvider for Http3Client {

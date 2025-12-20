@@ -442,6 +442,10 @@ impl Session {
         }
     }
 
+    pub(crate) fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        self.protocol.validate_send_group(group_id)
+    }
+
     fn has_data_to_send(&self) -> bool {
         self.control_stream_send.has_data_to_send()
     }

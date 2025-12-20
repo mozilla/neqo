@@ -13,6 +13,7 @@ static NEXT_SEND_GROUP_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SendGroupId(u64);
 
+// Note: 0 is not a valid SendGroupId
 impl SendGroupId {
     pub fn new() -> Self {
         Self(NEXT_SEND_GROUP_ID.fetch_add(1, Ordering::Relaxed))
