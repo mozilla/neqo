@@ -34,6 +34,7 @@ use crate::{
         ConnectType,
         extended_connect::{
             self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
+            send_group::SendGroupId,
             webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         },
     },
@@ -1070,6 +1071,19 @@ impl Http3Connection {
             .map_err(|_| Error::InvalidStreamId)
     }
 
+    /// Set the stream `SendGroup`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidStreamId` if the stream id doesn't exist or the stream doesn't support send groups
+    pub fn stream_set_sendgroup(&mut self, stream_id: StreamId, sendgroup: SendGroupId) -> Res<()> {
+        let send_stream = self
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?;
+        send_stream.set_send_group(sendgroup)
+    }
+
     /// Set the stream Fairness.   Fair streams will share bandwidth with other
     /// streams of the same sendOrder group (or the unordered group).  Unfair streams
     /// will give bandwidth preferentially to the lowest streamId with data to send.
@@ -1424,6 +1438,42 @@ impl Http3Connection {
             .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
             .ok_or(Error::InvalidStreamId)?;
         Ok(stream.session_protocol())
+    }
+
+    /// Create a new send group for a WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    /// Register a send group with a caller-provided ID for a WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist, is not a WebTransport session, or the ID is already in use.
+    pub(crate) fn webtransport_register_send_group(
+        &mut self,
+        session_id: StreamId,
+        group_id: SendGroupId,
+    ) -> Res<()> {
+        self.recv_streams
+            .get_mut(&session_id)
+            .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
+            .ok_or(Error::InvalidStreamId)?
+            .register_send_group(group_id)
+    }
+
+    /// Validate that a send group belongs to the specified WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_validate_send_group(
+        &self,
+        session_id: StreamId,
+        group_id: SendGroupId,
+    ) -> Res<bool> {
+        self.recv_streams
+            .get(&session_id)
+            .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
+            .map(|s| s.validate_send_group(group_id))
+            .ok_or(Error::InvalidStreamId)
     }
 
     pub(crate) fn connect_udp_close_session(

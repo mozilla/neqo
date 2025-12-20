@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fmt::{self, Display, Formatter},
     mem,
     time::Instant,
@@ -18,6 +18,7 @@ use crate::{
     Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
     features::extended_connect::{
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
+        send_group::{SendGroup, SendGroupId},
         session::{DgramContextIdError, Protocol, State},
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
@@ -36,6 +37,8 @@ pub struct Session {
     pending_streams: HashSet<StreamId>,
     /// The negotiated protocol from server response headers.
     negotiated_protocol: Option<String>,
+    /// Send groups for this session.
+    send_groups: HashMap<SendGroupId, SendGroup>,
 }
 
 impl Display for Session {
@@ -55,7 +58,30 @@ impl Session {
             role,
             pending_streams: HashSet::default(),
             negotiated_protocol: None,
+            send_groups: HashMap::default(),
         }
+    }
+    /// Register a send group with a caller-provided ID for this session.
+    ///
+    /// Returns an error if the ID is already in use.
+    pub(crate) fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {
+        if self.send_groups.contains_key(&id) {
+            return Err(Error::InvalidState);
+        }
+        let group = SendGroup::new(id, self.id);
+        self.send_groups.insert(id, group);
+        Ok(())
+    }
+
+    /// Validate that a send group belongs to this session.
+    pub(crate) fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        self.send_groups.contains_key(&group_id)
+    }
+
+    /// Get the session ID for a send group.
+    #[expect(dead_code, reason = "pending send group routing integration")]
+    pub(crate) fn send_group_session(&self, group_id: SendGroupId) -> Option<StreamId> {
+        self.send_groups.get(&group_id).map(|g| g.session_id())
     }
 }
 
@@ -210,6 +236,14 @@ impl Protocol for Session {
 
     fn protocol(&self) -> Option<&str> {
         self.negotiated_protocol.as_deref()
+    }
+
+    fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {
+        self.register_send_group(id)
+    }
+
+    fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        self.validate_send_group(group_id)
     }
 
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
