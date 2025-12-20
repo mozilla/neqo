@@ -1386,6 +1386,17 @@ impl Http3Client {
     pub const fn webtransport_enabled(&self) -> bool {
         self.base_handler.webtransport_enabled()
     }
+
+    /// Get the negotiated protocol for a WebTransport session.
+    ///
+    /// Returns `None` if no protocol was negotiated or session doesn't exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid.
+    pub fn webtransport_session_protocol(&self, session_id: StreamId) -> Res<Option<String>> {
+        self.base_handler.webtransport_session_protocol(session_id)
+    }
 }
 
 impl EventProvider for Http3Client {

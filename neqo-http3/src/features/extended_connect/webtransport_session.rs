@@ -36,6 +36,8 @@ pub struct Session {
     pending_streams: HashSet<StreamId>,
     /// Whether the session is draining (no new streams should be created).
     draining: bool,
+    /// The negotiated protocol from server response headers.
+    negotiated_protocol: Option<String>,
 }
 
 impl Display for Session {
@@ -55,6 +57,7 @@ impl Session {
             role,
             pending_streams: HashSet::default(),
             draining: false,
+            negotiated_protocol: None,
         }
     }
 
@@ -66,6 +69,16 @@ impl Session {
     /// Check if session is draining.
     pub(crate) fn is_draining(&self) -> bool {
         self.draining
+    }
+
+    /// Set the negotiated protocol from server response headers.
+    pub(crate) fn set_protocol(&mut self, protocol: Option<String>) {
+        self.negotiated_protocol = protocol;
+    }
+
+    /// Get the negotiated protocol.
+    pub(crate) fn protocol(&self) -> Option<&str> {
+        self.negotiated_protocol.as_deref()
     }
 }
 
@@ -212,6 +225,14 @@ impl Protocol for Session {
             mem::take(&mut self.recv_streams),
             mem::take(&mut self.send_streams),
         )
+    }
+
+    fn set_protocol(&mut self, protocol: Option<String>) {
+        self.negotiated_protocol = protocol;
+    }
+
+    fn protocol(&self) -> Option<&str> {
+        self.negotiated_protocol.as_deref()
     }
 
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {

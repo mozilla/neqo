@@ -282,6 +282,30 @@ impl Session {
                         );
                         State::Done
                     } else {
+                        // Extract negotiated protocol from headers
+                        // The wt-protocol header value is a structured field string (RFC 8941)
+                        // Format: "protocol" or "protocol"; param=value
+                        // We need to extract just the unquoted protocol name
+                        let negotiated_protocol = headers
+                            .iter()
+                            .find(|h| h.name().eq_ignore_ascii_case("wt-protocol"))
+                            .and_then(|h| from_utf8(h.value()).ok())
+                            .and_then(|s| {
+                                // Split on ';' to remove parameters
+                                let main_value = s.split(';').next()?.trim();
+                                // Remove surrounding quotes
+                                if main_value.len() >= 2
+                                    && main_value.starts_with('"')
+                                    && main_value.ends_with('"') {
+                                    Some(main_value[1..main_value.len()-1].to_string())
+                                } else {
+                                    // If not quoted, use as-is (shouldn't happen per spec)
+                                    Some(main_value.to_string())
+                                }
+                            });
+
+                        self.protocol.set_protocol(negotiated_protocol);
+
                         self.events.session_start(
                             self.protocol.connect_type(),
                             self.id,
@@ -430,6 +454,10 @@ impl Stream for Rc<RefCell<Session>> {
     fn stream_type(&self) -> Http3StreamType {
         Http3StreamType::ExtendedConnect
     }
+
+    fn session_protocol(&self) -> Option<String> {
+        self.borrow().protocol.protocol().map(|s| s.to_string())
+    }
 }
 
 impl RecvStream for Rc<RefCell<Session>> {
@@ -560,6 +588,15 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
         (HashSet::default(), HashSet::default())
+    }
+
+    fn set_protocol(&mut self, _protocol: Option<String>) {
+        // Default implementation does nothing
+    }
+
+    fn protocol(&self) -> Option<&str> {
+        // Default implementation returns None
+        None
     }
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);

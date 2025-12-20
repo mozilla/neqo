@@ -1391,6 +1391,17 @@ impl Http3Connection {
             .collect()
     }
 
+    /// Get the negotiated protocol for a WebTransport session.
+    ///
+    /// Returns `None` if no protocol was negotiated or session doesn't exist.
+    pub(crate) fn webtransport_session_protocol(&self, session_id: StreamId) -> Res<Option<String>> {
+        self.send_streams
+            .get(&session_id)
+            .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
+            .map(|s| s.session_protocol())
+            .ok_or(Error::InvalidStreamId)
+    }
+
     pub(crate) fn connect_udp_close_session(
         &mut self,
         conn: &mut Connection,

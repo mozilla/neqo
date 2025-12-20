@@ -455,3 +455,19 @@ fn wt_draining_event_defined() {
     let event2 = event.clone();
     assert_eq!(event, event2);
 }
+
+#[test]
+fn wt_session_protocol_negotiation() {
+    // This test verifies that the negotiated protocol can be retrieved
+    // from a WebTransport session.
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Since we don't send a protocol header in create_wt_session,
+    // the protocol should be None
+    let protocol = wt.client.webtransport_session_protocol(session_id);
+    assert!(protocol.is_ok());
+    assert_eq!(protocol.unwrap(), None);
+}
