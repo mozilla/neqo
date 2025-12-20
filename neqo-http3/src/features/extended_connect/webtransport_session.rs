@@ -42,6 +42,8 @@ pub struct Session {
     /// wired into the GOAWAY path.
     // TODO: wire into GOAWAY path and WT_DRAIN_SESSION handling.
     draining: bool,
+    /// The negotiated protocol from server response headers.
+    negotiated_protocol: Option<String>,
 }
 
 impl Display for Session {
@@ -61,6 +63,7 @@ impl Session {
             role,
             pending_streams: HashSet::default(),
             draining: false,
+            negotiated_protocol: None,
         }
     }
 
@@ -76,6 +79,7 @@ impl Session {
     pub(crate) fn is_draining(&self) -> bool {
         self.draining
     }
+
 }
 
 impl Protocol for Session {
@@ -221,6 +225,14 @@ impl Protocol for Session {
             mem::take(&mut self.recv_streams),
             mem::take(&mut self.send_streams),
         )
+    }
+
+    fn set_protocol(&mut self, protocol: Option<String>) {
+        self.negotiated_protocol = protocol;
+    }
+
+    fn protocol(&self) -> Option<&str> {
+        self.negotiated_protocol.as_deref()
     }
 
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
