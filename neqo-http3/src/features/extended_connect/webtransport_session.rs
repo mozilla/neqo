@@ -34,6 +34,14 @@ pub struct Session {
     ///
     /// [`HashSet`] size limited by QUIC connection stream limit.
     pending_streams: HashSet<StreamId>,
+    /// Whether the session is draining (the remote signalled graceful shutdown).
+    ///
+    /// Set when a `WT_DRAIN_SESSION` capsule is received; for GOAWAY-triggered
+    /// draining the application is notified via [`WebTransportEvent::Draining`]
+    /// instead. Will also be set for GOAWAY once `WT_DRAIN_SESSION` handling is
+    /// wired into the GOAWAY path.
+    // TODO: wire into GOAWAY path and WT_DRAIN_SESSION handling.
+    draining: bool,
 }
 
 impl Display for Session {
@@ -52,7 +60,21 @@ impl Session {
             recv_streams: HashSet::default(),
             role,
             pending_streams: HashSet::default(),
+            draining: false,
         }
+    }
+
+    /// Mark session as draining (called when a `WT_DRAIN_SESSION` capsule is received).
+    // TODO: call from WT_DRAIN_SESSION capsule handler and from GOAWAY path.
+    #[expect(dead_code, reason = "pending WT_DRAIN_SESSION capsule implementation")]
+    pub(crate) fn set_draining(&mut self) {
+        self.draining = true;
+    }
+
+    /// Returns `true` if the session has been marked as draining.
+    #[expect(dead_code, reason = "pending WT_DRAIN_SESSION capsule implementation")]
+    pub(crate) fn is_draining(&self) -> bool {
+        self.draining
     }
 }
 

@@ -299,6 +299,16 @@ impl Http3ServerHandler {
         self.events.next_event()
     }
 
+    /// Queue a GOAWAY frame on the local control stream.
+    ///
+    /// Only used in tests to simulate the server initiating connection shutdown.
+    #[cfg(test)]
+    pub fn test_queue_goaway(&mut self, stream_id: StreamId) {
+        self.base_handler
+            .queue_control_frame(&HFrame::Goaway { stream_id });
+        self.needs_processing = true;
+    }
+
     /// Whether this connection has events to process or data to send.
     pub(crate) fn should_be_processed(&mut self) -> bool {
         if self.needs_processing {
