@@ -154,6 +154,10 @@ impl Session {
     /// # Errors
     ///
     /// The function can only fail if supplied headers are not valid http headers.
+    pub(crate) fn connect_type(&self) -> ExtendedConnectType {
+        self.protocol.connect_type()
+    }
+
     pub(crate) fn send_request(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()> {
         qdebug!("[{self}]: send_request {headers:?}");
         self.control_stream_send
