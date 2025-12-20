@@ -802,6 +802,48 @@ impl SecretAgent {
         CertificateInfo::new(self.fd)
     }
 
+    /// Export keying material per RFC 9846 Section 7.5.
+    ///
+    /// This can only be called after the handshake is complete.
+    /// In TLS 1.3, there is no distinction between no context and an empty
+    /// context, so context is always provided.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if handshake is not complete or export fails.
+    pub fn export_keying_material(
+        &self,
+        label: &[u8],
+        context: &[u8],
+        out_len: usize,
+    ) -> Res<Vec<u8>> {
+        if !self.state.is_connected() {
+            return Err(Error::InvalidState);
+        }
+
+        let mut out = vec![0u8; out_len];
+        let (has_context, ctx_ptr, ctx_len) = if context.is_empty() {
+            (PRBool::from(false), null(), 0)
+        } else {
+            (PRBool::from(true), context.as_ptr(), context.len())
+        };
+
+        secstatus_to_res(unsafe {
+            ssl::SSL_ExportKeyingMaterial(
+                self.fd,
+                label.as_ptr().cast(),
+                c_uint::try_from(label.len())?,
+                has_context,
+                ctx_ptr,
+                c_uint::try_from(ctx_len)?,
+                out.as_mut_ptr(),
+                c_uint::try_from(out_len)?,
+            )
+        })?;
+
+        Ok(out)
+    }
+
     /// Return any fatal alert that the TLS stack might have sent.
     #[must_use]
     pub fn alert(&self) -> Option<Alert> {

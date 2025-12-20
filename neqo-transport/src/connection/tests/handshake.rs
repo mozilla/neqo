@@ -1824,3 +1824,55 @@ fn initial_crypto_retransmit_during_handshake_pto() {
         );
     }
 }
+
+#[test]
+fn export_keying_material_basic() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let material = client
+        .export_keying_material(b"EXPORTER-WebTransport", &[], 32)
+        .expect("export should succeed after handshake");
+    assert_eq!(material.len(), 32);
+}
+
+#[test]
+fn export_keying_material_same_both_sides() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let label = b"EXPORTER-WebTransport";
+    let context = b"session-context";
+
+    let client_material = client
+        .export_keying_material(label, context, 32)
+        .expect("client export should succeed");
+    let server_material = server
+        .export_keying_material(label, context, 32)
+        .expect("server export should succeed");
+
+    assert_eq!(
+        client_material, server_material,
+        "client and server must export identical keying material"
+    );
+}
+
+#[test]
+fn export_keying_material_before_handshake() {
+    let client = default_client();
+    let result = client.export_keying_material(b"EXPORTER-WebTransport", &[], 32);
+    assert!(result.is_err());
+}
+
+#[test]
+fn export_keying_material_zero_length() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    assert!(client
+        .export_keying_material(b"EXPORTER-WebTransport", &[], 0)
+        .is_err());
+}

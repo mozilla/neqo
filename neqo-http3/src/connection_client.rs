@@ -929,6 +929,47 @@ impl Http3Client {
             .stats(&mut self.conn)
     }
 
+    /// Export WebTransport keying material per
+    /// draft-ietf-webtrans-http3-15 Section 4.8.
+    ///
+    /// Derives keying material scoped to a specific WebTransport session
+    /// by calling the TLS exporter with label `"EXPORTER-WebTransport"`
+    /// and a context struct that binds the session ID, application label,
+    /// and application context together.
+    ///
+    /// # Errors
+    ///
+    /// Returns Error::Transport if the connection is not ready, the label
+    /// or context exceed 255 bytes, or the TLS export fails.
+    pub fn webtransport_export_keying_material(
+        &self,
+        session_id: StreamId,
+        label: &[u8],
+        context: &[u8],
+        out_len: usize,
+    ) -> Res<Vec<u8>> {
+        let label_len =
+            u8::try_from(label.len()).map_err(|_| Error::InvalidInput)?;
+        let context_len =
+            u8::try_from(context.len()).map_err(|_| Error::InvalidInput)?;
+
+        let mut wt_context =
+            Vec::with_capacity(8 + 1 + label.len() + 1 + context.len());
+        wt_context.extend_from_slice(&session_id.as_u64().to_be_bytes());
+        wt_context.push(label_len);
+        wt_context.extend_from_slice(label);
+        wt_context.push(context_len);
+        wt_context.extend_from_slice(context);
+
+        self.conn
+            .export_keying_material(
+                b"EXPORTER-WebTransport",
+                &wt_context,
+                out_len,
+            )
+            .map_err(Error::Transport)
+    }
+
     /// This function combines  `process_input` and `process_output` function.
     pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,

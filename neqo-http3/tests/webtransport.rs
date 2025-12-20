@@ -497,3 +497,63 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
 
     assert_eq!(client.events().next(), None);
 }
+
+#[test]
+fn wt_export_keying_material() {
+    let (mut client, mut server) = connect();
+    let wt_session = create_wt_session(&mut client, &mut server);
+    let session_id = wt_session.stream_id();
+
+    let result = client
+        .webtransport_export_keying_material(session_id, b"my-label", b"my-context", 32)
+        .unwrap();
+    assert_eq!(result.len(), 32);
+
+    let result2 = client
+        .webtransport_export_keying_material(session_id, b"my-label", b"my-context", 32)
+        .unwrap();
+    assert_eq!(result, result2, "same inputs should produce same output");
+
+    let different_label = client
+        .webtransport_export_keying_material(session_id, b"other-label", b"my-context", 32)
+        .unwrap();
+    assert_ne!(result, different_label, "different labels should differ");
+
+    let different_context = client
+        .webtransport_export_keying_material(session_id, b"my-label", b"other-ctx", 32)
+        .unwrap();
+    assert_ne!(result, different_context, "different contexts should differ");
+
+    let different_len = client
+        .webtransport_export_keying_material(session_id, b"my-label", b"my-context", 64)
+        .unwrap();
+    assert_eq!(different_len.len(), 64);
+}
+
+#[test]
+fn wt_export_keying_material_label_too_long() {
+    let (mut client, mut server) = connect();
+    let wt_session = create_wt_session(&mut client, &mut server);
+    let session_id = wt_session.stream_id();
+
+    let long_label = vec![0u8; 256];
+    assert!(client
+        .webtransport_export_keying_material(session_id, &long_label, b"ctx", 32)
+        .is_err());
+
+    let long_context = vec![0u8; 256];
+    assert!(client
+        .webtransport_export_keying_material(session_id, b"label", &long_context, 32)
+        .is_err());
+}
+
+#[test]
+fn wt_export_keying_material_zero_length() {
+    let (mut client, mut server) = connect();
+    let wt_session = create_wt_session(&mut client, &mut server);
+    let session_id = wt_session.stream_id();
+
+    assert!(client
+        .webtransport_export_keying_material(session_id, b"my-label", b"my-context", 0)
+        .is_err());
+}

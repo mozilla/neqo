@@ -840,7 +840,7 @@ fn export_keying_material_basic() {
 
     let label = b"EXPORTER-test";
     let material = client
-        .export_keying_material(label, &[], 32)
+    	.export_keying_material(label, None, 32)
         .expect("should export keying material");
     assert_eq!(material.len(), 32);
 }
