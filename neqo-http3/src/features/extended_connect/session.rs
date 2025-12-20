@@ -296,6 +296,8 @@ impl Session {
                         );
                         State::Done
                     } else {
+                        self.protocol.process_response_headers(&headers);
+
                         self.events.session_start(
                             self.protocol.connect_type(),
                             self.id,
@@ -459,6 +461,10 @@ impl Stream for Rc<RefCell<Session>> {
     fn stream_type(&self) -> Http3StreamType {
         Http3StreamType::ExtendedConnect
     }
+
+    fn session_protocol(&self) -> Option<String> {
+        self.borrow().protocol.protocol().map(ToString::to_string)
+    }
 }
 
 impl RecvStream for Rc<RefCell<Session>> {
@@ -589,6 +595,14 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
         (HashSet::default(), HashSet::default())
+    }
+
+    fn process_response_headers(&mut self, _headers: &[Header]) {
+        debug_assert!(false, "extended connect protocol does not support response headers");
+    }
+
+    fn protocol(&self) -> Option<&str> {
+        None
     }
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);
