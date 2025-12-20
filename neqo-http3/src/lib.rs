@@ -628,7 +628,8 @@ trait SendStream: Stream {
         Err(Error::InvalidStreamId)
     }
 
-    /// This function is only implemented by `WebTransportSendStream`.
+    /// This function is only implemented by
+    /// [`WebTransportSendStream`](crate::features::extended_connect::webtransport_streams::WebTransportSendStream).
     fn stats(&mut self, _conn: &mut Connection) -> Res<send_stream::Stats> {
         Err(Error::Unavailable)
     }

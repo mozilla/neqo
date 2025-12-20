@@ -20,7 +20,7 @@ use crate::{
     CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
     SendStream, Stream,
     features::extended_connect::{
-        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
+        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers, stats::SessionStats,
     },
     frames::HFrame,
     priority::PriorityHandler,
@@ -426,11 +426,13 @@ impl Session {
         dgram_data.encode(buf);
 
         conn.send_datagram(dgram_data.into(), id)?;
+        self.protocol.record_datagram_sent();
+        self.protocol.record_bytes_sent(buf.len() as u64);
         qtrace!("[{self}] sent datagram via QUIC datagram");
         Ok(())
     }
 
-    pub(crate) fn datagram(&self, datagram: Bytes) {
+    pub(crate) fn datagram(&mut self, datagram: Bytes) {
         if self.state != State::Active {
             qdebug!("[{self}]: received datagram on {:?} session.", self.state);
             return;
@@ -439,8 +441,11 @@ impl Session {
         // dgram_context_id returns the payload after stripping any context ID
         match self.protocol.dgram_context_id(datagram) {
             Ok(slice) => {
+                let len = slice.len() as u64;
                 self.events
                     .new_datagram(self.id, slice, self.protocol.connect_type());
+                self.protocol.record_datagram_received();
+                self.protocol.record_bytes_received(len);
             }
             Err(e) => {
                 qdebug!("[{self}]: received datagram with invalid context identifier: {e}");
@@ -454,6 +459,15 @@ impl Session {
 
     pub(crate) fn local_stream_count(&self, stream_type: neqo_transport::StreamType) -> u64 {
         self.protocol.local_stream_count(stream_type)
+    }
+
+    pub(crate) fn record_stream_opened(&mut self, local: bool) {
+        self.protocol.record_stream_opened(local);
+    }
+
+    #[must_use]
+    pub(crate) fn stats(&self) -> Option<SessionStats> {
+        self.protocol.stats()
     }
 
     fn has_data_to_send(&self) -> bool {
@@ -629,6 +643,20 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn local_stream_count(&self, _stream_type: neqo_transport::StreamType) -> u64 {
         0
+    }
+
+    fn record_bytes_sent(&mut self, _bytes: u64) {}
+
+    fn record_bytes_received(&mut self, _bytes: u64) {}
+
+    fn record_datagram_sent(&mut self) {}
+
+    fn record_datagram_received(&mut self) {}
+
+    fn record_stream_opened(&mut self, _local: bool) {}
+
+    fn stats(&self) -> Option<SessionStats> {
+        None
     }
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);
