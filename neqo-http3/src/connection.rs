@@ -1441,6 +1441,21 @@ impl Http3Connection {
             .ok_or(Error::InvalidStreamId)
     }
 
+    /// Get statistics for a WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_session_stats(
+        &self,
+        session_id: StreamId,
+    ) -> Res<extended_connect::stats::WebTransportSessionStats> {
+        self.recv_streams
+            .get(&session_id)
+            .and_then(|s| s.extended_connect_session())
+            .and_then(|s| s.borrow().stats())
+            .ok_or(Error::InvalidStreamId)
+    }
+
     pub(crate) fn connect_udp_close_session(
         &mut self,
         conn: &mut Connection,
@@ -1599,6 +1614,9 @@ impl Http3Connection {
         send_group: Option<SendGroupId>,
     ) -> Res<()> {
         webtransport_session.borrow_mut().add_stream(stream_id)?;
+        webtransport_session
+            .borrow_mut()
+            .record_stream_opened(local);
         if stream_id.stream_type() == StreamType::UniDi {
             if local {
                 self.send_streams.insert(

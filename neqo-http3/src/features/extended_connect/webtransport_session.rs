@@ -18,6 +18,7 @@ use crate::{
     Error, Http3StreamInfo, Http3StreamType, RecvStream, Res,
     features::extended_connect::{
         send_group::{SendGroup, SendGroupId},
+        stats::WebTransportSessionStats,
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
         session::{DgramContextIdError, Protocol, State},
     },
@@ -41,6 +42,8 @@ pub struct Session {
     negotiated_protocol: Option<String>,
     /// Send groups for this session.
     send_groups: HashMap<SendGroupId, SendGroup>,
+    /// Session-level statistics.
+    stats: WebTransportSessionStats,
 }
 
 impl Display for Session {
@@ -62,6 +65,7 @@ impl Session {
             draining: false,
             negotiated_protocol: None,
             send_groups: HashMap::default(),
+            stats: WebTransportSessionStats::new(),
         }
     }
 
@@ -101,6 +105,37 @@ impl Session {
     /// Get the session ID for a send group.
     pub(crate) fn send_group_session(&self, group_id: SendGroupId) -> Option<StreamId> {
         self.send_groups.get(&group_id).map(|g| g.session_id())
+    }
+
+    pub(crate) fn record_bytes_sent(&mut self, bytes: u64) {
+        self.stats.bytes_sent += bytes;
+    }
+
+    pub(crate) fn record_bytes_received(&mut self, bytes: u64) {
+        self.stats.bytes_received += bytes;
+    }
+
+    pub(crate) fn record_datagram_sent(&mut self) {
+        self.stats.datagrams_sent += 1;
+    }
+
+    pub(crate) fn record_datagram_received(&mut self) {
+        self.stats.datagrams_received += 1;
+    }
+
+    pub(crate) fn record_stream_opened(&mut self, local: bool) {
+        if local {
+            self.stats.streams_opened_local += 1;
+        } else {
+            self.stats.streams_opened_remote += 1;
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn stats(&self) -> WebTransportSessionStats {
+        let mut stats = self.stats.clone();
+        stats.timestamp = Some(Instant::now());
+        stats
     }
 }
 
@@ -263,6 +298,30 @@ impl Protocol for Session {
 
     fn validate_send_group(&self, group_id: SendGroupId) -> bool {
         self.validate_send_group(group_id)
+    }
+
+    fn record_bytes_sent(&mut self, bytes: u64) {
+        self.record_bytes_sent(bytes);
+    }
+
+    fn record_bytes_received(&mut self, bytes: u64) {
+        self.record_bytes_received(bytes);
+    }
+
+    fn record_datagram_sent(&mut self) {
+        self.record_datagram_sent();
+    }
+
+    fn record_datagram_received(&mut self) {
+        self.record_datagram_received();
+    }
+
+    fn record_stream_opened(&mut self, local: bool) {
+        self.record_stream_opened(local);
+    }
+
+    fn stats(&self) -> Option<WebTransportSessionStats> {
+        Some(self.stats())
     }
 
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
