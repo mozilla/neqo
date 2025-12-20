@@ -20,6 +20,7 @@ use crate::{
     features::extended_connect::{
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
         session::{DgramContextIdError, Protocol, State},
+        stats::SessionStats,
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
 };
@@ -39,6 +40,8 @@ pub struct Session {
     negotiated_protocol: Option<String>,
     /// Send groups registered for this session.
     send_groups: HashSet<SendGroupId>,
+    /// Session-level statistics.
+    stats: SessionStats,
 }
 
 impl Display for Session {
@@ -59,6 +62,7 @@ impl Session {
             pending_streams: HashSet::default(),
             negotiated_protocol: None,
             send_groups: HashSet::default(),
+            stats: SessionStats::new(),
         }
     }
     /// Register a send group with a caller-provided ID for this session.
@@ -74,6 +78,41 @@ impl Session {
     /// Validate that a send group belongs to this session.
     pub(crate) fn validate_send_group(&self, group_id: SendGroupId) -> bool {
         self.send_groups.contains(&group_id)
+    }
+
+    pub(crate) const fn record_bytes_sent(&mut self, bytes: u64) {
+        self.stats.bytes_sent += bytes;
+    }
+
+    pub(crate) const fn record_bytes_received(&mut self, bytes: u64) {
+        self.stats.bytes_received += bytes;
+    }
+
+    pub(crate) const fn record_datagram_sent(&mut self) {
+        self.stats.datagrams_sent += 1;
+    }
+
+    pub(crate) const fn record_datagram_received(&mut self) {
+        self.stats.datagrams_received += 1;
+    }
+
+    pub(crate) const fn record_stream_opened(&mut self, local: bool) {
+        if local {
+            self.stats.streams_opened_local += 1;
+        } else {
+            self.stats.streams_opened_remote += 1;
+        }
+    }
+
+    #[must_use]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "stats snapshot needs wall-clock time"
+    )]
+    pub(crate) fn stats(&self) -> SessionStats {
+        let mut stats = self.stats.clone();
+        stats.timestamp = Some(Instant::now());
+        stats
     }
 }
 
@@ -246,6 +285,30 @@ impl Protocol for Session {
 
     fn validate_send_group(&self, group_id: SendGroupId) -> bool {
         Self::validate_send_group(self, group_id)
+    }
+
+    fn record_bytes_sent(&mut self, bytes: u64) {
+        Self::record_bytes_sent(self, bytes);
+    }
+
+    fn record_bytes_received(&mut self, bytes: u64) {
+        Self::record_bytes_received(self, bytes);
+    }
+
+    fn record_datagram_sent(&mut self) {
+        Self::record_datagram_sent(self);
+    }
+
+    fn record_datagram_received(&mut self) {
+        Self::record_datagram_received(self);
+    }
+
+    fn record_stream_opened(&mut self, local: bool) {
+        Self::record_stream_opened(self, local);
+    }
+
+    fn stats(&self) -> Option<SessionStats> {
+        Some(Self::stats(self))
     }
 
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
