@@ -344,6 +344,21 @@ impl Http3Server {
     pub fn next_event(&self) -> Option<Http3ServerEvent> {
         self.events.next_event()
     }
+
+    /// Queue a GOAWAY frame to be sent to all connected clients.
+    ///
+    /// `stream_id` is the first stream ID that was **not** processed.
+    /// Only used in tests.
+    #[cfg(test)]
+    pub fn test_send_goaway(&self, stream_id: neqo_transport::StreamId) {
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to iterate over handlers in undefined order for test goaway"
+        )]
+        for handler in self.http3_handlers.values() {
+            handler.borrow_mut().test_queue_goaway(stream_id);
+        }
+    }
 }
 fn prepare_data(
     stream_info: Http3StreamInfo,
