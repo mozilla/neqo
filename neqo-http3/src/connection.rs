@@ -1421,6 +1421,28 @@ impl Http3Connection {
         Ok(())
     }
 
+    fn get_extended_connect_session(
+        &self,
+        session_id: StreamId,
+    ) -> Res<Rc<RefCell<extended_connect::session::Session>>> {
+        self.recv_streams
+            .get(&session_id)
+            .ok_or(Error::InvalidStreamId)?
+            .extended_connect_session()
+            .ok_or(Error::InvalidStreamId)
+    }
+
+    pub(crate) fn validate_extended_connect_session(
+        &self,
+        session_id: StreamId,
+    ) -> Res<Rc<RefCell<extended_connect::session::Session>>> {
+        let wt = self.get_extended_connect_session(session_id)?;
+        if !wt.borrow().is_active() {
+            return Err(Error::InvalidStreamId);
+        }
+        Ok(wt)
+    }
+
     pub(crate) fn webtransport_create_stream_local(
         &mut self,
         conn: &mut Connection,
@@ -1431,15 +1453,7 @@ impl Http3Connection {
     ) -> Res<StreamId> {
         qtrace!("Create new WebTransport stream session={session_id} type={stream_type:?}");
 
-        let wt = self
-            .recv_streams
-            .get(&session_id)
-            .ok_or(Error::InvalidStreamId)?
-            .extended_connect_session()
-            .ok_or(Error::InvalidStreamId)?;
-        if !wt.borrow().is_active() {
-            return Err(Error::InvalidStreamId);
-        }
+        let wt = self.validate_extended_connect_session(session_id)?;
 
         let stream_id = conn
             .stream_create(stream_type)
@@ -1467,12 +1481,7 @@ impl Http3Connection {
     ) -> Res<()> {
         qtrace!("Create new WebTransport stream session={session_id} stream_id={stream_id}");
 
-        let wt = self
-            .recv_streams
-            .get(&session_id)
-            .ok_or(Error::InvalidStreamId)?
-            .extended_connect_session()
-            .ok_or(Error::InvalidStreamId)?;
+        let wt = self.get_extended_connect_session(session_id)?;
 
         self.webtransport_create_stream_internal(
             wt,
@@ -1540,7 +1549,7 @@ impl Http3Connection {
     }
 
     pub fn webtransport_send_datagram<I: Into<DatagramTracking>>(
-        &mut self,
+        &self,
         session_id: StreamId,
         conn: &mut Connection,
         buf: &[u8],
@@ -1551,7 +1560,7 @@ impl Http3Connection {
     }
 
     pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
-        &mut self,
+        &self,
         session_id: StreamId,
         conn: &mut Connection,
         buf: &[u8],
@@ -1562,18 +1571,14 @@ impl Http3Connection {
     }
 
     fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
-        &mut self,
+        &self,
         session_id: StreamId,
         conn: &mut Connection,
         buf: &[u8],
         id: I,
         now: Instant,
     ) -> Res<()> {
-        self.recv_streams
-            .get_mut(&session_id)
-            .ok_or(Error::InvalidStreamId)?
-            .extended_connect_session()
-            .ok_or(Error::InvalidStreamId)?
+        self.validate_extended_connect_session(session_id)?
             .borrow_mut()
             .send_datagram(conn, buf, id, now)
     }
