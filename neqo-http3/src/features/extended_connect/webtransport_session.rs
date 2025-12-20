@@ -34,6 +34,8 @@ pub struct Session {
     ///
     /// [`HashSet`] size limited by QUIC connection stream limit.
     pending_streams: HashSet<StreamId>,
+    /// The negotiated protocol from server response headers.
+    negotiated_protocol: Option<String>,
 }
 
 impl Display for Session {
@@ -52,6 +54,7 @@ impl Session {
             recv_streams: HashSet::default(),
             role,
             pending_streams: HashSet::default(),
+            negotiated_protocol: None,
         }
     }
 }
@@ -199,6 +202,14 @@ impl Protocol for Session {
             mem::take(&mut self.recv_streams),
             mem::take(&mut self.send_streams),
         )
+    }
+
+    fn set_protocol(&mut self, protocol: String) {
+        self.negotiated_protocol = Some(protocol);
+    }
+
+    fn protocol(&self) -> Option<&str> {
+        self.negotiated_protocol.as_deref()
     }
 
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
