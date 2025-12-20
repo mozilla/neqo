@@ -76,6 +76,8 @@ pub enum Error {
     InvalidAlpn,
     #[error("Invalid epoch")]
     InvalidEpoch,
+    #[error("Invalid state for this operation")]
+    InvalidState,
     #[error("Invalid certificate compression ID")]
     InvalidCertificateCompressionID,
     #[error("Mixed handshake method")]
