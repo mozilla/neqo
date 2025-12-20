@@ -52,7 +52,7 @@ use crate::{
     stateless_reset::Token as Srt,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
-    streams::{SendOrder, Streams},
+    streams::{SendGroupId, SendOrder, Streams},
     tparams::{
         self,
         TransportParameterId::{
