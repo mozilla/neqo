@@ -1397,6 +1397,22 @@ impl Http3Client {
     pub const fn webtransport_enabled(&self) -> bool {
         self.base_handler.webtransport_enabled()
     }
+
+    /// Get the negotiated subprotocol for a WebTransport session.
+    ///
+    /// Returns the raw protocol value from the server's `wt-protocol` response header, or `None`
+    /// if the server did not include a `wt-protocol` header (or its value was malformed).
+    ///
+    /// **Note:** this returns the server's raw value without validating it against the list of
+    /// protocols offered by the client.  Callers are responsible for checking that the returned
+    /// protocol was among those originally offered.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid.
+    pub fn webtransport_session_protocol(&self, session_id: StreamId) -> Res<Option<String>> {
+        self.base_handler.webtransport_session_protocol(session_id)
+    }
 }
 
 impl EventProvider for Http3Client {

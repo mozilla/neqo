@@ -514,3 +514,50 @@ fn wt_goaway_draining_rejected_session() {
     });
     assert!(has_closed, "expected SessionClosed event for rejected session");
 }
+
+#[test]
+fn wt_session_protocol_none_when_no_header() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    assert_eq!(
+        wt.client.webtransport_session_protocol(session_id).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn wt_session_protocol_quoted_value() {
+    let mut wt = WtTest::new();
+    let (session_id, _) = wt.negotiate_wt_session(&SessionAcceptAction::AcceptWith(vec![
+        Header::new("wt-protocol", r#""myproto""#),
+    ]));
+    assert_eq!(
+        wt.client.webtransport_session_protocol(session_id).unwrap(),
+        Some("myproto".to_string())
+    );
+}
+
+#[test]
+fn wt_session_protocol_parameters_stripped() {
+    let mut wt = WtTest::new();
+    let (session_id, _) = wt.negotiate_wt_session(&SessionAcceptAction::AcceptWith(vec![
+        Header::new("wt-protocol", r#""myproto"; foo=bar; baz=2"#),
+    ]));
+    assert_eq!(
+        wt.client.webtransport_session_protocol(session_id).unwrap(),
+        Some("myproto".to_string())
+    );
+}
+
+#[test]
+fn wt_session_protocol_malformed_unquoted_rejected() {
+    let mut wt = WtTest::new();
+    let (session_id, _) = wt.negotiate_wt_session(&SessionAcceptAction::AcceptWith(vec![
+        Header::new("wt-protocol", "myproto"),
+    ]));
+    assert_eq!(
+        wt.client.webtransport_session_protocol(session_id).unwrap(),
+        None
+    );
+}
