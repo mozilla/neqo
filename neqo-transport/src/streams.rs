@@ -121,7 +121,18 @@ impl Streams {
             } => {
                 stats.reset_stream += 1;
                 if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
-                    rs.reset(*application_error_code, *final_size)?;
+                    rs.reset(*application_error_code, *final_size, None)?;
+                }
+            }
+            Frame::ResetStreamAt {
+                stream_id,
+                application_error_code,
+                final_size,
+                reliable_size,
+            } => {
+                stats.reset_stream_at += 1;
+                if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
+                    rs.reset(*application_error_code, *final_size, Some(*reliable_size))?;
                 }
             }
             Frame::StopSending {
