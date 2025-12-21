@@ -18,9 +18,8 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as EventProvider, hex, hex_snip_middle, hex_with_len, hrtime, qdebug, qerror,
-    qinfo, qlog::Qlog, qtrace, qwarn, Buffer, Datagram, DatagramBatch, Decoder, Ecn, Encoder, Role,
-    Tos,
+    datagram, event::Provider as EventProvider, hex, hex_snip_middle, hex_with_len, hrtime, qdebug,
+    qerror, qinfo, qlog::Qlog, qtrace, qwarn, Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos,
 };
 use neqo_crypto::{
     agent::{CertificateCompressor, CertificateInfo},
@@ -121,7 +120,7 @@ pub enum OutputBatch {
     /// Connection requires no action.
     None,
     /// Connection requires the datagram batch be sent.
-    DatagramBatch(DatagramBatch),
+    DatagramBatch(datagram::Batch),
     /// Connection requires `process_input()` be called when the `Duration`
     /// elapses.
     Callback(Duration),
@@ -131,16 +130,16 @@ impl From<Output> for OutputBatch {
     fn from(value: Output) -> Self {
         match value {
             Output::None => Self::None,
-            Output::Datagram(dg) => Self::DatagramBatch(DatagramBatch::from(dg)),
+            Output::Datagram(dg) => Self::DatagramBatch(datagram::Batch::from(dg)),
             Output::Callback(t) => Self::Callback(t),
         }
     }
 }
 
 impl OutputBatch {
-    /// Convert into an [`Option<DatagramBatch>`].
+    /// Convert into an [`Option<datagram::Batch>`].
     #[must_use]
-    pub fn dgram(self) -> Option<DatagramBatch> {
+    pub fn dgram(self) -> Option<datagram::Batch> {
         match self {
             Self::DatagramBatch(dg) => Some(dg),
             _ => None,
@@ -186,7 +185,7 @@ impl From<Option<Datagram>> for Output {
 /// Used by inner functions like `Connection::output`.
 enum SendOptionBatch {
     /// Yes, please send this datagram.
-    Yes(DatagramBatch),
+    Yes(datagram::Batch),
     /// Don't send.  If this was blocked on the pacer (the arg is true).
     No(bool),
 }
