@@ -1157,8 +1157,12 @@ impl Http3Client {
                 ConnectionEvent::Datagram(dgram) => {
                     self.base_handler.handle_datagram(dgram);
                 }
+                ConnectionEvent::OutgoingDatagramOutcome { outcome, .. } => {
+                    // TODO: Move into events?
+                    self.events
+                        .insert(Http3ClientEvent::OutgoingDatagramOutcome { outcome });
+                }
                 ConnectionEvent::SendStreamComplete { .. }
-                | ConnectionEvent::OutgoingDatagramOutcome { .. }
                 | ConnectionEvent::IncomingDatagramDropped => {}
             }
         }
