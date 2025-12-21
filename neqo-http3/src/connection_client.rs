@@ -1158,8 +1158,7 @@ impl Http3Client {
                     self.base_handler.handle_datagram(dgram);
                 }
                 ConnectionEvent::SendStreamComplete { .. }
-                | ConnectionEvent::OutgoingDatagramOutcome { .. }
-                | ConnectionEvent::IncomingDatagramDropped => {}
+                | ConnectionEvent::OutgoingDatagramOutcome { .. } => {}
             }
         }
         Ok(())
