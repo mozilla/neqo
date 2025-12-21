@@ -23,7 +23,7 @@ use std::{
 
 use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
-use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
+use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority, WebTransportEvent, features::extended_connect::session};
 use neqo_transport::{
     AppError, CloseReason, Connection, EmptyConnectionIdGenerator, Error as TransportError,
     OutputBatch, RandomConnectionIdGenerator, StreamId,
@@ -96,6 +96,7 @@ pub fn create_client(
             .max_table_size_encoder(args.shared.max_table_size_encoder)
             .max_table_size_decoder(args.shared.max_table_size_decoder)
             .max_blocked_streams(args.shared.max_blocked_streams)
+            .webtransport(true)
             .max_concurrent_push_streams(args.max_concurrent_push_streams),
     );
 
@@ -237,8 +238,8 @@ impl super::Handler for Handler {
                 }
                 Http3ClientEvent::StateChange(Http3State::Connected)
                 | Http3ClientEvent::RequestsCreatable => {
-                    qinfo!("{event:?}");
-                    self.url_handler.process_urls(client);
+                    client.webtransport_create_session(Instant::now(), ("https", "https://fb.mvfst.net:8443", "/webtransport/devious-baton"), &[]);
+                    // self.url_handler.process_urls(client);
                 }
                 Http3ClientEvent::ZeroRttRejected => {
                     qinfo!("{event:?}");
@@ -247,13 +248,19 @@ impl super::Handler for Handler {
                     self.url_handler.process_urls(client);
                 }
                 Http3ClientEvent::ResumptionToken(t) => self.token = Some(t),
+                Http3ClientEvent::WebTransport(WebTransportEvent::Negotiated(negotiated)) => assert!(negotiated),
+                Http3ClientEvent::WebTransport(WebTransportEvent::NewSession { status, ..}) => assert_eq!(status, 200),
+                Http3ClientEvent::WebTransport(WebTransportEvent::NewStream { stream_id, session_id }) => {
+                    assert!(!stream_id.is_bidi());
+                }
+                Http3ClientEvent::WebTransport(e) => panic!("{e:?}"),
                 _ => {
                     qwarn!("Unhandled event {event:?}");
                 }
             }
         }
 
-        Ok(self.url_handler.done())
+        Ok(false)
     }
 
     fn take_token(&mut self) -> Option<ResumptionToken> {
