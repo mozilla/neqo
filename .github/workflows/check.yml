@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025, windows-11-arm]
         rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
         type: [debug]
         # Include some dynamically-linked release builds, to check that that works on all platforms.
@@ -54,10 +54,16 @@ jobs:
           - os: ubuntu-24.04
             rust-toolchain: stable
             type: release
+          - os: ubuntu-24.04-arm
+            rust-toolchain: stable
+            type: release
           - os: macos-15
             rust-toolchain: stable
             type: release
           - os: windows-2025
+            rust-toolchain: stable
+            type: release
+          - os: windows-11-arm
             rust-toolchain: stable
             type: release
           # TODO: Remove once Neqo's MSRV is increased to 1.82.0. NSS build
