@@ -1442,7 +1442,10 @@ impl Http3Connection {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::stats::SessionStats> {
+        // Snapshot the session's stats before it is torn down so the caller can read the
+        // final values.
+        let stats = self.webtransport_session_stats(session_id)?;
         let send_stream = self
             .send_streams
             .get_mut(&session_id)
@@ -1455,7 +1458,7 @@ impl Http3Connection {
         } else if send_stream.has_data_to_send() {
             self.streams_with_pending_data.insert(session_id);
         }
-        Ok(())
+        Ok(stats)
     }
 
     fn get_extended_connect_session(
