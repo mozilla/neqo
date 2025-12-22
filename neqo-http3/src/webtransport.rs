@@ -166,7 +166,7 @@ pub trait ClientSession {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<extended_connect::stats::SessionStats>;
 
     /// Create a `WebTransport` stream.
     ///
@@ -307,7 +307,7 @@ impl ClientSession for Http3Client {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::stats::SessionStats> {
         let (conn, handler) = self.connection_and_handler();
         handler.webtransport_close_session(conn, session_id, error, message, now)
     }
@@ -410,7 +410,7 @@ trait Handler {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<extended_connect::stats::SessionStats>;
 
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &self,
@@ -474,7 +474,7 @@ impl Handler for Http3Connection {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::stats::SessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
         self.extended_connect_close_session(conn, session_id, error, message, now)
     }
@@ -508,7 +508,7 @@ pub(crate) trait ServerHandler {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<extended_connect::stats::SessionStats>;
 
     fn webtransport_create_stream(
         &mut self,
@@ -548,7 +548,7 @@ impl ServerHandler for Http3ServerHandler {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::stats::SessionStats> {
         self.mark_needs_processing();
         self.base_handler_mut()
             .webtransport_close_session(conn, session_id, error, message, now)
@@ -651,6 +651,7 @@ impl ServerSession {
                 message,
                 now,
             )
+            .map(|_| ())
     }
 
     #[must_use]
