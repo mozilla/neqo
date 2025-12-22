@@ -6,7 +6,7 @@
 
 use std::cmp::min;
 
-use neqo_common::qwarn;
+use neqo_common::qdebug;
 use neqo_qpack as qpack;
 use neqo_transport::ConnectionParameters;
 
@@ -146,8 +146,7 @@ impl Http3Parameters {
     #[must_use]
     pub fn get_http3_datagram(&self) -> bool {
         if self.http3_datagram && self.conn_params.get_datagram_size() == 0 {
-            qwarn!("HTTP/3 setting SETTINGS_HTTP3_DATAGRAM is enabled but QUIC transport parameter max_datagram_frame_size is 0.");
-            debug_assert!(false);
+            qdebug!("HTTP/3 setting SETTINGS_H3_DATAGRAM is enabled but QUIC transport parameter max_datagram_frame_size is 0. Datagrams will be sent via HTTP DATAGRAM Capsules.");
         }
         self.http3_datagram
     }
@@ -161,9 +160,7 @@ mod tests {
     use crate::Http3Parameters;
 
     #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "assertion failed: false")]
-    fn get_http3_datagram_debug_panic_on_mismatch() {
+    fn http3_datagram_with_capsules_only() {
         let params = Http3Parameters::default()
             .connection_parameters(ConnectionParameters::default().datagram_size(0))
             .http3_datagram(true);
