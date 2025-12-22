@@ -133,8 +133,6 @@ impl Session {
         stats.timestamp = Some(Instant::now());
         stats
     }
-
-
 }
 
 impl Protocol for Session {
