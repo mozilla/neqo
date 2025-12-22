@@ -1387,9 +1387,13 @@ impl Http3Connection {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::stats::WebTransportSessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
-        self.extended_connect_close_session(conn, session_id, error, message, now)
+        // Capture stats BEFORE closing the session
+        let stats = self.webtransport_session_stats(session_id)?;
+        // Now close the session
+        self.extended_connect_close_session(conn, session_id, error, message, now)?;
+        Ok(stats)
     }
 
     /// Get all WebTransport session stream IDs.
