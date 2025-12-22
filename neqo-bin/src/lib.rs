@@ -14,8 +14,8 @@ use std::{
 
 use clap::{builder::TypedValueParser as _, Parser};
 use neqo_transport::{
-    tparams::PreferredAddress, CongestionControlAlgorithm, ConnectionParameters, StreamType,
-    Version, DEFAULT_INITIAL_RTT,
+    tparams::PreferredAddress, CongestionControlAlgorithm, ConnectionParameters,
+    SlowStartAlgorithm, StreamType, Version, DEFAULT_INITIAL_RTT,
 };
 use strum::VariantNames as _;
 use thiserror::Error;
@@ -126,8 +126,14 @@ pub struct QuicParameters {
     #[arg(long = "cc", default_value = "cubic",
         value_parser = clap::builder::PossibleValuesParser::new(CongestionControlAlgorithm::VARIANTS)
             .map(|s| s.parse::<CongestionControlAlgorithm>().unwrap()))]
-    /// The congestion controller to use.
-    pub congestion_control: CongestionControlAlgorithm,
+    /// The congestion control algorithm to use.
+    pub cc_algorithm: CongestionControlAlgorithm,
+
+    #[arg(long = "ss", default_value = "classic",
+        value_parser = clap::builder::PossibleValuesParser::new(SlowStartAlgorithm::VARIANTS)
+            .map(|s| s.parse::<SlowStartAlgorithm>().unwrap()))]
+    /// The slow start algorithm to use.
+    pub ss_algorithm: SlowStartAlgorithm,
 
     #[arg(long = "no-pacing")]
     /// Whether to disable pacing.
@@ -160,7 +166,8 @@ impl Default for QuicParameters {
             idle_timeout: 30,
             initial_rtt_ms: u64::try_from(DEFAULT_INITIAL_RTT.as_millis())
                 .expect("this value will always be less than u64::MAX"),
-            congestion_control: CongestionControlAlgorithm::Cubic,
+            cc_algorithm: CongestionControlAlgorithm::Cubic,
+            ss_algorithm: SlowStartAlgorithm::Classic,
             no_pacing: false,
             no_pmtud: false,
             preferred_address_v4: None,
@@ -237,7 +244,8 @@ impl QuicParameters {
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .idle_timeout(Duration::from_secs(self.idle_timeout))
             .initial_rtt(Duration::from_millis(self.initial_rtt_ms))
-            .cc_algorithm(self.congestion_control)
+            .cc_algorithm(self.cc_algorithm)
+            .ss_algorithm(self.ss_algorithm)
             .pacing(!self.no_pacing)
             .pmtud(!self.no_pmtud)
             .sni_slicing(!self.no_sni_slicing);
