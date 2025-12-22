@@ -19,6 +19,7 @@ use crate::{Pmtud, recovery::sent, rtt::RttEstimate, stats::CongestionControlSta
 mod classic_cc;
 mod classic_slow_start;
 mod cubic;
+mod hystart;
 mod new_reno;
 
 #[cfg(test)]
@@ -26,6 +27,7 @@ pub use classic_cc::CWND_INITIAL_PKTS;
 pub use classic_cc::ClassicCongestionControl;
 pub use classic_slow_start::ClassicSlowStart;
 pub use cubic::Cubic;
+pub use hystart::HyStart;
 pub use new_reno::NewReno;
 
 #[derive(Clone, Copy, PartialEq, Eq, Enum, Debug)]
@@ -105,6 +107,16 @@ pub enum CongestionControlAlgorithm {
     #[strum(serialize = "cubic")]
     #[default]
     Cubic,
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
+#[strum(ascii_case_insensitive)]
+pub enum SlowStartAlgorithm {
+    #[strum(serialize = "classic")]
+    #[default]
+    Classic,
+    #[strum(serialize = "hystart")]
+    HyStart,
 }
 
 #[cfg(test)]

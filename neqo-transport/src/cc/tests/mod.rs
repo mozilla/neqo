@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use super::CongestionControlAlgorithm;
+use super::{CongestionControlAlgorithm, SlowStartAlgorithm};
 use crate::{
     cc::{classic_cc::ClassicCongestionControl, cubic::Cubic, new_reno::NewReno, ClassicSlowStart},
     Pmtud,
@@ -26,6 +26,13 @@ pub const RTT: Duration = Duration::from_millis(100);
 fn congestion_control_algorithm_from_str() {
     assert_eq!("cubic".parse(), Ok(CongestionControlAlgorithm::Cubic));
     assert_eq!("reno".parse(), Ok(CongestionControlAlgorithm::NewReno));
+    assert!("invalid".parse::<CongestionControlAlgorithm>().is_err());
+}
+
+#[test]
+fn slow_start_algorithm_from_str() {
+    assert_eq!("classic".parse(), Ok(SlowStartAlgorithm::Classic));
+    assert_eq!("hystart".parse(), Ok(SlowStartAlgorithm::HyStart));
     assert!("invalid".parse::<CongestionControlAlgorithm>().is_err());
 }
 
