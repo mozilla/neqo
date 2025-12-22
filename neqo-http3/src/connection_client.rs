@@ -780,7 +780,7 @@ impl Http3Client {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<crate::features::extended_connect::stats::SessionStats> {
         self.base_handler.webtransport_close_session(
             &mut self.conn,
             session_id,

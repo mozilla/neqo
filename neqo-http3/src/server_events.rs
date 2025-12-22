@@ -301,6 +301,7 @@ impl WebTransportRequest {
                 message,
                 now,
             )
+            .map(|_| ())
     }
 
     #[must_use]

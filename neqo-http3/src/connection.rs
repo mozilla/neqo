@@ -1431,9 +1431,11 @@ impl Http3Connection {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::stats::SessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
-        self.extended_connect_close_session(conn, session_id, error, message, now)
+        let stats = self.webtransport_session_stats(session_id)?;
+        self.extended_connect_close_session(conn, session_id, error, message, now)?;
+        Ok(stats)
     }
 
     /// Invoked when GOAWAY is received. It flags all open WebTransport
