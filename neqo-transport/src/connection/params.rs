@@ -23,7 +23,7 @@ use crate::{
     },
     tracking::DEFAULT_LOCAL_ACK_DELAY,
     version::{self, Version},
-    CongestionControlAlgorithm, Res, DEFAULT_INITIAL_RTT,
+    CongestionControlAlgorithm, Res, SlowStartAlgorithm, DEFAULT_INITIAL_RTT,
 };
 
 /// Maximum number of bidirectional streams that the remote can open.
@@ -107,6 +107,7 @@ pub enum PreferredAddressConfig {
 pub struct ConnectionParameters {
     versions: version::Config,
     cc_algorithm: CongestionControlAlgorithm,
+    ss_algorithm: SlowStartAlgorithm,
     /// Initial connection-level flow control limit.
     max_data: u64,
     /// Initial flow control limit for receiving data on bidirectional streams that the peer
@@ -157,6 +158,7 @@ impl Default for ConnectionParameters {
         Self {
             versions: version::Config::default(),
             cc_algorithm: CongestionControlAlgorithm::Cubic,
+            ss_algorithm: SlowStartAlgorithm::Classic,
             max_data: INITIAL_LOCAL_MAX_DATA,
             max_stream_data_bidi_remote: u64::try_from(INITIAL_LOCAL_MAX_STREAM_DATA)
                 .expect("usize fits in u64"),
@@ -222,6 +224,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn cc_algorithm(mut self, v: CongestionControlAlgorithm) -> Self {
         self.cc_algorithm = v;
+        self
+    }
+
+    #[must_use]
+    pub const fn get_ss_algorithm(&self) -> SlowStartAlgorithm {
+        self.ss_algorithm
+    }
+
+    #[must_use]
+    pub const fn ss_algorithm(mut self, v: SlowStartAlgorithm) -> Self {
+        self.ss_algorithm = v;
         self
     }
 

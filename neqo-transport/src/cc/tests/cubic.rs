@@ -17,14 +17,13 @@ use std::{
 
 use test_fixture::now;
 
-use super::{IP_ADDR, MTU, RTT};
+use super::{make_cc_cubic, RTT};
 use crate::{
     cc::{
         classic_cc::ClassicCongestionControl,
         cubic::{convert_to_f64, Cubic},
-        CongestionControl as _, CongestionEvent,
+        ClassicSlowStart, CongestionControl as _, CongestionEvent,
     },
-    pmtud::Pmtud,
     recovery::sent,
     rtt::RttEstimate,
     stats::CongestionControlStats,
@@ -44,8 +43,11 @@ const fn cwnd_after_loss_slow_start(cwnd: usize, mtu: usize) -> usize {
 /// If false, sets `w_max` lower than cwnd to prevent fast convergence.
 fn setup_congestion_avoidance(
     fast_convergence: bool,
-) -> (ClassicCongestionControl<Cubic>, CongestionControlStats) {
-    let mut cc = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
+) -> (
+    ClassicCongestionControl<ClassicSlowStart, Cubic>,
+    CongestionControlStats,
+) {
+    let mut cc = make_cc_cubic();
     let mut cc_stats = CongestionControlStats::default();
     // Enter congestion avoidance phase.
     cc.set_ssthresh(1);
@@ -63,7 +65,11 @@ fn setup_congestion_avoidance(
     (cc, cc_stats)
 }
 
-fn fill_cwnd(cc: &mut ClassicCongestionControl<Cubic>, mut next_pn: u64, now: Instant) -> u64 {
+fn fill_cwnd(
+    cc: &mut ClassicCongestionControl<ClassicSlowStart, Cubic>,
+    mut next_pn: u64,
+    now: Instant,
+) -> u64 {
     while cc.bytes_in_flight() < cc.cwnd() {
         let sent = sent::make_packet(next_pn, now, cc.max_datagram_size());
         cc.on_packet_sent(&sent, now);
@@ -73,7 +79,7 @@ fn fill_cwnd(cc: &mut ClassicCongestionControl<Cubic>, mut next_pn: u64, now: In
 }
 
 fn ack_packet(
-    cc: &mut ClassicCongestionControl<Cubic>,
+    cc: &mut ClassicCongestionControl<ClassicSlowStart, Cubic>,
     pn: u64,
     now: Instant,
     cc_stats: &mut CongestionControlStats,
@@ -83,7 +89,7 @@ fn ack_packet(
 }
 
 fn packet_lost(
-    cc: &mut ClassicCongestionControl<Cubic>,
+    cc: &mut ClassicCongestionControl<ClassicSlowStart, Cubic>,
     pn: u64,
     cc_stats: &mut CongestionControlStats,
 ) {
@@ -94,7 +100,7 @@ fn packet_lost(
 }
 
 fn ecn_ce(
-    cc: &mut ClassicCongestionControl<Cubic>,
+    cc: &mut ClassicCongestionControl<ClassicSlowStart, Cubic>,
     pn: u64,
     now: Instant,
     cc_stats: &mut CongestionControlStats,
@@ -112,7 +118,7 @@ fn expected_tcp_acks(cwnd_rtt_start: usize, mtu: usize) -> u64 {
 
 #[test]
 fn tcp_phase() {
-    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
+    let mut cubic = make_cc_cubic();
     let mut cc_stats = CongestionControlStats::default();
 
     // change to congestion avoidance state.
@@ -220,7 +226,7 @@ fn tcp_phase() {
 
 #[test]
 fn cubic_phase() {
-    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
+    let mut cubic = make_cc_cubic();
     let mut cc_stats = CongestionControlStats::default();
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
     // Set w_max to a higher number make sure that cc is the cubic phase (cwnd is calculated
@@ -276,7 +282,7 @@ fn assert_within<T: Sub<Output = T> + PartialOrd + Copy>(value: T, expected: T, 
 
 #[test]
 fn congestion_event_slow_start() {
-    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
+    let mut cubic = make_cc_cubic();
     let mut cc_stats = CongestionControlStats::default();
 
     _ = fill_cwnd(&mut cubic, 0, now());
@@ -324,7 +330,11 @@ fn congestion_event_congestion_avoidance() {
 
 /// Verify that `acked_bytes` is correctly reduced on a congestion event.
 fn acked_bytes_reduced_on_congestion_event(
-    trigger: impl FnOnce(&mut ClassicCongestionControl<Cubic>, Instant, &mut CongestionControlStats),
+    trigger: impl FnOnce(
+        &mut ClassicCongestionControl<ClassicSlowStart, Cubic>,
+        Instant,
+        &mut CongestionControlStats,
+    ),
     beta: usize,
 ) {
     let (mut cubic, mut cc_stats) = setup_congestion_avoidance(false);
@@ -391,7 +401,7 @@ fn congestion_event_congestion_avoidance_fast_convergence() {
 #[test]
 fn congestion_event_congestion_avoidance_no_overflow() {
     const PTO: Duration = Duration::from_millis(120);
-    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
+    let mut cubic = make_cc_cubic();
     let mut cc_stats = CongestionControlStats::default();
 
     // Set ssthresh to something small to make sure that cc is in the congection avoidance phase.

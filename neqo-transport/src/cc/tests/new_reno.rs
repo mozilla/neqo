@@ -15,11 +15,10 @@ use std::time::Duration;
 
 use test_fixture::now;
 
-use super::{IP_ADDR, MTU, RTT};
+use super::{make_cc_newreno, RTT};
 use crate::{
-    cc::{new_reno::NewReno, ClassicCongestionControl, CongestionControl as _},
+    cc::{new_reno::NewReno, ClassicCongestionControl, ClassicSlowStart, CongestionControl as _},
     packet,
-    pmtud::Pmtud,
     recovery::{self, sent},
     rtt::RttEstimate,
     stats::CongestionControlStats,
@@ -27,19 +26,19 @@ use crate::{
 
 const PTO: Duration = RTT;
 
-fn cwnd_is_default(cc: &ClassicCongestionControl<NewReno>) {
+fn cwnd_is_default(cc: &ClassicCongestionControl<ClassicSlowStart, NewReno>) {
     assert_eq!(cc.cwnd(), cc.cwnd_initial());
     assert_eq!(cc.ssthresh(), usize::MAX);
 }
 
-fn cwnd_is_halved(cc: &ClassicCongestionControl<NewReno>) {
+fn cwnd_is_halved(cc: &ClassicCongestionControl<ClassicSlowStart, NewReno>) {
     assert_eq!(cc.cwnd(), cc.cwnd_initial() / 2);
     assert_eq!(cc.ssthresh(), cc.cwnd_initial() / 2);
 }
 
 #[test]
 fn issue_876() {
-    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
+    let mut cc = make_cc_newreno();
     let mut cc_stats = CongestionControlStats::default();
     let now = now();
     let before = now.checked_sub(Duration::from_millis(100)).unwrap();
@@ -163,7 +162,7 @@ fn issue_876() {
 #[test]
 // https://github.com/mozilla/neqo/pull/1465
 fn issue_1465() {
-    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
+    let mut cc = make_cc_newreno();
     let mut cc_stats = CongestionControlStats::default();
     let mut pn = 0;
     let mut now = now();
@@ -180,7 +179,7 @@ fn issue_1465() {
         pn += 1;
         p
     };
-    let mut send_next = |cc: &mut ClassicCongestionControl<NewReno>, now| {
+    let mut send_next = |cc: &mut ClassicCongestionControl<ClassicSlowStart, NewReno>, now| {
         let p = next_packet(now);
         cc.on_packet_sent(&p, now);
         p
