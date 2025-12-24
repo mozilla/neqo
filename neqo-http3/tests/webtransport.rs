@@ -590,7 +590,7 @@ fn wt_session_stats_after_datagram_transfer() {
 
     // Send a datagram
     client
-        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now(), 0, 0)
+        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now())
         .unwrap();
     exchange_packets(&mut client, &mut server, false, None);
 
@@ -680,7 +680,7 @@ fn wt_stats_at_session_close() {
 
     // Send a datagram to have some stats
     client
-        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now(), 0, 0)
+        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now())
         .unwrap();
     exchange_packets(&mut client, &mut server, false, None);
 

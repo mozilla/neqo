@@ -45,6 +45,11 @@ pub enum WebTransportEvent {
         session_id: StreamId,
         datagram: Bytes,
     },
+    DatagramOutcome {
+        session_id: StreamId,
+        tracking_id: u64,
+        outcome: extended_connect::datagram_queue::DatagramOutcome,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
