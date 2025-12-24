@@ -354,6 +354,7 @@ impl WebTransportRequest {
                 id,
                 now,
             )
+            .map(|_| ())
     }
 
     // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.
@@ -479,6 +480,7 @@ impl ConnectUdpRequest {
                 id,
                 now,
             )
+            .map(|_| ())
     }
 
     #[must_use]

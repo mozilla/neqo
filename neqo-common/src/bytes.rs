@@ -39,6 +39,15 @@ impl Bytes {
         self.len() == 0
     }
 
+    #[must_use]
+    pub fn into_vec(self) -> Vec<u8> {
+        if self.offset == 0 {
+            self.data
+        } else {
+            self.data[self.offset..].to_vec()
+        }
+    }
+
     /// Skips the first `n` bytes, consuming and returning `self`.
     ///
     /// # Panics
