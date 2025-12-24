@@ -405,9 +405,23 @@ impl Session {
         self.control_stream_send.send_data(conn, buf, now)
     }
 
+    /// Enqueue a datagram for sending.
+    ///
+    /// The datagram is placed into the per-session datagram queue and will be
+    /// moved to the QUIC send queue when `process_datagram_queue()` is called
+    /// (which happens during `process_http3()` as part of `process_output()`).
+    /// The caller must ensure `process_output()` is called afterward to
+    /// actually transmit the datagram.
+    ///
+    /// Returns `Ok((below_watermark, dropped))` where `below_watermark` is
+    /// `true` if the queue is below the high water mark, and `dropped` is
+    /// `Some((id, outcome))` if the oldest datagram was dropped to make room
+    /// when the queue was at its hard limit.
+    ///
     /// # Errors
     ///
     /// Returns an error if:
+    /// - The datagram exceeds the remote datagram size limit.
     /// - The session is not in Active state (`Error::Unavailable`).
     /// - QUIC datagram or HTTP DATAGRAM Capsule sending fails.
     pub(crate) fn send_datagram<I: Into<DatagramTracking>>(
@@ -416,34 +430,79 @@ impl Session {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<(bool, Option<(u64, super::datagram_queue::DatagramOutcome)>)> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state != State::Active {
             qdebug!("[{self}]: cannot send datagram in {:?} state.", self.state);
             debug_assert!(false);
             return Err(Error::Unavailable);
         }
-
         if conn.remote_datagram_size() == 0 && self.protocol.datagram_capsule_support() {
             qtrace!("[{self}] remote_datagram_size is 0, trying HTTP DATAGRAM Capsule");
-            return self.protocol.write_datagram_capsule(
+            self.protocol.write_datagram_capsule(
                 &mut self.control_stream_send,
                 conn,
                 buf,
                 now,
-            );
+            )?;
+            return Ok((true, None));
         }
+
+        let max_datagram_size = conn.max_datagram_size()?;
 
         let mut dgram_data = Encoder::default();
         dgram_data.encode_varint(self.id.as_u64() / 4);
         self.protocol.write_datagram_prefix(&mut dgram_data);
         dgram_data.encode(buf);
 
-        conn.send_datagram(dgram_data.into(), id)?;
-        self.protocol.record_datagram_sent();
-        self.protocol.record_bytes_sent(buf.len() as u64);
-        qtrace!("[{self}] sent datagram via QUIC datagram");
-        Ok(())
+        if dgram_data.len() as u64 > max_datagram_size {
+            return Err(Error::Transport(neqo_transport::Error::TooMuchData));
+        }
+
+        let datagram_id = id.into();
+        let id_u64 = match datagram_id {
+            DatagramTracking::Id(id_val) => id_val,
+            DatagramTracking::None => 0,
+        };
+
+        let payload_len = buf.len();
+        let (below_watermark, dropped) = self.protocol.enqueue_datagram(Bytes::from(Vec::<u8>::from(dgram_data)), id_u64, payload_len);
+
+        qtrace!("[{self}] enqueued datagram for sending via QUIC datagram");
+        Ok((below_watermark, dropped))
+    }
+
+    pub(crate) fn process_datagram_queue(
+        &mut self,
+        conn: &mut Connection,
+    ) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
+        let (outcomes, payload_bytes, _overhead_bytes) = self.protocol.process_datagram_queue(&mut |data, id| {
+            match conn.send_datagram(data.to_vec(), DatagramTracking::Id(id)) {
+                Ok(()) => Ok(()),
+                Err(_) => Err(()),
+            }
+        });
+
+        let sent_count = outcomes
+            .iter()
+            .filter(|(_, outcome)| *outcome == super::datagram_queue::DatagramOutcome::Sent)
+            .count();
+        for _ in 0..sent_count {
+            self.protocol.record_datagram_sent();
+        }
+        if payload_bytes > 0 {
+            self.protocol.record_bytes_sent(payload_bytes);
+        }
+
+        outcomes
+    }
+
+    pub(crate) fn set_datagram_high_water_mark(&mut self, mark: f64) {
+        self.protocol.set_datagram_high_water_mark(mark);
+    }
+
+    pub(crate) fn set_datagram_max_age(&mut self, age_ms: f64) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
+        self.protocol.set_datagram_max_age(age_ms)
     }
 
     pub(crate) fn datagram(&mut self, datagram: Bytes) {
@@ -658,6 +717,8 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn record_bytes_sent(&mut self, _bytes: u64) {}
 
+    fn record_bytes_sent_overhead(&mut self, _bytes: u64) {}
+
     fn record_bytes_received(&mut self, _bytes: u64) {}
 
     fn record_datagram_sent(&mut self) {}
@@ -686,6 +747,21 @@ pub(crate) trait Protocol: Debug + Display {
         _buf: &[u8],
         _now: Instant,
     ) -> Res<()>;
+
+    fn set_datagram_high_water_mark(&mut self, _mark: f64) {
+    }
+
+    fn set_datagram_max_age(&mut self, _age_ms: f64) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
+        Vec::new()
+    }
+
+    fn enqueue_datagram(&mut self, _data: Bytes, _id: u64, _payload_len: usize) -> (bool, Option<(u64, super::datagram_queue::DatagramOutcome)>) {
+        (true, None)
+    }
+
+    fn process_datagram_queue(&mut self, _send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> (Vec<(u64, super::datagram_queue::DatagramOutcome)>, u64, u64) {
+        (Vec::new(), 0, 0)
+    }
 }
 
 #[derive(Debug, Error)]
