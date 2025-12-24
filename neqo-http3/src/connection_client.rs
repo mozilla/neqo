@@ -820,6 +820,15 @@ impl Http3Client {
 
     /// Send `WebTransport` datagram.
     ///
+    /// This enqueues the datagram into a per-session queue. The datagram is
+    /// not actually sent until `process_output()` (or `process()`) is called,
+    /// which drains the queue into the QUIC layer and assembles outgoing
+    /// packets. The caller must call `process_output()` after this to ensure
+    /// timely delivery.
+    ///
+    /// Returns `Ok(true)` if the queue is below the high water mark, or
+    /// `Ok(false)` if it is at or above it.
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
@@ -831,10 +840,21 @@ impl Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         qtrace!("webtransport_send_datagram session:{session_id:?}");
-        self.base_handler
-            .webtransport_send_datagram(session_id, &mut self.conn, buf, id, now)
+        let (below_watermark, dropped) = self
+            .base_handler
+            .webtransport_send_datagram(session_id, &mut self.conn, buf, id, now)?;
+        if let Some((tracking_id, outcome)) = dropped {
+            self.events.insert(Http3ClientEvent::WebTransport(
+                WebTransportEvent::DatagramOutcome {
+                    session_id,
+                    tracking_id,
+                    outcome,
+                },
+            ));
+        }
+        Ok(below_watermark)
     }
 
     /// Send `ConnectUdp` datagram.
@@ -850,10 +870,12 @@ impl Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
-        self.base_handler
-            .connect_udp_send_datagram(session_id, &mut self.conn, buf, id, now)
+        let (below_watermark, _dropped) = self
+            .base_handler
+            .connect_udp_send_datagram(session_id, &mut self.conn, buf, id, now)?;
+        Ok(below_watermark)
     }
 
     /// Returns the current max size of a datagram that can fit into a packet.
@@ -871,6 +893,55 @@ impl Http3Client {
         Ok(self.conn.max_datagram_size()?
             - u64::try_from(Encoder::varint_len(session_id.as_u64()))
                 .map_err(|_| Error::Internal)?)
+    }
+
+    pub fn webtransport_set_datagram_high_water_mark(
+        &mut self,
+        session_id: StreamId,
+        high_water_mark: f64,
+    ) -> Res<()> {
+        self.base_handler
+            .webtransport_set_datagram_high_water_mark(session_id, high_water_mark)
+    }
+
+    pub fn webtransport_set_datagram_max_age(
+        &mut self,
+        session_id: StreamId,
+        max_age: f64,
+    ) -> Res<()> {
+        let expired = self
+            .base_handler
+            .webtransport_set_datagram_max_age(session_id, max_age)?;
+        for (tracking_id, outcome) in expired {
+            self.events.insert(Http3ClientEvent::WebTransport(
+                WebTransportEvent::DatagramOutcome {
+                    session_id,
+                    tracking_id,
+                    outcome,
+                },
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn connect_udp_set_datagram_high_water_mark(
+        &mut self,
+        session_id: StreamId,
+        high_water_mark: f64,
+    ) -> Res<()> {
+        self.base_handler
+            .connect_udp_set_datagram_high_water_mark(session_id, high_water_mark)
+    }
+
+    pub fn connect_udp_set_datagram_max_age(
+        &mut self,
+        session_id: StreamId,
+        max_age: f64,
+    ) -> Res<()> {
+        // Expired outcomes are discarded; ConnectUdpEvent has no DatagramOutcome variant.
+        self.base_handler
+            .connect_udp_set_datagram_max_age(session_id, max_age)
+            .map(|_| ())
     }
 
     /// Sets the `SendOrder` for a given stream
@@ -1046,6 +1117,22 @@ impl Http3Client {
                     .maybe_send_max_push_id_frame(&mut self.base_handler);
                 let res = self.base_handler.process_sending(&mut self.conn, now);
                 self.check_result(now, &res);
+
+                // Drain per-session datagram queues into the QUIC layer.
+                // Datagrams are enqueued by webtransport_send_datagram() and only
+                // moved to the QUIC send queue here, during process_http3(). This
+                // is called from process_output()/process(), so datagrams are sent
+                // on the next outgoing packet after the caller triggers processing.
+                let outcomes = self.base_handler.process_all_datagram_queues(&mut self.conn);
+                for (session_id, tracking_id, outcome) in outcomes {
+                    self.events.insert(Http3ClientEvent::WebTransport(
+                        WebTransportEvent::DatagramOutcome {
+                            session_id,
+                            tracking_id,
+                            outcome,
+                        },
+                    ));
+                }
             }
             Http3State::Closed { .. } => {}
             _ => {
