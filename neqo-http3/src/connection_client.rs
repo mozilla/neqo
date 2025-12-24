@@ -802,6 +802,24 @@ impl Http3Client {
                     .maybe_send_max_push_id_frame(&mut self.base_handler);
                 let res = self.base_handler.process_sending(&mut self.conn, now);
                 self.check_result(now, &res);
+
+                // Drain per-session datagram queues into the QUIC layer.
+                // Datagrams are enqueued by webtransport_send_datagram() and only
+                // moved to the QUIC send queue here, during process_http3(). This
+                // is called from process_output()/process(), so datagrams are sent
+                // on the next outgoing packet after the caller triggers processing.
+                self.base_handler.process_all_datagram_queues(
+                    &mut self.conn,
+                    now,
+                    |session_id, outcome| {
+                        self.events.insert(Http3ClientEvent::WebTransport(
+                            WebTransportEvent::DatagramOutcome {
+                                session_id,
+                                outcome,
+                            },
+                        ));
+                    },
+                );
             }
             Http3State::Closed { .. } => {}
             _ => {

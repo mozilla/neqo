@@ -19,8 +19,8 @@ use neqo_transport::{
 };
 
 use crate::{
-    Error, Http3Client, Http3OrWebTransportStream, Http3ServerEvent, Http3State, Http3StreamInfo,
-    Http3StreamType, Res, SendGroupId, SessionAcceptAction,
+    Error, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3ServerEvent, Http3State,
+    Http3StreamInfo, Http3StreamType, Res, SendGroupId, SessionAcceptAction, WebTransportEvent,
     connection::Http3Connection,
     connection_server::Http3ServerHandler,
     features::extended_connect,
@@ -61,6 +61,25 @@ pub trait ClientSession {
     ///
     /// This cannot panic. The max varint length is 8.
     fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64>;
+
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    fn webtransport_set_datagram_high_water_mark(
+        &mut self,
+        session_id: StreamId,
+        high_water_mark: f64,
+    ) -> Res<()>;
+
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    fn webtransport_set_datagram_max_age(
+        &mut self,
+        session_id: StreamId,
+        max_age: f64,
+        now: Instant,
+    ) -> Res<()>;
 
     /// Sets the `SendOrder` for a given stream
     ///
@@ -182,6 +201,15 @@ pub trait ClientSession {
 
     /// Send a `WebTransport` datagram.
     ///
+    /// This enqueues the datagram into a per-session queue. The datagram is
+    /// not actually sent until `process_output()` (or `process()`) is called,
+    /// which drains the queue into the QUIC layer and assembles outgoing
+    /// packets. The caller must call `process_output()` after this to ensure
+    /// timely delivery.
+    ///
+    /// Returns `Ok(true)` if the queue is below the high water mark, or
+    /// `Ok(false)` if it is at or above it.
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
@@ -193,7 +221,7 @@ pub trait ClientSession {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<(bool, Option<extended_connect::DatagramOutcome>)>;
 }
 
 impl ClientSession for Http3Client {
@@ -211,6 +239,37 @@ impl ClientSession for Http3Client {
             .connection()
             .max_datagram_size()?
             .saturating_sub(to_u64(qsid_len)))
+    }
+
+    fn webtransport_set_datagram_high_water_mark(
+        &mut self,
+        session_id: StreamId,
+        high_water_mark: f64,
+    ) -> Res<()> {
+        self.connection_and_handler()
+            .1
+            .webtransport_set_datagram_high_water_mark(session_id, high_water_mark)
+    }
+
+    fn webtransport_set_datagram_max_age(
+        &mut self,
+        session_id: StreamId,
+        max_age: f64,
+        now: Instant,
+    ) -> Res<()> {
+        let expired = self
+            .connection_and_handler()
+            .1
+            .webtransport_set_datagram_max_age(session_id, max_age, now)?;
+        for outcome in expired {
+            self.client_events().insert(Http3ClientEvent::WebTransport(
+                WebTransportEvent::DatagramOutcome {
+                    session_id,
+                    outcome,
+                },
+            ));
+        }
+        Ok(())
     }
 
     fn webtransport_set_sendorder(
@@ -335,7 +394,7 @@ impl ClientSession for Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<(bool, Option<extended_connect::DatagramOutcome>)> {
         qtrace!("webtransport_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
         handler.webtransport_send_datagram(session_id, conn, buf, id, now)
@@ -419,7 +478,7 @@ trait Handler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<(bool, Option<extended_connect::DatagramOutcome>)>;
 }
 
 impl Handler for Http3Connection {
@@ -484,7 +543,7 @@ impl Handler for Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<(bool, Option<extended_connect::DatagramOutcome>)> {
         self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 }
@@ -581,6 +640,7 @@ impl ServerHandler for Http3ServerHandler {
         self.mark_needs_processing();
         self.base_handler_mut()
             .webtransport_send_datagram(session_id, conn, buf, id, now)
+            .map(|_| ())
     }
 }
 
