@@ -600,7 +600,7 @@ impl WtTest {
     }
 
     fn send_datagram(&mut self, stream_id: StreamId, buf: &[u8]) -> Result<(), Error> {
-        self.client.webtransport_send_datagram(stream_id, buf, None)
+        self.client.webtransport_send_datagram(stream_id, buf, None).map(|_| ())
     }
 
     fn check_datagram_received_client(

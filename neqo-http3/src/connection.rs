@@ -1673,7 +1673,7 @@ impl Http3Connection {
         conn: &mut Connection,
         buf: &[u8],
         id: I,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.extended_connect_send_datagram(session_id, conn, buf, id)
     }
 
@@ -1683,7 +1683,7 @@ impl Http3Connection {
         conn: &mut Connection,
         buf: &[u8],
         id: I,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.extended_connect_send_datagram(session_id, conn, buf, id)
     }
 
@@ -1693,7 +1693,7 @@ impl Http3Connection {
         conn: &mut Connection,
         buf: &[u8],
         id: I,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.recv_streams
             .get_mut(&session_id)
             .ok_or(Error::InvalidStreamId)?
@@ -1701,6 +1701,79 @@ impl Http3Connection {
             .ok_or(Error::InvalidStreamId)?
             .borrow_mut()
             .send_datagram(conn, buf, id)
+    }
+
+    pub fn webtransport_set_datagram_high_water_mark(
+        &mut self,
+        session_id: StreamId,
+        mark: f64,
+    ) -> Res<()> {
+        self.recv_streams
+            .get_mut(&session_id)
+            .ok_or(Error::InvalidStreamId)?
+            .extended_connect_session()
+            .ok_or(Error::InvalidStreamId)?
+            .borrow_mut()
+            .set_datagram_high_water_mark(mark);
+        Ok(())
+    }
+
+    pub fn webtransport_set_datagram_max_age(
+        &mut self,
+        session_id: StreamId,
+        age_ms: f64,
+    ) -> Res<()> {
+        self.recv_streams
+            .get_mut(&session_id)
+            .ok_or(Error::InvalidStreamId)?
+            .extended_connect_session()
+            .ok_or(Error::InvalidStreamId)?
+            .borrow_mut()
+            .set_datagram_max_age(age_ms);
+        Ok(())
+    }
+
+    pub fn webtransport_process_datagram_queue(
+        &mut self,
+        session_id: StreamId,
+        conn: &mut Connection,
+    ) -> Res<Vec<(u64, extended_connect::datagram_queue::DatagramOutcome)>> {
+        Ok(self
+            .recv_streams
+            .get_mut(&session_id)
+            .ok_or(Error::InvalidStreamId)?
+            .extended_connect_session()
+            .ok_or(Error::InvalidStreamId)?
+            .borrow_mut()
+            .process_datagram_queue(conn))
+    }
+
+    pub(crate) fn process_all_datagram_queues(
+        &mut self,
+        conn: &mut Connection,
+    ) -> Vec<(StreamId, u64, crate::features::extended_connect::datagram_queue::DatagramOutcome)> {
+        let session_ids: Vec<StreamId> = self
+            .recv_streams
+            .iter()
+            .filter_map(|(id, stream)| {
+                if stream.extended_connect_session().is_some() {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut all_outcomes = Vec::new();
+        for session_id in session_ids {
+            if let Ok(outcomes) = self.webtransport_process_datagram_queue(session_id, conn) {
+                // Collect all outcomes with session_id
+                for (tracking_id, outcome) in outcomes {
+                    all_outcomes.push((session_id, tracking_id, outcome));
+                }
+            }
+        }
+        all_outcomes
     }
 
     /// If the control stream has received frames `MaxPushId`, `Goaway`, `PriorityUpdateRequest` or

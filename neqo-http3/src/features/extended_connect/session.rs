@@ -408,22 +408,69 @@ impl Session {
         conn: &mut Connection,
         buf: &[u8],
         id: I,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state == State::Active {
+            conn.max_datagram_size().map_err(|e| {
+                if matches!(e, neqo_transport::Error::NotAvailable) {
+                    neqo_transport::Error::TooMuchData
+                } else {
+                    e
+                }
+            })?;
+
             let mut dgram_data = Encoder::default();
             dgram_data.encode_varint(self.id.as_u64() / 4);
             self.protocol.write_datagram_prefix(&mut dgram_data);
             dgram_data.encode(buf);
-            conn.send_datagram(dgram_data.into(), id)?;
-            self.protocol.record_datagram_sent();
+
+            let datagram_id = id.into();
+            let id_u64 = match datagram_id {
+                DatagramTracking::Id(id_val) => id_val,
+                DatagramTracking::None => 0,
+            };
+
+            let (below_watermark, _dropped) = self.protocol.enqueue_datagram(Bytes::from(Vec::<u8>::from(dgram_data)), id_u64);
+            // Note: _dropped outcomes from queue-full are currently not reported as events
+            // They will be silent drops. This could be improved in the future.
+
             self.protocol.record_bytes_sent(buf.len() as u64);
+            Ok(below_watermark)
         } else {
             qdebug!("[{self}]: cannot send datagram in {:?} state.", self.state);
             debug_assert!(false);
-            return Err(Error::Unavailable);
+            Err(Error::Unavailable)
         }
-        Ok(())
+    }
+
+    pub(crate) fn process_datagram_queue(
+        &mut self,
+        conn: &mut Connection,
+    ) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
+        let outcomes = self.protocol.process_datagram_queue(&mut |data, id| {
+            match conn.send_datagram(data.to_vec(), DatagramTracking::Id(id)) {
+                Ok(()) => Ok(()),
+                Err(_) => Err(()),
+            }
+        });
+
+        let sent_count = outcomes
+            .iter()
+            .filter(|(_, outcome)| *outcome == super::datagram_queue::DatagramOutcome::Sent)
+            .count();
+        for _ in 0..sent_count {
+            self.protocol.record_datagram_sent();
+        }
+
+        outcomes
+    }
+
+    pub(crate) fn set_datagram_high_water_mark(&mut self, mark: f64) {
+        self.protocol.set_datagram_high_water_mark(mark);
+    }
+
+    pub(crate) fn set_datagram_max_age(&mut self, age_ms: f64) {
+        self.protocol.set_datagram_max_age(age_ms);
     }
 
     pub(crate) fn datagram(&mut self, datagram: Bytes) {
@@ -653,6 +700,20 @@ pub(crate) trait Protocol: Debug + Display {
     fn write_datagram_prefix(&self, encoder: &mut Encoder);
 
     fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError>;
+
+    fn set_datagram_high_water_mark(&mut self, _mark: f64) {
+    }
+
+    fn set_datagram_max_age(&mut self, _age_ms: f64) {
+    }
+
+    fn enqueue_datagram(&mut self, _data: Bytes, _id: u64) -> (bool, Option<(u64, super::datagram_queue::DatagramOutcome)>) {
+        (true, None)
+    }
+
+    fn process_datagram_queue(&mut self, _send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
+        Vec::new()
+    }
 }
 
 #[derive(Debug, Error)]

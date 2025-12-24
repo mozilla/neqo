@@ -17,6 +17,7 @@ use neqo_transport::{Connection, StreamId};
 use crate::{
     Error, Http3StreamInfo, Http3StreamType, RecvStream, Res,
     features::extended_connect::{
+        datagram_queue::{DatagramOutcome, WebTransportDatagramQueue},
         send_group::{SendGroup, SendGroupId},
         stats::WebTransportSessionStats,
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
@@ -44,6 +45,8 @@ pub struct Session {
     send_groups: HashMap<SendGroupId, SendGroup>,
     /// Session-level statistics.
     stats: WebTransportSessionStats,
+    /// Datagram queue for managing outgoing datagrams.
+    datagram_queue: WebTransportDatagramQueue,
 }
 
 impl Display for Session {
@@ -66,6 +69,7 @@ impl Session {
             negotiated_protocol: None,
             send_groups: HashMap::default(),
             stats: WebTransportSessionStats::new(),
+            datagram_queue: WebTransportDatagramQueue::new(),
         }
     }
 
@@ -136,6 +140,22 @@ impl Session {
         let mut stats = self.stats.clone();
         stats.timestamp = Some(Instant::now());
         stats
+    }
+
+    pub(crate) fn set_datagram_high_water_mark(&mut self, mark: f64) {
+        self.datagram_queue.set_high_water_mark(mark);
+    }
+
+    pub(crate) fn set_datagram_max_age(&mut self, age_ms: f64) {
+        self.datagram_queue.set_max_age(age_ms);
+    }
+
+    pub(crate) fn enqueue_datagram(&mut self, data: Bytes, id: u64) -> (bool, Option<(u64, DatagramOutcome)>) {
+        self.datagram_queue.enqueue(data, id)
+    }
+
+    pub(crate) fn process_datagram_queue(&mut self, send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> Vec<(u64, DatagramOutcome)> {
+        self.datagram_queue.process_queue(send_fn)
     }
 }
 
@@ -331,5 +351,21 @@ impl Protocol for Session {
     fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError> {
         // WebTransport does not use a prefix (i.e. context ID).
         Ok(datagram)
+    }
+
+    fn set_datagram_high_water_mark(&mut self, mark: f64) {
+        self.set_datagram_high_water_mark(mark);
+    }
+
+    fn set_datagram_max_age(&mut self, age_ms: f64) {
+        self.set_datagram_max_age(age_ms);
+    }
+
+    fn enqueue_datagram(&mut self, data: Bytes, id: u64) -> (bool, Option<(u64, DatagramOutcome)>) {
+        self.enqueue_datagram(data, id)
+    }
+
+    fn process_datagram_queue(&mut self, send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> Vec<(u64, DatagramOutcome)> {
+        self.process_datagram_queue(send_fn)
     }
 }
