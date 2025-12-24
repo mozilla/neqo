@@ -711,3 +711,29 @@ fn connect_udp_session_rejected_by_webtransport_create_stream() {
         Err(Error::InvalidStreamId)
     );
 }
+
+/// `webtransport_set_datagram_high_water_mark` must not accept a connect-udp
+/// session id just because it happens to share the extended-CONNECT session
+/// machinery with WebTransport.
+#[test]
+fn connect_udp_session_rejected_by_webtransport_set_datagram_high_water_mark() {
+    fixture_init();
+    let (mut client, _proxy, session_id, _proxy_session) = establish_new_session();
+    assert_eq!(
+        client.webtransport_set_datagram_high_water_mark(session_id, 2.0),
+        Err(Error::InvalidStreamId)
+    );
+}
+
+/// `webtransport_set_datagram_max_age` must not accept a connect-udp session
+/// id just because it happens to share the extended-CONNECT session
+/// machinery with WebTransport.
+#[test]
+fn connect_udp_session_rejected_by_webtransport_set_datagram_max_age() {
+    fixture_init();
+    let (mut client, _proxy, session_id, _proxy_session) = establish_new_session();
+    assert_eq!(
+        client.webtransport_set_datagram_max_age(session_id, 100.0, now()),
+        Err(Error::InvalidStreamId)
+    );
+}
