@@ -4,13 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::event::Provider as _;
 use static_assertions::const_assert;
 
 use super::{
-    AT_LEAST_PTO, assert_error, connect_force_idle, default_server, new_client, new_server, now,
+    AT_LEAST_PTO, assert_error, connect, connect_force_idle, default_server, new_client,
+    new_server, now,
 };
 use crate::{
     CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Pmtud,
@@ -672,4 +673,65 @@ fn datagram_fill_gap4() {
     }));
     datagram_overfill(&mut client, &mut server, 4);
     assert!(*called.borrow());
+}
+
+/// Verifies that datagrams are not included in PMTUD probe packets.
+/// Since lost datagrams cannot be retried, they must not be sent in probe packets
+/// that may be silently dropped by middleboxes enforcing a lower path MTU.
+#[test]
+fn datagram_not_in_pmtud_probe() {
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .datagram_size(QuicDatagram::MAX_SIZE)
+            .outgoing_datagram_queue(OUTGOING_QUEUE),
+    );
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .datagram_size(QuicDatagram::MAX_SIZE),
+    );
+    connect(&mut client, &mut server);
+
+    // After connect, the client has sent the first PMTUD probe (probe_state = Sent).
+    // The server received the probe at the end of connect() and will ACK it after
+    // its ACK delay (DEFAULT_LOCAL_ACK_DELAY = 20ms).  Advance past that delay and
+    // collect the ACK via process_input only — deliberately NOT calling
+    // client.process_output yet, so the datagram queue stays empty.
+    // Delivering the ACK to the client will advance PMTUD: probe_state → Needed.
+    let ack_time = now() + Duration::from_millis(30);
+    while let Some(d) = server.process_output(ack_time).dgram() {
+        client.process_input(d, ack_time);
+    }
+
+    // Queue a datagram now, while probe_state = Needed.
+    // It must NOT be included in the PMTUD probe that process_output is about to send.
+    client
+        .send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1))
+        .unwrap();
+
+    let pmtud_before = client.stats().pmtud_tx;
+    let dgram_before = client.stats().frame_tx.datagram;
+
+    // This must send the PMTUD probe without including the datagram.
+    let probe_pkt = client.process_output(ack_time).dgram().unwrap();
+    assert_eq!(
+        client.stats().pmtud_tx,
+        pmtud_before + 1,
+        "PMTUD probe should have been sent"
+    );
+    assert_eq!(
+        client.stats().frame_tx.datagram,
+        dgram_before,
+        "datagram must not be sent in a PMTUD probe packet"
+    );
+
+    // The datagram should be sent in the next (non-probe) packet.
+    _ = client.process_output(ack_time).dgram().unwrap();
+    assert_eq!(
+        client.stats().frame_tx.datagram,
+        dgram_before + 1,
+        "datagram should be sent in a non-probe packet"
+    );
+
+    server.process_input(probe_pkt, ack_time);
 }
