@@ -2300,6 +2300,7 @@ impl Connection {
         builder: &mut packet::Builder<&mut Vec<u8>>,
         tokens: &mut recovery::Tokens,
         now: Instant,
+        is_pmtud_probe: bool,
     ) {
         let rtt = self.paths.primary().map_or_else(
             || RttEstimate::new(self.conn_params.get_initial_rtt()).estimate(),
@@ -2357,9 +2358,12 @@ impl Connection {
         }
 
         // Datagrams are best-effort and unreliable.  Let streams starve them for now.
-        self.quic_datagrams.write_frames(builder, tokens, stats);
-        if builder.is_full() {
-            return;
+        // Skip datagrams in PMTUD probe packets to avoid losing user data when probes are lost.
+        if !is_pmtud_probe {
+            self.quic_datagrams.write_frames(builder, tokens, stats);
+            if builder.is_full() {
+                return;
+            }
         }
 
         // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
@@ -2486,11 +2490,11 @@ impl Connection {
 
         if primary {
             if space == PacketNumberSpace::ApplicationData {
-                if self.state.connected()
+                let is_pmtud_probe = self.state.connected()
                     && path.borrow().pmtud().needs_probe()
                     && !coalesced // Only send PMTUD probes using non-coalesced packets.
-                    && full_mtu
-                {
+                    && full_mtu;
+                if is_pmtud_probe {
                     path.borrow_mut().pmtud_mut().send_probe(
                         builder,
                         &mut tokens,
@@ -2498,7 +2502,7 @@ impl Connection {
                     );
                     ack_eliciting = true;
                 }
-                self.write_appdata_frames(builder, &mut tokens, now);
+                self.write_appdata_frames(builder, &mut tokens, now, is_pmtud_probe);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
                 self.crypto.write_frame(
