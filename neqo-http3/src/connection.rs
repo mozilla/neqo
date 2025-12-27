@@ -1460,6 +1460,34 @@ impl Http3Connection {
             .ok_or(Error::InvalidStreamId)
     }
 
+    pub(crate) fn webtransport_set_anticipated_incoming_uni(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        self.recv_streams
+            .get(&session_id)
+            .and_then(|s| s.extended_connect_session())
+            .map(|s| {
+                s.borrow_mut().set_anticipated_incoming_uni(value);
+            })
+            .ok_or(Error::InvalidStreamId)
+    }
+
+    pub(crate) fn webtransport_set_anticipated_incoming_bidi(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        self.recv_streams
+            .get(&session_id)
+            .and_then(|s| s.extended_connect_session())
+            .map(|s| {
+                s.borrow_mut().set_anticipated_incoming_bidi(value);
+            })
+            .ok_or(Error::InvalidStreamId)
+    }
+
     pub(crate) fn connect_udp_close_session(
         &mut self,
         conn: &mut Connection,

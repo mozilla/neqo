@@ -47,6 +47,10 @@ pub struct Session {
     stats: WebTransportSessionStats,
     /// Datagram queue for managing outgoing datagrams.
     datagram_queue: WebTransportDatagramQueue,
+    /// Anticipated concurrent incoming unidirectional streams.
+    anticipated_incoming_uni: Option<u16>,
+    /// Anticipated concurrent incoming bidirectional streams.
+    anticipated_incoming_bidi: Option<u16>,
 }
 
 impl Display for Session {
@@ -70,6 +74,8 @@ impl Session {
             send_groups: HashMap::default(),
             stats: WebTransportSessionStats::new(),
             datagram_queue: WebTransportDatagramQueue::new(),
+            anticipated_incoming_uni: None,
+            anticipated_incoming_bidi: None,
         }
     }
 
@@ -91,6 +97,16 @@ impl Session {
     /// Get the negotiated protocol.
     pub(crate) fn protocol(&self) -> Option<&str> {
         self.negotiated_protocol.as_deref()
+    }
+
+    /// Set the anticipated concurrent incoming unidirectional streams.
+    pub(crate) fn set_anticipated_incoming_uni(&mut self, value: u16) {
+        self.anticipated_incoming_uni = Some(value);
+    }
+
+    /// Set the anticipated concurrent incoming bidirectional streams.
+    pub(crate) fn set_anticipated_incoming_bidi(&mut self, value: u16) {
+        self.anticipated_incoming_bidi = Some(value);
     }
 
     /// Create a new send group for this session.

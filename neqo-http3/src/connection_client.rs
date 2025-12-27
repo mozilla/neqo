@@ -1476,6 +1476,32 @@ impl Http3Client {
         self.base_handler.webtransport_session_stats(session_id)
     }
 
+    /// Set the anticipated concurrent incoming unidirectional streams for a WebTransport session.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_set_anticipated_incoming_uni(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        self.base_handler.webtransport_set_anticipated_incoming_uni(session_id, value)
+    }
+
+    /// Set the anticipated concurrent incoming bidirectional streams for a WebTransport session.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_set_anticipated_incoming_bidi(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        self.base_handler.webtransport_set_anticipated_incoming_bidi(session_id, value)
+    }
+
     /// Create a WebTransport stream with a send group.
     ///
     /// # Errors
