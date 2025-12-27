@@ -98,11 +98,22 @@ pub trait WindowAdjustment: Display + Debug {
     ) -> (usize, usize);
     /// Cubic needs this signal to reset its epoch.
     fn on_app_limited(&mut self);
+    fn save_undo_state(&mut self);
+    fn restore_undo_state(&mut self);
 }
 
 #[derive(Debug)]
 struct MaybeLostPacket {
     time_sent: Instant,
+}
+
+#[derive(Debug)]
+struct Undo {
+    state: State,
+    congestion_window: usize,
+    acked_bytes: usize,
+    ssthresh: usize,
+    recovery_start: Option<packet::Number>,
 }
 
 #[derive(Debug)]
@@ -112,15 +123,18 @@ pub struct ClassicCongestionControl<T> {
     congestion_window: usize, // = kInitialWindow
     bytes_in_flight: usize,
     acked_bytes: usize,
+    ssthresh: usize,
+    /// Packet number of the first packet that was sent after a congestion event. When this one is
+    /// acked we will exit [`State::Recovery`] and enter [`State::CongestionAvoidance`].
+    recovery_start: Option<packet::Number>,
     /// Packets that have supposedly been lost. These are used for spurious congestion event
     /// detection. Gets drained when the same packets are later acked and regularly purged from too
     /// old packets in [`Self::cleanup_maybe_lost_packets`]. Needs a tuple of `(packet::Number,
     /// packet::Type)` to identify packets across packet number spaces.
     maybe_lost_packets: HashMap<(packet::Number, packet::Type), MaybeLostPacket>,
-    ssthresh: usize,
-    /// Packet number of the first packet that was sent after a congestion event. When this one is
-    /// acked we will exit [`State::Recovery`] and enter [`State::CongestionAvoidance`].
-    recovery_start: Option<packet::Number>,
+    /// Congestion parameters stored on a congestion event to restore prior state in case the
+    /// congestion event turns out to be spurious.
+    undo: Option<Undo>,
     /// `first_app_limited` indicates the packet number after which the application might be
     /// underutilizing the congestion window. When underutilizing the congestion window due to not
     /// sending out enough data, we SHOULD NOT increase the congestion window.[1] Packets sent
@@ -448,6 +462,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             bytes_in_flight: 0,
             acked_bytes: 0,
             maybe_lost_packets: HashMap::default(),
+            undo: None,
             ssthresh: usize::MAX,
             recovery_start: None,
             qlog: Qlog::disabled(),
@@ -533,7 +548,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         // If all of them have been removed we detected a spurious congestion event.
         if self.maybe_lost_packets.is_empty() {
             cc_stats.congestion_events[CongestionEvent::Spurious] += 1;
-            // TODO: Implement spurious congestion event handling: <https://github.com/mozilla/neqo/issues/2694>
+            self.on_spurious_congestion_event(cc_stats);
         }
     }
 
@@ -545,6 +560,32 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         let max_age = pto * 2;
         self.maybe_lost_packets
             .retain(|_, packet| now.saturating_duration_since(packet.time_sent) <= max_age);
+    }
+
+    fn on_spurious_congestion_event(&mut self, cc_stats: &mut CongestionControlStats) {
+        if let Some(undo) = self.undo.take() {
+            if undo.congestion_window > self.congestion_window {
+                self.cc_algorithm.restore_undo_state();
+
+                self.state = undo.state;
+                self.congestion_window = undo.congestion_window;
+                self.acked_bytes = undo.acked_bytes;
+                self.ssthresh = undo.ssthresh;
+                self.recovery_start = undo.recovery_start;
+
+                if self.state.in_slow_start() {
+                    cc_stats.slow_start_exited = false;
+                }
+            }
+        } else {
+            debug_assert!(false, "couldn't restore congestion controller undo state");
+        }
+
+        qinfo!(
+            "[{self}] Spurious cong event -> UNDO; cwnd {}, ssthresh {}",
+            self.congestion_window,
+            self.ssthresh
+        );
     }
 
     fn detect_persistent_congestion<'a>(
@@ -630,6 +671,18 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         // after the start of the previous congestion recovery period.
         if !self.after_recovery_start(last_packet) {
             return false;
+        }
+
+        if congestion_event != CongestionEvent::Ecn {
+            self.undo = Some(Undo {
+                state: self.state,
+                congestion_window: self.congestion_window,
+                acked_bytes: self.acked_bytes,
+                ssthresh: self.ssthresh,
+                recovery_start: self.recovery_start,
+            });
+
+            self.cc_algorithm.save_undo_state();
         }
 
         let (cwnd, acked_bytes) = self.cc_algorithm.reduce_cwnd(

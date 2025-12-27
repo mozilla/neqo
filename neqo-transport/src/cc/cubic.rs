@@ -24,6 +24,15 @@ pub fn convert_to_f64(v: usize) -> f64 {
     f_64
 }
 
+#[derive(Debug)]
+struct Undo {
+    w_est: f64,
+    k: f64,
+    w_max: f64,
+    t_epoch: Option<Instant>,
+    reno_acked_bytes: f64,
+}
+
 #[derive(Debug, Default, derive_more::Display)]
 #[display("Cubic [w_max: {w_max}, k: {k}, t_epoch: {t_epoch:?}]")]
 pub struct Cubic {
@@ -74,10 +83,13 @@ pub struct Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-variables-of-interest>
     ///
-    /// This also is reset on being application limited.
+    /// This is also reset on being application limited.
     t_epoch: Option<Instant>,
     /// New and unused leftover acked bytes for calculating the reno region increases to `w_est`.
     reno_acked_bytes: f64,
+    /// Cubic parameters stored on a congestion event to restore prior state in case the congestion
+    /// event turns out to be spurious.
+    undo: Option<Undo>,
 }
 
 impl Cubic {
@@ -425,5 +437,27 @@ impl WindowAdjustment for Cubic {
         // Reset t_epoch. Let it start again when the congestion controller
         // exits the app-limited period.
         self.t_epoch = None;
+    }
+
+    fn save_undo_state(&mut self) {
+        self.undo = Some(Undo {
+            w_est: self.w_est,
+            k: self.k,
+            w_max: self.w_max,
+            t_epoch: self.t_epoch,
+            reno_acked_bytes: self.reno_acked_bytes,
+        });
+    }
+
+    fn restore_undo_state(&mut self) {
+        if let Some(undo) = self.undo.take() {
+            self.w_est = undo.w_est;
+            self.k = undo.k;
+            self.w_max = undo.w_max;
+            self.t_epoch = undo.t_epoch;
+            self.reno_acked_bytes = undo.reno_acked_bytes;
+        } else {
+            debug_assert!(false, "couldn't restore {} specific undo state", self);
+        }
     }
 }
