@@ -64,6 +64,8 @@ pub(crate) struct Session {
     draining: bool,
     role: Role,
     stats: SessionStats,
+    anticipated_incoming_uni: u16,
+    anticipated_incoming_bidi: u16,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -126,6 +128,8 @@ impl Session {
             draining: false,
             role,
             stats: SessionStats::default(),
+            anticipated_incoming_uni: 0,
+            anticipated_incoming_bidi: 0,
         }
     }
 
@@ -158,6 +162,8 @@ impl Session {
             draining: false,
             role,
             stats: SessionStats::default(),
+            anticipated_incoming_uni: 0,
+            anticipated_incoming_bidi: 0,
         })
     }
 
@@ -524,6 +530,22 @@ impl Session {
         now: Instant,
     ) -> Vec<super::datagram_queue::DatagramOutcome> {
         self.protocol.set_datagram_max_age(age_ms, now)
+    }
+
+    pub(crate) const fn set_anticipated_incoming_uni(&mut self, value: u16) {
+        self.anticipated_incoming_uni = value;
+    }
+
+    pub(crate) const fn anticipated_incoming_uni(&self) -> u16 {
+        self.anticipated_incoming_uni
+    }
+
+    pub(crate) const fn set_anticipated_incoming_bidi(&mut self, value: u16) {
+        self.anticipated_incoming_bidi = value;
+    }
+
+    pub(crate) const fn anticipated_incoming_bidi(&self) -> u16 {
+        self.anticipated_incoming_bidi
     }
 
     pub(crate) fn datagram(&mut self, datagram: Bytes) {
