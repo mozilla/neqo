@@ -1237,6 +1237,50 @@ impl Http3Client {
         self.base_handler.webtransport_session_stats(session_id)
     }
 
+    /// Increase the maximum concurrent incoming unidirectional streams for a WebTransport session.
+    ///
+    /// This raises a connection-wide stream limit computed as the sum of the anticipated values
+    /// set for all active WebTransport sessions on this connection; it does not create a
+    /// per-session limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_increase_max_uni_streams(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        self.base_handler.webtransport_increase_max_streams(
+            &mut self.conn,
+            session_id,
+            StreamType::UniDi,
+            value,
+        )
+    }
+
+    /// Increase the maximum concurrent incoming bidirectional streams for a WebTransport session.
+    ///
+    /// This raises a connection-wide stream limit computed as the sum of the anticipated values
+    /// set for all active WebTransport sessions on this connection; it does not create a
+    /// per-session limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_increase_max_bidi_streams(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        self.base_handler.webtransport_increase_max_streams(
+            &mut self.conn,
+            session_id,
+            StreamType::BiDi,
+            value,
+        )
+    }
+
     /// Create a WebTransport stream with a send group.
     ///
     /// # Errors
