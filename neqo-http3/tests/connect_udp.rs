@@ -228,9 +228,7 @@ fn session_lifecycle(client_closes: bool) {
     assert_eq!(session_id, id);
     assert_eq!(&datagram, PING);
 
-    proxy_session
-        .send_datagram(PONG, None, now())
-        .unwrap();
+    proxy_session.send_datagram(PONG, None, now()).unwrap();
 
     exchange_packets(&mut client, &mut proxy, false, None);
 
@@ -398,9 +396,7 @@ fn server_datagram_before_accept() {
         let proxy_accept = proxy.process_output(now()).dgram().unwrap();
         assert!(proxy.process_output(now()).dgram().is_none());
 
-        proxy_session
-            .send_datagram(b"ping", None, now())
-            .unwrap();
+        proxy_session.send_datagram(b"ping", None, now()).unwrap();
         let proxy_dgram = proxy.process_output(now()).dgram().unwrap();
 
         while client.next_event().is_some() {}
@@ -595,9 +591,7 @@ fn session_lifecycle_with_http_datagram_capsule() {
     qinfo!("Capsule decode successful (client -> server)");
 
     qinfo!("Testing Capsule receive (server -> client)");
-    proxy_session
-        .send_datagram(PONG, None, now())
-        .unwrap();
+    proxy_session.send_datagram(PONG, None, now()).unwrap();
 
     exchange_packets(&mut client, &mut proxy, false, None);
 
