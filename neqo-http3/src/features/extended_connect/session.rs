@@ -526,6 +526,14 @@ impl Session {
         self.protocol.set_datagram_max_age(age_ms, now)
     }
 
+    pub(crate) fn set_anticipated_incoming_uni(&mut self, value: u16) {
+        self.protocol.set_anticipated_incoming_uni(value);
+    }
+
+    pub(crate) fn set_anticipated_incoming_bidi(&mut self, value: u16) {
+        self.protocol.set_anticipated_incoming_bidi(value);
+    }
+
     pub(crate) fn datagram(&mut self, datagram: Bytes) {
         if self.state != State::Active {
             qdebug!("[{self}]: received datagram on {:?} session.", self.state);
@@ -777,6 +785,12 @@ pub(crate) trait Protocol: Debug + Display {
         _now: Instant,
     ) -> Vec<(Option<u64>, super::datagram_queue::DatagramOutcome)> {
         Vec::new()
+    }
+
+    fn set_anticipated_incoming_uni(&mut self, _value: u16) {
+    }
+
+    fn set_anticipated_incoming_bidi(&mut self, _value: u16) {
     }
 
     fn enqueue_datagram(
