@@ -64,6 +64,10 @@ pub(crate) struct Session {
     /// CONNECT request.
     protocol: Box<dyn Protocol>,
     draining: bool,
+    /// Anticipated concurrent incoming unidirectional streams for this session.
+    anticipated_incoming_uni: u16,
+    /// Anticipated concurrent incoming bidirectional streams for this session.
+    anticipated_incoming_bidi: u16,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -124,6 +128,8 @@ impl Session {
             events,
             protocol,
             draining: false,
+            anticipated_incoming_uni: 0,
+            anticipated_incoming_bidi: 0,
         }
     }
 
@@ -154,6 +160,8 @@ impl Session {
             events,
             protocol,
             draining: false,
+            anticipated_incoming_uni: 0,
+            anticipated_incoming_bidi: 0,
         })
     }
 
@@ -538,6 +546,22 @@ impl Session {
         now: Instant,
     ) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
         self.protocol.set_datagram_max_age(age_ms, now)
+    }
+
+    pub(crate) fn set_anticipated_incoming_uni(&mut self, value: u16) {
+        self.anticipated_incoming_uni = value;
+    }
+
+    pub(crate) fn anticipated_incoming_uni(&self) -> u16 {
+        self.anticipated_incoming_uni
+    }
+
+    pub(crate) fn set_anticipated_incoming_bidi(&mut self, value: u16) {
+        self.anticipated_incoming_bidi = value;
+    }
+
+    pub(crate) fn anticipated_incoming_bidi(&self) -> u16 {
+        self.anticipated_incoming_bidi
     }
 
     pub(crate) fn datagram(&mut self, datagram: Bytes) {

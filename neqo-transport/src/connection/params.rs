@@ -28,13 +28,23 @@ use crate::{
 
 /// Maximum number of bidirectional streams that the remote can open.
 ///
-/// Constant throughout the lifetime of the connection.
+/// This is the baseline sent in the `initial_max_streams_bidi` transport
+/// parameter during the QUIC handshake. It can be increased later via
+/// `MAX_STREAMS` frames (see [`crate::streams::Streams::set_remote_max_streams_bidi`]),
+/// for example when WebTransport sessions set anticipated concurrent incoming
+/// stream counts that exceed this baseline.  Per the QUIC spec, stream limits
+/// can only increase; values at or below the current limit have no effect.
 ///
 /// See also <https://github.com/google/quiche/blob/4f1f0fcea045cd71410c2c318773fc24c3523ed7/quiche/quic/core/quic_constants.h#L113-L114>.
 const LOCAL_STREAM_LIMIT_BIDI: u64 = 100;
 /// Maximum number of unidirectional streams that the remote can open.
 ///
-/// Constant throughout the lifetime of the connection.
+/// This is the baseline sent in the `initial_max_streams_uni` transport
+/// parameter during the QUIC handshake. It can be increased later via
+/// `MAX_STREAMS` frames (see [`crate::streams::Streams::set_remote_max_streams_uni`]),
+/// for example when WebTransport sessions set anticipated concurrent incoming
+/// stream counts that exceed this baseline.  Per the QUIC spec, stream limits
+/// can only increase; values at or below the current limit have no effect.
 ///
 /// See also <https://github.com/google/quiche/blob/4f1f0fcea045cd71410c2c318773fc24c3523ed7/quiche/quic/core/quic_constants.h#L113-L114>.
 const LOCAL_STREAM_LIMIT_UNI: u64 = 100;
