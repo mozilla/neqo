@@ -1137,6 +1137,58 @@ impl Http3Client {
         self.base_handler.webtransport_session_stats(session_id)
     }
 
+    /// Set the number of concurrent incoming unidirectional streams a WebTransport session
+    /// anticipates.
+    ///
+    /// This raises a connection-wide stream limit computed as the sum of the anticipated values
+    /// set for all active WebTransport sessions on this connection; it does not create a
+    /// per-session limit. The transport limit only ever rises, so lowering `value` does not
+    /// reduce it. The limit is a concurrency window, not a cumulative budget: as the peer
+    /// closes streams it opened, it may open further streams without another call here.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_set_anticipated_incoming_uni_streams(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        self.base_handler
+            .webtransport_set_anticipated_incoming_streams(
+                &mut self.conn,
+                session_id,
+                StreamType::UniDi,
+                value,
+            )
+    }
+
+    /// Set the number of concurrent incoming bidirectional streams a WebTransport session
+    /// anticipates.
+    ///
+    /// This raises a connection-wide stream limit computed as the sum of the anticipated values
+    /// set for all active WebTransport sessions on this connection; it does not create a
+    /// per-session limit. The transport limit only ever rises, so lowering `value` does not
+    /// reduce it. The limit is a concurrency window, not a cumulative budget: as the peer
+    /// closes streams it opened, it may open further streams without another call here.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_set_anticipated_incoming_bidi_streams(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        self.base_handler
+            .webtransport_set_anticipated_incoming_streams(
+                &mut self.conn,
+                session_id,
+                StreamType::BiDi,
+                value,
+            )
+    }
+
     /// Create a WebTransport stream with a send group.
     ///
     /// # Errors

@@ -3828,6 +3828,15 @@ impl Connection {
         self.streams.stream_create(st)
     }
 
+    /// Raise the maximum number of concurrent incoming streams of `stream_type`.
+    ///
+    /// This is a local receive limit advertised to the peer via `MAX_STREAMS`
+    /// (RFC 9000, Section 4.6). It is monotonic: if `max` is not greater than the
+    /// current limit, it has no effect.
+    pub fn set_remote_max_streams(&mut self, stream_type: StreamType, max: u64) {
+        self.streams.set_remote_max_streams(stream_type, max);
+    }
+
     /// Set the priority of a stream.
     ///
     /// # Errors
