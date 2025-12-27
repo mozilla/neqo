@@ -13,7 +13,9 @@ use std::{
 };
 
 use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace, to_u64};
-use neqo_transport::{AppError, Connection, DatagramTracking, StreamId, streams::SendGroupId};
+use neqo_transport::{
+    AppError, Connection, DatagramTracking, StreamId, StreamType, streams::SendGroupId,
+};
 use rustc_hash::FxHashSet as HashSet;
 
 use crate::{
@@ -68,6 +70,8 @@ pub(crate) struct Session {
     /// Outgoing datagrams awaiting handover to the QUIC layer. Shared by every
     /// extended-CONNECT protocol; the queue itself is protocol-agnostic.
     datagram_queue: DatagramQueue,
+    anticipated_incoming_uni: u16,
+    anticipated_incoming_bidi: u16,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -128,6 +132,8 @@ impl Session {
             protocol,
             draining: false,
             datagram_queue: DatagramQueue::new(),
+            anticipated_incoming_uni: 0,
+            anticipated_incoming_bidi: 0,
         }
     }
 
@@ -159,6 +165,8 @@ impl Session {
             protocol,
             draining: false,
             datagram_queue: DatagramQueue::new(),
+            anticipated_incoming_uni: 0,
+            anticipated_incoming_bidi: 0,
         })
     }
 
@@ -346,6 +354,11 @@ impl Session {
     #[must_use]
     pub(crate) const fn is_active(&self) -> bool {
         matches!(self.state, State::Active)
+    }
+
+    #[must_use]
+    pub(crate) const fn is_closing(&self) -> bool {
+        self.state.closing_state()
     }
 
     pub(crate) fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
@@ -627,6 +640,20 @@ impl Session {
             .set_max_age(max_age, now, default_max_age);
         for outcome in self.record_expired(expired) {
             self.report_datagram_outcome(outcome);
+        }
+    }
+
+    pub(crate) const fn set_anticipated_incoming(&mut self, stream_type: StreamType, value: u16) {
+        match stream_type {
+            StreamType::UniDi => self.anticipated_incoming_uni = value,
+            StreamType::BiDi => self.anticipated_incoming_bidi = value,
+        }
+    }
+
+    pub(crate) const fn anticipated_incoming(&self, stream_type: StreamType) -> u16 {
+        match stream_type {
+            StreamType::UniDi => self.anticipated_incoming_uni,
+            StreamType::BiDi => self.anticipated_incoming_bidi,
         }
     }
 

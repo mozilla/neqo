@@ -211,6 +211,60 @@ fn zero_rtt_send_reject() {
     assert!(server.events().any(recvd_stream_evt));
 }
 
+/// A caller (e.g. the `WebTransport` anticipated-streams API) can raise the incoming
+/// stream limit before the handshake confirms, since that is exactly when the W3C API
+/// supplies it. `Streams::zero_rtt_rejected` must tolerate a limit already raised above
+/// the configured transport parameter rather than asserting it is unchanged.
+#[test]
+fn zero_rtt_reject_after_set_remote_max_streams() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let token = exchange_ticket(&mut client, &mut server, now());
+    let mut client = default_client();
+    client
+        .enable_resumption(now(), token)
+        .expect("should set token");
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        ConnectionParameters::default().versions(client.version(), Version::all()),
+    )
+    .unwrap();
+    // Using a freshly initialized anti-replay context
+    // should result in the server rejecting 0-RTT.
+    let ar =
+        AntiReplay::new(now(), test_fixture::ANTI_REPLAY_WINDOW, 1, 3).expect("setup anti-replay");
+    server
+        .server_enable_0rtt(&ar, AllowZeroRtt {})
+        .expect("enable 0-RTT");
+
+    client.set_remote_max_streams(StreamType::BiDi, 1000);
+    client.set_remote_max_streams(StreamType::UniDi, 1000);
+
+    let client_hs = client.process_output(now());
+    assert!(client_hs.as_dgram_ref().is_some());
+    let client_0rtt = client.process_output(now());
+    assert!(client_0rtt.as_dgram_ref().is_some());
+
+    let server_hs = server.process(client_hs.dgram(), now());
+    let server_hs2 = server.process(client_0rtt.dgram(), now());
+
+    _ = client.process(server_hs.dgram(), now());
+    let dgram = client.process(server_hs2.dgram(), now()).dgram();
+    let dgram = server.process(dgram, now()).dgram();
+
+    // This is where a debug build previously panicked: `zero_rtt_rejected` asserted
+    // the limit was unchanged from the transport parameter.
+    let client_fin = client.process(dgram, now());
+    let recvd_0rtt_reject = |e| e == ConnectionEvent::ZeroRttRejected;
+    assert!(client.events().any(recvd_0rtt_reject));
+
+    _ = server.process(client_fin.dgram(), now());
+}
+
 #[test]
 fn zero_rtt_update_flow_control() {
     const LOW: u64 = 3;
