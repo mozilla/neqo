@@ -1488,30 +1488,53 @@ impl Http3Connection {
 
     pub(crate) fn webtransport_set_anticipated_incoming_uni(
         &mut self,
+        conn: &mut Connection,
         session_id: StreamId,
         value: u16,
     ) -> Res<()> {
         self.recv_streams
             .get(&session_id)
             .and_then(|s| s.extended_connect_session())
-            .map(|s| {
-                s.borrow_mut().set_anticipated_incoming_uni(value);
-            })
-            .ok_or(Error::InvalidStreamId)
+            .ok_or(Error::InvalidStreamId)?
+            .borrow_mut()
+            .set_anticipated_incoming_uni(value);
+        // Sum across all sessions: multiple WebTransport sessions may share a
+        // connection in the future, and each session's streams count against the
+        // same QUIC connection-level limit.  The connection's baseline is
+        // LOCAL_STREAM_LIMIT_UNI (100); only a total exceeding that will cause a
+        // MAX_STREAMS frame to be sent.
+        let total: u64 = self
+            .recv_streams
+            .values()
+            .filter_map(|s| s.extended_connect_session())
+            .map(|s| u64::from(s.borrow().anticipated_incoming_uni()))
+            .sum();
+        conn.set_remote_max_streams_uni(total);
+        Ok(())
     }
 
     pub(crate) fn webtransport_set_anticipated_incoming_bidi(
         &mut self,
+        conn: &mut Connection,
         session_id: StreamId,
         value: u16,
     ) -> Res<()> {
         self.recv_streams
             .get(&session_id)
             .and_then(|s| s.extended_connect_session())
-            .map(|s| {
-                s.borrow_mut().set_anticipated_incoming_bidi(value);
-            })
-            .ok_or(Error::InvalidStreamId)
+            .ok_or(Error::InvalidStreamId)?
+            .borrow_mut()
+            .set_anticipated_incoming_bidi(value);
+        // Sum across all sessions: see comment in webtransport_set_anticipated_incoming_uni.
+        // The connection's baseline is LOCAL_STREAM_LIMIT_BIDI (100).
+        let total: u64 = self
+            .recv_streams
+            .values()
+            .filter_map(|s| s.extended_connect_session())
+            .map(|s| u64::from(s.borrow().anticipated_incoming_bidi()))
+            .sum();
+        conn.set_remote_max_streams_bidi(total);
+        Ok(())
     }
 
     pub(crate) fn connect_udp_close_session(

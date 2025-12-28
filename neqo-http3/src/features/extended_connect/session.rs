@@ -61,6 +61,10 @@ pub(crate) struct Session {
     /// Corresponds to the `:protocol` pseudo-header in the HTTP EXTENDED
     /// CONNECT request.
     protocol: Box<dyn Protocol>,
+    /// Anticipated concurrent incoming unidirectional streams for this session.
+    anticipated_incoming_uni: u16,
+    /// Anticipated concurrent incoming bidirectional streams for this session.
+    anticipated_incoming_bidi: u16,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -120,6 +124,8 @@ impl Session {
             state: State::Negotiating,
             events,
             protocol,
+            anticipated_incoming_uni: 0,
+            anticipated_incoming_bidi: 0,
         }
     }
 
@@ -149,6 +155,8 @@ impl Session {
             state: State::Active,
             events,
             protocol,
+            anticipated_incoming_uni: 0,
+            anticipated_incoming_bidi: 0,
         })
     }
 
@@ -527,11 +535,19 @@ impl Session {
     }
 
     pub(crate) fn set_anticipated_incoming_uni(&mut self, value: u16) {
-        self.protocol.set_anticipated_incoming_uni(value);
+        self.anticipated_incoming_uni = value;
+    }
+
+    pub(crate) fn anticipated_incoming_uni(&self) -> u16 {
+        self.anticipated_incoming_uni
     }
 
     pub(crate) fn set_anticipated_incoming_bidi(&mut self, value: u16) {
-        self.protocol.set_anticipated_incoming_bidi(value);
+        self.anticipated_incoming_bidi = value;
+    }
+
+    pub(crate) fn anticipated_incoming_bidi(&self) -> u16 {
+        self.anticipated_incoming_bidi
     }
 
     pub(crate) fn datagram(&mut self, datagram: Bytes) {
@@ -785,12 +801,6 @@ pub(crate) trait Protocol: Debug + Display {
         _now: Instant,
     ) -> Vec<(Option<u64>, super::datagram_queue::DatagramOutcome)> {
         Vec::new()
-    }
-
-    fn set_anticipated_incoming_uni(&mut self, _value: u16) {
-    }
-
-    fn set_anticipated_incoming_bidi(&mut self, _value: u16) {
     }
 
     fn enqueue_datagram(

@@ -1608,7 +1608,7 @@ impl Http3Client {
         session_id: StreamId,
         value: u16,
     ) -> Res<()> {
-        self.base_handler.webtransport_set_anticipated_incoming_uni(session_id, value)
+        self.base_handler.webtransport_set_anticipated_incoming_uni(&mut self.conn, session_id, value)
     }
 
     /// Set the anticipated concurrent incoming bidirectional streams for a WebTransport session.
@@ -1621,7 +1621,7 @@ impl Http3Client {
         session_id: StreamId,
         value: u16,
     ) -> Res<()> {
-        self.base_handler.webtransport_set_anticipated_incoming_bidi(session_id, value)
+        self.base_handler.webtransport_set_anticipated_incoming_bidi(&mut self.conn, session_id, value)
     }
 
     /// Create a WebTransport stream with a send group.

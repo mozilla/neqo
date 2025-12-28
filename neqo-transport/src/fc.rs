@@ -331,6 +331,10 @@ where
 
     pub const fn set_max_active(&mut self, max: u64) {
         // If max_active has been increased, send an update immediately.
+        // If max is less than or equal to the current max_active, no frame is
+        // sent — the peer's existing allowance already covers this limit.  This
+        // reflects the QUIC requirement that MAX_STREAMS (and MAX_DATA) frames
+        // may only increase the limit, never decrease it.
         self.frame_pending |= self.max_active < max;
         self.max_active = max;
     }
