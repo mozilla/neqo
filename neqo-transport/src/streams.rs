@@ -472,6 +472,14 @@ impl Streams {
         }
     }
 
+    pub fn set_remote_max_streams_bidi(&mut self, max: u64) {
+        self.remote_stream_limits[StreamType::BiDi].set_max_active(max);
+    }
+
+    pub fn set_remote_max_streams_uni(&mut self, max: u64) {
+        self.remote_stream_limits[StreamType::UniDi].set_max_active(max);
+    }
+
     pub fn handle_max_data(&mut self, maximum_data: u64) {
         let previous_limit = self.sender_fc.borrow().available();
         let Some(current_limit) = self.sender_fc.borrow_mut().update(maximum_data) else {

@@ -1462,6 +1462,7 @@ impl Http3Connection {
 
     pub(crate) fn webtransport_set_anticipated_incoming_uni(
         &mut self,
+        conn: &mut Connection,
         session_id: StreamId,
         value: u16,
     ) -> Res<()> {
@@ -1471,11 +1472,14 @@ impl Http3Connection {
             .map(|s| {
                 s.borrow_mut().set_anticipated_incoming_uni(value);
             })
-            .ok_or(Error::InvalidStreamId)
+            .ok_or(Error::InvalidStreamId)?;
+        conn.set_remote_max_streams_uni(u64::from(value));
+        Ok(())
     }
 
     pub(crate) fn webtransport_set_anticipated_incoming_bidi(
         &mut self,
+        conn: &mut Connection,
         session_id: StreamId,
         value: u16,
     ) -> Res<()> {
@@ -1485,7 +1489,9 @@ impl Http3Connection {
             .map(|s| {
                 s.borrow_mut().set_anticipated_incoming_bidi(value);
             })
-            .ok_or(Error::InvalidStreamId)
+            .ok_or(Error::InvalidStreamId)?;
+        conn.set_remote_max_streams_bidi(u64::from(value));
+        Ok(())
     }
 
     pub(crate) fn connect_udp_close_session(

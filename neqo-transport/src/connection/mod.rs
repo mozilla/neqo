@@ -3652,6 +3652,16 @@ impl Connection {
         self.streams.stream_create(st)
     }
 
+    /// Set the maximum number of concurrent incoming bidirectional streams.
+    pub fn set_remote_max_streams_bidi(&mut self, max: u64) {
+        self.streams.set_remote_max_streams_bidi(max);
+    }
+
+    /// Set the maximum number of concurrent incoming unidirectional streams.
+    pub fn set_remote_max_streams_uni(&mut self, max: u64) {
+        self.streams.set_remote_max_streams_uni(max);
+    }
+
     /// Set the priority of a stream.
     ///
     /// # Errors
