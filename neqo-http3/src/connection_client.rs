@@ -813,7 +813,8 @@ impl Http3Client {
     /// # Errors
     ///
     /// This may return an error if the particular session does not exist
-    /// or the connection is not in the active state.
+    /// or the connection is not in the active state or if we're it would
+    /// exceed the connection stream limit.
     pub fn webtransport_create_stream(
         &mut self,
         session_id: StreamId,
@@ -1309,7 +1310,8 @@ impl Http3Client {
                 )?,
 
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
-                    self.events.new_requests_creatable(stream_type);
+                    let going_away = matches!(self.base_handler.state(), Http3State::GoingAway(..));
+                    self.events.stream_creatable(stream_type, going_away);
                 }
                 ConnectionEvent::AuthenticationNeeded => self.events.authentication_needed(),
                 ConnectionEvent::EchFallbackAuthenticationNeeded { public_name } => {
@@ -4011,6 +4013,34 @@ mod tests {
         client.process(out.dgram(), now());
 
         assert_closed(&client, &Error::HttpId);
+    }
+
+    #[test]
+    fn stream_creatable_after_zero_initial_bidi() {
+        let (mut client, mut server) = connect_with_connection_parameters(
+            ConnectionParameters::default().max_streams(StreamType::BiDi, 0),
+        );
+        client.events().for_each(drop);
+
+        // Server grants 1 bidi stream.
+        server.conn.set_remote_max_streams_bidi(1);
+        let out = server.conn.process_output(now());
+        client.process(out.dgram(), now());
+
+        let events: Vec<Http3ClientEvent> = client.events().collect();
+        assert!(
+            events.iter().any(
+                |e| matches!(e, Http3ClientEvent::StreamCreatable { stream_type }
+                    if *stream_type == StreamType::BiDi)
+            ),
+            "StreamCreatable(BiDi) should fire after MAX_STREAMS from zero"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Http3ClientEvent::RequestsCreatable)),
+            "RequestsCreatable should fire after MAX_STREAMS from zero"
+        );
     }
 
     // Close stream before headers.

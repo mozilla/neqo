@@ -74,13 +74,13 @@ if grep -q "ZeroRttRejected" <<< "$IPV6_OUTPUT"; then
     exit 0
 fi
 
-# 0-RTT was attempted if RequestsCreatable fires before the handshake completes
+# 0-RTT was attempted if StreamCreatable fires before the handshake completes
 # (i.e. before "Connection established").  With 0-RTT, the client sends requests
 # at t=0 while the handshake is still in flight.
-if awk '/RequestsCreatable/{saw=1} /Connection established/{exit !saw}' <<< "$IPV6_OUTPUT" \
+if awk '/StreamCreatable/{saw=1} /Connection established/{exit !saw}' <<< "$IPV6_OUTPUT" \
    && grep -q "StateChange(Connected)" <<< "$IPV6_OUTPUT"; then
     echo "RESULT: 0-RTT ACCEPTED"
-    echo "        RequestsCreatable fired before the handshake completed (0-RTT data was sent)"
+    echo "        StreamCreatable fired before the handshake completed (0-RTT data was sent)"
     echo "        and the server did not reject it.  Cloudflare accepts cross-IP 0-RTT token reuse."
     exit 0
 fi
