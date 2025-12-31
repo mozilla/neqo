@@ -245,6 +245,9 @@ impl super::Handler for Handler {
                     self.url_handler.process_urls(client);
                 }
                 Http3ClientEvent::ResumptionToken(t) => self.token = Some(t),
+                // WebTransport-specific signal for retrying stream creation; not
+                // actionable for this classic HTTP/3 client.
+                Http3ClientEvent::StreamCreatable { .. } => {}
                 _ => {
                     qwarn!("Unhandled event {event:?}");
                 }

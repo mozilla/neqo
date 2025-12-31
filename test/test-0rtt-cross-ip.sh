@@ -76,7 +76,9 @@ fi
 
 # 0-RTT was attempted if RequestsCreatable fires before the handshake completes
 # (i.e. before "Connection established").  With 0-RTT, the client sends requests
-# at t=0 while the handshake is still in flight.
+# at t=0 while the handshake is still in flight. RequestsCreatable (unlike
+# StreamCreatable) only fires for request-capable bidirectional streams, so it
+# isn't a false positive from unrelated unidirectional control/QPACK streams.
 if awk '/RequestsCreatable/{saw=1} /Connection established/{exit !saw}' <<< "$IPV6_OUTPUT" \
    && grep -q "StateChange(Connected)" <<< "$IPV6_OUTPUT"; then
     echo "RESULT: 0-RTT ACCEPTED"
