@@ -118,8 +118,8 @@ pub enum Http3ClientEvent {
     /// A push stream was been reset due to a `HttpGeneralProtocol` error.
     /// Most common case are malformed response headers.
     PushReset { push_id: PushId, error: AppError },
-    /// New stream can be created
-    RequestsCreatable,
+    /// Stream quota increased - more streams of the specified type can be created
+    StreamCreatable { stream_type: StreamType },
     /// Cert authentication needed
     AuthenticationNeeded,
     /// Encrypted client hello fallback occurred.  The certificate for the
@@ -331,11 +331,8 @@ impl Http3ClientEvents {
         self.insert(Http3ClientEvent::PushReset { push_id, error });
     }
 
-    /// Add a new `RequestCreatable` event
-    pub(crate) fn new_requests_creatable(&self, stream_type: StreamType) {
-        if stream_type == StreamType::BiDi {
-            self.insert(Http3ClientEvent::RequestsCreatable);
-        }
+    pub(crate) fn stream_creatable(&self, stream_type: StreamType) {
+        self.insert(Http3ClientEvent::StreamCreatable { stream_type });
     }
 
     /// Add a new `AuthenticationNeeded` event
@@ -360,7 +357,14 @@ impl Http3ClientEvents {
 
     /// Add a new `GoawayReceived` event.
     pub(crate) fn goaway_received(&self) {
-        self.remove(|evt| matches!(evt, Http3ClientEvent::RequestsCreatable));
+        self.remove(|evt| {
+            matches!(
+                evt,
+                Http3ClientEvent::StreamCreatable {
+                    stream_type: StreamType::BiDi
+                }
+            )
+        });
         self.insert(Http3ClientEvent::GoawayReceived);
     }
 

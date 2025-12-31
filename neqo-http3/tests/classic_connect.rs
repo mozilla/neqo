@@ -64,7 +64,7 @@ fn classic_connect() {
     while let Some(event) = client.next_event() {
         match event {
             Http3ClientEvent::StateChange { .. }
-            | Http3ClientEvent::RequestsCreatable
+            | Http3ClientEvent::StreamCreatable { .. }
             | Http3ClientEvent::ResumptionToken { .. }
             | Http3ClientEvent::DataWritable { .. } => {}
             e => {

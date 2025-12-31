@@ -18,7 +18,7 @@ use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent,
     Http3State, Priority,
 };
-use neqo_transport::{ConnectionParameters, Output, StreamId};
+use neqo_transport::{ConnectionParameters, Output, StreamId, StreamType};
 use nss::AuthenticationStatus;
 
 use crate::{
@@ -350,7 +350,9 @@ impl Goal for Requests {
             Endpoint::Server(_) => unreachable!("only client can make a request"),
         };
         match e {
-            Http3ClientEvent::RequestsCreatable => {
+            Http3ClientEvent::StreamCreatable {
+                stream_type: StreamType::BiDi,
+            } => {
                 self.fetch(c);
                 GoalStatus::Active
             }

@@ -24,7 +24,7 @@ use neqo_common::{Datagram, event::Provider, hex, qdebug, qerror, qinfo, qwarn};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
     AppError, CloseReason, Connection, EmptyConnectionIdGenerator, Error as TransportError,
-    OutputBatch, RandomConnectionIdGenerator, StreamId,
+    OutputBatch, RandomConnectionIdGenerator, StreamId, StreamType,
 };
 use nss::{AuthenticationStatus, ResumptionToken};
 use rustc_hash::FxHashMap as HashMap;
@@ -234,7 +234,9 @@ impl super::Handler for Handler {
                     }
                 }
                 Http3ClientEvent::StateChange(Http3State::Connected)
-                | Http3ClientEvent::RequestsCreatable => {
+                | Http3ClientEvent::StreamCreatable {
+                    stream_type: StreamType::BiDi,
+                } => {
                     qinfo!("{event:?}");
                     self.url_handler.process_urls(client);
                 }
