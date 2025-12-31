@@ -192,7 +192,8 @@ pub trait ClientSession {
     /// # Errors
     ///
     /// This may return an error if the particular session does not exist
-    /// or the connection is not in the active state.
+    /// or the connection is not in the active state, or if creating the
+    /// stream would exceed the connection's stream limit.
     fn webtransport_create_stream(
         &mut self,
         session_id: StreamId,
