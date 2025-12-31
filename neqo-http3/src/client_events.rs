@@ -103,8 +103,12 @@ pub enum Http3ClientEvent {
         stream_id: StreamId,
         error: AppError,
     },
-    /// New stream can be created
+    /// New HTTP request (including extended connect and WebTransport sessions) can be created
     RequestsCreatable,
+    /// Stream quota increased - more streams of the specified type can be created.
+    /// Distinct from `RequestsCreatable`: a GOAWAY suppresses new requests but
+    /// existing WebTransport sessions may still create streams.
+    StreamCreatable { stream_type: StreamType },
     /// Cert authentication needed
     AuthenticationNeeded,
     /// Encrypted client hello fallback occurred.  The certificate for the
@@ -324,11 +328,12 @@ impl ExtendedConnectEvents for Http3ClientEvents {
 }
 
 impl Http3ClientEvents {
-    /// Add a new `RequestCreatable` event
-    pub(crate) fn new_requests_creatable(&self, stream_type: StreamType) {
-        if stream_type == StreamType::BiDi {
+    pub(crate) fn stream_creatable(&self, stream_type: StreamType, going_away: bool) {
+        if stream_type == StreamType::BiDi && !going_away {
             self.events.push(Http3ClientEvent::RequestsCreatable);
         }
+        self.events
+            .push(Http3ClientEvent::StreamCreatable { stream_type });
     }
 
     /// Add a new `AuthenticationNeeded` event
