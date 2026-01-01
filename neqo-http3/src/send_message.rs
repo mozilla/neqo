@@ -305,14 +305,21 @@ impl SendStream for SendMessage {
         Some(self)
     }
 
-    fn send_data_atomic(&mut self, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<()> {
+    fn send_data_atomic(&mut self, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<bool> {
+        // Buffer the whole frame, then flush what the transport will take right now.
+        // `BufferedStream` keeps the remainder and sends it later, so the frame is
+        // never partially written and never dropped.
+        //
+        // Handing the frame straight to `stream_send_atomic` instead would discard it
+        // whenever the stream is momentarily full or already has bytes queued, which
+        // silently loses capsules such as `CLOSE_WEBTRANSPORT_SESSION`.
         let data_frame = HFrame::Data {
             len: to_u64(buf.len()),
         };
         self.stream.encode_with(|e| data_frame.encode(e));
         self.stream.buffer(buf);
         _ = self.stream.send_buffer(conn, now)?;
-        Ok(())
+        Ok(true)
     }
 }
 
