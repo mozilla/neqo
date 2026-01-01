@@ -1643,6 +1643,39 @@ impl Http3Connection {
         Ok(())
     }
 
+    pub(crate) fn webtransport_send_stream_atomic(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        data: &[u8],
+        now: Instant,
+    ) -> Res<bool> {
+        let send_stream = self
+            .send_streams
+            .get_mut(&stream_id)
+            .filter(|s| matches!(s.stream_type(), Http3StreamType::WebTransport(_)))
+            .ok_or(Error::InvalidStreamId)?;
+
+        send_stream.send_data_atomic(conn, data, now)
+    }
+
+    pub(crate) fn webtransport_send_stream_flow_control_info(
+        &self,
+        conn: &Connection,
+        stream_id: StreamId,
+    ) -> Res<crate::SendStreamFlowControl> {
+        self.send_streams
+            .get(&stream_id)
+            .filter(|s| matches!(s.stream_type(), Http3StreamType::WebTransport(_)))
+            .ok_or(Error::InvalidStreamId)?;
+        let available = conn.stream_avail_send_space(stream_id)?;
+        let buffered = conn.stream_send_buffered(stream_id)?;
+        Ok(crate::SendStreamFlowControl {
+            available,
+            buffered,
+        })
+    }
+
     fn webtransport_create_stream_internal(
         &mut self,
         webtransport_session: Rc<RefCell<extended_connect::session::Session>>,
