@@ -168,7 +168,7 @@ use buffered_send_stream::BufferedStream;
 pub use client_events::{ConnectUdpEvent, Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::{Http3State, SessionAcceptAction};
-pub use connection_client::Http3Client;
+pub use connection_client::{Http3Client, SendStreamFlowControl};
 pub use features::extended_connect::send_group::SendGroupId;
 use frames::HFrame;
 pub use neqo_common::Header;
@@ -610,7 +610,12 @@ trait SendStream: Stream {
     /// # Errors
     ///
     /// It may happen that the transport stream is already closed. This is unlikely.
-    fn send_data_atomic(&mut self, _conn: &mut Connection, _buf: &[u8], _now: Instant) -> Res<()> {
+    fn send_data_atomic(
+        &mut self,
+        _conn: &mut Connection,
+        _buf: &[u8],
+        _now: Instant,
+    ) -> Res<bool> {
         Err(Error::InvalidStreamId)
     }
 
@@ -623,6 +628,7 @@ trait SendStream: Stream {
     fn set_send_group(&mut self, _send_group: SendGroupId) -> Res<()> {
         Err(Error::Unavailable)
     }
+
     /// This function is only implemented by `WebTransportSendStream`.
     fn clear_send_group(&mut self) -> Res<()> {
         Err(Error::Unavailable)

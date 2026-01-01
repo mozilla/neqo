@@ -3845,6 +3845,14 @@ impl Connection {
         Ok(self.streams.get_send_stream(stream_id)?.avail())
     }
 
+    /// Bytes currently buffered in the tx buffer for this stream awaiting
+    /// transmission (sent but not yet acked, or queued but not yet sent).
+    /// # Errors
+    /// When the stream ID is invalid.
+    pub fn stream_send_buffered(&self, stream_id: StreamId) -> Res<usize> {
+        Ok(self.streams.get_send_stream(stream_id)?.buffered())
+    }
+
     /// Set low watermark for [`ConnectionEvent::SendStreamWritable`] event.
     ///
     /// Stream emits a [`crate::ConnectionEvent::SendStreamWritable`] event

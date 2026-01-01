@@ -1735,6 +1735,21 @@ impl Http3Connection {
         Ok(())
     }
 
+    pub(crate) fn webtransport_send_stream_atomic(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        data: &[u8],
+        now: Instant,
+    ) -> Res<bool> {
+        let send_stream = self
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?;
+
+        send_stream.send_data_atomic(conn, data, now)
+    }
+
     fn webtransport_create_stream_internal(
         &mut self,
         webtransport_session: Rc<RefCell<extended_connect::session::Session>>,
