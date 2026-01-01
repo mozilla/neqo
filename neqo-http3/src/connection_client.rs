@@ -958,6 +958,33 @@ impl Http3Client {
             .stats(&mut self.conn)
     }
 
+    /// Returns available send window and buffered bytes for a WebTransport send stream.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream does not exist.
+    pub fn webtransport_send_stream_flow_control_info(
+        &self,
+        stream_id: StreamId,
+    ) -> Res<(usize, usize)> {
+        let available = self.conn.stream_avail_send_space(stream_id)?;
+        Ok((available, 0))
+    }
+
+    /// Send data atomically on a WebTransport send stream.
+    /// Returns true if all data was sent, false if it couldn't fit.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream does not exist or other stream errors.
+    pub fn webtransport_send_stream_atomic(
+        &mut self,
+        stream_id: StreamId,
+        data: &[u8],
+    ) -> Res<bool> {
+        Ok(self.conn.stream_send_atomic(stream_id, data)?)
+    }
+
     /// Export keying material per RFC 5705/8446.
     ///
     /// Note: The keying material is derived from the TLS connection, so it is
