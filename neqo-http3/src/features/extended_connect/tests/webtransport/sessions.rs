@@ -1312,10 +1312,7 @@ fn wt_session_stats_bytes_sent_overhead() {
     wt.send_datagram(session_id, DGRAM).unwrap();
     wt.exchange_packets();
 
-    let stats = wt
-        .client
-        .webtransport_session_stats(session_id, now())
-        .unwrap();
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
     assert_eq!(stats.bytes_sent, DGRAM.len() as u64);
     assert_eq!(stats.bytes_sent_overhead, expected_overhead);
     assert_eq!(stats.datagrams_sent, 1);
@@ -1323,10 +1320,7 @@ fn wt_session_stats_bytes_sent_overhead() {
     wt.send_datagram(session_id, DGRAM).unwrap();
     wt.exchange_packets();
 
-    let stats = wt
-        .client
-        .webtransport_session_stats(session_id, now())
-        .unwrap();
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
     assert_eq!(stats.bytes_sent, 2 * DGRAM.len() as u64);
     assert_eq!(stats.bytes_sent_overhead, 2 * expected_overhead);
     assert_eq!(stats.datagrams_sent, 2);
