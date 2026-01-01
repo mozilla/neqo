@@ -623,6 +623,10 @@ trait SendStream: Stream {
     fn set_send_group(&mut self, _send_group: SendGroupId) -> Res<()> {
         Err(Error::Unavailable)
     }
+
+    /// Helper for downcasting to concrete types
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+
     /// This function is only implemented by `WebTransportSendStream`.
     fn clear_send_group(&mut self) -> Res<()> {
         Err(Error::Unavailable)
