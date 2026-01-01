@@ -1399,6 +1399,20 @@ impl SendStream {
         }
     }
 
+    /// Bytes currently buffered in the tx buffer and not yet acknowledged.
+    ///
+    /// This includes data queued but not yet sent, as well as data that has
+    /// been sent but is still awaiting an ACK.
+    #[must_use]
+    pub fn buffered(&self) -> usize {
+        match &self.state {
+            State::Send { send_buf, .. }
+            | State::DataSent { send_buf, .. }
+            | State::ResetSentReliable { send_buf, .. } => send_buf.buffered(),
+            _ => 0,
+        }
+    }
+
     /// Bytes sendable on stream. Constrained by stream credit available,
     /// connection credit available, and space in the tx buffer.
     #[must_use]
