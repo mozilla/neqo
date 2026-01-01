@@ -1035,6 +1035,37 @@ impl Http3Client {
             .stats(&mut self.conn)
     }
 
+    /// Returns available send window and buffered bytes for a WebTransport send stream.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream does not exist.
+    pub fn webtransport_send_stream_flow_control_info(
+        &self,
+        stream_id: StreamId,
+    ) -> Res<(usize, usize)> {
+        let available = self.conn.stream_avail_send_space(stream_id)?;
+        let buffered = self.conn.stream_send_buffered(stream_id)?;
+        Ok((available, buffered))
+    }
+
+    /// Send data atomically on a WebTransport send stream.
+    /// Returns true if all data was sent, false if it couldn't fit.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream does not exist or other stream errors.
+    pub fn webtransport_send_stream_atomic(
+        &mut self,
+        stream_id: StreamId,
+        data: &[u8],
+    ) -> Res<bool> {
+        let now = std::time::Instant::now();
+        self.base_handler
+            .webtransport_send_stream_atomic(&mut self.conn, stream_id, data, now)
+    }
+
+
     /// Export WebTransport keying material per
     /// draft-ietf-webtrans-http3-15 Section 4.8.
     ///
