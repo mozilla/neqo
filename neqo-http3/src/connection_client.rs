@@ -42,6 +42,12 @@ use crate::{
     settings::HSettings,
 };
 
+#[derive(Debug, Clone, Copy)]
+pub struct SendStreamFlowControl {
+    pub available: usize,
+    pub buffered: usize,
+}
+
 // This is used for filtering send_streams and recv_Streams with a stream_ids greater than or equal
 // a given id. Only the same type (bidirectional or unidirectional) streams are filtered.
 fn id_gte<U>(base: StreamId) -> impl FnMut((&StreamId, &U)) -> Option<StreamId> + 'static
