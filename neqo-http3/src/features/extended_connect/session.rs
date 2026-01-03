@@ -619,6 +619,10 @@ impl SendStream for Rc<RefCell<Session>> {
     fn handle_stop_sending(&mut self, close_type: CloseType) {
         self.borrow_mut().close(close_type);
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 /// An extended connect protocol.

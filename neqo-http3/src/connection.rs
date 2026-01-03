@@ -1641,6 +1641,31 @@ impl Http3Connection {
         Ok(())
     }
 
+    pub(crate) fn webtransport_send_stream_atomic(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        data: &[u8],
+        now: Instant,
+    ) -> Res<bool> {
+        use crate::features::extended_connect::webtransport_streams::WebTransportSendStream;
+
+        // Get the send stream
+        let send_stream = self
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?;
+
+        // Try to downcast to WebTransportSendStream
+        let wt_stream = send_stream
+            .as_any_mut()
+            .downcast_mut::<WebTransportSendStream>()
+            .ok_or(Error::InvalidStreamId)?;
+
+        // Use send_atomic which ensures init buffer is sent first
+        wt_stream.send_atomic(conn, data, now)
+    }
+
     fn webtransport_create_stream_internal(
         &mut self,
         webtransport_session: Rc<RefCell<extended_connect::session::Session>>,

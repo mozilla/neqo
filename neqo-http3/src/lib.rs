@@ -623,6 +623,9 @@ trait SendStream: Stream {
     fn set_send_group(&mut self, _send_group: SendGroupId) -> Res<()> {
         Err(Error::Unavailable)
     }
+
+    /// Helper for downcasting to concrete types
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 trait HttpSendStream: SendStream {

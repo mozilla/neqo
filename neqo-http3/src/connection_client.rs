@@ -982,7 +982,9 @@ impl Http3Client {
         stream_id: StreamId,
         data: &[u8],
     ) -> Res<bool> {
-        Ok(self.conn.stream_send_atomic(stream_id, data)?)
+        let now = std::time::Instant::now();
+        self.base_handler
+            .webtransport_send_stream_atomic(&mut self.conn, stream_id, data, now)
     }
 
     /// Export keying material per RFC 5705/8446.

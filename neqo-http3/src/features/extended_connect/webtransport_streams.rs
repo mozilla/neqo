@@ -179,6 +179,19 @@ impl WebTransportSendStream {
         Ok(())
     }
 
+    pub(crate) fn send_atomic(&mut self, conn: &mut Connection, data: &[u8], now: Instant) -> Res<bool> {
+        // First ensure init buffer is sent
+        self.send(conn, now)?;
+
+        // Only send atomically if we're in SendingData state (init buffer sent)
+        if self.state == WebTransportSenderStreamState::SendingData {
+            Ok(conn.stream_send_atomic(self.stream_id, data)?)
+        } else {
+            // Can't send atomically yet, init buffer not fully sent
+            Ok(false)
+        }
+    }
+
     fn set_done(&mut self, close_type: CloseType) {
         self.state = WebTransportSenderStreamState::Done;
         self.events.send_closed(&self.stream_info, close_type);
@@ -286,5 +299,9 @@ impl SendStream for WebTransportSendStream {
 
     fn set_send_group(&mut self, send_group: SendGroupId) -> Res<()> {
         self.set_send_group(Some(send_group))
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }
