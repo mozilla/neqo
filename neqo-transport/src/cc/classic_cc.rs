@@ -333,13 +333,15 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                 // were sent before the rebinding.
                 self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
             }
-            let present = self.maybe_lost_packets.insert(
-                (pkt.pn(), pkt.packet_type()),
-                MaybeLostPacket {
-                    time_sent: pkt.time_sent(),
-                },
-            );
-            debug_assert!(present.is_none());
+            if !pkt.is_pmtud_probe() {
+                let present = self.maybe_lost_packets.insert(
+                    (pkt.pn(), pkt.packet_type()),
+                    MaybeLostPacket {
+                        time_sent: pkt.time_sent(),
+                    },
+                );
+                debug_assert!(present.is_none());
+            }
         }
 
         qlog::metrics_updated(
