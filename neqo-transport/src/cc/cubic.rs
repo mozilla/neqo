@@ -8,7 +8,7 @@
 
 use std::time::{Duration, Instant};
 
-use neqo_common::qtrace;
+use neqo_common::{qdebug, qtrace};
 
 use crate::cc::{classic_cc::WindowAdjustment, CongestionEvent};
 
@@ -451,13 +451,32 @@ impl WindowAdjustment for Cubic {
 
     fn restore_undo_state(&mut self) {
         if let Some(undo) = self.undo.take() {
+            qdebug!(
+                "Spurious cong event: trying to recover cubic params:
+                w_est: {} -> {}
+                k: {} -> {}
+                w_max: {} -> {}
+                t_epoch: {:?} -> {:?}
+                reno_acked_bytes: {} -> {}
+                ",
+                self.w_est,
+                undo.w_est,
+                self.k,
+                undo.k,
+                self.w_max,
+                undo.w_max,
+                self.t_epoch,
+                undo.t_epoch,
+                self.reno_acked_bytes,
+                undo.reno_acked_bytes
+            );
             self.w_est = undo.w_est;
             self.k = undo.k;
             self.w_max = undo.w_max;
             self.t_epoch = undo.t_epoch;
             self.reno_acked_bytes = undo.reno_acked_bytes;
         } else {
-            debug_assert!(false, "couldn't restore {} specific undo state", self);
+            debug_assert!(false, "couldn't restore {self} specific undo state");
         }
     }
 }

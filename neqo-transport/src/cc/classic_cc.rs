@@ -340,6 +340,12 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                         time_sent: pkt.time_sent(),
                     },
                 );
+                qdebug!(
+                    "Spurious detection: added MaybeLostPacket: pn {}, type {:?}, time_sent {:?}",
+                    pkt.pn(),
+                    pkt.packet_type(),
+                    pkt.time_sent()
+                );
                 debug_assert!(present.is_none());
             }
         }
@@ -418,6 +424,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         // Record the recovery time and exit any transient state.
         if self.state.transient() {
             self.recovery_start = Some(pkt.pn());
+            qdebug!("set recovery_start to pn={}", pkt.pn());
             self.state.update();
         }
 
@@ -543,13 +550,22 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
         // Removes all newly acked packets that are late acks from `maybe_lost_packets`.
         for acked_packet in acked_packets {
-            self.maybe_lost_packets
-                .remove(&(acked_packet.pn(), acked_packet.packet_type()));
+            if self
+                .maybe_lost_packets
+                .remove(&(acked_packet.pn(), acked_packet.packet_type()))
+                .is_some()
+            {
+                qdebug!(
+                    "Spurious detection: removed MaybeLostPacket with pn {}, type {:?}",
+                    acked_packet.pn(),
+                    acked_packet.packet_type(),
+                );
+            }
         }
 
         // If all of them have been removed we detected a spurious congestion event.
         if self.maybe_lost_packets.is_empty() {
-            cc_stats.congestion_events[CongestionEvent::Spurious] += 1;
+            qdebug!("Spurious detection: maybe_lost_packets emptied -> calling on_spurious_congestion_event");
             self.on_spurious_congestion_event(cc_stats);
         }
     }
@@ -560,8 +576,16 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         // The `pto * 2` maximum age of the lost packets is taken from msquic's implementation:
         // <https://github.com/microsoft/msquic/blob/2623c07df62b4bd171f469fb29c2714b6735b676/src/core/loss_detection.c#L939-L943>
         let max_age = pto * 2;
-        self.maybe_lost_packets
-            .retain(|_, packet| now.saturating_duration_since(packet.time_sent) <= max_age);
+        self.maybe_lost_packets.retain(|(pn, pt), packet| {
+            let keep = now.saturating_duration_since(packet.time_sent) <= max_age;
+            if !keep {
+                qdebug!(
+                    "Spurious detection: cleaned up old MaybeLostPacket with pn {pn}, type {:?}",
+                    pt
+                );
+            }
+            keep
+        });
     }
 
     fn on_spurious_congestion_event(&mut self, cc_stats: &mut CongestionControlStats) {
@@ -569,6 +593,25 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             if undo.congestion_window > self.congestion_window {
                 self.cc_algorithm.restore_undo_state();
 
+                qdebug!(
+                    "Spurious cong event: trying to recover cc params:
+                    state: {:?} -> {:?}
+                    congestion_window: {} -> {}
+                    acked_bytes: {} -> {}
+                    ssthresh: {} -> {}
+                    recovery_start: {:?} -> {:?}
+                    ",
+                    self.state,
+                    undo.state,
+                    self.congestion_window,
+                    undo.congestion_window,
+                    self.acked_bytes,
+                    undo.acked_bytes,
+                    self.ssthresh,
+                    undo.ssthresh,
+                    self.recovery_start,
+                    undo.recovery_start
+                );
                 self.state = undo.state;
                 self.congestion_window = undo.congestion_window;
                 self.acked_bytes = undo.acked_bytes;
@@ -578,16 +621,18 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                 if self.state.in_slow_start() {
                     cc_stats.slow_start_exited = false;
                 }
+                qinfo!("[{self}] Spurious cong event -> RESTORED;",);
+            } else {
+                qinfo!(
+                    "[{self}] Spurious cong event -> IGNORED because undo.cwnd {} < self.cwnd {};",
+                    undo.congestion_window,
+                    self.congestion_window
+                );
             }
+            cc_stats.congestion_events[CongestionEvent::Spurious] += 1;
         } else {
-            debug_assert!(false, "couldn't restore congestion controller undo state");
+            qdebug!("[{self}] Spurious cong event -> ABORT, couldn't restore undo state.");
         }
-
-        qinfo!(
-            "[{self}] Spurious cong event -> UNDO; cwnd {}, ssthresh {}",
-            self.congestion_window,
-            self.ssthresh
-        );
     }
 
     fn detect_persistent_congestion<'a>(
@@ -672,6 +717,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         // Start a new congestion event if lost or ECN CE marked packet was sent
         // after the start of the previous congestion recovery period.
         if !self.after_recovery_start(last_packet) {
+            qdebug!("Called on_congestion_event during recovery -> don't react; last_packet {}, recovery_start {}", last_packet.pn(), self.recovery_start.unwrap_or(0));
             return false;
         }
 
@@ -1610,11 +1656,11 @@ mod tests {
     /// 1. Send packets 1,2
     /// 2. Lose packet 1 → congestion event #1
     /// 3. Send packet 3 → enter Recovery state
-    /// 4. Late ack packet 1 → spurious event #1 detected
-    /// (we would not leave recovery here, thus 5. wouldn't trigger a congestion event)
+    /// 4. Late ack packet 1 → spurious event #1 detected (we would not leave recovery here, thus
+    ///    5. wouldn't trigger a congestion event)
     /// 5. Lose packet 2 → congestion event #2
-    /// 6. Ack packet 2 → should trigger spurious event #2
-    /// (but not without also having an actual congestion event in 4.)
+    /// 6. Ack packet 2 → should trigger spurious event #2 (but not without also having an actual
+    ///    congestion event in 4.)
     #[test]
     fn spurious_no_double_detection_in_recovery() {
         let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
