@@ -41,6 +41,8 @@ pub struct Session {
     draining: bool,
     /// The negotiated protocol from server response headers.
     negotiated_protocol: Option<String>,
+    /// The list of protocols offered by the client in the request.
+    offered_protocols: Vec<String>,
     /// Send groups for this session.
     send_groups: HashMap<SendGroupId, SendGroup>,
     /// Session-level statistics.
@@ -71,6 +73,7 @@ impl Session {
             pending_streams: HashSet::default(),
             draining: false,
             negotiated_protocol: None,
+            offered_protocols: Vec::new(),
             send_groups: HashMap::default(),
             stats: WebTransportSessionStats::new(),
             datagram_queue: WebTransportDatagramQueue::new(),
@@ -87,6 +90,11 @@ impl Session {
     /// Check if session is draining.
     pub(crate) fn is_draining(&self) -> bool {
         self.draining
+    }
+
+    /// Set the offered protocols list from the client request.
+    pub(crate) fn set_offered_protocols(&mut self, protocols: Vec<String>) {
+        self.offered_protocols = protocols;
     }
 
     /// Set the negotiated protocol from server response headers.
@@ -320,12 +328,16 @@ impl Protocol for Session {
         )
     }
 
+    fn set_offered_protocols(&mut self, protocols: Vec<String>) {
+        self.set_offered_protocols(protocols);
+    }
+
     fn set_protocol(&mut self, protocol: Option<String>) {
-        self.negotiated_protocol = protocol;
+        self.set_protocol(protocol);
     }
 
     fn protocol(&self) -> Option<&str> {
-        self.negotiated_protocol.as_deref()
+        self.protocol()
     }
 
     fn create_send_group(&mut self) -> Option<SendGroupId> {

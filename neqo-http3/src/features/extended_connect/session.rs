@@ -292,16 +292,21 @@ impl Session {
                             .find(|h| h.name().eq_ignore_ascii_case("wt-protocol"))
                             .and_then(|h| from_utf8(h.value()).ok())
                             .and_then(|s| {
+                                qtrace!("wt-protocol header value: {:?}", s);
                                 // Split on ';' to remove parameters
                                 let main_value = s.split(';').next()?.trim();
+                                qtrace!("wt-protocol main_value after split/trim: {:?}", main_value);
                                 // Remove surrounding quotes
                                 if main_value.len() >= 2
                                     && main_value.starts_with('"')
                                     && main_value.ends_with('"') {
-                                    Some(main_value[1..main_value.len()-1].to_string())
+                                    let extracted = main_value[1..main_value.len()-1].to_string();
+                                    qtrace!("wt-protocol extracted: {:?}", extracted);
+                                    Some(extracted)
                                 } else {
-                                    // If not quoted, use as-is (shouldn't happen per spec)
-                                    Some(main_value.to_string())
+                                    // If not quoted, it's malformed per spec - reject it
+                                    qtrace!("wt-protocol malformed (not quoted): {:?}", main_value);
+                                    None
                                 }
                             });
 
@@ -674,6 +679,10 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
         (HashSet::default(), HashSet::default())
+    }
+
+    fn set_offered_protocols(&mut self, _protocols: Vec<String>) {
+        // Default implementation does nothing
     }
 
     fn set_protocol(&mut self, _protocol: Option<String>) {
