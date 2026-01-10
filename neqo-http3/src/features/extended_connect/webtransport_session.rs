@@ -11,7 +11,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qdebug, qtrace, Bytes, Encoder, Role};
+use neqo_common::{qtrace, Bytes, Encoder, Role};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -210,6 +210,19 @@ impl Protocol for Session {
         Ok(datagram)
     }
 
+    fn datagram_capsule_support(&self) -> bool {
+        // HTTP/3 WebTransport requires QUIC datagram support. In other words,
+        // HTTP/3 WebTransport never falls back to HTTP datagram capsules.
+        //
+        // > WebTransport over HTTP/3 also requires support for QUIC datagrams.
+        // > To indicate support, both the client and the server send a
+        // > max_datagram_frame_size transport parameter with a value greater than
+        // > 0 (see Section 3 of [QUIC-DATAGRAM]).
+        //
+        // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-3.1>
+        false
+    }
+
     fn write_datagram_capsule(
         &self,
         _control_stream_send: &mut Box<dyn SendStream>,
@@ -217,8 +230,10 @@ impl Protocol for Session {
         _buf: &[u8],
         _now: Instant,
     ) -> Res<()> {
-        // WebTransport never sends datagram capsules, dropping it.
-        qdebug!("[{self}] WebTransport does not support datagram capsules, dropping it.");
+        debug_assert!(
+            false,
+            "[{self}] WebTransport does not support datagram capsules."
+        );
         Ok(())
     }
 }

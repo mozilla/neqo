@@ -378,11 +378,8 @@ impl Session {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The session is not in Active state (`Error::Unavailable`)
-    /// - When QUIC datagrams are unavailable (`remote_datagram_size() == 0`):
-    ///   - Capsule writing fails (if the protocol supports HTTP DATAGRAM Capsules)
-    ///   - The protocol doesn't support capsules and QUIC datagram sending fails
-    /// - When QUIC datagrams are available: QUIC datagram sending fails
+    /// - The session is not in Active state (`Error::Unavailable`).
+    /// - QUIC datagram or HTTP DATAGRAM Capsule sending fails.
     pub(crate) fn send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         conn: &mut Connection,
@@ -397,11 +394,14 @@ impl Session {
             return Err(Error::Unavailable);
         }
 
-        if conn.remote_datagram_size() == 0 {
+        if conn.remote_datagram_size() == 0 && self.protocol.datagram_capsule_support() {
             qtrace!("[{self}] remote_datagram_size is 0, trying HTTP DATAGRAM Capsule");
-            self.protocol
-                .write_datagram_capsule(&mut self.control_stream_send, conn, buf, now)?;
-            return Ok(());
+            return self.protocol.write_datagram_capsule(
+                &mut self.control_stream_send,
+                conn,
+                buf,
+                now,
+            );
         }
 
         let mut dgram_data = Encoder::default();
@@ -581,6 +581,11 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError>;
 
+    /// Whether the extended CONNECT protocol supports sending datagrams as HTTP
+    /// DATAGRAM Capsules when QUIC datagrams are unavailable.
+    fn datagram_capsule_support(&self) -> bool;
+
+    /// Write a datagram as an HTTP DATAGRAM Capsule to the control stream.
     fn write_datagram_capsule(
         &self,
         _control_stream_send: &mut Box<dyn SendStream>,

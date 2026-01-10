@@ -121,7 +121,7 @@ mod tests {
     fn encode_decode_roundtrip() {
         let payload = vec![0xde, 0xad, 0xbe, 0xef];
         let original = Capsule::Datagram {
-            payload: Bytes::from(payload.clone()),
+            payload: Bytes::from(payload),
         };
 
         let mut enc = Encoder::default();

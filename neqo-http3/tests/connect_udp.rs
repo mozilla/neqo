@@ -599,7 +599,7 @@ fn session_lifecycle_with_http_datagram_capsule() {
         .unwrap();
     assert_eq!(session_id, id);
     assert_eq!(&datagram, PING);
-    qinfo!("✓ Capsule decode successful (client -> server)");
+    qinfo!("Capsule decode successful (client -> server)");
 
     qinfo!("Testing Capsule receive (server -> client)");
     proxy_session.send_datagram(PONG, None, now()).unwrap();
@@ -622,7 +622,7 @@ fn session_lifecycle_with_http_datagram_capsule() {
         .unwrap();
     assert_eq!(session_id, id);
     assert_eq!(&datagram, PONG);
-    qinfo!("✓ Capsule encode/decode successful (server -> client)");
+    qinfo!("Capsule encode/decode successful (server -> client)");
 
     qinfo!("Testing multiple datagrams via Capsules");
     for i in 0..5 {
@@ -646,7 +646,7 @@ fn session_lifecycle_with_http_datagram_capsule() {
         }
     }
     assert_eq!(count, 5, "Should receive all 5 datagrams via Capsules");
-    qinfo!("✓ Multiple Capsules transmitted successfully");
+    qinfo!("Multiple Capsules transmitted successfully");
 
     client
         .connect_udp_close_session(session_id, 0, "capsule test complete", now())
@@ -673,5 +673,5 @@ fn session_lifecycle_with_http_datagram_capsule() {
         "No QUIC datagram frames should have been sent by client"
     );
 
-    qinfo!("✓ HTTP DATAGRAM Capsule test completed successfully");
+    qinfo!("HTTP DATAGRAM Capsule test completed successfully");
 }

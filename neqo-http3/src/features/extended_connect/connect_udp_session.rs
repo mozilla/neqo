@@ -118,6 +118,10 @@ impl Protocol for Session {
         }
     }
 
+    fn datagram_capsule_support(&self) -> bool {
+        true
+    }
+
     fn write_datagram_capsule(
         &self,
         control_stream_send: &mut Box<dyn SendStream>,
