@@ -466,7 +466,7 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
     wt_server_session
         .response(&SessionAcceptAction::Accept, now)
         .unwrap();
-    wt_server_session.send_datagram(b"PING", None).unwrap();
+    wt_server_session.send_datagram(b"PING", None, now).unwrap();
     let accept_and_wt_datagram = server
         .process_output(now)
         .dgram()
