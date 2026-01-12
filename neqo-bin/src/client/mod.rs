@@ -24,7 +24,7 @@ use futures::{
     future::{select, Either},
     FutureExt as _, TryFutureExt as _,
 };
-use http::Uri;
+use http::Uri as Url;
 use neqo_common::{qdebug, qerror, qinfo, qlog::Qlog, Datagram, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
@@ -83,7 +83,7 @@ pub struct Args {
     #[command(flatten)]
     shared: SharedArgs,
 
-    urls: Vec<Uri>,
+    urls: Vec<Url>,
 
     #[arg(short = 'm', default_value = "GET")]
     method: String,
@@ -169,7 +169,7 @@ impl Args {
             shared: SharedArgs::default(),
             urls: repeat_with(|| {
                 format!("http://{addr}/{download_size}")
-                    .parse::<Uri>()
+                    .parse::<Url>()
                     .unwrap()
             })
             .take(num_requests)
@@ -294,7 +294,7 @@ impl Args {
 }
 
 fn get_output_file(
-    url: &Uri,
+    url: &Url,
     output_dir: Option<&PathBuf>,
     all_paths: &mut Vec<PathBuf>,
 ) -> Option<BufWriter<File>> {
@@ -540,15 +540,15 @@ const fn local_addr_for(remote_addr: &SocketAddr, local_port: u16) -> SocketAddr
     }
 }
 
-fn urls_by_origin(urls: &[Uri]) -> impl Iterator<Item = ((String, u16), VecDeque<Uri>)> {
+fn urls_by_origin(urls: &[Url]) -> impl Iterator<Item = ((String, u16), VecDeque<Url>)> {
     urls.iter()
         .fold(
-            HashMap::<(String, u16), VecDeque<Uri>>::default(),
-            |mut map, uri| {
-                if let Some(authority) = uri.authority() {
+            HashMap::<(String, u16), VecDeque<Url>>::default(),
+            |mut map, url| {
+                if let Some(authority) = url.authority() {
                     let host = authority.host().to_string();
                     let port = authority.port_u16().unwrap_or(443);
-                    map.entry((host, port)).or_default().push_back(uri.clone());
+                    map.entry((host, port)).or_default().push_back(url.clone());
                 }
                 map
             },

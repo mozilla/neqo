@@ -21,7 +21,7 @@ use std::{
     time::Instant,
 };
 
-use http::Uri;
+use http::Uri as Url;
 use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
@@ -35,8 +35,8 @@ use crate::STREAM_IO_BUFFER_SIZE;
 
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
-    url_queue: VecDeque<Uri>,
-    handled_urls: Vec<Uri>,
+    url_queue: VecDeque<Url>,
+    handled_urls: Vec<Url>,
     all_paths: Vec<PathBuf>,
     args: &'a Args,
     token: Option<ResumptionToken>,
@@ -231,7 +231,7 @@ impl super::Client for Connection {
 }
 
 impl<'b> Handler<'b> {
-    pub fn new(url_queue: VecDeque<Uri>, args: &'b Args) -> Self {
+    pub fn new(url_queue: VecDeque<Url>, args: &'b Args) -> Self {
         Self {
             streams: HashMap::default(),
             url_queue,

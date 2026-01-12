@@ -6,7 +6,7 @@
 
 use std::fmt::Debug;
 
-use http::Uri;
+use http::Uri as Url;
 
 pub trait RequestTarget: Debug {
     fn scheme(&self) -> &str;
@@ -14,17 +14,17 @@ pub trait RequestTarget: Debug {
     fn path(&self) -> &str;
 }
 
-impl RequestTarget for &Uri {
+impl RequestTarget for &Url {
     fn scheme(&self) -> &str {
         self.scheme_str().unwrap_or("")
     }
 
     fn authority(&self) -> &str {
-        Uri::authority(self).map_or("", |a| a.as_str())
+        Url::authority(self).map_or("", |a| a.as_str())
     }
 
     fn path(&self) -> &str {
-        Uri::path(self)
+        Url::path(self)
     }
 }
 

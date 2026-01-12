@@ -1878,10 +1878,9 @@ mod tests {
 
     #[test]
     fn create_request_headers_connect_without_connect_type() {
-        let uri = Uri::from_static("https://example.com");
         let request = RequestDescription {
             method: "CONNECT",
-            target: &uri,
+            target: &Uri::from_static("https://example.com"),
             headers: &[],
             connect_type: None,
             priority: Priority::default(),
@@ -1894,10 +1893,9 @@ mod tests {
 
     #[test]
     fn create_request_headers_connect_type_without_connect() {
-        let uri = Uri::from_static("https://example.com");
         let request = RequestDescription {
             method: "GET",
-            target: &uri,
+            target: &Uri::from_static("https://example.com"),
             headers: &[],
             connect_type: Some(ConnectType::Classic),
             priority: Priority::default(),

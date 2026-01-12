@@ -21,7 +21,7 @@ use std::{
     time::Instant,
 };
 
-use http::Uri;
+use http::Uri as Url;
 use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
@@ -43,7 +43,7 @@ pub struct Handler {
 }
 
 impl Handler {
-    pub(crate) fn new(url_queue: VecDeque<Uri>, args: Args) -> Self {
+    pub(crate) fn new(url_queue: VecDeque<Url>, args: Args) -> Self {
         let output_read_data = args.output_read_data;
         let url_handler = UrlHandler {
             url_queue,
@@ -369,8 +369,8 @@ impl StreamHandler for UploadStreamHandler {
 }
 
 struct UrlHandler {
-    url_queue: VecDeque<Uri>,
-    handled_urls: Vec<Uri>,
+    url_queue: VecDeque<Url>,
+    handled_urls: Vec<Url>,
     stream_handlers: HashMap<StreamId, Box<dyn StreamHandler>>,
     all_paths: Vec<PathBuf>,
     args: Args,
