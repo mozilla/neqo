@@ -1456,4 +1456,32 @@ mod test {
 
         Ok(())
     }
+
+    #[test]
+    fn auto_tune_never_decreases_large_manually_set_max_active() -> Res<()> {
+        let rtt = Duration::from_millis(40);
+        let now = test_fixture::now();
+        let mut fc = ReceiverFlowControl::new(
+            StreamId::new(0),
+            // Very large manually configured window beyond the maximum auto-tuned window.
+            MAX_LOCAL_MAX_STREAM_DATA * 10,
+        );
+        let initial_max_active = fc.max_active();
+
+        // Consume and retire multiple windows to trigger auto-tuning.
+        // Each iteration: consume a full window, retire it, send update.
+        for _ in 1..11 {
+            let consumed = fc.set_consumed(fc.next_limit())?;
+            fc.add_retired(consumed);
+            write_frames(&mut fc, rtt, now);
+        }
+        let increased_max_active = fc.max_active();
+
+        assert!(
+            initial_max_active == increased_max_active,
+            "expect receive window auto-tuning to not increase max_active below manually set initial value."
+        );
+
+        Ok(())
+    }
 }
