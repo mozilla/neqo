@@ -98,7 +98,12 @@ pub trait WindowAdjustment: Display + Debug {
     ) -> (usize, usize);
     /// Cubic needs this signal to reset its epoch.
     fn on_app_limited(&mut self);
+    /// Store the current congestion controller state, to be recovered in the case of a spurious
+    /// congestion event.
     fn save_undo_state(&mut self);
+
+    /// Restore the previously stored congestion controller state, to recover from a spurious
+    /// congestion event.
     fn restore_undo_state(&mut self);
 }
 
@@ -107,34 +112,26 @@ struct MaybeLostPacket {
     time_sent: Instant,
 }
 
-#[derive(Debug)]
-struct Undo {
+#[derive(Debug, Clone)]
+struct Parameters {
     state: State,
     congestion_window: usize,
     acked_bytes: usize,
     ssthresh: usize,
+    /// Packet number of the first packet that was sent after a congestion event. When this one is
+    /// acked we will exit [`State::Recovery`] and enter [`State::CongestionAvoidance`].
     recovery_start: Option<packet::Number>,
 }
 
 #[derive(Debug)]
 pub struct ClassicCongestionControl<T> {
     cc_algorithm: T,
-    state: State,
-    congestion_window: usize, // = kInitialWindow
     bytes_in_flight: usize,
-    acked_bytes: usize,
-    ssthresh: usize,
-    /// Packet number of the first packet that was sent after a congestion event. When this one is
-    /// acked we will exit [`State::Recovery`] and enter [`State::CongestionAvoidance`].
-    recovery_start: Option<packet::Number>,
     /// Packets that have supposedly been lost. These are used for spurious congestion event
     /// detection. Gets drained when the same packets are later acked and regularly purged from too
     /// old packets in [`Self::cleanup_maybe_lost_packets`]. Needs a tuple of `(packet::Number,
     /// packet::Type)` to identify packets across packet number spaces.
     maybe_lost_packets: HashMap<(packet::Number, packet::Type), MaybeLostPacket>,
-    /// Congestion parameters stored on a congestion event to restore prior state in case the
-    /// congestion event turns out to be spurious.
-    undo: Option<Undo>,
     /// `first_app_limited` indicates the packet number after which the application might be
     /// underutilizing the congestion window. When underutilizing the congestion window due to not
     /// sending out enough data, we SHOULD NOT increase the congestion window.[1] Packets sent
@@ -145,6 +142,11 @@ pub struct ClassicCongestionControl<T> {
     first_app_limited: packet::Number,
     pmtud: Pmtud,
     qlog: Qlog,
+    /// Current congestion controller parameters.
+    current: Parameters,
+    /// Congestion controller parameters that were stored on a congestion event to restore prior
+    /// state in case the congestion event turns out to be spurious.
+    stored: Option<Parameters>,
 }
 
 impl<T> ClassicCongestionControl<T> {
@@ -158,7 +160,10 @@ impl<T: WindowAdjustment> Display for ClassicCongestionControl<T> {
         write!(
             f,
             "{} CongCtrl {}/{} ssthresh {}",
-            self.cc_algorithm, self.bytes_in_flight, self.congestion_window, self.ssthresh,
+            self.cc_algorithm,
+            self.bytes_in_flight,
+            self.current.congestion_window,
+            self.current.ssthresh,
         )?;
         Ok(())
     }
@@ -170,7 +175,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     }
 
     fn cwnd(&self) -> usize {
-        self.congestion_window
+        self.current.congestion_window
     }
 
     fn bytes_in_flight(&self) -> usize {
@@ -180,7 +185,9 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     fn cwnd_avail(&self) -> usize {
         // BIF can be higher than cwnd due to PTO packets, which are sent even
         // if avail is 0, but still count towards BIF.
-        self.congestion_window.saturating_sub(self.bytes_in_flight)
+        self.current
+            .congestion_window
+            .saturating_sub(self.bytes_in_flight)
     }
 
     fn cwnd_min(&self) -> usize {
@@ -241,7 +248,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                 continue;
             }
 
-            if self.state.in_recovery() {
+            if self.current.state.in_recovery() {
                 self.set_state(State::CongestionAvoidance, now);
                 qlog::metrics_updated(&mut self.qlog, &[qlog::Metric::InRecovery(false)], now);
             }
@@ -251,29 +258,32 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
         if is_app_limited {
             self.cc_algorithm.on_app_limited();
-            qdebug!("on_packets_acked this={self:p}, limited=1, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={new_acked}", self.bytes_in_flight, self.congestion_window, self.state);
+            qdebug!("on_packets_acked this={self:p}, limited=1, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={new_acked}", self.bytes_in_flight, self.current.congestion_window, self.current.state);
             return;
         }
 
         // Slow start, up to the slow start threshold.
-        if self.congestion_window < self.ssthresh {
-            self.acked_bytes += new_acked;
-            let increase = min(self.ssthresh - self.congestion_window, self.acked_bytes);
-            self.congestion_window += increase;
-            self.acked_bytes -= increase;
+        if self.current.congestion_window < self.current.ssthresh {
+            self.current.acked_bytes += new_acked;
+            let increase = min(
+                self.current.ssthresh - self.current.congestion_window,
+                self.current.acked_bytes,
+            );
+            self.current.congestion_window += increase;
+            self.current.acked_bytes -= increase;
             qdebug!("[{self}] slow start += {increase}");
-            if self.congestion_window == self.ssthresh {
+            if self.current.congestion_window == self.current.ssthresh {
                 // This doesn't look like it is necessary, but it can happen
                 // after persistent congestion.
                 self.set_state(State::CongestionAvoidance, now);
             }
         }
         // Congestion avoidance, above the slow start threshold.
-        if self.congestion_window >= self.ssthresh {
+        if self.current.congestion_window >= self.current.ssthresh {
             // The following function return the amount acked bytes a controller needs
             // to collect to be allowed to increase its cwnd by MAX_DATAGRAM_SIZE.
             let bytes_for_increase = self.cc_algorithm.bytes_for_cwnd_increase(
-                self.congestion_window,
+                self.current.congestion_window,
                 new_acked,
                 rtt_est.minimum(),
                 self.max_datagram_size(),
@@ -282,29 +292,30 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             debug_assert!(bytes_for_increase > 0);
             // If enough credit has been accumulated already, apply them gradually.
             // If we have sudden increase in allowed rate we actually increase cwnd gently.
-            if self.acked_bytes >= bytes_for_increase {
-                self.acked_bytes = 0;
-                self.congestion_window += self.max_datagram_size();
+            if self.current.acked_bytes >= bytes_for_increase {
+                self.current.acked_bytes = 0;
+                self.current.congestion_window += self.max_datagram_size();
             }
-            self.acked_bytes += new_acked;
-            if self.acked_bytes >= bytes_for_increase {
-                self.acked_bytes -= bytes_for_increase;
-                self.congestion_window += self.max_datagram_size(); // or is this the current MTU?
+            self.current.acked_bytes += new_acked;
+            if self.current.acked_bytes >= bytes_for_increase {
+                self.current.acked_bytes -= bytes_for_increase;
+                self.current.congestion_window += self.max_datagram_size(); // or is this the
+                                                                            // current MTU?
             }
             // The number of bytes we require can go down over time with Cubic.
             // That might result in an excessive rate of increase, so limit the number of unused
             // acknowledged bytes after increasing the congestion window twice.
-            self.acked_bytes = min(bytes_for_increase, self.acked_bytes);
+            self.current.acked_bytes = min(bytes_for_increase, self.current.acked_bytes);
         }
         qlog::metrics_updated(
             &mut self.qlog,
             &[
-                qlog::Metric::CongestionWindow(self.congestion_window),
+                qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::BytesInFlight(self.bytes_in_flight),
             ],
             now,
         );
-        qdebug!("[{self}] on_packets_acked this={self:p}, limited=0, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={new_acked}", self.bytes_in_flight, self.congestion_window, self.state);
+        qdebug!("[{self}] on_packets_acked this={self:p}, limited=0, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={new_acked}", self.bytes_in_flight, self.current.congestion_window, self.current.state);
     }
 
     /// Update congestion controller state based on lost packets.
@@ -379,8 +390,8 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         qdebug!(
             "on_packets_lost this={self:p}, bytes_in_flight={}, cwnd={}, state={:?}",
             self.bytes_in_flight,
-            self.congestion_window,
-            self.state
+            self.current.congestion_window,
+            self.current.state
         );
         congestion || persistent_congestion
     }
@@ -422,10 +433,10 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
     fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant) {
         // Record the recovery time and exit any transient state.
-        if self.state.transient() {
-            self.recovery_start = Some(pkt.pn());
+        if self.current.state.transient() {
+            self.current.recovery_start = Some(pkt.pn());
             qdebug!("set recovery_start to pn={}", pkt.pn());
-            self.state.update();
+            self.current.state.update();
         }
 
         if !pkt.cc_in_flight() {
@@ -454,7 +465,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
     /// Whether a packet can be sent immediately as a result of entering recovery.
     fn recovery_packet(&self) -> bool {
-        self.state == State::RecoveryStart
+        self.current.state == State::RecoveryStart
     }
 }
 
@@ -464,31 +475,34 @@ const fn cwnd_initial(mtu: usize) -> usize {
 
 impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     pub fn new(cc_algorithm: T, pmtud: Pmtud) -> Self {
+        let mtu = pmtud.plpmtu();
         Self {
             cc_algorithm,
-            state: State::SlowStart,
-            congestion_window: cwnd_initial(pmtud.plpmtu()),
             bytes_in_flight: 0,
-            acked_bytes: 0,
             maybe_lost_packets: HashMap::default(),
-            undo: None,
-            ssthresh: usize::MAX,
-            recovery_start: None,
             qlog: Qlog::disabled(),
             first_app_limited: 0,
             pmtud,
+            current: Parameters {
+                state: State::SlowStart,
+                congestion_window: cwnd_initial(mtu),
+                acked_bytes: 0,
+                ssthresh: usize::MAX,
+                recovery_start: None,
+            },
+            stored: None,
         }
     }
 
     #[cfg(test)]
     #[must_use]
     pub const fn ssthresh(&self) -> usize {
-        self.ssthresh
+        self.current.ssthresh
     }
 
     #[cfg(test)]
     pub const fn set_ssthresh(&mut self, v: usize) {
-        self.ssthresh = v;
+        self.current.ssthresh = v;
     }
 
     /// Accessor for [`ClassicCongestionControl::cc_algorithm`]. Is used to call Cubic getters in
@@ -507,13 +521,13 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
     #[cfg(test)]
     pub const fn acked_bytes(&self) -> usize {
-        self.acked_bytes
+        self.current.acked_bytes
     }
 
     fn set_state(&mut self, state: State, now: Instant) {
-        if self.state != state {
+        if self.current.state != state {
             qdebug!("[{self}] state -> {state:?}");
-            let old_state = self.state;
+            let old_state = self.current.state;
             self.qlog.add_event_at(
                 || {
                     // No need to tell qlog about exit from transient states.
@@ -530,7 +544,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                 },
                 now,
             );
-            self.state = state;
+            self.current.state = state;
         }
     }
 
@@ -589,50 +603,36 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     }
 
     fn on_spurious_congestion_event(&mut self, cc_stats: &mut CongestionControlStats) {
-        if let Some(undo) = self.undo.take() {
-            if undo.congestion_window > self.congestion_window {
-                self.cc_algorithm.restore_undo_state();
+        let Some(stored) = self.stored.take() else {
+            qdebug!(
+                "[{self}] Spurious cong event -> ABORT, no stored params to restore available."
+            );
+            return;
+        };
 
-                qdebug!(
-                    "Spurious cong event: trying to recover cc params:
-                    state: {:?} -> {:?}
-                    congestion_window: {} -> {}
-                    acked_bytes: {} -> {}
-                    ssthresh: {} -> {}
-                    recovery_start: {:?} -> {:?}
-                    ",
-                    self.state,
-                    undo.state,
-                    self.congestion_window,
-                    undo.congestion_window,
-                    self.acked_bytes,
-                    undo.acked_bytes,
-                    self.ssthresh,
-                    undo.ssthresh,
-                    self.recovery_start,
-                    undo.recovery_start
-                );
-                self.state = undo.state;
-                self.congestion_window = undo.congestion_window;
-                self.acked_bytes = undo.acked_bytes;
-                self.ssthresh = undo.ssthresh;
-                self.recovery_start = undo.recovery_start;
-
-                if self.state.in_slow_start() {
-                    cc_stats.slow_start_exited = false;
-                }
-                qinfo!("[{self}] Spurious cong event -> RESTORED;",);
-            } else {
-                qinfo!(
-                    "[{self}] Spurious cong event -> IGNORED because undo.cwnd {} < self.cwnd {};",
-                    undo.congestion_window,
-                    self.congestion_window
-                );
-            }
+        if stored.congestion_window <= self.current.congestion_window {
+            qinfo!(
+                "[{self}] Spurious cong event -> IGNORED because stored.cwnd {} < self.cwnd {};",
+                stored.congestion_window,
+                self.current.congestion_window
+            );
             cc_stats.congestion_events[CongestionEvent::Spurious] += 1;
-        } else {
-            qdebug!("[{self}] Spurious cong event -> ABORT, couldn't restore undo state.");
+            return;
         }
+        self.cc_algorithm.restore_undo_state();
+
+        qdebug!(
+            "Spurious cong event: recovering cc params from {:?} to {:?}",
+            self.current,
+            stored
+        );
+        self.current = stored;
+
+        if self.current.state.in_slow_start() {
+            cc_stats.slow_start_exited = false;
+        }
+        qinfo!("[{self}] Spurious cong event -> RESTORED;",);
+        cc_stats.congestion_events[CongestionEvent::Spurious] += 1;
     }
 
     fn detect_persistent_congestion<'a>(
@@ -677,12 +677,14 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                     .expect("time is monotonic");
                 if elapsed > pc_period {
                     qinfo!("[{self}] persistent congestion");
-                    self.congestion_window = self.cwnd_min();
-                    self.acked_bytes = 0;
+                    self.current.congestion_window = self.cwnd_min();
+                    self.current.acked_bytes = 0;
                     self.set_state(State::PersistentCongestion, now);
                     qlog::metrics_updated(
                         &mut self.qlog,
-                        &[qlog::Metric::CongestionWindow(self.congestion_window)],
+                        &[qlog::Metric::CongestionWindow(
+                            self.current.congestion_window,
+                        )],
                         now,
                     );
                     return true;
@@ -702,7 +704,11 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         // state and update the variable `self.recovery_start`. Before the
         // first recovery, all packets were sent after the recovery event,
         // allowing to reduce the cwnd on congestion events.
-        !self.state.transient() && self.recovery_start.is_none_or(|pn| packet.pn() >= pn)
+        !self.current.state.transient()
+            && self
+                .current
+                .recovery_start
+                .is_none_or(|pn| packet.pn() >= pn)
     }
 
     /// Handle a congestion event.
@@ -717,45 +723,39 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         // Start a new congestion event if lost or ECN CE marked packet was sent
         // after the start of the previous congestion recovery period.
         if !self.after_recovery_start(last_packet) {
-            qdebug!("Called on_congestion_event during recovery -> don't react; last_packet {}, recovery_start {}", last_packet.pn(), self.recovery_start.unwrap_or(0));
+            qdebug!("Called on_congestion_event during recovery -> don't react; last_packet {}, recovery_start {}", last_packet.pn(), self.current.recovery_start.unwrap_or(0));
             return false;
         }
 
         if congestion_event != CongestionEvent::Ecn {
-            self.undo = Some(Undo {
-                state: self.state,
-                congestion_window: self.congestion_window,
-                acked_bytes: self.acked_bytes,
-                ssthresh: self.ssthresh,
-                recovery_start: self.recovery_start,
-            });
+            self.stored = Some(self.current.clone());
 
             self.cc_algorithm.save_undo_state();
         }
 
         let (cwnd, acked_bytes) = self.cc_algorithm.reduce_cwnd(
-            self.congestion_window,
-            self.acked_bytes,
+            self.current.congestion_window,
+            self.current.acked_bytes,
             self.max_datagram_size(),
             congestion_event,
         );
-        self.congestion_window = max(cwnd, self.cwnd_min());
-        self.acked_bytes = acked_bytes;
-        self.ssthresh = self.congestion_window;
+        self.current.congestion_window = max(cwnd, self.cwnd_min());
+        self.current.acked_bytes = acked_bytes;
+        self.current.ssthresh = self.current.congestion_window;
         qinfo!(
             "[{self}] Cong event -> recovery; cwnd {}, ssthresh {}",
-            self.congestion_window,
-            self.ssthresh
+            self.current.congestion_window,
+            self.current.ssthresh
         );
 
         cc_stats.congestion_events[congestion_event] += 1;
-        cc_stats.slow_start_exited |= self.state.in_slow_start();
+        cc_stats.slow_start_exited |= self.current.state.in_slow_start();
 
         qlog::metrics_updated(
             &mut self.qlog,
             &[
-                qlog::Metric::CongestionWindow(self.congestion_window),
-                qlog::Metric::SsThresh(self.ssthresh),
+                qlog::Metric::CongestionWindow(self.current.congestion_window),
+                qlog::Metric::SsThresh(self.current.ssthresh),
                 qlog::Metric::InRecovery(true),
             ],
             now,
@@ -765,18 +765,18 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     }
 
     fn app_limited(&self) -> bool {
-        if self.bytes_in_flight >= self.congestion_window {
+        if self.bytes_in_flight >= self.current.congestion_window {
             false
-        } else if self.state.in_slow_start() {
+        } else if self.current.state.in_slow_start() {
             // Allow for potential doubling of the congestion window during slow start.
             // That is, the application might not have been able to send enough to respond
             // to increases to the congestion window.
-            self.bytes_in_flight < self.congestion_window / 2
+            self.bytes_in_flight < self.current.congestion_window / 2
         } else {
             // We're not limited if the in-flight data is within a single burst of the
             // congestion window.
             (self.bytes_in_flight + self.max_datagram_size() * PACING_BURST_SIZE)
-                < self.congestion_window
+                < self.current.congestion_window
         }
     }
 }
@@ -1255,7 +1255,7 @@ mod tests {
         const BELOW_APP_LIMIT_PKTS: usize = 5;
         const ABOVE_APP_LIMIT_PKTS: usize = BELOW_APP_LIMIT_PKTS + 1;
         let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
-        let cwnd = cc.congestion_window;
+        let cwnd = cc.current.congestion_window;
         let mut now = now();
         let mut next_pn = 0;
         let mut cc_stats = CongestionControlStats::default();
@@ -1289,8 +1289,9 @@ mod tests {
                 &mut cc_stats,
             );
             assert_eq!(cc.bytes_in_flight(), 0);
-            assert_eq!(cc.acked_bytes, 0);
-            assert_eq!(cwnd, cc.congestion_window); // CWND doesn't grow because we're app limited
+            assert_eq!(cc.acked_bytes(), 0);
+            assert_eq!(cwnd, cc.current.congestion_window); // CWND doesn't grow because
+                                                            // we're app limited
         }
 
         // Fully utilize the congestion window by sending enough packets to
@@ -1330,14 +1331,14 @@ mod tests {
             // increase acked_bytes with each packet
             qinfo!(
                 "{} {}",
-                cc.congestion_window,
+                cc.current.congestion_window,
                 cwnd + i * cc.max_datagram_size()
             );
             assert_eq!(
-                cc.congestion_window,
+                cc.current.congestion_window,
                 cwnd + (i + 1) * cc.max_datagram_size()
             );
-            assert_eq!(cc.acked_bytes, 0);
+            assert_eq!(cc.acked_bytes(), 0);
         }
     }
 
@@ -1388,10 +1389,10 @@ mod tests {
         );
         cwnd_is_halved(&cc);
         // cc is app limited therefore cwnd in not increased.
-        assert_eq!(cc.acked_bytes, 0);
+        assert_eq!(cc.acked_bytes(), 0);
 
         // Now we are in the congestion avoidance state.
-        assert_eq!(cc.state, State::CongestionAvoidance);
+        assert_eq!(cc.current.state, State::CongestionAvoidance);
         // simulate packet bursts below app_limit
         let mut next_pn = 3;
         for packet_burst_size in 1..=BELOW_APP_LIMIT_PKTS {
@@ -1428,7 +1429,7 @@ mod tests {
                     (packet_burst_size - i - 1) * cc.max_datagram_size()
                 );
                 cwnd_is_halved(&cc); // CWND doesn't grow because we're app limited
-                assert_eq!(cc.acked_bytes, 0);
+                assert_eq!(cc.acked_bytes(), 0);
             }
         }
 
@@ -1471,8 +1472,8 @@ mod tests {
             // increase, once the number of bytes reaches the necessary level
             cwnd_is_halved(&cc);
             // increase acked_bytes with each packet
-            assert_ne!(cc.acked_bytes, last_acked_bytes);
-            last_acked_bytes = cc.acked_bytes;
+            assert_ne!(cc.acked_bytes(), last_acked_bytes);
+            last_acked_bytes = cc.acked_bytes();
         }
     }
 
@@ -1492,18 +1493,18 @@ mod tests {
         cc.on_packet_sent(&p_ce, now);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
         assert_eq!(cc.ssthresh(), usize::MAX);
-        assert_eq!(cc.state, State::SlowStart);
+        assert_eq!(cc.current.state, State::SlowStart);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Ecn], 0);
 
         // Signal congestion (ECN CE) and thus change state to recovery start.
         cc.on_ecn_ce_received(&p_ce, now, &mut cc_stats);
         assert_eq!(cc.cwnd(), cc.cwnd_initial() * 85 / 100);
         assert_eq!(cc.ssthresh(), cc.cwnd_initial() * 85 / 100);
-        assert_eq!(cc.state, State::RecoveryStart);
+        assert_eq!(cc.current.state, State::RecoveryStart);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Ecn], 1);
     }
 
-    /// This tests spurious congestion event detection, stat counting and the undo mechanism
+    /// This tests spurious congestion event detection, stat counting and the recovery mechanism.
     ///
     /// 1. Send packets (1, 2) --> `SlowStart`, no events
     /// 2. Lose packets (1, 2) --> `RecoveryStart`, 1 event
@@ -1524,7 +1525,7 @@ mod tests {
         let pkt2 = sent::make_packet(2, now, 1000);
         cc.on_packet_sent(&pkt1, now);
         cc.on_packet_sent(&pkt2, now);
-        assert_eq!(cc.state, State::SlowStart);
+        assert_eq!(cc.current.state, State::SlowStart);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 0);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 0);
 
@@ -1541,7 +1542,7 @@ mod tests {
             now,
             &mut cc_stats,
         );
-        assert_eq!(cc.state, State::RecoveryStart);
+        assert_eq!(cc.current.state, State::RecoveryStart);
         assert!(cc_stats.slow_start_exited);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
         assert_eq!(
@@ -1552,7 +1553,7 @@ mod tests {
         // 3. Send packet (3)     --> `Recovery`, 1 event
         let pkt3 = sent::make_packet(3, now, 1000);
         cc.on_packet_sent(&pkt3, now);
-        assert_eq!(cc.state, State::Recovery);
+        assert_eq!(cc.current.state, State::Recovery);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
 
         // 4. Ack packet (3)      --> `CongestionAvoidance`, 1 event
@@ -1562,7 +1563,7 @@ mod tests {
             now,
             &mut cc_stats,
         );
-        assert_eq!(cc.state, State::CongestionAvoidance);
+        assert_eq!(cc.current.state, State::CongestionAvoidance);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
 
         // 5. Ack packet (1)      --> `CongestionAvoidance`, 1 event, not a spurious event as not
@@ -1573,7 +1574,7 @@ mod tests {
             now,
             &mut cc_stats,
         );
-        assert_eq!(cc.state, State::CongestionAvoidance);
+        assert_eq!(cc.current.state, State::CongestionAvoidance);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 0);
 
@@ -1585,7 +1586,7 @@ mod tests {
             now,
             &mut cc_stats,
         );
-        assert_eq!(cc.state, State::SlowStart);
+        assert_eq!(cc.current.state, State::SlowStart);
         assert!(!cc_stats.slow_start_exited);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 1);
@@ -1641,16 +1642,16 @@ mod tests {
         // Now detect spurious (late)
         cc.on_packets_acked(&[pkt], &rtt_estimate, now, &mut cc_stats);
 
-        // Detects the spurious congestion event but should NOT undo because cwnd has recovered
-        // naturally.
+        // Detects the spurious congestion event but should NOT restore old params because cwnd has
+        // recovered naturally.
         assert_eq!(cc.cwnd(), cwnd_recovered, "cwnd should not be restored");
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 1);
     }
 
     /// Test that losses during recovery don't cause double-counting of spurious events.
-    /// This happened when detection was implemented but the undo mechanism wasn't, as that meant
-    /// we weren't leaving recovery when detecting a spurious event. The test confirms that the bug
-    /// doesn't occur anymore now that the undo is implemented.
+    /// This happened when detection was implemented but the recovery mechanism wasn't, as that
+    /// meant we weren't leaving recovery when detecting a spurious event. The test confirms
+    /// that the bug doesn't occur anymore now that the recovery is implemented.
     ///
     /// Scenario:
     /// 1. Send packets 1,2
@@ -1675,7 +1676,7 @@ mod tests {
         cc.on_packet_sent(&pkt1, now);
         cc.on_packet_sent(&pkt2, now);
 
-        assert_eq!(cc.state, State::SlowStart);
+        assert_eq!(cc.current.state, State::SlowStart);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 0);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 0);
 
@@ -1692,14 +1693,14 @@ mod tests {
             &mut cc_stats,
         );
 
-        assert_eq!(cc.state, State::RecoveryStart);
+        assert_eq!(cc.current.state, State::RecoveryStart);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 0);
 
         // Step 3: Send packet 3 → enter Recovery state
         let pkt3 = sent::make_packet(3, now, 1000);
         cc.on_packet_sent(&pkt3, now);
-        assert_eq!(cc.state, State::Recovery);
+        assert_eq!(cc.current.state, State::Recovery);
 
         // Step 4: Ack packet 1 → spurious event #1 detected
         cc.on_packets_acked(&[pkt1], &rtt_estimate, now, &mut cc_stats);
@@ -1710,8 +1711,8 @@ mod tests {
         let mut lost_pkt2 = pkt2.clone();
         lost_pkt2.declare_lost(now);
 
-        // Step 5. Lose packet 2 → New congestion event as we left recovery when undo'ing the
-        // spurious event
+        // Step 5. Lose packet 2 → New congestion event as we left recovery when restoring the
+        // previous params.
         cc.on_packets_lost(
             Some(now),
             None,
@@ -1725,8 +1726,8 @@ mod tests {
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 2);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 1);
 
-        // 6. Ack packet 2 → should trigger spurious event #2 because we left recovery when undo'ing
-        //    spurious event #1
+        // 6. Ack packet 2 → should trigger spurious event #2 because we left recovery when
+        //    recovering from spurious event #1
         cc.on_packets_acked(&[pkt2], &rtt_estimate, now, &mut cc_stats);
 
         // Should now be 2 loss events and 2 spurious events, no double counting occured
@@ -1785,7 +1786,7 @@ mod tests {
         let now = now();
         let mut cc_stats = CongestionControlStats::default();
 
-        assert!(cc.state.in_slow_start());
+        assert!(cc.current.state.in_slow_start());
         assert!(!cc_stats.slow_start_exited);
 
         let pkt1 = sent::make_packet(1, now, 1000);
@@ -1801,7 +1802,7 @@ mod tests {
             CongestionEvent::Spurious => panic!("unsupported congestion event"),
         }
 
-        assert!(!cc.state.in_slow_start());
+        assert!(!cc.current.state.in_slow_start());
         assert!(cc_stats.slow_start_exited);
     }
 
