@@ -419,31 +419,29 @@ where
         };
 
         let prev_max_active = self.max_active;
-        self.max_active = min(
+        let new_max_active = min(
             self.max_active + excess * WINDOW_INCREASE_MULTIPLIER,
             max_window,
         );
 
-        // Debug <https://github.com/mozilla/neqo/issues/3208>.
-        debug_assert!(
-            self.max_active >= prev_max_active,
-            "expect no decrease, self: {self:?}, now: {now:?}, rtt: {rtt:?}, max_window: {max_window}, subject: {subject}"
-        );
+        if new_max_active <= prev_max_active {
+            // Never decrease max_active, even if max_window is smaller.  This
+            // can happen if max_active was set manually.
+            return;
+        }
 
-        let increase = self.max_active - prev_max_active;
-        if increase > 0 {
-            qdebug!(
-                "Increasing max {subject} receive window by {} B, \
+        self.max_active = new_max_active;
+        qdebug!(
+            "Increasing max {subject} receive window by {} B, \
                 previous max_active: {} MiB, \
                 new max_active: {} MiB, \
                 last update: {:?}, \
                 rtt: {rtt:?}",
-                increase,
-                prev_max_active / 1024 / 1024,
-                self.max_active / 1024 / 1024,
-                now - max_allowed_sent_at,
-            );
-        }
+            new_max_active - prev_max_active,
+            prev_max_active / 1024 / 1024,
+            self.max_active / 1024 / 1024,
+            now - max_allowed_sent_at,
+        );
     }
 }
 
