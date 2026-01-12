@@ -562,6 +562,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn grease_default() {
+        let params = ConnectionParameters::default();
+        assert!(params.is_greasing());
+        let params = params.grease(false);
+        assert!(!params.is_greasing());
+    }
+
+    #[test]
     fn pmtud_iface_mtu() {
         let params = ConnectionParameters::default().pmtud_iface_mtu(true);
         assert!(params.pmtud_iface_mtu_enabled());
