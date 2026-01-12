@@ -181,3 +181,21 @@ impl Key {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use crate::{
+        constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
+        hkdf,
+        hp::Key,
+    };
+
+    #[test]
+    fn debug_format() {
+        test_fixture::fixture_init();
+        let prk = hkdf::import_key(TLS_VERSION_1_3, &[0; 32]).unwrap();
+        let key = Key::extract(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &prk, "test").unwrap();
+        assert_eq!(format!("{key:?}"), "hp::Key");
+    }
+}

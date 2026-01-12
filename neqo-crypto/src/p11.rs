@@ -407,10 +407,12 @@ pub fn random<const N: usize>() -> [u8; N] {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
+    use std::ptr::null_mut;
+
     use test_fixture::fixture_init;
 
     use super::RandomCache;
-    use crate::random;
+    use crate::{random, PrivateKey, PublicKey};
 
     #[cfg(not(feature = "disable-random"))]
     #[test]
@@ -446,5 +448,40 @@ mod test {
                 assert_ne!(&cache.randomize(&mut buf[..len])[..len], &ZERO[..len]);
             }
         }
+    }
+
+    #[test]
+    fn key_operations() {
+        use crate::ech::generate_keys;
+
+        fixture_init();
+        let (sk, pk) = generate_keys().unwrap();
+
+        // Test key_data serialization - X25519 keys are 32 bytes
+        assert_eq!(pk.key_data().unwrap().len(), 32);
+
+        // Test Debug formatting
+        let pk_dbg = format!("{pk:?}");
+        assert_eq!(&pk_dbg[..9], "PublicKey");
+        let sk_dbg = format!("{sk:?}");
+        // Private key debug output depends on whether key extraction is allowed by NSS.
+        // It could be either "PrivateKey [hex]" or "Opaque PrivateKey".
+        assert!(
+            sk_dbg.starts_with("PrivateKey") || sk_dbg.starts_with("Opaque"),
+            "unexpected private key debug format: {sk_dbg}"
+        );
+
+        // Test cloning
+        let pk2 = pk.clone();
+        let sk2 = sk.clone();
+        assert_eq!(pk.key_data().unwrap(), pk2.key_data().unwrap());
+        assert_eq!(format!("{sk:?}"), format!("{sk2:?}"));
+    }
+
+    #[test]
+    fn null_pointer_error() {
+        fixture_init();
+        assert!(PublicKey::from_ptr(null_mut()).is_err());
+        assert!(PrivateKey::from_ptr(null_mut()).is_err());
     }
 }

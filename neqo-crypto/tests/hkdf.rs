@@ -156,3 +156,16 @@ fn expand_label_sha384() {
         ],
     );
 }
+
+#[test]
+fn unsupported_version() {
+    fixture_init();
+    assert!(hkdf::generate_key(0x0303, TLS_AES_128_GCM_SHA256).is_err());
+    assert!(hkdf::import_key(0x0302, &[0; 32]).is_err());
+}
+
+#[test]
+fn unsupported_cipher() {
+    fixture_init();
+    assert!(hkdf::generate_key(TLS_VERSION_1_3, 0xFFFF).is_err());
+}

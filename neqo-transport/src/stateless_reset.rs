@@ -71,6 +71,7 @@ impl TryFrom<&mut Decoder<'_>> for Token {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

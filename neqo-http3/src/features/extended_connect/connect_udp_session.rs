@@ -99,6 +99,7 @@ impl Protocol for Session {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::Bytes;
     use neqo_transport::StreamId;

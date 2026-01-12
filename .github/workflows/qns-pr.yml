@@ -73,7 +73,7 @@ jobs:
       URL: https://github.com/mozilla/neqo
       ROLE: both
     steps:
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: '* Docker image'
           path: /tmp
@@ -158,18 +158,18 @@ jobs:
       # quic-interop-runner requires Docker v28.1. GitHub's ubuntu-24.04 comes
       # with v28.0.4. Install newer version.
       - name: Set up Docker
-        uses: docker/setup-docker-action@e61617a16c407a86262fb923c35a616ddbe070b3 # v4.6.0
+        uses: docker/setup-docker-action@e43656e248c0bd0647d3f5c195d116aacf6fcaf4 # v4.7.0
         with:
           version: 'v28.1.0'
 
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: 'pr Docker image'
           path: /tmp
 
       - run: docker load --input "/tmp/pr.tar"
 
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         if: contains(matrix.pair, 'neqo-main')
         with:
           name: 'main Docker image'
@@ -214,7 +214,7 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: '*results'
           path: results
