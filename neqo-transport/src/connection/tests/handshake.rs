@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::missing_asserts_for_indexing, reason = "OK in tests")]
+#![allow(clippy::missing_asserts_for_indexing, clippy::unwrap_in_result, reason = "OK in tests")]
 
 use std::{
     cell::RefCell,
@@ -1606,4 +1606,49 @@ fn grease_quic_bit_respects_current_handshake() {
         !client.can_grease_quic_bit(),
         "Must not grease with only cached 0-RTT params (RFC 9287 Section 3.1)"
     );
+}
+
+#[test]
+fn certificate_compression() {
+    use std::sync::Mutex;
+
+    use neqo_crypto::agent::CertificateCompressor;
+
+    // These statics work for concurrent test execution because the certificate is
+    // effectively a fixed value. A more robust approach would use a hash-based lookup,
+    // but that's unnecessary given the current test setup.
+    static ORIGINAL: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+    static DECODED: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+
+    struct Xor;
+    impl CertificateCompressor for Xor {
+        const ID: u16 = 0x1234;
+        const NAME: &std::ffi::CStr = c"xor";
+        const ENABLE_ENCODING: bool = true;
+        fn decode(input: &[u8], output: &mut [u8]) -> neqo_crypto::Res<()> {
+            output
+                .iter_mut()
+                .zip(input)
+                .for_each(|(o, &i)| *o = i ^ 0xAA);
+            *DECODED.lock().unwrap() = output[..input.len()].to_vec();
+            Ok(())
+        }
+        fn encode(input: &[u8], output: &mut [u8]) -> neqo_crypto::Res<usize> {
+            *ORIGINAL.lock().unwrap() = input.to_vec();
+            output
+                .iter_mut()
+                .zip(input)
+                .for_each(|(o, &i)| *o = i ^ 0xAA);
+            Ok(input.len())
+        }
+    }
+
+    let mut client = default_client();
+    client.set_certificate_compression::<Xor>().unwrap();
+    let mut server = default_server();
+    server.set_certificate_compression::<Xor>().unwrap();
+    connect(&mut client, &mut server);
+
+    assert!(!ORIGINAL.lock().unwrap().is_empty());
+    assert_eq!(*ORIGINAL.lock().unwrap(), *DECODED.lock().unwrap());
 }

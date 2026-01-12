@@ -457,4 +457,20 @@ mod tests {
         pkts.track(pkt(0));
         assert!(pkts.take_ranges([1..=1]).is_empty());
     }
+
+    #[test]
+    fn pto() {
+        let mut p = pkt(0);
+        assert!(!p.pto_fired());
+        assert!(p.pto()); // First call returns true
+        assert!(p.pto_fired());
+        assert!(!p.pto()); // Second call returns false
+    }
+
+    #[test]
+    fn pto_after_lost() {
+        let mut p = pkt(0);
+        p.declare_lost(start_time());
+        assert!(!p.pto()); // Lost packet returns false
+    }
 }

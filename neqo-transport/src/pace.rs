@@ -230,7 +230,11 @@ mod tests {
 
     #[test]
     fn pacer_display_and_debug() {
-        let p = Pacer::new(true, now(), PACKET, PACKET);
+        let mut p = Pacer::new(true, now(), PACKET, PACKET);
+        assert_eq!(p.mtu(), PACKET);
+        p.set_mtu(500);
+        assert_eq!(p.mtu(), 500);
+        p.set_mtu(PACKET);
         assert_eq!(p.to_string(), "Pacer 1000/1000");
         assert!(format!("{p:?}").starts_with("Pacer@"));
     }

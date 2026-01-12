@@ -137,7 +137,6 @@ impl Http3Parameters {
         self.connect
     }
 
-    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn http3_datagram(mut self, http3_datagram: bool) -> Self {
         self.http3_datagram = http3_datagram;
@@ -192,5 +191,13 @@ mod tests {
     #[should_panic(expected = "assertion")]
     fn max_table_size_decoder_rejects_above_limit() {
         _ = Http3Parameters::default().max_table_size_decoder(1 << 30);
+    }
+
+    #[test]
+    fn http3_datagram_setting() {
+        let params = Http3Parameters::default()
+            .connection_parameters(ConnectionParameters::default().datagram_size(1200))
+            .http3_datagram(true);
+        assert!(params.get_http3_datagram());
     }
 }

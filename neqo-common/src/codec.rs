@@ -710,7 +710,7 @@ impl Buffer for Cursor<&mut [u8]> {
 mod tests {
     use std::io::Cursor;
 
-    use super::{Buffer, Decoder, Encoder};
+    use super::{Buffer, Decoder, Encoder, MAX_VARINT};
 
     #[test]
     fn decode() {
@@ -917,6 +917,8 @@ mod tests {
         assert_eq!(Encoder::varint_len(0x4000), 4);
         assert_eq!(Encoder::varint_len(0x3fff_ffff), 4);
         assert_eq!(Encoder::varint_len(0x4000_0000), 8);
+        assert_eq!(Encoder::varint_len(MAX_VARINT), 8);
+        assert_eq!(MAX_VARINT, (1 << 62) - 1);
     }
 
     #[test]
@@ -1095,6 +1097,17 @@ mod tests {
         });
         let v: Vec<u8> = enc.into();
         assert_eq!(&v[..3], &[0x40, 0x41, 0xa5]);
+    }
+
+    #[test]
+    fn encode_vvec_with_30bit() {
+        let mut enc = Encoder::default();
+        enc.encode_vvec_with(|enc_inner| {
+            enc_inner.encode([0xbe; 16384]); // Just past 14-bit limit
+        });
+        let v: Vec<u8> = enc.into();
+        // 4-byte varint: 0x80004000 for 16384
+        assert_eq!(&v[..5], &[0x80, 0x00, 0x40, 0x00, 0xbe]);
     }
 
     // Test that Deref to &[u8] works for Encoder.
@@ -1330,5 +1343,10 @@ mod tests {
         assert_eq!(cloned.len(), 4);
         let v: Vec<u8> = cloned.into();
         assert_eq!(v, vec![0x03, 0x04, 0x05, 0x06]);
+    }
+
+    #[test]
+    fn encoder_debug() {
+        assert_eq!(format!("{:?}", Encoder::from_hex("010203")), "[3]: 010203");
     }
 }

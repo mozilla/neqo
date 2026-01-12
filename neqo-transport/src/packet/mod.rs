@@ -1188,12 +1188,14 @@ mod tests {
     #[test]
     fn build_short() {
         fixture_init();
+        assert!(!Type::Short.is_long());
         let mut builder = Builder::short(
             Encoder::new(),
             true,
             Some(ConnectionId::from(SERVER_CID)),
             packet::LIMIT,
         );
+        assert!(!builder.is_empty());
         builder.pn(0, 1);
         builder.encode(SAMPLE_SHORT_PAYLOAD); // Enough payload for sampling.
         let packet = builder

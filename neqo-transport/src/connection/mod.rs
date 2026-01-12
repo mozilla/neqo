@@ -490,8 +490,6 @@ impl Connection {
 
     /// # Errors
     /// When the operation fails.
-    //
-    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
         self.crypto.tls_mut().set_certificate_compression::<T>()?;
         Ok(())
