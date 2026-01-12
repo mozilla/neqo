@@ -158,7 +158,7 @@ jobs:
       # quic-interop-runner requires Docker v28.1. GitHub's ubuntu-24.04 comes
       # with v28.0.4. Install newer version.
       - name: Set up Docker
-        uses: docker/setup-docker-action@e61617a16c407a86262fb923c35a616ddbe070b3 # v4.6.0
+        uses: docker/setup-docker-action@e43656e248c0bd0647d3f5c195d116aacf6fcaf4 # v4.7.0
         with:
           version: 'v28.1.0'
 
