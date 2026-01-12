@@ -113,7 +113,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'openbsd' }}
-      uses: vmactions/openbsd-vm@0d65352eee1508bab7cb12d130536d3a556be487 # v1.1.8
+      uses: vmactions/openbsd-vm@00753f2835e62704570734312de6f212069dfef7 # v1.3.1
       with:
         usesh: true
         envs: ${{ steps.prep.outputs.envs }}
