@@ -30,7 +30,7 @@ runs:
             freebsd)    pkg install -y curl llvm nss pkgconf
                         ;;
             openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
-                        pkg_add rust rust-clippy rust-rustfmt llvm-19.1.7p3 nss pkgconf # rustup does not support OpenBSD at all
+                        pkg_add rust rust-clippy rust-rustfmt llvm-21.1.2p0 nss # rustup does not support OpenBSD at all
                         ;;
             netbsd)     /usr/sbin/pkg_add pkgin && pkgin -y install curl clang nss pkgconf
                         ;;
@@ -56,9 +56,9 @@ runs:
             freebsd)    sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
                         . "\$HOME/.cargo/env"
                         ;;
-            openbsd)    export LIBCLANG_PATH=/usr/local/llvm19/lib
-                        export LLVM_COV=/usr/local/llvm19/bin/llvm-cov
-                        export LLVM_PROFDATA=/usr/local/llvm19/bin/llvm-profdata
+            openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
+                        export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
+                        export LLVM_PROFDATA=/usr/local/llvm21/bin/llvm-profdata
                         [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on OpenBSD
                         ;;
             netbsd)     sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
