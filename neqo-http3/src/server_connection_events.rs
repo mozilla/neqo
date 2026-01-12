@@ -279,3 +279,18 @@ impl Http3ServerConnEvents {
         });
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::Http3ServerConnEvents;
+    use crate::connection::Http3State;
+
+    #[test]
+    fn has_events() {
+        let events = Http3ServerConnEvents::default();
+        assert!(!events.has_events());
+        events.connection_state_change(Http3State::Connected);
+        assert!(events.has_events());
+    }
+}

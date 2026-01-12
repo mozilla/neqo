@@ -121,7 +121,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'netbsd' }}
-      uses: vmactions/netbsd-vm@d0228be27fbaba19418cc1b332609a895cf16561 # v1.1.9
+      uses: vmactions/netbsd-vm@b24ed5f7a605362ab1226e73df291c8b01990c85 # v1.2.3
       with:
         usesh: true
         envs: ${{ steps.prep.outputs.envs }}
@@ -129,7 +129,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'solaris' }}
-      uses: vmactions/solaris-vm@58cbd70c6e051860f9b8f65908cc582938fbbdba # v1.1.5
+      uses: vmactions/solaris-vm@47bea106d03acaf91084e52548ee460556011602 # v1.1.8
       with:
         release: "11.4-gcc"
         usesh: true
@@ -138,7 +138,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.codecov-token != '' }}
-      uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0
+      uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
       with:
         files: codecov.json
         fail_ci_if_error: false

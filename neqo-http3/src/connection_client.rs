@@ -876,8 +876,6 @@ impl Http3Client {
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    //
-    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     pub fn webtransport_set_sendorder(
         &mut self,
         stream_id: StreamId,

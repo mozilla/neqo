@@ -646,6 +646,7 @@ mod tests {
 
     fn test_ack_range(pns: &[packet::Number], nranges: usize) {
         let mut rp = RecvdPackets::new(PacketNumberSpace::Initial); // Any space will do.
+        assert_eq!(rp.to_string(), "Recvd-in");
         let mut packets = HashSet::new();
 
         for pn in pns {
@@ -1109,5 +1110,41 @@ mod tests {
             PacketNumberSpace::from(packet::Type::VersionNegotiation)
         })
         .is_err());
+    }
+
+    #[test]
+    fn packet_range_acknowledged() {
+        use super::PacketRange;
+        let mut r = PacketRange::new(5);
+        assert!(r.ack_needed());
+        assert_eq!(r.to_string(), "5->5");
+        assert_eq!(r.len(), 1);
+        assert!(r.contains(5));
+        assert!(!r.contains(4));
+        r.acknowledged(&PacketRange {
+            largest: 10,
+            smallest: 0,
+            ack_needed: false,
+        });
+        assert!(!r.ack_needed());
+
+        // Test partial overlap: other.smallest <= self.smallest but other.largest < self.largest.
+        // Should NOT clear ack_needed.
+        let mut r2 = PacketRange::new(5);
+        r2.add(6); // range is now 5..=6
+        assert_eq!(r2.to_string(), "6->5");
+        assert_eq!(r2.len(), 2);
+        r2.acknowledged(&PacketRange {
+            largest: 5,
+            smallest: 0,
+            ack_needed: false,
+        });
+        assert!(r2.ack_needed()); // Should still need ack
+    }
+
+    #[test]
+    fn useful_ack_len() {
+        // 1 (type) + 8 (largest) + 8 (delay) + 1 (count) + 8 (first range) + 24 (3 ECN counts)
+        assert_eq!(RecvdPackets::USEFUL_ACK_LEN, 50);
     }
 }

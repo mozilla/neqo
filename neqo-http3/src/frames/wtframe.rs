@@ -28,15 +28,24 @@ impl WebTransportFrame {
     const CLOSE_MAX_MESSAGE_SIZE: u64 = 1024;
 
     pub fn encode(&self, enc: &mut Encoder) {
+        #[cfg(feature = "build-fuzzing-corpus")]
+        let start = enc.len();
+
         enc.encode_varint(Self::CLOSE_SESSION);
         let Self::CloseSession { error, message } = &self;
         enc.encode_varint(4 + message.len() as u64);
         enc.encode_uint(4, *error);
         enc.encode(message.as_bytes());
+
+        #[cfg(feature = "build-fuzzing-corpus")]
+        neqo_common::write_item_to_fuzzing_corpus("wtframe", &enc.as_ref()[start..]);
     }
 }
 
 impl FrameDecoder<Self> for WebTransportFrame {
+    #[cfg(feature = "build-fuzzing-corpus")]
+    const FUZZING_CORPUS: Option<&'static str> = Some("wtframe");
+
     fn decode(frame_type: HFrameType, frame_len: u64, data: Option<&[u8]>) -> Res<Option<Self>> {
         if let Some(payload) = data {
             let mut dec = Decoder::from(payload);
@@ -59,5 +68,57 @@ impl FrameDecoder<Self> for WebTransportFrame {
 
     fn is_known_type(frame_type: HFrameType) -> bool {
         frame_type == HFrameType(Self::CLOSE_SESSION)
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::{HFrameType, WebTransportFrame};
+    use crate::frames::reader::FrameDecoder as _;
+
+    #[test]
+    fn is_known_type_close_session() {
+        assert!(WebTransportFrame::is_known_type(HFrameType(
+            WebTransportFrame::CLOSE_SESSION
+        )));
+    }
+
+    #[test]
+    fn is_known_type_unknown() {
+        assert!(!WebTransportFrame::is_known_type(HFrameType(0x1234)));
+        assert!(!WebTransportFrame::is_known_type(HFrameType(0)));
+    }
+
+    #[test]
+    fn decode_close_session_too_large() {
+        // Message size exceeds CLOSE_MAX_MESSAGE_SIZE (1024) + 4 bytes for error code.
+        let large_message = vec![0u8; 1025];
+        let mut payload = vec![0, 0, 0, 0]; // 4-byte error code
+        payload.extend(&large_message);
+        let frame_len = payload.len() as u64;
+
+        let result = WebTransportFrame::decode(
+            HFrameType(WebTransportFrame::CLOSE_SESSION),
+            frame_len,
+            Some(&payload),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_close_session_at_limit() {
+        // Message size exactly at CLOSE_MAX_MESSAGE_SIZE (1024).
+        let message = vec![b'a'; 1024];
+        let mut payload = vec![0, 0, 0, 0]; // 4-byte error code
+        payload.extend(&message);
+        let frame_len = payload.len() as u64;
+
+        let result = WebTransportFrame::decode(
+            HFrameType(WebTransportFrame::CLOSE_SESSION),
+            frame_len,
+            Some(&payload),
+        );
+        assert!(result.is_ok());
     }
 }

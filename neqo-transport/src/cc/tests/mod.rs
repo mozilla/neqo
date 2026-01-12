@@ -9,9 +9,18 @@ use std::{
     time::Duration,
 };
 
+use super::CongestionControlAlgorithm;
+
 mod cubic;
 mod new_reno;
 
 pub const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 pub const MTU: Option<usize> = Some(1_500);
 pub const RTT: Duration = Duration::from_millis(100);
+
+#[test]
+fn congestion_control_algorithm_from_str() {
+    assert_eq!("cubic".parse(), Ok(CongestionControlAlgorithm::Cubic));
+    assert_eq!("reno".parse(), Ok(CongestionControlAlgorithm::NewReno));
+    assert!("invalid".parse::<CongestionControlAlgorithm>().is_err());
+}

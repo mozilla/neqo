@@ -16,7 +16,7 @@ use windows::Win32::Media::{timeBeginPeriod, timeEndPeriod};
 /// A quantized `Duration`.  This currently just produces 16 discrete values
 /// corresponding to whole milliseconds.  Future implementations might choose
 /// a different allocation, such as a logarithmic scale.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Period(u8);
 
 impl Period {
@@ -377,6 +377,73 @@ impl Drop for Time {
                 mac::set_thread_policy(self.deflt);
             }
         }
+    }
+}
+
+// Unit tests for Period and PeriodSet data structures (platform-independent)
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod unit_tests {
+    use std::time::Duration;
+
+    use super::{Period, PeriodSet};
+
+    #[test]
+    fn period_from_duration() {
+        assert_eq!(Period::from(Duration::from_millis(0)), Period::MIN);
+        assert_eq!(Period::from(Duration::from_millis(1)), Period::MIN);
+        assert_eq!(Period::from(Duration::from_millis(5)), Period(5));
+        assert_eq!(Period::from(Duration::from_millis(16)), Period::MAX);
+        assert_eq!(Period::from(Duration::from_millis(100)), Period::MAX);
+    }
+
+    #[test]
+    fn period_set_add_remove_min() {
+        let mut ps = PeriodSet::default();
+        assert!(ps.min().is_none());
+
+        ps.add(Period(5));
+        assert_eq!(ps.min(), Some(Period(5)));
+
+        ps.add(Period(3));
+        assert_eq!(ps.min(), Some(Period(3)));
+
+        ps.add(Period(5)); // Add another 5
+        ps.remove(Period(3));
+        assert_eq!(ps.min(), Some(Period(5)));
+
+        ps.remove(Period(5));
+        assert_eq!(ps.min(), Some(Period(5))); // Still one 5 left
+
+        ps.remove(Period(5));
+        assert!(ps.min().is_none());
+    }
+
+    #[test]
+    fn period_set_max_ignored() {
+        let mut ps = PeriodSet::default();
+        ps.add(Period::MAX);
+        assert!(ps.min().is_none()); // MAX not tracked
+
+        ps.add(Period(5));
+        assert_eq!(ps.min(), Some(Period(5)));
+
+        ps.remove(Period::MAX); // Should not panic
+        assert_eq!(ps.min(), Some(Period(5)));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn period_scaled() {
+        assert_eq!(Period(5).scaled(2.0).to_bits(), 10.0_f64.to_bits());
+        assert_eq!(Period(4).scaled(0.5).to_bits(), 2.0_f64.to_bits());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn period_as_u32() {
+        assert_eq!(Period(5).as_u32(), 5);
+        assert_eq!(Period::MIN.as_u32(), 1);
     }
 }
 

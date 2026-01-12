@@ -127,9 +127,12 @@ impl ConnectionEvents {
     }
 
     pub fn send_stream_complete(&self, stream_id: StreamId) {
-        self.remove(|evt| matches!(evt, ConnectionEvent::SendStreamWritable { stream_id: x } if *x == stream_id));
-
-        self.remove(|evt| matches!(evt, ConnectionEvent::SendStreamStopSending { stream_id: x, .. } if *x == stream_id.as_u64()));
+        self.remove(|evt| {
+            matches!(evt,
+                ConnectionEvent::SendStreamWritable { stream_id: x } |
+                ConnectionEvent::SendStreamStopSending { stream_id: x, .. }
+                if *x == stream_id)
+        });
 
         self.insert(ConnectionEvent::SendStreamComplete { stream_id });
     }
@@ -255,8 +258,10 @@ mod tests {
     #[test]
     fn event_culling() {
         let mut evts = ConnectionEvents::default();
+        assert!(!evts.has_events());
 
         evts.client_0rtt_rejected();
+        assert!(evts.has_events());
         evts.client_0rtt_rejected();
         assert_eq!(evts.events().count(), 1);
         assert_eq!(evts.events().count(), 0);

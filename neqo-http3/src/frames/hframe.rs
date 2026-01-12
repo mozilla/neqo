@@ -154,6 +154,9 @@ impl HFrame {
 }
 
 impl FrameDecoder<Self> for HFrame {
+    #[cfg(feature = "build-fuzzing-corpus")]
+    const FUZZING_CORPUS: Option<&'static str> = Some("hframe");
+
     fn frame_type_allowed(frame_type: HFrameType) -> Res<()> {
         if HFrameType::RESERVED.contains(&frame_type) {
             return Err(Error::HttpFrameUnexpected);

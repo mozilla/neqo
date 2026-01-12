@@ -218,12 +218,32 @@ mod tests {
     #[test]
     fn header_comparison_with_bytes() {
         let header = Header::new("test", b"value");
-
-        // Test PartialEq with byte slice
         assert_eq!(header, ("test", b"value".as_ref()));
+        assert_ne!(header, ("test", b"other".as_ref()));
+        assert_ne!(header, ("other", b"value".as_ref()));
+    }
 
-        // Test with string (converted to bytes)
-        let header2 = Header::new("test2", "string_value");
-        assert_eq!(header2, ("test2", b"string_value".as_ref()));
+    #[test]
+    fn is_allowed_for_response() {
+        assert!(Header::new("content-type", "text/html").is_allowed_for_response());
+        for name in ["connection", "host", "keep-alive", "transfer-encoding"] {
+            assert!(!Header::new(name, "x").is_allowed_for_response());
+        }
+    }
+
+    #[test]
+    fn headers_ext() {
+        let headers = [
+            Header::new("content-type", "text/html"),
+            Header::new("x-custom", "value"),
+        ];
+        assert!(headers.iter().contains_header("content-type", "text/html"));
+        assert!(!headers.iter().contains_header("content-type", "other"));
+        assert!(!headers.iter().contains_header("missing", "value"));
+        assert_eq!(
+            headers.iter().find_header("x-custom").unwrap().name(),
+            "x-custom"
+        );
+        assert!(headers.iter().find_header("missing").is_none());
     }
 }

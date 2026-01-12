@@ -67,7 +67,7 @@ runs:
       # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
       # is too small for this to be effective there.
       if: ${{ env.SCCACHE_ENABLED != '1' && !steps.system_nss.outputs.suitable && runner.environment != 'github-hosted' }}
-      uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
+      uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
     - name: Enable sscache
       if: ${{ !steps.system_nss.outputs.suitable && runner.environment != 'github-hosted' }}
@@ -88,32 +88,37 @@ runs:
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
 
-    - name: Checkout NSS
+    - name: Retrieve NSS
+      id: nss
       if: ${{ !steps.system_nss.outputs.suitable }}
-      uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
-      with:
-        repository: nss-dev/nss
-        path: nss
-        persist-credentials: false
+      shell: bash
+      env:
+        NSS_VERSION: 3.119.1 # TODO: Bump this periodically; also in qns/Dockerfile.
+      run: |
+        NSS_TAG=${NSS_VERSION//./_}
+        curl -L https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_TAG}.tar.gz |
+          tar xz --strip-components=1
+        echo "version=$NSS_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Retrieve NSPR
       id: nspr
       if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
       env:
-        NSPR_VERSION: 4.38.2 # This changes so rarely that we can hardcode it.
+        NSPR_VERSION: 4.38.2 # TODO: Bump this periodically; also in qns/Dockerfile
       run: |
         curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz |
           tar xz --strip-components=1
         echo "version=$NSPR_VERSION" >> "$GITHUB_OUTPUT"
 
-    - name: Store NSS version
-      id: nss
-      if: ${{ !steps.system_nss.outputs.suitable }}
+    - name: Store Ubuntu release code name (Linux)
+      id: ubuntu_release
       shell: bash
+      if: ${{ runner.os == 'Linux' && !steps.system_nss.outputs.suitable && runner.environment == 'github-hosted' }}
       run: |
-        NSS_HEAD=$(git -C nss rev-parse HEAD)
-        echo "version=$NSS_HEAD" >> "$GITHUB_OUTPUT"
+        # Store Ubuntu release codename for use in cache key.
+        . /etc/os-release
+        echo "codename=-$UBUNTU_CODENAME" >> "$GITHUB_OUTPUT"
 
     - name: Cache NSS
       id: cache
@@ -121,7 +126,7 @@ runs:
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: dist
-        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
+        key: nss-${{ inputs.target || runner.os }}${{ steps.ubuntu_release.outputs.codename }}-${{ runner.arch }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
 
     - name: Check if build is needed
       id: check_build

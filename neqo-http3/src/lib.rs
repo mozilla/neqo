@@ -142,6 +142,9 @@ mod connection_server;
 mod control_stream_local;
 mod control_stream_remote;
 pub mod features;
+#[cfg(fuzzing)]
+pub mod frames;
+#[cfg(not(fuzzing))]
 mod frames;
 mod headers_checks;
 mod priority;
@@ -179,6 +182,8 @@ pub use server_events::{
     ConnectUdpRequest, ConnectUdpServerEvent, Http3OrWebTransportStream, Http3ServerEvent,
     WebTransportRequest, WebTransportServerEvent,
 };
+#[cfg(fuzzing)]
+pub use settings::HSettings;
 use stream_type_reader::NewStreamType;
 use thiserror::Error;
 
@@ -647,5 +652,89 @@ impl CloseType {
     #[must_use]
     pub const fn locally_initiated(&self) -> bool {
         matches!(self, Self::ResetApp(_))
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use neqo_transport::StreamId;
+
+    use super::{Error, Http3StreamInfo, Http3StreamType};
+
+    #[test]
+    fn stream_info_is_http() {
+        let http = Http3StreamInfo::new(StreamId::new(0), Http3StreamType::Http);
+        assert!(http.is_http());
+
+        let control = Http3StreamInfo::new(StreamId::new(2), Http3StreamType::Control);
+        assert!(!control.is_http());
+
+        let wt = Http3StreamInfo::new(
+            StreamId::new(4),
+            Http3StreamType::WebTransport(StreamId::new(0)),
+        );
+        assert!(!wt.is_http());
+    }
+
+    #[test]
+    fn error_codes() {
+        for (error, expected) in [
+            (Error::HttpNone, 0x100),
+            (Error::HttpGeneralProtocol, 0x101),
+            (Error::HttpGeneralProtocolStream, 0x101),
+            (Error::InvalidHeader, 0x101),
+            (Error::HttpInternal(0), 0x102),
+            (Error::HttpStreamCreation, 0x103),
+            (Error::HttpClosedCriticalStream, 0x104),
+            (Error::HttpFrameUnexpected, 0x105),
+            (Error::HttpFrame, 0x106),
+            (Error::HttpExcessiveLoad, 0x107),
+            (Error::HttpId, 0x108),
+            (Error::HttpSettings, 0x109),
+            (Error::HttpMissingSettings, 0x10a),
+            (Error::HttpRequestRejected, 0x10b),
+            (Error::HttpRequestCancelled, 0x10c),
+            (Error::HttpRequestIncomplete, 0x10d),
+            (Error::HttpMessage, 0x10e),
+            (Error::HttpConnect, 0x10f),
+            (Error::HttpVersionFallback, 0x110),
+        ] {
+            assert_eq!(error.code(), expected);
+        }
+    }
+
+    #[test]
+    fn error_mapping() {
+        use neqo_transport::Error as Te;
+        use Error::{
+            InvalidInput, StreamLimit, Transport, TransportStreamDoesNotExist, Unavailable,
+        };
+
+        assert!(matches!(
+            Error::map_stream_send_errors(&Transport(Te::InvalidStreamId)),
+            TransportStreamDoesNotExist
+        ));
+        assert!(matches!(
+            Error::map_stream_send_errors(&Transport(Te::FinalSize)),
+            TransportStreamDoesNotExist
+        ));
+        assert!(matches!(
+            Error::map_stream_send_errors(&Transport(Te::InvalidInput)),
+            InvalidInput
+        ));
+        assert!(matches!(
+            Error::map_stream_create_errors(&Te::ConnectionState),
+            Unavailable
+        ));
+        assert!(matches!(
+            Error::map_stream_create_errors(&Te::StreamLimit),
+            StreamLimit
+        ));
+        // Note: map_stream_recv_errors with NoMoreData has debug_assert, skip in debug builds.
+        assert!(matches!(
+            Error::map_stream_recv_errors(&Transport(Te::InvalidStreamId)),
+            TransportStreamDoesNotExist
+        ));
     }
 }

@@ -445,7 +445,7 @@ impl Connection {
             role,
             version: conn_params.get_versions().initial(),
             state: State::Init,
-            paths: Paths::default(),
+            paths: Paths::new(conn_params.pmtud_enabled()),
             cid_manager,
             tps: Rc::clone(&tphandler),
             zero_rtt_state: ZeroRttState::Init,
@@ -490,8 +490,6 @@ impl Connection {
 
     /// # Errors
     /// When the operation fails.
-    //
-    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
         self.crypto.tls_mut().set_certificate_compression::<T>()?;
         Ok(())
@@ -1059,7 +1057,7 @@ impl Connection {
         if let Some(path) = self.paths.primary() {
             let lost = self.loss_recovery.timeout(&path, now);
             self.handle_lost_packets(&lost);
-            qlog::packets_lost(&self.qlog, &lost, now);
+            qlog::packets_lost(&mut self.qlog, &lost, now);
         }
 
         if self.release_resumption_token_timer.is_some() {
@@ -1447,7 +1445,7 @@ impl Connection {
                 .set_initial(self.conn_params.get_versions().initial());
             mem::swap(self, &mut c);
             qlog::client_version_information_negotiated(
-                &self.qlog,
+                &mut self.qlog,
                 self.conn_params.get_versions().all(),
                 supported,
                 version,
@@ -1828,7 +1826,7 @@ impl Connection {
                     // the rest of the datagram on the floor, but don't generate an error.
                     self.check_stateless_reset(path, e.data, dcid.is_none(), now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
-                    qlog::packet_dropped(&self.qlog, &e, now);
+                    qlog::packet_dropped(&mut self.qlog, &e, now);
                     dcid = Some(e.dcid);
                 }
             }
@@ -2257,13 +2255,9 @@ impl Connection {
 
     fn can_grease_quic_bit(&self) -> bool {
         let tph = self.tps.borrow();
-        tph.remote_handshake().as_ref().map_or_else(
-            || {
-                tph.remote_0rtt()
-                    .is_some_and(|r| r.get_empty(GreaseQuicBit))
-            },
-            |r| r.get_empty(GreaseQuicBit),
-        )
+        tph.remote_handshake()
+            .as_ref()
+            .is_some_and(|r| r.get_empty(GreaseQuicBit))
     }
 
     /// Write the frames that are exchanged in the application data space.
@@ -2593,15 +2587,10 @@ impl Connection {
                 break;
             }
 
-            // Determine how we are sending packets (PTO, etc..).
-            let profile = self.loss_recovery.send_profile(&path.borrow(), now);
-            qdebug!("[{self}] output_path send_profile {profile:?}");
-
             match self.output_dgram_on_path(
                 path,
                 now,
                 closing_frame.take(),
-                &profile,
                 Encoder::new_borrowed_vec(&mut send_buffer),
                 packet_tos,
             )? {
@@ -2654,7 +2643,6 @@ impl Connection {
         path: &PathRef,
         now: Instant,
         closing_frame: Option<&ClosingFrame>,
-        profile: &SendProfile,
         mut encoder: Encoder<&mut Vec<u8>>,
         packet_tos: Tos,
     ) -> Res<SendOption> {
@@ -2662,6 +2650,10 @@ impl Connection {
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
+
+        // Determine how we are sending packets (PTO, etc..).
+        let profile = self.loss_recovery.send_profile(&path.borrow(), now);
+        qdebug!("[{self}] output_dgram_on_path send_profile {profile:?}");
 
         // Determine the size limit and padding for this UDP datagram.
         let limit = if path.borrow().pmtud().needs_probe() {
@@ -2717,7 +2709,7 @@ impl Connection {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, space, profile, &mut builder, header_start != 0, now);
+                    self.write_frames(path, space, &profile, &mut builder, header_start != 0, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
@@ -2856,10 +2848,10 @@ impl Connection {
         qdebug!("[{self}] client_start");
         debug_assert_eq!(self.role, Role::Client);
         if let Some(path) = self.paths.primary() {
-            qlog::client_connection_started(&self.qlog, &path, now);
+            qlog::client_connection_started(&mut self.qlog, &path, now);
         }
         qlog::client_version_information_initiated(
-            &self.qlog,
+            &mut self.qlog,
             self.conn_params.get_versions(),
             now,
         );
@@ -2959,7 +2951,7 @@ impl Connection {
             self.cid_manager.set_limit(max_active_cids);
         }
         self.set_initial_limits();
-        qlog::connection_tparams_set(&self.qlog, &self.tps.borrow(), now);
+        qlog::connection_tparams_set(&mut self.qlog, &self.tps.borrow(), now);
         Ok(())
     }
 
@@ -3302,6 +3294,13 @@ impl Connection {
                 // Report an error if we don't have enough connection IDs.
                 self.ensure_permanent(path, now)?;
                 path.borrow_mut().challenged(data);
+                // A PATH_CHALLENGE indicates the peer sees a different path,
+                // so start PMTUD to discover any MTU changes.
+                if self.conn_params.pmtud_enabled() {
+                    path.borrow_mut()
+                        .pmtud_mut()
+                        .start(now, &mut self.stats.borrow_mut());
+                }
             }
             Frame::PathResponse { data } => {
                 self.stats.borrow_mut().frame_rx.path_response += 1;
@@ -3485,7 +3484,7 @@ impl Connection {
             }
         }
         self.handle_lost_packets(&lost_packets);
-        qlog::packets_lost(&self.qlog, &lost_packets, now);
+        qlog::packets_lost(&mut self.qlog, &lost_packets, now);
         let stats = &mut self.stats.borrow_mut().frame_rx;
         stats.ack += 1;
         if let Some(largest_acknowledged) = largest_acknowledged {
@@ -3534,7 +3533,7 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_valid(now);
             // Generate a qlog event that the server connection started.
-            qlog::server_connection_started(&self.qlog, &path, now);
+            qlog::server_connection_started(&mut self.qlog, &path, now);
         } else {
             self.zero_rtt_state = if self
                 .crypto
@@ -3576,7 +3575,7 @@ impl Connection {
                 self.streams.clear_streams();
             }
             self.events.connection_state_change(state);
-            qlog::connection_state_updated(&self.qlog, &self.state, now);
+            qlog::connection_state_updated(&mut self.qlog, &self.state, now);
         } else if mem::discriminant(&state) != mem::discriminant(&self.state) {
             // Only tolerate a regression in state if the new state is closing
             // and the connection is already closed.
@@ -3884,7 +3883,7 @@ impl Connection {
         self.paths.primary().unwrap().borrow().plpmtu()
     }
 
-    fn log_packet(&self, meta: packet::MetaData, now: Instant) {
+    fn log_packet(&mut self, meta: packet::MetaData, now: Instant) {
         if log::log_enabled!(log::Level::Debug) {
             let mut s = String::new();
             let mut d = Decoder::from(meta.payload());
@@ -3901,7 +3900,7 @@ impl Connection {
             qdebug!("[{self}] {meta}{s}");
         }
 
-        qlog::packet_io(&self.qlog, meta, now);
+        qlog::packet_io(&mut self.qlog, meta, now);
     }
 }
 

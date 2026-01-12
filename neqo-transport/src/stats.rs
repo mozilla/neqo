@@ -18,7 +18,7 @@ use enum_map::EnumMap;
 use neqo_common::{qdebug, Dscp, Ecn};
 use strum::IntoEnumIterator as _;
 
-use crate::{ecn, packet};
+use crate::{cc::CongestionEvent, ecn, packet};
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct FrameStats {
@@ -137,14 +137,13 @@ pub struct DatagramStats {
 /// Congestion Control stats
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct CongestionControlStats {
-    /// Total number of congestion events caused by packet loss.
-    pub congestion_events_loss: usize,
-    /// Total number of congestion events caused by ECN-CE marked packets.
-    pub congestion_events_ecn: usize,
-    /// Number of spurious congestion events, where congestion was incorrectly inferred due to
-    /// packets initially considered lost but subsequently acknowledged. This indicates
-    /// instances where the congestion control algorithm overreacted to perceived losses.
-    pub congestion_events_spurious: usize,
+    /// Total number of congestion events caused by packet loss, total number of
+    /// congestion events caused by ECN-CE marked packets, and number of
+    /// spurious congestion events, where congestion was incorrectly inferred
+    /// due to packets initially considered lost but subsequently acknowledged.
+    /// The latter indicates instances where the congestion control algorithm
+    /// overreacted to perceived losses.
+    pub congestion_events: EnumMap<CongestionEvent, usize>,
     /// Whether this connection has exited slow start.
     pub slow_start_exited: bool,
 }
@@ -276,8 +275,6 @@ pub struct Stats {
     pub pmtud_ack: usize,
     /// Number of PMTUD probes lost.
     pub pmtud_lost: usize,
-    /// Number of times a path MTU changed unexpectedly.
-    pub pmtud_change: usize,
     /// MTU of the local interface used for the most recent path.
     pub pmtud_iface_mtu: usize,
     /// Probed PMTU of the current path.
@@ -388,20 +385,15 @@ impl Debug for Stats {
         writeln!(
             f,
             "  cc: ce_loss {} ce_ecn {} ce_spurious {}",
-            self.cc.congestion_events_loss,
-            self.cc.congestion_events_ecn,
-            self.cc.congestion_events_spurious,
+            self.cc.congestion_events[CongestionEvent::Loss],
+            self.cc.congestion_events[CongestionEvent::Ecn],
+            self.cc.congestion_events[CongestionEvent::Spurious],
         )?;
         writeln!(f, "  ss_exit: {}", self.cc.slow_start_exited)?;
         writeln!(
             f,
-            "  pmtud: {} sent {} acked {} lost {} change {} iface_mtu {} pmtu",
-            self.pmtud_tx,
-            self.pmtud_ack,
-            self.pmtud_lost,
-            self.pmtud_change,
-            self.pmtud_iface_mtu,
-            self.pmtud_pmtu
+            "  pmtud: {} sent {} acked {} lost {} iface_mtu {} pmtu",
+            self.pmtud_tx, self.pmtud_ack, self.pmtud_lost, self.pmtud_iface_mtu, self.pmtud_pmtu
         )?;
         writeln!(f, "  resumed: {}", self.resumed)?;
         writeln!(f, "  frames rx:")?;
