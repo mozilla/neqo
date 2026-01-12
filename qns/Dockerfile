@@ -29,7 +29,7 @@ ENV NSS_DIR=/nss \
 RUN set -eux; \
     mkdir -p "$NSPR_DIR" "$NSS_DIR"; \
     curl -L "https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz" | tar xz --strip-components=2 -C "$NSPR_DIR"; \
-    NSS_TAG=$(echo $NSS_VERSION | tr '.' '_'); \
+    NSS_TAG=$(echo "$NSS_VERSION" | tr '.' '_'); \
     curl -L "https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_TAG}.tar.gz" | tar xz --strip-components=2 -C "$NSS_DIR";
 
 RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 -o
