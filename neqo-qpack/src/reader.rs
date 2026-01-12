@@ -713,6 +713,7 @@ mod tests {
         let buf = [0u8; 10];
         let mut wrapper = ReceiverBufferWrapper::new(&buf);
         wrapper.offset = 5;
+        assert_eq!(wrapper.slice(7), Err(Error::Decompression));
         assert_eq!(wrapper.slice(usize::MAX), Err(Error::Decompression));
     }
 }
