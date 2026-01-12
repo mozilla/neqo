@@ -172,7 +172,7 @@ impl Debug for Batch {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
-            "Batch {:?} {:?}->{:?} {:?}: {}",
+            "DatagramBatch {:?} {:?}->{:?} {:?}: {}",
             self.tos,
             self.src,
             self.dst,
