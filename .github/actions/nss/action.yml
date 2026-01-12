@@ -88,32 +88,28 @@ runs:
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
 
-    - name: Checkout NSS
+    - name: Retrieve NSS
+      id: nss
       if: ${{ !steps.system_nss.outputs.suitable }}
-      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-      with:
-        repository: nss-dev/nss
-        path: nss
-        persist-credentials: false
+      shell: bash
+      env:
+        NSS_VERSION: 3.119.1 # TODO: Bump this periodically; also in qns/Dockerfile.
+      run: |
+        NSS_TAG=${NSS_VERSION//./_}
+        curl -L https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_TAG}.tar.gz |
+          tar xz --strip-components=1
+        echo "version=$NSS_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Retrieve NSPR
       id: nspr
       if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
       env:
-        NSPR_VERSION: 4.38.2 # This changes so rarely that we can hardcode it.
+        NSPR_VERSION: 4.38.2 # TODO: Bump this periodically; also in qns/Dockerfile
       run: |
         curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz |
           tar xz --strip-components=1
         echo "version=$NSPR_VERSION" >> "$GITHUB_OUTPUT"
-
-    - name: Store NSS version
-      id: nss
-      if: ${{ !steps.system_nss.outputs.suitable }}
-      shell: bash
-      run: |
-        NSS_HEAD=$(git -C nss rev-parse HEAD)
-        echo "version=$NSS_HEAD" >> "$GITHUB_OUTPUT"
 
     - name: Store Ubuntu release code name (Linux)
       id: ubuntu_release
