@@ -66,6 +66,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "hframe"
+path = "fuzz_targets/hframe.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "tparams"
 path = "fuzz_targets/tparams.rs"
 test = false
@@ -96,6 +103,13 @@ bench = false
 [[bin]]
 name = "wtframe"
 path = "fuzz_targets/wtframe.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hsettings"
+path = "fuzz_targets/hsettings.rs"
 test = false
 doc = false
 bench = false

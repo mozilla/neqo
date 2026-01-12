@@ -1,11 +1,9 @@
 name: Lint GitHub Actions workflows
 on:
-  push:
-    branches: ["main"]
-    paths: [".github/**"]
   pull_request:
     branches: ["main"]
     paths: [".github/**"]
+  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -47,7 +45,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@ed21f2f24f8dd64503750218de024bcf64c7250a # v7.1.5
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
 
       - run: uvx zizmor --persona auditor --format sarif . > results.sarif
         env:

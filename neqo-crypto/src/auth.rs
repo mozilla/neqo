@@ -44,9 +44,31 @@ impl From<AuthenticationStatus> for PRErrorCode {
 
 // Note that this mapping should be removed after gecko eventually learns how to
 // map into the enumerated type.
-// TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
 impl From<PRErrorCode> for AuthenticationStatus {
     fn from(v: PRErrorCode) -> Self {
         Self::from_repr(v).unwrap_or(Self::Unknown)
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn authentication_status_from_error_code() {
+        assert_eq!(
+            AuthenticationStatus::from(sec::SEC_ERROR_EXPIRED_CERTIFICATE),
+            AuthenticationStatus::CertExpired
+        );
+        assert_eq!(AuthenticationStatus::from(0), AuthenticationStatus::Ok);
+        assert_eq!(
+            AuthenticationStatus::from(12345),
+            AuthenticationStatus::Unknown
+        );
+        assert_eq!(
+            AuthenticationStatus::from(i32::MIN),
+            AuthenticationStatus::Unknown
+        );
     }
 }

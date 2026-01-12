@@ -258,8 +258,10 @@ mod tests {
     #[test]
     fn event_culling() {
         let mut evts = ConnectionEvents::default();
+        assert!(!evts.has_events());
 
         evts.client_0rtt_rejected();
+        assert!(evts.has_events());
         evts.client_0rtt_rejected();
         assert_eq!(evts.events().count(), 1);
         assert_eq!(evts.events().count(), 0);

@@ -1181,12 +1181,14 @@ mod tests {
     #[test]
     fn build_short() {
         fixture_init();
+        assert!(!Type::Short.is_long());
         let mut builder = Builder::short(
             Encoder::new(),
             true,
             Some(ConnectionId::from(SERVER_CID)),
             packet::LIMIT,
         );
+        assert!(!builder.is_empty());
         builder.pn(0, 1);
         builder.encode(SAMPLE_SHORT_PAYLOAD); // Enough payload for sampling.
         let packet = builder
@@ -1587,7 +1589,7 @@ mod tests {
 
         let mut damaged_retry = SAMPLE_RETRY_V1.to_vec();
         let last = damaged_retry.len() - 1;
-        damaged_retry[last] ^= 66;
+        damaged_retry[last] ^= 0b100_0010; // 66
         let (packet, remainder) = Public::decode(&mut damaged_retry, &cid_mgr).unwrap();
         assert!(remainder.is_empty());
         assert!(!packet.is_valid_retry(&odcid));

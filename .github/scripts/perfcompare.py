@@ -299,8 +299,8 @@ def run(cfg, tmp):
 
             if client == "neqo" and server == "neqo":
                 opts = [
-                    ("reno", True),
-                    ("reno", False),
+                    ("newreno", True),
+                    ("newreno", False),
                     ("cubic", True),
                     ("cubic", False),
                 ]

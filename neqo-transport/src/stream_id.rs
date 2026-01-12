@@ -163,6 +163,9 @@ mod test {
         assert!(!id1.is_recv_only(Role::Server));
         assert!(!id1.is_recv_only(Role::Client));
         assert_eq!(id1.as_u64(), 16);
+        assert_eq!(id1.index(), 4);
+        assert!(id1 == 16);
+        assert!(id1 != 17);
     }
 
     #[test]
@@ -182,5 +185,18 @@ mod test {
         assert!(!id2.is_recv_only(Role::Server));
         assert!(id2.is_recv_only(Role::Client));
         assert_eq!(id2.as_u64(), 35);
+        assert_eq!(id2.index(), 8);
+    }
+
+    #[test]
+    fn stream_id_display() {
+        assert_eq!(StreamId::new(123).to_string(), "123");
+    }
+
+    #[test]
+    fn stream_id_next() {
+        let mut id = StreamId::new(0);
+        id.next();
+        assert_eq!(id.as_u64(), 4);
     }
 }

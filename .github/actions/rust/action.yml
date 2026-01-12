@@ -30,7 +30,7 @@ runs:
 
     - name: Install Rust
       # TODO: Manually upate this, Dependabot will skip it because no tags associated with SHA:
-      uses: dtolnay/rust-toolchain@0b1efabc08b657293548b77fb76cc02d26091c7e # zizmor: ignore[stale-action-refs]
+      uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # zizmor: ignore[stale-action-refs]
       with:
         toolchain: ${{ inputs.version  }}
         components: ${{ inputs.components }}
@@ -77,7 +77,7 @@ runs:
     #   with:
     #     cache-bin: ${{ runner.environment != 'github-hosted' }}
     #     cache-all-crates: true
-    #     key: ${{ inputs.targets != '' && format('{0}-', inputs.targets) || '' }}${{ runner.os }}
+    #     key: ${{ inputs.targets && format('{0}-', inputs.targets) || '' }}${{ runner.os }}
     #     workspaces: ${{ inputs.workspaces }}
     #      # Only create the cache when we push to `main` (also via a merge group).
     #     save-if: ${{ github.ref == 'refs/heads/main' || github.event.merge_group.base_ref == 'refs/heads/main' }}
@@ -105,6 +105,9 @@ runs:
           if [ "$tool" == "samply" ]; then
             # TODO: Install released version once `--presymbolicate` (https://github.com/mstange/samply/pull/634) is released.
             cargo install --git https://github.com/mstange/samply --rev f6ff5dedc73ab84a8ef45231f41cd3e721fb5cd4 samply
+          elif [ "$OS" != "linux" ] && [ "$tool" == "cargo-careful" ]; then
+            # TODO: There is an issue with the binary releases of cargo-careful for non-Linux platforms.
+            cargo install cargo-careful
           else
             # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
             cargo install --locked --force "$tool"

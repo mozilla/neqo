@@ -1013,7 +1013,7 @@ impl Path {
             );
             stats.rtt_init_guess = true;
             self.rtt.update(
-                &self.qlog,
+                &mut self.qlog,
                 now - sent.time_sent(),
                 Duration::new(0, 0),
                 RttSource::Guesstimate,

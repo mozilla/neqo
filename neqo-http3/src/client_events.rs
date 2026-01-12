@@ -450,3 +450,19 @@ impl EventProvider for Http3ClientEvents {
         self.events.borrow_mut().pop_front()
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use neqo_common::event::Provider as _;
+
+    use super::{Http3ClientEvent, Http3ClientEvents};
+
+    #[test]
+    fn has_events() {
+        let events = Http3ClientEvents::default();
+        assert!(!events.has_events());
+        events.insert(Http3ClientEvent::GoawayReceived);
+        assert!(events.has_events());
+    }
+}

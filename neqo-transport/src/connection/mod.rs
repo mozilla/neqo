@@ -489,8 +489,6 @@ impl Connection {
 
     /// # Errors
     /// When the operation fails.
-    //
-    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
         self.crypto.tls_mut().set_certificate_compression::<T>()?;
         Ok(())
@@ -1058,7 +1056,7 @@ impl Connection {
         if let Some(path) = self.paths.primary() {
             let lost = self.loss_recovery.timeout(&path, now);
             self.handle_lost_packets(&lost);
-            qlog::packets_lost(&self.qlog, &lost, now);
+            qlog::packets_lost(&mut self.qlog, &lost, now);
         }
 
         if self.release_resumption_token_timer.is_some() {
@@ -1446,7 +1444,7 @@ impl Connection {
                 .set_initial(self.conn_params.get_versions().initial());
             mem::swap(self, &mut c);
             qlog::client_version_information_negotiated(
-                &self.qlog,
+                &mut self.qlog,
                 self.conn_params.get_versions().all(),
                 supported,
                 version,
@@ -1827,7 +1825,7 @@ impl Connection {
                     // the rest of the datagram on the floor, but don't generate an error.
                     self.check_stateless_reset(path, e.data, dcid.is_none(), now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
-                    qlog::packet_dropped(&self.qlog, &e, now);
+                    qlog::packet_dropped(&mut self.qlog, &e, now);
                     dcid = Some(e.dcid);
                 }
             }
@@ -2256,13 +2254,9 @@ impl Connection {
 
     fn can_grease_quic_bit(&self) -> bool {
         let tph = self.tps.borrow();
-        tph.remote_handshake().as_ref().map_or_else(
-            || {
-                tph.remote_0rtt()
-                    .is_some_and(|r| r.get_empty(GreaseQuicBit))
-            },
-            |r| r.get_empty(GreaseQuicBit),
-        )
+        tph.remote_handshake()
+            .as_ref()
+            .is_some_and(|r| r.get_empty(GreaseQuicBit))
     }
 
     /// Write the frames that are exchanged in the application data space.
@@ -2853,10 +2847,10 @@ impl Connection {
         qdebug!("[{self}] client_start");
         debug_assert_eq!(self.role, Role::Client);
         if let Some(path) = self.paths.primary() {
-            qlog::client_connection_started(&self.qlog, &path, now);
+            qlog::client_connection_started(&mut self.qlog, &path, now);
         }
         qlog::client_version_information_initiated(
-            &self.qlog,
+            &mut self.qlog,
             self.conn_params.get_versions(),
             now,
         );
@@ -2956,7 +2950,7 @@ impl Connection {
             self.cid_manager.set_limit(max_active_cids);
         }
         self.set_initial_limits();
-        qlog::connection_tparams_set(&self.qlog, &self.tps.borrow(), now);
+        qlog::connection_tparams_set(&mut self.qlog, &self.tps.borrow(), now);
         Ok(())
     }
 
@@ -3489,7 +3483,7 @@ impl Connection {
             }
         }
         self.handle_lost_packets(&lost_packets);
-        qlog::packets_lost(&self.qlog, &lost_packets, now);
+        qlog::packets_lost(&mut self.qlog, &lost_packets, now);
         let stats = &mut self.stats.borrow_mut().frame_rx;
         stats.ack += 1;
         if let Some(largest_acknowledged) = largest_acknowledged {
@@ -3538,7 +3532,7 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_valid(now);
             // Generate a qlog event that the server connection started.
-            qlog::server_connection_started(&self.qlog, &path, now);
+            qlog::server_connection_started(&mut self.qlog, &path, now);
         } else {
             self.zero_rtt_state = if self
                 .crypto
@@ -3580,7 +3574,7 @@ impl Connection {
                 self.streams.clear_streams();
             }
             self.events.connection_state_change(state);
-            qlog::connection_state_updated(&self.qlog, &self.state, now);
+            qlog::connection_state_updated(&mut self.qlog, &self.state, now);
         } else if mem::discriminant(&state) != mem::discriminant(&self.state) {
             // Only tolerate a regression in state if the new state is closing
             // and the connection is already closed.
@@ -3888,7 +3882,7 @@ impl Connection {
         self.paths.primary().unwrap().borrow().plpmtu()
     }
 
-    fn log_packet(&self, meta: packet::MetaData, now: Instant) {
+    fn log_packet(&mut self, meta: packet::MetaData, now: Instant) {
         if log::log_enabled!(log::Level::Debug) {
             let mut s = String::new();
             let mut d = Decoder::from(meta.payload());
@@ -3905,7 +3899,7 @@ impl Connection {
             qdebug!("[{self}] {meta}{s}");
         }
 
-        qlog::packet_io(&self.qlog, meta, now);
+        qlog::packet_io(&mut self.qlog, meta, now);
     }
 }
 
