@@ -36,10 +36,23 @@ pub use nss_p11::*;
 macro_rules! scoped_ptr {
     // With custom debug method
     ($scoped:ident, $target:ty, $dtor:path, $debug_method:ident) => {
-        #[derive(derive_more::Debug)]
-        #[debug("{}", self.$debug_method().map_or_else(|_| format!("Opaque {}", stringify!($scoped)), |b| format!("{} {}", stringify!($scoped), neqo_common::hex_with_len(b))))]
         pub struct $scoped {
             ptr: *mut $target,
+        }
+
+        impl $scoped {
+            fn debug_display(&self) -> String {
+                self.$debug_method().map_or_else(
+                    |_| concat!("Opaque ", stringify!($scoped)).to_string(),
+                    |b| format!(concat!(stringify!($scoped), " {}"), neqo_common::hex_with_len(b))
+                )
+            }
+        }
+
+        impl std::fmt::Debug for $scoped {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.debug_display())
+            }
         }
 
         scoped_ptr!(@impls $scoped, $target, $dtor);

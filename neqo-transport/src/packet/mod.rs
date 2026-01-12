@@ -561,7 +561,7 @@ impl<B> From<Builder<B>> for Encoder<B> {
 /// `Public` holds information from packets that is public only.  This allows for
 /// processing of packets prior to decryption.
 #[derive(derive_more::Debug)]
-#[debug("{:?}: {} {}", self.packet_type(), hex_with_len(&data[..*header_len]), hex_with_len(&data[*header_len..]))]
+#[debug("{:?}: {} {}", self.packet_type(), hex_with_len(&self.data[..self.header_len]), hex_with_len(&self.data[self.header_len..]))]
 pub struct Public<'a> {
     /// The packet type.
     packet_type: Type,

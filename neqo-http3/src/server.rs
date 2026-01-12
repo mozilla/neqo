@@ -6,7 +6,7 @@
 
 #![expect(
     clippy::mutable_key_type,
-    reason = "Triggered by derive_more::Display on Http3Server, which just prints a static string."
+    reason = "HashMap<ConnectionRef, HandlerRef> uses ConnectionRef as key, which contains interior mutable types."
 )]
 
 use std::{
