@@ -161,17 +161,17 @@ impl Args {
         upload_size: usize,
         download_size: usize,
     ) -> Self {
-        use std::iter::repeat_with;
+        use std::iter::repeat;
 
         let addr =
             server_addr.map_or_else(|| "[::1]:12345".into(), |a| format!("[::1]:{}", a.port()));
         Self {
             shared: SharedArgs::default(),
-            urls: repeat_with(|| {
+            urls: repeat(
                 format!("http://{addr}/{download_size}")
                     .parse::<Url>()
-                    .unwrap()
-            })
+                    .unwrap(),
+            )
             .take(num_requests)
             .collect(),
             method: if upload_size == 0 {
@@ -545,11 +545,10 @@ fn urls_by_origin(urls: &[Url]) -> impl Iterator<Item = ((String, u16), VecDeque
         .fold(
             HashMap::<(String, u16), VecDeque<Url>>::default(),
             |mut map, url| {
-                if let Some(authority) = url.authority() {
-                    let host = authority.host().to_string();
-                    let port = authority.port_u16().unwrap_or(443);
-                    map.entry((host, port)).or_default().push_back(url.clone());
-                }
+                let authority = url.authority().expect("URL must have an authority (host)");
+                let host = authority.host().to_string();
+                let port = authority.port_u16().unwrap_or(443);
+                map.entry((host, port)).or_default().push_back(url.clone());
                 map
             },
         )
@@ -602,7 +601,6 @@ pub async fn client(mut args: Args) -> Res<()> {
             args.shared.alpn
         );
 
-        let hostname = host.clone();
         let mut token: Option<ResumptionToken> = None;
         let mut first = true;
         while !urls.is_empty() {
@@ -615,7 +613,7 @@ pub async fn client(mut args: Args) -> Res<()> {
             first = false;
 
             token = if args.shared.alpn == "h3" {
-                let client = http3::create_client(&args, real_local, remote_addr, &hostname, token)
+                let client = http3::create_client(&args, real_local, remote_addr, &host, token)
                     .expect("failed to create client");
 
                 let handler = http3::Handler::new(to_request, args.clone());
@@ -624,9 +622,8 @@ pub async fn client(mut args: Args) -> Res<()> {
                     .run()
                     .await?
             } else {
-                let client =
-                    http09::create_client(&args, real_local, remote_addr, &hostname, token)
-                        .expect("failed to create client");
+                let client = http09::create_client(&args, real_local, remote_addr, &host, token)
+                    .expect("failed to create client");
 
                 let handler = http09::Handler::new(to_request, &args);
 
