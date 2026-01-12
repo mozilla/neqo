@@ -78,3 +78,18 @@ impl AntiReplay {
         unsafe { SSL_SetAntiReplayContext(fd, *self.ctx) }
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::time::Duration;
+
+    #[test]
+    fn creation() {
+        test_fixture::fixture_init();
+        for (k, bits, expected) in [(7, 8, true), (usize::MAX, 3, false), (1, usize::MAX, false)] {
+            let res = crate::AntiReplay::new(test_fixture::now(), Duration::from_secs(10), k, bits);
+            assert_eq!(res.is_ok(), expected);
+        }
+    }
+}
