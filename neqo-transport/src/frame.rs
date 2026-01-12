@@ -1126,6 +1126,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::too_many_lines, reason = "OK in tests.")]
     fn dump() {
         let s = |id| StreamId::from(id);
         assert_eq!(Frame::Padding(5).dump(), "Padding { len: 5 }");

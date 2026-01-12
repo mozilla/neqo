@@ -13,7 +13,7 @@ use std::{
     cell::RefCell,
     ffi::{CStr, CString},
     fmt::{self, Debug, Display, Formatter},
-    mem::{size_of, MaybeUninit},
+    mem::MaybeUninit,
     ops::{Deref, DerefMut},
     os::raw::{c_uint, c_void},
     pin::Pin,
@@ -1316,7 +1316,7 @@ impl Server {
                 // ssl_auth_null means "I don't care what sort of certificate this is".
                 authType: ssl::SSLAuthType::ssl_auth_null,
                 certChain: null(),
-                stapledOCSPResponses: &ocsp_array,
+                stapledOCSPResponses: &raw const ocsp_array,
                 signedCertTimestamps: std::ptr::from_ref(&sct_item).cast(),
                 delegCred: null(),
                 delegCredPrivKey: null(),
@@ -1326,7 +1326,7 @@ impl Server {
                     agent.fd,
                     (*cert).cast(),
                     (*key).cast(),
-                    &extra,
+                    &raw const extra,
                     c_uint::try_from(size_of::<ssl::SSLExtraServerCertDataStr>())?,
                 )
             })?;

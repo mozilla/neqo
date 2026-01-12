@@ -4,7 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::missing_asserts_for_indexing, clippy::unwrap_in_result, reason = "OK in tests")]
+#![allow(
+    clippy::missing_asserts_for_indexing,
+    clippy::unwrap_in_result,
+    reason = "OK in tests"
+)]
 
 use std::{
     cell::RefCell,
