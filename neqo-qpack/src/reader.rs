@@ -695,11 +695,12 @@ mod tests {
     #[test]
     fn buffer_wrapper_rejects_oversized_literal() {
         const PREFIX_LEN: u8 = 3;
+        // Encode only the length field (MAX_LEN + 1) without allocating the actual data.
+        // The validation should fail before attempting to read the literal content.
         let mut data = Encoder::default();
-        data.encode_literal(
-            false,
-            Prefix::new(0x00, PREFIX_LEN),
-            &vec![b'a'; LiteralReader::MAX_LEN + 1],
+        data.encode_prefixed_encoded_int(
+            Prefix::new(0x00, PREFIX_LEN + 1),
+            (LiteralReader::MAX_LEN + 1) as u64,
         );
         let mut buffer = ReceiverBufferWrapper::new(data.as_ref());
         assert_eq!(
