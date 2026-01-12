@@ -172,7 +172,7 @@ impl Debug for Batch {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
-            "DatagramBatch {:?} {:?}->{:?} {:?}: {}",
+            "datagram::Batch {:?} {:?}->{:?} {:?}: {}",
             self.tos,
             self.src,
             self.dst,
@@ -283,7 +283,7 @@ mod tests {
 
     use test_fixture::{datagram, DEFAULT_ADDR};
 
-    use crate::{datagram::Batch, Datagram, Ecn, Tos};
+    use crate::{datagram, Datagram, Ecn, Tos};
 
     #[test]
     fn fmt_datagram() {
@@ -319,25 +319,29 @@ mod tests {
         let tos = Tos::default();
 
         // 10 bytes, segment size 4 -> 3 datagrams (4+4+2)
-        let batch = Batch::new(src, dst, tos, NonZeroUsize::new(4).unwrap(), vec![0u8; 10]);
+        let batch =
+            datagram::Batch::new(src, dst, tos, NonZeroUsize::new(4).unwrap(), vec![0u8; 10]);
         assert_eq!(batch.num_datagrams(), 3);
 
         // 8 bytes, segment size 4 -> 2 datagrams (4+4)
-        let batch = Batch::new(src, dst, tos, NonZeroUsize::new(4).unwrap(), vec![0u8; 8]);
+        let batch =
+            datagram::Batch::new(src, dst, tos, NonZeroUsize::new(4).unwrap(), vec![0u8; 8]);
         assert_eq!(batch.num_datagrams(), 2);
 
         // 5 bytes, segment size 5 -> 1 datagram
-        let batch = Batch::new(src, dst, tos, NonZeroUsize::new(5).unwrap(), vec![0u8; 5]);
+        let batch =
+            datagram::Batch::new(src, dst, tos, NonZeroUsize::new(5).unwrap(), vec![0u8; 5]);
         assert_eq!(batch.num_datagrams(), 1);
 
         // 6 bytes, segment size 5 -> 2 datagrams (5+1)
-        let batch = Batch::new(src, dst, tos, NonZeroUsize::new(5).unwrap(), vec![0u8; 6]);
+        let batch =
+            datagram::Batch::new(src, dst, tos, NonZeroUsize::new(5).unwrap(), vec![0u8; 6]);
         assert_eq!(batch.num_datagrams(), 2);
     }
 
     #[test]
     fn batch_tos() {
-        let mut batch = Batch::new(
+        let mut batch = datagram::Batch::new(
             SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234),
             SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678),
             Tos::default(),
@@ -353,7 +357,7 @@ mod tests {
         let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
         let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
         let tos = Tos::default();
-        let batch = Batch::new(
+        let batch = datagram::Batch::new(
             src,
             dst,
             tos,
@@ -378,7 +382,7 @@ mod tests {
         let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
         let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
         let tos = Tos::default();
-        let mut batch = Batch::new(
+        let mut batch = datagram::Batch::new(
             src,
             dst,
             tos,
@@ -415,7 +419,7 @@ mod tests {
     #[test]
     fn batch_data_and_try_from() {
         let d = Datagram::new(DEFAULT_ADDR, DEFAULT_ADDR, Tos::default(), vec![1, 2, 3]);
-        let batch = DatagramBatch::from(d);
+        let batch = datagram::Batch::from(d);
         assert_eq!(batch.data(), &[1, 2, 3]);
         let d2: Datagram = batch.try_into().unwrap();
         assert_eq!(d2.as_ref(), &[1, 2, 3]);
@@ -423,7 +427,7 @@ mod tests {
 
     #[test]
     fn batch_try_from_multiple_fails() {
-        let batch = DatagramBatch::new(
+        let batch = datagram::Batch::new(
             DEFAULT_ADDR,
             DEFAULT_ADDR,
             Tos::default(),

@@ -34,24 +34,6 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
         rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
-        include:
-          # TODO: Remove once Neqo's MSRV is increased to 1.82.0. NSS build
-          # fails on Windows with Rust 1.81.0. Firefox does not use Rust 1.81.0
-          # (except for testing, see
-          # https://bugzilla.mozilla.org/show_bug.cgi?id=1968057#c1). Firefox
-          # uses Rust 1.82.0. Thus this is not worth fixing. Let's explicitly
-          # use Rust 1.82.0 here for now.
-          - os: windows-2025
-            rust-toolchain: 1.82.0
-        exclude:
-          # TODO: Remove once Neqo's MSRV is increased to 1.82.0. NSS build
-          # fails on Windows with Rust 1.81.0. Firefox does not use Rust 1.81.0
-          # (except for testing, see
-          # https://bugzilla.mozilla.org/show_bug.cgi?id=1968057#c1). Firefox
-          # uses Rust 1.82.0. Thus this is not worth fixing. Let's explicitly
-          # use Rust 1.82.0 here for now.
-          - os: windows-2025
-            rust-toolchain: 1.81.0
     runs-on: ${{ matrix.os }}
     defaults:
       run:
