@@ -64,7 +64,7 @@ impl Decoder {
         self.table.capacity()
     }
 
-    /// returns a list of unblocked streams
+    /// Returns a list of unblocked streams.
     ///
     /// # Errors
     ///
@@ -79,13 +79,11 @@ impl Decoder {
             return Ok(Vec::new());
         }
 
-        let r = self
+        Ok(self
             .blocked_streams
-            .iter()
-            .filter_map(|(id, req)| (*req <= base_new).then_some(*id))
-            .collect::<Vec<_>>();
-        self.blocked_streams.retain(|(_, req)| *req > base_new);
-        Ok(r)
+            .extract_if(.., |(_, req)| *req <= base_new)
+            .map(|(id, _)| id)
+            .collect())
     }
 
     fn read_instructions(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
