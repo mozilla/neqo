@@ -26,7 +26,7 @@ pub fn convert_to_f64(v: usize) -> f64 {
 
 #[derive(Debug, Default, Clone, derive_more::Display)]
 #[display("state [w_max: {w_max}, k: {k}, t_epoch: {t_epoch:?}]")]
-struct Parameters {
+struct State {
     /// > An estimate for the congestion window \[...\] in the Reno-friendly region -- that
     /// > is, an estimate for the congestion window of Reno.
     ///
@@ -84,10 +84,10 @@ struct Parameters {
 #[display("Cubic {current}")]
 pub struct Cubic {
     /// Current CUBIC parameters.
-    current: Parameters,
+    current: State,
     /// CUBIC parameters that have been stored on a congestion event to restore later in case it
     /// turns out to have been spurious.
-    stored: Option<Parameters>,
+    stored: Option<State>,
 }
 
 impl Cubic {
@@ -450,9 +450,8 @@ impl WindowAdjustment for Cubic {
         };
 
         qdebug!(
-            "Spurious cong event: recovering cubic params from {:?} to {:?}",
-            self.current,
-            stored
+            "Spurious cong event: recovering cubic state from {} to {stored}",
+            self.current
         );
         self.current = stored;
     }
