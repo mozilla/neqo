@@ -9,9 +9,9 @@
 
 use std::{
     cmp::min,
-    fmt::{Debug, Display},
+    fmt::Debug,
     num::NonZeroU64,
-    ops::{Deref, DerefMut, Index, IndexMut},
+    ops::{Index, IndexMut},
     time::{Duration, Instant},
 };
 
@@ -47,19 +47,12 @@ const WINDOW_INCREASE_MULTIPLIER: u64 = 4;
 
 /// Subject for flow control auto-tuning, used to avoid heap allocations
 /// when logging.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, strum::Display)]
 enum AutoTuneSubject {
+    #[strum(to_string = "connection")]
     Connection,
+    #[strum(to_string = "stream {0}")]
     Stream(StreamId),
-}
-
-impl Display for AutoTuneSubject {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Connection => write!(f, "connection"),
-            Self::Stream(id) => write!(f, "stream {id}"),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -617,7 +610,10 @@ impl ReceiverFlowControl<StreamType> {
     }
 }
 
+#[derive(derive_more::Deref, derive_more::DerefMut)]
 pub struct RemoteStreamLimit {
+    #[deref]
+    #[deref_mut]
     streams_fc: ReceiverFlowControl<StreamType>,
     next_stream: StreamId,
 }
@@ -648,19 +644,6 @@ impl RemoteStreamLimit {
         self.next_stream.next();
         assert!(self.is_allowed(new_stream));
         new_stream
-    }
-}
-
-impl Deref for RemoteStreamLimit {
-    type Target = ReceiverFlowControl<StreamType>;
-    fn deref(&self) -> &Self::Target {
-        &self.streams_fc
-    }
-}
-
-impl DerefMut for RemoteStreamLimit {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.streams_fc
     }
 }
 

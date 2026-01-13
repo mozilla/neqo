@@ -6,15 +6,11 @@
 
 // Tracking of sent packets and detecting their loss.
 
-// #[cfg(feature = "bench")]
 pub mod sent;
-// #[cfg(not(feature = "bench"))]
-// mod sent;
 mod token;
 
 use std::{
     cmp::{max, min},
-    fmt::{self, Display, Formatter},
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
@@ -482,7 +478,8 @@ impl PtoState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("recovery::Loss")]
 pub struct Loss {
     /// When the handshake was confirmed, if it has been.
     confirmed_time: Option<Instant>,
@@ -981,12 +978,6 @@ impl Loss {
                 SendProfile::new_limited(limit)
             }
         }
-    }
-}
-
-impl Display for Loss {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "recovery::Loss")
     }
 }
 
