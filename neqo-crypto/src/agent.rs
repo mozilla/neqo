@@ -13,7 +13,7 @@ use std::{
     cell::RefCell,
     ffi::{CStr, CString},
     fmt::{self, Debug, Formatter},
-    mem::{size_of, MaybeUninit},
+    mem::MaybeUninit,
     ops::{Deref, DerefMut},
     os::raw::{c_uint, c_void},
     pin::Pin,
