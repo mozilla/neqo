@@ -217,13 +217,13 @@ pub fn default_client() -> Connection {
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server() -> Connection {
-    new_server::<CountingConnectionIdGenerator>(DEFAULT_ALPN, ConnectionParameters::default())
+    new_server::<CountingConnectionIdGenerator, &str>(DEFAULT_ALPN, ConnectionParameters::default())
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server_h3() -> Connection {
-    new_server::<CountingConnectionIdGenerator>(
+    new_server::<CountingConnectionIdGenerator, &str>(
         DEFAULT_ALPN_H3,
         ConnectionParameters::default().pacing(false),
     )
@@ -235,7 +235,7 @@ pub fn default_server_h3() -> Connection {
 ///
 /// If this doesn't work.
 #[must_use]
-pub fn new_server<G>(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection
+pub fn new_server<G, A: AsRef<str>>(alpn: &[A], params: ConnectionParameters) -> Connection
 where
     G: ConnectionIdGenerator + Default + 'static,
 {

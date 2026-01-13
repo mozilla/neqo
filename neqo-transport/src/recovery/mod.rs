@@ -593,10 +593,10 @@ impl Loss {
         };
 
         // Only prime if we've received Initial ACKs (proving the peer is alive).
-        if !self
+        if self
             .spaces
             .get(PacketNumberSpace::Initial)
-            .is_some_and(|space| space.largest_acked.is_some())
+            .is_none_or(|space| space.largest_acked.is_none())
         {
             return;
         }
@@ -954,11 +954,6 @@ impl Loss {
         qtrace!("[{self}] get send profile {now:?}");
         let sender = path.sender();
         let mtu = path.plpmtu();
-        #[allow(
-            clippy::allow_attributes,
-            clippy::return_and_then,
-            reason = "TODO: False positive on nightly; function isn't returning Option or Result"
-        )]
         if let Some(profile) = self
             .pto_state
             .as_mut()

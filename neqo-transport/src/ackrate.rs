@@ -124,7 +124,7 @@ impl FlexibleAckRate {
         self.current = acked.clone();
     }
 
-    fn frame_lost(&mut self, _lost: &AckRate) {
+    const fn frame_lost(&mut self, _lost: &AckRate) {
         self.frame_outstanding = false;
     }
 
@@ -184,7 +184,7 @@ impl PeerAckDelay {
         }
     }
 
-    pub fn frame_lost(&mut self, r: &AckRate) {
+    pub const fn frame_lost(&mut self, r: &AckRate) {
         if let Self::Flexible(rate) = self {
             rate.frame_lost(r);
         }

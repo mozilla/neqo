@@ -231,9 +231,9 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
     secstatus_to_res(unsafe {
         ssl::SSL_GetNextProto(
             fd,
-            &mut alpn_state,
+            &raw mut alpn_state,
             chosen.as_mut_ptr(),
-            &mut chosen_len,
+            &raw mut chosen_len,
             c_uint::try_from(chosen.len())?,
         )
     })?;
@@ -576,7 +576,7 @@ impl SecretAgent {
     /// If the range of versions isn't supported.
     pub fn set_version_range(&mut self, min: Version, max: Version) -> Res<()> {
         let range = ssl::SSLVersionRange { min, max };
-        secstatus_to_res(unsafe { ssl::SSL_VersionRangeSet(self.fd, &range) })
+        secstatus_to_res(unsafe { ssl::SSL_VersionRangeSet(self.fd, &raw const range) })
     }
 
     /// Enable a set of ciphers.  Note that the order of these is not respected.
@@ -1293,7 +1293,7 @@ impl Server {
                 // ssl_auth_null means "I don't care what sort of certificate this is".
                 authType: ssl::SSLAuthType::ssl_auth_null,
                 certChain: null(),
-                stapledOCSPResponses: &ocsp_array,
+                stapledOCSPResponses: &raw const ocsp_array,
                 signedCertTimestamps: std::ptr::from_ref(&sct_item).cast(),
                 delegCred: null(),
                 delegCredPrivKey: null(),
@@ -1303,7 +1303,7 @@ impl Server {
                     agent.fd,
                     (*cert).cast(),
                     (*key).cast(),
-                    &extra,
+                    &raw const extra,
                     c_uint::try_from(size_of::<ssl::SSLExtraServerCertDataStr>())?,
                 )
             })?;

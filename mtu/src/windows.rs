@@ -30,7 +30,7 @@ use crate::default_err;
 struct MibTablePtr(*mut MIB_IPINTERFACE_TABLE);
 
 impl MibTablePtr {
-    fn mut_ptr_ptr(&mut self) -> *mut *mut MIB_IPINTERFACE_TABLE {
+    const fn mut_ptr_ptr(&mut self) -> *mut *mut MIB_IPINTERFACE_TABLE {
         ptr::from_mut(&mut self.0)
     }
 }
@@ -115,7 +115,7 @@ pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
     // Make a slice
     let ifaces = unsafe {
         slice::from_raw_parts::<MIB_IPINTERFACE_ROW>(
-            &(*if_table.0).Table[0],
+            &raw const (*if_table.0).Table[0],
             (*if_table.0).NumEntries as usize,
         )
     };

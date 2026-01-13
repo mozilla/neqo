@@ -432,7 +432,7 @@ impl Http3ClientEvents {
                     succeeded,
                 )));
             }
-            _ => qtrace!("HSetting {:?} {succeeded} not handled", feature_type),
+            _ => qtrace!("HSetting {feature_type:?} {succeeded} not handled"),
         }
     }
 }

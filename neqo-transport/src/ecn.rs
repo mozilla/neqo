@@ -158,7 +158,7 @@ impl Info {
     }
 
     /// Set the baseline (= the ECN counts from the last ACK Frame).
-    pub(crate) fn set_baseline(&mut self, baseline: Count) {
+    pub(crate) const fn set_baseline(&mut self, baseline: Count) {
         self.baseline = baseline;
     }
 
@@ -205,7 +205,7 @@ impl Info {
     }
 
     /// An [`Ecn::Ect0`] marked packet has been acked.
-    pub(crate) fn acked_ecn(&mut self) {
+    pub(crate) const fn acked_ecn(&mut self) {
         if let ValidationState::Testing {
             initial_probes_acked: probes_acked,
             ..

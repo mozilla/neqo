@@ -130,7 +130,7 @@ impl PublicKey {
             PK11_HPKE_Serialize(
                 **self,
                 buf.as_mut_ptr(),
-                &mut len,
+                &raw mut len,
                 c_uint::try_from(buf.len())?,
             )
         })?;
@@ -172,7 +172,7 @@ impl PrivateKey {
                 PK11ObjectType::PK11_TypePrivKey,
                 (**self).cast(),
                 CK_ATTRIBUTE_TYPE::from(CKA_VALUE),
-                &mut key_item,
+                &raw mut key_item,
             )
         })?;
         let slc = unsafe { null_safe_slice(key_item.data, key_item.len) };
@@ -181,7 +181,7 @@ impl PrivateKey {
         // use the scoped `Item` implementation.  This is OK as long as nothing
         // panics between `PK11_ReadRawAttribute` succeeding and here.
         unsafe {
-            SECITEM_FreeItem(&mut key_item, PRBool::from(false));
+            SECITEM_FreeItem(&raw mut key_item, PRBool::from(false));
         }
         Ok(key)
     }

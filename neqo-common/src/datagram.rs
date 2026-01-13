@@ -57,7 +57,7 @@ impl<D> Datagram<D> {
         self.tos
     }
 
-    pub fn set_tos(&mut self, tos: Tos) {
+    pub const fn set_tos(&mut self, tos: Tos) {
         self.tos = tos;
     }
 }
@@ -210,7 +210,7 @@ impl DatagramBatch {
         self.tos
     }
 
-    pub fn set_tos(&mut self, tos: Tos) {
+    pub const fn set_tos(&mut self, tos: Tos) {
         self.tos = tos;
     }
 
@@ -219,18 +219,13 @@ impl DatagramBatch {
         self.datagram_size
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "False positive on 1.86, remove when MSRV is higher."
-    )]
     #[must_use]
     pub fn data(&self) -> &[u8] {
         &self.d
     }
 
     #[must_use]
-    pub fn num_datagrams(&self) -> usize {
+    pub const fn num_datagrams(&self) -> usize {
         self.d.len().div_ceil(self.datagram_size.get())
     }
 

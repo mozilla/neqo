@@ -147,7 +147,7 @@ impl PacketRange {
     /// When a packet containing the range `other` is acknowledged,
     /// clear the `ack_needed` attribute on this.
     /// Requires that other is equal to this, or a larger range.
-    pub fn acknowledged(&mut self, other: &Self) {
+    pub const fn acknowledged(&mut self, other: &Self) {
         if (other.smallest <= self.smallest) && (other.largest >= self.largest) {
             self.ack_needed = false;
         }
@@ -240,7 +240,7 @@ impl RecvdPackets {
     }
 
     /// Get the ECN counts.
-    pub fn ecn_marks(&mut self) -> &mut ecn::Count {
+    pub const fn ecn_marks(&mut self) -> &mut ecn::Count {
         &mut self.ecn_count
     }
 
@@ -250,7 +250,7 @@ impl RecvdPackets {
     }
 
     /// Update acknowledgment delay parameters.
-    pub fn ack_freq(
+    pub const fn ack_freq(
         &mut self,
         seqno: u64,
         tolerance: packet::Number,

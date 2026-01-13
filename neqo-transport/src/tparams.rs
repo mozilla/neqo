@@ -742,7 +742,7 @@ impl TransportParametersHandler {
     }
 
     #[must_use]
-    pub fn local_mut(&mut self) -> &mut TransportParameters {
+    pub const fn local_mut(&mut self) -> &mut TransportParameters {
         &mut self.local
     }
 
@@ -1249,7 +1249,7 @@ mod tests {
     #[test]
     fn versions_equal_0rtt() {
         let mut current = TransportParameters::default();
-        qdebug!("Current = {:?}", current);
+        qdebug!("Current = {current:?}");
         current.set(
             VersionInformation,
             TransportParameter::Versions {

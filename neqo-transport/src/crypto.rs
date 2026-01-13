@@ -404,7 +404,7 @@ impl Crypto {
     }
 
     #[must_use]
-    pub fn tls_mut(&mut self) -> &mut Agent {
+    pub const fn tls_mut(&mut self) -> &mut Agent {
         &mut self.tls
     }
 
@@ -419,7 +419,7 @@ impl Crypto {
     }
 
     #[must_use]
-    pub fn streams_mut(&mut self) -> &mut CryptoStreams {
+    pub const fn streams_mut(&mut self) -> &mut CryptoStreams {
         &mut self.streams
     }
 
@@ -429,7 +429,7 @@ impl Crypto {
     }
 
     #[must_use]
-    pub fn states_mut(&mut self) -> &mut CryptoStates {
+    pub const fn states_mut(&mut self) -> &mut CryptoStates {
         &mut self.states
     }
 }
@@ -909,10 +909,9 @@ impl CryptoStates {
     /// This only needs to be run once, so run it when getting header protection.
     fn maybe_continue_initial_rx(&mut self, version: Version) {
         // Only do this if this version hasn't been used...
-        // This would be better with `is_none_or`, but that needs MSRV >= 1.82
-        if !self.initials[version]
+        if self.initials[version]
             .as_ref()
-            .is_some_and(|dx| dx.rx.next_pn() == 0)
+            .is_none_or(|dx| dx.rx.next_pn() != 0)
         {
             return;
         }
@@ -1522,7 +1521,7 @@ impl CryptoStreams {
     }
 
     pub fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
-        self.get_mut(space).map_or(true, |cs| cs.tx.is_empty())
+        self.get_mut(space).is_none_or(|cs| cs.tx.is_empty())
     }
 
     const fn get(&self, space: PacketNumberSpace) -> Option<&CryptoStream> {
@@ -1545,7 +1544,7 @@ impl CryptoStreams {
         }
     }
 
-    fn get_mut(&mut self, space: PacketNumberSpace) -> Option<&mut CryptoStream> {
+    const fn get_mut(&mut self, space: PacketNumberSpace) -> Option<&mut CryptoStream> {
         let (initial, hs, app) = match self {
             Self::Initial {
                 initial,

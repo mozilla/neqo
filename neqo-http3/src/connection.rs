@@ -1819,7 +1819,7 @@ impl Http3Connection {
     }
 
     #[must_use]
-    pub fn state_mut(&mut self) -> &mut Http3State {
+    pub const fn state_mut(&mut self) -> &mut Http3State {
         &mut self.state
     }
 

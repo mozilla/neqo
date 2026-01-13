@@ -26,7 +26,7 @@ impl PushId {
         Self(id)
     }
 
-    pub fn next(&mut self) {
+    pub const fn next(&mut self) {
         self.0 += 1;
     }
 }

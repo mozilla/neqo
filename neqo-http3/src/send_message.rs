@@ -86,7 +86,7 @@ impl MessageState {
         }
     }
 
-    fn fin(&mut self) -> Res<()> {
+    const fn fin(&mut self) -> Res<()> {
         match &self {
             Self::WaitingForHeaders | Self::Done => Err(Error::InvalidInput),
             Self::WaitingForData | Self::TrailersSet => {

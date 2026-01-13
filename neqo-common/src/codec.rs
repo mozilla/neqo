@@ -262,7 +262,7 @@ impl<B: Buffer> Encoder<B> {
     /// # Panics
     ///
     /// When writing to the underlying buffer fails.
-    pub fn encode(&mut self, data: impl AsRef<[u8]>) -> &mut Self {
+    pub fn encode<D: AsRef<[u8]>>(&mut self, data: D) -> &mut Self {
         self.buf
             .write_all(data.as_ref())
             .expect("Buffer has enough capacity.");
@@ -547,7 +547,7 @@ impl<'a> Encoder<Cursor<&'a mut [u8]>> {
     /// underlying buffer has enough capacity for the called operation. This
     /// invariant needs to be upheld by the caller.
     #[must_use]
-    pub fn new_borrowed_slice(buf: &'a mut [u8]) -> Self {
+    pub const fn new_borrowed_slice(buf: &'a mut [u8]) -> Self {
         Encoder {
             buf: Cursor::new(buf),
             start: 0,
