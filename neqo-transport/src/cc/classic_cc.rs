@@ -120,7 +120,7 @@ struct State {
     acked_bytes: usize,
     ssthresh: usize,
     /// Packet number of the first packet that was sent after a congestion event. When this one is
-    /// acked we will exit [`State::Recovery`] and enter [`State::CongestionAvoidance`].
+    /// acked we will exit [`Phase::Recovery`] and enter [`Phase::CongestionAvoidance`].
     recovery_start: Option<packet::Number>,
 }
 
