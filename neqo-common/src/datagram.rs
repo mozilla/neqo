@@ -149,7 +149,7 @@ impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
 /// batch have the same size. The last datagram may be equal or smaller.
 #[derive(Clone, PartialEq, Eq, derive_more::Debug)]
 #[debug(
-    "DatagramBatch {:?} {:?}->{:?} {:?}: {}",
+    "datagram::Batch {:?} {:?}->{:?} {:?}: {}",
     tos,
     src,
     dst,
