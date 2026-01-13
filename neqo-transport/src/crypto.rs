@@ -7,7 +7,6 @@
 use std::{
     cell::RefCell,
     cmp::{max, min},
-    fmt::{self, Display, Formatter},
     mem,
     ops::Range,
     rc::Rc,
@@ -54,7 +53,8 @@ pub const UPDATE_WRITE_KEYS_AT: packet::Number = 100;
 #[cfg(test)]
 thread_local!(pub static OVERWRITE_INVOCATIONS: RefCell<Option<packet::Number>> = RefCell::default());
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("Crypto")]
 pub struct Crypto {
     version: Version,
     protocols: Vec<String>,
@@ -434,19 +434,14 @@ impl Crypto {
     }
 }
 
-impl Display for Crypto {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Crypto")
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CryptoDxDirection {
     Read,
     Write,
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("epoch {epoch} {direction:?}")]
 pub struct CryptoDxState {
     /// The QUIC version.
     version: Version,
@@ -754,12 +749,6 @@ impl CryptoDxState {
     }
 }
 
-impl Display for CryptoDxState {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "epoch {} {:?}", self.epoch, self.direction)
-    }
-}
-
 #[derive(Debug)]
 pub struct CryptoState {
     tx: CryptoDxState,
@@ -818,7 +807,8 @@ impl CryptoDxAppData {
 /// Note that the methods on this struct take a version but those are only ever
 /// used for Initial keys; a version has been selected at the time we need to
 /// get other keys, so those have fixed versions.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, derive_more::Display)]
+#[display("CryptoStates")]
 pub struct CryptoStates {
     initials: EnumMap<Version, Option<CryptoState>>,
     handshake: Option<CryptoState>,
@@ -1418,12 +1408,6 @@ impl CryptoStates {
             app_read_next: Some(app_read(4)),
             read_update_time: None,
         }
-    }
-}
-
-impl Display for CryptoStates {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "CryptoStates")
     }
 }
 

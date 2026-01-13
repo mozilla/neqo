@@ -16,6 +16,7 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
+derive_more = { workspace = true }
 enum-map = { workspace = true }
 env_logger = { version = "0.10", default-features = false }
 hex = { workspace = true, optional = true }
