@@ -463,7 +463,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     }
 
     #[cfg(test)]
-    pub fn set_ssthresh(&mut self, v: usize) {
+    pub const fn set_ssthresh(&mut self, v: usize) {
         self.ssthresh = v;
     }
 
@@ -477,7 +477,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     /// Mutable accessor for [`ClassicCongestionControl::cc_algorithm`]. Is used to call Cubic
     /// setters in tests.
     #[cfg(test)]
-    pub fn cc_algorithm_mut(&mut self) -> &mut T {
+    pub const fn cc_algorithm_mut(&mut self) -> &mut T {
         &mut self.cc_algorithm
     }
 
@@ -614,7 +614,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         // state and update the variable `self.recovery_start`. Before the
         // first recovery, all packets were sent after the recovery event,
         // allowing to reduce the cwnd on congestion events.
-        !self.state.transient() && self.recovery_start.map_or(true, |pn| packet.pn() >= pn)
+        !self.state.transient() && self.recovery_start.is_none_or(|pn| packet.pn() >= pn)
     }
 
     /// Handle a congestion event.

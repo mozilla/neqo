@@ -108,7 +108,7 @@ fn version_check() -> Res<()> {
 fn enable_ssl_trace() -> Res<()> {
     let opt = Opt::Locking.as_int();
     let mut v: ::std::os::raw::c_int = 0;
-    secstatus_to_res(unsafe { ssl::SSL_OptionGetDefault(opt, &mut v) })
+    secstatus_to_res(unsafe { ssl::SSL_OptionGetDefault(opt, &raw mut v) })
 }
 
 fn init_once(db: Option<PathBuf>) -> Res<NssLoaded> {

@@ -72,13 +72,12 @@ pub fn send_inner(
         Ok(()) => {}
         Err(e) if is_emsgsize(&e) => {
             qdebug!(
-                "Failed to send datagram of size {} bytes, in {} segments, each {} bytes, from {} to {}. PMTUD probe? Ignoring error: {}",
+                "Failed to send datagram of size {} bytes, in {} segments, each {} bytes, from {} to {}. PMTUD probe? Ignoring error: {e}",
                 d.data().len(),
                 d.num_datagrams(),
                 d.datagram_size().get(),
                 d.source(),
-                d.destination(),
-                e
+                d.destination()
             );
             return Ok(());
         }

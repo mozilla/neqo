@@ -172,7 +172,7 @@ impl Cubic {
     /// The calculation assumes `CUBIC_BETA = 0.7`.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
-    pub const FAST_CONVERGENCE_FACTOR: f64 = (1.0 + 0.7) / 2.0;
+    pub const FAST_CONVERGENCE_FACTOR: f64 = f64::midpoint(1.0, 0.7);
 
     /// Original equation is:
     ///
@@ -246,7 +246,7 @@ impl Cubic {
     }
 
     #[cfg(test)]
-    pub fn set_w_max(&mut self, w_max: f64) {
+    pub const fn set_w_max(&mut self, w_max: f64) {
         self.w_max = w_max;
     }
 }

@@ -57,35 +57,15 @@ jobs:
           - os: windows-2025
             rust-toolchain: stable
             type: release
-          # TODO: Remove once Neqo's MSRV is increased to 1.82.0. NSS build
-          # fails on Windows with Rust 1.81.0. Firefox does not use Rust 1.81.0
-          # (except for testing, see
-          # https://bugzilla.mozilla.org/show_bug.cgi?id=1968057#c1). Firefox
-          # uses Rust 1.82.0. Thus this is not worth fixing. Let's explicitly
-          # use Rust 1.82.0 here for now.
-          - os: windows-2025
-            rust-toolchain: 1.82.0
-            type: debug
           # Also do some debug builds on the oldest OS versions.
-          # FIXME: NSS compile fails?
-          # - os: ubuntu-22.04
-          #   rust-toolchain: stable
-          #   type: debug
+          - os: ubuntu-22.04
+            rust-toolchain: stable
+            type: debug
           - os: macos-14
             rust-toolchain: stable
             type: debug
           - os: windows-2022
             rust-toolchain: stable
-            type: debug
-        exclude:
-          # TODO: Remove once Neqo's MSRV is increased to 1.82.0. NSS build
-          # fails on Windows with Rust 1.81.0. Firefox does not use Rust 1.81.0
-          # (except for testing, see
-          # https://bugzilla.mozilla.org/show_bug.cgi?id=1968057#c1). Firefox
-          # uses Rust 1.82.0. Thus this is not worth fixing. Let's explicitly
-          # use Rust 1.82.0 here for now.
-          - os: windows-2025
-            rust-toolchain: 1.81.0
             type: debug
     env:
       BUILD_TYPE: ${{ matrix.type == 'release' && '--release' || '' }}
