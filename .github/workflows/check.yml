@@ -32,13 +32,10 @@ jobs:
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
-          sparse-checkout: Cargo.toml
           persist-credentials: false
 
       - id: toolchains
-        run: |
-          msrv="$(grep rust-version Cargo.toml | tr -d '"' | cut -f3 -d\ )"
-          echo "toolchains=[\"$msrv\", \"stable\", \"nightly\"]" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/toolchains
 
   check:
     name: Run checks
@@ -116,7 +113,6 @@ jobs:
             cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
             if [ -n "$CAREFUL" ]; then
-              # FIXME: Rust 1.81 doesn't have the ability to print host-tuple
               TRIPLE="--target $(rustc --print host-tuple)"
             fi
             cargo $CAREFUL test $BUILD_TYPE --locked --features ci $TRIPLE
