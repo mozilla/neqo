@@ -6,10 +6,7 @@
 
 // Tracking of sent packets and detecting their loss.
 
-// #[cfg(feature = "bench")]
 pub mod sent;
-// #[cfg(not(feature = "bench"))]
-// mod sent;
 mod token;
 
 use std::{
