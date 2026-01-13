@@ -84,9 +84,9 @@ impl Display for HttpServer {
 }
 
 impl super::HttpServer for HttpServer {
-    fn process_multiple<'a>(
+    fn process_multiple<'a, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
         &mut self,
-        dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
+        dgrams: D,
         now: Instant,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {

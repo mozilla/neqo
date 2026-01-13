@@ -57,7 +57,7 @@ fuzz_target!(|data: &[u8]| {
     );
     let fuzzed_ci = Datagram::new(ci.source(), ci.destination(), ci.tos(), ciphertext);
 
-    let mut server = new_server::<CountingConnectionIdGenerator>(
+    let mut server = new_server::<CountingConnectionIdGenerator, &str>(
         DEFAULT_ALPN,
         ConnectionParameters::default().mlkem(false),
     );

@@ -307,7 +307,7 @@ impl<B: Buffer> Builder<B> {
     /// This stores a value that can be used as a limit.  This does not cause
     /// this limit to be enforced until encryption occurs.  Prior to that, it
     /// is only used voluntarily by users of the builder, through `remaining()`.
-    pub fn set_limit(&mut self, limit: usize) {
+    pub const fn set_limit(&mut self, limit: usize) {
         self.limit = limit;
     }
 
@@ -336,7 +336,7 @@ impl<B: Buffer> Builder<B> {
     }
 
     /// Mark the packet as needing padding (or not).
-    pub fn enable_padding(&mut self, needs_padding: bool) {
+    pub const fn enable_padding(&mut self, needs_padding: bool) {
         self.padding = needs_padding;
     }
 
@@ -796,7 +796,7 @@ impl<'a> Public<'a> {
 
     #[cfg(feature = "build-fuzzing-corpus")]
     #[must_use]
-    pub fn data(&self) -> &[u8] {
+    pub const fn data(&self) -> &[u8] {
         self.data
     }
 
@@ -815,6 +815,12 @@ impl<'a> Public<'a> {
         }
     }
 
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_asserts_for_indexing,
+        reason = "Checked, but clippy doesn't recognize it."
+        // FIXME: Check if MSRV >= 1.88 fixes this.
+    )]
     /// Decrypt the header of the packet.
     fn decrypt_header(&mut self, crypto: &CryptoDxState) -> Res<(bool, Number, Range<usize>)> {
         debug_assert_ne!(self.packet_type, Type::Retry);
@@ -839,6 +845,7 @@ impl<'a> Public<'a> {
         } else {
             HP_MASK_LONG
         };
+        assert!(!self.data.is_empty());
         let first_byte = self.data[0] ^ (mask[0] & bits);
 
         let mut hdrbytes = 0..self.header_len + 4;

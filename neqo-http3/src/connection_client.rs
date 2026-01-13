@@ -386,7 +386,7 @@ impl Http3Client {
     ///
     /// Never, because clients always have this field.
     #[must_use]
-    pub fn connection_id(&self) -> &ConnectionId {
+    pub const fn connection_id(&self) -> &ConnectionId {
         self.conn.odcid().expect("Client always has odcid")
     }
 
@@ -7157,10 +7157,11 @@ mod tests {
     #[test]
     fn client_control_stream_create_failed() {
         let mut client = default_http3_client();
-        let mut server = TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator>(
-            DEFAULT_ALPN_H3,
-            ConnectionParameters::default().max_streams(StreamType::UniDi, 0),
-        ));
+        let mut server =
+            TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator, &str>(
+                DEFAULT_ALPN_H3,
+                ConnectionParameters::default().max_streams(StreamType::UniDi, 0),
+            ));
         handshake_client_error(&mut client, &mut server, &Error::StreamLimit);
     }
 
@@ -7168,10 +7169,11 @@ mod tests {
     #[test]
     fn client_qpack_stream_create_failed() {
         let mut client = default_http3_client();
-        let mut server = TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator>(
-            DEFAULT_ALPN_H3,
-            ConnectionParameters::default().max_streams(StreamType::UniDi, 2),
-        ));
+        let mut server =
+            TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator, &str>(
+                DEFAULT_ALPN_H3,
+                ConnectionParameters::default().max_streams(StreamType::UniDi, 2),
+            ));
         handshake_client_error(&mut client, &mut server, &Error::StreamLimit);
     }
 

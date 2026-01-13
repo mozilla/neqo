@@ -26,7 +26,6 @@ impl FrameDecoder<Self> for Frame {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use crate::frames::reader::FrameDecoder;
 
     const DATAGRAM: HFrameType = HFrameType(0x0);
 
