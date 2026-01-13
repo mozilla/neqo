@@ -13,12 +13,27 @@ permissions:
   contents: read
 
 jobs:
+  toolchains:
+    name: Determine toolchains
+    runs-on: ubuntu-24.04
+    outputs:
+      toolchains: ${{ steps.toolchains.outputs.toolchains }}
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+
+      - id: toolchains
+        uses: ./.github/actions/toolchains
+
   clippy:
     name: cargo clippy
+    needs: toolchains
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
+        rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -31,6 +46,7 @@ jobs:
 
       - uses: ./.github/actions/rust
         with:
+          version: ${{ matrix.rust-toolchain }}
           components: clippy
           tools: cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
