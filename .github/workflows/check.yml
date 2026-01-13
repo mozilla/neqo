@@ -116,7 +116,6 @@ jobs:
             cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
             if [ -n "$CAREFUL" ]; then
-              # FIXME: Rust 1.81 doesn't have the ability to print host-tuple
               TRIPLE="--target $(rustc --print host-tuple)"
             fi
             cargo $CAREFUL test $BUILD_TYPE --locked --features ci $TRIPLE
