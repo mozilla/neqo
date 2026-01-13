@@ -985,7 +985,7 @@ mod test {
         fc[StreamType::BiDi].send_flowc_update();
         // consume the frame
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         fc[StreamType::BiDi].write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
         assert_eq!(tokens.len(), 1);
@@ -1093,7 +1093,7 @@ mod test {
 
     fn write_frames(fc: &mut ReceiverFlowControl<StreamId>, rtt: Duration, now: Instant) -> usize {
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         fc.write_frames(
             &mut builder,
@@ -1354,7 +1354,7 @@ mod test {
         // Helper to write frames
         let write_conn_frames = |fc: &mut ReceiverFlowControl<()>, now: Instant| {
             let mut builder =
-                packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+                packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
             let mut tokens = recovery::Tokens::new();
             fc.write_frames(
                 &mut builder,
@@ -1394,7 +1394,7 @@ mod test {
         // Helper to write frames
         let write_conn_frames = |fc: &mut ReceiverFlowControl<()>| {
             let mut builder =
-                packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+                packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
             let mut tokens = recovery::Tokens::new();
             fc.write_frames(
                 &mut builder,

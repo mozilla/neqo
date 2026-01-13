@@ -2572,7 +2572,7 @@ mod tests {
 
         let mut tokens = recovery::Tokens::new();
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
 
         // Write a small frame: no fin.
         let written = builder.len();
@@ -2661,7 +2661,7 @@ mod tests {
 
         let mut tokens = recovery::Tokens::new();
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         ss.write_frames(
             TransmissionPriority::default(),
             &mut builder,
@@ -2740,7 +2740,7 @@ mod tests {
 
         // This doesn't report blocking yet.
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
@@ -2807,7 +2807,7 @@ mod tests {
 
         // Assert that STREAM_DATA_BLOCKED is sent.
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
@@ -2895,7 +2895,7 @@ mod tests {
 
         // No frame should be sent here.
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         s.write_stream_frame(
@@ -2947,7 +2947,7 @@ mod tests {
         }
 
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let header_len = builder.len();
         builder.set_limit(header_len + space);
 
@@ -3049,7 +3049,7 @@ mod tests {
             s.close();
 
             let mut builder =
-                packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+                packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
             let header_len = builder.len();
             // Add 2 for the frame type and stream ID, then add the extra.
             builder.set_limit(header_len + data.len() + 2 + extra);
@@ -3067,7 +3067,7 @@ mod tests {
         }
 
         // The minimum amount of extra space for getting another frame in.
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         enc.encode_varint(u64::try_from(data.len()).unwrap());
         let len_buf = Vec::from(enc);
         let minimum_extra = len_buf.len() + packet::Builder::MINIMUM_FRAME_SIZE;

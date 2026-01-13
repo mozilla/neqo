@@ -45,7 +45,7 @@ impl Decoder {
         send_buf.encode_varint(QPACK_UNI_STREAM_TYPE_DECODER);
         let max_blocked_streams = usize::from(qpack_settings.max_blocked_streams);
         Self {
-            instruction_reader: EncoderInstructionReader::new(),
+            instruction_reader: EncoderInstructionReader::default(),
             table: HeaderTable::new(false),
             acked_inserts: 0,
             max_entries: qpack_settings.max_table_size_decoder >> 5,

@@ -361,6 +361,8 @@ impl RandomCache {
     const SIZE: usize = 256;
     const CUTOFF: usize = 32;
 
+    // Const constructor for compile-time initialization in thread_local!.
+    // Cannot derive Default because `used` must be SIZE, not 0.
     const fn new() -> Self {
         Self {
             cache: [0; Self::SIZE],

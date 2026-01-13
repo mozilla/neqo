@@ -138,8 +138,7 @@ impl Drop for AgentIoInputContext<'_> {
     }
 }
 
-// TODO: Use `#[derive(Default)]` when MSRV reaches 1.88.0, as raw pointers implement Default
-// starting in that version. See: https://github.com/rust-lang/rust/pull/139535
+// TODO: Derive Default when MSRV >= 1.88 (Default for raw pointers stabilized in 1.88).
 #[derive(Debug, derive_more::Display)]
 #[display("AgentIoInput {input:p}")]
 struct AgentIoInput {
