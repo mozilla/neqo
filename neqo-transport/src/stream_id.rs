@@ -6,8 +6,6 @@
 
 // Stream ID and stream index handling.
 
-use std::fmt::{self, Display, Formatter};
-
 use enum_map::Enum;
 use neqo_common::Role;
 
@@ -20,7 +18,20 @@ pub enum StreamType {
     UniDi = 2,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Ord, PartialOrd, Hash, Default)]
+#[derive(
+    Debug,
+    Eq,
+    PartialEq,
+    Clone,
+    Copy,
+    Ord,
+    PartialOrd,
+    Hash,
+    Default,
+    derive_more::Display,
+    derive_more::From,
+)]
+#[display("{_0}")]
 pub struct StreamId(u64);
 
 impl StreamId {
@@ -121,21 +132,9 @@ impl StreamId {
     }
 }
 
-impl From<u64> for StreamId {
-    fn from(val: u64) -> Self {
-        Self::new(val)
-    }
-}
-
 impl PartialEq<u64> for StreamId {
     fn eq(&self, other: &u64) -> bool {
         self.as_u64() == *other
-    }
-}
-
-impl Display for StreamId {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", self.as_u64())
     }
 }
 

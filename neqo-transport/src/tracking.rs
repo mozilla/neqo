@@ -9,7 +9,6 @@
 use std::{
     cmp::min,
     collections::VecDeque,
-    fmt::{self, Display, Formatter},
     time::{Duration, Instant},
 };
 
@@ -81,7 +80,8 @@ pub enum InsertionResult {
     NotInserted,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, derive_more::Display)]
+#[display("{largest}->{smallest}")]
 pub struct PacketRange {
     largest: packet::Number,
     smallest: packet::Number,
@@ -154,12 +154,6 @@ impl PacketRange {
     }
 }
 
-impl Display for PacketRange {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}->{}", self.largest, self.smallest)
-    }
-}
-
 /// The default maximum ACK delay we use locally and advertise to the remote.
 pub const DEFAULT_LOCAL_ACK_DELAY: Duration = Duration::from_millis(20);
 /// The default maximum ACK delay we assume the remote uses.
@@ -190,7 +184,8 @@ impl AckToken {
 
 /// A structure that tracks what packets have been received,
 /// and what needs acknowledgement for a packet number space.
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("Recvd-{space}")]
 pub struct RecvdPackets {
     space: PacketNumberSpace,
     ranges: VecDeque<PacketRange>,
@@ -511,12 +506,6 @@ impl RecvdPackets {
             space: self.space,
             ranges: ranges.into_boxed_slice(),
         }));
-    }
-}
-
-impl Display for RecvdPackets {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Recvd-{}", self.space)
     }
 }
 

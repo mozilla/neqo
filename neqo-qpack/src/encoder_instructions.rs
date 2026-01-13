@@ -4,10 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    fmt::{self, Display, Formatter},
-    mem,
-};
+use std::mem;
 
 use neqo_common::{qdebug, qtrace};
 
@@ -153,20 +150,11 @@ impl<'a> From<&'a EncoderInstruction<'a>> for DecodedEncoderInstruction {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, derive_more::Display)]
+#[display("EncoderInstructionReader state={state:?} instruction={instruction:?}")]
 pub struct EncoderInstructionReader {
     state: EncoderInstructionReaderState,
     instruction: DecodedEncoderInstruction,
-}
-
-impl Display for EncoderInstructionReader {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(
-            f,
-            "EncoderInstructionReader state={:?} instruction:{:?}",
-            self.state, self.instruction
-        )
-    }
 }
 
 impl EncoderInstructionReader {

@@ -6,7 +6,7 @@
 
 use std::{
     cell::RefCell,
-    fmt::{self, Display},
+    fmt::Display,
     fs::OpenOptions,
     io::BufWriter,
     path::PathBuf,
@@ -30,7 +30,10 @@ pub struct Qlog {
     inner: Option<Rc<RefCell<Option<SharedStreamer>>>>,
 }
 
+#[derive(derive_more::Debug)]
+#[debug("Qlog writing to {}", qlog_path.display())]
 pub struct SharedStreamer {
+    #[expect(dead_code, reason = "Used by derived Debug implementation")]
     qlog_path: PathBuf,
     streamer: QlogStreamer,
 }
@@ -137,12 +140,6 @@ impl Qlog {
             // Set the outer Option to None to prevent future dereferences.
             self.inner = None;
         }
-    }
-}
-
-impl fmt::Debug for SharedStreamer {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Qlog writing to {}", self.qlog_path.display())
     }
 }
 
