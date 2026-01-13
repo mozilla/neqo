@@ -19,7 +19,7 @@ use crate::{frames::HFrame, BufferedStream, Error, Http3StreamType, RecvStream, 
 pub const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
 
 /// The local control stream, responsible for encoding frames and sending them
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ControlStreamLocal {
     stream: BufferedStream,
     /// `stream_id`s of outstanding request streams
@@ -33,13 +33,6 @@ impl Display for ControlStreamLocal {
 }
 
 impl ControlStreamLocal {
-    pub fn new() -> Self {
-        Self {
-            stream: BufferedStream::default(),
-            outstanding_priority_update: VecDeque::new(),
-        }
-    }
-
     /// Add a new frame that needs to be send.
     pub fn queue_frame(&mut self, f: &HFrame) {
         self.stream.encode_with(|e| f.encode(e));
@@ -113,6 +106,6 @@ impl ControlStreamLocal {
 
 #[test]
 fn control_stream_local_display() {
-    let stream = ControlStreamLocal::new();
+    let stream = ControlStreamLocal::default();
     assert!(stream.to_string().starts_with("Local control stream"));
 }

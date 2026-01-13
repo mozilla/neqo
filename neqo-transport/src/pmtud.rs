@@ -343,7 +343,7 @@ mod tests {
         } else {
             profile.limit() - AEAD_EXPANSION
         };
-        let mut builder = packet::Builder::short(Encoder::new(), false, None::<&[u8]>, limit);
+        let mut builder = packet::Builder::short(Encoder::default(), false, None::<&[u8]>, limit);
         let pn = prot.next_pn();
         builder.pn(pn, 4);
         builder.enable_padding(true);

@@ -1088,7 +1088,7 @@ mod tests {
 
     #[test]
     fn frame_decode_enforces_bound_on_ack_range() {
-        let mut e = Encoder::new();
+        let mut e = Encoder::default();
 
         e.encode_varint(FrameType::Ack);
         e.encode_varint(0u64); // largest acknowledged
@@ -1112,7 +1112,7 @@ mod tests {
     /// See bug in <https://github.com/mozilla/neqo/issues/2838>.
     #[test]
     fn padding_frame_u16_overflow() {
-        let mut e = Encoder::new();
+        let mut e = Encoder::default();
         e.encode_varint(FrameType::Padding);
         // `Frame::Padding` uses u16 to store length. Try to overflow length.
         e.pad_to(u16::MAX as usize + 1, 0);
