@@ -254,6 +254,11 @@ jobs:
                 echo "* $PAIR: $BRANCH result missing" >> "$ROLE.failed.md"
                 continue 2
               fi
+              # Skip if .results is null or missing
+              if ! jq -e '.results' "$BRANCH/result.json" > /dev/null 2>&1; then
+                echo "* $PAIR: $BRANCH has no results" >> "$ROLE.failed.md"
+                continue 2
+              fi
               jq < "$BRANCH/result.json" '
                   . as $data |
                   .results[][].result //= "failed" |
