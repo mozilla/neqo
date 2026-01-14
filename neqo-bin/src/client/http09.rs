@@ -22,7 +22,7 @@ use std::{
 };
 
 use http::Uri as Url;
-use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
+use neqo_common::{Datagram, event::Provider, qdebug, qinfo, qwarn};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
     CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator, EmptyConnectionIdGenerator,
@@ -30,7 +30,7 @@ use neqo_transport::{
 };
 use rustc_hash::FxHashMap as HashMap;
 
-use super::{get_output_file, qlog_new, Args, CloseState, Res};
+use super::{Args, CloseState, Res, get_output_file, qlog_new};
 use crate::STREAM_IO_BUFFER_SIZE;
 
 pub struct Handler<'a> {
@@ -340,10 +340,13 @@ impl<'b> Handler<'b> {
                 )?;
 
                 if fin_recvd {
-                    if let Some(mut out_file) = maybe_out_file.take() {
-                        out_file.flush()?;
-                    } else {
-                        qinfo!("<FIN[{stream_id}]>");
+                    match maybe_out_file.take() {
+                        Some(mut out_file) => {
+                            out_file.flush()?;
+                        }
+                        _ => {
+                            qinfo!("<FIN[{stream_id}]>");
+                        }
                     }
                     self.streams.remove(&stream_id);
                     self.download_urls(client);

@@ -8,6 +8,7 @@ use std::{cmp::max, time::Duration};
 
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
+    CongestionControlAlgorithm, DEFAULT_INITIAL_RTT, Res,
     connection::{ConnectionIdManager, Role},
     rtt::GRANULARITY,
     stream_id::StreamType,
@@ -23,7 +24,6 @@ use crate::{
     },
     tracking::DEFAULT_LOCAL_ACK_DELAY,
     version::{self, Version},
-    CongestionControlAlgorithm, Res, DEFAULT_INITIAL_RTT,
 };
 
 /// Maximum number of bidirectional streams that the remote can open.

@@ -13,11 +13,11 @@ use std::{
 
 use crate::{
     constants::{Cipher, Version},
-    err::{sec::SEC_ERROR_BAD_DATA, Error, Res},
+    err::{Error, Res, sec::SEC_ERROR_BAD_DATA},
     experimental_api,
     p11::{PK11SymKey, SymKey},
     scoped_ptr,
-    ssl::{PRUint16, PRUint64, PRUint8, SSLAeadContext},
+    ssl::{PRUint8, PRUint16, PRUint64, SSLAeadContext},
 };
 
 /// Trait for AEAD (Authenticated Encryption with Associated Data) operations.
@@ -122,19 +122,21 @@ impl RealAead {
         secret: *mut PK11SymKey,
         prefix: &str,
     ) -> Res<Self> {
-        let p = prefix.as_bytes();
-        let mut ctx: *mut SSLAeadContext = null_mut();
-        SSL_MakeAead(
-            version,
-            cipher,
-            secret,
-            p.as_ptr().cast(),
-            c_uint::try_from(p.len())?,
-            &raw mut ctx,
-        )?;
-        Ok(Self {
-            ctx: AeadContext::from_ptr(ctx)?,
-        })
+        unsafe {
+            let p = prefix.as_bytes();
+            let mut ctx: *mut SSLAeadContext = null_mut();
+            SSL_MakeAead(
+                version,
+                cipher,
+                secret,
+                p.as_ptr().cast(),
+                c_uint::try_from(p.len())?,
+                &raw mut ctx,
+            )?;
+            Ok(Self {
+                ctx: AeadContext::from_ptr(ctx)?,
+            })
+        }
     }
 }
 

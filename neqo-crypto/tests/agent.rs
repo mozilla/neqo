@@ -7,18 +7,18 @@
 use std::ffi::CStr;
 
 use neqo_crypto::{
-    agent::CertificateCompressor, generate_ech_keys, AuthenticationStatus, Client, Error,
-    HandshakeState, Res, SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,
+    AuthenticationStatus, Client, Error, HandshakeState, Res, SecretAgentPreInfo, Server,
     TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
-    TLS_SIG_ECDSA_SECP256R1_SHA256, TLS_VERSION_1_3,
+    TLS_SIG_ECDSA_SECP256R1_SHA256, TLS_VERSION_1_3, ZeroRttCheckResult, ZeroRttChecker,
+    agent::CertificateCompressor, generate_ech_keys,
 };
 
 mod handshake;
 use test_fixture::{damage_ech_config, fixture_init, now};
 
 use crate::handshake::{
-    connect, connect_fail, forward_records, resumption_setup, PermissiveZeroRttChecker, Resumption,
-    ZERO_RTT_TOKEN_DATA,
+    PermissiveZeroRttChecker, Resumption, ZERO_RTT_TOKEN_DATA, connect, connect_fail,
+    forward_records, resumption_setup,
 };
 
 #[test]

@@ -22,7 +22,7 @@ use std::{
 };
 
 use http::Uri as Url;
-use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};
+use neqo_common::{Datagram, event::Provider, hex, qdebug, qerror, qinfo, qwarn};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
@@ -31,8 +31,8 @@ use neqo_transport::{
 };
 use rustc_hash::FxHashMap as HashMap;
 
-use super::{get_output_file, qlog_new, Args, CloseState, Res};
-use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};
+use super::{Args, CloseState, Res, get_output_file, qlog_new};
+use crate::{STREAM_IO_BUFFER_SIZE, send_data::SendData};
 
 pub struct Handler {
     #[expect(clippy::struct_field_names, reason = "This name is more descriptive.")]
@@ -305,10 +305,13 @@ impl StreamHandler for DownloadStreamHandler {
         }
 
         if fin {
-            if let Some(mut out_file) = self.out_file.take() {
-                out_file.flush()?;
-            } else {
-                qdebug!("<FIN[{stream_id}]>");
+            match self.out_file.take() {
+                Some(mut out_file) => {
+                    out_file.flush()?;
+                }
+                _ => {
+                    qdebug!("<FIN[{stream_id}]>");
+                }
             }
         }
 

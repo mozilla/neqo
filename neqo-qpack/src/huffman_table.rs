@@ -11,7 +11,7 @@ pub struct Entry {
 }
 
 macro_rules! huffman_table {
-    [$($v:expr => $l:expr),+ $(,)?] => {
+    [$($v:expr_2021 => $l:expr_2021),+ $(,)?] => {
         &[
             $(Entry { len: $l, val: $v }),+
         ]

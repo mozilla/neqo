@@ -3,7 +3,7 @@
 # `rustfmt` envoked not through `cargo fmt` but directly does not pick up Rust
 # edition in `Cargo.toml`. Thus duplicate here. See
 # https://github.com/mozilla/neqo/pull/1722 for details.
-edition = "2021"
+edition = "2024"
 
 comment_width=100
 wrap_comments=true

@@ -23,7 +23,7 @@ use neqo_common::{hex, hex_with_len, qtrace};
 
 use crate::{
     constants::{ContentType, Epoch},
-    err::{nspr, Error, PR_SetError, Res},
+    err::{Error, PR_SetError, Res, nspr},
     null_safe_slice, prio, ssl,
 };
 
@@ -100,18 +100,20 @@ impl RecordList {
         len: c_uint,
         arg: *mut c_void,
     ) -> ssl::SECStatus {
-        let Ok(epoch) = Epoch::try_from(epoch) else {
-            return ssl::SECFailure;
-        };
-        let Ok(ct) = ContentType::try_from(ct) else {
-            return ssl::SECFailure;
-        };
-        let Some(records) = arg.cast::<Self>().as_mut() else {
-            return ssl::SECFailure;
-        };
-        let slice = null_safe_slice(data, len);
-        records.append(epoch, ct, slice);
-        ssl::SECSuccess
+        unsafe {
+            let Ok(epoch) = Epoch::try_from(epoch) else {
+                return ssl::SECFailure;
+            };
+            let Ok(ct) = ContentType::try_from(ct) else {
+                return ssl::SECFailure;
+            };
+            let Some(records) = arg.cast::<Self>().as_mut() else {
+                return ssl::SECFailure;
+            };
+            let slice = null_safe_slice(data, len);
+            records.append(epoch, ct, slice);
+            ssl::SECSuccess
+        }
     }
 
     /// Create a new record list.
@@ -232,7 +234,7 @@ pub struct AgentIo {
 
 impl AgentIo {
     unsafe fn borrow(fd: &mut PrFd) -> &mut Self {
-        (**fd).secret.cast::<Self>().as_mut().unwrap()
+        unsafe { (**fd).secret.cast::<Self>().as_mut().unwrap() }
     }
 
     pub fn wrap<'a: 'c, 'b: 'c, 'c>(&'a mut self, input: &'b [u8]) -> AgentIoInputContext<'c> {
@@ -260,22 +262,26 @@ impl Display for AgentIo {
 }
 
 unsafe extern "C" fn agent_close(fd: PrFd) -> PrStatus {
-    (*fd).secret = null_mut();
-    if let Some(dtor) = (*fd).dtor {
-        dtor(fd);
+    unsafe {
+        (*fd).secret = null_mut();
+        if let Some(dtor) = (*fd).dtor {
+            dtor(fd);
+        }
+        PR_SUCCESS
     }
-    PR_SUCCESS
 }
 
 unsafe extern "C" fn agent_read(mut fd: PrFd, buf: *mut c_void, amount: prio::PRInt32) -> PrStatus {
-    let io = AgentIo::borrow(&mut fd);
-    if let Ok(a) = usize::try_from(amount) {
-        match io.input.read_input(buf.cast(), a) {
-            Ok(_) => PR_SUCCESS,
-            Err(_) => PR_FAILURE,
+    unsafe {
+        let io = AgentIo::borrow(&mut fd);
+        if let Ok(a) = usize::try_from(amount) {
+            match io.input.read_input(buf.cast(), a) {
+                Ok(_) => PR_SUCCESS,
+                Err(_) => PR_FAILURE,
+            }
+        } else {
+            PR_FAILURE
         }
-    } else {
-        PR_FAILURE
     }
 }
 
@@ -286,16 +292,18 @@ unsafe extern "C" fn agent_recv(
     flags: prio::PRIntn,
     _timeout: prio::PRIntervalTime,
 ) -> prio::PRInt32 {
-    let io = AgentIo::borrow(&mut fd);
-    if flags != 0 {
-        return PR_FAILURE;
-    }
-    if let Ok(a) = usize::try_from(amount) {
-        io.input.read_input(buf.cast(), a).map_or(PR_FAILURE, |v| {
-            prio::PRInt32::try_from(v).unwrap_or(PR_FAILURE)
-        })
-    } else {
-        PR_FAILURE
+    unsafe {
+        let io = AgentIo::borrow(&mut fd);
+        if flags != 0 {
+            return PR_FAILURE;
+        }
+        if let Ok(a) = usize::try_from(amount) {
+            io.input.read_input(buf.cast(), a).map_or(PR_FAILURE, |v| {
+                prio::PRInt32::try_from(v).unwrap_or(PR_FAILURE)
+            })
+        } else {
+            PR_FAILURE
+        }
     }
 }
 
@@ -304,11 +312,13 @@ unsafe extern "C" fn agent_write(
     buf: *const c_void,
     amount: prio::PRInt32,
 ) -> PrStatus {
-    let io = AgentIo::borrow(&mut fd);
-    usize::try_from(amount).map_or(PR_FAILURE, |a| {
-        io.save_output(buf.cast(), a);
-        amount
-    })
+    unsafe {
+        let io = AgentIo::borrow(&mut fd);
+        usize::try_from(amount).map_or(PR_FAILURE, |a| {
+            io.save_output(buf.cast(), a);
+            amount
+        })
+    }
 }
 
 unsafe extern "C" fn agent_send(
@@ -318,28 +328,34 @@ unsafe extern "C" fn agent_send(
     flags: prio::PRIntn,
     _timeout: prio::PRIntervalTime,
 ) -> prio::PRInt32 {
-    let io = AgentIo::borrow(&mut fd);
+    unsafe {
+        let io = AgentIo::borrow(&mut fd);
 
-    if flags != 0 {
-        return PR_FAILURE;
+        if flags != 0 {
+            return PR_FAILURE;
+        }
+        usize::try_from(amount).map_or(PR_FAILURE, |a| {
+            io.save_output(buf.cast(), a);
+            amount
+        })
     }
-    usize::try_from(amount).map_or(PR_FAILURE, |a| {
-        io.save_output(buf.cast(), a);
-        amount
-    })
 }
 
 unsafe extern "C" fn agent_available(mut fd: PrFd) -> prio::PRInt32 {
-    let io = AgentIo::borrow(&mut fd);
-    io.input.available.try_into().unwrap_or(PR_FAILURE)
+    unsafe {
+        let io = AgentIo::borrow(&mut fd);
+        io.input.available.try_into().unwrap_or(PR_FAILURE)
+    }
 }
 
 unsafe extern "C" fn agent_available64(mut fd: PrFd) -> prio::PRInt64 {
-    let io = AgentIo::borrow(&mut fd);
-    io.input
-        .available
-        .try_into()
-        .unwrap_or_else(|_| PR_FAILURE.into())
+    unsafe {
+        let io = AgentIo::borrow(&mut fd);
+        io.input
+            .available
+            .try_into()
+            .unwrap_or_else(|_| PR_FAILURE.into())
+    }
 }
 
 #[expect(
@@ -347,26 +363,30 @@ unsafe extern "C" fn agent_available64(mut fd: PrFd) -> prio::PRInt64 {
     reason = "Cast is safe because prio::PR_AF_INET is 2."
 )]
 const unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrStatus {
-    let Some(a) = addr.as_mut() else {
-        return PR_FAILURE;
-    };
-    a.inet.family = prio::PR_AF_INET as prio::PRUint16;
-    a.inet.port = 0;
-    a.inet.ip = 0;
-    PR_SUCCESS
+    unsafe {
+        let Some(a) = addr.as_mut() else {
+            return PR_FAILURE;
+        };
+        a.inet.family = prio::PR_AF_INET as prio::PRUint16;
+        a.inet.port = 0;
+        a.inet.ip = 0;
+        PR_SUCCESS
+    }
 }
 
 const unsafe extern "C" fn agent_getsockopt(
     _fd: PrFd,
     opt: *mut prio::PRSocketOptionData,
 ) -> PrStatus {
-    if let Some(o) = opt.as_mut() {
-        if o.option == prio::PRSockOption::PR_SockOpt_Nonblocking {
-            o.value.non_blocking = 1;
-            return PR_SUCCESS;
+    unsafe {
+        if let Some(o) = opt.as_mut() {
+            if o.option == prio::PRSockOption::PR_SockOpt_Nonblocking {
+                o.value.non_blocking = 1;
+                return PR_SUCCESS;
+            }
         }
+        PR_FAILURE
     }
-    PR_FAILURE
 }
 
 pub const METHODS: &prio::PRIOMethods = &prio::PRIOMethods {

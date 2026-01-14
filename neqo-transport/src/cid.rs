@@ -15,16 +15,16 @@ use std::{
     rc::Rc,
 };
 
-use neqo_common::{hex, hex_with_len, qdebug, qinfo, Buffer, Decoder, Encoder};
+use neqo_common::{Buffer, Decoder, Encoder, hex, hex_with_len, qdebug, qinfo};
 use neqo_crypto::{random, randomize};
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 
 use crate::{
+    Error, Res,
     frame::{FrameEncoder as _, FrameType},
     packet, recovery,
     stateless_reset::Token as Srt,
     stats::FrameStats,
-    Error, Res,
 };
 
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
@@ -493,15 +493,19 @@ impl ConnectionIdManager {
         if self.generator.deref().borrow().generates_empty_cids() {
             return Err(Error::ConnectionIdsExhausted);
         }
-        if let Some(cid) = self.generator.borrow_mut().generate_cid() {
-            assert_ne!(cid.len(), 0);
-            debug_assert_eq!(self.next_seqno, Self::SEQNO_PREFERRED);
-            self.connection_ids
-                .add_local(ConnectionIdEntry::new(self.next_seqno, cid.clone(), ()));
-            self.next_seqno += 1;
-            Ok((cid, Srt::random()))
-        } else {
-            Err(Error::ConnectionIdsExhausted)
+        match self.generator.borrow_mut().generate_cid() {
+            Some(cid) => {
+                assert_ne!(cid.len(), 0);
+                debug_assert_eq!(self.next_seqno, Self::SEQNO_PREFERRED);
+                self.connection_ids.add_local(ConnectionIdEntry::new(
+                    self.next_seqno,
+                    cid.clone(),
+                    (),
+                ));
+                self.next_seqno += 1;
+                Ok((cid, Srt::random()))
+            }
+            _ => Err(Error::ConnectionIdsExhausted),
         }
     }
 
@@ -613,10 +617,10 @@ mod tests {
     use test_fixture::fixture_init;
 
     use crate::{
+        Token as Srt,
         cid::{ConnectionId, ConnectionIdEntry},
         packet,
         stats::FrameStats,
-        Token as Srt,
     };
 
     #[test]

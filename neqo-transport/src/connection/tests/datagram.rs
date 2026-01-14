@@ -10,17 +10,17 @@ use neqo_common::event::Provider as _;
 use static_assertions::const_assert;
 
 use super::{
-    assert_error, connect_force_idle, default_server, new_client, new_server, now, AT_LEAST_PTO,
+    AT_LEAST_PTO, assert_error, connect_force_idle, default_server, new_client, new_server, now,
 };
 use crate::{
+    CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Pmtud,
+    StreamType,
     connection::tests::DEFAULT_ADDR,
     events::{ConnectionEvent, OutgoingDatagramOutcome},
     frame::FrameType,
     packet,
     quic_datagrams::QuicDatagram,
     send_stream::{RetransmissionPriority, TransmissionPriority},
-    CloseReason, Connection, ConnectionParameters, Error, Pmtud, StreamType,
-    MIN_INITIAL_PACKET_SIZE,
 };
 
 // FIXME: The 27 here is a magic constant that the original code also (implicitly) had.
@@ -365,7 +365,7 @@ fn datagram_lost() {
     let dgram_lost = client.stats().datagram_tx.lost;
     let out = client.process_output(now).dgram();
     assert!(out.is_some()); // PING probing
-                            // Datagram is not sent again.
+    // Datagram is not sent again.
     assert_eq!(client.stats().frame_tx.ping, pings_sent + 1);
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent2);
     assert_eq!(client.stats().datagram_tx.lost, dgram_lost + 1);

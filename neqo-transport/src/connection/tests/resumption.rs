@@ -15,13 +15,13 @@ use test_fixture::{
 };
 
 use super::{
-    connect, connect_with_rtt, default_client, default_server, exchange_ticket, get_tokens,
-    new_client, resumed_server, send_something, AT_LEAST_PTO,
+    AT_LEAST_PTO, connect, connect_with_rtt, default_client, default_server, exchange_ticket,
+    get_tokens, new_client, resumed_server, send_something,
 };
 use crate::{
+    ConnectionParameters, DEFAULT_INITIAL_RTT, Error, MIN_INITIAL_PACKET_SIZE, State, Version,
     addr_valid::{AddressValidation, ValidateAddress},
     frame::FrameType,
-    ConnectionParameters, Error, State, Version, DEFAULT_INITIAL_RTT, MIN_INITIAL_PACKET_SIZE,
 };
 
 #[test]

@@ -98,8 +98,10 @@ impl ExtensionTracker {
     where
         F: FnOnce(&mut dyn ExtensionHandler) -> T,
     {
-        let rc = arg.cast::<BoxedExtensionHandler>().as_mut().unwrap();
-        f(&mut *rc.borrow_mut())
+        unsafe {
+            let rc = arg.cast::<BoxedExtensionHandler>().as_mut().unwrap();
+            f(&mut *rc.borrow_mut())
+        }
     }
 
     unsafe extern "C" fn extension_writer(
@@ -110,24 +112,26 @@ impl ExtensionTracker {
         max_len: c_uint,
         arg: *mut c_void,
     ) -> PRBool {
-        // The input message type is larger than the `u8` range of `SSLHandshakeType`.
-        // The only valid value outside that range is for ECH outer ClientHello,
-        // which we need to have special handling for.
-        let (msg, ch_outer) = HandshakeMessage::try_from(message).map_or_else(
-            |_| {
-                debug_assert_eq!(message, SSLHandshakeType::ssl_hs_ech_outer_client_hello);
-                (TLS_HS_CLIENT_HELLO, true)
-            },
-            |msg| (msg, false),
-        );
-        let d = std::slice::from_raw_parts_mut(data, max_len as usize);
-        Self::wrap_handler_call(arg, |handler| match handler.write(msg, ch_outer, d) {
-            ExtensionWriterResult::Write(sz) => {
-                *len = c_uint::try_from(sz).expect("integer overflow from extension writer");
-                1
-            }
-            ExtensionWriterResult::Skip => 0,
-        })
+        unsafe {
+            // The input message type is larger than the `u8` range of `SSLHandshakeType`.
+            // The only valid value outside that range is for ECH outer ClientHello,
+            // which we need to have special handling for.
+            let (msg, ch_outer) = HandshakeMessage::try_from(message).map_or_else(
+                |_| {
+                    debug_assert_eq!(message, SSLHandshakeType::ssl_hs_ech_outer_client_hello);
+                    (TLS_HS_CLIENT_HELLO, true)
+                },
+                |msg| (msg, false),
+            );
+            let d = std::slice::from_raw_parts_mut(data, max_len as usize);
+            Self::wrap_handler_call(arg, |handler| match handler.write(msg, ch_outer, d) {
+                ExtensionWriterResult::Write(sz) => {
+                    *len = c_uint::try_from(sz).expect("integer overflow from extension writer");
+                    1
+                }
+                ExtensionWriterResult::Skip => 0,
+            })
+        }
     }
 
     unsafe extern "C" fn extension_handler(
@@ -138,23 +142,25 @@ impl ExtensionTracker {
         alert: *mut SSLAlertDescription,
         arg: *mut c_void,
     ) -> SECStatus {
-        let d = null_safe_slice(data, len);
-        Self::wrap_handler_call(arg, |handler| {
-            // Cast is safe here because the message type is always part of the enum
-            #[allow(
-                clippy::allow_attributes,
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                reason = "Cast is safe here because the message type is always part of the enum."
-            )]
-            match handler.handle(message as HandshakeMessage, d) {
-                ExtensionHandlerResult::Ok => SECSuccess,
-                ExtensionHandlerResult::Alert(a) => {
-                    *alert = a;
-                    SECFailure
+        unsafe {
+            let d = null_safe_slice(data, len);
+            Self::wrap_handler_call(arg, |handler| {
+                // Cast is safe here because the message type is always part of the enum
+                #[allow(
+                    clippy::allow_attributes,
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "Cast is safe here because the message type is always part of the enum."
+                )]
+                match handler.handle(message as HandshakeMessage, d) {
+                    ExtensionHandlerResult::Ok => SECSuccess,
+                    ExtensionHandlerResult::Alert(a) => {
+                        *alert = a;
+                        SECFailure
+                    }
                 }
-            }
-        })
+            })
+        }
     }
 
     /// Use the provided handler to manage an extension.  This is quite unsafe.
@@ -173,30 +179,32 @@ impl ExtensionTracker {
         extension: Extension,
         handler: Rc<RefCell<dyn ExtensionHandler>>,
     ) -> Res<Self> {
-        // The ergonomics here aren't great for users of this API, but it's
-        // horrific here. The pinned outer box gives us a stable pointer to the inner
-        // box.  This is the pointer that is passed to NSS.
-        //
-        // The inner box points to the reference-counted object.  This inner box is
-        // what we end up with a reference to in callbacks.  That extra wrapper around
-        // the Rc avoid any touching of reference counts in callbacks, which would
-        // inevitably lead to leaks as we don't control how many times the callback
-        // is invoked.
-        //
-        // This way, only this "outer" code deals with the reference count.
-        let mut tracker = Self {
-            extension,
-            handler: Box::pin(Box::new(handler)),
-        };
-        SSL_InstallExtensionHooks(
-            fd,
-            extension,
-            Some(Self::extension_writer),
-            as_c_void(&mut tracker.handler),
-            Some(Self::extension_handler),
-            as_c_void(&mut tracker.handler),
-        )?;
-        Ok(tracker)
+        unsafe {
+            // The ergonomics here aren't great for users of this API, but it's
+            // horrific here. The pinned outer box gives us a stable pointer to the inner
+            // box.  This is the pointer that is passed to NSS.
+            //
+            // The inner box points to the reference-counted object.  This inner box is
+            // what we end up with a reference to in callbacks.  That extra wrapper around
+            // the Rc avoid any touching of reference counts in callbacks, which would
+            // inevitably lead to leaks as we don't control how many times the callback
+            // is invoked.
+            //
+            // This way, only this "outer" code deals with the reference count.
+            let mut tracker = Self {
+                extension,
+                handler: Box::pin(Box::new(handler)),
+            };
+            SSL_InstallExtensionHooks(
+                fd,
+                extension,
+                Some(Self::extension_writer),
+                as_c_void(&mut tracker.handler),
+                Some(Self::extension_handler),
+                as_c_void(&mut tracker.handler),
+            )?;
+            Ok(tracker)
+        }
     }
 }
 

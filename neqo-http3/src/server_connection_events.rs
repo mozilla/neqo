@@ -6,14 +6,14 @@
 
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-use neqo_common::{header::HeadersExt as _, Bytes, Header};
+use neqo_common::{Bytes, Header, header::HeadersExt as _};
 use neqo_transport::{AppError, StreamId};
 
 use crate::{
-    connection::Http3State,
-    features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
     CloseType, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents, Res,
     SendStreamEvents,
+    connection::Http3State,
+    features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
 };
 
 /// Server events for a single connection.

@@ -8,14 +8,13 @@
 
 use std::ops::RangeInclusive;
 
-use neqo_common::{qtrace, Buffer, Decoder, Encoder, MAX_VARINT};
+use neqo_common::{Buffer, Decoder, Encoder, MAX_VARINT, qtrace};
 use strum::FromRepr;
 
 use crate::{
-    ecn, packet,
+    AppError, ConnectionId, Error, Res, TransportError, ecn, packet,
     stateless_reset::Token as Srt,
     stream_id::{StreamId, StreamType},
-    AppError, ConnectionId, Error, Res, TransportError,
 };
 
 #[repr(u64)]
@@ -727,9 +726,9 @@ mod tests {
     use neqo_common::{Decoder, Encoder};
 
     use crate::{
+        CloseError, ConnectionId, Error, StreamId, StreamType, Token as Srt,
         ecn::Count,
         frame::{AckRange, Frame, FrameType},
-        CloseError, ConnectionId, Error, StreamId, StreamType, Token as Srt,
     };
 
     fn just_dec(f: &Frame, s: &str) {

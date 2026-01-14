@@ -18,18 +18,19 @@ use std::{
 };
 
 use neqo_common::{
-    datagram, event::Provider as EventProvider, hex, hex_snip_middle, hex_with_len, hrtime, qdebug,
-    qerror, qinfo, qlog::Qlog, qtrace, qwarn, Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos,
+    Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram, event::Provider as EventProvider,
+    hex, hex_snip_middle, hex_with_len, hrtime, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn,
 };
 use neqo_crypto::{
-    agent::{CertificateCompressor, CertificateInfo},
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
     PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttChecker,
+    agent::{CertificateCompressor, CertificateInfo},
 };
 use smallvec::SmallVec;
 use strum::IntoEnumIterator as _;
 
 use crate::{
+    AppError, CloseReason, Error, Res, StreamId,
     addr_valid::{AddressValidation, NewTokenState},
     cid::{
         ConnectionId, ConnectionIdEntry, ConnectionIdGenerator, ConnectionIdManager,
@@ -42,10 +43,10 @@ use crate::{
     packet::{self},
     path::{Path, PathRef, Paths},
     qlog,
-    quic_datagrams::{DatagramTracking, QuicDatagrams, DATAGRAM_FRAME_TYPE_VARINT_LEN},
-    recovery::{self, sent, SendProfile},
+    quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, DatagramTracking, QuicDatagrams},
+    recovery::{self, SendProfile, sent},
     recv_stream,
-    rtt::{RttEstimate, GRANULARITY},
+    rtt::{GRANULARITY, RttEstimate},
     saved::SavedDatagrams,
     send_stream::{self, SendStream},
     stateless_reset::Token as Srt,
@@ -63,7 +64,6 @@ use crate::{
     },
     tracking::{AckTracker, PacketNumberSpace, RecvdPackets},
     version::{self, Version},
-    AppError, CloseReason, Error, Res, StreamId,
 };
 
 mod idle;
@@ -806,7 +806,7 @@ impl Connection {
         qtrace!("[{self}]   TLS token {}", hex(tok));
 
         match self.crypto.tls_mut() {
-            Agent::Client(ref mut c) => {
+            Agent::Client(c) => {
                 let res = c.enable_resumption(tok);
                 if let Err(e) = res {
                     self.absorb_error::<Error>(now, Err(Error::from(e)));
@@ -852,7 +852,7 @@ impl Connection {
         }
 
         let tps = &self.tps;
-        if let Agent::Server(ref mut s) = self.crypto.tls_mut() {
+        if let Agent::Server(s) = self.crypto.tls_mut() {
             let mut enc = Encoder::default();
             enc.encode_vvec_with(|enc_inner| {
                 tps.borrow().local().encode(enc_inner);
@@ -868,16 +868,17 @@ impl Connection {
         // If we are able, also send a NEW_TOKEN frame.
         // This should be recording all remote addresses that are valid,
         // but there are just 0 or 1 in the current implementation.
-        if let Some(path) = self.paths.primary() {
-            if let Some(token) = self
-                .address_validation
-                .generate_new_token(path.borrow().remote_address(), now)
-            {
-                self.new_token.send_new_token(token);
+        match self.paths.primary() {
+            Some(path) => {
+                if let Some(token) = self
+                    .address_validation
+                    .generate_new_token(path.borrow().remote_address(), now)
+                {
+                    self.new_token.send_new_token(token);
+                }
+                Ok(())
             }
-            Ok(())
-        } else {
-            Err(Error::NotConnected)
+            _ => Err(Error::NotConnected),
         }
     }
 
@@ -983,8 +984,8 @@ impl Connection {
                     }
                     self.set_state(State::Closed(error), now);
                 }
-                _ => {
-                    if let Some(path) = path.or_else(|| self.paths.primary()) {
+                _ => match path.or_else(|| self.paths.primary()) {
+                    Some(path) => {
                         self.state_signaling
                             .close(path, error.clone(), frame_type, msg);
                         if matches!(v, Error::KeysExhausted) {
@@ -998,10 +999,11 @@ impl Connection {
                                 now,
                             );
                         }
-                    } else {
+                    }
+                    _ => {
                         self.set_state(State::Closed(error), now);
                     }
-                }
+                },
             }
         }
         res
@@ -1377,11 +1379,12 @@ impl Connection {
     fn process_saved(&mut self, now: Instant) {
         while let Some(epoch) = self.saved_datagrams.available() {
             qdebug!("[{self}] process saved for epoch {epoch:?}");
-            debug_assert!(self
-                .crypto
-                .states_mut()
-                .rx_hp(self.version, epoch)
-                .is_some());
+            debug_assert!(
+                self.crypto
+                    .states_mut()
+                    .rx_hp(self.version, epoch)
+                    .is_some()
+            );
             for saved in self.saved_datagrams.take_saved() {
                 qtrace!("[{self}] input saved @{:?}: {:?}", saved.t, saved.d);
                 self.input(saved.d, saved.t, now);
@@ -1951,21 +1954,30 @@ impl Connection {
             // If there isn't a connection ID to use for this path, the packet
             // will be processed, but it won't be attributed to a path.  That means
             // no path probes or PATH_RESPONSE.  But it's not fatal.
-            if let Some(cid) = self.cids.next() {
-                self.paths.make_permanent(path, None, cid, now);
-                Ok(())
-            } else if let Some(primary) = self.paths.primary() {
-                if primary.borrow().remote_cid().is_none_or(|id| id.is_empty()) {
-                    self.paths
-                        .make_permanent(path, None, ConnectionIdEntry::empty_remote(), now);
+            match self.cids.next() {
+                Some(cid) => {
+                    self.paths.make_permanent(path, None, cid, now);
                     Ok(())
-                } else {
-                    qtrace!("[{self}] Unable to make path permanent: {}", path.borrow());
-                    Err(Error::InvalidMigration)
                 }
-            } else {
-                qtrace!("[{self}] Unable to make path permanent: {}", path.borrow());
-                Err(Error::InvalidMigration)
+                _ => {
+                    if let Some(primary) = self.paths.primary() {
+                        if primary.borrow().remote_cid().is_none_or(|id| id.is_empty()) {
+                            self.paths.make_permanent(
+                                path,
+                                None,
+                                ConnectionIdEntry::empty_remote(),
+                                now,
+                            );
+                            Ok(())
+                        } else {
+                            qtrace!("[{self}] Unable to make path permanent: {}", path.borrow());
+                            Err(Error::InvalidMigration)
+                        }
+                    } else {
+                        qtrace!("[{self}] Unable to make path permanent: {}", path.borrow());
+                        Err(Error::InvalidMigration)
+                    }
+                }
             }
         } else {
             Ok(())
@@ -2880,12 +2892,15 @@ impl Connection {
     pub fn close<A: AsRef<str>>(&mut self, now: Instant, app_error: AppError, msg: A) {
         let error = CloseReason::Application(app_error);
         let timeout = self.get_closing_period_time(now);
-        if let Some(path) = self.paths.primary() {
-            self.state_signaling
-                .close(path, error.clone(), FrameType::Padding, msg);
-            self.set_state(State::Closing { error, timeout }, now);
-        } else {
-            self.set_state(State::Closed(error), now);
+        match self.paths.primary() {
+            Some(path) => {
+                self.state_signaling
+                    .close(path, error.clone(), FrameType::Padding, msg);
+                self.set_state(State::Closing { error, timeout }, now);
+            }
+            _ => {
+                self.set_state(State::Closed(error), now);
+            }
         }
     }
 

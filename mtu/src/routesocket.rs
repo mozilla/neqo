@@ -11,7 +11,7 @@ use std::{
     sync::atomic::Ordering,
 };
 
-use libc::{fsync, read, socket, write, SOCK_RAW};
+use libc::{SOCK_RAW, fsync, read, socket, write};
 
 use crate::unlikely_err;
 

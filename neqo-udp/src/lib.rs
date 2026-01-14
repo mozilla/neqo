@@ -18,8 +18,8 @@ use std::{
     slice::{self, ChunksMut},
 };
 
-use log::{log_enabled, Level};
-use neqo_common::{datagram, qdebug, qtrace, Datagram, Tos};
+use log::{Level, log_enabled};
+use neqo_common::{Datagram, Tos, datagram, qdebug, qtrace};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 
 /// Receive buffer size

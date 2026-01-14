@@ -15,19 +15,18 @@ use std::{
 
 use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
-use log::{log_enabled, Level};
-use neqo_common::{qdebug, qtrace, qwarn, Buffer, Ecn, MAX_VARINT};
+use log::{Level, log_enabled};
+use neqo_common::{Buffer, Ecn, MAX_VARINT, qdebug, qtrace, qwarn};
 use neqo_crypto::Epoch;
 use smallvec::SmallVec;
 use strum::{Display, EnumIter};
 
 use crate::{
-    ecn,
+    Error, Res, Stats, ecn,
     frame::{FrameEncoder as _, FrameType},
     packet,
     recovery::{self},
     stats::FrameStats,
-    Error, Res, Stats,
 };
 
 #[derive(Debug, PartialOrd, Ord, EnumSetType, Enum, EnumIter, Display)]
@@ -632,14 +631,14 @@ mod tests {
     use test_fixture::now;
 
     use super::{
-        AckTracker, Duration, Instant, PacketNumberSpace, RecvdPackets, MAX_TRACKED_RANGES,
+        AckTracker, Duration, Instant, MAX_TRACKED_RANGES, PacketNumberSpace, RecvdPackets,
     };
     use crate::{
+        Stats,
         frame::Frame,
         packet,
         recovery::{self},
         stats::FrameStats,
-        Stats,
     };
 
     const RTT: Duration = Duration::from_millis(100);
@@ -943,9 +942,11 @@ mod tests {
             .set_received(now(), 0, true, &mut stats)
             .unwrap();
         // The reference time for `ack_time` has to be in the past or we filter out the timer.
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_some());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_some()
+        );
 
         let mut tokens = recovery::Tokens::new();
         let mut frame_stats = FrameStats::default();
@@ -965,17 +966,21 @@ mod tests {
             .unwrap()
             .set_received(now(), 1, true, &mut stats)
             .unwrap();
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_some());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_some()
+        );
 
         // Now drop that space.
         tracker.drop_space(PacketNumberSpace::Initial);
 
         assert!(tracker.get_mut(PacketNumberSpace::Initial).is_none());
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_none());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_none()
+        );
         tracker.write_frame(
             PacketNumberSpace::Initial,
             now(),
@@ -1000,9 +1005,11 @@ mod tests {
             .unwrap()
             .set_received(now(), 0, true, &mut Stats::default())
             .unwrap();
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_some());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_some()
+        );
 
         let mut builder =
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
@@ -1035,9 +1042,11 @@ mod tests {
             .unwrap()
             .set_received(now(), 2, true, &mut stats)
             .unwrap();
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_some());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_some()
+        );
 
         let mut builder =
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
@@ -1106,10 +1115,12 @@ mod tests {
             PacketNumberSpace::from(packet::Type::Short),
             PacketNumberSpace::ApplicationData
         );
-        assert!(std::panic::catch_unwind(|| {
-            PacketNumberSpace::from(packet::Type::VersionNegotiation)
-        })
-        .is_err());
+        assert!(
+            std::panic::catch_unwind(|| {
+                PacketNumberSpace::from(packet::Type::VersionNegotiation)
+            })
+            .is_err()
+        );
     }
 
     #[test]

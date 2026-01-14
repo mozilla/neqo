@@ -6,12 +6,12 @@
 
 use std::time::Duration;
 
-use test_fixture::{assertions, DEFAULT_ADDR_V4};
+use test_fixture::{DEFAULT_ADDR_V4, assertions};
 
 use super::{
-    super::ConnectionParameters, ack_bytes, connect_rtt_idle, default_client, default_server,
-    fill_cwnd, increase_cwnd, induce_persistent_congestion, new_client, new_server, send_something,
-    DEFAULT_RTT,
+    super::ConnectionParameters, DEFAULT_RTT, ack_bytes, connect_rtt_idle, default_client,
+    default_server, fill_cwnd, increase_cwnd, induce_persistent_congestion, new_client, new_server,
+    send_something,
 };
 use crate::{connection::tests::assert_path_challenge_min_len, stream_id::StreamType};
 

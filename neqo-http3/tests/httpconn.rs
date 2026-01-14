@@ -8,7 +8,7 @@
 
 use std::time::{Duration, Instant};
 
-use neqo_common::{event::Provider as _, qtrace, Datagram};
+use neqo_common::{Datagram, event::Provider as _, qtrace};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,

@@ -19,17 +19,17 @@ use std::{
     cell::RefCell,
     cmp::min,
     fmt::Debug,
-    fs::{create_dir_all, File},
+    fs::{File, create_dir_all},
     ops::{Deref, DerefMut},
     path::PathBuf,
     rc::Rc,
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qerror, qinfo, qtrace, Datagram, Encoder};
+use NodeState::{Active, Idle, Waiting};
+use neqo_common::{Datagram, Encoder, qdebug, qerror, qinfo, qtrace};
 use neqo_transport::Output;
 use rng::Random;
-use NodeState::{Active, Idle, Waiting};
 
 use crate::now;
 
@@ -47,7 +47,7 @@ type Rng = Rc<RefCell<Random>>;
 /// A macro that turns a list of values into boxed versions of the same.
 #[macro_export]
 macro_rules! boxed {
-    [$($v:expr),+ $(,)?] => {
+    [$($v:expr_2021),+ $(,)?] => {
         vec![ $( Box::new($v) as _ ),+ ]
     };
 }
@@ -63,10 +63,10 @@ macro_rules! boxed {
 /// to the value returned by the setup.
 #[macro_export]
 macro_rules! simulate {
-    ($n:ident, [ $($v:expr),+ $(,)? ] $(,)?) => {
+    ($n:ident, [ $($v:expr_2021),+ $(,)? ] $(,)?) => {
         simulate!($n, (), [ $(|_| $v),+ ]);
     };
-    ($n:ident, $setup:expr, [ $( $v:expr ),+ $(,)? ] $(,)?) => {
+    ($n:ident, $setup:expr_2021, [ $( $v:expr_2021 ),+ $(,)? ] $(,)?) => {
         #[test]
         fn $n() {
             let fixture = $setup;
