@@ -161,18 +161,16 @@ impl Args {
         upload_size: usize,
         download_size: usize,
     ) -> Self {
-        use std::iter::repeat;
-
         let addr =
             server_addr.map_or_else(|| "[::1]:12345".into(), |a| format!("[::1]:{}", a.port()));
         Self {
             shared: SharedArgs::default(),
-            urls: repeat(
+            urls: std::iter::repeat_n(
                 format!("http://{addr}/{download_size}")
                     .parse::<Url>()
                     .unwrap(),
+                num_requests,
             )
-            .take(num_requests)
             .collect(),
             method: if upload_size == 0 {
                 "GET".into()
