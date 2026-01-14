@@ -37,7 +37,9 @@ jobs:
           # Create a GitHub matrix where each entry is a bench with its
           # associated crate, benchmarking mode, and runner taken from the
           # Cargo metadata. Walltime benchmarks run on Codspeed runners,
-          # simulation benchmarks run on GitHub runners.
+          # simulation and memory benchmarks run on GitHub runners.
+          # Each benchmark is run twice: once for CPU profiling (simulation
+          # or walltime) and once for memory profiling.
           {
             echo -n "benches="
             cargo metadata --no-deps --format-version 1 | jq -c '
@@ -46,13 +48,23 @@ jobs:
                 .targets[] |
                 select(.kind[] == "bench") |
                 select(has("required-features")) |
-                ($pkg.metadata.bench[.name].codspeed.mode // "simulation") as $mode |
-                {
-                  crate: $pkg.name,
-                  bench: .name,
-                  mode: $mode,
-                  runner: (if $mode == "walltime" then {group: "codspeed", labels: "codspeed-macro"} else "ubuntu-24.04" end)
-                }
+                ($pkg.metadata.bench[.name].codspeed.mode // "simulation") as $cpu_mode |
+                (
+                  # CPU profiling entry (simulation or walltime)
+                  {
+                    crate: $pkg.name,
+                    bench: .name,
+                    mode: $cpu_mode,
+                    runner: (if $cpu_mode == "walltime" then {group: "codspeed", labels: "codspeed-macro"} else "ubuntu-24.04" end)
+                  },
+                  # Memory profiling entry
+                  {
+                    crate: $pkg.name,
+                    bench: .name,
+                    mode: "memory",
+                    runner: "ubuntu-24.04"
+                  }
+                )
               ]'
           } >> "${GITHUB_OUTPUT}"
 
