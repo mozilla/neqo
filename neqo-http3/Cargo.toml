@@ -63,10 +63,18 @@ ignored = ["criterion", "log"]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
 
-[package.metadata.bench.streams]
-codspeed.mode = "walltime" # Use "walltime" mode for "streams" bench with codspeed.
+[package.metadata.bench.streams_walltime]
+codspeed.mode = "walltime"
+
+[package.metadata.bench.streams_simulated]
+codspeed.mode = "simulation"
 
 [[bench]]
-name = "streams"
+name = "streams_walltime"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "streams_simulated"
 harness = false
 required-features = ["bench"]
