@@ -162,10 +162,10 @@ pub struct ClassicCongestionControl<T> {
     /// state in case the congestion event turns out to be spurious.
     ///
     /// For reference:
-    /// - `acked_bytes` is stored because that is where we accumulate our window increase credit
-    ///   and it is also reduced on a congestion event.
-    /// - `bytes_in_flight` is not stored because if it was to be restored it might get out-of-sync
-    ///   with the actual number of bytes-in-flight on the path.
+    /// - [`State::acked_bytes`] is stored because that is where we accumulate our window increase
+    ///   credit and it is also reduced on a congestion event.
+    /// - [`Self::bytes_in_flight`] is not stored because if it was to be restored it might get
+    ///   out-of-sync with the actual number of bytes-in-flight on the path.
     stored: Option<State>,
 }
 
@@ -1285,8 +1285,8 @@ mod tests {
             );
             assert_eq!(cc.bytes_in_flight(), 0);
             assert_eq!(cc.acked_bytes(), 0);
-            assert_eq!(cwnd, cc.current.congestion_window); // CWND doesn't grow because
-                                                            // we're app limited
+            // CWND doesn't grow because we're app-limited.
+            assert_eq!(cwnd, cc.current.congestion_window);
         }
 
         // Fully utilize the congestion window by sending enough packets to
