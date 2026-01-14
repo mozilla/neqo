@@ -33,7 +33,7 @@ permissions:
 jobs:
   perfcompare:
     name: Performance comparison
-    runs-on: ${{ (inputs.bencher || 'codspeed') == 'codspeed' && 'Neqo' || 'self-hosted' }}
+    runs-on: ${{ (inputs.bencher || 'on-prem') == 'codspeed' && 'Neqo' || 'self-hosted' }}
     defaults:
       run:
         shell: bash
