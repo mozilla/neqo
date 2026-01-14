@@ -99,9 +99,7 @@ jobs:
           BENCH: ${{ matrix.bench.bench }}
           CRATE: ${{ matrix.bench.crate }}
           MODE: ${{ matrix.bench.mode }}
-        run: |
-          # FIXME: Codspeed is switching from "instrumentation" to "simulation", but the command line flag has not yet been updated.
-          cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "${MODE/simulation/instrumentation}"
+        run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
 
       - name: Run bench & upload results
         uses: CodSpeedHQ/action@346a2d8a8d9d38909abd0bc3d23f773110f076ad # v4.4.1
