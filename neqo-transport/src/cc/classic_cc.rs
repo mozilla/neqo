@@ -525,27 +525,25 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     }
 
     fn set_phase(&mut self, phase: Phase, now: Instant) {
-        if self.current.phase != phase {
-            qdebug!("[{self}] phase -> {phase:?}");
-            let old_state = self.current.phase;
+        if self.current.phase == phase {
+            return;
+        }
+        qdebug!("[{self}] phase -> {phase:?}");
+        let old_state = self.current.phase;
+        // No need to tell qlog about exit from transient states.
+        if !old_state.transient() {
             self.qlog.add_event_at(
                 || {
-                    // No need to tell qlog about exit from transient states.
-                    if old_state.transient() {
-                        None
-                    } else {
-                        let ev_data = EventData::CongestionStateUpdated(CongestionStateUpdated {
-                            old: Some(old_state.to_qlog().to_owned()),
-                            new: phase.to_qlog().to_owned(),
-                            trigger: None,
-                        });
-                        Some(ev_data)
-                    }
+                    Some(EventData::CongestionStateUpdated(CongestionStateUpdated {
+                        old: Some(old_state.to_qlog().to_owned()),
+                        new: phase.to_qlog().to_owned(),
+                        trigger: None,
+                    }))
                 },
                 now,
             );
-            self.current.phase = phase;
         }
+        self.current.phase = phase;
     }
 
     // NOTE: Maybe do tracking of lost packets per congestion epoch. Right now if we get a spurious
@@ -727,7 +725,6 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
         if congestion_event != CongestionEvent::Ecn {
             self.stored = Some(self.current.clone());
-
             self.cc_algorithm.save_undo_state();
         }
 
