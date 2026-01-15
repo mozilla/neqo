@@ -26,7 +26,7 @@ permissions:
 jobs:
   bench:
     name: cargo bench
-    runs-on: 'self-hosted'
+    runs-on: 'self-hosted' # zizmor: ignore[self-hosted-runner]
     defaults:
       run:
         shell: bash
