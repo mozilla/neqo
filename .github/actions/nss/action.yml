@@ -14,7 +14,7 @@ runs:
   steps:
     - name: Install system NSS (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && inputs.target == '' }}
+      if: ${{ runner.os == 'Linux' && inputs.target == '' && runner.environment != 'self-hosted' }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -144,7 +144,7 @@ runs:
 
     - name: Install build dependencies (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && steps.check_build.outputs.build_nss }}
+      if: ${{ runner.os == 'Linux' && steps.check_build.outputs.build_nss && runner.environment != 'self-hosted' }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: sudo apt-get install -y --no-install-recommends gyp ninja-build
