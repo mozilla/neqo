@@ -425,7 +425,7 @@ where
 
         self.max_active = new_max_active;
         qdebug!(
-            "Increasing max {subject} receive window by {increase} B, \
+            "Increasing max {subject} receive window by {} B, \
                 previous max_active: {} MiB, \
                 new max_active: {} MiB, \
                 last update: {:?}, \
