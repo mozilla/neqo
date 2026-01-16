@@ -1477,7 +1477,7 @@ mod test {
 
         assert!(
             initial_max_active == increased_max_active,
-            "expect receive window auto-tuning to not increase max_active below manually set initial value."
+            "expect receive window auto-tuning to not decrease max_active below manually set initial value."
         );
 
         Ok(())
