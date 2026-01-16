@@ -5,15 +5,8 @@
 // except according to those terms.
 
 use std::{
-    cell::RefCell,
-    fmt::{self, Debug, Formatter},
-    ops::Deref,
-    os::raw::c_uint,
-    ptr::null_mut,
-    slice::Iter as SliceIter,
+    cell::RefCell, fmt::Debug, ops::Deref, os::raw::c_uint, ptr::null_mut, slice::Iter as SliceIter,
 };
-
-use neqo_common::hex_with_len;
 
 use crate::{
     err::{secstatus_to_res, Error, Res},
@@ -41,11 +34,42 @@ pub use nss_p11::*;
 
 #[macro_export]
 macro_rules! scoped_ptr {
-    ($scoped:ident, $target:ty, $dtor:path) => {
+    // With custom debug method
+    ($scoped:ident, $target:ty, $dtor:path, $debug_method:ident) => {
         pub struct $scoped {
             ptr: *mut $target,
         }
 
+        impl $scoped {
+            fn debug_display(&self) -> String {
+                self.$debug_method().map_or_else(
+                    |_| concat!("Opaque ", stringify!($scoped)).to_string(),
+                    |b| format!(concat!(stringify!($scoped), " {}"), neqo_common::hex_with_len(b))
+                )
+            }
+        }
+
+        impl std::fmt::Debug for $scoped {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.debug_display())
+            }
+        }
+
+        scoped_ptr!(@impls $scoped, $target, $dtor);
+    };
+
+    // Without custom debug method
+    ($scoped:ident, $target:ty, $dtor:path) => {
+        #[derive(Debug)]
+        pub struct $scoped {
+            ptr: *mut $target,
+        }
+
+        scoped_ptr!(@impls $scoped, $target, $dtor);
+    };
+
+    // Common implementations
+    (@impls $scoped:ident, $target:ty, $dtor:path) => {
         impl $scoped {
             /// Create a new instance of `$scoped` from a pointer.
             ///
@@ -82,7 +106,12 @@ macro_rules! scoped_ptr {
 }
 
 scoped_ptr!(Certificate, CERTCertificate, CERT_DestroyCertificate);
-scoped_ptr!(PublicKey, SECKEYPublicKey, SECKEY_DestroyPublicKey);
+scoped_ptr!(
+    PublicKey,
+    SECKEYPublicKey,
+    SECKEY_DestroyPublicKey,
+    key_data
+);
 
 impl PublicKey {
     /// Get the HPKE serialization of the public key.
@@ -101,7 +130,7 @@ impl PublicKey {
             PK11_HPKE_Serialize(
                 **self,
                 buf.as_mut_ptr(),
-                &mut len,
+                &raw mut len,
                 c_uint::try_from(buf.len())?,
             )
         })?;
@@ -118,17 +147,12 @@ impl Clone for PublicKey {
     }
 }
 
-impl Debug for PublicKey {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        if let Ok(b) = self.key_data() {
-            write!(f, "PublicKey {}", hex_with_len(b))
-        } else {
-            write!(f, "Opaque PublicKey")
-        }
-    }
-}
-
-scoped_ptr!(PrivateKey, SECKEYPrivateKey, SECKEY_DestroyPrivateKey);
+scoped_ptr!(
+    PrivateKey,
+    SECKEYPrivateKey,
+    SECKEY_DestroyPrivateKey,
+    key_data
+);
 
 impl PrivateKey {
     /// Get the bits of the private key.
@@ -148,7 +172,7 @@ impl PrivateKey {
                 PK11ObjectType::PK11_TypePrivKey,
                 (**self).cast(),
                 CK_ATTRIBUTE_TYPE::from(CKA_VALUE),
-                &mut key_item,
+                &raw mut key_item,
             )
         })?;
         let slc = unsafe { null_safe_slice(key_item.data, key_item.len) };
@@ -157,7 +181,7 @@ impl PrivateKey {
         // use the scoped `Item` implementation.  This is OK as long as nothing
         // panics between `PK11_ReadRawAttribute` succeeding and here.
         unsafe {
-            SECITEM_FreeItem(&mut key_item, PRBool::from(false));
+            SECITEM_FreeItem(&raw mut key_item, PRBool::from(false));
         }
         Ok(key)
     }
@@ -172,16 +196,6 @@ impl Clone for PrivateKey {
     }
 }
 
-impl Debug for PrivateKey {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        if let Ok(b) = self.key_data() {
-            write!(f, "PrivateKey {}", hex_with_len(b))
-        } else {
-            write!(f, "Opaque PrivateKey")
-        }
-    }
-}
-
 scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 
 impl Slot {
@@ -191,7 +205,7 @@ impl Slot {
     }
 }
 
-scoped_ptr!(SymKey, PK11SymKey, PK11_FreeSymKey);
+scoped_ptr!(SymKey, PK11SymKey, PK11_FreeSymKey, as_bytes);
 
 impl SymKey {
     /// You really don't want to use this.
@@ -216,16 +230,6 @@ impl Clone for SymKey {
         let ptr = unsafe { PK11_ReferenceSymKey(self.ptr) };
         assert!(!ptr.is_null());
         Self { ptr }
-    }
-}
-
-impl Debug for SymKey {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        if let Ok(b) = self.as_bytes() {
-            write!(f, "SymKey {}", hex_with_len(b))
-        } else {
-            write!(f, "Opaque SymKey")
-        }
     }
 }
 
@@ -357,6 +361,8 @@ impl RandomCache {
     const SIZE: usize = 256;
     const CUTOFF: usize = 32;
 
+    // Const constructor for compile-time initialization in thread_local!.
+    // Cannot derive Default because `used` must be SIZE, not 0.
     const fn new() -> Self {
         Self {
             cache: [0; Self::SIZE],
@@ -403,10 +409,12 @@ pub fn random<const N: usize>() -> [u8; N] {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
+    use std::ptr::null_mut;
+
     use test_fixture::fixture_init;
 
     use super::RandomCache;
-    use crate::random;
+    use crate::{random, PrivateKey, PublicKey};
 
     #[cfg(not(feature = "disable-random"))]
     #[test]
@@ -442,5 +450,40 @@ mod test {
                 assert_ne!(&cache.randomize(&mut buf[..len])[..len], &ZERO[..len]);
             }
         }
+    }
+
+    #[test]
+    fn key_operations() {
+        use crate::ech::generate_keys;
+
+        fixture_init();
+        let (sk, pk) = generate_keys().unwrap();
+
+        // Test key_data serialization - X25519 keys are 32 bytes
+        assert_eq!(pk.key_data().unwrap().len(), 32);
+
+        // Test Debug formatting
+        let pk_dbg = format!("{pk:?}");
+        assert_eq!(&pk_dbg[..9], "PublicKey");
+        let sk_dbg = format!("{sk:?}");
+        // Private key debug output depends on whether key extraction is allowed by NSS.
+        // It could be either "PrivateKey [hex]" or "Opaque PrivateKey".
+        assert!(
+            sk_dbg.starts_with("PrivateKey") || sk_dbg.starts_with("Opaque"),
+            "unexpected private key debug format: {sk_dbg}"
+        );
+
+        // Test cloning
+        let pk2 = pk.clone();
+        let sk2 = sk.clone();
+        assert_eq!(pk.key_data().unwrap(), pk2.key_data().unwrap());
+        assert_eq!(format!("{sk:?}"), format!("{sk2:?}"));
+    }
+
+    #[test]
+    fn null_pointer_error() {
+        fixture_init();
+        assert!(PublicKey::from_ptr(null_mut()).is_err());
+        assert!(PrivateKey::from_ptr(null_mut()).is_err());
     }
 }

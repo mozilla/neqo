@@ -4,10 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    fmt::{self, Display, Formatter},
-    mem,
-};
+use std::mem;
 
 use neqo_common::{qdebug, qtrace};
 use neqo_transport::StreamId;
@@ -19,11 +16,18 @@ use crate::{
     Res,
 };
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum DecoderInstruction {
-    InsertCountIncrement { increment: u64 },
-    HeaderAck { stream_id: StreamId },
-    StreamCancellation { stream_id: StreamId },
+    InsertCountIncrement {
+        increment: u64,
+    },
+    HeaderAck {
+        stream_id: StreamId,
+    },
+    StreamCancellation {
+        stream_id: StreamId,
+    },
+    #[default]
     NoInstruction,
 }
 
@@ -60,32 +64,23 @@ impl DecoderInstruction {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 enum DecoderInstructionReaderState {
+    #[default]
     ReadInstruction,
-    ReadInt { reader: IntReader },
+    ReadInt {
+        reader: IntReader,
+    },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, derive_more::Display)]
+#[display("InstructionReader")]
 pub struct DecoderInstructionReader {
     state: DecoderInstructionReaderState,
     instruction: DecoderInstruction,
 }
 
-impl Display for DecoderInstructionReader {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "InstructionReader")
-    }
-}
-
 impl DecoderInstructionReader {
-    pub const fn new() -> Self {
-        Self {
-            state: DecoderInstructionReaderState::ReadInstruction,
-            instruction: DecoderInstruction::NoInstruction,
-        }
-    }
-
     /// # Errors
     ///
     /// 1) `NeedMoreData` if the reader needs more data
@@ -155,7 +150,7 @@ mod test {
         instruction.marshal(&mut buf);
         let mut test_receiver: TestReceiver = TestReceiver::default();
         test_receiver.write(buf.as_ref());
-        let mut decoder = DecoderInstructionReader::new();
+        let mut decoder = DecoderInstructionReader::default();
         assert_eq!(
             decoder.read_instructions(&mut test_receiver).unwrap(),
             instruction
@@ -186,7 +181,7 @@ mod test {
         let mut buf = Encoder::default();
         instruction.marshal(&mut buf);
         let mut test_receiver: TestReceiver = TestReceiver::default();
-        let mut decoder = DecoderInstructionReader::new();
+        let mut decoder = DecoderInstructionReader::default();
         for i in 0..buf.len() - 1 {
             test_receiver.write(&buf.as_ref()[i..=i]);
             assert_eq!(
@@ -221,7 +216,7 @@ mod test {
         test_receiver.write(&[
             0x3f, 0xc1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xff, 0x02,
         ]);
-        let mut decoder = DecoderInstructionReader::new();
+        let mut decoder = DecoderInstructionReader::default();
         assert_eq!(
             decoder.read_instructions(&mut test_receiver),
             Err(Error::IntegerOverflow)
@@ -232,7 +227,7 @@ mod test {
         test_receiver.write(&[
             0x7f, 0xc1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xff, 0x02,
         ]);
-        let mut decoder = DecoderInstructionReader::new();
+        let mut decoder = DecoderInstructionReader::default();
         assert_eq!(
             decoder.read_instructions(&mut test_receiver),
             Err(Error::IntegerOverflow)
@@ -243,7 +238,7 @@ mod test {
         test_receiver.write(&[
             0x7f, 0xc1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xff, 0x02,
         ]);
-        let mut decoder = DecoderInstructionReader::new();
+        let mut decoder = DecoderInstructionReader::default();
         assert_eq!(
             decoder.read_instructions(&mut test_receiver),
             Err(Error::IntegerOverflow)

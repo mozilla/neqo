@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::{self, Display, Formatter};
-
 use neqo_common::{qdebug, Encoder, Header};
 use neqo_transport::{Connection, StreamId};
 
@@ -21,7 +19,8 @@ use crate::{
 
 pub const QPACK_UNI_STREAM_TYPE_DECODER: u64 = 0x3;
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("QPack {}", self.capacity())]
 pub struct Decoder {
     instruction_reader: EncoderInstructionReader,
     table: HeaderTable,
@@ -46,7 +45,7 @@ impl Decoder {
         send_buf.encode_varint(QPACK_UNI_STREAM_TYPE_DECODER);
         let max_blocked_streams = usize::from(qpack_settings.max_blocked_streams);
         Self {
-            instruction_reader: EncoderInstructionReader::new(),
+            instruction_reader: EncoderInstructionReader::default(),
             table: HeaderTable::new(false),
             acked_inserts: 0,
             max_entries: qpack_settings.max_table_size_decoder >> 5,
@@ -64,7 +63,7 @@ impl Decoder {
         self.table.capacity()
     }
 
-    /// returns a list of unblocked streams
+    /// Returns a list of unblocked streams.
     ///
     /// # Errors
     ///
@@ -79,13 +78,11 @@ impl Decoder {
             return Ok(Vec::new());
         }
 
-        let r = self
+        Ok(self
             .blocked_streams
-            .iter()
-            .filter_map(|(id, req)| (*req <= base_new).then_some(*id))
-            .collect::<Vec<_>>();
-        self.blocked_streams.retain(|(_, req)| *req > base_new);
-        Ok(r)
+            .extract_if(.., |(_, req)| *req <= base_new)
+            .map(|(id, _)| id)
+            .collect())
     }
 
     fn read_instructions(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
@@ -260,12 +257,6 @@ impl Decoder {
     #[must_use]
     pub fn stats(&self) -> Stats {
         self.stats.clone()
-    }
-}
-
-impl Display for Decoder {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "QPack {}", self.capacity())
     }
 }
 

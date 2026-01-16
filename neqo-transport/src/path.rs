@@ -13,9 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{
-    hex, qdebug, qinfo, qlog::Qlog, qtrace, qwarn, Buffer, DatagramBatch, Encoder, Tos,
-};
+use neqo_common::{datagram, hex, qdebug, qinfo, qlog::Qlog, qtrace, qwarn, Buffer, Encoder, Tos};
 use neqo_crypto::random;
 
 use crate::{
@@ -607,7 +605,7 @@ impl Path {
         }
     }
 
-    pub fn set_ecn_baseline(&mut self, baseline: ecn::Count) {
+    pub const fn set_ecn_baseline(&mut self, baseline: ecn::Count) {
         self.ecn_info.set_baseline(baseline);
     }
 
@@ -647,7 +645,7 @@ impl Path {
 
     /// Update the remote port number.  Any flexibility we allow in `received_on`
     /// need to be adjusted at this point.
-    fn update_port(&mut self, port: u16) {
+    const fn update_port(&mut self, port: u16) {
         self.remote.set_port(port);
     }
 
@@ -671,7 +669,7 @@ impl Path {
 
     /// Update the last use of this path, if it is valid.
     /// This will keep the path active slightly longer.
-    pub fn update(&mut self, now: Instant) {
+    pub const fn update(&mut self, now: Instant) {
         if self.validated.is_some() {
             self.validated = Some(now);
         }
@@ -730,12 +728,12 @@ impl Path {
         num_datagrams: usize,
         datagram_size: usize,
         stats: &mut Stats,
-    ) -> DatagramBatch {
+    ) -> datagram::Batch {
         // Make sure to use the TOS value from before calling ecn::Info::on_packet_sent, which may
         // update the ECN state and can hence change it - this packet should still be sent
         // with the current value.
         self.ecn_info.on_packet_sent(num_datagrams, stats);
-        DatagramBatch::new(
+        datagram::Batch::new(
             self.local,
             self.remote,
             tos,
@@ -875,11 +873,11 @@ impl Path {
         self.rtt.write_frames(builder, tokens, stats);
     }
 
-    pub fn lost_ack_frequency(&mut self, lost: &AckRate) {
+    pub const fn lost_ack_frequency(&mut self, lost: &AckRate) {
         self.rtt.frame_lost(lost);
     }
 
-    pub fn acked_ecn(&mut self) {
+    pub const fn acked_ecn(&mut self) {
         self.ecn_info.acked_ecn();
     }
 
@@ -940,7 +938,7 @@ impl Path {
     }
 
     /// Mutably borrow the RTT estimator for this path.
-    pub fn rtt_mut(&mut self) -> &mut RttEstimate {
+    pub const fn rtt_mut(&mut self) -> &mut RttEstimate {
         &mut self.rtt
     }
 
@@ -984,12 +982,12 @@ impl Path {
     }
 
     /// Record received bytes for the path.
-    pub fn add_received(&mut self, count: usize) {
+    pub const fn add_received(&mut self, count: usize) {
         self.received_bytes = self.received_bytes.saturating_add(count);
     }
 
     /// Record sent bytes for the path.
-    pub fn add_sent(&mut self, count: usize) {
+    pub const fn add_sent(&mut self, count: usize) {
         self.sent_bytes = self.sent_bytes.saturating_add(count);
     }
 

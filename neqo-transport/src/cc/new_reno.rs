@@ -6,22 +6,15 @@
 
 // Congestion control
 
-use std::{
-    fmt::{self, Display},
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
+
+use derive_more::Display;
 
 use crate::cc::{classic_cc::WindowAdjustment, CongestionEvent};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Display)]
+#[display("NewReno")]
 pub struct NewReno {}
-
-impl Display for NewReno {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "NewReno")?;
-        Ok(())
-    }
-}
 
 impl WindowAdjustment for NewReno {
     fn bytes_for_cwnd_increase(
@@ -47,4 +40,8 @@ impl WindowAdjustment for NewReno {
     }
 
     fn on_app_limited(&mut self) {}
+
+    fn save_undo_state(&mut self) {}
+
+    fn restore_undo_state(&mut self) {}
 }

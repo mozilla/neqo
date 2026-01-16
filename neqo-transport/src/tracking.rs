@@ -9,7 +9,6 @@
 use std::{
     cmp::min,
     collections::VecDeque,
-    fmt::{self, Display, Formatter},
     time::{Duration, Instant},
 };
 
@@ -81,7 +80,8 @@ pub enum InsertionResult {
     NotInserted,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, derive_more::Display)]
+#[display("{largest}->{smallest}")]
 pub struct PacketRange {
     largest: packet::Number,
     smallest: packet::Number,
@@ -147,16 +147,10 @@ impl PacketRange {
     /// When a packet containing the range `other` is acknowledged,
     /// clear the `ack_needed` attribute on this.
     /// Requires that other is equal to this, or a larger range.
-    pub fn acknowledged(&mut self, other: &Self) {
+    pub const fn acknowledged(&mut self, other: &Self) {
         if (other.smallest <= self.smallest) && (other.largest >= self.largest) {
             self.ack_needed = false;
         }
-    }
-}
-
-impl Display for PacketRange {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}->{}", self.largest, self.smallest)
     }
 }
 
@@ -190,7 +184,8 @@ impl AckToken {
 
 /// A structure that tracks what packets have been received,
 /// and what needs acknowledgement for a packet number space.
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("Recvd-{space}")]
 pub struct RecvdPackets {
     space: PacketNumberSpace,
     ranges: VecDeque<PacketRange>,
@@ -245,7 +240,7 @@ impl RecvdPackets {
     }
 
     /// Get the ECN counts.
-    pub fn ecn_marks(&mut self) -> &mut ecn::Count {
+    pub const fn ecn_marks(&mut self) -> &mut ecn::Count {
         &mut self.ecn_count
     }
 
@@ -255,7 +250,7 @@ impl RecvdPackets {
     }
 
     /// Update acknowledgment delay parameters.
-    pub fn ack_freq(
+    pub const fn ack_freq(
         &mut self,
         seqno: u64,
         tolerance: packet::Number,
@@ -511,12 +506,6 @@ impl RecvdPackets {
             space: self.space,
             ranges: ranges.into_boxed_slice(),
         }));
-    }
-}
-
-impl Display for RecvdPackets {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Recvd-{}", self.space)
     }
 }
 
@@ -776,7 +765,7 @@ mod tests {
 
     fn write_frame_at(rp: &mut RecvdPackets, now: Instant) {
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut stats = FrameStats::default();
         let mut tokens = recovery::Tokens::new();
         rp.write_frame(now, RTT, &mut builder, &mut tokens, &mut stats);
@@ -936,7 +925,7 @@ mod tests {
         let mut stats = Stats::default();
         let mut tracker = AckTracker::default();
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         tracker
             .get_mut(PacketNumberSpace::Initial)
             .unwrap()
@@ -1005,7 +994,7 @@ mod tests {
             .is_some());
 
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         builder.set_limit(10);
 
         let mut stats = FrameStats::default();
@@ -1040,7 +1029,7 @@ mod tests {
             .is_some());
 
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         // The code pessimistically assumes that each range needs 16 bytes to express.
         // So this won't be enough for a second range.
         builder.set_limit(RecvdPackets::USEFUL_ACK_LEN + 8);

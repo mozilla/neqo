@@ -47,7 +47,7 @@ impl AckRate {
 
     pub fn write_frame<B: Buffer>(&self, builder: &mut packet::Builder<B>, seqno: u64) -> bool {
         builder.write_varint_frame(&[
-            u64::from(FrameType::AckFrequency),
+            FrameType::AckFrequency as u64,
             seqno,
             u64::try_from(self.packets + 1).expect("usize fits in u64"),
             u64::try_from(self.delay.as_micros()).unwrap_or(u64::MAX),
@@ -124,7 +124,7 @@ impl FlexibleAckRate {
         self.current = acked.clone();
     }
 
-    fn frame_lost(&mut self, _lost: &AckRate) {
+    const fn frame_lost(&mut self, _lost: &AckRate) {
         self.frame_outstanding = false;
     }
 
@@ -184,7 +184,7 @@ impl PeerAckDelay {
         }
     }
 
-    pub fn frame_lost(&mut self, r: &AckRate) {
+    pub const fn frame_lost(&mut self, r: &AckRate) {
         if let Self::Flexible(rate) = self {
             rate.frame_lost(r);
         }

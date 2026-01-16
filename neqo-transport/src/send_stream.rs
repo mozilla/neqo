@@ -10,7 +10,6 @@ use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
     collections::{btree_map::Entry, BTreeMap, VecDeque},
-    fmt::{self, Display, Formatter},
     mem,
     num::NonZeroUsize,
     ops::Add,
@@ -611,7 +610,7 @@ pub enum State {
 }
 
 impl State {
-    fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
+    const fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
         match self {
             Self::Send { send_buf, .. } | Self::DataSent { send_buf, .. } => Some(send_buf),
             Self::Ready { .. }
@@ -631,7 +630,7 @@ impl State {
     }
 
     fn transition(&mut self, new_state: Self) {
-        qtrace!("SendStream state {:?} -> {:?}", self, new_state);
+        qtrace!("SendStream state {self:?} -> {new_state:?}");
         *self = new_state;
     }
 }
@@ -682,7 +681,8 @@ impl Stats {
 }
 
 /// Implement a QUIC send stream.
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("SendStream {stream_id}")]
 pub struct SendStream {
     stream_id: StreamId,
     state: State,
@@ -745,7 +745,7 @@ impl SendStream {
         true
     }
 
-    pub fn set_fairness(&mut self, make_fair: bool) {
+    pub const fn set_fairness(&mut self, make_fair: bool) {
         self.fair = make_fair;
     }
 
@@ -754,7 +754,7 @@ impl SendStream {
         self.fair
     }
 
-    pub fn set_priority(
+    pub const fn set_priority(
         &mut self,
         transmission: TransmissionPriority,
         retransmission: RetransmissionPriority,
@@ -768,7 +768,7 @@ impl SendStream {
         self.sendorder
     }
 
-    pub fn set_sendorder(&mut self, sendorder: Option<SendOrder>) {
+    pub const fn set_sendorder(&mut self, sendorder: Option<SendOrder>) {
         self.sendorder = sendorder;
     }
 
@@ -1175,7 +1175,7 @@ impl SendStream {
     /// event.
     ///
     /// See [`crate::Connection::stream_set_writable_event_low_watermark`].
-    pub fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
+    pub const fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
         self.writable_event_low_watermark = watermark;
     }
 
@@ -1342,7 +1342,7 @@ impl SendStream {
     }
 
     #[cfg(test)]
-    pub(crate) fn state(&mut self) -> &mut State {
+    pub(crate) const fn state(&mut self) -> &mut State {
         &mut self.state
     }
 
@@ -1361,12 +1361,6 @@ impl SendStream {
         }
 
         self.conn_events.send_stream_writable(self.stream_id);
-    }
-}
-
-impl Display for SendStream {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "SendStream {}", self.stream_id)
     }
 }
 
@@ -1399,7 +1393,7 @@ pub struct OrderGroupIter<'a> {
 }
 
 impl OrderGroup {
-    pub fn iter(&mut self) -> OrderGroupIter<'_> {
+    pub const fn iter(&mut self) -> OrderGroupIter<'_> {
         // Ids may have been deleted since we last iterated
         if self.next >= self.vec.len() {
             self.next = 0;
@@ -1428,7 +1422,7 @@ impl OrderGroup {
         self.vec.truncate(position);
     }
 
-    fn update_next(&mut self) -> usize {
+    const fn update_next(&mut self) -> usize {
         let next = self.next;
         self.next = (self.next + 1) % self.vec.len();
         next
@@ -2578,7 +2572,7 @@ mod tests {
 
         let mut tokens = recovery::Tokens::new();
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
 
         // Write a small frame: no fin.
         let written = builder.len();
@@ -2667,7 +2661,7 @@ mod tests {
 
         let mut tokens = recovery::Tokens::new();
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         ss.write_frames(
             TransmissionPriority::default(),
             &mut builder,
@@ -2746,7 +2740,7 @@ mod tests {
 
         // This doesn't report blocking yet.
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
@@ -2813,7 +2807,7 @@ mod tests {
 
         // Assert that STREAM_DATA_BLOCKED is sent.
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
@@ -2901,7 +2895,7 @@ mod tests {
 
         // No frame should be sent here.
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         s.write_stream_frame(
@@ -2953,7 +2947,7 @@ mod tests {
         }
 
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let header_len = builder.len();
         builder.set_limit(header_len + space);
 
@@ -3055,7 +3049,7 @@ mod tests {
             s.close();
 
             let mut builder =
-                packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+                packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
             let header_len = builder.len();
             // Add 2 for the frame type and stream ID, then add the extra.
             builder.set_limit(header_len + data.len() + 2 + extra);
@@ -3073,7 +3067,7 @@ mod tests {
         }
 
         // The minimum amount of extra space for getting another frame in.
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         enc.encode_varint(u64::try_from(data.len()).unwrap());
         let len_buf = Vec::from(enc);
         let minimum_extra = len_buf.len() + packet::Builder::MINIMUM_FRAME_SIZE;

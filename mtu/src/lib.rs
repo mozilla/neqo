@@ -144,7 +144,7 @@ mod test {
 
     impl PartialEq<NameMtu<'_>> for (String, usize) {
         fn eq(&self, other: &NameMtu<'_>) -> bool {
-            other.0.map_or(true, |name| name == self.0) && other.1 == self.1
+            other.0.is_none_or(|name| name == self.0) && other.1 == self.1
         }
     }
 
@@ -239,5 +239,20 @@ mod test {
                 }
             }
         }
+    }
+
+    #[test]
+    fn default_error() {
+        let err = crate::default_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert!(err.to_string().contains("Local interface MTU not found"));
+    }
+
+    #[test]
+    #[should_panic(expected = "test error")]
+    #[cfg(not(target_os = "windows"))]
+    #[cfg(debug_assertions)]
+    fn unlikely_error_panics() {
+        crate::unlikely_err("test error".to_string());
     }
 }

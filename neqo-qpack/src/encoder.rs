@@ -4,12 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    cmp::min,
-    collections::VecDeque,
-    fmt::{self, Display, Formatter},
-    time::Instant,
-};
+use std::{cmp::min, collections::VecDeque, time::Instant};
 
 use neqo_common::{qdebug, qerror, qlog::Qlog, qtrace, Header};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
@@ -44,7 +39,8 @@ impl LocalStreamState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("QPack")]
 pub struct Encoder {
     table: HeaderTable,
     max_table_size: u64,
@@ -70,7 +66,7 @@ impl Encoder {
             table: HeaderTable::new(true),
             max_table_size: qpack_settings.max_table_size_encoder,
             max_entries: 0,
-            instruction_reader: DecoderInstructionReader::new(),
+            instruction_reader: DecoderInstructionReader::default(),
             local_stream: LocalStreamState::NoStream,
             max_blocked_streams: 0,
             unacked_header_blocks: HashMap::default(),
@@ -525,12 +521,6 @@ impl Encoder {
     }
 }
 
-impl Display for Encoder {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "QPack")
-    }
-}
-
 fn map_error(err: &Error) -> Error {
     if *err == Error::ClosedCriticalStream {
         Error::ClosedCriticalStream
@@ -617,7 +607,7 @@ mod tests {
     fn connect_generic(huffman: bool, max_data: Option<u64>) -> TestEncoder {
         let mut conn = default_client();
         let mut peer_conn = max_data.map_or_else(default_server, |max| {
-            new_server::<CountingConnectionIdGenerator>(
+            new_server::<CountingConnectionIdGenerator, &str>(
                 DEFAULT_ALPN,
                 ConnectionParameters::default()
                     .max_stream_data(StreamType::UniDi, true, max)

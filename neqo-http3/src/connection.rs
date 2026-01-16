@@ -4,13 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    cell::RefCell,
-    fmt::{self, Debug, Display, Formatter},
-    mem,
-    rc::Rc,
-    time::Instant,
-};
+use std::{cell::RefCell, fmt::Debug, mem, rc::Rc, time::Instant};
 
 use neqo_common::{
     qdebug, qerror, qinfo, qtrace, qwarn, Bytes, Decoder, Header, MessageType, Role,
@@ -284,7 +278,8 @@ impl Http3State {
 /// [`Http3ServerHandler`]: crate::connection_server::Http3ServerHandler
 /// [`ConnectionEvent::RecvStreamReadable`]: neqo_transport::ConnectionEvent::RecvStreamReadable
 /// [`ConnectionEvent::NewStream`]: neqo_transport::ConnectionEvent::NewStream
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("Http3 connection")]
 pub struct Http3Connection {
     role: Role,
     state: Http3State,
@@ -300,18 +295,12 @@ pub struct Http3Connection {
     connect_udp: ExtendedConnectFeature,
 }
 
-impl Display for Http3Connection {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Http3 connection")
-    }
-}
-
 impl Http3Connection {
     /// Create a new connection.
     pub fn new(conn_params: Http3Parameters, role: Role) -> Self {
         Self {
             state: Http3State::Initializing,
-            control_stream_local: ControlStreamLocal::new(),
+            control_stream_local: ControlStreamLocal::default(),
             qpack_encoder: Rc::new(RefCell::new(qpack::Encoder::new(
                 conn_params.get_qpack_settings(),
                 true,
@@ -642,7 +631,7 @@ impl Http3Connection {
     pub(crate) fn handle_zero_rtt_rejected(&mut self) -> Res<()> {
         if self.state == Http3State::ZeroRtt {
             self.state = Http3State::Initializing;
-            self.control_stream_local = ControlStreamLocal::new();
+            self.control_stream_local = ControlStreamLocal::default();
             self.qpack_encoder = Rc::new(RefCell::new(qpack::Encoder::new(
                 self.local_params.get_qpack_settings(),
                 true,
@@ -1830,7 +1819,7 @@ impl Http3Connection {
     }
 
     #[must_use]
-    pub fn state_mut(&mut self) -> &mut Http3State {
+    pub const fn state_mut(&mut self) -> &mut Http3State {
         &mut self.state
     }
 

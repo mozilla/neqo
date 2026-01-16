@@ -9,7 +9,7 @@
 use std::{
     cmp::{max, min},
     collections::VecDeque,
-    fmt::{self, Debug, Display},
+    fmt::{self, Display},
     time::{Duration, Instant},
 };
 
@@ -51,6 +51,8 @@ struct Stats {
 }
 
 impl Stats {
+    // Const constructor for compile-time initialization in TailDrop::new().
+    // Could derive Default if const was not required.
     const fn new() -> Self {
         Self {
             received: 0,
@@ -109,7 +111,8 @@ impl Display for Stats {
 }
 
 /// This models a link with a tail drop router at the front of it.
-#[derive(Clone)]
+#[derive(Clone, derive_more::Debug)]
+#[debug("taildrop")]
 pub struct TailDrop {
     /// An overhead associated with each entry.  This accounts for
     /// layer 2, IP, and UDP overheads.
@@ -338,12 +341,6 @@ impl Node for TailDrop {
     }
 }
 
-impl Debug for TailDrop {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("taildrop")
-    }
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
@@ -358,7 +355,7 @@ mod test {
     use crate::sim::{network::TailDrop, rng::Random, Node as _};
 
     fn mark_rate(used: usize, capacity: usize, trials: usize, salt: u64) -> usize {
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         enc.encode_uint(8, u64::try_from(used).unwrap());
         enc.encode_uint(8, u64::try_from(capacity).unwrap());
         enc.encode_uint(8, u64::try_from(trials).unwrap());

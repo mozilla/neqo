@@ -1,5 +1,7 @@
 name: CodSpeed
 on:
+  push:
+    branches: ["main"] # To generate a performance baseline.
   pull_request:
     branches: ["main"]
   merge_group:
@@ -33,39 +35,42 @@ jobs:
       - id: benches
         run: |
           # Create a GitHub matrix where each entry is a bench with its
-          # associated crate and benchmarking mode taken from the Cargo
-          # metadata.
+          # associated crate, benchmarking mode, and runner taken from the
+          # Cargo metadata. Walltime benchmarks run on Codspeed runners,
+          # simulation and memory benchmarks run on GitHub runners.
+          # Each benchmark is run twice: once for CPU profiling (simulation
+          # or walltime) and once for memory profiling.
           {
-            echo -n "benches=["
-            first=true
-            while IFS=: read -r crate manifest_path; do
-              dir=$(dirname "$manifest_path")
-              if [ -e "$dir/benches" ]; then
-                for bench in "$dir/benches"/*.rs; do
-                  bench=$(basename -s .rs "$bench")
-                  # Set measurement mode from Cargo.toml metadata, default to "instrumentation".
-                  # The following jq pipeline:
-                  # - Selects the package with name == $crate
-                  # - Looks up .metadata.bench[$bench].codspeed.mode for the benchmark
-                  # - If not set, defaults to "instrumentation"
-                  mode=$(cargo metadata --no-deps --format-version 1 | jq -r --arg crate "$crate" --arg bench "$bench" '.packages[] | select(.name == $crate) | .metadata.bench[$bench].codspeed.mode // "instrumentation"')
-                  # FIXME: Always use "instrumentation" mode to eliminate CI VM effects.
-                  mode="instrumentation"
-                  if [ "$first" = true ]; then
-                    first=false
-                  else
-                    echo -n ","
-                  fi
-                  echo -n "{\"crate\":\"$crate\",\"bench\":\"$bench\",\"mode\":\"$mode\"}"
-                done
-              fi
-            done < <(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | .name + ":" + .manifest_path')
-            echo -n "]"
+            echo -n "benches="
+            cargo metadata --no-deps --format-version 1 | jq -c '
+              [.packages[] |
+                . as $pkg |
+                .targets[] |
+                select(.kind[] == "bench") |
+                select(has("required-features")) |
+                ($pkg.metadata.bench[.name].codspeed.mode // "simulation") as $cpu_mode |
+                (
+                  # CPU profiling entry (simulation or walltime)
+                  {
+                    crate: $pkg.name,
+                    bench: .name,
+                    mode: $cpu_mode,
+                    runner: (if $cpu_mode == "walltime" then {group: "codspeed", labels: "codspeed-macro"} else "ubuntu-24.04" end)
+                  },
+                  # Memory profiling entry
+                  {
+                    crate: $pkg.name,
+                    bench: .name,
+                    mode: "memory",
+                    runner: "ubuntu-24.04"
+                  }
+                )
+              ]'
           } >> "${GITHUB_OUTPUT}"
 
   benchmarks:
     name: Run bench
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.bench.runner }}
     strategy:
       matrix:
         bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
@@ -97,7 +102,7 @@ jobs:
         run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
 
       - name: Run bench & upload results
-        uses: CodSpeedHQ/action@346a2d8a8d9d38909abd0bc3d23f773110f076ad # v4.4.1
+        uses: CodSpeedHQ/action@0700edb451d0e9f2426f99bd6977027e550fb2a6 # v4.7.0
         with:
           mode: ${{ matrix.bench.mode }}
           run: cargo codspeed run

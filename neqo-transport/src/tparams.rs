@@ -742,7 +742,7 @@ impl TransportParametersHandler {
     }
 
     #[must_use]
-    pub fn local_mut(&mut self) -> &mut TransportParameters {
+    pub const fn local_mut(&mut self) -> &mut TransportParameters {
         &mut self.local
     }
 
@@ -969,7 +969,7 @@ mod tests {
             0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
         ];
         let spa = make_spa();
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         spa.encode(&mut enc, PreferredAddress);
         assert_eq!(enc.as_ref(), ENCODED);
 
@@ -1002,7 +1002,7 @@ mod tests {
     /// It then encodes it, working from the knowledge that the `encode` function
     /// doesn't care about validity, and decodes it.  The result should be failure.
     fn assert_invalid_spa(spa: &TransportParameter) {
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         spa.encode(&mut enc, PreferredAddress);
         assert_eq!(
             TransportParameter::decode(&mut enc.as_decoder()).unwrap_err(),
@@ -1012,7 +1012,7 @@ mod tests {
 
     /// This is for those rare mutations that are acceptable.
     fn assert_valid_spa(spa: &TransportParameter) {
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         spa.encode(&mut enc, PreferredAddress);
         let mut dec = enc.as_decoder();
         let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
@@ -1063,7 +1063,7 @@ mod tests {
     #[test]
     fn preferred_address_truncated() {
         let spa = make_spa();
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         spa.encode(&mut enc, PreferredAddress);
         let mut dec = Decoder::from(&enc.as_ref()[..enc.len() - 1]);
         assert_eq!(
@@ -1206,7 +1206,7 @@ mod tests {
             other: vec![0x1a2a_3a4a, 0x5a6a_7a8a],
         };
 
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         vn.encode(&mut enc, VersionInformation);
         assert_eq!(enc.as_ref(), ENCODED);
 
@@ -1249,7 +1249,7 @@ mod tests {
     #[test]
     fn versions_equal_0rtt() {
         let mut current = TransportParameters::default();
-        qdebug!("Current = {:?}", current);
+        qdebug!("Current = {current:?}");
         current.set(
             VersionInformation,
             TransportParameter::Versions {

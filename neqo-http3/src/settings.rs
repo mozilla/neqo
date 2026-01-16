@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::ops::Deref;
-
 use neqo_common::{qdebug, Buffer, Decoder, Encoder};
 use neqo_crypto::{ZeroRttCheckResult, ZeroRttChecker};
 
@@ -72,7 +70,7 @@ impl HSetting {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, derive_more::Deref)]
 pub struct HSettings {
     settings: Vec<HSetting>,
 }
@@ -214,13 +212,6 @@ impl HSettings {
     }
 }
 
-impl Deref for HSettings {
-    type Target = [HSetting];
-    fn deref(&self) -> &Self::Target {
-        &self.settings
-    }
-}
-
 impl From<&Http3Parameters> for HSettings {
     fn from(conn_param: &Http3Parameters) -> Self {
         Self {
@@ -265,7 +256,7 @@ impl HttpZeroRttChecker {
     /// Save the settings that matter for 0-RTT.
     #[must_use]
     pub fn save(settings: &Http3Parameters) -> Vec<u8> {
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         enc.encode_varint(SETTINGS_ZERO_RTT_VERSION)
             .encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY)
             .encode_varint(settings.get_max_table_size_decoder())
@@ -340,13 +331,11 @@ impl ZeroRttChecker for HttpZeroRttChecker {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::Encoder;
-
     use super::*;
 
     #[test]
     fn unknown_setting_type_ignored() {
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
 
         // Add a known setting.
         enc.encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY);
@@ -376,7 +365,7 @@ mod tests {
 
     #[test]
     fn not_enough_data_error() {
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
 
         // Add a complete setting.
         enc.encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY);
@@ -398,14 +387,14 @@ mod tests {
     fn datagram_settings() {
         for setting in [SETTINGS_H3_DATAGRAM, SETTINGS_H3_DATAGRAM_DRAFT04] {
             // Valid value accepted.
-            let mut enc = Encoder::new();
+            let mut enc = Encoder::default();
             enc.encode_varint(setting).encode_varint(1u64);
             let mut s = HSettings::new(&[]);
             s.decode_frame_contents(&mut enc.as_decoder()).unwrap();
             assert_eq!(s.get(HSettingType::EnableH3Datagram), 1);
 
             // Invalid value rejected.
-            enc = Encoder::new();
+            enc = Encoder::default();
             enc.encode_varint(setting).encode_varint(2u64);
             let mut s = HSettings::new(&[]);
             assert_eq!(
@@ -419,7 +408,7 @@ mod tests {
             (SETTINGS_H3_DATAGRAM, SETTINGS_H3_DATAGRAM_DRAFT04, 1),
             (SETTINGS_H3_DATAGRAM_DRAFT04, SETTINGS_H3_DATAGRAM, 0),
         ] {
-            let mut enc = Encoder::new();
+            let mut enc = Encoder::default();
             enc.encode_varint(first).encode_varint(expected);
             enc.encode_varint(second).encode_varint(1 - expected);
             let mut s = HSettings::new(&[]);
@@ -429,7 +418,7 @@ mod tests {
     }
 
     fn make_0rtt_token(settings: &[(u64, u64)]) -> Vec<u8> {
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         enc.encode_varint(SETTINGS_ZERO_RTT_VERSION);
         for (k, v) in settings {
             enc.encode_varint(*k).encode_varint(*v);

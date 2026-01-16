@@ -10,7 +10,6 @@
 )]
 
 use std::{
-    ops::Deref,
     os::raw::c_void,
     pin::Pin,
     sync::OnceLock,
@@ -82,16 +81,9 @@ pub fn init() {
 }
 
 /// Time wraps Instant and provides conversion functions into `PRTime`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, derive_more::Deref)]
 pub struct Time {
     t: Instant,
-}
-
-impl Deref for Time {
-    type Target = Instant;
-    fn deref(&self) -> &Self::Target {
-        &self.t
-    }
 }
 
 impl From<Instant> for Time {
@@ -148,7 +140,7 @@ impl From<Time> for Instant {
 }
 
 /// Interval wraps Duration and provides conversion functions into `PRTime`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, derive_more::From)]
 pub struct Interval {
     d: Duration,
 }
@@ -159,12 +151,6 @@ impl TryFrom<PRTime> for Interval {
         Ok(Self {
             d: Duration::from_micros(u64::try_from(prtime)?),
         })
-    }
-}
-
-impl From<Duration> for Interval {
-    fn from(d: Duration) -> Self {
-        Self { d }
     }
 }
 
@@ -182,7 +168,7 @@ pub struct TimeHolder {
 }
 
 impl TimeHolder {
-    unsafe extern "C" fn time_func(arg: *mut c_void) -> PRTime {
+    const unsafe extern "C" fn time_func(arg: *mut c_void) -> PRTime {
         let p = arg as *const PRTime;
         *p.as_ref().unwrap()
     }
@@ -208,7 +194,7 @@ impl Default for TimeHolder {
 mod test {
     use std::time::{Duration, Instant};
 
-    use super::{get_base, init, Interval, PRTime, Time};
+    use super::{get_base, init, Interval, PRTime, Time, TimeZero};
     use crate::err::Res;
 
     #[test]
@@ -241,6 +227,24 @@ mod test {
         let base = get_base();
         let t = Time::from(base.instant.checked_sub(DELTA).unwrap());
         assert_eq!(Instant::from(t) + DELTA, base.instant);
+
+        // Convert back to PRTime to cover the backwards conversion path.
+        let pr: PRTime = t.try_into().expect("convert past time to PRTime");
+        let delta_micros = PRTime::try_from(DELTA.as_micros()).unwrap();
+        assert_eq!(pr, base.prtime - delta_micros);
+    }
+
+    #[test]
+    fn timezero_baseline_future() {
+        let tz = TimeZero::baseline(Instant::now() + Duration::from_secs(10));
+        let now = Instant::now();
+        assert!(tz.instant <= now && tz.instant + Duration::from_millis(100) > now);
+    }
+
+    #[test]
+    fn timezero_baseline_past() {
+        let past = Instant::now().checked_sub(Duration::from_secs(5)).unwrap();
+        assert_eq!(TimeZero::baseline(past).instant, past);
     }
 
     #[test]

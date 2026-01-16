@@ -14,7 +14,7 @@ runs:
   steps:
     - name: Install system NSS (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && inputs.target == '' }}
+      if: ${{ runner.os == 'Linux' && inputs.target == '' && runner.environment != 'self-hosted' }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -23,7 +23,7 @@ runs:
 
     - name: Install system NSS (MacOS)
       shell: bash
-      if: ${{ runner.os == 'MacOS' && runner.environment == 'github-hosted' && inputs.target == '' }}
+      if: ${{ runner.os == 'MacOS' && inputs.target == '' }}
       run: |
         [ "$BREW_UPDATED" ] || brew update && echo "BREW_UPDATED=1" >> "$GITHUB_ENV"
         brew install nss
@@ -88,37 +88,33 @@ runs:
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
 
-    - name: Checkout NSS
+    - name: Retrieve NSS
+      id: nss
       if: ${{ !steps.system_nss.outputs.suitable }}
-      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-      with:
-        repository: nss-dev/nss
-        path: nss
-        persist-credentials: false
+      shell: bash
+      env:
+        NSS_VERSION: 3.119.1 # TODO: Bump this periodically; also in qns/Dockerfile.
+      run: |
+        NSS_TAG=${NSS_VERSION//./_}
+        curl -L https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_TAG}.tar.gz |
+          tar xz --strip-components=1
+        echo "version=$NSS_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Retrieve NSPR
       id: nspr
       if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
       env:
-        NSPR_VERSION: 4.38.2 # This changes so rarely that we can hardcode it.
+        NSPR_VERSION: 4.38.2 # TODO: Bump this periodically; also in qns/Dockerfile
       run: |
         curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz |
           tar xz --strip-components=1
         echo "version=$NSPR_VERSION" >> "$GITHUB_OUTPUT"
 
-    - name: Store NSS version
-      id: nss
-      if: ${{ !steps.system_nss.outputs.suitable }}
-      shell: bash
-      run: |
-        NSS_HEAD=$(git -C nss rev-parse HEAD)
-        echo "version=$NSS_HEAD" >> "$GITHUB_OUTPUT"
-
     - name: Store Ubuntu release code name (Linux)
       id: ubuntu_release
       shell: bash
-      if: ${{ runner.os == 'Linux' && !steps.system_nss.outputs.suitable && runner.environment == 'github-hosted' }}
+      if: ${{ runner.os == 'Linux' && !steps.system_nss.outputs.suitable }}
       run: |
         # Store Ubuntu release codename for use in cache key.
         . /etc/os-release
@@ -126,7 +122,7 @@ runs:
 
     - name: Cache NSS
       id: cache
-      if: ${{ !steps.system_nss.outputs.suitable && runner.environment == 'github-hosted' }}
+      if: ${{ !steps.system_nss.outputs.suitable }}
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: dist
@@ -137,10 +133,9 @@ runs:
       if: ${{ !steps.system_nss.outputs.suitable }}
       env:
         CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
-        RUNNER_ENVIRONMENT: ${{ runner.environment }}
       shell: bash
       run: |
-        if [ "$RUNNER_ENVIRONMENT" != "github-hosted" ] || [ ! "$CACHE_HIT" ]; then
+        if [ ! "$CACHE_HIT" ]; then
           echo "Building NSS from source"
           echo "build_nss=1" >> "$GITHUB_OUTPUT"
         else
@@ -149,7 +144,7 @@ runs:
 
     - name: Install build dependencies (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && steps.check_build.outputs.build_nss && runner.environment == 'github-hosted' }}
+      if: ${{ runner.os == 'Linux' && steps.check_build.outputs.build_nss && runner.environment != 'self-hosted' }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: sudo apt-get install -y --no-install-recommends gyp ninja-build
