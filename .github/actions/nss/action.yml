@@ -253,7 +253,7 @@ runs:
           cp -vaL "$LIB_DIR"/* "dist/Release/lib"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-          ls -la "$NSS_DIR/.."
+          ls -la
           ls -la "$NSS_DIR"
           $NSS_DIR/build.sh -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static
         fi
