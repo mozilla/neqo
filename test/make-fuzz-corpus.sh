@@ -51,7 +51,7 @@ cargo fuzz build --dev
 # "cargo fuzz" cannot do this, so use the underlying LLVM fuzzer binary directly.
 for fuzzer in $(cargo fuzz list); do
     # client_initial and server_initial are processed monthly; others weekly.
-    # MONTHLY_ONLY unset means process all targets, true means only monthly, false means only weekly.
+    # MONTHLY_ONLY empty/unset means process all targets, "true" means only monthly, "false" means only weekly.
     case "$fuzzer" in
         client_initial|server_initial)
             if [ "${MONTHLY_ONLY-}" = "false" ]; then
