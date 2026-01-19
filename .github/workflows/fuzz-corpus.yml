@@ -50,7 +50,7 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHA: ${{ github.sha }}
           # Monthly schedule or manual trigger with monthly-only=true
-          MONTHLY_ONLY: ${{ github.event.schedule == '0 0 1 * *' || inputs.monthly-only == true }}
+          MONTHLY_ONLY: ${{ github.event.schedule == '0 0 1 * *' || inputs.monthly-only }}
         run: |
           ./test/make-fuzz-corpus.sh
           # If there are no new corpus samples, exit.
