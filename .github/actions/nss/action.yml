@@ -19,7 +19,7 @@ runs:
         DEBIAN_FRONTEND: noninteractive
       run: |
         [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
-        sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config
+        sudo apt-get install -y --no-install-recommends libnss3-dev
 
     - name: Install system NSS (MacOS)
       shell: bash
@@ -253,5 +253,6 @@ runs:
           cp -vaL "$LIB_DIR"/* "dist/Release/lib"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
+          ls -la "$NSS_DIR"
           $NSS_DIR/build.sh -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static
         fi
