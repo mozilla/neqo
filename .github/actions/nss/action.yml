@@ -96,8 +96,9 @@ runs:
         NSS_VERSION: 3.120 # TODO: Bump this periodically; also in qns/Dockerfile.
       run: |
         NSS_TAG=${NSS_VERSION//./_}
-        curl -L https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_VERSION}.tar.gz |
-          tar xz --strip-components=1
+        NSS_URL="https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_VERSION}.tar.gz"
+        echo "Retrieving NSS $NSS_VERSION from $NSS_URL"
+        curl -L "$NSS_URL" | tar xz --strip-components=1
         echo "version=$NSS_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Retrieve NSPR
@@ -107,8 +108,9 @@ runs:
       env:
         NSPR_VERSION: 4.38.2 # TODO: Bump this periodically; also in qns/Dockerfile
       run: |
-        curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz |
-          tar xz --strip-components=1
+        NSPR_URL="https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz"
+        echo "Retrieving NSPR $NSPR_VERSION from $NSPR_URL"
+        curl -L "$NSPR_URL" | tar xz --strip-components=1
         echo "version=$NSPR_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Store Ubuntu release code name (Linux)
