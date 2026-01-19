@@ -87,7 +87,6 @@ fn setup_clang() {
     };
     let libclang_dir = mozbuild_root.join("clang").join("lib");
     if libclang_dir.is_dir() {
-        // TODO: Audit that the environment access only happens in single-threaded code.
         unsafe {
             env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
         }

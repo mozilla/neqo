@@ -79,18 +79,16 @@ impl Secrets {
         secret: *mut PK11SymKey,
         arg: *mut c_void,
     ) {
-        unsafe {
-            let Ok(epoch) = Epoch::try_from(epoch) else {
-                debug_assert!(false, "Invalid epoch");
-                // Don't touch secrets.
-                return;
-            };
-            let Some(secrets) = arg.cast::<Self>().as_mut() else {
-                debug_assert!(false, "No secrets");
-                return;
-            };
-            secrets.put_raw(epoch, dir, secret);
-        }
+        let Ok(epoch) = Epoch::try_from(epoch) else {
+            debug_assert!(false, "Invalid epoch");
+            // Don't touch secrets.
+            return;
+        };
+        let Some(secrets) = (unsafe { arg.cast::<Self>().as_mut() }) else {
+            debug_assert!(false, "No secrets");
+            return;
+        };
+        secrets.put_raw(epoch, dir, secret);
     }
 
     fn put_raw(&mut self, epoch: Epoch, dir: SSLSecretDirection::Type, key_ptr: *mut PK11SymKey) {

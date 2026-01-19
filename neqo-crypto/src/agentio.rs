@@ -100,20 +100,18 @@ impl RecordList {
         len: c_uint,
         arg: *mut c_void,
     ) -> ssl::SECStatus {
-        unsafe {
-            let Ok(epoch) = Epoch::try_from(epoch) else {
-                return ssl::SECFailure;
-            };
-            let Ok(ct) = ContentType::try_from(ct) else {
-                return ssl::SECFailure;
-            };
-            let Some(records) = arg.cast::<Self>().as_mut() else {
-                return ssl::SECFailure;
-            };
-            let slice = null_safe_slice(data, len);
-            records.append(epoch, ct, slice);
-            ssl::SECSuccess
-        }
+        let Ok(epoch) = Epoch::try_from(epoch) else {
+            return ssl::SECFailure;
+        };
+        let Ok(ct) = ContentType::try_from(ct) else {
+            return ssl::SECFailure;
+        };
+        let Some(records) = (unsafe { arg.cast::<Self>().as_mut() }) else {
+            return ssl::SECFailure;
+        };
+        let slice = unsafe { null_safe_slice(data, len) };
+        records.append(epoch, ct, slice);
+        ssl::SECSuccess
     }
 
     /// Create a new record list.
@@ -267,21 +265,18 @@ unsafe extern "C" fn agent_close(fd: PrFd) -> PrStatus {
         if let Some(dtor) = (*fd).dtor {
             dtor(fd);
         }
-        PR_SUCCESS
     }
+    PR_SUCCESS
 }
 
 unsafe extern "C" fn agent_read(mut fd: PrFd, buf: *mut c_void, amount: prio::PRInt32) -> PrStatus {
-    unsafe {
-        let io = AgentIo::borrow(&mut fd);
-        if let Ok(a) = usize::try_from(amount) {
-            match io.input.read_input(buf.cast(), a) {
-                Ok(_) => PR_SUCCESS,
-                Err(_) => PR_FAILURE,
-            }
-        } else {
-            PR_FAILURE
-        }
+    let io = unsafe { AgentIo::borrow(&mut fd) };
+    let Ok(a) = usize::try_from(amount) else {
+        return PR_FAILURE;
+    };
+    match io.input.read_input(buf.cast(), a) {
+        Ok(_) => PR_SUCCESS,
+        Err(_) => PR_FAILURE,
     }
 }
 
@@ -292,19 +287,16 @@ unsafe extern "C" fn agent_recv(
     flags: prio::PRIntn,
     _timeout: prio::PRIntervalTime,
 ) -> prio::PRInt32 {
-    unsafe {
-        let io = AgentIo::borrow(&mut fd);
-        if flags != 0 {
-            return PR_FAILURE;
-        }
-        if let Ok(a) = usize::try_from(amount) {
-            io.input.read_input(buf.cast(), a).map_or(PR_FAILURE, |v| {
-                prio::PRInt32::try_from(v).unwrap_or(PR_FAILURE)
-            })
-        } else {
-            PR_FAILURE
-        }
+    let io = unsafe { AgentIo::borrow(&mut fd) };
+    if flags != 0 {
+        return PR_FAILURE;
     }
+    let Ok(a) = usize::try_from(amount) else {
+        return PR_FAILURE;
+    };
+    io.input.read_input(buf.cast(), a).map_or(PR_FAILURE, |v| {
+        prio::PRInt32::try_from(v).unwrap_or(PR_FAILURE)
+    })
 }
 
 unsafe extern "C" fn agent_write(
@@ -312,13 +304,11 @@ unsafe extern "C" fn agent_write(
     buf: *const c_void,
     amount: prio::PRInt32,
 ) -> PrStatus {
-    unsafe {
-        let io = AgentIo::borrow(&mut fd);
-        usize::try_from(amount).map_or(PR_FAILURE, |a| {
-            io.save_output(buf.cast(), a);
-            amount
-        })
-    }
+    let io = unsafe { AgentIo::borrow(&mut fd) };
+    usize::try_from(amount).map_or(PR_FAILURE, |a| {
+        io.save_output(buf.cast(), a);
+        amount
+    })
 }
 
 unsafe extern "C" fn agent_send(
@@ -328,34 +318,27 @@ unsafe extern "C" fn agent_send(
     flags: prio::PRIntn,
     _timeout: prio::PRIntervalTime,
 ) -> prio::PRInt32 {
-    unsafe {
-        let io = AgentIo::borrow(&mut fd);
-
-        if flags != 0 {
-            return PR_FAILURE;
-        }
-        usize::try_from(amount).map_or(PR_FAILURE, |a| {
-            io.save_output(buf.cast(), a);
-            amount
-        })
+    let io = unsafe { AgentIo::borrow(&mut fd) };
+    if flags != 0 {
+        return PR_FAILURE;
     }
+    usize::try_from(amount).map_or(PR_FAILURE, |a| {
+        io.save_output(buf.cast(), a);
+        amount
+    })
 }
 
 unsafe extern "C" fn agent_available(mut fd: PrFd) -> prio::PRInt32 {
-    unsafe {
-        let io = AgentIo::borrow(&mut fd);
-        io.input.available.try_into().unwrap_or(PR_FAILURE)
-    }
+    let io = unsafe { AgentIo::borrow(&mut fd) };
+    io.input.available.try_into().unwrap_or(PR_FAILURE)
 }
 
 unsafe extern "C" fn agent_available64(mut fd: PrFd) -> prio::PRInt64 {
-    unsafe {
-        let io = AgentIo::borrow(&mut fd);
-        io.input
-            .available
-            .try_into()
-            .unwrap_or_else(|_| PR_FAILURE.into())
-    }
+    let io = unsafe { AgentIo::borrow(&mut fd) };
+    io.input
+        .available
+        .try_into()
+        .unwrap_or_else(|_| PR_FAILURE.into())
 }
 
 #[expect(
@@ -363,30 +346,27 @@ unsafe extern "C" fn agent_available64(mut fd: PrFd) -> prio::PRInt64 {
     reason = "Cast is safe because prio::PR_AF_INET is 2."
 )]
 const unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrStatus {
-    unsafe {
-        let Some(a) = addr.as_mut() else {
-            return PR_FAILURE;
-        };
-        a.inet.family = prio::PR_AF_INET as prio::PRUint16;
-        a.inet.port = 0;
-        a.inet.ip = 0;
-        PR_SUCCESS
-    }
+    let Some(a) = (unsafe { addr.as_mut() }) else {
+        return PR_FAILURE;
+    };
+    a.inet.family = prio::PR_AF_INET as prio::PRUint16;
+    a.inet.port = 0;
+    a.inet.ip = 0;
+    PR_SUCCESS
 }
 
 const unsafe extern "C" fn agent_getsockopt(
     _fd: PrFd,
     opt: *mut prio::PRSocketOptionData,
 ) -> PrStatus {
-    unsafe {
-        if let Some(o) = opt.as_mut() {
-            if o.option == prio::PRSockOption::PR_SockOpt_Nonblocking {
-                o.value.non_blocking = 1;
-                return PR_SUCCESS;
-            }
-        }
-        PR_FAILURE
+    let Some(o) = (unsafe { opt.as_mut() }) else {
+        return PR_FAILURE;
+    };
+    if o.option == prio::PRSockOption::PR_SockOpt_Nonblocking {
+        o.value.non_blocking = 1;
+        return PR_SUCCESS;
     }
+    PR_FAILURE
 }
 
 pub const METHODS: &prio::PRIOMethods = &prio::PRIOMethods {

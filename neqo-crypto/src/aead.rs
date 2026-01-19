@@ -122,9 +122,9 @@ impl RealAead {
         secret: *mut PK11SymKey,
         prefix: &str,
     ) -> Res<Self> {
+        let p = prefix.as_bytes();
+        let mut ctx: *mut SSLAeadContext = null_mut();
         unsafe {
-            let p = prefix.as_bytes();
-            let mut ctx: *mut SSLAeadContext = null_mut();
             SSL_MakeAead(
                 version,
                 cipher,
@@ -133,10 +133,10 @@ impl RealAead {
                 c_uint::try_from(p.len())?,
                 &raw mut ctx,
             )?;
-            Ok(Self {
-                ctx: AeadContext::from_ptr(ctx)?,
-            })
         }
+        Ok(Self {
+            ctx: AeadContext::from_ptr(ctx)?,
+        })
     }
 }
 

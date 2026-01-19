@@ -47,7 +47,7 @@ type Rng = Rc<RefCell<Random>>;
 /// A macro that turns a list of values into boxed versions of the same.
 #[macro_export]
 macro_rules! boxed {
-    [$($v:expr_2021),+ $(,)?] => {
+    [$($v:expr),+ $(,)?] => {
         vec![ $( Box::new($v) as _ ),+ ]
     };
 }
@@ -63,10 +63,10 @@ macro_rules! boxed {
 /// to the value returned by the setup.
 #[macro_export]
 macro_rules! simulate {
-    ($n:ident, [ $($v:expr_2021),+ $(,)? ] $(,)?) => {
+    ($n:ident, [ $($v:expr),+ $(,)? ] $(,)?) => {
         simulate!($n, (), [ $(|_| $v),+ ]);
     };
-    ($n:ident, $setup:expr_2021, [ $( $v:expr_2021 ),+ $(,)? ] $(,)?) => {
+    ($n:ident, $setup:expr, [ $( $v:expr ),+ $(,)? ] $(,)?) => {
         #[test]
         fn $n() {
             let fixture = $setup;

@@ -98,10 +98,8 @@ impl ExtensionTracker {
     where
         F: FnOnce(&mut dyn ExtensionHandler) -> T,
     {
-        unsafe {
-            let rc = arg.cast::<BoxedExtensionHandler>().as_mut().unwrap();
-            f(&mut *rc.borrow_mut())
-        }
+        let rc = unsafe { arg.cast::<BoxedExtensionHandler>().as_mut().unwrap() };
+        f(&mut *rc.borrow_mut())
     }
 
     unsafe extern "C" fn extension_writer(
@@ -112,18 +110,19 @@ impl ExtensionTracker {
         max_len: c_uint,
         arg: *mut c_void,
     ) -> PRBool {
+        // The input message type is larger than the `u8` range of `SSLHandshakeType`.
+        // The only valid value outside that range is for ECH outer ClientHello,
+        // which we need to have special handling for.
+        let (msg, ch_outer) = HandshakeMessage::try_from(message).map_or_else(
+            |_| {
+                debug_assert_eq!(message, SSLHandshakeType::ssl_hs_ech_outer_client_hello);
+                (TLS_HS_CLIENT_HELLO, true)
+            },
+            |msg| (msg, false),
+        );
+        let d = unsafe { std::slice::from_raw_parts_mut(data, max_len as usize) };
+        // provided by NSS for writing the output length.
         unsafe {
-            // The input message type is larger than the `u8` range of `SSLHandshakeType`.
-            // The only valid value outside that range is for ECH outer ClientHello,
-            // which we need to have special handling for.
-            let (msg, ch_outer) = HandshakeMessage::try_from(message).map_or_else(
-                |_| {
-                    debug_assert_eq!(message, SSLHandshakeType::ssl_hs_ech_outer_client_hello);
-                    (TLS_HS_CLIENT_HELLO, true)
-                },
-                |msg| (msg, false),
-            );
-            let d = std::slice::from_raw_parts_mut(data, max_len as usize);
             Self::wrap_handler_call(arg, |handler| match handler.write(msg, ch_outer, d) {
                 ExtensionWriterResult::Write(sz) => {
                     *len = c_uint::try_from(sz).expect("integer overflow from extension writer");
@@ -142,8 +141,9 @@ impl ExtensionTracker {
         alert: *mut SSLAlertDescription,
         arg: *mut c_void,
     ) -> SECStatus {
+        let d = unsafe { null_safe_slice(data, len) };
+        // provided by NSS for writing the alert description.
         unsafe {
-            let d = null_safe_slice(data, len);
             Self::wrap_handler_call(arg, |handler| {
                 // Cast is safe here because the message type is always part of the enum
                 #[allow(

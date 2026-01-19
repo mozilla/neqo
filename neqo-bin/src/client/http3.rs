@@ -305,14 +305,13 @@ impl StreamHandler for DownloadStreamHandler {
         }
 
         if fin {
-            match self.out_file.take() {
-                Some(mut out_file) => {
-                    out_file.flush()?;
-                }
-                _ => {
+            self.out_file.take().map_or_else(
+                || {
                     qdebug!("<FIN[{stream_id}]>");
-                }
-            }
+                    Ok(())
+                },
+                |mut out_file| out_file.flush(),
+            )?;
         }
 
         Ok(())

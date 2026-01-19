@@ -202,7 +202,7 @@ mod tests {
     }
 
     macro_rules! uint_tc {
-        [$( $b:expr_2021 => $v:expr_2021 ),+ $(,)?] => {
+        [$( $b:expr => $v:expr ),+ $(,)?] => {
             vec![ $( UintTestCase { b: String::from($b), v: $v, } ),+]
         };
     }

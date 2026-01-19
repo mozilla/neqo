@@ -500,13 +500,13 @@ impl SecretAgent {
         _check_sig: PRBool,
         _is_server: PRBool,
     ) -> ssl::SECStatus {
+        let auth_required_ptr = arg.cast::<bool>();
         unsafe {
-            let auth_required_ptr = arg.cast::<bool>();
             *auth_required_ptr = true;
-            // NSS insists on getting SECWouldBlock here rather than accepting
-            // the usual combination of PR_WOULD_BLOCK_ERROR and SECFailure.
-            ssl::_SECStatus_SECWouldBlock
         }
+        // NSS insists on getting SECWouldBlock here rather than accepting
+        // the usual combination of PR_WOULD_BLOCK_ERROR and SECFailure.
+        ssl::_SECStatus_SECWouldBlock
     }
 
     unsafe extern "C" fn alert_sent_cb(
@@ -514,16 +514,14 @@ impl SecretAgent {
         arg: *mut c_void,
         alert: *const ssl::SSLAlert,
     ) {
-        unsafe {
-            let alert = alert.as_ref().unwrap();
-            if alert.level == 2 {
-                // Fatal alerts demand attention.
-                let st = arg.cast::<Option<Alert>>().as_mut().unwrap();
-                if st.is_none() {
-                    *st = Some(alert.description);
-                } else {
-                    qwarn!("[{fd:p}] duplicate alert {}", alert.description);
-                }
+        let alert = unsafe { alert.as_ref().unwrap() };
+        if alert.level == 2 {
+            // Fatal alerts demand attention.
+            let st = unsafe { arg.cast::<Option<Alert>>().as_mut().unwrap() };
+            if st.is_none() {
+                *st = Some(alert.description);
+            } else {
+                qwarn!("[{fd:p}] duplicate alert {}", alert.description);
             }
         }
     }
@@ -1073,40 +1071,38 @@ impl Client {
         len: c_uint,
         arg: *mut c_void,
     ) -> ssl::SECStatus {
-        unsafe {
-            let mut info: MaybeUninit<ssl::SSLResumptionTokenInfo> = MaybeUninit::uninit();
-            let Ok(info_len) = c_uint::try_from(size_of::<ssl::SSLResumptionTokenInfo>()) else {
-                return ssl::SECFailure;
-            };
-            let info_res =
-                &ssl::SSL_GetResumptionTokenInfo(token, len, info.as_mut_ptr(), info_len);
-            if info_res.is_err() {
-                // Ignore the token.
-                return ssl::SECSuccess;
-            }
-            let expiration_time = info.assume_init().expirationTime;
-            if ssl::SSL_DestroyResumptionTokenInfo(info.as_mut_ptr()).is_err() {
-                // Ignore the token.
-                return ssl::SECSuccess;
-            }
-            let Some(resumption) = arg.cast::<Vec<ResumptionToken>>().as_mut() else {
-                return ssl::SECFailure;
-            };
-            let Ok(len) = usize::try_from(len) else {
-                return ssl::SECFailure;
-            };
-            let mut v = Vec::with_capacity(len);
-            v.extend_from_slice(null_safe_slice(token, len));
-            qdebug!("[{fd:p}] Got resumption token {}", hex_snip_middle(&v));
-
-            if resumption.len() >= MAX_TICKETS {
-                resumption.remove(0);
-            }
-            if let Ok(t) = Time::try_from(expiration_time) {
-                resumption.push(ResumptionToken::new(v, *t));
-            }
-            ssl::SECSuccess
+        let mut info: MaybeUninit<ssl::SSLResumptionTokenInfo> = MaybeUninit::uninit();
+        let Ok(info_len) = c_uint::try_from(size_of::<ssl::SSLResumptionTokenInfo>()) else {
+            return ssl::SECFailure;
+        };
+        let info_res =
+            unsafe { ssl::SSL_GetResumptionTokenInfo(token, len, info.as_mut_ptr(), info_len) };
+        if info_res.is_err() {
+            // Ignore the token.
+            return ssl::SECSuccess;
         }
+        let expiration_time = unsafe { info.assume_init() }.expirationTime;
+        if unsafe { ssl::SSL_DestroyResumptionTokenInfo(info.as_mut_ptr()) }.is_err() {
+            // Ignore the token.
+            return ssl::SECSuccess;
+        }
+        let Some(resumption) = (unsafe { arg.cast::<Vec<ResumptionToken>>().as_mut() }) else {
+            return ssl::SECFailure;
+        };
+        let Ok(len) = usize::try_from(len) else {
+            return ssl::SECFailure;
+        };
+        let mut v = Vec::with_capacity(len);
+        v.extend_from_slice(unsafe { null_safe_slice(token, len) });
+        qdebug!("[{fd:p}] Got resumption token {}", hex_snip_middle(&v));
+
+        if resumption.len() >= MAX_TICKETS {
+            resumption.remove(0);
+        }
+        if let Ok(t) = Time::try_from(expiration_time) {
+            resumption.push(ResumptionToken::new(v, *t));
+        }
+        ssl::SECSuccess
     }
 
     #[must_use]
@@ -1354,31 +1350,31 @@ impl Server {
         retry_token_max: c_uint,
         arg: *mut c_void,
     ) -> ssl::SSLHelloRetryRequestAction::Type {
-        unsafe {
-            if first_hello == 0 {
-                // On the second ClientHello after HelloRetryRequest, skip checks.
-                return ssl::SSLHelloRetryRequestAction::ssl_hello_retry_accept;
-            }
+        if first_hello == 0 {
+            // On the second ClientHello after HelloRetryRequest, skip checks.
+            return ssl::SSLHelloRetryRequestAction::ssl_hello_retry_accept;
+        }
 
-            let check_state = arg.cast::<ZeroRttCheckState>().as_mut().unwrap();
-            let token = null_safe_slice(client_token, usize::try_from(client_token_len).unwrap());
-            match check_state.checker.check(token) {
-                ZeroRttCheckResult::Accept => {
-                    ssl::SSLHelloRetryRequestAction::ssl_hello_retry_accept
-                }
-                ZeroRttCheckResult::Fail => ssl::SSLHelloRetryRequestAction::ssl_hello_retry_fail,
-                ZeroRttCheckResult::Reject => {
-                    ssl::SSLHelloRetryRequestAction::ssl_hello_retry_reject_0rtt
-                }
-                ZeroRttCheckResult::HelloRetryRequest(tok) => {
-                    // Don't bother propagating errors from this, because it should be caught in
-                    // testing.
-                    assert!(tok.len() <= usize::try_from(retry_token_max).unwrap());
+        let check_state = unsafe { arg.cast::<ZeroRttCheckState>().as_mut().unwrap() };
+        let token =
+            unsafe { null_safe_slice(client_token, usize::try_from(client_token_len).unwrap()) };
+        match check_state.checker.check(token) {
+            ZeroRttCheckResult::Accept => ssl::SSLHelloRetryRequestAction::ssl_hello_retry_accept,
+            ZeroRttCheckResult::Fail => ssl::SSLHelloRetryRequestAction::ssl_hello_retry_fail,
+            ZeroRttCheckResult::Reject => {
+                ssl::SSLHelloRetryRequestAction::ssl_hello_retry_reject_0rtt
+            }
+            ZeroRttCheckResult::HelloRetryRequest(tok) => {
+                // Don't bother propagating errors from this, because it should be caught in
+                // testing.
+                assert!(tok.len() <= usize::try_from(retry_token_max).unwrap());
+                // and `retry_token_len` is a valid pointer provided by NSS.
+                unsafe {
                     let slc = slice::from_raw_parts_mut(retry_token, tok.len());
                     slc.copy_from_slice(&tok);
                     *retry_token_len = c_uint::try_from(tok.len()).unwrap();
-                    ssl::SSLHelloRetryRequestAction::ssl_hello_retry_request
                 }
+                ssl::SSLHelloRetryRequestAction::ssl_hello_retry_request
             }
         }
     }

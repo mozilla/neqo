@@ -183,10 +183,8 @@ pub struct TimeHolder {
 
 impl TimeHolder {
     const unsafe extern "C" fn time_func(arg: *mut c_void) -> PRTime {
-        unsafe {
-            let p = arg as *const PRTime;
-            *p.as_ref().unwrap()
-        }
+        let p = arg as *const PRTime;
+        unsafe { *p.as_ref().unwrap() }
     }
 
     pub fn bind(&mut self, fd: *mut PRFileDesc) -> Res<()> {

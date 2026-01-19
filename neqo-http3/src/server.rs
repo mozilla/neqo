@@ -327,7 +327,7 @@ impl Http3Server {
 
     /// Get all current events. Best used just in debug/testing code, use
     /// `next_event` instead.
-    pub fn events(&self) -> impl Iterator<Item = Http3ServerEvent> + use<> {
+    pub fn events(&self) -> impl Iterator<Item = Http3ServerEvent> {
         self.events.events()
     }
 

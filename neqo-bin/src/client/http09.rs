@@ -340,11 +340,13 @@ impl<'b> Handler<'b> {
                 )?;
 
                 if fin_recvd {
-                    maybe_out_file.take().map_or_else(|| {
-                        qinfo("<FIN[{stream_id}]>");
-                        Ok
-                    }, |mut out_file| out_file.flush())?;
-                    }
+                    maybe_out_file.take().map_or_else(
+                        || {
+                            qinfo!("<FIN[{stream_id}]>");
+                            Ok(())
+                        },
+                        |mut out_file| out_file.flush(),
+                    )?;
                     self.streams.remove(&stream_id);
                     self.download_urls(client);
                 }

@@ -200,11 +200,11 @@ unsafe fn null_safe_slice<'a, T, L>(data: *const T, len: L) -> &'a [T]
 where
     usize: TryFrom<L>,
 {
-    unsafe {
-        let len = usize::try_from(len).unwrap_or_else(|_| panic!("null_safe_slice: size overflow"));
-        if data.is_null() || len == 0 {
-            &[]
-        } else {
+    let len = usize::try_from(len).unwrap_or_else(|_| panic!("null_safe_slice: size overflow"));
+    if data.is_null() || len == 0 {
+        &[]
+    } else {
+        unsafe {
             #[expect(clippy::disallowed_methods, reason = "This is non-null.")]
             std::slice::from_raw_parts(data, len)
         }

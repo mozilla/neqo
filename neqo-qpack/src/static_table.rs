@@ -26,7 +26,7 @@ impl StaticTableEntry {
 }
 
 macro_rules! static_table_entries {
-    [$($i:expr_2021, $n:expr_2021, $v:expr_2021);+ $(;)?] => {
+    [$($i:expr, $n:expr, $v:expr);+ $(;)?] => {
         &[ $(StaticTableEntry { index: $i, name: $n, value: $v }),+ ]
     };
 }
