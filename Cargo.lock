@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "clap",
  "clap-verbosity-flag",
@@ -933,7 +933,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-common"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "codspeed-criterion-compat",
  "derive_more",
@@ -952,7 +952,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-crypto"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "bindgen",
  "derive_more",
@@ -972,7 +972,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-http3"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "codspeed-criterion-compat",
  "derive_more",
@@ -994,7 +994,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-qpack"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "derive_more",
  "log",
@@ -1009,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-transport"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "codspeed-criterion-compat",
  "derive_more",
@@ -1032,7 +1032,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-udp"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -1431,7 +1431,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "derive_more",
  "log",
