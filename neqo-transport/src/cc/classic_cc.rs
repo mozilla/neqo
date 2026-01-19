@@ -329,7 +329,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             if self.current.acked_bytes >= bytes_for_increase {
                 self.current.acked_bytes -= bytes_for_increase;
                 self.current.congestion_window += self.max_datagram_size(); // or is this the
-                                                                            // current MTU?
+                // current MTU?
             }
             // The number of bytes we require can go down over time with Cubic.
             // That might result in an excessive rate of increase, so limit the number of unused
@@ -605,7 +605,9 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
         // If all of them have been removed we detected a spurious congestion event.
         if self.maybe_lost_packets.is_empty() {
-            qdebug!("Spurious detection: maybe_lost_packets emptied -> calling on_spurious_congestion_event");
+            qdebug!(
+                "Spurious detection: maybe_lost_packets emptied -> calling on_spurious_congestion_event"
+            );
             self.on_spurious_congestion_event(cc_stats);
         }
     }
@@ -747,7 +749,11 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         // Start a new congestion event if lost or ECN CE marked packet was sent
         // after the start of the previous congestion recovery period.
         if !self.after_recovery_start(last_packet) {
-            qdebug!("Called on_congestion_event during recovery -> don't react; last_packet {}, recovery_start {}", last_packet.pn(), self.current.recovery_start.unwrap_or(0));
+            qdebug!(
+                "Called on_congestion_event during recovery -> don't react; last_packet {}, recovery_start {}",
+                last_packet.pn(),
+                self.current.recovery_start.unwrap_or(0)
+            );
             return false;
         }
 
@@ -1659,7 +1665,8 @@ mod tests {
         let cwnd_recovered = cc.cwnd();
         assert!(
             cwnd_recovered >= cc.cwnd_initial(),
-            "cwnd should have grown back, but cwnd_recovered is less than cwnd_initial {cwnd_recovered} < {}", cc.cwnd_initial()
+            "cwnd should have grown back, but cwnd_recovered is less than cwnd_initial {cwnd_recovered} < {}",
+            cc.cwnd_initial()
         );
 
         // Now detect spurious (late)
