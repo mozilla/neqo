@@ -93,10 +93,10 @@ runs:
       if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
       env:
-        NSS_VERSION: 3.119.1 # TODO: Bump this periodically; also in qns/Dockerfile.
+        NSS_VERSION: 3.120 # TODO: Bump this periodically; also in qns/Dockerfile.
       run: |
         NSS_TAG=${NSS_VERSION//./_}
-        curl -L https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_TAG}.tar.gz |
+        curl -L https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_VERSION}.tar.gz |
           tar xz --strip-components=1
         echo "version=$NSS_VERSION" >> "$GITHUB_OUTPUT"
 
