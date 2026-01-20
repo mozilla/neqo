@@ -37,7 +37,7 @@ runs:
       run: |
         if ! pkg-config --atleast-version "$MIN_VERSION" nss; then
           echo -n "System NSS needs ${MIN_VERSION}, got "
-          pkg-config --modversion nss
+          pkg-config --modversion nss 2>/dev/null || echo "pkg-config error"
           exit 0
         fi
         echo "System NSS is suitable: $NSS_VERSION"
