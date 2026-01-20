@@ -14,7 +14,7 @@ runs:
   steps:
     - name: Install system NSS (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && inputs.target == '' && runner.environment != 'self-hosted' }}
+      if: ${{ runner.os == 'Linux' && inputs.target == '' && (runner.environment != 'self-hosted' || contains(runner.name, 'CodSpeed')) }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -50,11 +50,11 @@ runs:
       #
       # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
       # is too small for this to be effective there.
-      if: ${{ env.SCCACHE_ENABLED != '1' && !steps.system_nss.outputs.suitable && runner.environment != 'github-hosted' }}
+      if: ${{ env.SCCACHE_ENABLED != '1' && !steps.system_nss.outputs.suitable && runner.environment == 'self-hosted' && !contains(runner.name, 'CodSpeed') }}
       uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
     - name: Enable sscache
-      if: ${{ !steps.system_nss.outputs.suitable && runner.environment != 'github-hosted' }}
+      if: ${{ !steps.system_nss.outputs.suitable && runner.environment == 'self-hosted' && !contains(runner.name, 'CodSpeed') }}
       env:
         RUNNER_ENVIRONMENT: ${{ runner.environment }}
         RUNNER_OS: ${{ runner.os }}
@@ -68,9 +68,7 @@ runs:
         fi
         echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
         echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
-        if [ "$RUNNER_ENVIRONMENT" == "github-hosted" ]; then
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-        fi
+        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
     - name: Retrieve NSS
       id: nss
@@ -130,7 +128,7 @@ runs:
 
     - name: Install build dependencies (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && steps.check_build.outputs.build_nss && runner.environment != 'self-hosted' }}
+      if: ${{ runner.os == 'Linux' && steps.check_build.outputs.build_nss && (runner.environment != 'self-hosted' || contains(runner.name, 'CodSpeed')) }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: sudo apt-get install -y --no-install-recommends gyp ninja-build
