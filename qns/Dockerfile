@@ -24,14 +24,13 @@ ENV NSS_DIR=/nss \
     NSPR_DIR=/nspr \
     LD_LIBRARY_PATH=/dist/Release/lib \
     NSPR_VERSION=4.38.2 \
-    NSS_VERSION=3.119.1
+    NSS_VERSION=3.120
 
 RUN set -eux; \
     mkdir -p "$NSPR_DIR" "$NSS_DIR"; \
     curl -L "https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz" | tar xz --strip-components=2 -C "$NSPR_DIR"; \
     NSS_TAG=$(echo "$NSS_VERSION" | tr '.' '_'); \
-    curl -L "https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_TAG}.tar.gz" | tar xz --strip-components=2 -C "$NSS_DIR";
-
+    curl -L "https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_VERSION}.tar.gz" | tar xz --strip-components=2 -C "$NSS_DIR";
 RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 -o
 
 COPY --from=planner /app/recipe.json recipe.json
