@@ -21,11 +21,11 @@ jobs:
           - os: linux
             runner: ubuntu-24.04
             header: linux.h
-            args: --allowlist-type 'rtattr|rtmsg|ifinfomsg|nlmsghdr'
+            args: --allowlist-type rtattr|rtmsg|ifinfomsg|nlmsghdr
           - os: macos
             runner: macos-15
             header: bsd.h
-            args: --allowlist-type 'rt_msghdr|rt_metrics|if_data' --allowlist-item 'RTAX_MAX|RTM_GET|RTM_VERSION|RTA_DST|RTA_IFP'
+            args: --allowlist-type rt_msghdr|rt_metrics|if_data --allowlist-item RTAX_MAX|RTM_GET|RTM_VERSION|RTA_DST|RTA_IFP
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
