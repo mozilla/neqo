@@ -37,7 +37,7 @@ pub mod network {
     pub use super::{
         delay::{Delay, RandomDelay},
         drop::Drop,
-        mtu::Mtu,
+        mtu::{DynamicMtu, Mtu},
         taildrop::TailDrop,
     };
 }

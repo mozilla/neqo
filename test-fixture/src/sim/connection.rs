@@ -343,3 +343,88 @@ impl Goal for ReceiveData {
         }
     }
 }
+
+/// Sends data and verifies that PMTUD black hole detection triggered on the sender.
+#[derive(Debug)]
+pub struct SendDataExpectPmtudChange {
+    inner: SendData,
+}
+
+impl SendDataExpectPmtudChange {
+    #[must_use]
+    pub const fn new(amount: usize) -> Self {
+        Self {
+            inner: SendData::new(amount),
+        }
+    }
+}
+
+impl Goal for SendDataExpectPmtudChange {
+    fn init(&mut self, c: &mut Connection, now: Instant) {
+        self.inner.init(c, now);
+    }
+
+    fn process(&mut self, c: &mut Connection, now: Instant) -> GoalStatus {
+        self.inner.process(c, now)
+    }
+
+    fn handle_event(
+        &mut self,
+        c: &mut Connection,
+        e: &ConnectionEvent,
+        now: Instant,
+    ) -> GoalStatus {
+        let status = self.inner.handle_event(c, e, now);
+        if status == GoalStatus::Done {
+            assert!(
+                c.stats().pmtud_change > 0,
+                "Expected PMTUD black hole detection to trigger (pmtud_change > 0), got {}",
+                c.stats().pmtud_change
+            );
+        }
+        status
+    }
+}
+
+/// Sends data and verifies that PMTUD black hole detection did NOT trigger.
+#[derive(Debug)]
+pub struct SendDataExpectNoPmtudChange {
+    inner: SendData,
+}
+
+impl SendDataExpectNoPmtudChange {
+    #[must_use]
+    pub const fn new(amount: usize) -> Self {
+        Self {
+            inner: SendData::new(amount),
+        }
+    }
+}
+
+impl Goal for SendDataExpectNoPmtudChange {
+    fn init(&mut self, c: &mut Connection, now: Instant) {
+        self.inner.init(c, now);
+    }
+
+    fn process(&mut self, c: &mut Connection, now: Instant) -> GoalStatus {
+        self.inner.process(c, now)
+    }
+
+    fn handle_event(
+        &mut self,
+        c: &mut Connection,
+        e: &ConnectionEvent,
+        now: Instant,
+    ) -> GoalStatus {
+        let status = self.inner.handle_event(c, e, now);
+        if status == GoalStatus::Done {
+            assert_eq!(
+                c.stats().pmtud_change,
+                0,
+                "Expected no PMTUD black hole detection (pmtud_change == 0), got {}",
+                c.stats().pmtud_change
+            );
+        }
+        status
+    }
+}
