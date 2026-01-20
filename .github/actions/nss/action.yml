@@ -35,25 +35,9 @@ runs:
       shell: bash
       if: inputs.target == ''
       run: |
-        if ! command -v pkg-config &> /dev/null; then
-          echo "pkg-config: not found"
-          exit 0
-        fi
-        if ! pkg-config --exists nss; then
-          echo "pkg-config: NSS not found"
-          exit 0
-        fi
-        NSS_VERSION="$(pkg-config --modversion nss)"
-        if [ "$?" -ne 0 ]; then
-          echo "pkg-config: failed to determine NSS version"
-          exit 0
-        fi
-        NSS_MAJOR=$(echo "$NSS_VERSION" | cut -d. -f1)
-        NSS_MINOR=$(echo "$NSS_VERSION" | cut -d. -f2)
-        REQ_NSS_MAJOR=$(echo "$MIN_VERSION" | cut -d. -f1)
-        REQ_NSS_MINOR=$(echo "$MIN_VERSION" | cut -d. -f2)
-        if [[ "$NSS_MAJOR" -lt "$REQ_NSS_MAJOR" || "$NSS_MAJOR" -eq "$REQ_NSS_MAJOR" && "$NSS_MINOR" -lt "$REQ_NSS_MINOR" ]]; then
-          echo "System NSS is too old: $NSS_VERSION"
+        if ! pkg-config --atleast-version "$MIN_VERSION" nss; then
+          echo -n "System NSS needs ${MIN_VERSION}, got "
+          pkg-config --modversion nss 2>/dev/null || echo "pkg-config error"
           exit 0
         fi
         echo "System NSS is suitable: $NSS_VERSION"
