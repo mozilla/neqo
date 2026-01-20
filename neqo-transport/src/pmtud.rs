@@ -173,13 +173,16 @@ impl Pmtud {
         now: Instant,
         stats: &mut Stats,
     ) {
-        // Black hole detection: check if full-MTU packets are getting through.
-        if acked_pkts.iter().any(|p| p.len() == self.plpmtu()) {
+        // Black hole detection: check if full-MTU packets are getting through on the primary path.
+        if acked_pkts
+            .iter()
+            .any(|p| p.on_primary_path() && p.len() == self.plpmtu())
+        {
             // Full-MTU packets are getting through, no black hole.
             self.loss_count = 0;
             self.some_acked = false;
-        } else if !acked_pkts.is_empty() {
-            // Some packets ACKed - path is alive, but may have a black hole at the current MTU.
+        } else if acked_pkts.iter().any(sent::Packet::on_primary_path) {
+            // Some packets ACKed on the primary path, but none were full-MTU.
             self.some_acked = true;
         }
 
@@ -220,7 +223,10 @@ impl Pmtud {
         now: Instant,
     ) {
         // Black hole detection: if we're losing full-MTU packets while others are ACKed, restart.
-        if lost_packets.iter().any(|p| p.len() == self.plpmtu()) {
+        if lost_packets
+            .iter()
+            .any(|p| p.on_primary_path() && p.len() == self.plpmtu())
+        {
             self.loss_count += 1;
             if self.loss_count >= BLACK_HOLE_THRESHOLD && self.some_acked {
                 qinfo!(
