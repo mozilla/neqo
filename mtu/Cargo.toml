@@ -45,3 +45,7 @@ gecko = ["dep:mozbuild"]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
 
+[[bin]]
+name = "mtu-lookup"
+path = "src/bin/mtu-lookup.rs"
+
