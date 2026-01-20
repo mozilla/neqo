@@ -12,6 +12,37 @@ permissions:
   contents: read
 
 jobs:
+  generate-bindings:
+    name: Generate ${{ matrix.os }} bindings
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-24.04
+            header: linux.h
+            args: --allowlist-type 'rtattr|rtmsg|ifinfomsg|nlmsghdr'
+          - os: macos
+            runner: macos-15
+            header: bsd.h
+            args: --allowlist-type 'rt_msghdr|rt_metrics|if_data' --allowlist-item 'RTAX_MAX|RTM_GET|RTM_VERSION|RTA_DST|RTA_IFP'
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+      - name: Install bindgen-cli
+        run: cargo install bindgen-cli --locked
+      - name: Generate bindings
+        env:
+          OS: ${{ matrix.os }}
+          ARGS: ${{ matrix.args }}
+          HEADER: ${{ matrix.header }}
+        run: |
+          echo "::group::Generated bindings for $OS"
+          bindgen $ARGS --generate-cstr --explicit-padding --with-derive-default "mtu/src/bindings/$HEADER"
+          echo "::endgroup::"
+
   check-android:
     name: Check Android
     runs-on: ubuntu-24.04
@@ -44,4 +75,5 @@ jobs:
           working-directory: mtu
           platform: ${{ matrix.os }}
           codecov-token: ${{ secrets.CODECOV_TOKEN }}
+          generate-bindings: true
 
