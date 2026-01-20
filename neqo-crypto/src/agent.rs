@@ -12,8 +12,8 @@
 use std::{
     cell::RefCell,
     ffi::{CStr, CString},
-    fmt::{self, Debug, Display, Formatter},
-    mem::{size_of, MaybeUninit},
+    fmt::{self, Debug, Formatter},
+    mem::MaybeUninit,
     ops::{Deref, DerefMut},
     os::raw::{c_uint, c_void},
     pin::Pin,
@@ -231,9 +231,9 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
     secstatus_to_res(unsafe {
         ssl::SSL_GetNextProto(
             fd,
-            &mut alpn_state,
+            &raw mut alpn_state,
             chosen.as_mut_ptr(),
-            &mut chosen_len,
+            &raw mut chosen_len,
             c_uint::try_from(chosen.len())?,
         )
     })?;
@@ -421,7 +421,8 @@ impl SecretAgentInfo {
 }
 
 /// `SecretAgent` holds the common parts of client and server.
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("Agent {fd:p}")]
 #[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub struct SecretAgent {
     fd: *mut ssl::PRFileDesc,
@@ -575,7 +576,7 @@ impl SecretAgent {
     /// If the range of versions isn't supported.
     pub fn set_version_range(&mut self, min: Version, max: Version) -> Res<()> {
         let range = ssl::SSLVersionRange { min, max };
-        secstatus_to_res(unsafe { ssl::SSL_VersionRangeSet(self.fd, &range) })
+        secstatus_to_res(unsafe { ssl::SSL_VersionRangeSet(self.fd, &raw const range) })
     }
 
     /// Enable a set of ciphers.  Note that the order of these is not respected.
@@ -988,14 +989,9 @@ impl Drop for SecretAgent {
     }
 }
 
-impl Display for SecretAgent {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Agent {:p}", self.fd)
-    }
-}
-
-#[derive(PartialOrd, Ord, PartialEq, Eq, Clone)]
+#[derive(PartialOrd, Ord, PartialEq, Eq, Clone, derive_more::AsRef)]
 pub struct ResumptionToken {
+    #[as_ref([u8])]
     token: Vec<u8>,
     expiration_time: Instant,
 }
@@ -1006,12 +1002,6 @@ impl Debug for ResumptionToken {
             .field("token", &hex_snip_middle(&self.token))
             .field("expiration_time", &self.expiration_time)
             .finish()
-    }
-}
-
-impl AsRef<[u8]> for ResumptionToken {
-    fn as_ref(&self) -> &[u8] {
-        &self.token
     }
 }
 
@@ -1031,8 +1021,11 @@ impl ResumptionToken {
 }
 
 /// A TLS Client.
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display, derive_more::Deref, derive_more::DerefMut)]
+#[display("Client {:p}", "agent.fd")]
 pub struct Client {
+    #[deref]
+    #[deref_mut]
     agent: SecretAgent,
 
     /// The name of the server we're attempting a connection to.
@@ -1185,25 +1178,6 @@ impl Client {
     }
 }
 
-impl Deref for Client {
-    type Target = SecretAgent;
-    fn deref(&self) -> &SecretAgent {
-        &self.agent
-    }
-}
-
-impl DerefMut for Client {
-    fn deref_mut(&mut self) -> &mut SecretAgent {
-        &mut self.agent
-    }
-}
-
-impl Display for Client {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Client {:p}", self.agent.fd)
-    }
-}
-
 /// `ZeroRttCheckResult` encapsulates the options for handling a `ClientHello`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ZeroRttCheckResult {
@@ -1248,8 +1222,11 @@ impl ZeroRttCheckState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display, derive_more::Deref, derive_more::DerefMut)]
+#[display("Server {:p}", "agent.fd")]
 pub struct Server {
+    #[deref]
+    #[deref_mut]
     agent: SecretAgent,
     /// This holds the HRR callback context.
     zero_rtt_check: Option<Pin<Box<ZeroRttCheckState>>>,
@@ -1316,7 +1293,7 @@ impl Server {
                 // ssl_auth_null means "I don't care what sort of certificate this is".
                 authType: ssl::SSLAuthType::ssl_auth_null,
                 certChain: null(),
-                stapledOCSPResponses: &ocsp_array,
+                stapledOCSPResponses: &raw const ocsp_array,
                 signedCertTimestamps: std::ptr::from_ref(&sct_item).cast(),
                 delegCred: null(),
                 delegCredPrivKey: null(),
@@ -1326,7 +1303,7 @@ impl Server {
                     agent.fd,
                     (*cert).cast(),
                     (*key).cast(),
-                    &extra,
+                    &raw const extra,
                     c_uint::try_from(size_of::<ssl::SSLExtraServerCertDataStr>())?,
                 )
             })?;
@@ -1442,25 +1419,6 @@ impl Server {
         };
         self.ech_config = cfg;
         Ok(())
-    }
-}
-
-impl Deref for Server {
-    type Target = SecretAgent;
-    fn deref(&self) -> &SecretAgent {
-        &self.agent
-    }
-}
-
-impl DerefMut for Server {
-    fn deref_mut(&mut self) -> &mut SecretAgent {
-        &mut self.agent
-    }
-}
-
-impl Display for Server {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Server {:p}", self.agent.fd)
     }
 }
 

@@ -4,15 +4,6 @@ on:
   pull_request:
     branches: ["main"]
   workflow_dispatch:
-    inputs:
-      bencher:
-        type: choice
-        description: Which benchmarking testbed to run on.
-        required: true
-        default: on-prem
-        options:
-          - on-prem
-          - gcp
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
@@ -33,7 +24,7 @@ permissions:
 jobs:
   perfcompare:
     name: Performance comparison
-    runs-on: ${{ inputs.bencher == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || 'self-hosted' }}
+    runs-on: 'self-hosted' # zizmor: ignore[self-hosted-runner]
     defaults:
       run:
         shell: bash
@@ -209,7 +200,7 @@ jobs:
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          TESTBED: ${{ inputs.bencher == 'gcp' && 'GCP' || 'On-prem' }}
+          TESTBED: 'On-prem'
         run: |
           SHA=$(cd neqo && git log origin/main -1 --format=%H)
           echo "$SHA" > main-sha.txt

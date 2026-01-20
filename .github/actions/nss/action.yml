@@ -14,7 +14,7 @@ runs:
   steps:
     - name: Install system NSS (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && inputs.target == '' }}
+      if: ${{ runner.os == 'Linux' && inputs.target == '' && runner.environment != 'self-hosted' }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -23,7 +23,7 @@ runs:
 
     - name: Install system NSS (MacOS)
       shell: bash
-      if: ${{ runner.os == 'MacOS' && runner.environment == 'github-hosted' && inputs.target == '' }}
+      if: ${{ runner.os == 'MacOS' && inputs.target == '' }}
       run: |
         [ "$BREW_UPDATED" ] || brew update && echo "BREW_UPDATED=1" >> "$GITHUB_ENV"
         brew install nss
@@ -98,7 +98,7 @@ runs:
     - name: Store Ubuntu release code name (Linux)
       id: ubuntu_release
       shell: bash
-      if: ${{ runner.os == 'Linux' && !steps.system_nss.outputs.suitable && runner.environment == 'github-hosted' }}
+      if: ${{ runner.os == 'Linux' && !steps.system_nss.outputs.suitable }}
       run: |
         # Store Ubuntu release codename for use in cache key.
         . /etc/os-release
@@ -106,7 +106,7 @@ runs:
 
     - name: Cache NSS
       id: cache
-      if: ${{ !steps.system_nss.outputs.suitable && runner.environment == 'github-hosted' }}
+      if: ${{ !steps.system_nss.outputs.suitable }}
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: dist
@@ -117,10 +117,9 @@ runs:
       if: ${{ !steps.system_nss.outputs.suitable }}
       env:
         CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
-        RUNNER_ENVIRONMENT: ${{ runner.environment }}
       shell: bash
       run: |
-        if [ "$RUNNER_ENVIRONMENT" != "github-hosted" ] || [ ! "$CACHE_HIT" ]; then
+        if [ ! "$CACHE_HIT" ]; then
           echo "Building NSS from source"
           echo "build_nss=1" >> "$GITHUB_OUTPUT"
         else
@@ -129,7 +128,7 @@ runs:
 
     - name: Install build dependencies (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && steps.check_build.outputs.build_nss && runner.environment == 'github-hosted' }}
+      if: ${{ runner.os == 'Linux' && steps.check_build.outputs.build_nss && runner.environment != 'self-hosted' }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: sudo apt-get install -y --no-install-recommends gyp ninja-build

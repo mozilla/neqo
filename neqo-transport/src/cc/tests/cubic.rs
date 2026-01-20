@@ -423,5 +423,8 @@ fn congestion_event_congestion_avoidance_no_overflow() {
 #[test]
 fn cubic_display() {
     let cubic = Cubic::default();
-    assert_eq!(cubic.to_string(), "Cubic [w_max: 0, k: 0, t_epoch: None]");
+    assert_eq!(
+        cubic.to_string(),
+        "Cubic state [w_max: 0, k: 0, t_epoch: None]"
+    );
 }

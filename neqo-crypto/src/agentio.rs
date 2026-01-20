@@ -11,9 +11,7 @@
 
 use std::{
     cmp::min,
-    fmt::{self, Display, Formatter},
     mem,
-    ops::Deref,
     os::raw::{c_uint, c_void},
     pin::Pin,
     ptr::{null, null_mut},
@@ -39,7 +37,8 @@ pub fn as_c_void<T: Unpin>(pin: &mut Pin<Box<T>>) -> *mut c_void {
 }
 
 /// A slice of the output.
-#[derive(Default)]
+#[derive(Default, derive_more::Debug)]
+#[debug("Record {:?}:{:?} {}", epoch, ct, hex_with_len(&data[..]))]
 pub struct Record {
     pub epoch: Epoch,
     pub ct: ContentType,
@@ -70,19 +69,7 @@ impl Record {
     }
 }
 
-impl fmt::Debug for Record {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Record {:?}:{:?} {}",
-            self.epoch,
-            self.ct,
-            hex_with_len(&self.data[..])
-        )
-    }
-}
-
-#[derive(Debug, Default)]
+#[derive(Debug, Default, derive_more::Deref)]
 pub struct RecordList {
     records: Vec<Record>,
 }
@@ -124,13 +111,6 @@ impl RecordList {
     }
 }
 
-impl Deref for RecordList {
-    type Target = Vec<Record>;
-    fn deref(&self) -> &Vec<Record> {
-        &self.records
-    }
-}
-
 pub struct RecordListIter(std::vec::IntoIter<Record>);
 
 impl Iterator for RecordListIter {
@@ -159,7 +139,8 @@ impl Drop for AgentIoInputContext<'_> {
 }
 
 // TODO: Derive Default when MSRV >= 1.88 (Default for raw pointers stabilized in 1.88).
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("AgentIoInput {input:p}")]
 struct AgentIoInput {
     // input is data that is read by TLS.
     input: *const u8,
@@ -215,13 +196,8 @@ impl AgentIoInput {
     }
 }
 
-impl Display for AgentIoInput {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "AgentIoInput {:p}", self.input)
-    }
-}
-
-#[derive(Debug, Default)]
+#[derive(Debug, Default, derive_more::Display)]
+#[display("AgentIo")]
 pub struct AgentIo {
     // input collects the input we might provide to TLS.
     input: AgentIoInput,
@@ -250,12 +226,6 @@ impl AgentIo {
     pub fn take_output(&mut self) -> Vec<u8> {
         qtrace!("[{self}] take output");
         mem::take(&mut self.output)
-    }
-}
-
-impl Display for AgentIo {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "AgentIo")
     }
 }
 
@@ -346,7 +316,7 @@ unsafe extern "C" fn agent_available64(mut fd: PrFd) -> prio::PRInt64 {
     clippy::cast_possible_truncation,
     reason = "Cast is safe because prio::PR_AF_INET is 2."
 )]
-unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrStatus {
+const unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrStatus {
     let Some(a) = addr.as_mut() else {
         return PR_FAILURE;
     };
@@ -356,7 +326,10 @@ unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrS
     PR_SUCCESS
 }
 
-unsafe extern "C" fn agent_getsockopt(_fd: PrFd, opt: *mut prio::PRSocketOptionData) -> PrStatus {
+const unsafe extern "C" fn agent_getsockopt(
+    _fd: PrFd,
+    opt: *mut prio::PRSocketOptionData,
+) -> PrStatus {
     if let Some(o) = opt.as_mut() {
         if o.option == prio::PRSockOption::PR_SockOpt_Nonblocking {
             o.value.non_blocking = 1;

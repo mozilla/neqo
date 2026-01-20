@@ -311,7 +311,7 @@ fn get_output_file(
             return None;
         }
 
-        qinfo!("Saving {url} to {out_path:?}");
+        qinfo!("Saving {url} to {}", out_path.display());
 
         if let Some(parent) = out_path.parent() {
             create_dir_all(parent).ok()?;

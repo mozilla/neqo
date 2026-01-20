@@ -5,15 +5,12 @@
 // except according to those terms.
 
 #![expect(clippy::unwrap_used, reason = "This is example code.")]
+#![expect(
+    clippy::mutable_key_type,
+    reason = "Triggered by derive_more::Display on HttpServer, which just prints a static string."
+)]
 
-use std::{
-    cell::RefCell,
-    fmt::{self, Display},
-    num::NonZeroUsize,
-    rc::Rc,
-    slice,
-    time::Instant,
-};
+use std::{cell::RefCell, num::NonZeroUsize, rc::Rc, slice, time::Instant};
 
 use neqo_common::{header::HeadersExt as _, hex, qdebug, qerror, qinfo, Datagram, Header};
 use neqo_crypto::{generate_ech_keys, random, AntiReplay};
@@ -26,6 +23,8 @@ use rustc_hash::FxHashMap as HashMap;
 use super::{qns_read_response, Args};
 use crate::send_data::SendData;
 
+#[derive(derive_more::Display)]
+#[display("{server}")]
 pub struct HttpServer {
     server: Http3Server,
     /// Progress writing to each stream.
@@ -77,16 +76,10 @@ impl HttpServer {
     }
 }
 
-impl Display for HttpServer {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.server.fmt(f)
-    }
-}
-
 impl super::HttpServer for HttpServer {
-    fn process_multiple<'a>(
+    fn process_multiple<'a, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
         &mut self,
-        dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
+        dgrams: D,
         now: Instant,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {

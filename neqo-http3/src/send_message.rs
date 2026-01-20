@@ -4,14 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    cell::RefCell,
-    cmp::min,
-    fmt::{self, Debug, Display, Formatter},
-    num::NonZeroUsize,
-    rc::Rc,
-    time::Instant,
-};
+use std::{cell::RefCell, cmp::min, fmt::Debug, num::NonZeroUsize, rc::Rc, time::Instant};
 
 use neqo_common::{qdebug, qtrace, Buffer, Encoder, Header, MessageType};
 use neqo_qpack as qpack;
@@ -93,7 +86,7 @@ impl MessageState {
         }
     }
 
-    fn fin(&mut self) -> Res<()> {
+    const fn fin(&mut self) -> Res<()> {
         match &self {
             Self::WaitingForHeaders | Self::Done => Err(Error::InvalidInput),
             Self::WaitingForData | Self::TrailersSet => {
@@ -108,7 +101,8 @@ impl MessageState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("SendMessage {}", self.stream_id())]
 pub struct SendMessage {
     state: MessageState,
     stream_info: Http3StreamInfo,
@@ -317,11 +311,5 @@ impl HttpSendStream for SendMessage {
     fn set_new_listener(&mut self, conn_events: Box<dyn SendStreamEvents>) {
         self.stream_type = Http3StreamType::ExtendedConnect;
         self.conn_events = conn_events;
-    }
-}
-
-impl Display for SendMessage {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "SendMesage {}", self.stream_id())
     }
 }

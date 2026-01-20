@@ -6,11 +6,7 @@
 
 #![expect(clippy::unwrap_used, reason = "This is test code.")]
 
-use std::{
-    cmp::min,
-    fmt::{self, Debug},
-    time::Instant,
-};
+use std::{cmp::min, fmt::Debug, time::Instant};
 
 use neqo_common::{event::Provider as _, qdebug, qinfo, qtrace, Datagram};
 use neqo_crypto::AuthenticationStatus;
@@ -38,6 +34,8 @@ pub trait Goal: Debug {
         -> GoalStatus;
 }
 
+#[derive(derive_more::Debug)]
+#[debug("{}", c)]
 pub struct Node {
     c: Connection,
     setup_goals: Vec<Box<dyn Goal>>,
@@ -69,7 +67,7 @@ impl Node {
         goals: I1,
     ) -> Self {
         Self {
-            c: crate::new_server::<EmptyConnectionIdGenerator>(
+            c: crate::new_server::<EmptyConnectionIdGenerator, &str>(
                 crate::DEFAULT_ALPN,
                 params.randomize_first_pn(false),
             ),
@@ -177,12 +175,6 @@ impl sim::Node for Node {
 
     fn print_summary(&self, test_name: &str) {
         qinfo!("{test_name}: {:?}", self.c.stats());
-    }
-}
-
-impl Debug for Node {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.c, f)
     }
 }
 

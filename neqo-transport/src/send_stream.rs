@@ -10,7 +10,6 @@ use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
     collections::{btree_map::Entry, BTreeMap, VecDeque},
-    fmt::{self, Display, Formatter},
     mem,
     num::NonZeroUsize,
     ops::Add,
@@ -611,7 +610,7 @@ pub enum State {
 }
 
 impl State {
-    fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
+    const fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
         match self {
             Self::Send { send_buf, .. } | Self::DataSent { send_buf, .. } => Some(send_buf),
             Self::Ready { .. }
@@ -631,7 +630,7 @@ impl State {
     }
 
     fn transition(&mut self, new_state: Self) {
-        qtrace!("SendStream state {:?} -> {:?}", self, new_state);
+        qtrace!("SendStream state {self:?} -> {new_state:?}");
         *self = new_state;
     }
 }
@@ -682,7 +681,8 @@ impl Stats {
 }
 
 /// Implement a QUIC send stream.
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("SendStream {stream_id}")]
 pub struct SendStream {
     stream_id: StreamId,
     state: State,
@@ -745,7 +745,7 @@ impl SendStream {
         true
     }
 
-    pub fn set_fairness(&mut self, make_fair: bool) {
+    pub const fn set_fairness(&mut self, make_fair: bool) {
         self.fair = make_fair;
     }
 
@@ -754,7 +754,7 @@ impl SendStream {
         self.fair
     }
 
-    pub fn set_priority(
+    pub const fn set_priority(
         &mut self,
         transmission: TransmissionPriority,
         retransmission: RetransmissionPriority,
@@ -768,7 +768,7 @@ impl SendStream {
         self.sendorder
     }
 
-    pub fn set_sendorder(&mut self, sendorder: Option<SendOrder>) {
+    pub const fn set_sendorder(&mut self, sendorder: Option<SendOrder>) {
         self.sendorder = sendorder;
     }
 
@@ -1175,7 +1175,7 @@ impl SendStream {
     /// event.
     ///
     /// See [`crate::Connection::stream_set_writable_event_low_watermark`].
-    pub fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
+    pub const fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
         self.writable_event_low_watermark = watermark;
     }
 
@@ -1342,7 +1342,7 @@ impl SendStream {
     }
 
     #[cfg(test)]
-    pub(crate) fn state(&mut self) -> &mut State {
+    pub(crate) const fn state(&mut self) -> &mut State {
         &mut self.state
     }
 
@@ -1361,12 +1361,6 @@ impl SendStream {
         }
 
         self.conn_events.send_stream_writable(self.stream_id);
-    }
-}
-
-impl Display for SendStream {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "SendStream {}", self.stream_id)
     }
 }
 
@@ -1399,7 +1393,7 @@ pub struct OrderGroupIter<'a> {
 }
 
 impl OrderGroup {
-    pub fn iter(&mut self) -> OrderGroupIter<'_> {
+    pub const fn iter(&mut self) -> OrderGroupIter<'_> {
         // Ids may have been deleted since we last iterated
         if self.next >= self.vec.len() {
             self.next = 0;
@@ -1428,7 +1422,7 @@ impl OrderGroup {
         self.vec.truncate(position);
     }
 
-    fn update_next(&mut self) -> usize {
+    const fn update_next(&mut self) -> usize {
         let next = self.next;
         self.next = (self.next + 1) % self.vec.len();
         next

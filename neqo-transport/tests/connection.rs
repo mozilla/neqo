@@ -49,7 +49,7 @@ fn truncate_long_packet() {
     // This test needs to alter the server handshake, so turn off MLKEM.
     let mut client =
         new_client::<CountingConnectionIdGenerator>(ConnectionParameters::default().mlkem(false));
-    let mut server = new_server::<CountingConnectionIdGenerator>(
+    let mut server = new_server::<CountingConnectionIdGenerator, &str>(
         DEFAULT_ALPN,
         ConnectionParameters::default().mlkem(false),
     );
@@ -367,7 +367,7 @@ fn server_initial_packet_number() {
                 .versions(Version::Version1, vec![Version::Version1])
                 .mlkem(false),
         );
-        let mut server = new_server::<CountingConnectionIdGenerator>(
+        let mut server = new_server::<CountingConnectionIdGenerator, &str>(
             DEFAULT_ALPN,
             ConnectionParameters::default()
                 .versions(Version::Version1, vec![Version::Version1])

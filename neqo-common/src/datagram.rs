@@ -5,7 +5,6 @@
 // except according to those terms.
 
 use std::{
-    fmt::{self, Debug, Formatter},
     net::SocketAddr,
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
@@ -16,7 +15,9 @@ use crate::{hex_with_len, Bytes, Tos};
 /// A UDP datagram.
 ///
 /// Guaranteed to not be empty.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, derive_more::Debug)]
+#[debug(bounds(D: AsRef<[u8]>))]
+#[debug("Datagram {:?} {:?}->{:?}: {}", tos, src, dst, hex_with_len(d))]
 pub struct Datagram<D = Vec<u8>> {
     src: SocketAddr,
     dst: SocketAddr,
@@ -24,10 +25,10 @@ pub struct Datagram<D = Vec<u8>> {
     d: D,
 }
 
-impl TryFrom<DatagramBatch> for Datagram {
+impl TryFrom<Batch> for Datagram {
     type Error = ();
 
-    fn try_from(d: DatagramBatch) -> Result<Self, Self::Error> {
+    fn try_from(d: Batch) -> Result<Self, Self::Error> {
         if d.num_datagrams() != 1 {
             return Err(());
         }
@@ -56,7 +57,7 @@ impl<D> Datagram<D> {
         self.tos
     }
 
-    pub fn set_tos(&mut self, tos: Tos) {
+    pub const fn set_tos(&mut self, tos: Tos) {
         self.tos = tos;
     }
 }
@@ -114,19 +115,6 @@ impl<D: AsRef<[u8]>> Deref for Datagram<D> {
     }
 }
 
-impl<D: AsRef<[u8]>> Debug for Datagram<D> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Datagram {:?} {:?}->{:?}: {}",
-            self.tos,
-            self.src,
-            self.dst,
-            hex_with_len(&self.d)
-        )
-    }
-}
-
 impl<'a> Datagram<&'a mut [u8]> {
     /// # Panics
     ///
@@ -159,8 +147,16 @@ impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
 ///
 /// Upholds Linux GSO requirement. That is, all but the last datagram in the
 /// batch have the same size. The last datagram may be equal or smaller.
-#[derive(Clone, PartialEq, Eq)]
-pub struct DatagramBatch {
+#[derive(Clone, PartialEq, Eq, derive_more::Debug)]
+#[debug(
+    "datagram::Batch {:?} {:?}->{:?} {:?}: {}",
+    tos,
+    src,
+    dst,
+    datagram_size,
+    hex_with_len(d)
+)]
+pub struct Batch {
     src: SocketAddr,
     dst: SocketAddr,
     tos: Tos,
@@ -168,21 +164,7 @@ pub struct DatagramBatch {
     d: Vec<u8>,
 }
 
-impl Debug for DatagramBatch {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(
-            f,
-            "DatagramBatch {:?} {:?}->{:?} {:?}: {}",
-            self.tos,
-            self.src,
-            self.dst,
-            self.datagram_size,
-            hex_with_len(&self.d)
-        )
-    }
-}
-
-impl From<Datagram<Vec<u8>>> for DatagramBatch {
+impl From<Datagram<Vec<u8>>> for Batch {
     fn from(d: Datagram<Vec<u8>>) -> Self {
         Self {
             src: d.src,
@@ -195,7 +177,7 @@ impl From<Datagram<Vec<u8>>> for DatagramBatch {
     }
 }
 
-impl DatagramBatch {
+impl Batch {
     #[must_use]
     pub const fn new(
         src: SocketAddr,
@@ -228,7 +210,7 @@ impl DatagramBatch {
         self.tos
     }
 
-    pub fn set_tos(&mut self, tos: Tos) {
+    pub const fn set_tos(&mut self, tos: Tos) {
         self.tos = tos;
     }
 
@@ -237,18 +219,13 @@ impl DatagramBatch {
         self.datagram_size
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "False positive on 1.86, remove when MSRV is higher."
-    )]
     #[must_use]
     pub fn data(&self) -> &[u8] {
         &self.d
     }
 
     #[must_use]
-    pub fn num_datagrams(&self) -> usize {
+    pub const fn num_datagrams(&self) -> usize {
         self.d.len().div_ceil(self.datagram_size.get())
     }
 
@@ -283,7 +260,7 @@ mod tests {
 
     use test_fixture::{datagram, DEFAULT_ADDR};
 
-    use crate::{Datagram, DatagramBatch, Ecn, Tos};
+    use crate::{datagram, Datagram, Ecn, Tos};
 
     #[test]
     fn fmt_datagram() {
@@ -319,25 +296,29 @@ mod tests {
         let tos = Tos::default();
 
         // 10 bytes, segment size 4 -> 3 datagrams (4+4+2)
-        let batch = DatagramBatch::new(src, dst, tos, NonZeroUsize::new(4).unwrap(), vec![0u8; 10]);
+        let batch =
+            datagram::Batch::new(src, dst, tos, NonZeroUsize::new(4).unwrap(), vec![0u8; 10]);
         assert_eq!(batch.num_datagrams(), 3);
 
         // 8 bytes, segment size 4 -> 2 datagrams (4+4)
-        let batch = DatagramBatch::new(src, dst, tos, NonZeroUsize::new(4).unwrap(), vec![0u8; 8]);
+        let batch =
+            datagram::Batch::new(src, dst, tos, NonZeroUsize::new(4).unwrap(), vec![0u8; 8]);
         assert_eq!(batch.num_datagrams(), 2);
 
         // 5 bytes, segment size 5 -> 1 datagram
-        let batch = DatagramBatch::new(src, dst, tos, NonZeroUsize::new(5).unwrap(), vec![0u8; 5]);
+        let batch =
+            datagram::Batch::new(src, dst, tos, NonZeroUsize::new(5).unwrap(), vec![0u8; 5]);
         assert_eq!(batch.num_datagrams(), 1);
 
         // 6 bytes, segment size 5 -> 2 datagrams (5+1)
-        let batch = DatagramBatch::new(src, dst, tos, NonZeroUsize::new(5).unwrap(), vec![0u8; 6]);
+        let batch =
+            datagram::Batch::new(src, dst, tos, NonZeroUsize::new(5).unwrap(), vec![0u8; 6]);
         assert_eq!(batch.num_datagrams(), 2);
     }
 
     #[test]
     fn batch_tos() {
-        let mut batch = DatagramBatch::new(
+        let mut batch = datagram::Batch::new(
             SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234),
             SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678),
             Tos::default(),
@@ -353,7 +334,7 @@ mod tests {
         let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
         let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
         let tos = Tos::default();
-        let batch = DatagramBatch::new(
+        let batch = datagram::Batch::new(
             src,
             dst,
             tos,
@@ -378,7 +359,7 @@ mod tests {
         let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
         let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
         let tos = Tos::default();
-        let mut batch = DatagramBatch::new(
+        let mut batch = datagram::Batch::new(
             src,
             dst,
             tos,
@@ -415,7 +396,7 @@ mod tests {
     #[test]
     fn batch_data_and_try_from() {
         let d = Datagram::new(DEFAULT_ADDR, DEFAULT_ADDR, Tos::default(), vec![1, 2, 3]);
-        let batch = DatagramBatch::from(d);
+        let batch = datagram::Batch::from(d);
         assert_eq!(batch.data(), &[1, 2, 3]);
         let d2: Datagram = batch.try_into().unwrap();
         assert_eq!(d2.as_ref(), &[1, 2, 3]);
@@ -423,14 +404,14 @@ mod tests {
 
     #[test]
     fn batch_try_from_multiple_fails() {
-        let batch = DatagramBatch::new(
+        let batch = datagram::Batch::new(
             DEFAULT_ADDR,
             DEFAULT_ADDR,
             Tos::default(),
             NonZeroUsize::new(2).unwrap(),
             vec![1, 2, 3, 4],
         );
-        assert!(format!("{batch:?}").starts_with("DatagramBatch"));
+        assert!(format!("{batch:?}").starts_with("datagram::Batch"));
         assert!(Datagram::try_from(batch).is_err());
     }
 }

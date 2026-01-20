@@ -6,15 +6,11 @@
 
 // Tracking of sent packets and detecting their loss.
 
-// #[cfg(feature = "bench")]
 pub mod sent;
-// #[cfg(not(feature = "bench"))]
-// mod sent;
 mod token;
 
 use std::{
     cmp::{max, min},
-    fmt::{self, Display, Formatter},
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
@@ -482,7 +478,8 @@ impl PtoState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
+#[display("recovery::Loss")]
 pub struct Loss {
     /// When the handshake was confirmed, if it has been.
     confirmed_time: Option<Instant>,
@@ -593,10 +590,10 @@ impl Loss {
         };
 
         // Only prime if we've received Initial ACKs (proving the peer is alive).
-        if !self
+        if self
             .spaces
             .get(PacketNumberSpace::Initial)
-            .is_some_and(|space| space.largest_acked.is_some())
+            .is_none_or(|space| space.largest_acked.is_none())
         {
             return;
         }
@@ -954,11 +951,6 @@ impl Loss {
         qtrace!("[{self}] get send profile {now:?}");
         let sender = path.sender();
         let mtu = path.plpmtu();
-        #[allow(
-            clippy::allow_attributes,
-            clippy::return_and_then,
-            reason = "TODO: False positive on nightly; function isn't returning Option or Result"
-        )]
         if let Some(profile) = self
             .pto_state
             .as_mut()
@@ -986,12 +978,6 @@ impl Loss {
                 SendProfile::new_limited(limit)
             }
         }
-    }
-}
-
-impl Display for Loss {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "recovery::Loss")
     }
 }
 
