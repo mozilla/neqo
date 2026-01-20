@@ -79,6 +79,15 @@ runs:
                         [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on Solaris
                         ;;
           esac
+          # Generate bindings first if requested (before build, so we can bootstrap)
+          if [ "$GENERATE_BINDINGS" = "true" ]; then
+            cargo install bindgen-cli --locked
+            bindgen --allowlist-type 'rt_msghdr|rt_metrics|if_data' \
+                    --allowlist-item 'RTAX_MAX|RTM_GET|RTM_VERSION|RTA_DST|RTA_IFP' \
+                    --generate-cstr --explicit-padding --with-derive-default \
+                    src/bindings/bsd.h > "$PLATFORM.rs"
+          fi
+
           cargo version
           cargo check --locked --all-targets $WORKSPACE \$EXCLUDE
           case "$PLATFORM" in
@@ -97,17 +106,6 @@ runs:
                         ;;
           esac
           cargo test --locked --no-fail-fast --release
-
-          # Generate bindings if requested
-          if [ "$GENERATE_BINDINGS" = "true" ]; then
-            cargo install bindgen-cli --locked
-            echo "::group::Generated bindings for $PLATFORM"
-            bindgen --allowlist-type 'rt_msghdr|rt_metrics|if_data' \
-                    --allowlist-item 'RTAX_MAX|RTM_GET|RTM_VERSION|RTA_DST|RTA_IFP' \
-                    --generate-cstr --explicit-padding --with-derive-default \
-                    src/bindings/bsd.h
-            echo "::endgroup::"
-          fi
 
           rm -rf target # Do not sync this back to host
         EOF
@@ -172,3 +170,9 @@ runs:
         token: ${{ inputs.codecov-token }}
         verbose: true
         flags: ${{ inputs.platform }}
+
+    - if: ${{ inputs.generate-bindings == 'true' }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      with:
+        name: bindings-${{ inputs.platform }}
+        path: ${{ inputs.working-directory }}/${{ inputs.platform }}.rs
