@@ -39,10 +39,13 @@ jobs:
           ARGS: ${{ matrix.args }}
           HEADER: ${{ matrix.header }}
         run: |
-          echo "::group::Generated bindings for $OS"
           # shellcheck disable=SC2086
-          bindgen $ARGS --generate-cstr --explicit-padding --with-derive-default "mtu/src/bindings/$HEADER"
-          echo "::endgroup::"
+          bindgen $ARGS --generate-cstr --explicit-padding --with-derive-default "mtu/src/bindings/$HEADER" > "$OS.rs"
+      - name: Upload bindings
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: bindings-${{ matrix.os }}
+          path: ${{ matrix.os }}.rs
 
   check-android:
     name: Check Android
