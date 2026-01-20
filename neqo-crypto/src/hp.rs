@@ -6,7 +6,6 @@
 
 use std::{
     cell::RefCell,
-    fmt::{self, Debug},
     os::raw::{c_char, c_int, c_uint},
     ptr::{addr_of_mut, null, null_mut},
     rc::Rc,
@@ -38,22 +37,18 @@ experimental_api!(SSL_HkdfExpandLabelWithMech(
     secret: *mut *mut PK11SymKey,
 ));
 
-#[derive(Clone)]
+#[derive(Clone, derive_more::Debug)]
 pub enum Key {
     /// An AES encryption context.
     /// Note: as we need to clone this object, we clone the pointer and
     /// track references using `Rc`.  `PK11Context` can't be used with `PK11_CloneContext`
     /// as that is not supported for these contexts.
+    #[debug("hp::Key")]
     Aes(Rc<RefCell<Context>>),
     /// The `ChaCha20` mask has to invoke a new `PK11_Encrypt` every time as it needs to
     /// change the counter and nonce on each invocation.
+    #[debug("hp::Key")]
     Chacha(SymKey),
-}
-
-impl Debug for Key {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "hp::Key")
-    }
 }
 
 impl Key {
@@ -94,7 +89,7 @@ impl Key {
                 c_uint::try_from(l.len())?,
                 mech,
                 key_size,
-                &mut secret,
+                &raw mut secret,
             )
         }?;
         let key = SymKey::from_ptr(secret).or(Err(Error::Hkdf))?;
@@ -149,7 +144,7 @@ impl Key {
                     PK11_CipherOp(
                         **context.borrow_mut(),
                         output.as_mut_ptr(),
-                        &mut output_len,
+                        &raw mut output_len,
                         c_int::try_from(output.len())?,
                         sample.as_ptr().cast(),
                         c_int::try_from(Self::SAMPLE_SIZE)?,
@@ -174,7 +169,7 @@ impl Key {
                         CK_MECHANISM_TYPE::from(CKM_CHACHA20),
                         addr_of_mut!(param_item),
                         output[..].as_mut_ptr(),
-                        &mut output_len,
+                        &raw mut output_len,
                         c_uint::try_from(output.len())?,
                         [0; Self::SAMPLE_SIZE].as_ptr(),
                         c_uint::try_from(Self::SAMPLE_SIZE)?,

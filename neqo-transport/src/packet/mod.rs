@@ -8,7 +8,6 @@
 
 use std::{
     cmp::min,
-    fmt,
     ops::{Deref, DerefMut, Range},
     time::Instant,
 };
@@ -307,7 +306,7 @@ impl<B: Buffer> Builder<B> {
     /// This stores a value that can be used as a limit.  This does not cause
     /// this limit to be enforced until encryption occurs.  Prior to that, it
     /// is only used voluntarily by users of the builder, through `remaining()`.
-    pub fn set_limit(&mut self, limit: usize) {
+    pub const fn set_limit(&mut self, limit: usize) {
         self.limit = limit;
     }
 
@@ -336,7 +335,7 @@ impl<B: Buffer> Builder<B> {
     }
 
     /// Mark the packet as needing padding (or not).
-    pub fn enable_padding(&mut self, needs_padding: bool) {
+    pub const fn enable_padding(&mut self, needs_padding: bool) {
         self.padding = needs_padding;
     }
 
@@ -561,6 +560,8 @@ impl<B> From<Builder<B>> for Encoder<B> {
 
 /// `Public` holds information from packets that is public only.  This allows for
 /// processing of packets prior to decryption.
+#[derive(derive_more::Debug)]
+#[debug("{:?}: {} {}", self.packet_type(), hex_with_len(&self.data[..self.header_len]), hex_with_len(&self.data[self.header_len..]))]
 pub struct Public<'a> {
     /// The packet type.
     packet_type: Type,
@@ -796,7 +797,7 @@ impl<'a> Public<'a> {
 
     #[cfg(feature = "build-fuzzing-corpus")]
     #[must_use]
-    pub fn data(&self) -> &[u8] {
+    pub const fn data(&self) -> &[u8] {
         self.data
     }
 
@@ -815,6 +816,12 @@ impl<'a> Public<'a> {
         }
     }
 
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_asserts_for_indexing,
+        reason = "Checked, but clippy doesn't recognize it."
+        // FIXME: Check if MSRV >= 1.88 fixes this.
+    )]
     /// Decrypt the header of the packet.
     fn decrypt_header(&mut self, crypto: &CryptoDxState) -> Res<(bool, Number, Range<usize>)> {
         debug_assert_ne!(self.packet_type, Type::Retry);
@@ -839,6 +846,7 @@ impl<'a> Public<'a> {
         } else {
             HP_MASK_LONG
         };
+        assert!(!self.data.is_empty());
         let first_byte = self.data[0] ^ (mask[0] & bits);
 
         let mut hdrbytes = 0..self.header_len + 4;
@@ -950,18 +958,6 @@ impl<'a> Public<'a> {
     }
 }
 
-impl fmt::Debug for Public<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{:?}: {} {}",
-            self.packet_type(),
-            hex_with_len(&self.data[..self.header_len]),
-            hex_with_len(&self.data[self.header_len..])
-        )
-    }
-}
-
 /// Error information from a failed decryption attempt.
 /// Contains minimal packet information needed for error handling.
 #[derive(Debug)]
@@ -1007,10 +1003,12 @@ impl DecryptionError<'_> {
     }
 }
 
+#[derive(derive_more::Deref)]
 pub struct Decrypted<'a> {
     version: Version,
     pt: Type,
     pn: Number,
+    #[deref]
     data: &'a [u8],
     dcid: ConnectionId,
     scid: Option<ConnectionId>,
@@ -1046,14 +1044,6 @@ impl Decrypted<'_> {
             .as_ref()
             .expect("should only be called for long header packets")
             .as_cid_ref()
-    }
-}
-
-impl Deref for Decrypted<'_> {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        self.data
     }
 }
 

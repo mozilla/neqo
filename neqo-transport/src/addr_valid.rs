@@ -440,7 +440,7 @@ impl NewTokenSender {
             if t.needs_sending && t.len() <= builder.remaining() {
                 t.needs_sending = false;
 
-                builder.encode_frame(FrameType::NewToken, |b| {
+                builder.encode_frame(FrameType::NewToken as u64, |b| {
                     b.encode_vvec(&t.token);
                 });
 

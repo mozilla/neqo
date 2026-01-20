@@ -11,11 +11,13 @@ description.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme.workspace = true
+autobenches = false
 
 [lints]
 workspace = true
 
 [dependencies]
+derive_more = { workspace = true }
 enum-map = { workspace = true }
 env_logger = { version = "0.10", default-features = false }
 hex = { workspace = true, optional = true }
@@ -38,6 +40,9 @@ bench = ["test-fixture/bench", "log/release_max_level_info"]
 build-fuzzing-corpus = ["hex/alloc", "sha1"]
 ci = []
 test-fixture = []
+
+[package.metadata.cargo-machete]
+ignored = ["criterion"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

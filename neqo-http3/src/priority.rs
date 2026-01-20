@@ -128,7 +128,7 @@ impl PriorityHandler {
         }
     }
 
-    pub fn priority_update_sent(&mut self) {
+    pub const fn priority_update_sent(&mut self) {
         self.last_send_priority = self.priority;
     }
 

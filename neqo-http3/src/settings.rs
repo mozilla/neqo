@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::ops::Deref;
-
 use neqo_common::{qdebug, Buffer, Decoder, Encoder};
 use neqo_crypto::{ZeroRttCheckResult, ZeroRttChecker};
 
@@ -72,7 +70,7 @@ impl HSetting {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, derive_more::Deref)]
 pub struct HSettings {
     settings: Vec<HSetting>,
 }
@@ -214,13 +212,6 @@ impl HSettings {
     }
 }
 
-impl Deref for HSettings {
-    type Target = [HSetting];
-    fn deref(&self) -> &Self::Target {
-        &self.settings
-    }
-}
-
 impl From<&Http3Parameters> for HSettings {
     fn from(conn_param: &Http3Parameters) -> Self {
         Self {
@@ -340,8 +331,6 @@ impl ZeroRttChecker for HttpZeroRttChecker {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::Encoder;
-
     use super::*;
 
     #[test]

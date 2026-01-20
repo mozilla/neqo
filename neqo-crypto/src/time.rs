@@ -10,7 +10,6 @@
 )]
 
 use std::{
-    ops::Deref,
     os::raw::c_void,
     pin::Pin,
     sync::OnceLock,
@@ -82,16 +81,9 @@ pub fn init() {
 }
 
 /// Time wraps Instant and provides conversion functions into `PRTime`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, derive_more::Deref)]
 pub struct Time {
     t: Instant,
-}
-
-impl Deref for Time {
-    type Target = Instant;
-    fn deref(&self) -> &Self::Target {
-        &self.t
-    }
 }
 
 impl From<Instant> for Time {
@@ -148,7 +140,7 @@ impl From<Time> for Instant {
 }
 
 /// Interval wraps Duration and provides conversion functions into `PRTime`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, derive_more::From)]
 pub struct Interval {
     d: Duration,
 }
@@ -159,12 +151,6 @@ impl TryFrom<PRTime> for Interval {
         Ok(Self {
             d: Duration::from_micros(u64::try_from(prtime)?),
         })
-    }
-}
-
-impl From<Duration> for Interval {
-    fn from(d: Duration) -> Self {
-        Self { d }
     }
 }
 
@@ -182,7 +168,7 @@ pub struct TimeHolder {
 }
 
 impl TimeHolder {
-    unsafe extern "C" fn time_func(arg: *mut c_void) -> PRTime {
+    const unsafe extern "C" fn time_func(arg: *mut c_void) -> PRTime {
         let p = arg as *const PRTime;
         *p.as_ref().unwrap()
     }
