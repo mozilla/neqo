@@ -11,6 +11,9 @@ inputs:
   codecov-token:
     description: 'Codecov token, if Codecov upload is desired.'
     default: ''
+  generate-bindings:
+    description: 'Generate and output bindgen bindings for BSD platforms.'
+    default: 'false'
 
 runs:
   using: composite
@@ -21,6 +24,7 @@ runs:
         WD: ${{ inputs.working-directory }}
         PLATFORM: ${{ inputs.platform }}
         WORKSPACE: ${{ inputs.working-directory == '.' && '--workspace' || '' }}
+        GENERATE_BINDINGS: ${{ inputs.generate-bindings }}
       run: |
         cat <<EOF > prepare.sh
           # This executes as root
@@ -93,6 +97,18 @@ runs:
                         ;;
           esac
           cargo test --locked --no-fail-fast --release
+
+          # Generate bindings if requested
+          if [ "$GENERATE_BINDINGS" = "true" ]; then
+            cargo install bindgen-cli --locked
+            echo "::group::Generated bindings for $PLATFORM"
+            bindgen --allowlist-type 'rt_msghdr|rt_metrics|if_data' \
+                    --allowlist-item 'RTAX_MAX|RTM_GET|RTM_VERSION|RTA_DST|RTA_IFP' \
+                    --generate-cstr --explicit-padding --with-derive-default \
+                    src/bindings/bsd.h
+            echo "::endgroup::"
+          fi
+
           rm -rf target # Do not sync this back to host
         EOF
         {
@@ -102,7 +118,7 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
         curl -o "$WD/rustup.sh" --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
-        echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
+        echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD GENERATE_BINDINGS" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
       uses: vmactions/freebsd-vm@ba6bedee4a4884da2b782a41a64329a1c8e42ffb # v1.3.8

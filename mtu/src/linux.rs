@@ -21,17 +21,11 @@ use static_assertions::{const_assert, const_assert_eq};
 
 use crate::{aligned_by, default_err, routesocket::RouteSocket, unlikely_err};
 
-#[allow(
-    clippy::allow_attributes,
-    clippy::allow_attributes_without_reason,
-    clippy::struct_field_names,
-    non_camel_case_types,
-    clippy::too_many_lines,
-    reason = "Bindgen-generated code"
+#[cfg_attr(
+    any(target_os = "linux", target_os = "android"),
+    path = "bindings/linux.rs"
 )]
-mod bindings {
-    include!(env!("BINDINGS"));
-}
+mod bindings;
 
 use bindings::{ifinfomsg, nlmsghdr, rtattr, rtmsg};
 
