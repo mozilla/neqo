@@ -40,6 +40,7 @@ jobs:
           HEADER: ${{ matrix.header }}
         run: |
           echo "::group::Generated bindings for $OS"
+          # shellcheck disable=SC2086
           bindgen $ARGS --generate-cstr --explicit-padding --with-derive-default "mtu/src/bindings/$HEADER"
           echo "::endgroup::"
 

@@ -771,7 +771,6 @@ checksum = "903970ae2f248d7275214cf8f387f8ba0c4ea7e3d87a320e85493db60ce28616"
 name = "mtu"
 version = "0.3.0"
 dependencies = [
- "bindgen",
  "cfg_aliases",
  "libc",
  "mozbuild",
