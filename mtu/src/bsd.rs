@@ -20,20 +20,12 @@ use libc::{
 };
 use static_assertions::{const_assert, const_assert_eq};
 
-#[allow(
-    clippy::allow_attributes,
-    clippy::allow_attributes_without_reason,
-    non_camel_case_types,
-    non_snake_case,
-    clippy::struct_field_names,
-    clippy::too_many_lines,
-    clippy::cognitive_complexity,
-    dead_code, // RTA_IFP is only used on NetBSD and Solaris
-    reason = "Bindgen-generated code"
-)]
-mod bindings {
-    include!(env!("BINDINGS"));
-}
+#[cfg_attr(target_os = "macos", path = "bindings/macos.rs")]
+#[cfg_attr(target_os = "freebsd", path = "bindings/freebsd.rs")]
+#[cfg_attr(target_os = "netbsd", path = "bindings/netbsd.rs")]
+#[cfg_attr(target_os = "openbsd", path = "bindings/openbsd.rs")]
+#[cfg_attr(target_os = "solaris", path = "bindings/solaris.rs")]
+mod bindings;
 
 #[cfg(any(target_os = "netbsd", target_os = "solaris"))]
 use crate::bsd::bindings::RTA_IFP;
