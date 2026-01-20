@@ -93,7 +93,7 @@ runs:
       if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
       env:
-        NSS_VERSION: 3.119.1 # TODO: Bump this periodically; also in qns/Dockerfile.
+        NSS_VERSION: 3.121 # TODO: Bump this periodically; also in qns/Dockerfile.
       run: |
         NSS_TAG=${NSS_VERSION//./_}
         curl -L https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_TAG}.tar.gz |
