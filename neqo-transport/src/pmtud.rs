@@ -38,6 +38,11 @@ const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();
 const MAX_PROBES: usize = 3;
 const PMTU_RAISE_TIMER: Duration = Duration::from_secs(600);
 
+/// Number of full-MTU packets lost before we assume a black hole.
+/// RFC 8899 Section 4.2 suggests `MAX_PROBES` (3) for probe packets, but we use
+/// a higher threshold for data packets to avoid false positives on lossy paths.
+const BLACK_HOLE_THRESHOLD: usize = 6;
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum Probe {
     NotNeeded,
@@ -55,6 +60,10 @@ pub struct Pmtud {
     probe_count: usize,
     probe_state: Probe,
     raise_timer: Option<Instant>,
+    /// Count of consecutive full-MTU packets lost, for black hole detection.
+    loss_count: usize,
+    /// Whether we've received an ACK for some packets since starting to count losses.
+    some_acked: bool,
 }
 
 impl Pmtud {
@@ -88,6 +97,8 @@ impl Pmtud {
             probe_count: 0,
             probe_state: Probe::NotNeeded,
             raise_timer: None,
+            loss_count: 0,
+            some_acked: false,
         }
     }
 
@@ -162,6 +173,16 @@ impl Pmtud {
         now: Instant,
         stats: &mut Stats,
     ) {
+        // Black hole detection: check if full-MTU packets are getting through.
+        if acked_pkts.iter().any(|p| p.len() == self.plpmtu()) {
+            // Full-MTU packets are getting through, no black hole.
+            self.loss_count = 0;
+            self.some_acked = false;
+        } else if !acked_pkts.is_empty() {
+            // Some packets ACKed - path is alive, but may have a black hole at the current MTU.
+            self.some_acked = true;
+        }
+
         let acked = Self::count_probes(acked_pkts);
         if acked == 0 {
             return;
@@ -198,6 +219,20 @@ impl Pmtud {
         stats: &mut Stats,
         now: Instant,
     ) {
+        // Black hole detection: if we're losing full-MTU packets while others are ACKed, restart.
+        if lost_packets.iter().any(|p| p.len() == self.plpmtu()) {
+            self.loss_count += 1;
+            if self.loss_count >= BLACK_HOLE_THRESHOLD && self.some_acked {
+                qinfo!(
+                    "PMTUD black hole detected: lost {} full-MTU packets while others are ACKed",
+                    self.loss_count
+                );
+                stats.pmtud_change += 1;
+                self.start(now, stats);
+                return;
+            }
+        }
+
         let lost = Self::count_probes(lost_packets);
         if lost == 0 {
             return;
@@ -225,6 +260,8 @@ impl Pmtud {
         self.mtu = self.search_table[self.probe_index];
         stats.pmtud_pmtu = self.mtu;
         self.raise_timer = None;
+        self.loss_count = 0;
+        self.some_acked = false;
         qdebug!("PMTUD started, PLPMTU is now {}", self.mtu);
         self.next(now, stats);
     }
