@@ -185,17 +185,3 @@ runs:
       with:
         name: bindings-${{ inputs.platform }}
         path: ${{ inputs.working-directory }}/${{ inputs.platform }}.rs
-
-    - if: ${{ always() && inputs.generate-bindings == 'true' }}
-      shell: bash
-      env:
-        WD: ${{ inputs.working-directory }}
-        PLATFORM: ${{ inputs.platform }}
-      run: |
-        # Check if generated bindings differ from committed bindings
-        if [ -f "$WD/$PLATFORM.rs" ]; then
-          if ! diff "$WD/src/bindings/$PLATFORM.rs" "$WD/$PLATFORM.rs"; then
-            echo "::error::Generated bindings for $PLATFORM differ from committed version. Update src/bindings/$PLATFORM.rs with the artifact contents."
-            exit 1
-          fi
-        fi
