@@ -193,7 +193,7 @@ impl AddressValidation {
                     return None;
                 }
             }
-            _ => return None,
+            None => return None,
         }
         Some(ConnectionId::from(dec.decode_remainder()))
     }
@@ -261,7 +261,7 @@ impl AddressValidation {
                     panic!("AddressValidation: NEW_TOKEN token with CID {cid}");
                 }
             }
-            _ => {
+            None => {
                 // From here on, we have a token that we couldn't decrypt.
                 // We've either lost the keys or we've received junk.
                 if retry {

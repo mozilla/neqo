@@ -516,7 +516,7 @@ impl<'a> Frame<'a> {
                 application_error_code: dv(dec)?,
                 final_size: match dec.decode_varint() {
                     Some(v) => v,
-                    _ => return Err(Error::NoMoreData),
+                    None => return Err(Error::NoMoreData),
                 },
             }),
             FrameType::Ack => decode_ack(dec, false),

@@ -14,15 +14,21 @@ fi
 
 check-lockfile-intersection \
     https://raw.githubusercontent.com/mozilla-firefox/firefox/refs/heads/main/Cargo.lock \
-    Cargo.lock 2>/dev/null | while read -r line; do
-        # Skip informational lines (not commands or comments)
-        if [[ "$line" != "cargo update"* && "$line" != "#"* ]]; then
+    Cargo.lock 2> /dev/null | while read -r d ; do
+        if [[ "$d" != *DIFFERENT* ]]; then
             continue
         fi
-        # Skip .999 versions
-        if [[ "$line" == *".999" ]]; then
-            echo "# Skipping due to .999: ${line#cargo update -p }"
-            continue
+        crate=$(echo "$d" | cut -d' ' -f2)
+        version_a=$(echo "$d" | cut -d' ' -f3)
+        version_b=$(echo "$d" | cut -d' ' -f5)
+        # echo "Found differing versions for $crate: $version_a vs $version_b"
+        # If version_a > version_b, then we want to update to version_a.
+        if sort --version-sort <<<"$version_a"$'\n'"$version_b" | head -n1 | grep -q "^$version_b$"; then
+            # But only if the version isn't ending in .999
+            if echo "$version_a" | grep -q '\.999$'; then
+                echo "# Skipping due to .999: cargo update -p $crate --precise $version_a"
+            else
+                echo "cargo update -p $crate --precise $version_a"
+            fi
         fi
-        echo "$line"
 done

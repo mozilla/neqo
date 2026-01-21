@@ -505,7 +505,7 @@ impl ConnectionIdManager {
                 self.next_seqno += 1;
                 Ok((cid, Srt::random()))
             }
-            _ => Err(Error::ConnectionIdsExhausted),
+            None => Err(Error::ConnectionIdsExhausted),
         }
     }
 

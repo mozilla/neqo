@@ -878,7 +878,7 @@ impl Connection {
                 }
                 Ok(())
             }
-            _ => Err(Error::NotConnected),
+            None => Err(Error::NotConnected),
         }
     }
 
@@ -1000,7 +1000,7 @@ impl Connection {
                             );
                         }
                     }
-                    _ => {
+                    None => {
                         self.set_state(State::Closed(error), now);
                     }
                 },
@@ -1959,7 +1959,7 @@ impl Connection {
                     self.paths.make_permanent(path, None, cid, now);
                     Ok(())
                 }
-                _ => {
+                None => {
                     if let Some(primary) = self.paths.primary() {
                         if primary.borrow().remote_cid().is_none_or(|id| id.is_empty()) {
                             self.paths.make_permanent(
@@ -2898,7 +2898,7 @@ impl Connection {
                     .close(path, error.clone(), FrameType::Padding, msg);
                 self.set_state(State::Closing { error, timeout }, now);
             }
-            _ => {
+            None => {
                 self.set_state(State::Closed(error), now);
             }
         }

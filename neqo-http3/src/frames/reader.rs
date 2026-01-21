@@ -277,7 +277,7 @@ impl FrameReader {
                 self.reset();
                 return Ok(Some(f));
             }
-            _ => {
+            None => {
                 if T::is_known_type(self.frame_type) {
                     self.state = FrameReaderState::GetData {
                         decoder: IncrementalDecoderBuffer::new(
