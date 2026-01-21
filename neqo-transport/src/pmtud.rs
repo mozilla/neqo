@@ -34,15 +34,6 @@ const MTU_SIZES_V6: &[usize] = &[
 const_assert!(MTU_SIZES_V4.len() == MTU_SIZES_V6.len());
 const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();
 
-// From https://datatracker.ietf.org/doc/html/rfc8899#section-5.1
-const MAX_PROBES: usize = 3;
-const PMTU_RAISE_TIMER: Duration = Duration::from_secs(600);
-
-/// Number of full-MTU packets lost before we assume a black hole.
-/// RFC 8899 Section 4.2 suggests `MAX_PROBES` (3) for probe packets, but we use
-/// a higher threshold for data packets to avoid false positives on lossy paths.
-const BLACK_HOLE_THRESHOLD: usize = 6;
-
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum Probe {
     NotNeeded,
@@ -60,13 +51,17 @@ pub struct Pmtud {
     probe_count: usize,
     probe_state: Probe,
     raise_timer: Option<Instant>,
-    /// Count of consecutive full-MTU packets lost, for black hole detection.
-    loss_count: usize,
-    /// Whether we've received an ACK for some packets since starting to count losses.
-    some_acked: bool,
+    black_hole: BlackHoleDetector,
 }
 
 impl Pmtud {
+    /// Number of probe attempts before giving up on a size.
+    /// From <https://datatracker.ietf.org/doc/html/rfc8899#section-5.1>.
+    const MAX_PROBES: usize = 3;
+
+    /// Time to wait before probing for a larger MTU after a probe failure.
+    const RAISE_TIMER: Duration = Duration::from_secs(600);
+
     /// Returns the MTU search table for the given remote IP address family.
     const fn search_table(remote_ip: IpAddr) -> &'static [usize] {
         match remote_ip {
@@ -87,18 +82,18 @@ impl Pmtud {
     #[must_use]
     pub fn new(remote_ip: IpAddr, iface_mtu: Option<usize>) -> Self {
         let search_table = Self::search_table(remote_ip);
-        let probe_index = 0;
+        let header_size = Self::header_size(remote_ip);
+        let base_plpmtu = search_table[0] - header_size;
         Self {
             search_table,
-            header_size: Self::header_size(remote_ip),
-            mtu: search_table[probe_index],
+            header_size,
+            mtu: search_table[0],
             iface_mtu: iface_mtu.unwrap_or(usize::MAX),
-            probe_index,
+            probe_index: 0,
             probe_count: 0,
             probe_state: Probe::NotNeeded,
             raise_timer: None,
-            loss_count: 0,
-            some_acked: false,
+            black_hole: BlackHoleDetector::new(base_plpmtu),
         }
     }
 
@@ -109,6 +104,16 @@ impl Pmtud {
             self.raise_timer = None;
             self.next(now, stats);
         }
+    }
+
+    /// Returns the minimum MTU from the search table.
+    const fn min_mtu(&self) -> usize {
+        self.search_table[0]
+    }
+
+    /// Returns the MTU currently being probed.
+    const fn probe_mtu(&self) -> usize {
+        self.search_table[self.probe_index]
     }
 
     /// Returns the current Packetization Layer Path MTU, i.e., the maximum UDP payload that can be
@@ -127,7 +132,7 @@ impl Pmtud {
     /// Returns the size of the current PMTUD probe.
     #[must_use]
     pub const fn probe_size(&self) -> usize {
-        self.search_table[self.probe_index] - self.header_size
+        self.probe_mtu() - self.header_size
     }
 
     /// Sends a PMTUD probe.
@@ -147,7 +152,7 @@ impl Pmtud {
         self.probe_state = Probe::Sent;
         qdebug!(
             "Sending PMTUD probe of size {}, count {}",
-            self.search_table[self.probe_index],
+            self.probe_mtu(),
             self.probe_count
         );
     }
@@ -173,18 +178,7 @@ impl Pmtud {
         now: Instant,
         stats: &mut Stats,
     ) {
-        // Black hole detection: check if full-MTU packets are getting through on the primary path.
-        if acked_pkts
-            .iter()
-            .any(|p| p.on_primary_path() && p.len() == self.plpmtu())
-        {
-            // Full-MTU packets are getting through, no black hole.
-            self.loss_count = 0;
-            self.some_acked = false;
-        } else if acked_pkts.iter().any(sent::Packet::on_primary_path) {
-            // Some packets ACKed on the primary path, but none were full-MTU.
-            self.some_acked = true;
-        }
+        self.black_hole.on_ack(acked_pkts);
 
         let acked = Self::count_probes(acked_pkts);
         if acked == 0 {
@@ -193,7 +187,7 @@ impl Pmtud {
 
         // A probe was ACKed, confirm the new MTU and try to probe upwards further.
         stats.pmtud_ack += acked;
-        self.mtu = self.search_table[self.probe_index];
+        self.mtu = self.probe_mtu();
         stats.pmtud_pmtu = self.mtu;
         qdebug!("PMTUD probe of size {} succeeded", self.mtu);
         self.next(now, stats);
@@ -206,7 +200,7 @@ impl Pmtud {
         self.mtu = self.search_table[idx]; // Leading to this MTU
         stats.pmtud_pmtu = self.mtu;
         self.probe_count = 0; // Reset the count
-        self.raise_timer = Some(now + PMTU_RAISE_TIMER);
+        self.raise_timer = Some(now + Self::RAISE_TIMER);
         qinfo!(
             "PMTUD stopped, PLPMTU is now {}, raise timer {:?}",
             self.mtu,
@@ -214,7 +208,7 @@ impl Pmtud {
         );
     }
 
-    /// Checks whether a PMTUD probe has been lost. If it has been lost more than `MAX_PROBES`
+    /// Checks whether a PMTUD probe has been lost. If it has been lost more than `Self::MAX_PROBES`
     /// times, the PMTUD process is stopped at the current MTU.
     pub fn on_packets_lost(
         &mut self,
@@ -222,21 +216,11 @@ impl Pmtud {
         stats: &mut Stats,
         now: Instant,
     ) {
-        // Black hole detection: if we're losing full-MTU packets while others are ACKed, restart.
-        if lost_packets
-            .iter()
-            .any(|p| p.on_primary_path() && p.len() == self.plpmtu())
-        {
-            self.loss_count += 1;
-            if self.loss_count >= BLACK_HOLE_THRESHOLD && self.some_acked {
-                qinfo!(
-                    "PMTUD black hole detected: lost {} full-MTU packets while others are ACKed",
-                    self.loss_count
-                );
-                stats.pmtud_change += 1;
-                self.start(now, stats);
-                return;
-            }
+        // Skip black hole detection if we're already at minimum MTU - there's nowhere to go.
+        if self.mtu > self.min_mtu() && self.black_hole.on_loss(lost_packets, now) {
+            stats.pmtud_change += 1;
+            self.start(now, stats);
+            return;
         }
 
         let lost = Self::count_probes(lost_packets);
@@ -245,13 +229,13 @@ impl Pmtud {
         }
         stats.pmtud_lost += lost;
 
-        if self.probe_count >= MAX_PROBES {
-            // We've sent MAX_PROBES probes and they were all lost. Stop probing at the
-            // previous successful MTU.
+        if self.probe_count >= Self::MAX_PROBES {
+            // We've exhausted probe attempts. Stop probing at the previous successful MTU.
             let ok_idx = self.probe_index.saturating_sub(1);
             qdebug!(
-                "PMTUD probe of size {} failed after {MAX_PROBES} attempts",
-                self.search_table[self.probe_index]
+                "PMTUD probe of size {} failed after {} attempts",
+                self.probe_mtu(),
+                Self::MAX_PROBES,
             );
             self.stop(ok_idx, now, stats);
         } else {
@@ -263,12 +247,11 @@ impl Pmtud {
     /// Starts PMTUD from the minimum MTU, probing upward.
     pub fn start(&mut self, now: Instant, stats: &mut Stats) {
         self.probe_index = 0;
-        self.mtu = self.search_table[self.probe_index];
+        self.mtu = self.min_mtu();
         stats.pmtud_pmtu = self.mtu;
         self.raise_timer = None;
-        self.loss_count = 0;
-        self.some_acked = false;
-        qdebug!("PMTUD started, PLPMTU is now {}", self.mtu);
+        self.black_hole.reset();
+        qdebug!("PMTUD started, PLPMTU is now {}", self.plpmtu());
         self.next(now, stats);
     }
 
@@ -296,10 +279,7 @@ impl Pmtud {
         self.probe_state = Probe::Needed; // We need to send a probe
         self.probe_count = 0; // For the first time
         self.probe_index += 1; // At this size
-        qdebug!(
-            "PMTUD started with probe size {}",
-            self.search_table[self.probe_index],
-        );
+        qdebug!("PMTUD started with probe size {}", self.probe_mtu());
     }
 
     /// Returns the default PLPMTU for the given remote IP address.
@@ -307,6 +287,109 @@ impl Pmtud {
     pub const fn default_plpmtu(remote_ip: IpAddr) -> usize {
         let search_table = Self::search_table(remote_ip);
         search_table[0] - Self::header_size(remote_ip)
+    }
+}
+
+/// Detects PMTUD black holes by tracking losses of large packets.
+///
+/// A black hole is declared when we see repeated losses of packets larger than
+/// the base PLPMTU while the connection remains alive (implying smaller packets
+/// are getting through).
+#[derive(Debug)]
+struct BlackHoleDetector {
+    /// Minimum PLPMTU - packets larger than this are considered "large".
+    base_plpmtu: usize,
+    /// Smallest packet size among lost large packets.
+    min_lost_size: Option<usize>,
+    /// Count of consecutive loss events for large packets.
+    loss_count: usize,
+    /// Ignore losses of packets sent before this time.
+    /// Set when we restart PMTUD to avoid counting stale losses.
+    ignore_before: Option<Instant>,
+}
+
+impl BlackHoleDetector {
+    /// Number of consecutive loss events before declaring a black hole.
+    const THRESHOLD: usize = 3;
+
+    const fn new(base_plpmtu: usize) -> Self {
+        Self {
+            base_plpmtu,
+            min_lost_size: None,
+            loss_count: 0,
+            ignore_before: None,
+        }
+    }
+
+    /// Reset detection state (but not the time filter).
+    const fn reset(&mut self) {
+        self.min_lost_size = None;
+        self.loss_count = 0;
+    }
+
+    /// Handle ACK of packets. If a large packet was acknowledged,
+    /// the path is working for that size, so reset detection.
+    fn on_ack(&mut self, acked_pkts: &[sent::Packet]) {
+        if self.min_lost_size.is_none() {
+            return;
+        }
+
+        let max_acked = acked_pkts
+            .iter()
+            .filter(|p| p.on_primary_path())
+            .map(sent::Packet::len)
+            .max();
+
+        if let Some(max_acked) = max_acked {
+            if self.min_lost_size.is_some_and(|min| max_acked >= min) {
+                qdebug!(
+                    "PMTUD black hole detection reset: ACK for {max_acked} bytes >= min_lost {:?}",
+                    self.min_lost_size
+                );
+                self.reset();
+            }
+        }
+    }
+
+    /// Record loss events. Returns `true` if a black hole is detected.
+    fn on_loss(&mut self, lost_pkts: &[sent::Packet], now: Instant) -> bool {
+        let Some(min_lost) = lost_pkts
+            .iter()
+            .filter(|p| {
+                p.on_primary_path()
+                    && !p.is_pmtud_probe()
+                    && p.len() > self.base_plpmtu
+                    && self.ignore_before.is_none_or(|t| p.time_sent() >= t)
+            })
+            .map(sent::Packet::len)
+            .min()
+        else {
+            return false;
+        };
+
+        let new_min = self
+            .min_lost_size
+            .map_or(min_lost, |current| current.min(min_lost));
+        self.min_lost_size = Some(new_min);
+        self.loss_count += 1;
+
+        qdebug!(
+            "PMTUD black hole detection: min_lost_size={new_min}, loss_count={}",
+            self.loss_count
+        );
+
+        if self.loss_count >= Self::THRESHOLD {
+            qinfo!(
+                "PMTUD black hole detected: {} losses of packets >= {new_min} bytes",
+                self.loss_count,
+            );
+            // Set the time filter before reset so we ignore stale losses after restart.
+            self.ignore_before = Some(now);
+            self.reset();
+            return true;
+        }
+
+        false
     }
 }
 
@@ -325,7 +408,7 @@ mod tests {
         Pmtud, Stats,
         crypto::CryptoDxState,
         packet,
-        pmtud::{PMTU_RAISE_TIMER, Probe, SEARCH_TABLE_LEN},
+        pmtud::{Probe, SEARCH_TABLE_LEN},
         recovery::{self, SendProfile, sent},
     };
 
@@ -450,7 +533,7 @@ mod tests {
 
         // Fire the raise timer - this only triggers probing for *higher* MTUs.
         qdebug!("Firing raise timer after reaching MTU {current_mtu}");
-        let now = now + PMTU_RAISE_TIMER;
+        let now = now + Pmtud::RAISE_TIMER;
         pmtud.maybe_fire_raise_timer(now, &mut stats);
 
         // If we're not at the max MTU, the timer should trigger a probe for a higher MTU.
@@ -483,7 +566,7 @@ mod tests {
         assert_mtu(&pmtud, mtu);
 
         qdebug!("Increasing MTU to {larger_mtu}");
-        let now = now + PMTU_RAISE_TIMER;
+        let now = now + Pmtud::RAISE_TIMER;
         pmtud.maybe_fire_raise_timer(now, &mut stats);
         while pmtud.needs_probe() {
             pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, larger_mtu, now);
@@ -600,5 +683,191 @@ mod tests {
 
         // No probe ACKs should have been recorded.
         assert_eq!(initial_ack, stats.pmtud_ack);
+    }
+
+    mod black_hole {
+        use std::time::{Duration, Instant};
+
+        use test_fixture::now;
+
+        use crate::{
+            pmtud::BlackHoleDetector,
+            recovery::{sent, Token},
+        };
+
+        const BASE_PLPMTU: usize = 1232;
+
+        fn make_packet(pn: u64, sent_time: Instant, len: usize) -> sent::Packet {
+            sent::make_packet(pn, sent_time, len)
+        }
+
+        fn make_probe(pn: u64, sent_time: Instant, len: usize) -> sent::Packet {
+            sent::Packet::new(
+                crate::packet::Type::Short,
+                pn,
+                sent_time,
+                true,
+                vec![Token::PmtudProbe],
+                len,
+            )
+        }
+
+        #[test]
+        fn no_detection_below_threshold() {
+            let now = now();
+            let mut detector = BlackHoleDetector::new(BASE_PLPMTU);
+
+            // Lose packets below threshold.
+            for i in 0..BlackHoleDetector::THRESHOLD - 1 {
+                let pkt = make_packet(u64::try_from(i).unwrap(), now, 1400);
+                assert!(!detector.on_loss(&[pkt], now));
+            }
+
+            assert_eq!(detector.loss_count, BlackHoleDetector::THRESHOLD - 1);
+            assert!(detector.min_lost_size.is_some());
+        }
+
+        #[test]
+        fn detection_at_threshold() {
+            let now = now();
+            let mut detector = BlackHoleDetector::new(BASE_PLPMTU);
+
+            // Lose packets up to threshold.
+            for i in 0..BlackHoleDetector::THRESHOLD - 1 {
+                let pkt = make_packet(u64::try_from(i).unwrap(), now, 1400);
+                assert!(!detector.on_loss(&[pkt], now));
+            }
+
+            // This loss triggers detection.
+            let pkt = make_packet(
+                u64::try_from(BlackHoleDetector::THRESHOLD).unwrap(),
+                now,
+                1400,
+            );
+            assert!(detector.on_loss(&[pkt], now));
+
+            // State should be reset after detection.
+            assert_eq!(detector.loss_count, 0);
+            assert!(detector.min_lost_size.is_none());
+            // But ignore_before should be set.
+            assert!(detector.ignore_before.is_some());
+        }
+
+        #[test]
+        fn ack_resets_detection() {
+            let now = now();
+            let mut detector = BlackHoleDetector::new(BASE_PLPMTU);
+
+            // Lose packets below threshold.
+            for i in 0..BlackHoleDetector::THRESHOLD - 1 {
+                let pkt = make_packet(u64::try_from(i).unwrap(), now, 1400);
+                assert!(!detector.on_loss(&[pkt], now));
+            }
+            assert_eq!(detector.loss_count, BlackHoleDetector::THRESHOLD - 1);
+            assert_eq!(detector.min_lost_size, Some(1400));
+
+            // ACK a packet >= min_lost_size resets detection.
+            let ack_pkt = make_packet(10, now, 1400);
+            detector.on_ack(&[ack_pkt]);
+
+            assert_eq!(detector.loss_count, 0);
+            assert!(detector.min_lost_size.is_none());
+        }
+
+        #[test]
+        fn ack_smaller_than_min_lost_no_reset() {
+            let now = now();
+            let mut detector = BlackHoleDetector::new(BASE_PLPMTU);
+
+            // Lose a large packet.
+            let pkt = make_packet(0, now, 1400);
+            assert!(!detector.on_loss(&[pkt], now));
+            assert_eq!(detector.min_lost_size, Some(1400));
+
+            // ACK a smaller packet - should not reset.
+            let ack_pkt = make_packet(10, now, 1300);
+            detector.on_ack(&[ack_pkt]);
+
+            assert_eq!(detector.loss_count, 1);
+            assert_eq!(detector.min_lost_size, Some(1400));
+        }
+
+        #[test]
+        fn small_packets_ignored() {
+            let now = now();
+            let mut detector = BlackHoleDetector::new(BASE_PLPMTU);
+
+            // Lose packets at or below base_plpmtu - should be ignored.
+            for i in 0..5 {
+                let pkt = make_packet(i, now, BASE_PLPMTU);
+                assert!(!detector.on_loss(&[pkt], now));
+            }
+
+            assert_eq!(detector.loss_count, 0);
+            assert!(detector.min_lost_size.is_none());
+        }
+
+        #[test]
+        fn probe_packets_ignored() {
+            let now = now();
+            let mut detector = BlackHoleDetector::new(BASE_PLPMTU);
+
+            // Lose probe packets - should be ignored.
+            for i in 0..5 {
+                let pkt = make_probe(i, now, 1400);
+                assert!(!detector.on_loss(&[pkt], now));
+            }
+
+            assert_eq!(detector.loss_count, 0);
+            assert!(detector.min_lost_size.is_none());
+        }
+
+        #[test]
+        fn old_packets_ignored_after_restart() {
+            let now = now();
+            let mut detector = BlackHoleDetector::new(BASE_PLPMTU);
+
+            // Trigger detection.
+            for i in 0..BlackHoleDetector::THRESHOLD {
+                let pkt = make_packet(u64::try_from(i).unwrap(), now, 1400);
+                detector.on_loss(&[pkt], now);
+            }
+            assert!(detector.ignore_before.is_some());
+
+            // Packets sent before ignore_before should be ignored.
+            let old_time = now.checked_sub(Duration::from_millis(100)).unwrap();
+            for i in 10..15 {
+                let pkt = make_packet(i, old_time, 1400);
+                assert!(!detector.on_loss(&[pkt], now));
+            }
+            assert_eq!(detector.loss_count, 0);
+
+            // But new packets should count.
+            let new_time = now + Duration::from_millis(100);
+            let pkt = make_packet(20, new_time, 1400);
+            assert!(!detector.on_loss(&[pkt], now));
+            assert_eq!(detector.loss_count, 1);
+        }
+
+        #[test]
+        fn tracks_minimum_lost_size() {
+            let now = now();
+            let mut detector = BlackHoleDetector::new(BASE_PLPMTU);
+
+            // Lose packets of different sizes.
+            let pkt = make_packet(0, now, 1500);
+            assert!(!detector.on_loss(&[pkt], now));
+            assert_eq!(detector.min_lost_size, Some(1500));
+
+            let pkt = make_packet(1, now, 1400);
+            assert!(!detector.on_loss(&[pkt], now));
+            assert_eq!(detector.min_lost_size, Some(1400));
+
+            // Larger packet doesn't change min.
+            let pkt = make_packet(2, now, 1450);
+            assert!(detector.on_loss(&[pkt], now)); // Triggers detection
+                                                    // After reset, min_lost_size is None.
+            assert!(detector.min_lost_size.is_none());
+        }
     }
 }
