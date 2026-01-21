@@ -18,10 +18,12 @@ Usage: Run from the workspace root (not inside test/).
 
 import subprocess
 import sys
-import tomllib
 from graphlib import TopologicalSorter
 from pathlib import Path
 from urllib.request import urlopen
+
+import tomlkit
+from packaging.version import Version
 
 GECKO_LOCKFILE_URL = "https://raw.githubusercontent.com/mozilla-firefox/firefox/refs/heads/main/Cargo.lock"
 GECKO_BUILD_RUST_URL = (
@@ -32,6 +34,10 @@ GECKO_RAW_URL = (
 )
 
 PATCH_DIR = Path("build/rust")
+
+# Threshold for determining if code content is substantial. Anything shorter
+# (after stripping comments/whitespace) is considered an empty stub.
+MIN_SUBSTANTIAL_CODE_LENGTH = 10
 
 LICENSE_HEADER = """\
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
@@ -94,7 +100,9 @@ def fetch_gecko_empty_patches() -> set[str]:
 
         # If nothing remains, or only a single short line, it's empty.
         # Re-export patches have "pub use something::*;" which we exclude.
-        if not code or (len(code) < 10 and "pub use" not in lib_content):
+        if not code or (
+            len(code) < MIN_SUBSTANTIAL_CODE_LENGTH and "pub use" not in lib_content
+        ):
             empty_patches.add(name)
 
     return empty_patches
@@ -107,8 +115,8 @@ def find_dev_only_packages() -> set[str]:
     """
     # Parse workspace Cargo.toml to find members.
     workspace_toml = Path("Cargo.toml")
-    with open(workspace_toml, "rb") as f:
-        workspace = tomllib.load(f)
+    with open(workspace_toml, "r") as f:
+        workspace = tomlkit.load(f)
 
     members = workspace.get("workspace", {}).get("members", [])
 
@@ -120,8 +128,8 @@ def find_dev_only_packages() -> set[str]:
         member_toml = Path(member) / "Cargo.toml"
         if not member_toml.exists():
             continue
-        with open(member_toml, "rb") as f:
-            cargo = tomllib.load(f)
+        with open(member_toml, "r") as f:
+            cargo = tomlkit.load(f)
 
         # Collect normal dependencies.
         for dep in cargo.get("dependencies", {}):
@@ -143,8 +151,8 @@ def find_dev_only_packages() -> set[str]:
         dev_build_roots.add(dep)
 
     # Load lockfile to trace transitive dependencies.
-    with open("Cargo.lock", "rb") as f:
-        lock = tomllib.load(f)
+    with open("Cargo.lock", "r") as f:
+        lock = tomlkit.load(f)
 
     pkg_deps = {}
     for pkg in lock.get("package", []):
@@ -168,28 +176,18 @@ def find_dev_only_packages() -> set[str]:
     return dev_only
 
 
-def parse_version(v: str) -> tuple:
-    """Parse version string into comparable tuple, ignoring pre-release suffixes."""
-    # Strip common suffixes like +wasi-snapshot-preview1
-    v = v.split("+")[0]
-    parts = []
-    for part in v.split("."):
-        # Handle pre-release like "0.11.0-alpha"
-        part = part.split("-")[0]
-        try:
-            parts.append(int(part))
-        except ValueError:
-            parts.append(0)
-    return tuple(parts)
+def parse_version(v: str) -> Version:
+    """Parse version string into a comparable Version object."""
+    return Version(v)
 
 
 def load_lockfile(src: str) -> dict:
     """Load a Cargo.lock from a path or URL."""
     if src.startswith(("http://", "https://")):
         with urlopen(src) as response:
-            return tomllib.loads(response.read().decode())
-    with open(src, "rb") as f:
-        return tomllib.load(f)
+            return tomlkit.loads(response.read().decode())
+    with open(src, "r") as f:
+        return tomlkit.load(f)
 
 
 def parse_packages(lock: dict, prefer_registry: bool = False) -> dict[str, dict]:
@@ -251,22 +249,21 @@ path = "lib.rs"
 def add_patch_to_cargo_toml(crate: str) -> bool:
     """Add a patch entry to Cargo.toml. Returns True if added, False if exists."""
     cargo_toml_path = Path("Cargo.toml")
-    content = cargo_toml_path.read_text()
+    doc = tomlkit.parse(cargo_toml_path.read_text())
 
-    patch_line = f'{crate} = {{ path = "{PATCH_DIR}/{crate}" }}'
+    # Ensure [patch.crates-io] section exists.
+    if "patch" not in doc:
+        doc["patch"] = {"crates-io": {}}
+    if "crates-io" not in doc["patch"]:
+        doc["patch"]["crates-io"] = {}
 
     # Check if patch already exists.
-    if f"{crate} = " in content:
+    if crate in doc["patch"]["crates-io"]:
         return False
 
-    # Check if [patch.crates-io] section exists.
-    if "[patch.crates-io]" not in content:
-        content += "\n[patch.crates-io]\n"
-
-    # Add the patch line after [patch.crates-io].
-    content = content.replace("[patch.crates-io]", f"[patch.crates-io]\n{patch_line}")
-
-    cargo_toml_path.write_text(content)
+    # Add the patch entry.
+    doc["patch"]["crates-io"][crate] = {"path": f"{PATCH_DIR}/{crate}"}
+    cargo_toml_path.write_text(tomlkit.dumps(doc))
     return True
 
 
@@ -429,8 +426,8 @@ def main():
         dev_only = find_dev_only_packages()
 
         # Parse lockfile to find what requires each failed package.
-        with open("Cargo.lock", "rb") as f:
-            lock = tomllib.load(f)
+        with open("Cargo.lock", "r") as f:
+            lock = tomlkit.load(f)
         dependents = {}
         for pkg in lock.get("package", []):
             for dep in pkg.get("dependencies", []):
