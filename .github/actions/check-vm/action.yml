@@ -122,6 +122,7 @@ runs:
       uses: vmactions/freebsd-vm@670398e4236735b8b65805c3da44b7a511fb8b27 # v1.3.0
       with:
         usesh: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
@@ -130,6 +131,7 @@ runs:
       uses: vmactions/openbsd-vm@00753f2835e62704570734312de6f212069dfef7 # v1.3.1
       with:
         usesh: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
@@ -138,6 +140,7 @@ runs:
       uses: vmactions/netbsd-vm@2ba9902c77c2ebdb7501e5e9308dea03f0f251c4 # v1.3.1
       with:
         usesh: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
@@ -147,6 +150,7 @@ runs:
       with:
         release: "11.4-gcc"
         usesh: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
