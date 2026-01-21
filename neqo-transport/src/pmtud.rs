@@ -413,7 +413,7 @@ mod tests {
         Pmtud, Stats,
         crypto::CryptoDxState,
         packet,
-        pmtud::{Probe, SEARCH_TABLE_LEN},
+        pmtud::{BlackHoleDetector, Probe, SEARCH_TABLE_LEN},
         recovery::{self, SendProfile, sent},
     };
 
@@ -452,6 +452,14 @@ mod tests {
             assert!(mtu < pmtud.search_table[idx + 1]);
         }
         assert_eq!(Probe::NotNeeded, pmtud.probe_state);
+    }
+
+    /// Triggers black hole detection by losing large packets.
+    fn trigger_black_hole(pmtud: &mut Pmtud, stats: &mut Stats, now: Instant) {
+        for i in 0..BlackHoleDetector::THRESHOLD {
+            let pkt = sent::make_packet(i as u64, now, 1400);
+            pmtud.on_packets_lost(&[pkt], stats, now);
+        }
     }
 
     #[cfg(test)]
@@ -688,6 +696,82 @@ mod tests {
 
         // No probe ACKs should have been recorded.
         assert_eq!(initial_ack, stats.pmtud_ack);
+    }
+
+    /// Tests that black hole detection does NOT restart PMTUD when already at minimum MTU.
+    /// There's no point restarting at `min_mtu` since we can't go any lower.
+    #[test]
+    fn black_hole_at_min_mtu_no_restart() {
+        let now = now();
+        let mut pmtud = Pmtud::new(V4, None);
+        let mut stats = Stats::default();
+
+        // Set PMTUD to minimum MTU.
+        pmtud.start(now, &mut stats);
+        assert_eq!(pmtud.mtu, pmtud.min_mtu());
+        let initial_pmtud_change = stats.pmtud_change;
+
+        trigger_black_hole(&mut pmtud, &mut stats, now);
+
+        // pmtud_change should NOT have incremented because we're at min_mtu.
+        assert_eq!(
+            initial_pmtud_change, stats.pmtud_change,
+            "Black hole detection should not trigger restart when at min_mtu"
+        );
+        assert_eq!(pmtud.mtu, pmtud.min_mtu());
+    }
+
+    /// Tests that black hole detection increments `pmtud_change` when triggered above `min_mtu`.
+    #[test]
+    fn black_hole_increments_pmtud_change() {
+        let now = now();
+        let mut pmtud = Pmtud::new(V4, None);
+        let mut stats = Stats::default();
+
+        // Complete PMTUD at MTU 1500 (above min_mtu).
+        let idx = pmtud.search_table.iter().position(|&m| m == 1500).unwrap();
+        pmtud.stop(idx, now, &mut stats);
+        assert_eq!(pmtud.mtu, 1500);
+        assert!(pmtud.mtu > pmtud.min_mtu());
+        assert_eq!(stats.pmtud_change, 0);
+
+        trigger_black_hole(&mut pmtud, &mut stats, now);
+
+        assert_eq!(
+            stats.pmtud_change, 1,
+            "pmtud_change should be exactly 1 after one black hole detection"
+        );
+    }
+
+    /// Tests that probe loss counting works correctly up to `MAX_PROBES`.
+    #[test]
+    fn probe_loss_stops_at_max_probes() {
+        let now = now();
+        let mut pmtud = Pmtud::new(V4, None);
+        let mut stats = Stats::default();
+
+        pmtud.next(now, &mut stats);
+        assert!(pmtud.needs_probe());
+
+        for probe_num in 0..Pmtud::MAX_PROBES {
+            pmtud.probe_state = Probe::Sent;
+            pmtud.probe_count = probe_num + 1;
+
+            let pn = u64::try_from(probe_num).unwrap();
+            let probe = make_pmtud_probe(pn, now, pmtud.probe_size());
+            pmtud.on_packets_lost(&[probe], &mut stats, now);
+
+            let expected = if probe_num < Pmtud::MAX_PROBES - 1 {
+                Probe::Needed
+            } else {
+                Probe::NotNeeded
+            };
+            assert_eq!(
+                expected, pmtud.probe_state,
+                "probe_state after {} probe losses",
+                probe_num + 1
+            );
+        }
     }
 
     mod black_hole {
