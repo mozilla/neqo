@@ -86,6 +86,13 @@ runs:
                     --allowlist-item 'RTAX_MAX|RTM_GET|RTM_VERSION|RTA_DST|RTA_IFP' \
                     --generate-cstr --explicit-padding --with-derive-default \
                     src/bindings/bsd.h > "$PLATFORM.rs"
+            # Compare generated bindings with committed bindings
+            # If different, exit early with success to trigger copyback
+            if ! diff -q "src/bindings/$PLATFORM.rs" "$PLATFORM.rs" > /dev/null 2>&1; then
+              echo "::warning::Bindings for $PLATFORM differ from committed version"
+              touch bindings-changed
+              exit 0
+            fi
           fi
 
           cargo version
@@ -176,3 +183,17 @@ runs:
       with:
         name: bindings-${{ inputs.platform }}
         path: ${{ inputs.working-directory }}/${{ inputs.platform }}.rs
+
+    - if: ${{ always() && inputs.generate-bindings == 'true' }}
+      shell: bash
+      env:
+        WD: ${{ inputs.working-directory }}
+        PLATFORM: ${{ inputs.platform }}
+      run: |
+        # Check if generated bindings differ from committed bindings
+        if [ -f "$WD/$PLATFORM.rs" ]; then
+          if ! diff "$WD/src/bindings/$PLATFORM.rs" "$WD/$PLATFORM.rs"; then
+            echo "::error::Generated bindings for $PLATFORM differ from committed version. Update src/bindings/$PLATFORM.rs with the artifact contents."
+            exit 1
+          fi
+        fi
