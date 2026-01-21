@@ -1,9 +1,16 @@
 name: Check for new fuzzing samples
 on:
   workflow_dispatch:
+    inputs:
+      monthly-only:
+        description: 'Only process monthly fuzzers (client_initial, server_initial)'
+        type: boolean
+        default: false
   schedule:
-    # Run at 12:00 AM on Sunday.
+    # Weekly: Run at 12:00 AM on Sunday.
     - cron: '0 0 * * 0'
+    # Monthly: Run at 12:00 AM on the 1st of each month.
+    - cron: '0 0 1 * *'
 
 concurrency:
   # If "pull_request" is added to triggers above, adjust "group" accordingly.
@@ -42,6 +49,8 @@ jobs:
       - env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHA: ${{ github.sha }}
+          # Monthly schedule or manual trigger with monthly-only=true
+          MONTHLY_ONLY: ${{ github.event.schedule == '0 0 1 * *' || inputs.monthly-only }}
         run: |
           ./test/make-fuzz-corpus.sh
           # If there are no new corpus samples, exit.

@@ -254,6 +254,11 @@ jobs:
                 echo "* $PAIR: $BRANCH result missing" >> "$ROLE.failed.md"
                 continue 2
               fi
+              # Skip if .results is null or missing
+              if ! jq -e '.results' "$BRANCH/result.json" > /dev/null 2>&1; then
+                echo "* $PAIR: $BRANCH has no results" >> "$ROLE.failed.md"
+                continue 2
+              fi
               jq < "$BRANCH/result.json" '
                   . as $data |
                   .results[][].result //= "failed" |
@@ -328,15 +333,11 @@ jobs:
             echo
             for GROUP in succeeded unsupported; do
               echo "### ${GROUP^} Interop Tests"
-              if [ -e "client.$GROUP.md" ] || [ -e "server.$GROUP.md" ]; then
-                echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
-                echo "#### $PR as client"
-                cat "client.$GROUP.md"
-                echo "#### $PR as server"
-                cat "server.$GROUP.md"
-              else
-                echo "None :question:"
-              fi
+              echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
+              echo "#### $PR as client"
+              cat "client.$GROUP.md" 2>/dev/null || echo "None :question:"
+              echo "#### $PR as server"
+              cat "server.$GROUP.md" 2>/dev/null || echo "None :question:"
             done
             echo
             echo "</details>"
