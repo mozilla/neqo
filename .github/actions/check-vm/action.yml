@@ -31,12 +31,12 @@ runs:
           set -ex
           pwd
           case "$PLATFORM" in
-            freebsd)    pkg install -y curl llvm nss pkgconf
+            freebsd)    pkg install -y curl llvm nss pkgconf rust-bindgen-cli
                         ;;
             openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
-                        pkg_add rust rust-clippy rust-rustfmt llvm-21.1.2p0 nss # rustup does not support OpenBSD at all
+                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-21.1.2p0 nss # rustup does not support OpenBSD at all
                         ;;
-            netbsd)     /usr/sbin/pkg_add pkgin && pkgin -y install curl clang nss pkgconf
+            netbsd)     /usr/sbin/pkg_add pkgin && pkgin -y install curl clang nss pkgconf rust-bindgen
                         ;;
             solaris)    pkg install clang-libs nss pkg-config
                         ;;
@@ -63,6 +63,7 @@ runs:
             openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
                         export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
                         export LLVM_PROFDATA=/usr/local/llvm21/bin/llvm-profdata
+                        export PATH="\$HOME/.cargo/bin:\$PATH"
                         [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on OpenBSD
                         ;;
             netbsd)     sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
@@ -81,7 +82,8 @@ runs:
           esac
           # Generate bindings first if requested (before build, so we can bootstrap)
           if [ "$GENERATE_BINDINGS" = "true" ]; then
-            cargo install bindgen-cli --locked
+            # Solaris doesn't have a system package for bindgen
+            [ "$PLATFORM" = "solaris" ] && cargo install bindgen-cli --locked
             bindgen --allowlist-type 'rt_msghdr|rt_metrics|if_data' \
                     --allowlist-item 'RTAX_MAX|RTM_GET|RTM_VERSION|RTA_DST|RTA_IFP' \
                     --generate-cstr --explicit-padding --with-derive-default \
