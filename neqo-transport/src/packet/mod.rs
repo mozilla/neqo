@@ -8,6 +8,7 @@
 
 use std::{
     cmp::min,
+    fmt,
     ops::{Deref, DerefMut, Range},
     time::Instant,
 };
@@ -560,8 +561,6 @@ impl<B> From<Builder<B>> for Encoder<B> {
 
 /// `Public` holds information from packets that is public only.  This allows for
 /// processing of packets prior to decryption.
-#[derive(derive_more::Debug)]
-#[debug("{:?}: {} {}", self.packet_type(), hex_with_len(&self.data[..self.header_len]), hex_with_len(&self.data[self.header_len..]))]
 pub struct Public<'a> {
     /// The packet type.
     packet_type: Type,
@@ -958,6 +957,18 @@ impl<'a> Public<'a> {
     }
 }
 
+impl fmt::Debug for Public<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{:?}: {} {}",
+            self.packet_type(),
+            hex_with_len(&self.data[..self.header_len]),
+            hex_with_len(&self.data[self.header_len..])
+        )
+    }
+}
+
 /// Error information from a failed decryption attempt.
 /// Contains minimal packet information needed for error handling.
 #[derive(Debug)]
@@ -1003,12 +1014,10 @@ impl DecryptionError<'_> {
     }
 }
 
-#[derive(derive_more::Deref)]
 pub struct Decrypted<'a> {
     version: Version,
     pt: Type,
     pn: Number,
-    #[deref]
     data: &'a [u8],
     dcid: ConnectionId,
     scid: Option<ConnectionId>,
@@ -1044,6 +1053,14 @@ impl Decrypted<'_> {
             .as_ref()
             .expect("should only be called for long header packets")
             .as_cid_ref()
+    }
+}
+
+impl Deref for Decrypted<'_> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.data
     }
 }
 

@@ -5,7 +5,13 @@
 // except according to those terms.
 
 use std::{
-    cell::RefCell, fmt::Display, iter, net::SocketAddr, num::NonZeroUsize, rc::Rc, time::Instant,
+    cell::RefCell,
+    fmt::{self, Display, Formatter},
+    iter,
+    net::SocketAddr,
+    num::NonZeroUsize,
+    rc::Rc,
+    time::Instant,
 };
 
 use neqo_common::{
@@ -270,13 +276,17 @@ const fn alpn_from_quic_version(version: Version) -> &'static str {
 ///     }
 /// }
 /// ```
-#[derive(derive_more::Display)]
-#[display("Http3 client")]
 pub struct Http3Client {
     conn: Connection,
     base_handler: Http3Connection,
     events: Http3ClientEvents,
     push_handler: Rc<RefCell<PushController>>,
+}
+
+impl Display for Http3Client {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Http3 client")
+    }
 }
 
 impl Http3Client {

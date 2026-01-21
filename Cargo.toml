@@ -21,7 +21,7 @@ description = "Neqo, the Mozilla implementation of QUIC in Rust."
 keywords = ["quic", "http3", "neqo", "mozilla", "ietf", "firefox"]
 categories = ["network-programming", "web-programming"]
 readme = "README.md"
-version = "0.22.0"
+version = "0.22.1"
 # Keep in sync with `.rustfmt.toml` `edition`.
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -30,7 +30,6 @@ license = "MIT OR Apache-2.0"
 rust-version = "1.87.0"
 
 [workspace.dependencies]
-derive_more = { version = "2.0", default-features = false, features = ["display", "debug", "deref", "deref_mut", "from", "into", "add", "as_ref"] }
 enum-map = { version = "2.7", default-features = false }
 enumset = { version = "1.1", default-features = false }
 hex = { version = "0.4", default-features = false }

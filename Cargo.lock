@@ -355,27 +355,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "derive_more"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "093242cf7570c207c83073cf82f79706fe7b8317e98620a47d5be7c3d8497678"
-dependencies = [
- "derive_more-impl",
-]
-
-[[package]]
-name = "derive_more-impl"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bda628edc44c4bb645fbe0f758797143e4e07926f7ebf4e9bdfbd3d2ce621df3"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
- "unicode-xid",
-]
-
-[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -536,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.22.0"
+version = "0.22.1"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -905,12 +884,11 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.22.0"
+version = "0.22.1"
 dependencies = [
  "clap",
  "clap-verbosity-flag",
  "codspeed-criterion-compat",
- "derive_more",
  "futures",
  "hex",
  "libc",
@@ -933,10 +911,9 @@ dependencies = [
 
 [[package]]
 name = "neqo-common"
-version = "0.22.0"
+version = "0.22.1"
 dependencies = [
  "codspeed-criterion-compat",
- "derive_more",
  "enum-map",
  "env_logger",
  "hex",
@@ -952,10 +929,9 @@ dependencies = [
 
 [[package]]
 name = "neqo-crypto"
-version = "0.22.0"
+version = "0.22.1"
 dependencies = [
  "bindgen",
- "derive_more",
  "enum-map",
  "log",
  "mozbuild",
@@ -972,10 +948,9 @@ dependencies = [
 
 [[package]]
 name = "neqo-http3"
-version = "0.22.0"
+version = "0.22.1"
 dependencies = [
  "codspeed-criterion-compat",
- "derive_more",
  "enumset",
  "log",
  "neqo-common",
@@ -994,9 +969,8 @@ dependencies = [
 
 [[package]]
 name = "neqo-qpack"
-version = "0.22.0"
+version = "0.22.1"
 dependencies = [
- "derive_more",
  "log",
  "neqo-common",
  "neqo-transport",
@@ -1009,10 +983,9 @@ dependencies = [
 
 [[package]]
 name = "neqo-transport"
-version = "0.22.0"
+version = "0.22.1"
 dependencies = [
  "codspeed-criterion-compat",
- "derive_more",
  "enum-map",
  "enumset",
  "indexmap",
@@ -1032,7 +1005,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-udp"
-version = "0.22.0"
+version = "0.22.1"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -1431,16 +1404,14 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.22.0"
+version = "0.22.1"
 dependencies = [
- "derive_more",
  "log",
  "neqo-common",
  "neqo-crypto",
  "neqo-http3",
  "neqo-transport",
  "qlog",
- "strum",
 ]
 
 [[package]]
@@ -1550,12 +1521,6 @@ name = "unicode-ident"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "84a22b9f218b40614adcb3f4ff08b703773ad44fa9423e4e0d346d5db86e4ebc"
-
-[[package]]
-name = "unicode-xid"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "url"
