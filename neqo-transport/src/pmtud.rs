@@ -80,6 +80,11 @@ impl Pmtud {
     }
 
     #[must_use]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_asserts_for_indexing,
+        reason = "FIXME: False positive with MSRV 1.87"
+    )]
     pub fn new(remote_ip: IpAddr, iface_mtu: Option<usize>) -> Self {
         let search_table = Self::search_table(remote_ip);
         let header_size = Self::header_size(remote_ip);
