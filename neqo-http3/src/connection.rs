@@ -1868,7 +1868,7 @@ impl Http3Connection {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use url::Url;
+    use http::Uri;
 
     use crate::{
         connection::{Http3Connection, RequestDescription},
@@ -1880,7 +1880,7 @@ mod tests {
     fn create_request_headers_connect_without_connect_type() {
         let request = RequestDescription {
             method: "CONNECT",
-            target: &Url::parse("https://example.com").unwrap(),
+            target: &Uri::from_static("https://example.com"),
             headers: &[],
             connect_type: None,
             priority: Priority::default(),
@@ -1895,7 +1895,7 @@ mod tests {
     fn create_request_headers_connect_type_without_connect() {
         let request = RequestDescription {
             method: "GET",
-            target: &Url::parse("https://example.com").unwrap(),
+            target: &Uri::from_static("https://example.com"),
             headers: &[],
             connect_type: Some(ConnectType::Classic),
             priority: Priority::default(),
