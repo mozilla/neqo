@@ -48,4 +48,5 @@ bench = false
 [[bin]]
 name = "mtu-lookup"
 path = "src/bin/mtu-lookup.rs"
+bench = false
 
