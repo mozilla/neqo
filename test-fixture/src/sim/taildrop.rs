@@ -9,7 +9,7 @@
 use std::{
     cmp::{max, min},
     collections::VecDeque,
-    fmt::{self, Display},
+    fmt::{self, Debug, Display},
     time::{Duration, Instant},
 };
 
@@ -111,8 +111,7 @@ impl Display for Stats {
 }
 
 /// This models a link with a tail drop router at the front of it.
-#[derive(Clone, derive_more::Debug)]
-#[debug("taildrop")]
+#[derive(Clone)]
 pub struct TailDrop {
     /// An overhead associated with each entry.  This accounts for
     /// layer 2, IP, and UDP overheads.
@@ -338,6 +337,12 @@ impl Node for TailDrop {
 
     fn print_summary(&self, test_name: &str) {
         qinfo!("{test_name}: taildrop: {stats}", stats = self.stats);
+    }
+}
+
+impl Debug for TailDrop {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("taildrop")
     }
 }
 

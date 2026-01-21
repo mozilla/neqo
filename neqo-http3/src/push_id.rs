@@ -4,20 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    PartialOrd,
-    Default,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-    derive_more::Sub,
-)]
-#[display("{_0}")]
+use std::{
+    fmt::{self, Display, Formatter},
+    ops::{Add, Sub},
+};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Default)]
 pub struct PushId(u64);
 
 impl PushId {
@@ -31,9 +23,33 @@ impl PushId {
     }
 }
 
-// TODO: Derive this with derive_more once generic RHS parameters are supported.
-// See: https://github.com/JelteF/derive_more/issues/118
-impl std::ops::Add<u64> for PushId {
+impl From<u64> for PushId {
+    fn from(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+impl From<PushId> for u64 {
+    fn from(id: PushId) -> Self {
+        id.0
+    }
+}
+
+impl Display for PushId {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl Sub for PushId {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self {
+        Self(self.0 - rhs.0)
+    }
+}
+
+impl Add<u64> for PushId {
     type Output = Self;
 
     fn add(self, rhs: u64) -> Self {
