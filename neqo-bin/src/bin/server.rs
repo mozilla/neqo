@@ -8,7 +8,8 @@ use clap::Parser as _;
 use neqo_bin::server::Res;
 
 #[tokio::main(flavor = "current_thread")]
-#[expect(
+#[allow(
+    clippy::allow_attributes,
     clippy::unwrap_in_result,
     reason = "FIXME: Fixed in newer tokio versions."
 )]
