@@ -9,6 +9,5 @@ use clap::Parser as _;
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), neqo_bin::client::Error> {
     let args = neqo_bin::client::Args::parse();
-
-    neqo_bin::client::client(args).await
+    Box::pin(neqo_bin::client::client(args)).await
 }

@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used, reason = "This is example code.")]
-
 //! An HTTP 3 client implementation.
 
 use std::{
@@ -83,7 +81,7 @@ pub fn create_client(
         cid_generator,
         local_addr,
         remote_addr,
-        args.shared.quic_parameters.get(args.shared.alpn.as_str()),
+        args.shared.quic_parameters.get(args.shared.alpn.as_str()).pmtud(false),
         Instant::now(),
     )?;
     let ciphers = args.get_ciphers();
