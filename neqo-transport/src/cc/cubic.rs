@@ -6,7 +6,10 @@
 
 //! CUBIC congestion control (RFC 9438)
 
-use std::time::{Duration, Instant};
+use std::{
+    fmt::{self, Display},
+    time::{Duration, Instant},
+};
 
 use neqo_common::{qdebug, qtrace};
 
@@ -24,9 +27,8 @@ pub fn convert_to_f64(v: usize) -> f64 {
     f_64
 }
 
-#[derive(Debug, Default, Clone, derive_more::Display)]
-#[display("state [w_max: {w_max}, k: {k}, t_epoch: {t_epoch:?}]")]
-struct State {
+#[derive(Debug, Default, Clone)]
+pub struct State {
     /// > An estimate for the congestion window \[...\] in the Reno-friendly region -- that
     /// > is, an estimate for the congestion window of Reno.
     ///
@@ -80,14 +82,30 @@ struct State {
     reno_acked_bytes: f64,
 }
 
-#[derive(Debug, Default, derive_more::Display)]
-#[display("Cubic {current}")]
+impl Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "state [w_max: {}, k: {}, t_epoch: {:?}]",
+            self.w_max, self.k, self.t_epoch
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct Cubic {
     /// Current CUBIC parameters.
     current: State,
     /// CUBIC parameters that have been stored on a congestion event to restore later in case it
     /// turns out to have been spurious.
     stored: Option<State>,
+}
+
+impl Display for Cubic {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Cubic {}", self.current)
+    }
 }
 
 impl Cubic {

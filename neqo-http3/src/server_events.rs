@@ -4,10 +4,19 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, collections::VecDeque, rc::Rc, time::Instant};
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    fmt::{self, Display, Formatter},
+    ops::Deref,
+    rc::Rc,
+    time::Instant,
+};
 
 use neqo_common::{qdebug, Bytes, Encoder, Header};
-use neqo_transport::{server::ConnectionRef, AppError, DatagramTracking, StreamId, StreamType};
+use neqo_transport::{
+    server::ConnectionRef, AppError, Connection, DatagramTracking, StreamId, StreamType,
+};
 
 use crate::{
     connection::{Http3State, SessionAcceptAction},
@@ -16,12 +25,18 @@ use crate::{
     Error, Http3StreamInfo, Http3StreamType, Priority, Res,
 };
 
-#[derive(Debug, Clone, derive_more::Display)]
-#[display("conn={} stream_info={stream_info:?}", &*self.conn.borrow())]
+#[derive(Debug, Clone)]
 pub struct StreamHandler {
     pub conn: ConnectionRef,
     pub handler: Rc<RefCell<Http3ServerHandler>>,
     pub stream_info: Http3StreamInfo,
+}
+
+impl Display for StreamHandler {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let conn: &Connection = &self.conn.borrow();
+        write!(f, "conn={conn} stream_info={:?}", self.stream_info)
+    }
 }
 
 impl std::hash::Hash for StreamHandler {
@@ -141,10 +156,15 @@ impl StreamHandler {
     }
 }
 
-#[derive(Debug, Clone, derive_more::Display, derive_more::Deref)]
-#[display("Stream server {stream_handler:?}")]
+#[derive(Debug, Clone)]
 pub struct Http3OrWebTransportStream {
     stream_handler: StreamHandler,
+}
+
+impl Display for Http3OrWebTransportStream {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Stream server {:?}", self.stream_handler)
+    }
 }
 
 impl Http3OrWebTransportStream {
@@ -192,6 +212,13 @@ impl Http3OrWebTransportStream {
     }
 }
 
+impl Deref for Http3OrWebTransportStream {
+    type Target = StreamHandler;
+    fn deref(&self) -> &Self::Target {
+        &self.stream_handler
+    }
+}
+
 impl std::hash::Hash for Http3OrWebTransportStream {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.stream_handler.hash(state);
@@ -206,10 +233,15 @@ impl PartialEq for Http3OrWebTransportStream {
 
 impl Eq for Http3OrWebTransportStream {}
 
-#[derive(Debug, Clone, derive_more::Display, derive_more::Deref)]
-#[display("WebTransport session {stream_handler}")]
+#[derive(Debug, Clone)]
 pub struct WebTransportRequest {
     stream_handler: StreamHandler,
+}
+
+impl Display for WebTransportRequest {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "WebTransport session {}", self.stream_handler)
+    }
 }
 
 impl WebTransportRequest {
@@ -344,10 +376,15 @@ impl WebTransportRequest {
     }
 }
 
-#[derive(Debug, Clone, derive_more::Display)]
-#[display("ConnectUdp session {stream_handler}")]
+#[derive(Debug, Clone)]
 pub struct ConnectUdpRequest {
     stream_handler: StreamHandler,
+}
+
+impl Display for ConnectUdpRequest {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "ConnectUdp session {}", self.stream_handler)
+    }
 }
 
 impl ConnectUdpRequest {
@@ -447,6 +484,13 @@ impl ConnectUdpRequest {
             0,
             &mut self.stream_handler.conn.borrow_mut(),
         )
+    }
+}
+
+impl Deref for WebTransportRequest {
+    type Target = StreamHandler;
+    fn deref(&self) -> &Self::Target {
+        &self.stream_handler
     }
 }
 
