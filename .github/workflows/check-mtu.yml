@@ -46,6 +46,14 @@ jobs:
         with:
           name: bindings-${{ matrix.os }}
           path: ${{ matrix.os }}.rs
+      - name: Check bindings match committed
+        env:
+          OS: ${{ matrix.os }}
+        run: |
+          if ! diff "mtu/src/bindings/$OS.rs" "$OS.rs"; then
+            echo "::error::Generated bindings for $OS differ from committed version. Update mtu/src/bindings/$OS.rs with the artifact contents."
+            exit 1
+          fi
 
   check-android:
     name: Check Android
