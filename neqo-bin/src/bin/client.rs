@@ -7,6 +7,10 @@
 use clap::Parser as _;
 
 #[tokio::main(flavor = "current_thread")]
+#[expect(
+    clippy::unwrap_in_result,
+    reason = "FIXME: Fixed in newer tokio versions."
+)]
 async fn main() -> Result<(), neqo_bin::client::Error> {
     let args = neqo_bin::client::Args::parse();
 
