@@ -767,7 +767,8 @@ mod tests {
                 Probe::NotNeeded
             };
             assert_eq!(
-                expected, pmtud.probe_state,
+                expected,
+                pmtud.probe_state,
                 "probe_state after {} probe losses",
                 probe_num + 1
             );
