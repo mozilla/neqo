@@ -412,30 +412,29 @@ where
         };
 
         let prev_max_active = self.max_active;
-        self.max_active = min(
+        let new_max_active = min(
             self.max_active + excess * WINDOW_INCREASE_MULTIPLIER,
             max_window,
         );
 
-        // Debug <https://github.com/mozilla/neqo/issues/3208>.
-        debug_assert!(
-            self.max_active >= prev_max_active,
-            "expect no decrease, self: {self:?}, now: {now:?}, rtt: {rtt:?}, max_window: {max_window}, subject: {subject}"
-        );
+        if new_max_active <= prev_max_active {
+            // Never decrease max_active, even if max_window is smaller.  This
+            // can happen if max_active was set manually.
+            return;
+        }
 
-        let increase = self.max_active - prev_max_active;
-        if increase > 0 {
-            qdebug!(
-                "Increasing max {subject} receive window by {increase} B, \
+        self.max_active = new_max_active;
+        qdebug!(
+            "Increasing max {subject} receive window by {} B, \
                 previous max_active: {} MiB, \
                 new max_active: {} MiB, \
                 last update: {:?}, \
                 rtt: {rtt:?}",
-                prev_max_active / 1024 / 1024,
-                self.max_active / 1024 / 1024,
-                now - max_allowed_sent_at,
-            );
-        }
+            new_max_active - prev_max_active,
+            prev_max_active / 1024 / 1024,
+            self.max_active / 1024 / 1024,
+            now - max_allowed_sent_at,
+        );
     }
 }
 
@@ -1434,6 +1433,34 @@ mod test {
         qdebug!(
             "Connection flow control window reached max: {} MiB",
             fc.max_active() / 1024 / 1024
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn auto_tune_never_decreases_large_manually_set_max_active() -> Res<()> {
+        let rtt = Duration::from_millis(40);
+        let now = test_fixture::now();
+        let mut fc = ReceiverFlowControl::new(
+            StreamId::new(0),
+            // Very large manually configured window beyond the maximum auto-tuned window.
+            MAX_LOCAL_MAX_STREAM_DATA * 10,
+        );
+        let initial_max_active = fc.max_active();
+
+        // Consume and retire multiple windows to trigger auto-tuning.
+        // Each iteration: consume a full window, retire it, send update.
+        for _ in 1..11 {
+            let consumed = fc.set_consumed(fc.next_limit())?;
+            fc.add_retired(consumed);
+            write_frames(&mut fc, rtt, now);
+        }
+        let increased_max_active = fc.max_active();
+
+        assert!(
+            initial_max_active == increased_max_active,
+            "expect receive window auto-tuning to not decrease max_active below manually set initial value."
         );
 
         Ok(())

@@ -121,7 +121,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'netbsd' }}
-      uses: vmactions/netbsd-vm@b24ed5f7a605362ab1226e73df291c8b01990c85 # v1.2.3
+      uses: vmactions/netbsd-vm@2ba9902c77c2ebdb7501e5e9308dea03f0f251c4 # v1.3.1
       with:
         usesh: true
         envs: ${{ steps.prep.outputs.envs }}
