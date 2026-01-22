@@ -49,19 +49,20 @@ jobs:
                 .targets[] |
                 select(.kind[] == "bench") |
                 select(has("required-features")) |
-                ($pkg.metadata.bench[.name].codspeed.mode // "simulation") as $cpu_mode |
+                .name as $bench_name |
+                ((($pkg.metadata.bench // []) | map(select(.name == $bench_name)) | .[0].codspeed.mode) // "simulation") as $cpu_mode |
                 (
                   # CPU profiling entry (simulation or walltime)
                   {
                     crate: $pkg.name,
-                    bench: .name,
+                    bench: $bench_name,
                     mode: $cpu_mode,
                     runner: (if $cpu_mode == "walltime" then {group: "codspeed", labels: "codspeed-macro"} else "ubuntu-24.04" end)
                   },
                   # Memory profiling entry
                   {
                     crate: $pkg.name,
-                    bench: .name,
+                    bench: $bench_name,
                     mode: "memory",
                     runner: "ubuntu-24.04"
                   }

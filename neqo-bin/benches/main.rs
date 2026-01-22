@@ -58,15 +58,16 @@ fn transfer(c: &mut Criterion) {
             download_size: 0,
         },
     ] {
-        let formatted_name = mtu_suffix.as_ref().map(|suffix| format!("{name}{suffix}"));
-        let name = formatted_name.as_deref().unwrap_or(name);
-        let mut group = c.benchmark_group(name);
+        let bench_name = mtu_suffix
+            .as_ref()
+            .map_or_else(|| name.to_string(), |suffix| format!("{name}{suffix}"));
+        let mut group = c.benchmark_group("transfer");
         group.throughput(if num_requests == 1 {
             Throughput::Bytes((upload_size + download_size) as u64)
         } else {
             Throughput::Elements(num_requests as u64)
         });
-        group.bench_function(name, |b| {
+        group.bench_function(&bench_name, |b| {
             b.to_async(Builder::new_current_thread().enable_all().build().unwrap())
                 .iter_batched(
                     || {
