@@ -73,7 +73,8 @@ ignored = ["criterion"]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
 
-[package.metadata.bench.main]
+[[package.metadata.bench]]
+name = "main"
 codspeed.mode = "walltime" # Use "walltime" mode for "main" bench with codspeed.
 
 [[bench]]
