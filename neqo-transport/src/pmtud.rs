@@ -145,7 +145,7 @@ impl Pmtud {
     /// address family. Note that this ignores the interface MTU.
     #[expect(clippy::missing_panics_doc, reason = "search table is never empty")]
     #[must_use]
-    pub fn address_family_max_mtu(&self) -> usize {
+    pub const fn address_family_max_mtu(&self) -> usize {
         *self.search_table.last().expect("search table is empty")
     }
 
@@ -343,7 +343,7 @@ mod tests {
         } else {
             profile.limit() - AEAD_EXPANSION
         };
-        let mut builder = packet::Builder::short(Encoder::new(), false, None::<&[u8]>, limit);
+        let mut builder = packet::Builder::short(Encoder::default(), false, None::<&[u8]>, limit);
         let pn = prot.next_pn();
         builder.pn(pn, 4);
         builder.enable_padding(true);

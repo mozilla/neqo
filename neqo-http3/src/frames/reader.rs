@@ -54,7 +54,7 @@ pub struct StreamReaderConnectionWrapper<'a> {
 }
 
 impl<'a> StreamReaderConnectionWrapper<'a> {
-    pub fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
+    pub const fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
         Self { conn, stream_id }
     }
 }

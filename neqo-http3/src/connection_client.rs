@@ -386,7 +386,7 @@ impl Http3Client {
     ///
     /// Never, because clients always have this field.
     #[must_use]
-    pub fn connection_id(&self) -> &ConnectionId {
+    pub const fn connection_id(&self) -> &ConnectionId {
         self.conn.odcid().expect("Client always has odcid")
     }
 
@@ -1376,6 +1376,7 @@ impl EventProvider for Http3Client {
 mod tests {
     use std::time::Duration;
 
+    use http::Uri;
     use neqo_common::{event::Provider as _, qtrace, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack as qpack;
@@ -1388,7 +1389,6 @@ mod tests {
         CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
         DEFAULT_SERVER_NAME,
     };
-    use url::Url;
 
     use super::{
         AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
@@ -1834,7 +1834,7 @@ mod tests {
             .fetch(
                 now(),
                 "GET",
-                &Url::parse("https://something.com/").unwrap(),
+                &Uri::from_static("https://something.com/"),
                 headers,
                 Priority::default(),
             )
@@ -7157,10 +7157,11 @@ mod tests {
     #[test]
     fn client_control_stream_create_failed() {
         let mut client = default_http3_client();
-        let mut server = TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator>(
-            DEFAULT_ALPN_H3,
-            ConnectionParameters::default().max_streams(StreamType::UniDi, 0),
-        ));
+        let mut server =
+            TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator, &str>(
+                DEFAULT_ALPN_H3,
+                ConnectionParameters::default().max_streams(StreamType::UniDi, 0),
+            ));
         handshake_client_error(&mut client, &mut server, &Error::StreamLimit);
     }
 
@@ -7168,10 +7169,11 @@ mod tests {
     #[test]
     fn client_qpack_stream_create_failed() {
         let mut client = default_http3_client();
-        let mut server = TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator>(
-            DEFAULT_ALPN_H3,
-            ConnectionParameters::default().max_streams(StreamType::UniDi, 2),
-        ));
+        let mut server =
+            TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator, &str>(
+                DEFAULT_ALPN_H3,
+                ConnectionParameters::default().max_streams(StreamType::UniDi, 2),
+            ));
         handshake_client_error(&mut client, &mut server, &Error::StreamLimit);
     }
 

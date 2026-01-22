@@ -9,7 +9,7 @@ use std::{
     ops::{Add, Sub},
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Default)]
 pub struct PushId(u64);
 
 impl PushId {
@@ -18,7 +18,7 @@ impl PushId {
         Self(id)
     }
 
-    pub fn next(&mut self) {
+    pub const fn next(&mut self) {
         self.0 += 1;
     }
 }

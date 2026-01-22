@@ -172,7 +172,7 @@ mod mac {
         const NANOS_PER_MSEC: f64 = 1_000_000.0;
         let mut timebase_info = mach_timebase_info_data_t::default();
         unsafe {
-            mach_timebase_info(&mut timebase_info);
+            mach_timebase_info(&raw mut timebase_info);
         }
         f64::from(timebase_info.denom) * NANOS_PER_MSEC / f64::from(timebase_info.numer)
     }
@@ -203,8 +203,8 @@ mod mac {
                 pthread_mach_thread_np(pthread_self()),
                 THREAD_TIME_CONSTRAINT_POLICY,
                 addr_of_mut!(policy).cast(), // horror!
-                &mut count,
-                &mut get_default,
+                &raw mut count,
+                &raw mut get_default,
             )
         };
         policy

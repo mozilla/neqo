@@ -61,6 +61,8 @@ struct ActivePushStreams {
 }
 
 impl ActivePushStreams {
+    // Const constructor for compile-time initialization in PushController::new().
+    // Could derive Default if const was not required.
     pub const fn new() -> Self {
         Self {
             push_streams: VecDeque::new(),
@@ -412,7 +414,7 @@ impl PushController {
         }
     }
 
-    pub fn handle_zero_rtt_rejected(&mut self) {
+    pub const fn handle_zero_rtt_rejected(&mut self) {
         self.current_max_push_id = PushId::new(0);
     }
 

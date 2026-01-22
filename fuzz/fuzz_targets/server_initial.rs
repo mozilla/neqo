@@ -16,7 +16,7 @@ fuzz_target!(|data: &[u8]| {
     let mut client =
         new_client::<CountingConnectionIdGenerator>(ConnectionParameters::default().mlkem(false));
     let ci = client.process_output(now()).dgram().expect("a datagram");
-    let mut server = new_server::<CountingConnectionIdGenerator>(
+    let mut server = new_server::<CountingConnectionIdGenerator, &str>(
         DEFAULT_ALPN,
         ConnectionParameters::default().mlkem(false),
     );
@@ -32,7 +32,7 @@ fuzz_target!(|data: &[u8]| {
     payload_enc.encode(data); // Add fuzzed data.
 
     // Make a new header with a 1 byte packet number length.
-    let mut header_enc = Encoder::new();
+    let mut header_enc = Encoder::default();
     header_enc
         .encode_byte(0xc0) // Initial with 1 byte packet number.
         .encode_uint(4, Version::default().wire_version())

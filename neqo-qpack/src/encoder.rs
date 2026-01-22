@@ -70,7 +70,7 @@ impl Encoder {
             table: HeaderTable::new(true),
             max_table_size: qpack_settings.max_table_size_encoder,
             max_entries: 0,
-            instruction_reader: DecoderInstructionReader::new(),
+            instruction_reader: DecoderInstructionReader::default(),
             local_stream: LocalStreamState::NoStream,
             max_blocked_streams: 0,
             unacked_header_blocks: HashMap::default(),
@@ -617,7 +617,7 @@ mod tests {
     fn connect_generic(huffman: bool, max_data: Option<u64>) -> TestEncoder {
         let mut conn = default_client();
         let mut peer_conn = max_data.map_or_else(default_server, |max| {
-            new_server::<CountingConnectionIdGenerator>(
+            new_server::<CountingConnectionIdGenerator, &str>(
                 DEFAULT_ALPN,
                 ConnectionParameters::default()
                     .max_stream_data(StreamType::UniDi, true, max)

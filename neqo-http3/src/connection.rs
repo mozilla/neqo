@@ -311,7 +311,7 @@ impl Http3Connection {
     pub fn new(conn_params: Http3Parameters, role: Role) -> Self {
         Self {
             state: Http3State::Initializing,
-            control_stream_local: ControlStreamLocal::new(),
+            control_stream_local: ControlStreamLocal::default(),
             qpack_encoder: Rc::new(RefCell::new(qpack::Encoder::new(
                 conn_params.get_qpack_settings(),
                 true,
@@ -642,7 +642,7 @@ impl Http3Connection {
     pub(crate) fn handle_zero_rtt_rejected(&mut self) -> Res<()> {
         if self.state == Http3State::ZeroRtt {
             self.state = Http3State::Initializing;
-            self.control_stream_local = ControlStreamLocal::new();
+            self.control_stream_local = ControlStreamLocal::default();
             self.qpack_encoder = Rc::new(RefCell::new(qpack::Encoder::new(
                 self.local_params.get_qpack_settings(),
                 true,
@@ -1830,7 +1830,7 @@ impl Http3Connection {
     }
 
     #[must_use]
-    pub fn state_mut(&mut self) -> &mut Http3State {
+    pub const fn state_mut(&mut self) -> &mut Http3State {
         &mut self.state
     }
 
@@ -1868,7 +1868,7 @@ impl Http3Connection {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use url::Url;
+    use http::Uri;
 
     use crate::{
         connection::{Http3Connection, RequestDescription},
@@ -1880,7 +1880,7 @@ mod tests {
     fn create_request_headers_connect_without_connect_type() {
         let request = RequestDescription {
             method: "CONNECT",
-            target: &Url::parse("https://example.com").unwrap(),
+            target: &Uri::from_static("https://example.com"),
             headers: &[],
             connect_type: None,
             priority: Priority::default(),
@@ -1895,7 +1895,7 @@ mod tests {
     fn create_request_headers_connect_type_without_connect() {
         let request = RequestDescription {
             method: "GET",
-            target: &Url::parse("https://example.com").unwrap(),
+            target: &Uri::from_static("https://example.com"),
             headers: &[],
             connect_type: Some(ConnectType::Classic),
             priority: Priority::default(),

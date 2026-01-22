@@ -47,21 +47,11 @@ impl Header {
         )
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "False positive on 1.86, remove when MSRV is higher."
-    )]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_const_for_fn,
-        reason = "False positive on 1.86, remove when MSRV is higher."
-    )]
     #[must_use]
     pub fn value(&self) -> &[u8] {
         &self.value

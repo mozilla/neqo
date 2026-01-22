@@ -18,9 +18,8 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as EventProvider, hex, hex_snip_middle, hex_with_len, hrtime, qdebug, qerror,
-    qinfo, qlog::Qlog, qtrace, qwarn, Buffer, Datagram, DatagramBatch, Decoder, Ecn, Encoder, Role,
-    Tos,
+    datagram, event::Provider as EventProvider, hex, hex_snip_middle, hex_with_len, hrtime, qdebug,
+    qerror, qinfo, qlog::Qlog, qtrace, qwarn, Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos,
 };
 use neqo_crypto::{
     agent::{CertificateCompressor, CertificateInfo},
@@ -121,7 +120,7 @@ pub enum OutputBatch {
     /// Connection requires no action.
     None,
     /// Connection requires the datagram batch be sent.
-    DatagramBatch(DatagramBatch),
+    DatagramBatch(datagram::Batch),
     /// Connection requires `process_input()` be called when the `Duration`
     /// elapses.
     Callback(Duration),
@@ -131,16 +130,16 @@ impl From<Output> for OutputBatch {
     fn from(value: Output) -> Self {
         match value {
             Output::None => Self::None,
-            Output::Datagram(dg) => Self::DatagramBatch(DatagramBatch::from(dg)),
+            Output::Datagram(dg) => Self::DatagramBatch(datagram::Batch::from(dg)),
             Output::Callback(t) => Self::Callback(t),
         }
     }
 }
 
 impl OutputBatch {
-    /// Convert into an [`Option<DatagramBatch>`].
+    /// Convert into an [`Option<datagram::Batch>`].
     #[must_use]
-    pub fn dgram(self) -> Option<DatagramBatch> {
+    pub fn dgram(self) -> Option<datagram::Batch> {
         match self {
             Self::DatagramBatch(dg) => Some(dg),
             _ => None,
@@ -186,7 +185,7 @@ impl From<Option<Datagram>> for Output {
 /// Used by inner functions like `Connection::output`.
 enum SendOptionBatch {
     /// Yes, please send this datagram.
-    Yes(DatagramBatch),
+    Yes(datagram::Batch),
     /// Don't send.  If this was blocked on the pacer (the arg is true).
     No(bool),
 }
@@ -527,7 +526,7 @@ impl Connection {
     }
 
     /// Get the qlog (if any) for this connection.
-    pub fn qlog_mut(&mut self) -> &mut Qlog {
+    pub const fn qlog_mut(&mut self) -> &mut Qlog {
         &mut self.qlog
     }
 
@@ -1251,9 +1250,9 @@ impl Connection {
 
     /// Process input and generate output.
     #[must_use = "OutputBatch of the process_multiple function must be handled"]
-    pub fn process_multiple(
+    pub fn process_multiple<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
-        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        dgram: Option<Datagram<A>>,
         now: Instant,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
@@ -1776,7 +1775,7 @@ impl Connection {
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if let Some(space) = self.acks.get_mut(space) {
                         if space.is_duplicate(pn) {
-                            qdebug!("Duplicate packet {space}-{}", pn);
+                            qdebug!("Duplicate packet {space}-{pn}");
                             self.stats.borrow_mut().dups_rx += 1;
                         } else {
                             match self.process_packet(path, &payload, now) {
@@ -1947,11 +1946,7 @@ impl Connection {
                 self.paths.make_permanent(path, None, cid, now);
                 Ok(())
             } else if let Some(primary) = self.paths.primary() {
-                if primary
-                    .borrow()
-                    .remote_cid()
-                    .map_or(true, |id| id.is_empty())
-                {
+                if primary.borrow().remote_cid().is_none_or(|id| id.is_empty()) {
                     self.paths
                         .make_permanent(path, None, ConnectionIdEntry::empty_remote(), now);
                     Ok(())

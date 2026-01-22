@@ -13,7 +13,7 @@ use std::{hint::black_box, time::Instant};
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use neqo_transport::{
-    self, packet,
+    packet,
     recovery::{self, sent},
 };
 

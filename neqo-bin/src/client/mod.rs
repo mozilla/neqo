@@ -24,7 +24,8 @@ use futures::{
     future::{select, Either},
     FutureExt as _, TryFutureExt as _,
 };
-use neqo_common::{qdebug, qerror, qinfo, qlog::Qlog, qwarn, Datagram, Role};
+use http::Uri as Url;
+use neqo_common::{qdebug, qerror, qinfo, qlog::Qlog, Datagram, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, Cipher, ResumptionToken,
@@ -35,7 +36,6 @@ use neqo_udp::RecvBuf;
 use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
 use tokio::time::Sleep;
-use url::{Host, Origin, Url};
 
 use crate::SharedArgs;
 
@@ -161,15 +161,17 @@ impl Args {
         upload_size: usize,
         download_size: usize,
     ) -> Self {
-        use std::{iter::repeat_with, str::FromStr as _};
-
         let addr =
             server_addr.map_or_else(|| "[::1]:12345".into(), |a| format!("[::1]:{}", a.port()));
         Self {
             shared: SharedArgs::default(),
-            urls: repeat_with(|| Url::from_str(&format!("http://{addr}/{download_size}")).unwrap())
-                .take(num_requests)
-                .collect(),
+            urls: std::iter::repeat_n(
+                format!("http://{addr}/{download_size}")
+                    .parse::<Url>()
+                    .unwrap(),
+                num_requests,
+            )
+            .collect(),
             method: if upload_size == 0 {
                 "GET".into()
             } else {
@@ -311,7 +313,7 @@ fn get_output_file(
             return None;
         }
 
-        qinfo!("Saving {url} to {out_path:?}");
+        qinfo!("Saving {url} to {}", out_path.display());
 
         if let Some(parent) = out_path.parent() {
             create_dir_all(parent).ok()?;
@@ -536,23 +538,19 @@ const fn local_addr_for(remote_addr: &SocketAddr, local_port: u16) -> SocketAddr
     }
 }
 
-fn urls_by_origin(urls: &[Url]) -> impl Iterator<Item = ((Host, u16), VecDeque<Url>)> {
+fn urls_by_origin(urls: &[Url]) -> impl Iterator<Item = ((String, u16), VecDeque<Url>)> {
     urls.iter()
         .fold(
-            HashMap::<Origin, VecDeque<Url>>::default(),
-            |mut urls, url| {
-                urls.entry(url.origin()).or_default().push_back(url.clone());
-                urls
+            HashMap::<(String, u16), VecDeque<Url>>::default(),
+            |mut map, url| {
+                let authority = url.authority().expect("URL must have an authority (host)");
+                let host = authority.host().to_string();
+                let port = authority.port_u16().unwrap_or(443);
+                map.entry((host, port)).or_default().push_back(url.clone());
+                map
             },
         )
         .into_iter()
-        .filter_map(|(origin, urls)| match origin {
-            Origin::Tuple(_scheme, h, p) => Some(((h, p), urls)),
-            Origin::Opaque(x) => {
-                qwarn!("Opaque origin {x:?}");
-                None
-            }
-        })
 }
 
 #[expect(
@@ -601,7 +599,6 @@ pub async fn client(mut args: Args) -> Res<()> {
             args.shared.alpn
         );
 
-        let hostname = format!("{host}");
         let mut token: Option<ResumptionToken> = None;
         let mut first = true;
         while !urls.is_empty() {
@@ -614,7 +611,7 @@ pub async fn client(mut args: Args) -> Res<()> {
             first = false;
 
             token = if args.shared.alpn == "h3" {
-                let client = http3::create_client(&args, real_local, remote_addr, &hostname, token)
+                let client = http3::create_client(&args, real_local, remote_addr, &host, token)
                     .expect("failed to create client");
 
                 let handler = http3::Handler::new(to_request, args.clone());
@@ -623,9 +620,8 @@ pub async fn client(mut args: Args) -> Res<()> {
                     .run()
                     .await?
             } else {
-                let client =
-                    http09::create_client(&args, real_local, remote_addr, &hostname, token)
-                        .expect("failed to create client");
+                let client = http09::create_client(&args, real_local, remote_addr, &host, token)
+                    .expect("failed to create client");
 
                 let handler = http09::Handler::new(to_request, &args);
 

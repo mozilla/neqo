@@ -93,7 +93,7 @@ impl MessageState {
         }
     }
 
-    fn fin(&mut self) -> Res<()> {
+    const fn fin(&mut self) -> Res<()> {
         match &self {
             Self::WaitingForHeaders | Self::Done => Err(Error::InvalidInput),
             Self::WaitingForData | Self::TrailersSet => {
@@ -322,6 +322,6 @@ impl HttpSendStream for SendMessage {
 
 impl Display for SendMessage {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "SendMesage {}", self.stream_id())
+        write!(f, "SendMessage {}", self.stream_id())
     }
 }

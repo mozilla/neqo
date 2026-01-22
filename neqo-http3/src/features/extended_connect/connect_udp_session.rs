@@ -39,7 +39,7 @@ impl Session {
 
 impl Display for Session {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "ConnectUdpSession",)
+        write!(f, "ConnectUdpSession")
     }
 }
 
@@ -107,6 +107,7 @@ impl Protocol for Session {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::Bytes;
     use neqo_transport::StreamId;
