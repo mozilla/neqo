@@ -19,8 +19,8 @@ use criterion::{criterion_group, criterion_main, Criterion};
 mod common;
 
 fn benchmark(c: &mut Criterion) {
-    common::benchmark(c, |group, streams, data_size| {
-        group.bench_function("walltime", |b| {
+    common::benchmark(c, |group, name, streams, data_size| {
+        group.bench_function(name, |b| {
             b.iter_batched(
                 || common::setup(streams, data_size),
                 |sim| black_box(sim.run()),

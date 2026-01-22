@@ -19,8 +19,8 @@ use criterion::{criterion_group, criterion_main, BatchSize::SmallInput};
 mod common;
 
 fn benchmark(c: &mut criterion::Criterion) {
-    common::benchmark(c, |group, label, seed, pacing| {
-        group.bench_function("walltime", |b| {
+    common::benchmark(c, |group, name, label, seed, pacing| {
+        group.bench_function(name, |b| {
             b.iter_batched(
                 || common::setup(label, seed, pacing),
                 |sim| black_box(sim.run()),
