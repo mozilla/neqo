@@ -1313,9 +1313,9 @@ impl Http3Connection {
         match (send_stream, recv_stream, accept_res) {
             (None, None, _) => Err(Error::InvalidStreamId),
             (None, Some(_), _) | (Some(_), None, _) => {
-                // TODO this needs a better error
+                // Stream is in an inconsistent state (one direction exists, the other doesn't).
                 self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
-                Err(Error::InvalidStreamId)
+                Err(Error::InvalidState)
             }
             (Some(s), Some(_r), SessionAcceptAction::Reject(headers)) => {
                 if s.http_stream()

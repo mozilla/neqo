@@ -1365,7 +1365,7 @@ fn emit_authentication_needed_once() {
         test_fixture::LONG_CERT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        // TODO: Why is this needed to avoind the 5ms pacing delay?
+        // Disable pacing to allow sending multiple packets without inter-packet delays.
         ConnectionParameters::default().pacing(false),
     )
     .expect("create a server");
@@ -1417,7 +1417,7 @@ fn emit_authentication_needed_once() {
 #[test]
 fn client_initial_retransmits_identical() {
     let mut now = now();
-    // TODO: With pacing on, why does the delay callback return by 5ms and then PTO after 295ms?
+    // Disable pacing so the PTO timer is the only callback, simplifying assertions.
     let mut client = new_client(ConnectionParameters::default().pacing(false));
 
     // Force the client to retransmit its Initial flight a number of times and make sure the

@@ -23,8 +23,15 @@ use crate::{
     MIN_INITIAL_PACKET_SIZE,
 };
 
-// FIXME: The 27 here is a magic constant that the original code also (implicitly) had.
-const DATAGRAM_LEN_MTU: usize = Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) - 27;
+/// Minimum overhead for a short header packet carrying a DATAGRAM frame:
+/// - 8 bytes: minimum connection ID length (from `CountingConnectionIdGenerator`)
+/// - 1 byte: short header (header form, spin, reserved, key phase, PN length)
+/// - 1 byte: minimum packet number encoding
+/// - 1 byte: DATAGRAM frame type
+/// - 16 bytes: AEAD authentication tag
+const MIN_DATAGRAM_PACKET_OVERHEAD: usize = 8 + 1 + 1 + 1 + 16;
+const DATAGRAM_LEN_MTU: usize =
+    Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) - MIN_DATAGRAM_PACKET_OVERHEAD;
 const DATA_MTU: &[u8] = &[1; DATAGRAM_LEN_MTU];
 const DATA_BIGGER_THAN_MTU: &[u8] = &[0; 2 * DATAGRAM_LEN_MTU];
 const_assert!(DATA_BIGGER_THAN_MTU.len() > DATAGRAM_LEN_MTU);
