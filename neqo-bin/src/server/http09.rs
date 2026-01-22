@@ -133,7 +133,7 @@ impl HttpServer {
         // Parse "GET /path\n" or "GET /path\r\n"
         let Some(path) = msg
             .strip_prefix("GET ")
-            .and_then(|s| s.trim_start().strip_prefix('/'))
+            .and_then(|s| s.strip_prefix('/'))
             .and_then(|s| s.split_once('\n').map(|(p, _)| p.trim_end_matches('\r')))
             .filter(|p| {
                 if self.is_qns_test {
