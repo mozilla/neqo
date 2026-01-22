@@ -14,7 +14,7 @@ client)
   /wait-for-it.sh sim:57832 -s -t 30
   OPTIONS=(--cc cubic --qns-test "$TESTCASE" --qlog-dir "$QLOGDIR" --output-dir /downloads)
   if [ "$REQUESTS" ]; then
-    mapfile -d ' ' -t URLS <<<"$REQUESTS"
+    read -ra URLS <<<"$REQUESTS"
     OPTIONS+=("${URLS[@]}")
   fi
   RUST_LOG=debug RUST_BACKTRACE=1 neqo-client "${OPTIONS[@]}" 2> >(tee -i -a "/logs/$ROLE.log" >&2)

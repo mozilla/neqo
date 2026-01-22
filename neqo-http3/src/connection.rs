@@ -4,7 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, fmt::Debug, mem, rc::Rc, time::Instant};
+use std::{
+    cell::RefCell,
+    fmt::{self, Debug, Display, Formatter},
+    mem,
+    rc::Rc,
+    time::Instant,
+};
 
 use neqo_common::{
     qdebug, qerror, qinfo, qtrace, qwarn, Bytes, Decoder, Header, MessageType, Role,
@@ -278,8 +284,7 @@ impl Http3State {
 /// [`Http3ServerHandler`]: crate::connection_server::Http3ServerHandler
 /// [`ConnectionEvent::RecvStreamReadable`]: neqo_transport::ConnectionEvent::RecvStreamReadable
 /// [`ConnectionEvent::NewStream`]: neqo_transport::ConnectionEvent::NewStream
-#[derive(Debug, derive_more::Display)]
-#[display("Http3 connection")]
+#[derive(Debug)]
 pub struct Http3Connection {
     role: Role,
     state: Http3State,
@@ -293,6 +298,12 @@ pub struct Http3Connection {
     recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
     webtransport: ExtendedConnectFeature,
     connect_udp: ExtendedConnectFeature,
+}
+
+impl Display for Http3Connection {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Http3 connection")
+    }
 }
 
 impl Http3Connection {
@@ -1857,7 +1868,7 @@ impl Http3Connection {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use url::Url;
+    use http::Uri;
 
     use crate::{
         connection::{Http3Connection, RequestDescription},
@@ -1869,7 +1880,7 @@ mod tests {
     fn create_request_headers_connect_without_connect_type() {
         let request = RequestDescription {
             method: "CONNECT",
-            target: &Url::parse("https://example.com").unwrap(),
+            target: &Uri::from_static("https://example.com"),
             headers: &[],
             connect_type: None,
             priority: Priority::default(),
@@ -1884,7 +1895,7 @@ mod tests {
     fn create_request_headers_connect_type_without_connect() {
         let request = RequestDescription {
             method: "GET",
-            target: &Url::parse("https://example.com").unwrap(),
+            target: &Uri::from_static("https://example.com"),
             headers: &[],
             connect_type: Some(ConnectType::Classic),
             priority: Priority::default(),

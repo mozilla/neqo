@@ -6,7 +6,15 @@
 
 #![expect(clippy::unwrap_used, reason = "This is example code.")]
 
-use std::{borrow::Cow, cell::RefCell, num::NonZeroUsize, rc::Rc, slice, str, time::Instant};
+use std::{
+    borrow::Cow,
+    cell::RefCell,
+    fmt::{self, Display, Formatter},
+    num::NonZeroUsize,
+    rc::Rc,
+    slice, str,
+    time::Instant,
+};
 
 use neqo_common::{event::Provider as _, hex, qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay};
@@ -15,7 +23,6 @@ use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
     ConnectionEvent, ConnectionIdGenerator, OutputBatch, State, StreamId,
 };
-use regex::Regex;
 use rustc_hash::FxHashMap as HashMap;
 
 use super::{qns_read_response, Args};
@@ -27,14 +34,11 @@ struct HttpStreamState {
     data_to_send: Option<SendData>,
 }
 
-#[derive(derive_more::Display)]
-#[display("Http 0.9 server ")]
 pub struct HttpServer {
     server: Server,
     write_state: HashMap<StreamId, HttpStreamState>,
     read_state: HashMap<StreamId, Vec<u8>>,
     is_qns_test: bool,
-    regex: Regex,
     read_buffer: Vec<u8>,
 }
 
@@ -67,17 +71,11 @@ impl HttpServer {
             qinfo!("ECHConfigList: {}", hex(server.ech_config()));
         }
 
-        let is_qns_test = args.shared.qns_test.is_some();
         Ok(Self {
             server,
             write_state: HashMap::default(),
             read_state: HashMap::default(),
-            is_qns_test,
-            regex: if is_qns_test {
-                Regex::new(r"GET +/(\S+)(?:\r)?\n").map_err(|_| Error::Internal)?
-            } else {
-                Regex::new(r"GET +/(\d+)(?:\r)?\n").map_err(|_| Error::Internal)?
-            },
+            is_qns_test: args.shared.qns_test.is_some(),
             read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
         })
     }
@@ -131,14 +129,23 @@ impl HttpServer {
             return;
         };
 
-        let m = self.regex.captures(msg);
-        let Some(path) = m.and_then(|m| m.get(1)) else {
+        // Parse "GET /path\n" or "GET /path\r\n"
+        let Some(path) = msg
+            .strip_prefix("GET /")
+            .and_then(|s| s.lines().next())
+            .filter(|p| {
+                if self.is_qns_test {
+                    !p.chars().any(char::is_whitespace)
+                } else {
+                    p.chars().all(|c| c.is_ascii_digit())
+                }
+            })
+        else {
             self.save_partial(stream_id, buf.to_vec(), conn);
             return;
         };
 
         let resp: SendData = {
-            let path = path.as_str();
             qdebug!("Path = '{path}'");
             if self.is_qns_test {
                 match qns_read_response(path) {
@@ -247,5 +254,11 @@ impl super::HttpServer for HttpServer {
 
     fn has_events(&self) -> bool {
         self.server.has_active_connections()
+    }
+}
+
+impl Display for HttpServer {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Http 0.9 server ")
     }
 }

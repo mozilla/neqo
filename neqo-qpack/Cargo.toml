@@ -16,7 +16,6 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-derive_more = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 neqo-transport = { path = "./../neqo-transport" }

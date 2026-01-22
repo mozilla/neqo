@@ -21,6 +21,7 @@ use std::{
     time::Instant,
 };
 
+use http::Uri as Url;
 use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
@@ -29,7 +30,6 @@ use neqo_transport::{
     OutputBatch, RandomConnectionIdGenerator, StreamId,
 };
 use rustc_hash::FxHashMap as HashMap;
-use url::Url;
 
 use super::{get_output_file, qlog_new, Args, CloseState, Res};
 use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};

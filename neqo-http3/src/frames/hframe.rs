@@ -12,7 +12,7 @@ use neqo_transport::StreamId;
 
 use crate::{frames::reader::FrameDecoder, settings::HSettings, Error, Priority, PushId, Res};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::Into)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HFrameType(pub u64);
 
 impl HFrameType {
@@ -28,6 +28,12 @@ impl HFrameType {
 
     /// See <https://www.rfc-editor.org/rfc/rfc9114.html#section-11.2.1> for these reserved types.
     pub const RESERVED: &[Self] = &[Self(0x2), Self(0x6), Self(0x8), Self(0x9)];
+}
+
+impl From<HFrameType> for u64 {
+    fn from(t: HFrameType) -> Self {
+        t.0
+    }
 }
 
 // data for DATA frame is not read into HFrame::Data.

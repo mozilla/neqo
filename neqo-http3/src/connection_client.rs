@@ -5,7 +5,13 @@
 // except according to those terms.
 
 use std::{
-    cell::RefCell, fmt::Display, iter, net::SocketAddr, num::NonZeroUsize, rc::Rc, time::Instant,
+    cell::RefCell,
+    fmt::{self, Display, Formatter},
+    iter,
+    net::SocketAddr,
+    num::NonZeroUsize,
+    rc::Rc,
+    time::Instant,
 };
 
 use neqo_common::{
@@ -270,13 +276,17 @@ const fn alpn_from_quic_version(version: Version) -> &'static str {
 ///     }
 /// }
 /// ```
-#[derive(derive_more::Display)]
-#[display("Http3 client")]
 pub struct Http3Client {
     conn: Connection,
     base_handler: Http3Connection,
     events: Http3ClientEvents,
     push_handler: Rc<RefCell<PushController>>,
+}
+
+impl Display for Http3Client {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Http3 client")
+    }
 }
 
 impl Http3Client {
@@ -1366,6 +1376,7 @@ impl EventProvider for Http3Client {
 mod tests {
     use std::time::Duration;
 
+    use http::Uri;
     use neqo_common::{event::Provider as _, qtrace, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack as qpack;
@@ -1378,7 +1389,6 @@ mod tests {
         CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
         DEFAULT_SERVER_NAME,
     };
-    use url::Url;
 
     use super::{
         AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
@@ -1824,7 +1834,7 @@ mod tests {
             .fetch(
                 now(),
                 "GET",
-                &Url::parse("https://something.com/").unwrap(),
+                &Uri::from_static("https://something.com/"),
                 headers,
                 Priority::default(),
             )

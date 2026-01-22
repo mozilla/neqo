@@ -19,8 +19,8 @@ autobenches = false
 workspace = true
 
 [dependencies]
-derive_more = { workspace = true }
 enumset = { workspace = true }
+http = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
@@ -31,7 +31,6 @@ rustc-hash = { workspace = true }
 sfv = { version = "0.14", default-features = false, features = ["parsed-types"] }
 strum = { workspace = true }
 thiserror = { workspace = true }
-url = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false }

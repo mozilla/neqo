@@ -21,9 +21,9 @@ use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 mod common;
 
 fn benchmark(c: &mut Criterion) {
-    common::benchmark(c, |group, streams, data_size| {
+    common::benchmark(c, |group, name, streams, data_size| {
         group.throughput(Throughput::Bytes((streams * data_size) as u64));
-        group.bench_function("simulated-time", |b| {
+        group.bench_function(name, |b| {
             b.iter_custom(|iters| {
                 let mut d_sum = Duration::ZERO;
                 for _i in 0..iters {

@@ -8,7 +8,7 @@
 use std::{
     cell::RefCell,
     cmp::{max, min},
-    fmt::{Debug, Write as _},
+    fmt::{self, Debug, Display, Formatter, Write as _},
     iter, mem,
     net::{IpAddr, SocketAddr},
     num::NonZeroUsize,
@@ -269,9 +269,6 @@ impl AddressValidationInfo {
 ///
 /// After the connection is closed (either by calling `close()` or by the
 /// remote) continue processing until `state()` returns `Closed`.
-#[derive(derive_more::Display, derive_more::Debug)]
-#[display("{:?} {}", role, self.odcid().map_or_else(|| "...".to_string(), ToString::to_string))]
-#[debug("{:?} Connection: {:?} {:?}", role, state, self.paths.primary())]
 pub struct Connection {
     role: Role,
     version: Version,
@@ -331,6 +328,18 @@ pub struct Connection {
     /// into packets proper mean that the frames follow the entire processing path.
     #[cfg(any(test, feature = "build-fuzzing-corpus"))]
     test_frame_writer: Option<Box<dyn test_internal::FrameWriter>>,
+}
+
+impl Debug for Connection {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{:?} Connection: {:?} {:?}",
+            self.role,
+            self.state,
+            self.paths.primary()
+        )
+    }
 }
 
 impl Connection {
@@ -3903,6 +3912,17 @@ impl EventProvider for Connection {
     /// previously-queued events, or cause new events to be generated.
     fn next_event(&mut self) -> Option<Self::Event> {
         self.events.next_event()
+    }
+}
+
+impl Display for Connection {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{:?} ", self.role)?;
+        if let Some(cid) = self.odcid() {
+            Display::fmt(&cid, f)
+        } else {
+            write!(f, "...")
+        }
     }
 }
 

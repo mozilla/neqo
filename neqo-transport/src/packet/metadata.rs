@@ -7,6 +7,8 @@
 // Enable just this file for logging to just see packets.
 // e.g. "RUST_LOG=neqo_transport::dump neqo-client ..."
 
+use std::fmt::{self, Display, Formatter};
+
 use neqo_common::Tos;
 use qlog::events::quic::PacketHeader;
 use strum::Display;
@@ -21,8 +23,6 @@ pub enum Direction {
     Rx,
 }
 
-#[derive(derive_more::Display)]
-#[display("pn={packet_number} type={packet_type:?} {} {tos:?} len {len}", self.path.borrow())]
 pub struct MetaData<'a> {
     path: &'a PathRef,
     direction: Direction,
@@ -94,6 +94,20 @@ impl From<MetaData<'_>> for PacketHeader {
             None,
             None,
             None,
+        )
+    }
+}
+
+impl Display for MetaData<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "pn={} type={:?} {} {:?} len {}",
+            self.packet_number,
+            self.packet_type,
+            self.path.borrow(),
+            self.tos,
+            self.len,
         )
     }
 }

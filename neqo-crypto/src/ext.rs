@@ -11,6 +11,7 @@
 
 use std::{
     cell::RefCell,
+    fmt::{self, Debug, Formatter},
     os::raw::{c_uint, c_void},
     pin::Pin,
     rc::Rc,
@@ -85,10 +86,7 @@ pub trait ExtensionHandler {
 
 type BoxedExtensionHandler = Box<Rc<RefCell<dyn ExtensionHandler>>>;
 
-#[derive(derive_more::Debug)]
-#[debug("ExtensionTracker: {:?}", extension)]
 pub struct ExtensionTracker {
-    #[expect(dead_code, reason = "Used by derived Debug implementation")]
     extension: Extension,
     handler: Pin<Box<BoxedExtensionHandler>>,
 }
@@ -199,5 +197,11 @@ impl ExtensionTracker {
             as_c_void(&mut tracker.handler),
         )?;
         Ok(tracker)
+    }
+}
+
+impl Debug for ExtensionTracker {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "ExtensionTracker: {:?}", self.extension)
     }
 }

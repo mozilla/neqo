@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::time::Instant;
+use std::{
+    fmt::{self, Display, Formatter},
+    time::Instant,
+};
 
 use neqo_common::qdebug;
 use neqo_transport::{Connection, StreamId};
@@ -16,11 +19,16 @@ use crate::{
 
 /// The remote control stream is responsible only for reading frames. The frames are handled by
 /// `Http3Connection`.
-#[derive(Debug, derive_more::Display)]
-#[display("Http3 remote control stream {stream_id:?}")]
+#[derive(Debug)]
 pub struct ControlStreamRemote {
     stream_id: StreamId,
     frame_reader: FrameReader,
+}
+
+impl Display for ControlStreamRemote {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Http3 remote control stream {:?}", self.stream_id)
+    }
 }
 
 impl ControlStreamRemote {

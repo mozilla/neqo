@@ -56,11 +56,17 @@ pub fn setup(label: &str, seed: Option<&str>, pacing: bool) -> ReadySimulator {
 
 /// Runs transfer benchmarks for all configurations.
 ///
-/// The closure receives the benchmark group, label, seed, and pacing flag,
+/// The closure receives the benchmark group, group name, label, seed, and pacing flag,
 /// allowing each benchmark to define its own measurement approach.
 pub fn benchmark<M>(c: &mut Criterion, mut measure: M)
 where
-    M: FnMut(&mut BenchmarkGroup<'_, criterion::measurement::WallTime>, &str, Option<&str>, bool),
+    M: FnMut(
+        &mut BenchmarkGroup<'_, criterion::measurement::WallTime>,
+        &str,
+        &str,
+        Option<&str>,
+        bool,
+    ),
 {
     // Handle SIMULATION_SEED environment variable for varying-seeds config
     let env_seed = std::env::var("SIMULATION_SEED").ok();
@@ -71,9 +77,10 @@ where
 
     for (label, seed) in configs {
         for pacing in [false, true] {
-            let mut group = c.benchmark_group(format!("transfer/pacing-{pacing}/{label}"));
+            let name = format!("transfer/pacing-{pacing}/{label}");
+            let mut group = c.benchmark_group(&name);
             group.noise_threshold(0.03);
-            measure(&mut group, label, seed, pacing);
+            measure(&mut group, &name, label, seed, pacing);
             group.finish();
         }
     }

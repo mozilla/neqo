@@ -112,8 +112,7 @@ struct MaybeLostPacket {
     time_sent: Instant,
 }
 
-#[derive(Debug, Clone, derive_more::Display)]
-#[display("State [phase: {phase:?}, cwnd: {congestion_window}, ssthresh: {ssthresh}, recovery_start: {recovery_start:?}]")]
+#[derive(Debug, Clone)]
 struct State {
     phase: Phase,
     congestion_window: usize,
@@ -122,6 +121,16 @@ struct State {
     /// Packet number of the first packet that was sent after a congestion event. When this one is
     /// acked we will exit [`Phase::Recovery`] and enter [`Phase::CongestionAvoidance`].
     recovery_start: Option<packet::Number>,
+}
+
+impl Display for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "State [phase: {:?}, cwnd: {}, ssthresh: {}, recovery_start: {:?}]",
+            self.phase, self.congestion_window, self.ssthresh, self.recovery_start
+        )
+    }
 }
 
 impl State {
@@ -136,8 +145,7 @@ impl State {
     }
 }
 
-#[derive(Debug, derive_more::Display)]
-#[display("{cc_algorithm} CongCtrl [bif: {bytes_in_flight}, {current}]")]
+#[derive(Debug)]
 pub struct ClassicCongestionControl<T> {
     cc_algorithm: T,
     bytes_in_flight: usize,
@@ -167,6 +175,16 @@ pub struct ClassicCongestionControl<T> {
     /// - [`Self::bytes_in_flight`] is not stored because if it was to be restored it might get
     ///   out-of-sync with the actual number of bytes-in-flight on the path.
     stored: Option<State>,
+}
+
+impl<T: Display> Display for ClassicCongestionControl<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} CongCtrl [bif: {}, {}]",
+            self.cc_algorithm, self.bytes_in_flight, self.current
+        )
+    }
 }
 
 impl<T> ClassicCongestionControl<T> {

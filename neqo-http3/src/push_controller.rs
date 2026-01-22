@@ -4,7 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, collections::VecDeque, fmt::Debug, mem, rc::Rc, slice::SliceIndex};
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    fmt::{self, Debug, Display, Formatter},
+    mem,
+    rc::Rc,
+    slice::SliceIndex,
+};
 
 use neqo_common::{qerror, qinfo, qtrace, Header};
 use neqo_transport::{Connection, StreamId};
@@ -138,8 +145,7 @@ impl ActivePushStreams {
 /// ignored for already closed pushes.  Application calling cancel: the actions are similar to the
 /// `CANCEL_PUSH` frame. The difference is that                              `PushCanceled` will not
 /// be posted and a `CANCEL_PUSH` frame may be sent.
-#[derive(Debug, derive_more::Display)]
-#[display("Push controller")]
+#[derive(Debug)]
 pub struct PushController {
     max_concurent_push: u64,
     current_max_push_id: PushId,
@@ -150,6 +156,12 @@ pub struct PushController {
     // All push_id < next_push_id_to_open are in the push_stream lists. If they are not in the list
     // they have been already closed.
     conn_events: Http3ClientEvents,
+}
+
+impl Display for PushController {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Push controller")
+    }
 }
 
 impl PushController {

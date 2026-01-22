@@ -4,7 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, cmp::min, collections::VecDeque, fmt::Debug, rc::Rc, time::Instant};
+use std::{
+    cell::RefCell,
+    cmp::min,
+    collections::VecDeque,
+    fmt::{self, Debug, Display, Formatter},
+    rc::Rc,
+    time::Instant,
+};
 
 use neqo_common::{header::HeadersExt as _, qdebug, qinfo, qtrace, Header};
 use neqo_qpack as qpack;
@@ -64,8 +71,7 @@ struct PushInfo {
     header_block: Vec<u8>,
 }
 
-#[derive(Debug, derive_more::Display)]
-#[display("RecvMessage stream_id:{stream_id}")]
+#[derive(Debug)]
 pub struct RecvMessage {
     state: RecvMessageState,
     stream_info: Http3StreamInfo,
@@ -77,6 +83,12 @@ pub struct RecvMessage {
     stream_id: StreamId,
     priority_handler: PriorityHandler,
     blocked_push_promise: VecDeque<PushInfo>,
+}
+
+impl Display for RecvMessage {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "RecvMessage stream_id:{}", self.stream_id)
+    }
 }
 
 impl RecvMessage {
