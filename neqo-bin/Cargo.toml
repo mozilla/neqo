@@ -48,7 +48,6 @@ neqo-transport = { path = "./../neqo-transport" }
 neqo-udp = { path = "./../neqo-udp" }
 qlog = { workspace = true }
 quinn-udp = { workspace = true }
-regex = { workspace = true, features = ["unicode-perl"] }
 rustc-hash = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }

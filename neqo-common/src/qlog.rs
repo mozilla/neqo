@@ -186,7 +186,6 @@ pub fn new_trace(role: Role) -> TraceSeq {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
-    use regex::Regex;
     use test_fixture::EXPECTED_LOG_HEADER;
 
     const EV_DATA: qlog::events::EventData =
@@ -208,14 +207,19 @@ mod test {
 
     #[test]
     fn add_event_at() {
+        const TIME_PREFIX: &str = "\"time\":";
         let (mut log, contents) = test_fixture::new_neqo_qlog();
         log.add_event_at(|| Some(EV_DATA), test_fixture::now());
-        assert_eq!(
-            Regex::new("\"time\":[0-9]+.[0-9]+,")
-                .unwrap()
-                .replace(&contents.to_string(), "\"time\":0.0,"),
-            format!("{EXPECTED_LOG_HEADER}{EXPECTED_LOG_EVENT}"),
-        );
+        let mut output = contents.to_string();
+        if let Some(range) = output.find(TIME_PREFIX).and_then(|start| {
+            let time_start = start + TIME_PREFIX.len();
+            output[time_start..]
+                .find(',')
+                .map(|end| time_start..time_start + end)
+        }) {
+            output.replace_range(range, "0.0");
+        }
+        assert_eq!(output, format!("{EXPECTED_LOG_HEADER}{EXPECTED_LOG_EVENT}"));
     }
 
     #[test]
