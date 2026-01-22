@@ -37,17 +37,18 @@ pub fn setup(streams: usize, data_size: usize) -> ReadySimulator {
 
 /// Runs benchmarks for all parameter combinations.
 ///
-/// The closure receives the benchmark group and parameters, allowing each
+/// The closure receives the benchmark group, group name, and parameters, allowing each
 /// benchmark to define its own measurement approach.
 pub fn benchmark<M>(c: &mut Criterion, mut measure: M)
 where
-    M: FnMut(&mut BenchmarkGroup<'_, criterion::measurement::WallTime>, usize, usize),
+    M: FnMut(&mut BenchmarkGroup<'_, criterion::measurement::WallTime>, &str, usize, usize),
 {
     fixture_init();
 
     for (streams, data_size) in BENCHMARK_PARAMS {
-        let mut group = c.benchmark_group(format!("{streams}-streams/each-{data_size}-bytes"));
-        measure(&mut group, streams, data_size);
+        let name = format!("{streams}-streams/each-{data_size}-bytes");
+        let mut group = c.benchmark_group(&name);
+        measure(&mut group, &name, streams, data_size);
         group.finish();
     }
 }
