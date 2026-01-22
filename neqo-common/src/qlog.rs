@@ -207,13 +207,17 @@ mod test {
 
     #[test]
     fn add_event_at() {
+        const TIME_PREFIX: &str = "\"time\":";
         let (mut log, contents) = test_fixture::new_neqo_qlog();
         log.add_event_at(|| Some(EV_DATA), test_fixture::now());
         let mut output = contents.to_string();
-        if let Some(start) = output.find("\"time\":") {
-            if let Some(end) = output[start + 7..].find(',') {
-                output.replace_range(start + 7..start + 7 + end, "0.0");
-            }
+        if let Some(range) = output.find(TIME_PREFIX).and_then(|start| {
+            let time_start = start + TIME_PREFIX.len();
+            output[time_start..]
+                .find(',')
+                .map(|end| time_start..time_start + end)
+        }) {
+            output.replace_range(range, "0.0");
         }
         assert_eq!(output, format!("{EXPECTED_LOG_HEADER}{EXPECTED_LOG_EVENT}"));
     }
