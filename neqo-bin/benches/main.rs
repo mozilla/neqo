@@ -58,13 +58,13 @@ fn transfer(c: &mut Criterion) {
             download_size: 0,
         },
     ] {
-        let mut group = c.benchmark_group(name);
+        let mut group = c.benchmark_group(&name);
         group.throughput(if num_requests == 1 {
             Throughput::Bytes((upload_size + download_size) as u64)
         } else {
             Throughput::Elements(num_requests as u64)
         });
-        group.bench_function("client", |b| {
+        group.bench_function(&name, |b| {
             b.to_async(Builder::new_current_thread().enable_all().build().unwrap())
                 .iter_batched(
                     || {
