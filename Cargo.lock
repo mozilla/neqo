@@ -501,7 +501,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.22.1"
+version = "0.22.2"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -736,7 +736,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.22.1"
+version = "0.22.2"
 dependencies = [
  "clap",
  "clap-verbosity-flag",
@@ -762,7 +762,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-common"
-version = "0.22.1"
+version = "0.22.2"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -779,7 +779,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-crypto"
-version = "0.22.1"
+version = "0.22.2"
 dependencies = [
  "bindgen",
  "enum-map",
@@ -798,7 +798,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-http3"
-version = "0.22.1"
+version = "0.22.2"
 dependencies = [
  "codspeed-criterion-compat",
  "enumset",
@@ -819,7 +819,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-qpack"
-version = "0.22.1"
+version = "0.22.2"
 dependencies = [
  "log",
  "neqo-common",
@@ -833,7 +833,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-transport"
-version = "0.22.1"
+version = "0.22.2"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -855,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-udp"
-version = "0.22.1"
+version = "0.22.2"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -1231,7 +1231,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.22.1"
+version = "0.22.2"
 dependencies = [
  "log",
  "neqo-common",
