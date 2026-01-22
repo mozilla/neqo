@@ -46,7 +46,7 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           repository: microsoft/msquic
-          ref: v2.5.5
+          ref: v2.5.6
           path: msquic
           submodules: 'recursive'
           persist-credentials: false
@@ -56,7 +56,7 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           repository: google/quiche
-          ref: f9f012c06eeabf39ccfbaaf6ea4bf5bda932d25b # Google doesn't tag release, just update the hash occasionally
+          ref: e43bc7032ea448f7cfabc4739a32fe307352f196 # Google doesn't tag release, just update the hash occasionally
           path: google-quiche
           submodules: 'recursive'
           persist-credentials: false
@@ -76,7 +76,7 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           repository: aws/s2n-quic
-          ref: v1.69.0
+          ref: v1.72.0
           path: s2n-quic
           submodules: 'recursive'
           persist-credentials: false
