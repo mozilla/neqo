@@ -59,6 +59,7 @@ impl FrameDecoder<Self> for WebTransportFrame {
                 };
                 Ok(Some(Self::CloseSession { error, message }))
             } else {
+                panic!();
                 Ok(None)
             }
         } else {
