@@ -16,8 +16,8 @@ use test_fixture::{
 use super::{
     super::{Connection, ConnectionParameters, Output, State},
     assert_full_cwnd, connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, cwnd,
-    default_client, default_server, fill_cwnd, maybe_authenticate, new_client, send_and_receive,
-    send_something, AT_LEAST_PTO, DEFAULT_ADDR, DEFAULT_RTT, DEFAULT_STREAM_DATA,
+    default_client, default_server, fill_cwnd, maybe_authenticate, new_client, new_server,
+    send_and_receive, send_something, AT_LEAST_PTO, DEFAULT_ADDR, DEFAULT_RTT, DEFAULT_STREAM_DATA,
     POST_HANDSHAKE_CWND,
 };
 use crate::{
@@ -1030,4 +1030,124 @@ fn pto_handshake_space_when_server_flight_lost() {
         has_handshake |= is_handshake(&first) || second.as_ref().is_some_and(|s| is_handshake(s));
     }
     assert!(has_handshake && client.stats().frame_tx.ping > stats_before.ping);
+}
+
+/// Test that the server resends 1-RTT data when receiving undecryptable Handshake packets.
+///
+/// When the server is in Confirmed state and receives Handshake packets that
+/// it cannot decrypt (because it has discarded Handshake keys per RFC 9001
+/// Section 4.9.2), it should immediately resend its 1-RTT data (`HANDSHAKE_DONE`,
+/// `NewSessionTicket`, etc.) rather than waiting for its PTO timer to fire.
+#[test]
+fn server_resends_1rtt_on_undecryptable_handshake() {
+    const HALF_RTT: Duration = Duration::from_millis(10);
+    let mut now = now();
+
+    // Disable packet number randomization to make the test deterministic.
+    let params = ConnectionParameters::default().randomize_first_pn(false);
+    let mut client = new_client(params.clone());
+    let mut server = new_server(params);
+
+    // Complete the handshake up to the point where client is Connected.
+    let pkt = client.process_output(now).dgram();
+    let pkt2 = client.process_output(now).dgram();
+
+    now += HALF_RTT;
+    server.process_input(pkt.unwrap(), now);
+    let pkt = server.process(pkt2, now).dgram();
+
+    now += HALF_RTT;
+    let pkt = client.process(pkt, now).dgram();
+
+    now += HALF_RTT;
+    let pkt = server.process(pkt, now).dgram();
+
+    now += HALF_RTT;
+    let pkt = client.process(pkt, now).dgram();
+
+    now += HALF_RTT;
+    let pkt = server.process(pkt, now).dgram();
+    assert!(pkt.is_none());
+
+    now += HALF_RTT;
+    client.authenticated(AuthenticationStatus::Ok, now);
+
+    // Client sends Handshake Finished, enters Connected state.
+    let client_finished = client.process_output(now).dgram();
+    assert_eq!(*client.state(), State::Connected);
+
+    now += HALF_RTT;
+
+    // Server receives client Finished, enters Confirmed state.
+    // Server sends Handshake ACK + 1-RTT `HANDSHAKE_DONE`.
+    let handshake_done_before = server.stats().frame_tx.handshake_done;
+    let s_hs_done = server.process(client_finished, now).dgram();
+    assert!(s_hs_done.is_some());
+    assert_eq!(*server.state(), State::Confirmed);
+    assert_eq!(
+        server.stats().frame_tx.handshake_done,
+        handshake_done_before + 1
+    );
+
+    // Verify the server has no additional immediate output.
+    assert!(server.process_output(now).dgram().is_none());
+
+    // DROP the server's response (simulating network loss).
+    // Client never receives the ACK or `HANDSHAKE_DONE`.
+    drop(s_hs_done);
+
+    // Client is still in Connected state, waiting for `HANDSHAKE_DONE`.
+    assert_eq!(*client.state(), State::Connected);
+
+    // Save the time when server entered Confirmed state.
+    let server_confirmed_time = now;
+
+    // Get the client's PTO so we can generate a Handshake retransmission.
+    let client_pto = client.process_output(now).callback();
+
+    // Advance time to trigger client's PTO.
+    now += client_pto;
+
+    // Client PTO fires, retransmits Handshake.
+    let c_hs_retrans = client.process_output(now).dgram();
+    assert!(c_hs_retrans.is_some());
+
+    // The retransmission is coalesced (Handshake + 1-RTT).
+    // Split it and only send the Handshake portion to the server.
+    let (c_hs_only, _) = split_datagram(c_hs_retrans.as_ref().unwrap());
+    assert!(is_handshake(&c_hs_only));
+
+    // Server receives the Handshake retransmission shortly after it entered
+    // Confirmed state (before its own timer would fire).
+    // Server has discarded Handshake keys, so it can't decrypt.
+    // Server SHOULD resend its 1-RTT data (`HANDSHAKE_DONE`).
+    // Use a very small delay to ensure no server timer fires.
+    let receive_time = server_confirmed_time + Duration::from_millis(1);
+
+    let handshake_done_before = server.stats().frame_tx.handshake_done;
+    let dropped_before = server.stats().dropped_rx;
+
+    // Use process_input to receive the packet without triggering timers.
+    server.process_input(c_hs_only, receive_time);
+
+    // Verify the server dropped the undecryptable Handshake packet.
+    assert!(
+        server.stats().dropped_rx > dropped_before,
+        "Server should have dropped the undecryptable Handshake packet"
+    );
+
+    // Check what the server wants to send in response.
+    let s_response = server.process_output(receive_time).dgram();
+
+    // BUG: Server should resend 1-RTT data (`HANDSHAKE_DONE`) but currently doesn't.
+    // These assertions demonstrate the bug - they should pass after the fix.
+    assert!(
+        s_response.is_some(),
+        "Server should send 1-RTT response when receiving undecryptable Handshake"
+    );
+    assert_eq!(
+        server.stats().frame_tx.handshake_done,
+        handshake_done_before + 1,
+        "Server should resend HANDSHAKE_DONE"
+    );
 }

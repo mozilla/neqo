@@ -1812,12 +1812,7 @@ impl Connection {
                             // Exhausting read keys is fatal.
                             return Err(e.error);
                         }
-                        Error::KeysDiscarded(epoch) => {
-                            // This was a valid-appearing Initial packet: maybe probe with
-                            // a Handshake packet to keep the handshake moving.
-                            self.received_untracked |=
-                                self.role == Role::Client && epoch == Epoch::Initial;
-                        }
+                        Error::KeysDiscarded(epoch) => self.handle_keys_discarded(epoch),
                         _ => (),
                     }
                     // Decryption failure, or not having keys is not fatal.
@@ -1833,6 +1828,20 @@ impl Connection {
         }
         self.check_stateless_reset(path, &d, dcid.is_none(), now)?;
         Ok(())
+    }
+
+    /// Handle receiving a packet for which keys have been discarded.
+    fn handle_keys_discarded(&mut self, epoch: Epoch) {
+        // Client: receiving undecryptable Initial packets while waiting
+        // indicates server's Initial was lost. Probe with Handshake.
+        self.received_untracked |= self.role == Role::Client && epoch == Epoch::Initial;
+
+        // Server: receiving undecryptable Handshake packets while Confirmed
+        // indicates the client hasn't received HANDSHAKE_DONE. Resend it.
+        if self.role == Role::Server && epoch == Epoch::Handshake && self.state == State::Confirmed
+        {
+            self.state_signaling.handshake_done();
+        }
     }
 
     /// Process a packet.  Returns true if the packet might initiate migration.
