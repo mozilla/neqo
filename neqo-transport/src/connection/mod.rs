@@ -2462,7 +2462,7 @@ impl Connection {
             }
         }
 
-        if profile.ack_only(space) {
+        if profile.ack_only() {
             // If we are CC limited we can only send ACKs!
             return (tokens, false, false);
         }
