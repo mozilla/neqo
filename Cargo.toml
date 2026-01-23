@@ -27,7 +27,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 # Don't increase beyond what Firefox is currently using:
 # https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
-rust-version = "1.87.0"
+rust-version = "1.90.0"
 
 [workspace.dependencies]
 enum-map = { version = "2.7", default-features = false }
@@ -105,7 +105,7 @@ precedence_bits = "warn"
 pub_without_shorthand = "warn"
 rc_buffer = "warn"
 rc_mutex = "warn"
-# redundant_test_prefix = "warn" # TODO: Re-activate with MSRV >= 1.88.0
+redundant_test_prefix = "warn"
 redundant_type_annotations = "warn"
 ref_patterns = "warn"
 renamed_function_params = "warn"

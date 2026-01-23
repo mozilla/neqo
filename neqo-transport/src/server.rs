@@ -590,11 +590,6 @@ impl Server {
         }
 
         // Process output datagrams.
-        #[allow(
-            clippy::allow_attributes,
-            clippy::needless_match,
-            reason = "FIXME: false positive with MSRV 1.87 (and later?)"
-        )]
         let maybe_callback = match self.process_next_output(now, max_datagrams) {
             // Return immediately. Do any maintenance on next call.
             o @ OutputBatch::DatagramBatch(_) => return o,
