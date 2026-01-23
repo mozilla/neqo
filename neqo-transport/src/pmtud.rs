@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, qdebug, qinfo};
+use neqo_common::{Buffer, qdebug, qinfo, qtrace};
 use static_assertions::const_assert;
 
 use crate::{
@@ -112,7 +112,7 @@ impl Pmtud {
     }
 
     /// Returns the minimum MTU from the search table.
-    const fn min_mtu(&self) -> usize {
+    pub(crate) const fn min_mtu(&self) -> usize {
         self.search_table[0]
     }
 
@@ -221,7 +221,7 @@ impl Pmtud {
         stats: &mut Stats,
         now: Instant,
     ) {
-        // Skip black hole detection if we're already at minimum MTU - there's nowhere to go.
+        // Only restart PMTUD if we aren't already at the minimum MTU.
         if self.mtu > self.min_mtu() && self.black_hole.on_loss(lost_packets, now) {
             stats.pmtud_change += 1;
             self.start(now, stats);
@@ -246,6 +246,15 @@ impl Pmtud {
         } else {
             // Probe was lost but we haven't exhausted retries yet.
             self.probe_state = Probe::Needed;
+        }
+    }
+
+    /// Fallback for when ACK-based black hole detection fails due to no ACKs having come in.
+    pub fn on_pto(&mut self, pto_packets: &[sent::Packet], stats: &mut Stats, now: Instant) {
+        // Only restart PMTUD if we aren't already at the minimum MTU.
+        if self.mtu > self.min_mtu() && self.black_hole.on_pto(pto_packets, now) {
+            stats.pmtud_change += 1;
+            self.start(now, stats);
         }
     }
 
@@ -295,26 +304,27 @@ impl Pmtud {
     }
 }
 
-/// Detects PMTUD black holes by tracking losses of large packets.
+/// Detects PMTUD black holes by tracking losses of large packets and PTO events.
 ///
 /// A black hole is declared when we see repeated losses of packets larger than
 /// the base PLPMTU while the connection remains alive (implying smaller packets
-/// are getting through).
+/// are getting through), OR when PTO fires for large packets (indicating that
+/// no ACKs are being received at all).
 #[derive(Debug)]
 struct BlackHoleDetector {
     /// Minimum PLPMTU - packets larger than this are considered "large".
     base_plpmtu: usize,
     /// Smallest packet size among lost large packets.
     min_lost_size: Option<usize>,
-    /// Count of consecutive loss events for large packets.
+    /// Count of consecutive loss events for large packets (ACK-based detection).
     loss_count: usize,
-    /// Ignore losses of packets sent before this time.
-    /// Set when we restart PMTUD to avoid counting stale losses.
+    /// Ignore losses/PTOs of packets sent before this time.
+    /// Set when we restart PMTUD to avoid counting stale events.
     ignore_before: Option<Instant>,
 }
 
 impl BlackHoleDetector {
-    /// Number of consecutive loss events before declaring a black hole.
+    /// Number of consecutive ACK-based loss events before declaring a black hole.
     const THRESHOLD: usize = 3;
 
     const fn new(base_plpmtu: usize) -> Self {
@@ -332,6 +342,18 @@ impl BlackHoleDetector {
         self.loss_count = 0;
     }
 
+    /// Returns true if this packet is a candidate for black hole detection:
+    /// - On primary path
+    /// - Not a PMTUD probe (those have their own loss handling)
+    /// - Larger than base PLPMTU
+    /// - Sent after any restart (`ignore_before` filter)
+    fn is_large_data_packet(&self, p: &sent::Packet) -> bool {
+        p.on_primary_path()
+            && !p.is_pmtud_probe()
+            && p.len() > self.base_plpmtu
+            && self.ignore_before.is_none_or(|t| p.time_sent() >= t)
+    }
+
     /// Handle ACK of packets. If a large packet was acknowledged,
     /// the path is working for that size, so reset detection.
     fn on_ack(&mut self, acked_pkts: &[sent::Packet]) {
@@ -347,7 +369,7 @@ impl BlackHoleDetector {
 
         if let Some(max_acked) = max_acked {
             if self.min_lost_size.is_some_and(|min| max_acked >= min) {
-                qdebug!(
+                qtrace!(
                     "PMTUD black hole detection reset: ACK for {max_acked} bytes >= min_lost {:?}",
                     self.min_lost_size
                 );
@@ -360,12 +382,7 @@ impl BlackHoleDetector {
     fn on_loss(&mut self, lost_pkts: &[sent::Packet], now: Instant) -> bool {
         let Some(min_lost) = lost_pkts
             .iter()
-            .filter(|p| {
-                p.on_primary_path()
-                    && !p.is_pmtud_probe()
-                    && p.len() > self.base_plpmtu
-                    && self.ignore_before.is_none_or(|t| p.time_sent() >= t)
-            })
+            .filter(|p| self.is_large_data_packet(p))
             .map(sent::Packet::len)
             .min()
         else {
@@ -378,7 +395,7 @@ impl BlackHoleDetector {
         self.min_lost_size = Some(new_min);
         self.loss_count += 1;
 
-        qdebug!(
+        qtrace!(
             "PMTUD black hole detection: min_lost_size={new_min}, loss_count={}",
             self.loss_count
         );
@@ -395,6 +412,22 @@ impl BlackHoleDetector {
         }
 
         false
+    }
+
+    /// Record PTO events. Returns `true` if a black hole is detected.
+    ///
+    /// When PTO fires for large packets, it means we haven't received any ACKs
+    /// for an extended period. This is a strong signal that large packets are
+    /// being dropped, so we immediately trigger black hole detection.
+    fn on_pto(&mut self, pto_pkts: &[sent::Packet], now: Instant) -> bool {
+        if !pto_pkts.iter().any(|p| self.is_large_data_packet(p)) {
+            return false;
+        }
+
+        qinfo!("PMTUD black hole detected: PTO for large packets");
+        self.ignore_before = Some(now);
+        self.reset();
+        true
     }
 }
 
@@ -776,16 +809,20 @@ mod tests {
     }
 
     mod black_hole {
-        use std::time::{Duration, Instant};
+        use std::{
+            net::{IpAddr, Ipv6Addr},
+            time::{Duration, Instant},
+        };
 
         use test_fixture::now;
 
         use crate::{
             pmtud::BlackHoleDetector,
             recovery::{sent, Token},
+            Pmtud,
         };
 
-        const BASE_PLPMTU: usize = 1232;
+        const BASE_PLPMTU: usize = Pmtud::default_plpmtu(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
 
         fn make_packet(pn: u64, sent_time: Instant, len: usize) -> sent::Packet {
             sent::make_packet(pn, sent_time, len)
@@ -958,6 +995,64 @@ mod tests {
             assert!(detector.on_loss(&[pkt], now)); // Triggers detection
                                                     // After reset, min_lost_size is None.
             assert!(detector.min_lost_size.is_none());
+        }
+
+        #[test]
+        fn pto_triggers_immediately() {
+            let now = now();
+            let mut detector = BlackHoleDetector::new(BASE_PLPMTU);
+
+            // First PTO with large packets triggers detection immediately.
+            let pkt = make_packet(0, now, 1400);
+            assert!(detector.on_pto(&[pkt], now));
+            assert!(detector.ignore_before.is_some());
+        }
+
+        #[test]
+        fn pto_small_packets_ignored() {
+            let now = now();
+            let mut detector = BlackHoleDetector::new(BASE_PLPMTU);
+
+            // PTO with small packets - should be ignored.
+            for i in 0..5 {
+                let pkt = make_packet(i, now, BASE_PLPMTU);
+                assert!(!detector.on_pto(&[pkt], now));
+            }
+        }
+
+        #[test]
+        fn pto_probe_packets_ignored() {
+            let now = now();
+            let mut detector = BlackHoleDetector::new(BASE_PLPMTU);
+
+            // PTO with probe packets - should be ignored.
+            for i in 0..5 {
+                let pkt = make_probe(i, now, 1400);
+                assert!(!detector.on_pto(&[pkt], now));
+            }
+        }
+
+        #[test]
+        fn pto_old_packets_ignored_after_restart() {
+            let now = now();
+            let mut detector = BlackHoleDetector::new(BASE_PLPMTU);
+
+            // Trigger detection via PTO.
+            let pkt = make_packet(0, now, 1400);
+            assert!(detector.on_pto(&[pkt], now));
+            assert!(detector.ignore_before.is_some());
+
+            // PTOs for packets sent before ignore_before should be ignored.
+            let old_time = now.checked_sub(Duration::from_millis(100)).unwrap();
+            for i in 10..15 {
+                let pkt = make_packet(i, old_time, 1400);
+                assert!(!detector.on_pto(&[pkt], now));
+            }
+
+            // But new packets trigger detection again.
+            let new_time = now + Duration::from_millis(100);
+            let pkt = make_packet(20, new_time, 1400);
+            assert!(detector.on_pto(&[pkt], now));
         }
     }
 }

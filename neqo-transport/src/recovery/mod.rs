@@ -868,6 +868,8 @@ impl Loss {
         let mut allow_probes = PacketNumberSpaceSet::default();
         // The spaces for which packets should be marked for retransmission.
         let mut retransmit = PacketNumberSpaceSet::default();
+        // Track where PTO packets start in the lost vector.
+        let pto_packets_start = lost.len();
         for pn_space in PacketNumberSpace::iter() {
             let Some(t) = self.pto_time(primary_path.borrow().rtt(), pn_space) else {
                 continue;
@@ -913,6 +915,13 @@ impl Loss {
 
         qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
         self.fire_pto(pn_space, allow_probes, now);
+
+        // Notify PMTUD about PTO.
+        primary_path.borrow_mut().on_pto(
+            &lost[pto_packets_start..],
+            &mut self.stats.borrow_mut(),
+            now,
+        );
 
         // Maybe prime the Handshake PTO when PTO fires in Initial space.
         if pn_space == PacketNumberSpace::Initial {

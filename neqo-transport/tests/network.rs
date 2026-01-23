@@ -15,7 +15,7 @@ use test_fixture::{
             Node, ReachState, ReceiveData, SendData, SendDataExpectNoPmtudChange,
             SendDataExpectPmtudChange,
         },
-        network::{Drop, DynamicMtu, RandomDelay, TailDrop},
+        network::{Delay, Drop, DynamicMtu, RandomDelay, TailDrop},
     },
     simulate,
 };
@@ -226,9 +226,9 @@ fn pmtud_mtu_decrease() {
         boxed![
             Node::default_client(boxed![SendDataExpectPmtudChange::new(TRANSFER_AMOUNT)]),
             DynamicMtu::new(1500, 1300, 100),
-            RandomDelay::new(DELAY_RANGE),
+            Delay::new(DELAY),
             Node::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
-            RandomDelay::new(DELAY_RANGE),
+            Delay::new(DELAY),
         ],
     );
     sim.run();
