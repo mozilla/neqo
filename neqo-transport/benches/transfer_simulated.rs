@@ -21,9 +21,10 @@ use criterion::{criterion_group, criterion_main, Throughput};
 mod common;
 
 fn benchmark(c: &mut criterion::Criterion) {
-    common::benchmark(c, |group, name, label, seed, pacing| {
+    common::benchmark(c, |group, label, seed, pacing| {
+        let bench_name = format!("simulated/pacing-{pacing}/{label}");
         group.throughput(Throughput::Bytes(common::TRANSFER_AMOUNT as u64));
-        group.bench_function(name, |b| {
+        group.bench_function(&bench_name, |b| {
             b.iter_custom(|iters| {
                 let mut d_sum = Duration::ZERO;
                 for _i in 0..iters {
