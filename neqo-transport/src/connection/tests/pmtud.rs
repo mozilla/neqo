@@ -17,10 +17,13 @@ use super::Connection;
 use crate::{
     ConnectionParameters, Output, Pmtud, StreamType,
     connection::tests::{
-        CountingConnectionIdGenerator, DEFAULT_RTT, connect, default_server, fill_stream,
-        new_client, new_server, send_something,
+        AT_LEAST_PTO, CountingConnectionIdGenerator, DEFAULT_RTT, connect, default_server,
+        fill_stream, new_client, new_server, send_something,
     },
 };
+
+/// Default PLPMTU for IPv6 connections.
+const DEFAULT_PLPMTU: usize = Pmtud::default_plpmtu(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
 
 /// Test that one can reach the maximum MTU with GSO enabled.
 #[test]
@@ -139,8 +142,8 @@ fn vpn_migration_triggers_pmtud() {
     let vpn_path_mtu = 1400 - header_size;
 
     connect(&mut client, &mut server);
-    assert_eq!(client.plpmtu(), 1232, "PMTU should be IPv6 default");
-    assert_eq!(server.plpmtu(), 1232, "PMTU should be IPv6 default");
+    assert_eq!(client.plpmtu(), DEFAULT_PLPMTU);
+    assert_eq!(server.plpmtu(), DEFAULT_PLPMTU);
 
     // Drive PMTUD on the initial path.
     now = drive_pmtud(&mut client, &mut server, initial_path_mtu, now);
@@ -190,4 +193,59 @@ fn vpn_migration_triggers_pmtud() {
     let expected_vpn_mtu = 1380 - header_size;
     assert_eq!(server.plpmtu(), expected_vpn_mtu);
     assert_eq!(client.plpmtu(), expected_vpn_mtu);
+}
+
+/// Tests that PTO-based black hole detection triggers when all packets are lost.
+/// This tests the fallback detection mechanism that activates when no ACKs return.
+#[test]
+fn pto_triggers_black_hole_detection() {
+    fixture_init();
+    let mut now = now();
+    let mut client = new_client(ConnectionParameters::default().pmtud(true));
+    let mut server = new_server(ConnectionParameters::default().pmtud(true));
+    let header_size = Pmtud::header_size(
+        client
+            .paths
+            .primary()
+            .unwrap()
+            .borrow()
+            .local_address()
+            .ip(),
+    );
+    let path_mtu = 1500 - header_size;
+
+    connect(&mut client, &mut server);
+    assert_eq!(client.plpmtu(), DEFAULT_PLPMTU);
+
+    // Drive PMTUD to completion.
+    now = drive_pmtud(&mut client, &mut server, path_mtu, now);
+    let plpmtu_before = client.plpmtu();
+    assert_eq!(plpmtu_before, path_mtu, "PMTUD should have completed");
+
+    // Send data from client - creates large packets.
+    let stream = client.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut client, stream);
+    let d1 = client.process_output(now).dgram().unwrap();
+    assert_eq!(d1.len(), path_mtu, "Packet should be large");
+    // Drop the packet.
+
+    // Record state before PTO.
+    let pmtud_change_before = client.stats().pmtud_change;
+
+    // Advance time to trigger PTO.
+    now += AT_LEAST_PTO;
+
+    // Process client - this fires PTO and should trigger black hole detection.
+    let pto_dgram = client.process_output(now).dgram();
+    assert!(pto_dgram.is_some(), "Client should send PTO packet");
+
+    // Verify black hole detection triggered.
+    let pmtud_change_after = client.stats().pmtud_change;
+    assert_eq!(pmtud_change_after, pmtud_change_before + 1,);
+
+    // Verify PMTUD restarted - MTU should be back to minimum.
+    assert_eq!(
+        client.plpmtu(),
+        client.paths.primary().unwrap().borrow().pmtud().min_mtu() - header_size
+    );
 }
