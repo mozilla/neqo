@@ -72,7 +72,7 @@ pub fn fixture_init() {
 // This needs to be > 2ms to avoid it being rounded to zero.
 // NSS operates in milliseconds and halves any value it is provided.
 // But make it a second, so that tests with reasonable RTTs don't fail.
-pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(1000);
+pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(1);
 
 /// A baseline time for all tests.  This needs to be earlier than what `now()` produces
 /// because of the need to have a span of time elapse for anti-replay purposes.
