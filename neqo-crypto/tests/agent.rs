@@ -881,7 +881,10 @@ fn export_keying_material_different_labels() {
 
     assert_eq!(material1.len(), 32);
     assert_eq!(material2.len(), 32);
-    assert_ne!(material1, material2, "Different labels should produce different output");
+    assert_ne!(
+        material1, material2,
+        "Different labels should produce different output"
+    );
 }
 
 #[test]
@@ -905,7 +908,10 @@ fn export_keying_material_different_contexts() {
 
     assert_eq!(material1.len(), 32);
     assert_eq!(material2.len(), 32);
-    assert_ne!(material1, material2, "Different contexts should produce different output");
+    assert_ne!(
+        material1, material2,
+        "Different contexts should produce different output"
+    );
 }
 
 #[test]
@@ -937,5 +943,8 @@ fn export_keying_material_same_for_both_sides() {
         .export_keying_material(label, Some(context), 32)
         .expect("server export");
 
-    assert_eq!(client_material, server_material, "Both sides should export identical material");
+    assert_eq!(
+        client_material, server_material,
+        "Both sides should export identical material"
+    );
 }

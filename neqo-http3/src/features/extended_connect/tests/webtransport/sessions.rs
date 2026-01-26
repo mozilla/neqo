@@ -491,10 +491,15 @@ fn wt_validate_send_group() {
     let wt_session = wt.create_wt_session();
     let session_id = wt_session.stream_id();
 
-    let group = wt.client.webtransport_create_send_group(session_id).unwrap();
+    let group = wt
+        .client
+        .webtransport_create_send_group(session_id)
+        .unwrap();
 
     // Validate that the group belongs to this session
-    let valid = wt.client.webtransport_validate_send_group(session_id, group);
+    let valid = wt
+        .client
+        .webtransport_validate_send_group(session_id, group);
     assert!(valid.is_ok());
     assert!(valid.unwrap());
 }
@@ -518,20 +523,26 @@ fn wt_cross_session_send_group_rejected() {
     // Accept second session
     while let Some(event) = wt.server.next_event() {
         if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-            session,
-            ..
+            session, ..
         }) = event
         {
-            session.response(&SessionAcceptAction::Accept, now()).unwrap();
+            session
+                .response(&SessionAcceptAction::Accept, now())
+                .unwrap();
         }
     }
     wt.exchange_packets();
 
     // Create send group for session 1
-    let group1 = wt.client.webtransport_create_send_group(session_id1).unwrap();
+    let group1 = wt
+        .client
+        .webtransport_create_send_group(session_id1)
+        .unwrap();
 
     // Try to validate group1 with session2 - should return false
-    let valid = wt.client.webtransport_validate_send_group(wt_session2_id, group1);
+    let valid = wt
+        .client
+        .webtransport_validate_send_group(wt_session2_id, group1);
     assert!(valid.is_ok());
     assert!(!valid.unwrap());
 }
@@ -544,12 +555,17 @@ fn wt_create_stream_with_send_group() {
     let session_id = wt_session.stream_id();
 
     // Create a send group
-    let group = wt.client.webtransport_create_send_group(session_id).unwrap();
+    let group = wt
+        .client
+        .webtransport_create_send_group(session_id)
+        .unwrap();
 
     // Create a stream with the send group
-    let stream = wt
-        .client
-        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group));
+    let stream = wt.client.webtransport_create_stream_with_send_group(
+        session_id,
+        StreamType::UniDi,
+        Some(group),
+    );
     assert!(stream.is_ok());
 }
 
@@ -561,9 +577,9 @@ fn wt_create_stream_without_send_group() {
     let session_id = wt_session.stream_id();
 
     // Create a stream without a send group
-    let stream = wt
-        .client
-        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, None);
+    let stream =
+        wt.client
+            .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, None);
     assert!(stream.is_ok());
 }
 
@@ -585,22 +601,28 @@ fn wt_create_stream_with_invalid_send_group() {
     // Accept second session
     while let Some(event) = wt.server.next_event() {
         if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-            session,
-            ..
+            session, ..
         }) = event
         {
-            session.response(&SessionAcceptAction::Accept, now()).unwrap();
+            session
+                .response(&SessionAcceptAction::Accept, now())
+                .unwrap();
         }
     }
     wt.exchange_packets();
 
     // Create send group for session 1
-    let group1 = wt.client.webtransport_create_send_group(session_id1).unwrap();
+    let group1 = wt
+        .client
+        .webtransport_create_send_group(session_id1)
+        .unwrap();
 
     // Try to create stream in session2 with group from session1 - should fail
-    let result = wt
-        .client
-        .webtransport_create_stream_with_send_group(wt_session2_id, StreamType::UniDi, Some(group1));
+    let result = wt.client.webtransport_create_stream_with_send_group(
+        wt_session2_id,
+        StreamType::UniDi,
+        Some(group1),
+    );
     assert!(result.is_err());
 }
 
@@ -612,7 +634,10 @@ fn wt_multiple_streams_same_send_group() {
     let session_id = wt_session.stream_id();
 
     // Create a send group
-    let group = wt.client.webtransport_create_send_group(session_id).unwrap();
+    let group = wt
+        .client
+        .webtransport_create_send_group(session_id)
+        .unwrap();
 
     // Create multiple streams with the same send group
     let stream1 = wt
@@ -643,8 +668,14 @@ fn wt_send_group_with_sendorder() {
     let session_id = wt_session.stream_id();
 
     // Create two send groups
-    let group1 = wt.client.webtransport_create_send_group(session_id).unwrap();
-    let group2 = wt.client.webtransport_create_send_group(session_id).unwrap();
+    let group1 = wt
+        .client
+        .webtransport_create_send_group(session_id)
+        .unwrap();
+    let group2 = wt
+        .client
+        .webtransport_create_send_group(session_id)
+        .unwrap();
 
     // Create streams in different groups with sendOrder
     let stream1 = wt
@@ -669,10 +700,18 @@ fn wt_send_group_with_sendorder() {
     // stream1 and stream2 are in group1 - their sendOrders should be compared within group1
     // stream3 is in group2 - its sendOrder is independent
     // stream4 has no group - its sendOrder is in the ungrouped namespace
-    wt.client.webtransport_set_sendorder(stream1, Some(100)).unwrap();
-    wt.client.webtransport_set_sendorder(stream2, Some(200)).unwrap();
-    wt.client.webtransport_set_sendorder(stream3, Some(100)).unwrap(); // Same value as stream1, but different group
-    wt.client.webtransport_set_sendorder(stream4, Some(100)).unwrap(); // Same value as stream1, but ungrouped
+    wt.client
+        .webtransport_set_sendorder(stream1, Some(100))
+        .unwrap();
+    wt.client
+        .webtransport_set_sendorder(stream2, Some(200))
+        .unwrap();
+    wt.client
+        .webtransport_set_sendorder(stream3, Some(100))
+        .unwrap(); // Same value as stream1, but different group
+    wt.client
+        .webtransport_set_sendorder(stream4, Some(100))
+        .unwrap(); // Same value as stream1, but ungrouped
 
     // All operations should succeed
     // Note: The actual prioritization logic (treating groups equally, sendOrder within groups)
@@ -695,8 +734,14 @@ fn wt_send_groups_fair_bandwidth_allocation() {
     let session_id = wt_session.stream_id();
 
     // Create two send groups
-    let group_high = wt.client.webtransport_create_send_group(session_id).unwrap();
-    let group_low = wt.client.webtransport_create_send_group(session_id).unwrap();
+    let group_high = wt
+        .client
+        .webtransport_create_send_group(session_id)
+        .unwrap();
+    let group_low = wt
+        .client
+        .webtransport_create_send_group(session_id)
+        .unwrap();
 
     // Create streams in group_high with HIGH sendOrder (should be prioritized WITHIN the group)
     let stream_high1 = wt
@@ -719,19 +764,24 @@ fn wt_send_groups_fair_bandwidth_allocation() {
         .unwrap();
 
     // Set HIGH sendOrder for group_high streams
-    wt.client.webtransport_set_sendorder(stream_high1, Some(1000)).unwrap();
-    wt.client.webtransport_set_sendorder(stream_high2, Some(900)).unwrap();
+    wt.client
+        .webtransport_set_sendorder(stream_high1, Some(1000))
+        .unwrap();
+    wt.client
+        .webtransport_set_sendorder(stream_high2, Some(900))
+        .unwrap();
 
     // Set LOW sendOrder for group_low streams
-    wt.client.webtransport_set_sendorder(stream_low1, Some(100)).unwrap();
-    wt.client.webtransport_set_sendorder(stream_low2, Some(50)).unwrap();
+    wt.client
+        .webtransport_set_sendorder(stream_low1, Some(100))
+        .unwrap();
+    wt.client
+        .webtransport_set_sendorder(stream_low2, Some(50))
+        .unwrap();
 
     // Fill all streams with data
     for stream in [stream_high1, stream_high2, stream_low1, stream_low2] {
-        assert_eq!(
-            wt.client.send_data(stream, BUF, now()).unwrap(),
-            DATA_SIZE
-        );
+        assert_eq!(wt.client.send_data(stream, BUF, now()).unwrap(), DATA_SIZE);
     }
 
     wt.exchange_packets();
@@ -755,8 +805,14 @@ fn wt_send_groups_fair_bandwidth_allocation() {
     }
 
     // Both send groups should have gotten bandwidth allocation
-    assert!(group_high_readable, "group_high streams should have received data");
-    assert!(group_low_readable, "group_low streams should have received data despite lower sendOrder");
+    assert!(
+        group_high_readable,
+        "group_high streams should have received data"
+    );
+    assert!(
+        group_low_readable,
+        "group_low streams should have received data despite lower sendOrder"
+    );
 }
 
 #[test]
@@ -772,7 +828,10 @@ fn wt_sendorder_within_send_group() {
     let session_id = wt_session.stream_id();
 
     // Create one send group
-    let group = wt.client.webtransport_create_send_group(session_id).unwrap();
+    let group = wt
+        .client
+        .webtransport_create_send_group(session_id)
+        .unwrap();
 
     // Create two streams in the same group with different sendOrders
     let stream_high = wt
@@ -785,12 +844,22 @@ fn wt_sendorder_within_send_group() {
         .unwrap();
 
     // Set sendOrder: stream_high should be prioritized over stream_low WITHIN the group
-    wt.client.webtransport_set_sendorder(stream_high, Some(1000)).unwrap();
-    wt.client.webtransport_set_sendorder(stream_low, Some(10)).unwrap();
+    wt.client
+        .webtransport_set_sendorder(stream_high, Some(1000))
+        .unwrap();
+    wt.client
+        .webtransport_set_sendorder(stream_low, Some(10))
+        .unwrap();
 
     // Fill both streams with data
-    assert_eq!(wt.client.send_data(stream_low, BUF, now()).unwrap(), DATA_SIZE);
-    assert_eq!(wt.client.send_data(stream_high, BUF, now()).unwrap(), DATA_SIZE);
+    assert_eq!(
+        wt.client.send_data(stream_low, BUF, now()).unwrap(),
+        DATA_SIZE
+    );
+    assert_eq!(
+        wt.client.send_data(stream_high, BUF, now()).unwrap(),
+        DATA_SIZE
+    );
 
     wt.exchange_packets();
 
@@ -827,25 +896,38 @@ fn wt_ungrouped_streams_independent_namespace() {
     let session_id = wt_session.stream_id();
 
     // Create a send group
-    let group = wt.client.webtransport_create_send_group(session_id).unwrap();
+    let group = wt
+        .client
+        .webtransport_create_send_group(session_id)
+        .unwrap();
 
     // Create a grouped stream with sendOrder 100
     let stream_grouped = wt
         .client
         .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group))
         .unwrap();
-    wt.client.webtransport_set_sendorder(stream_grouped, Some(100)).unwrap();
+    wt.client
+        .webtransport_set_sendorder(stream_grouped, Some(100))
+        .unwrap();
 
     // Create an ungrouped stream with sendOrder 100 (same value, different namespace)
     let stream_ungrouped = wt
         .client
         .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, None)
         .unwrap();
-    wt.client.webtransport_set_sendorder(stream_ungrouped, Some(100)).unwrap();
+    wt.client
+        .webtransport_set_sendorder(stream_ungrouped, Some(100))
+        .unwrap();
 
     // Fill both streams
-    assert_eq!(wt.client.send_data(stream_grouped, BUF, now()).unwrap(), DATA_SIZE);
-    assert_eq!(wt.client.send_data(stream_ungrouped, BUF, now()).unwrap(), DATA_SIZE);
+    assert_eq!(
+        wt.client.send_data(stream_grouped, BUF, now()).unwrap(),
+        DATA_SIZE
+    );
+    assert_eq!(
+        wt.client.send_data(stream_ungrouped, BUF, now()).unwrap(),
+        DATA_SIZE
+    );
 
     wt.exchange_packets();
 
@@ -884,9 +966,18 @@ fn wt_multiple_groups_separate_sendorder_namespaces() {
     let session_id = wt_session.stream_id();
 
     // Create three send groups
-    let group1 = wt.client.webtransport_create_send_group(session_id).unwrap();
-    let group2 = wt.client.webtransport_create_send_group(session_id).unwrap();
-    let group3 = wt.client.webtransport_create_send_group(session_id).unwrap();
+    let group1 = wt
+        .client
+        .webtransport_create_send_group(session_id)
+        .unwrap();
+    let group2 = wt
+        .client
+        .webtransport_create_send_group(session_id)
+        .unwrap();
+    let group3 = wt
+        .client
+        .webtransport_create_send_group(session_id)
+        .unwrap();
 
     // Create streams in each group, all with the SAME sendOrder value
     let stream1 = wt
@@ -903,9 +994,15 @@ fn wt_multiple_groups_separate_sendorder_namespaces() {
         .unwrap();
 
     // Set the SAME sendOrder value for all streams (different namespaces!)
-    wt.client.webtransport_set_sendorder(stream1, Some(500)).unwrap();
-    wt.client.webtransport_set_sendorder(stream2, Some(500)).unwrap();
-    wt.client.webtransport_set_sendorder(stream3, Some(500)).unwrap();
+    wt.client
+        .webtransport_set_sendorder(stream1, Some(500))
+        .unwrap();
+    wt.client
+        .webtransport_set_sendorder(stream2, Some(500))
+        .unwrap();
+    wt.client
+        .webtransport_set_sendorder(stream3, Some(500))
+        .unwrap();
 
     // Fill all streams
     for stream in [stream1, stream2, stream3] {

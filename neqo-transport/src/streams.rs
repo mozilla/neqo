@@ -34,6 +34,7 @@ use crate::{
 };
 
 pub type SendOrder = i64;
+pub type SendGroupId = u64;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct StreamOrder {
@@ -424,6 +425,16 @@ impl Streams {
     /// When the stream does not exist.
     pub fn set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         self.send.set_fairness(stream_id, fairness)
+    }
+
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn set_sendgroup(
+        &mut self,
+        stream_id: StreamId,
+        sendgroup: Option<SendGroupId>,
+    ) -> Res<()> {
+        self.send.set_sendgroup(stream_id, sendgroup)
     }
 
     /// # Errors

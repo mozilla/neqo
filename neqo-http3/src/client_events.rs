@@ -121,9 +121,7 @@ pub enum Http3ClientEvent {
     /// New stream can be created
     RequestsCreatable,
     /// Stream quota increased - more streams of the specified type can be created
-    StreamCreatable {
-        stream_type: StreamType,
-    },
+    StreamCreatable { stream_type: StreamType },
     /// Cert authentication needed
     AuthenticationNeeded,
     /// Encrypted client hello fallback occurred.  The certificate for the

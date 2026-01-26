@@ -127,7 +127,10 @@ impl WebTransportDatagramQueue {
         (below_watermark, dropped)
     }
 
-    pub fn process_queue(&mut self, send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> Vec<(u64, DatagramOutcome)> {
+    pub fn process_queue(
+        &mut self,
+        send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>,
+    ) -> Vec<(u64, DatagramOutcome)> {
         let mut outcomes = Vec::new();
 
         let expired = self.expire_old_datagrams();

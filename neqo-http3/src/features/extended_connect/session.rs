@@ -295,12 +295,16 @@ impl Session {
                                 qtrace!("wt-protocol header value: {:?}", s);
                                 // Split on ';' to remove parameters
                                 let main_value = s.split(';').next()?.trim();
-                                qtrace!("wt-protocol main_value after split/trim: {:?}", main_value);
+                                qtrace!(
+                                    "wt-protocol main_value after split/trim: {:?}",
+                                    main_value
+                                );
                                 // Remove surrounding quotes
                                 if main_value.len() >= 2
                                     && main_value.starts_with('"')
-                                    && main_value.ends_with('"') {
-                                    let extracted = main_value[1..main_value.len()-1].to_string();
+                                    && main_value.ends_with('"')
+                                {
+                                    let extracted = main_value[1..main_value.len() - 1].to_string();
                                     qtrace!("wt-protocol extracted: {:?}", extracted);
                                     Some(extracted)
                                 } else {
@@ -435,7 +439,9 @@ impl Session {
                 DatagramTracking::None => 0,
             };
 
-            let (below_watermark, _dropped) = self.protocol.enqueue_datagram(Bytes::from(Vec::<u8>::from(dgram_data)), id_u64);
+            let (below_watermark, _dropped) = self
+                .protocol
+                .enqueue_datagram(Bytes::from(Vec::<u8>::from(dgram_data)), id_u64);
             // Note: _dropped outcomes from queue-full are currently not reported as events
             // They will be silent drops. This could be improved in the future.
 
@@ -452,12 +458,14 @@ impl Session {
         &mut self,
         conn: &mut Connection,
     ) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
-        let outcomes = self.protocol.process_datagram_queue(&mut |data, id| {
-            match conn.send_datagram(data.to_vec(), DatagramTracking::Id(id)) {
+        let outcomes = self
+            .protocol
+            .process_datagram_queue(&mut |data, id| match conn
+                .send_datagram(data.to_vec(), DatagramTracking::Id(id))
+            {
                 Ok(()) => Ok(()),
                 Err(_) => Err(()),
-            }
-        });
+            });
 
         let sent_count = outcomes
             .iter()
@@ -722,23 +730,26 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError>;
 
-    fn set_datagram_high_water_mark(&mut self, _mark: f64) {
-    }
+    fn set_datagram_high_water_mark(&mut self, _mark: f64) {}
 
-    fn set_datagram_max_age(&mut self, _age_ms: f64) {
-    }
+    fn set_datagram_max_age(&mut self, _age_ms: f64) {}
 
-    fn set_anticipated_incoming_uni(&mut self, _value: u16) {
-    }
+    fn set_anticipated_incoming_uni(&mut self, _value: u16) {}
 
-    fn set_anticipated_incoming_bidi(&mut self, _value: u16) {
-    }
+    fn set_anticipated_incoming_bidi(&mut self, _value: u16) {}
 
-    fn enqueue_datagram(&mut self, _data: Bytes, _id: u64) -> (bool, Option<(u64, super::datagram_queue::DatagramOutcome)>) {
+    fn enqueue_datagram(
+        &mut self,
+        _data: Bytes,
+        _id: u64,
+    ) -> (bool, Option<(u64, super::datagram_queue::DatagramOutcome)>) {
         (true, None)
     }
 
-    fn process_datagram_queue(&mut self, _send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
+    fn process_datagram_queue(
+        &mut self,
+        _send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>,
+    ) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
         Vec::new()
     }
 }

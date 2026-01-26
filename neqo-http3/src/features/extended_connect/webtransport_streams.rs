@@ -179,7 +179,12 @@ impl WebTransportSendStream {
         Ok(())
     }
 
-    pub(crate) fn send_atomic(&mut self, conn: &mut Connection, data: &[u8], now: Instant) -> Res<bool> {
+    pub(crate) fn send_atomic(
+        &mut self,
+        conn: &mut Connection,
+        data: &[u8],
+        now: Instant,
+    ) -> Res<bool> {
         // First ensure init buffer is sent
         self.send(conn, now)?;
 

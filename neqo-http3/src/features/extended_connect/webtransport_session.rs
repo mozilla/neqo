@@ -174,11 +174,18 @@ impl Session {
         self.datagram_queue.set_max_age(age_ms);
     }
 
-    pub(crate) fn enqueue_datagram(&mut self, data: Bytes, id: u64) -> (bool, Option<(u64, DatagramOutcome)>) {
+    pub(crate) fn enqueue_datagram(
+        &mut self,
+        data: Bytes,
+        id: u64,
+    ) -> (bool, Option<(u64, DatagramOutcome)>) {
         self.datagram_queue.enqueue(data, id)
     }
 
-    pub(crate) fn process_datagram_queue(&mut self, send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> Vec<(u64, DatagramOutcome)> {
+    pub(crate) fn process_datagram_queue(
+        &mut self,
+        send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>,
+    ) -> Vec<(u64, DatagramOutcome)> {
         self.datagram_queue.process_queue(send_fn)
     }
 }
@@ -393,7 +400,10 @@ impl Protocol for Session {
         self.enqueue_datagram(data, id)
     }
 
-    fn process_datagram_queue(&mut self, send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> Vec<(u64, DatagramOutcome)> {
+    fn process_datagram_queue(
+        &mut self,
+        send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>,
+    ) -> Vec<(u64, DatagramOutcome)> {
         self.process_datagram_queue(send_fn)
     }
 }

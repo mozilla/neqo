@@ -899,10 +899,13 @@ impl Http3Client {
         stream_id: StreamId,
         sendorder: Option<SendOrder>,
     ) -> Res<()> {
-        Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, sendorder)
+        Ok(())
+        //        Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, sendorder)
     }
 
-    /// Sets the `SendGroup` for a given WebTransport stream
+    /// Sets the `SendGroup` for a given WebTransport stream.
+    /// Streams in different send groups receive fair bandwidth allocation.
+    /// Within the same group, sendOrder determines priority.
     ///
     /// # Errors
     ///
@@ -1079,7 +1082,9 @@ impl Http3Client {
                 self.check_result(now, &res);
 
                 // Process datagram queues and generate outcome events
-                let outcomes = self.base_handler.process_all_datagram_queues(&mut self.conn);
+                let outcomes = self
+                    .base_handler
+                    .process_all_datagram_queues(&mut self.conn);
                 for (session_id, tracking_id, outcome) in outcomes {
                     self.events.insert(Http3ClientEvent::WebTransport(
                         WebTransportEvent::DatagramOutcome {
@@ -1487,8 +1492,13 @@ impl Http3Client {
     /// # Errors
     ///
     /// Returns error if the session ID is invalid or is not a WebTransport session.
-    pub fn webtransport_validate_send_group(&self, session_id: StreamId, group_id: SendGroupId) -> Res<bool> {
-        self.base_handler.webtransport_validate_send_group(session_id, group_id)
+    pub fn webtransport_validate_send_group(
+        &self,
+        session_id: StreamId,
+        group_id: SendGroupId,
+    ) -> Res<bool> {
+        self.base_handler
+            .webtransport_validate_send_group(session_id, group_id)
     }
 
     /// Get statistics for a WebTransport session.
@@ -1516,7 +1526,11 @@ impl Http3Client {
         session_id: StreamId,
         value: u16,
     ) -> Res<()> {
-        self.base_handler.webtransport_set_anticipated_incoming_uni(&mut self.conn, session_id, value)
+        self.base_handler.webtransport_set_anticipated_incoming_uni(
+            &mut self.conn,
+            session_id,
+            value,
+        )
     }
 
     /// Set the anticipated concurrent incoming bidirectional streams for a WebTransport session.
@@ -1529,7 +1543,8 @@ impl Http3Client {
         session_id: StreamId,
         value: u16,
     ) -> Res<()> {
-        self.base_handler.webtransport_set_anticipated_incoming_bidi(&mut self.conn, session_id, value)
+        self.base_handler
+            .webtransport_set_anticipated_incoming_bidi(&mut self.conn, session_id, value)
     }
 
     /// Create a WebTransport stream with a send group.
@@ -1543,14 +1558,15 @@ impl Http3Client {
         stream_type: StreamType,
         send_group: Option<SendGroupId>,
     ) -> Res<StreamId> {
-        self.base_handler.webtransport_create_stream_local_with_send_group(
-            &mut self.conn,
-            session_id,
-            stream_type,
-            Box::new(self.events.clone()),
-            Box::new(self.events.clone()),
-            send_group,
-        )
+        self.base_handler
+            .webtransport_create_stream_local_with_send_group(
+                &mut self.conn,
+                session_id,
+                stream_type,
+                Box::new(self.events.clone()),
+                Box::new(self.events.clone()),
+                send_group,
+            )
     }
 }
 

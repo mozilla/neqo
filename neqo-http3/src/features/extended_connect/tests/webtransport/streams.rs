@@ -1140,3 +1140,198 @@ fn wt_set_sendorder() {
         .webtransport_set_sendorder(wt_stream, None)
         .unwrap();
 }
+
+// ============================================================================
+// WebTransport SendGroup Tests
+// ============================================================================
+// These tests validate the sendgroup API. The actual bandwidth scheduling
+// based on sendgroup is implemented in neqo-transport.
+// ============================================================================
+
+#[test]
+fn wt_set_sendgroup_valid_streams() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+
+    // Create send groups for the session
+    let group1 = wt
+        .client
+        .webtransport_create_send_group(wt_session.stream_id())
+        .unwrap();
+    let group2 = wt
+        .client
+        .webtransport_create_send_group(wt_session.stream_id())
+        .unwrap();
+
+    // Create bidirectional stream
+    let stream_bidi = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::BiDi);
+
+    // Set sendgroup - should succeed
+    assert!(wt
+        .client
+        .webtransport_set_sendgroup(stream_bidi, group1)
+        .is_ok());
+
+    // Create unidirectional stream
+    let stream_uni = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+
+    // Set sendgroup - should succeed
+    assert!(wt
+        .client
+        .webtransport_set_sendgroup(stream_uni, group2)
+        .is_ok());
+}
+
+#[test]
+fn wt_set_sendgroup_invalid_stream() {
+    use neqo_transport::StreamId;
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+
+    // Create a valid send group
+    let group = wt
+        .client
+        .webtransport_create_send_group(wt_session.stream_id())
+        .unwrap();
+
+    // Try to set sendgroup on non-existent stream
+    let invalid_stream = StreamId::from(999_u64);
+    assert!(wt
+        .client
+        .webtransport_set_sendgroup(invalid_stream, group)
+        .is_err());
+}
+
+#[test]
+fn wt_set_sendgroup_multiple_groups() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+
+    // Create send groups
+    let group1 = wt
+        .client
+        .webtransport_create_send_group(wt_session.stream_id())
+        .unwrap();
+    let group2 = wt
+        .client
+        .webtransport_create_send_group(wt_session.stream_id())
+        .unwrap();
+
+    // Create multiple streams
+    let stream1 = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::BiDi);
+    let stream2 = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::BiDi);
+    let stream3 = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+
+    // Assign to different groups
+    assert!(wt
+        .client
+        .webtransport_set_sendgroup(stream1, group1)
+        .is_ok());
+    assert!(wt
+        .client
+        .webtransport_set_sendgroup(stream2, group2)
+        .is_ok());
+    assert!(wt
+        .client
+        .webtransport_set_sendgroup(stream3, group1)
+        .is_ok());
+}
+
+#[test]
+fn wt_set_sendgroup_change_group() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+
+    // Create multiple send groups
+    let group1 = wt
+        .client
+        .webtransport_create_send_group(wt_session.stream_id())
+        .unwrap();
+    let group2 = wt
+        .client
+        .webtransport_create_send_group(wt_session.stream_id())
+        .unwrap();
+    let group3 = wt
+        .client
+        .webtransport_create_send_group(wt_session.stream_id())
+        .unwrap();
+
+    let stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::BiDi);
+
+    // Set initial group
+    assert!(wt.client.webtransport_set_sendgroup(stream, group1).is_ok());
+
+    // Change to different group
+    assert!(wt.client.webtransport_set_sendgroup(stream, group2).is_ok());
+
+    // Change again
+    assert!(wt.client.webtransport_set_sendgroup(stream, group3).is_ok());
+}
+
+#[test]
+fn wt_sendgroup_with_sendorder() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+
+    // Create send group
+    let group = wt
+        .client
+        .webtransport_create_send_group(wt_session.stream_id())
+        .unwrap();
+
+    let stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::BiDi);
+
+    // Set sendorder first
+    assert!(wt
+        .client
+        .webtransport_set_sendorder(stream, Some(1000))
+        .is_ok());
+
+    // Then set sendgroup
+    assert!(wt.client.webtransport_set_sendgroup(stream, group).is_ok());
+
+    // Set sendorder again - should not interfere with sendgroup
+    assert!(wt
+        .client
+        .webtransport_set_sendorder(stream, Some(500))
+        .is_ok());
+}
+
+#[test]
+fn wt_sendgroup_invalid_group() {
+    use crate::features::extended_connect::send_group::SendGroupId;
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::BiDi);
+
+    // Try to use a sendgroup that wasn't created for this session - should fail
+    let invalid_group = SendGroupId::from(12345);
+    assert!(wt
+        .client
+        .webtransport_set_sendgroup(stream, invalid_group)
+        .is_err());
+}
+
+#[test]
+fn wt_sendgroup_different_session() {
+    let mut wt = WtTest::new();
+    let wt_session1 = wt.create_wt_session();
+    let wt_session2 = wt.create_wt_session();
+
+    // Create a group for session1
+    let group1 = wt
+        .client
+        .webtransport_create_send_group(wt_session1.stream_id())
+        .unwrap();
+
+    // Create a stream on session2
+    let stream2 = wt.create_wt_stream_client(wt_session2.stream_id(), StreamType::BiDi);
+
+    // Try to use session1's group on session2's stream - should fail
+    assert!(wt
+        .client
+        .webtransport_set_sendgroup(stream2, group1)
+        .is_err());
+}
