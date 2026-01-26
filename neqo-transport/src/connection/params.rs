@@ -536,19 +536,19 @@ impl ConnectionParameters {
             TransportParameterId::IdleTimeout,
             u64::try_from(self.idle_timeout.as_millis()).unwrap_or(0),
         );
-        if let PreferredAddressConfig::Address(preferred) = &self.preferred_address {
-            if role == Role::Server {
-                let (cid, srt) = cid_manager.preferred_address_cid()?;
-                tps.local_mut().set(
-                    TransportParameterId::PreferredAddress,
-                    TransportParameter::PreferredAddress {
-                        v4: preferred.ipv4(),
-                        v6: preferred.ipv6(),
-                        cid,
-                        srt,
-                    },
-                );
-            }
+        if let PreferredAddressConfig::Address(preferred) = &self.preferred_address
+            && role == Role::Server
+        {
+            let (cid, srt) = cid_manager.preferred_address_cid()?;
+            tps.local_mut().set(
+                TransportParameterId::PreferredAddress,
+                TransportParameter::PreferredAddress {
+                    v4: preferred.ipv4(),
+                    v6: preferred.ipv6(),
+                    cid,
+                    srt,
+                },
+            );
         }
         tps.local_mut()
             .set_integer(MaxDatagramFrameSize, self.datagram_size);
