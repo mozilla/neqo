@@ -41,6 +41,8 @@ jobs:
           # simulation and memory benchmarks run on GitHub runners.
           # Each benchmark is run twice: once for CPU profiling (simulation
           # or walltime) and once for memory profiling.
+          # Memory profiling can be disabled by setting codspeed.memory = false
+          # in the package.metadata.bench entry.
           {
             echo -n "benches="
             cargo metadata --no-deps --format-version 1 | jq -c '
@@ -50,7 +52,9 @@ jobs:
                 select(.kind[] == "bench") |
                 select(has("required-features")) |
                 .name as $bench_name |
-                ((($pkg.metadata.bench // []) | map(select(.name == $bench_name)) | .[0].codspeed.mode) // "simulation") as $cpu_mode |
+                (($pkg.metadata.bench // []) | map(select(.name == $bench_name)) | .[0]) as $bench_meta |
+                (($bench_meta.codspeed.mode) // "simulation") as $cpu_mode |
+                (if $bench_meta.codspeed.memory == null then true else $bench_meta.codspeed.memory end) as $memory_enabled |
                 (
                   # CPU profiling entry (simulation or walltime)
                   {
@@ -59,13 +63,17 @@ jobs:
                     mode: $cpu_mode,
                     runner: (if $cpu_mode == "walltime" then {group: "codspeed", labels: "codspeed-macro"} else "ubuntu-24.04" end)
                   },
-                  # Memory profiling entry
-                  {
-                    crate: $pkg.name,
-                    bench: $bench_name,
-                    mode: "memory",
-                    runner: "ubuntu-24.04"
-                  }
+                  # Memory profiling entry (only if enabled)
+                  if $memory_enabled then
+                    {
+                      crate: $pkg.name,
+                      bench: $bench_name,
+                      mode: "memory",
+                      runner: "ubuntu-24.04"
+                    }
+                  else
+                    empty
+                  end
                 )
               ]'
           } >> "${GITHUB_OUTPUT}"
