@@ -299,10 +299,6 @@ pub struct Stats {
     /// Count frames sent.
     pub frame_tx: FrameStats,
 
-    /// The number of incoming datagrams dropped due to reaching the limit
-    /// of the incoming queue.
-    pub incoming_datagram_dropped: usize,
-
     pub datagram_tx: DatagramStats,
 
     pub cc: CongestionControlStats,

@@ -373,8 +373,7 @@ impl Http3ServerHandler {
                 | ConnectionEvent::ResumptionToken(..) => return Err(Error::HttpInternal(4)),
                 ConnectionEvent::SendStreamComplete { .. }
                 | ConnectionEvent::SendStreamCreatable { .. }
-                | ConnectionEvent::OutgoingDatagramOutcome { .. }
-                | ConnectionEvent::IncomingDatagramDropped => {}
+                | ConnectionEvent::OutgoingDatagramOutcome { .. } => {}
             }
         }
         Ok(())
