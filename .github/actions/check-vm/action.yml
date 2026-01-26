@@ -137,10 +137,18 @@ runs:
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
-    - if: ${{ inputs.codecov-token != '' }}
+    - id: check-coverage
+      shell: bash
+      env:
+        WORKING_DIR: ${{ inputs.working-directory }}
+      run: test -f "$WORKING_DIR/codecov.json" && echo "exists=true" >> "$GITHUB_OUTPUT" || true
+
+    - if: ${{ steps.check-coverage.outputs.exists == 'true' }}
       uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
       with:
         files: codecov.json
+        working-directory: ${{ inputs.working-directory }}
         fail_ci_if_error: false
         token: ${{ inputs.codecov-token }}
         verbose: true
+        flags: ${{ inputs.platform }}
