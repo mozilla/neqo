@@ -15,18 +15,20 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::Qlog, qtrace, qwarn,
-    Datagram, Decoder, Encoder, Header, MessageType, Role,
+    Datagram, Decoder, Encoder, Header, MessageType, Role, event::Provider as EventProvider, hex,
+    hex_with_len, qdebug, qinfo, qlog::Qlog, qtrace, qwarn,
 };
-use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
+use neqo_crypto::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, agent::CertificateInfo};
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
-    recv_stream, send_stream, streams::SendOrder, AppError, Connection, ConnectionEvent,
-    ConnectionId, ConnectionIdGenerator, DatagramTracking, Output, OutputBatch,
-    Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
+    AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, DatagramTracking,
+    Output, OutputBatch, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
+    recv_stream, send_stream, streams::SendOrder,
 };
 
 use crate::{
+    Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, PushId,
+    ReceiveOutput, Res,
     client_events::{Http3ClientEvent, Http3ClientEvents},
     connection::{Http3Connection, Http3State, RequestDescription},
     features::ConnectType,
@@ -35,8 +37,6 @@ use crate::{
     recv_message::{RecvMessage, RecvMessageInfo},
     request_target::RequestTarget,
     settings::HSettings,
-    Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, PushId,
-    ReceiveOutput, Res,
 };
 
 // This is used for filtering send_streams and recv_Streams with a stream_ids greater than or equal
@@ -1293,7 +1293,7 @@ impl Http3Client {
                 self.base_handler
                     .set_state(Http3State::GoingAway(goaway_stream_id));
             }
-            Http3State::GoingAway(ref mut stream_id) => {
+            Http3State::GoingAway(stream_id) => {
                 if goaway_stream_id > *stream_id {
                     return Err(Error::HttpGoaway);
                 }
@@ -1377,17 +1377,16 @@ mod tests {
     use std::time::Duration;
 
     use http::Uri;
-    use neqo_common::{event::Provider as _, qtrace, Datagram, Decoder, Encoder};
+    use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, qtrace};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
-        Version, INITIAL_LOCAL_MAX_STREAM_DATA, MIN_INITIAL_PACKET_SIZE,
+        CloseReason, ConnectionEvent, ConnectionParameters, INITIAL_LOCAL_MAX_STREAM_DATA,
+        MIN_INITIAL_PACKET_SIZE, Output, State, StreamId, StreamType, Version,
     };
     use test_fixture::{
-        anti_replay, default_server_h3, fixture_init, new_server, now,
         CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
-        DEFAULT_SERVER_NAME,
+        DEFAULT_SERVER_NAME, anti_replay, default_server_h3, fixture_init, new_server, now,
     };
 
     use super::{
@@ -1395,10 +1394,10 @@ mod tests {
         Http3Parameters, Http3State, Rc, RefCell,
     };
     use crate::{
+        Http3Server, Priority, PushId, RecvStream as _,
         frames::{HFrame, HFrameType},
         qpack_encoder_receiver::EncoderRecvStream,
-        settings::{HSetting, HSettingType, H3_RESERVED_SETTINGS},
-        Http3Server, Priority, PushId, RecvStream as _,
+        settings::{H3_RESERVED_SETTINGS, HSetting, HSettingType},
     };
 
     fn assert_closed(client: &Http3Client, expected: &Error) {
@@ -2166,9 +2165,11 @@ mod tests {
                     request_stream_id,
                     headers,
                 } => {
-                    assert!(push_promises
-                        .iter()
-                        .any(|p| p.push_id == push_id && p.ref_stream_id == request_stream_id));
+                    assert!(
+                        push_promises
+                            .iter()
+                            .any(|p| p.push_id == push_id && p.ref_stream_id == request_stream_id)
+                    );
                     check_pushpromise_header(&headers[..]);
                     num_push_promises += 1;
                 }
@@ -4358,15 +4359,17 @@ mod tests {
     #[test]
     fn zero_rtt_before_resumption_token() {
         let mut client = default_http3_client();
-        assert!(client
-            .fetch(
-                now(),
-                "GET",
-                ("https", "something.com", "/"),
-                &[],
-                Priority::default()
-            )
-            .is_err());
+        assert!(
+            client
+                .fetch(
+                    now(),
+                    "GET",
+                    ("https", "something.com", "/"),
+                    &[],
+                    Priority::default()
+                )
+                .is_err()
+        );
     }
 
     #[test]
@@ -7457,9 +7460,11 @@ mod tests {
             .unwrap();
 
         // now queue a priority_update packet for that stream
-        assert!(client
-            .priority_update(request_stream_id, Priority::new(6, false))
-            .unwrap());
+        assert!(
+            client
+                .priority_update(request_stream_id, Priority::new(6, false))
+                .unwrap()
+        );
 
         let md_before = server.conn.stats().frame_tx.max_data;
 

@@ -15,12 +15,13 @@ use test_fixture::{
 
 use super::{
     super::{Connection, ConnectionParameters, Output, State},
+    AT_LEAST_PTO, DEFAULT_ADDR, DEFAULT_RTT, DEFAULT_STREAM_DATA, POST_HANDSHAKE_CWND,
     assert_full_cwnd, connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, cwnd,
     default_client, default_server, fill_cwnd, maybe_authenticate, new_client, new_server,
-    send_and_receive, send_something, AT_LEAST_PTO, DEFAULT_ADDR, DEFAULT_RTT, DEFAULT_STREAM_DATA,
-    POST_HANDSHAKE_CWND,
+    send_and_receive, send_something,
 };
 use crate::{
+    CloseReason, Error, Pmtud, Stats, StreamType,
     connection::{test_internal::FrameWriter, tests::cwnd_min},
     frame::FrameType,
     packet,
@@ -30,7 +31,6 @@ use crate::{
     rtt::GRANULARITY,
     tparams::{TransportParameter, TransportParameterId::*},
     tracking::{DEFAULT_LOCAL_ACK_DELAY, DEFAULT_REMOTE_ACK_DELAY},
-    CloseReason, Error, Pmtud, Stats, StreamType,
 };
 
 #[test]

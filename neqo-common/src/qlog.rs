@@ -15,7 +15,7 @@ use std::{
 };
 
 use qlog::{
-    streamer::QlogStreamer, CommonFields, Configuration, TraceSeq, VantagePoint, VantagePointType,
+    CommonFields, Configuration, TraceSeq, VantagePoint, VantagePointType, streamer::QlogStreamer,
 };
 
 use crate::Role;

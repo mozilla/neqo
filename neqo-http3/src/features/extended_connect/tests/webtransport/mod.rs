@@ -12,16 +12,16 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_crypto::AuthenticationStatus;
-use neqo_transport::{recv_stream, send_stream, ConnectionParameters, Pmtud, StreamId, StreamType};
+use neqo_transport::{ConnectionParameters, Pmtud, StreamId, StreamType, recv_stream, send_stream};
 use test_fixture::{
-    anti_replay, fixture_init, now, CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3,
-    DEFAULT_KEYS, DEFAULT_SERVER_NAME,
+    CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
+    DEFAULT_SERVER_NAME, anti_replay, fixture_init, now,
 };
 
 use crate::{
-    features::extended_connect::CloseReason, Error, Header, Http3Client, Http3ClientEvent,
-    Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
-    SessionAcceptAction, WebTransportEvent, WebTransportRequest, WebTransportServerEvent,
+    Error, Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters,
+    Http3Server, Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent,
+    WebTransportRequest, WebTransportServerEvent, features::extended_connect::CloseReason,
 };
 
 // Leave space for large QUIC header.

@@ -8,10 +8,10 @@ use neqo_common::Encoder;
 use neqo_transport::{ConnectionParameters, Error as TransportError};
 
 use crate::{
-    features::extended_connect::tests::webtransport::{
-        wt_default_parameters, WtTest, DATAGRAM_SIZE,
-    },
     Error, Http3Parameters, WebTransportRequest,
+    features::extended_connect::tests::webtransport::{
+        DATAGRAM_SIZE, WtTest, wt_default_parameters,
+    },
 };
 
 const DGRAM: &[u8] = &[0, 100];

@@ -7,7 +7,7 @@
 use neqo_common::{Decoder, Encoder};
 
 use super::hframe::HFrameType;
-use crate::{frames::reader::FrameDecoder, Error, Res};
+use crate::{Error, Res, frames::reader::FrameDecoder};
 
 pub type WebTransportFrameType = u64;
 

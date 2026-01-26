@@ -11,7 +11,7 @@
 
 use std::{hint::black_box, time::Instant};
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use neqo_transport::{
     packet,
     recovery::{self, sent},

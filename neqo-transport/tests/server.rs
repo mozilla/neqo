@@ -9,20 +9,21 @@ mod common;
 use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
 
 use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
-use neqo_common::{qtrace, Datagram, Decoder, Encoder, Role};
+use neqo_common::{Datagram, Decoder, Encoder, Role, qtrace};
 use neqo_crypto::{
-    generate_ech_keys, AeadTrait as _, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult,
-    ZeroRttChecker,
+    AeadTrait as _, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
+    generate_ech_keys,
 };
 use neqo_transport::{
+    CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Output, State,
+    StreamType, Version,
     server::{ConnectionRef, Server, ValidateAddress},
-    version, CloseReason, Connection, ConnectionParameters, Error, Output, State, StreamType,
-    Version, MIN_INITIAL_PACKET_SIZE,
+    version,
 };
 use test_fixture::{
-    assertions, datagram, default_client,
+    CountingConnectionIdGenerator, assertions, datagram, default_client,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
-    new_client, now, split_datagram, CountingConnectionIdGenerator,
+    new_client, now, split_datagram,
 };
 
 /// Take a pair of connections in any state and complete the handshake.
@@ -886,12 +887,14 @@ fn ech() {
     assert!(client.tls_info().unwrap().ech_accepted());
     assert!(server_instance.borrow().tls_info().unwrap().ech_accepted());
     assert!(client.tls_preinfo().unwrap().ech_accepted().unwrap());
-    assert!(server_instance
-        .borrow()
-        .tls_preinfo()
-        .unwrap()
-        .ech_accepted()
-        .unwrap());
+    assert!(
+        server_instance
+            .borrow()
+            .tls_preinfo()
+            .unwrap()
+            .ech_accepted()
+            .unwrap()
+    );
 }
 
 #[test]

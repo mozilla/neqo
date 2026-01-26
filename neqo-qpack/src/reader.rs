@@ -9,7 +9,7 @@ use std::{mem, str};
 use neqo_common::{qdebug, qerror};
 use neqo_transport::{Connection, StreamId};
 
-use crate::{huffman, prefix::Prefix, Error, Res};
+use crate::{Error, Res, huffman, prefix::Prefix};
 
 pub trait ReadByte {
     /// # Errors
@@ -402,8 +402,8 @@ mod tests {
     use test_receiver::TestReceiver;
 
     use super::{
-        huffman, test_receiver, Error, IntReader, LiteralReader, ReadByte as _,
-        ReceiverBufferWrapper, Res,
+        Error, IntReader, LiteralReader, ReadByte as _, ReceiverBufferWrapper, Res, huffman,
+        test_receiver,
     };
     use crate::{prefix::Prefix, qpack_send_buf::Encoder as _};
 

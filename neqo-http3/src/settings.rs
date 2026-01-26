@@ -6,7 +6,7 @@
 
 use std::ops::Deref;
 
-use neqo_common::{qdebug, Buffer, Decoder, Encoder};
+use neqo_common::{Buffer, Decoder, Encoder, qdebug};
 use neqo_crypto::{ZeroRttCheckResult, ZeroRttChecker};
 
 use crate::{Error, Http3Parameters, Res};
