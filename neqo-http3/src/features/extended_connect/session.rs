@@ -13,10 +13,12 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qdebug, qtrace, Bytes, Encoder, Header, MessageType, Role};
+use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace};
 use neqo_transport::{AppError, Connection, DatagramTracking, StreamId};
 
 use crate::{
+    CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
+    SendStream, Stream,
     features::extended_connect::{
         ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
     },
@@ -24,8 +26,6 @@ use crate::{
     priority::PriorityHandler,
     recv_message::{RecvMessage, RecvMessageInfo},
     send_message::SendMessage,
-    CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
-    SendStream, Stream,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]

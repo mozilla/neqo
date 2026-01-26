@@ -8,7 +8,7 @@
 
 use std::{cmp::max, time::Duration};
 
-use neqo_common::{qtrace, Buffer};
+use neqo_common::{Buffer, qtrace};
 
 use crate::{
     connection::params::ConnectionParameters,

@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qinfo, qtrace, Datagram, Dscp, Ecn, Tos};
+use neqo_common::{Datagram, Dscp, Ecn, Tos, qinfo, qtrace};
 use neqo_transport::Output;
 
 use super::Node;
@@ -355,9 +355,9 @@ mod test {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{qinfo, Encoder};
+    use neqo_common::{Encoder, qinfo};
 
-    use crate::sim::{network::TailDrop, rng::Random, Node as _};
+    use crate::sim::{Node as _, network::TailDrop, rng::Random};
 
     fn mark_rate(used: usize, capacity: usize, trials: usize, salt: u64) -> usize {
         let mut enc = Encoder::default();

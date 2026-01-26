@@ -13,7 +13,7 @@ use std::{
 use neqo_common::qtrace;
 
 use crate::{
-    err::{ssl::SSL_ERROR_ECH_RETRY_WITH_ECH, Error, Res},
+    err::{Error, Res, ssl::SSL_ERROR_ECH_RETRY_WITH_ECH},
     experimental_api, null_safe_slice,
     p11::{
         self, Item, PrivateKey, PublicKey, SECITEM_FreeItem, SECItem, SECKEYPrivateKey,

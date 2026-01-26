@@ -173,8 +173,8 @@ use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;
 use neqo_qpack::Error as QpackError;
-use neqo_transport::{recv_stream, send_stream, AppError, Connection, Error as TransportError};
-pub use neqo_transport::{streams::SendOrder, Output, StreamId};
+use neqo_transport::{AppError, Connection, Error as TransportError, recv_stream, send_stream};
+pub use neqo_transport::{Output, StreamId, streams::SendOrder};
 pub use priority::Priority;
 pub use push_id::PushId;
 pub use server::Http3Server;
@@ -706,10 +706,10 @@ mod tests {
 
     #[test]
     fn error_mapping() {
-        use neqo_transport::Error as Te;
         use Error::{
             InvalidInput, StreamLimit, Transport, TransportStreamDoesNotExist, Unavailable,
         };
+        use neqo_transport::Error as Te;
 
         assert!(matches!(
             Error::map_stream_send_errors(&Transport(Te::InvalidStreamId)),

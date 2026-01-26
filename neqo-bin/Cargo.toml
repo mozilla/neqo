@@ -75,6 +75,7 @@ bench = false
 [[package.metadata.bench]]
 name = "main"
 codspeed.mode = "walltime" # Use "walltime" mode for "main" bench with codspeed.
+codspeed.memory = false # FIXME: Disabled due to high variance in results.
 
 [[bench]]
 name = "main"

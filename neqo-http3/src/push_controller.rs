@@ -13,14 +13,14 @@ use std::{
     slice::SliceIndex,
 };
 
-use neqo_common::{qerror, qinfo, qtrace, Header};
+use neqo_common::{Header, qerror, qinfo, qtrace};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
+    CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, PushId, RecvStreamEvents, Res,
     client_events::{Http3ClientEvent, Http3ClientEvents},
     connection::Http3Connection,
     frames::HFrame,
-    CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, PushId, RecvStreamEvents, Res,
 };
 
 /// `PushStates`:

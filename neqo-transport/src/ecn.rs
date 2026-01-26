@@ -7,9 +7,9 @@
 use std::ops::{AddAssign, Deref, DerefMut, Sub};
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{qdebug, qinfo, Ecn};
+use neqo_common::{Ecn, qdebug, qinfo};
 
-use crate::{packet, recovery::sent, Stats};
+use crate::{Stats, packet, recovery::sent};
 
 /// The number of packets to use for testing a path for ECN capability.
 pub(crate) const TEST_COUNT: usize = 10;

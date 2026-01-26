@@ -7,10 +7,11 @@ use libfuzzer_sys::fuzz_target;
 fuzz_target!(|data: &[u8]| {
     use neqo_common::{Datagram, Encoder, Role};
     use neqo_crypto::AeadTrait as _;
-    use neqo_transport::{packet::MIN_INITIAL_PACKET_SIZE, ConnectionParameters, Version};
+    use neqo_transport::{ConnectionParameters, Version, packet::MIN_INITIAL_PACKET_SIZE};
     use test_fixture::{
+        CountingConnectionIdGenerator, DEFAULT_ALPN,
         header_protection::{self, decode_initial_header, initial_aead_and_hp},
-        new_client, new_server, now, CountingConnectionIdGenerator, DEFAULT_ALPN,
+        new_client, new_server, now,
     };
 
     let mut client =

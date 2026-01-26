@@ -12,13 +12,13 @@ use std::{
 use neqo_common::{qdebug, qtrace};
 
 use crate::{
+    Res,
     prefix::{
         ENCODER_CAPACITY, ENCODER_DUPLICATE, ENCODER_INSERT_WITH_NAME_LITERAL,
         ENCODER_INSERT_WITH_NAME_REF_DYNAMIC, ENCODER_INSERT_WITH_NAME_REF_STATIC, NO_PREFIX,
     },
     qpack_send_buf::Encoder,
     reader::{IntReader, LiteralReader, ReadByte, Reader},
-    Res,
 };
 
 // The encoder only uses InsertWithNameLiteral.
@@ -312,7 +312,7 @@ impl EncoderInstructionReader {
 mod test {
 
     use super::{EncoderInstruction, EncoderInstructionReader};
-    use crate::{reader::test_receiver::TestReceiver, Error};
+    use crate::{Error, reader::test_receiver::TestReceiver};
 
     fn test_encoding_decoding(instruction: &EncoderInstruction, use_huffman: bool) {
         let mut buf = neqo_common::Encoder::default();

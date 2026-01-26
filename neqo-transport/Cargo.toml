@@ -59,6 +59,7 @@ bench = false
 [[package.metadata.bench]]
 name = "transfer_walltime"
 codspeed.mode = "walltime"
+codspeed.memory = false # FIXME: Disabled due to high variance in results.
 
 [[package.metadata.bench]]
 name = "transfer_simulated"

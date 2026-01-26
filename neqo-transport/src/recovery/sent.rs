@@ -281,7 +281,7 @@ impl Packets {
     }
 
     /// Empty out the packets, but keep the offset.
-    pub fn drain_all(&mut self) -> impl Iterator<Item = Packet> {
+    pub fn drain_all(&mut self) -> impl Iterator<Item = Packet> + use<> {
         std::mem::take(&mut self.packets).into_values()
     }
 

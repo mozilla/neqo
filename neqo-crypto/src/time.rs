@@ -184,7 +184,7 @@ pub struct TimeHolder {
 impl TimeHolder {
     const unsafe extern "C" fn time_func(arg: *mut c_void) -> PRTime {
         let p = arg as *const PRTime;
-        *p.as_ref().unwrap()
+        unsafe { *p.as_ref().unwrap() }
     }
 
     pub fn bind(&mut self, fd: *mut PRFileDesc) -> Res<()> {
@@ -208,7 +208,7 @@ impl Default for TimeHolder {
 mod test {
     use std::time::{Duration, Instant};
 
-    use super::{get_base, init, Interval, PRTime, Time, TimeZero};
+    use super::{Interval, PRTime, Time, TimeZero, get_base, init};
     use crate::err::Res;
 
     #[test]

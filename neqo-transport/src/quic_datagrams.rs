@@ -8,12 +8,13 @@
 
 use std::{cmp::min, collections::VecDeque};
 
-use neqo_common::{qdebug, Buffer, Encoder};
+use neqo_common::{Buffer, Encoder, qdebug};
 
 use crate::{
+    ConnectionEvents, Error, Res, Stats,
     events::OutgoingDatagramOutcome,
     frame::{FrameEncoder as _, FrameType},
-    packet, recovery, ConnectionEvents, Error, Res, Stats,
+    packet, recovery,
 };
 
 /// Length of a [`FrameType::Datagram`] or [`FrameType::DatagramWithLen`] in

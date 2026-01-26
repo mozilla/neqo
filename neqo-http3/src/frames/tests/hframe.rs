@@ -10,9 +10,9 @@ use test_fixture::fixture_init;
 
 use super::enc_dec_hframe;
 use crate::{
+    Priority, PushId,
     frames::HFrame,
     settings::{HSetting, HSettingType, HSettings},
-    Priority, PushId,
 };
 
 #[test]

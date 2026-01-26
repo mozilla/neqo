@@ -17,8 +17,8 @@ use neqo_http3::{
 };
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use test_fixture::{
-    anti_replay, exchange_packets, fixture_init, now, CountingConnectionIdGenerator, DEFAULT_ADDR,
-    DEFAULT_ALPN_H3, DEFAULT_KEYS, DEFAULT_SERVER_NAME,
+    CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
+    DEFAULT_SERVER_NAME, anti_replay, exchange_packets, fixture_init, now,
 };
 
 fn connect() -> (Http3Client, Http3Server) {

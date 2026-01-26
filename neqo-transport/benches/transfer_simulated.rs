@@ -15,7 +15,7 @@
 
 use std::time::Duration;
 
-use criterion::{criterion_group, criterion_main, Throughput};
+use criterion::{Throughput, criterion_group, criterion_main};
 
 #[path = "transfer_common.rs"]
 mod common;

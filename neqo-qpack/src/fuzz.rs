@@ -27,8 +27,8 @@ mod write_corpus {
 /// Helpers to support fuzzing.
 mod fuzzing {
     use crate::{
-        reader::{ReadByte, Reader},
         Decoder, Error, Res,
+        reader::{ReadByte, Reader},
     };
 
     /// Buffer wrapper that implements `ReadByte` and `Reader` for a byte slice.

@@ -17,35 +17,36 @@ use std::{
     time::Duration,
 };
 
-use neqo_common::{event::Provider as _, qdebug, Datagram};
+use neqo_common::{Datagram, event::Provider as _, qdebug};
 use neqo_crypto::{
-    constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus,
+    AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys,
 };
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
 use test_fixture::{
+    DEFAULT_ADDR,
     assertions::{assert_coalesced_0rtt, assert_handshake, assert_initial, assert_version},
-    damage_ech_config, fixture_init, now, split_datagram, strip_padding, DEFAULT_ADDR,
+    damage_ech_config, fixture_init, now, split_datagram, strip_padding,
 };
 
 use super::{
     super::{Connection, Output, State},
-    assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
-    get_tokens, handshake, maybe_authenticate, resumed_server, send_something, zero_len_cid_client,
-    CountingConnectionIdGenerator, AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
+    AT_LEAST_PTO, CountingConnectionIdGenerator, DEFAULT_RTT, DEFAULT_STREAM_DATA, assert_error,
+    connect, connect_force_idle, connect_with_rtt, default_client, default_server, get_tokens,
+    handshake, maybe_authenticate, resumed_server, send_something, zero_len_cid_client,
 };
 use crate::{
+    CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
+    Version,
     connection::{
-        tests::{exchange_ticket, new_client, new_server},
         AddressValidation,
+        tests::{exchange_ticket, new_client, new_server},
     },
     events::ConnectionEvent,
     server::ValidateAddress,
     stats::FrameStats,
     tparams::{TransportParameter, TransportParameterId::*},
     tracking::DEFAULT_LOCAL_ACK_DELAY,
-    CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
-    Version,
 };
 
 const ECH_CONFIG_ID: u8 = 7;
@@ -770,7 +771,7 @@ fn corrupted_initial() {
         .iter()
         .enumerate()
         .rev()
-        .find(|(_, &v)| v != 0)
+        .find(|&(_, &v)| v != 0)
         .unwrap();
     corrupted[idx] ^= 0x76;
     let dgram = Datagram::new(d.source(), d.destination(), d.tos(), corrupted);

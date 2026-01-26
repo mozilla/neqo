@@ -13,8 +13,8 @@ use neqo_common::qdebug;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
-    frames::{FrameReader, HFrame, StreamReaderConnectionWrapper},
     CloseType, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream,
+    frames::{FrameReader, HFrame, StreamReaderConnectionWrapper},
 };
 
 /// The remote control stream is responsible only for reading frames. The frames are handled by

@@ -10,9 +10,10 @@ use std::{
     ops::{Deref, Div as _},
 };
 
-use neqo_common::{qtrace, Header};
+use neqo_common::{Header, qtrace};
 
 use crate::{
+    Error, Res,
     prefix::{
         BASE_PREFIX_NEGATIVE, BASE_PREFIX_POSITIVE, HEADER_FIELD_INDEX_DYNAMIC,
         HEADER_FIELD_INDEX_DYNAMIC_POST, HEADER_FIELD_INDEX_STATIC,
@@ -21,9 +22,8 @@ use crate::{
         NO_PREFIX,
     },
     qpack_send_buf::Encoder as _,
-    reader::{parse_utf8, ReceiverBufferWrapper},
+    reader::{ReceiverBufferWrapper, parse_utf8},
     table::HeaderTable,
-    Error, Res,
 };
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -81,7 +81,9 @@ impl HeaderEncoder {
     }
 
     pub fn encode_literal_with_name_ref(&mut self, is_static: bool, index: u64, value: &[u8]) {
-        qtrace!("[{self}] encode literal with name ref - index={index}, static={is_static}, value={value:x?}");
+        qtrace!(
+            "[{self}] encode literal with name ref - index={index}, static={is_static}, value={value:x?}"
+        );
         if is_static {
             self.buf
                 .encode_prefixed_encoded_int(HEADER_FIELD_LITERAL_NAME_REF_STATIC, index);

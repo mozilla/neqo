@@ -11,9 +11,9 @@ use neqo_transport::{ConnectionParameters, State};
 use test_fixture::{
     boxed,
     sim::{
+        ReadySimulator, Simulator,
         connection::{Node, ReachState, ReceiveData, SendData},
         network::{Delay, TailDrop},
-        ReadySimulator, Simulator,
     },
 };
 

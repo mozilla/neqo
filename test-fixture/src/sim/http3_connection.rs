@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider as _, qdebug, qinfo, qtrace, Datagram};
+use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent,
@@ -438,9 +438,9 @@ mod tests {
     use crate::{
         boxed,
         sim::{
+            Simulator,
             http3_connection::{Node, Requests, Responses},
             network::TailDrop,
-            Simulator,
         },
     };
 

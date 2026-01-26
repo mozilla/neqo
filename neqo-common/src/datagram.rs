@@ -11,7 +11,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{hex_with_len, Bytes, Tos};
+use crate::{Bytes, Tos, hex_with_len};
 
 /// A UDP datagram.
 ///
@@ -276,9 +276,9 @@ mod tests {
         num::NonZeroUsize,
     };
 
-    use test_fixture::{datagram, DEFAULT_ADDR};
+    use test_fixture::{DEFAULT_ADDR, datagram};
 
-    use crate::{datagram, Datagram, Ecn, Tos};
+    use crate::{Datagram, Ecn, Tos, datagram};
 
     #[test]
     fn fmt_datagram() {

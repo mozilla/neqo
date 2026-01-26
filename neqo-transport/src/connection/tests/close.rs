@@ -13,9 +13,9 @@ use super::{
     connect, connect_force_idle, default_client, default_server, send_something,
 };
 use crate::{
+    AppError, CloseReason, ERROR_APPLICATION_CLOSE, Error,
     stateless_reset::Token as Srt,
     tparams::{TransportParameter, TransportParameterId::StatelessResetToken},
-    AppError, CloseReason, Error, ERROR_APPLICATION_CLOSE,
 };
 
 fn assert_draining(c: &Connection, expected: &Error) {

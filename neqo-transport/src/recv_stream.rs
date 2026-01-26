@@ -17,11 +17,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qtrace, Buffer, Role};
+use neqo_common::{Buffer, Role, qtrace};
 use smallvec::SmallVec;
 use strum::Display;
 
 use crate::{
+    AppError, Error, Res,
     events::ConnectionEvents,
     fc::ReceiverFlowControl,
     frame::FrameType,
@@ -30,7 +31,6 @@ use crate::{
     send_stream::SendStreams,
     stats::FrameStats,
     stream_id::StreamId,
-    AppError, Error, Res,
 };
 
 #[derive(Debug, Default)]
@@ -984,15 +984,15 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{qtrace, Encoder};
+    use neqo_common::{Encoder, qtrace};
 
     use super::RecvStream;
     use crate::{
+        ConnectionEvents, Error, INITIAL_LOCAL_MAX_STREAM_DATA, StreamId,
         fc::{ReceiverFlowControl, WINDOW_UPDATE_FRACTION},
         packet, recovery,
         recv_stream::RxStreamOrderer,
         stats::FrameStats,
-        ConnectionEvents, Error, StreamId, INITIAL_LOCAL_MAX_STREAM_DATA,
     };
 
     const SESSION_WINDOW: usize = 1024;

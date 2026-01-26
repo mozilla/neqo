@@ -14,14 +14,14 @@ use std::{
 
 use crate::{
     constants::{
-        Cipher, Version, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
-        TLS_CHACHA20_POLY1305_SHA256,
+        Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
+        Version,
     },
-    err::{secstatus_to_res, Error, Res},
+    err::{Error, Res, secstatus_to_res},
     p11::{
-        Context, Item, PK11SymKey, PK11_CipherOp, PK11_CreateContextBySymKey, PK11_Encrypt,
-        PK11_GetBlockSize, SymKey, CKA_ENCRYPT, CKM_AES_ECB, CKM_CHACHA20, CK_ATTRIBUTE_TYPE,
-        CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE,
+        CK_ATTRIBUTE_TYPE, CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE, CKA_ENCRYPT, CKM_AES_ECB,
+        CKM_CHACHA20, Context, Item, PK11_CipherOp, PK11_CreateContextBySymKey, PK11_Encrypt,
+        PK11_GetBlockSize, PK11SymKey, SymKey,
     },
 };
 

@@ -13,10 +13,10 @@ use neqo_common::{qdebug, qtrace};
 use neqo_transport::StreamId;
 
 use crate::{
+    Res,
     prefix::{DECODER_HEADER_ACK, DECODER_INSERT_COUNT_INCREMENT, DECODER_STREAM_CANCELLATION},
     qpack_send_buf::Encoder,
     reader::{IntReader, ReadByte},
-    Res,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -151,7 +151,7 @@ mod test {
     use neqo_transport::StreamId;
 
     use super::{DecoderInstruction, DecoderInstructionReader};
-    use crate::{reader::test_receiver::TestReceiver, Error};
+    use crate::{Error, reader::test_receiver::TestReceiver};
 
     fn test_encoding_decoding(instruction: DecoderInstruction) {
         let mut buf = Encoder::default();

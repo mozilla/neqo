@@ -6,7 +6,7 @@
 
 use std::{mem, time::Instant};
 
-use neqo_common::{qdebug, qinfo, Datagram};
+use neqo_common::{Datagram, qdebug, qinfo};
 
 use crate::crypto::Epoch;
 
