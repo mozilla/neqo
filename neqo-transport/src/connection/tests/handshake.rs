@@ -1698,9 +1698,10 @@ fn initial_crypto_retransmit_during_handshake_pto() {
     assert_initial(&c_init_1, false);
     assert_initial(&c_init_2, false);
 
-    // Record the initial CRYPTO frame count.
+    // Record the initial CRYPTO frame count. With default settings (MLKEM + SNI slicing),
+    // the ClientHello is split: 2 CRYPTO frames in the first packet, 1 in the second.
     let crypto_before = client.stats().frame_tx.crypto;
-    assert!(crypto_before >= 2, "Client should have sent CRYPTO frames");
+    assert_eq!(crypto_before, 3);
 
     // Deliver only the FIRST Initial packet to server. The second is "lost".
     now += DEFAULT_RTT / 2;
