@@ -10,11 +10,11 @@ use neqo_common::{event::Provider as _, qdebug};
 use test_fixture::now;
 
 use super::{
-    super::State, assert_error, connect, connect_force_idle, default_client, default_server,
-    maybe_authenticate, new_client, new_server, send_something, send_with_extra,
-    DEFAULT_STREAM_DATA,
+    super::State, DEFAULT_STREAM_DATA, assert_error, connect, connect_force_idle, default_client,
+    default_server, maybe_authenticate, new_client, new_server, send_something, send_with_extra,
 };
 use crate::{
+    CloseReason, Connection, ConnectionParameters, Error, StreamId, StreamType,
     connection::params::INITIAL_LOCAL_MAX_STREAM_DATA,
     events::ConnectionEvent,
     frame::FrameType,
@@ -22,7 +22,6 @@ use crate::{
     send_stream::{self, OrderGroup},
     streams::{SendOrder, StreamOrder},
     tparams::{TransportParameter, TransportParameterId::*},
-    CloseReason, Connection, ConnectionParameters, Error, StreamId, StreamType,
 };
 
 #[test]

@@ -13,10 +13,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{datagram, hex, qdebug, qinfo, qlog::Qlog, qtrace, qwarn, Buffer, Encoder, Tos};
+use neqo_common::{Buffer, Encoder, Tos, datagram, hex, qdebug, qinfo, qlog::Qlog, qtrace, qwarn};
 use neqo_crypto::random;
 
 use crate::{
+    ConnectionParameters, Stats,
     ackrate::{AckRate, PeerAckDelay},
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn,
@@ -28,7 +29,6 @@ use crate::{
     sender::PacketSender,
     stateless_reset::Token as Srt,
     stats::FrameStats,
-    ConnectionParameters, Stats,
 };
 
 /// The maximum number of paths that `Paths` will track.

@@ -10,9 +10,9 @@ use neqo_transport::{CloseReason, ConnectionParameters, Error, State};
 use test_fixture::{
     boxed,
     sim::{
+        Simulator,
         connection::{Node, ReachState, ReceiveData, SendData},
         network::{Drop, RandomDelay, TailDrop},
-        Simulator,
     },
     simulate,
 };

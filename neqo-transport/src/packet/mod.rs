@@ -14,16 +14,16 @@ use std::{
 };
 
 use enum_map::Enum;
-use neqo_common::{hex, hex_with_len, qtrace, qwarn, Buffer, Decoder, Encoder};
-use neqo_crypto::{random, AeadTrait as _};
+use neqo_common::{Buffer, Decoder, Encoder, hex, hex_with_len, qtrace, qwarn};
+use neqo_crypto::{AeadTrait as _, random};
 use strum::{EnumIter, FromRepr};
 
 use crate::{
+    Error, Res,
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef},
     crypto::{CryptoDxState, CryptoStates, Epoch},
     frame::{FrameEncoder as _, FrameType},
     version::{self, Version},
-    Error, Res,
 };
 
 /// `MIN_INITIAL_PACKET_SIZE` is the smallest packet that can be used to establish
@@ -1069,9 +1069,9 @@ mod tests {
     use test_fixture::{fixture_init, now};
 
     use crate::{
+        ConnectionId, EmptyConnectionIdGenerator, Error, RandomConnectionIdGenerator, Version,
         crypto::{CryptoDxState, CryptoStates},
         packet::{self, Builder, Public, Type},
-        ConnectionId, EmptyConnectionIdGenerator, Error, RandomConnectionIdGenerator, Version,
     };
 
     const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
@@ -1250,20 +1250,24 @@ mod tests {
         .unwrap();
         assert_eq!(packet.packet_type(), Type::Short);
         assert!(remainder.is_empty());
-        assert!(packet
-            .decrypt(&mut CryptoStates::test_default(), now())
-            .is_err());
+        assert!(
+            packet
+                .decrypt(&mut CryptoStates::test_default(), now())
+                .is_err()
+        );
     }
 
     /// Saying that the connection ID is longer causes the initial decode to fail.
     #[test]
     fn decode_short_long_cid() {
         let mut sample_short = SAMPLE_SHORT.to_vec();
-        assert!(Public::decode(
-            &mut sample_short,
-            &RandomConnectionIdGenerator::new(SERVER_CID.len() + 1)
-        )
-        .is_err());
+        assert!(
+            Public::decode(
+                &mut sample_short,
+                &RandomConnectionIdGenerator::new(SERVER_CID.len() + 1)
+            )
+            .is_err()
+        );
     }
 
     #[test]

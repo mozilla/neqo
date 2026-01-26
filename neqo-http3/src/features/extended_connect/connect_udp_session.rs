@@ -13,12 +13,12 @@ use neqo_common::{Bytes, Decoder, Encoder};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
+    Error, RecvStream, Res,
     features::extended_connect::{
-        session::{DgramContextIdError, State},
         CloseReason, ExtendedConnectEvents, ExtendedConnectType, Protocol,
+        session::{DgramContextIdError, State},
     },
     frames::{ConnectUdpFrame, FrameReader, StreamReaderRecvStreamWrapper},
-    Error, RecvStream, Res,
 };
 
 #[derive(Debug)]

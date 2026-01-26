@@ -11,7 +11,7 @@
 
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use neqo_transport::send_stream::RangeTracker;
 
 const CHUNK: u64 = 1000;

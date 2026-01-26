@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider as _, qdebug, qinfo, qtrace, Datagram};
+use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator, Output, State,
@@ -35,7 +35,7 @@ pub trait Goal: Debug {
     /// Handle an event from the provided connection, returning `true` when the
     /// goal is achieved.
     fn handle_event(&mut self, c: &mut Connection, e: &ConnectionEvent, now: Instant)
-        -> GoalStatus;
+    -> GoalStatus;
 }
 
 pub struct Node {

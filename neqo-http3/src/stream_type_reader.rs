@@ -6,14 +6,14 @@
 
 use std::{cmp::min, time::Instant};
 
-use neqo_common::{qtrace, Decoder, IncrementalDecoderUint, Role};
+use neqo_common::{Decoder, IncrementalDecoderUint, Role, qtrace};
 use neqo_qpack::{decoder::QPACK_UNI_STREAM_TYPE_DECODER, encoder::QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::{Connection, StreamId, StreamType};
 
 use crate::{
-    control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL,
-    frames::{hframe::HFrameType, reader::FrameDecoder, HFrame},
     CloseType, Error, Http3StreamType, PushId, ReceiveOutput, RecvStream, Res, Stream,
+    control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL,
+    frames::{HFrame, hframe::HFrameType, reader::FrameDecoder},
 };
 
 pub const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
@@ -250,12 +250,12 @@ mod tests {
     use test_fixture::{connect, now};
 
     use super::{
-        NewStreamHeadReader, HTTP3_UNI_STREAM_TYPE_PUSH, WEBTRANSPORT_STREAM,
+        HTTP3_UNI_STREAM_TYPE_PUSH, NewStreamHeadReader, WEBTRANSPORT_STREAM,
         WEBTRANSPORT_UNI_STREAM,
     };
     use crate::{
-        control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL, frames::HFrameType, CloseType, Error,
-        NewStreamType, PushId, ReceiveOutput, RecvStream as _, Res,
+        CloseType, Error, NewStreamType, PushId, ReceiveOutput, RecvStream as _, Res,
+        control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL, frames::HFrameType,
     };
 
     struct Test {

@@ -21,16 +21,17 @@ use std::{
 };
 
 use neqo_common::{
+    Datagram, Decoder, Ecn, Role,
     event::Provider as _,
     hex,
-    qlog::{new_trace, Qlog},
-    qtrace, Datagram, Decoder, Ecn, Role,
+    qlog::{Qlog, new_trace},
+    qtrace,
 };
-use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
+use neqo_crypto::{AllowZeroRtt, AntiReplay, AuthenticationStatus, init_db, random};
 use neqo_http3::{Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State};
 use neqo_transport::{
-    version, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
-    ConnectionIdRef, ConnectionParameters, State, Version,
+    Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
+    ConnectionIdRef, ConnectionParameters, State, Version, version,
 };
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 

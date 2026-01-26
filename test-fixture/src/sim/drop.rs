@@ -11,7 +11,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qtrace, Datagram};
+use neqo_common::{Datagram, qtrace};
 use neqo_transport::Output;
 
 use super::{Node, Rng};

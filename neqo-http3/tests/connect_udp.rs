@@ -7,7 +7,7 @@
 #![cfg(test)]
 
 use http::Uri;
-use neqo_common::{event::Provider as _, header::HeadersExt as _, qinfo, Datagram, Tos};
+use neqo_common::{Datagram, Tos, event::Provider as _, header::HeadersExt as _, qinfo};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     ConnectUdpEvent, ConnectUdpRequest, ConnectUdpServerEvent, Error, Http3Client,
@@ -16,8 +16,8 @@ use neqo_http3::{
 };
 use neqo_transport::ConnectionParameters;
 use test_fixture::{
-    default_http3_client, default_http3_server, exchange_packets, fixture_init,
-    http3_client_with_params, http3_server_with_params, now, DEFAULT_ADDR,
+    DEFAULT_ADDR, default_http3_client, default_http3_server, exchange_packets, fixture_init,
+    http3_client_with_params, http3_server_with_params, now,
 };
 
 const PING: &[u8] = b"ping";

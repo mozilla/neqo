@@ -14,12 +14,14 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{event::Provider as _, qdebug, qtrace, Datagram, Decoder, Role};
-use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
-use test_fixture::{fixture_init, new_neqo_qlog, now, DEFAULT_ADDR};
+use neqo_common::{Datagram, Decoder, Role, event::Provider as _, qdebug, qtrace};
+use neqo_crypto::{AllowZeroRtt, AuthenticationStatus, ResumptionToken, random};
+use test_fixture::{DEFAULT_ADDR, fixture_init, new_neqo_qlog, now};
 
-use super::{test_internal, CloseReason, Connection, ConnectionId, Output, State};
+use super::{CloseReason, Connection, ConnectionId, Output, State, test_internal};
 use crate::{
+    ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, EmptyConnectionIdGenerator,
+    Error, MIN_INITIAL_PACKET_SIZE, StreamId, StreamType, Version,
     addr_valid::{AddressValidation, ValidateAddress},
     cc::CWND_INITIAL_PKTS,
     cid::ConnectionIdRef,
@@ -30,8 +32,6 @@ use crate::{
     recovery::ACK_ONLY_SIZE_LIMIT,
     stats::{FrameStats, Stats},
     tparams::TransportParameterId::*,
-    ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, EmptyConnectionIdGenerator,
-    Error, StreamId, StreamType, Version, MIN_INITIAL_PACKET_SIZE,
 };
 
 // All the tests.

@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use neqo_common::{event::Provider as _, Datagram};
+use neqo_common::{Datagram, event::Provider as _};
 use test_fixture::now;
 
 use super::{
@@ -14,9 +14,9 @@ use super::{
     connect, default_client, default_server, fill_cwnd, maybe_authenticate,
 };
 use crate::{
+    ConnectionEvent, StreamId, StreamType,
     addr_valid::{AddressValidation, ValidateAddress},
     send_stream::{RetransmissionPriority, TransmissionPriority},
-    ConnectionEvent, StreamId, StreamType,
 };
 
 const BLOCK_SIZE: usize = 4_096;
