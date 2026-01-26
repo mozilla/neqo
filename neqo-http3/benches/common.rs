@@ -12,12 +12,11 @@ use test_fixture::{
     sim::{
         ReadySimulator, Simulator,
         http3_connection::{Node, Requests, Responses},
-        network::{RandomDelay, TailDrop},
+        network::{Delay, TailDrop},
     },
 };
 
-const ZERO: Duration = Duration::from_millis(0);
-const JITTER: Duration = Duration::from_millis(10);
+const RTT: Duration = Duration::from_millis(10);
 
 /// Benchmark parameters: `(streams, data_size)`.
 const BENCHMARK_PARAMS: [(usize, usize); 3] = [(1, 1_000), (1_000, 1), (1_000, 1_000)];
@@ -27,10 +26,10 @@ pub fn setup(streams: usize, data_size: usize) -> ReadySimulator {
     let nodes = boxed![
         Node::default_client(boxed![Requests::new(streams, data_size)]),
         TailDrop::dsl_uplink(),
-        RandomDelay::new(ZERO..JITTER),
+        Delay::new(RTT),
         Node::default_server(boxed![Responses::new(streams, data_size)]),
         TailDrop::dsl_uplink(),
-        RandomDelay::new(ZERO..JITTER),
+        Delay::new(RTT),
     ];
     Simulator::new("", nodes).setup()
 }
