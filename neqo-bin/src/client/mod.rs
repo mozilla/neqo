@@ -495,10 +495,7 @@ impl<'a, H: Handler> Runner<'a, H> {
     }
 
     async fn process_multiple_input(&mut self) -> Res<()> {
-        loop {
-            let Some(dgrams) = self.socket.recv(self.local_addr, &mut self.recv_buf)? else {
-                break;
-            };
+        while let Some(dgrams) = self.socket.recv(self.local_addr, &mut self.recv_buf)? {
             self.client.process_multiple_input(dgrams, Instant::now());
             self.process_output().await?;
         }
