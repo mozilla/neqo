@@ -49,8 +49,9 @@ jobs:
       - env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHA: ${{ github.sha }}
-          # Monthly schedule or manual trigger with monthly-only=true
-          MONTHLY_ONLY: ${{ github.event.schedule == '0 0 1 * *' || inputs.monthly-only }}
+          # Empty = all fuzzers, "true" = monthly only, "false" = weekly only
+          # Monthly schedule runs all; weekly schedule runs weekly only; manual respects input
+          MONTHLY_ONLY: ${{ github.event_name == 'workflow_dispatch' && (inputs.monthly-only && 'true' || 'false') || (github.event.schedule == '0 0 * * 0' && 'false' || '') }}
         run: |
           ./test/make-fuzz-corpus.sh
           # If there are no new corpus samples, exit.
