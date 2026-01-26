@@ -680,7 +680,7 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     //    IDLE_TIMEOUT / 2)
     //  - PTO timer will trigger again. (at the start time + pto + 2*pto)
     //  - Idle time out  will trigger (at the timeout + IDLE_TIMEOUT)
-    const IDLE_TIMEOUT: Duration = Duration::from_millis(6000);
+    const IDLE_TIMEOUT: Duration = Duration::from_secs(6);
 
     // This test makes too many assumptions about single-packet flights and PTOs for multi-packet
     // MLKEM flights to work.
