@@ -1070,12 +1070,14 @@ impl Http3Connection {
     /// # Errors
     ///
     /// Returns `InvalidStreamId` if the stream id doesn't exist or the stream doesn't support send groups
-    pub fn stream_set_sendgroup(&mut self, stream_id: StreamId, sendgroup: SendGroupId) -> Res<()> {
-        let send_stream = self
-            .send_streams
-            .get_mut(&stream_id)
-            .ok_or(Error::InvalidStreamId)?;
-        send_stream.set_send_group(sendgroup)
+    pub fn stream_set_sendgroup(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        sendgroup: SendGroupId,
+    ) -> Res<()> {
+        conn.stream_sendgroup(stream_id, Some(sendgroup.as_u64()))
+            .map_err(|_| Error::InvalidStreamId)
     }
 
     /// Set the stream Fairness.   Fair streams will share bandwidth with other

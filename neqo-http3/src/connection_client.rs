@@ -915,7 +915,7 @@ impl Http3Client {
         stream_id: StreamId,
         sendgroup: SendGroupId,
     ) -> Res<()> {
-        self.base_handler.stream_set_sendgroup(stream_id, sendgroup)
+        Http3Connection::stream_set_sendgroup(&mut self.base_handler, &mut self.conn, stream_id, sendgroup)
     }
 
     /// Sets the `Fairness` for a given stream
@@ -927,6 +927,10 @@ impl Http3Client {
     // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.
     pub fn webtransport_set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         Http3Connection::stream_set_fairness(&mut self.conn, stream_id, fairness)
+    }
+
+    pub fn stream_set_sendgroup(&mut self, stream_id: StreamId, sendgroup: SendGroupId) -> Res<()> {
+        Http3Connection::stream_set_sendgroup(&mut self.base_handler, &mut self.conn, stream_id, sendgroup)
     }
 
     /// Returns the current `send_stream::Stats` of a `WebTransportSendStream`.
