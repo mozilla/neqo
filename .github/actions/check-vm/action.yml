@@ -129,7 +129,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'solaris' }}
-      uses: vmactions/solaris-vm@47bea106d03acaf91084e52548ee460556011602 # v1.1.8
+      uses: vmactions/solaris-vm@61030aaba6acacac59cf375214a9668f46e94445 # v1.2.6
       with:
         release: "11.4-gcc"
         usesh: true
