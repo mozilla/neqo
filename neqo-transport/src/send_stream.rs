@@ -8,8 +8,8 @@
 
 use std::{
     cell::RefCell,
-    cmp::{max, min, Ordering},
-    collections::{btree_map::Entry, BTreeMap, VecDeque},
+    cmp::{Ordering, max, min},
+    collections::{BTreeMap, VecDeque, btree_map::Entry},
     fmt::{self, Display, Formatter},
     mem,
     num::NonZeroUsize,
@@ -18,11 +18,12 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use neqo_common::{qdebug, qerror, qtrace, Buffer, Encoder, Role};
+use neqo_common::{Buffer, Encoder, Role, qdebug, qerror, qtrace};
 use smallvec::SmallVec;
 use static_assertions::const_assert;
 
 use crate::{
+    AppError, Error, MAX_LOCAL_MAX_STREAM_DATA, Res,
     events::ConnectionEvents,
     fc::SenderFlowControl,
     frame::{Frame, FrameEncoder as _, FrameType},
@@ -35,7 +36,6 @@ use crate::{
         TransportParameterId::{InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni},
         TransportParameters,
     },
-    AppError, Error, Res, MAX_LOCAL_MAX_STREAM_DATA,
 };
 
 /// The priority that is assigned to sending data for the stream.
@@ -1784,10 +1784,11 @@ pub struct RecoveryToken {
 mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
-    use neqo_common::{event::Provider as _, hex_with_len, qtrace, Encoder, MAX_VARINT};
+    use neqo_common::{Encoder, MAX_VARINT, event::Provider as _, hex_with_len, qtrace};
 
     use super::RecoveryToken;
     use crate::{
+        ConnectionEvents, INITIAL_LOCAL_MAX_STREAM_DATA, StreamId,
         connection::{RetransmissionPriority, TransmissionPriority},
         events::ConnectionEvent,
         fc::SenderFlowControl,
@@ -1795,7 +1796,6 @@ mod tests {
         recovery::{self, StreamRecoveryToken},
         send_stream::{RangeState, RangeTracker, SendStream, SendStreams, State, TxBuffer},
         stats::FrameStats,
-        ConnectionEvents, StreamId, INITIAL_LOCAL_MAX_STREAM_DATA,
     };
 
     fn connection_fc(limit: u64) -> Rc<RefCell<SenderFlowControl<()>>> {

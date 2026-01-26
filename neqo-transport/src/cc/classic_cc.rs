@@ -12,14 +12,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use ::qlog::events::{quic::CongestionStateUpdated, EventData};
+use ::qlog::events::{EventData, quic::CongestionStateUpdated};
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::Qlog, qtrace};
 use rustc_hash::FxHashMap as HashMap;
 
 use super::CongestionControl;
 use crate::{
-    cc::CongestionEvent, packet, qlog, recovery::sent, rtt::RttEstimate, sender::PACING_BURST_SIZE,
-    stats::CongestionControlStats, Pmtud,
+    Pmtud, cc::CongestionEvent, packet, qlog, recovery::sent, rtt::RttEstimate,
+    sender::PACING_BURST_SIZE, stats::CongestionControlStats,
 };
 
 pub const CWND_INITIAL_PKTS: usize = 10;
@@ -282,7 +282,12 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
         if is_app_limited {
             self.cc_algorithm.on_app_limited();
-            qdebug!("on_packets_acked this={self:p}, limited=1, bytes_in_flight={}, cwnd={}, phase={:?}, new_acked={new_acked}", self.bytes_in_flight, self.current.congestion_window, self.current.phase);
+            qdebug!(
+                "on_packets_acked this={self:p}, limited=1, bytes_in_flight={}, cwnd={}, phase={:?}, new_acked={new_acked}",
+                self.bytes_in_flight,
+                self.current.congestion_window,
+                self.current.phase
+            );
             return;
         }
 
@@ -323,8 +328,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             self.current.acked_bytes += new_acked;
             if self.current.acked_bytes >= bytes_for_increase {
                 self.current.acked_bytes -= bytes_for_increase;
-                self.current.congestion_window += self.max_datagram_size(); // or is this the
-                                                                            // current MTU?
+                self.current.congestion_window += self.max_datagram_size(); // or is this the current MTU?
             }
             // The number of bytes we require can go down over time with Cubic.
             // That might result in an excessive rate of increase, so limit the number of unused
@@ -339,7 +343,12 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             ],
             now,
         );
-        qdebug!("[{self}] on_packets_acked this={self:p}, limited=0, bytes_in_flight={}, cwnd={}, phase={:?}, new_acked={new_acked}", self.bytes_in_flight, self.current.congestion_window, self.current.phase);
+        qdebug!(
+            "[{self}] on_packets_acked this={self:p}, limited=0, bytes_in_flight={}, cwnd={}, phase={:?}, new_acked={new_acked}",
+            self.bytes_in_flight,
+            self.current.congestion_window,
+            self.current.phase
+        );
     }
 
     /// Update congestion controller state based on lost packets.
@@ -595,7 +604,9 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
         // If all of them have been removed we detected a spurious congestion event.
         if self.maybe_lost_packets.is_empty() {
-            qdebug!("Spurious detection: maybe_lost_packets emptied -> calling on_spurious_congestion_event");
+            qdebug!(
+                "Spurious detection: maybe_lost_packets emptied -> calling on_spurious_congestion_event"
+            );
             self.on_spurious_congestion_event(cc_stats);
         }
     }
@@ -737,7 +748,11 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         // Start a new congestion event if lost or ECN CE marked packet was sent
         // after the start of the previous congestion recovery period.
         if !self.after_recovery_start(last_packet) {
-            qdebug!("Called on_congestion_event during recovery -> don't react; last_packet {}, recovery_start {}", last_packet.pn(), self.current.recovery_start.unwrap_or(0));
+            qdebug!(
+                "Called on_congestion_event during recovery -> don't react; last_packet {}, recovery_start {}",
+                last_packet.pn(),
+                self.current.recovery_start.unwrap_or(0)
+            );
             return false;
         }
 
@@ -802,20 +817,20 @@ mod tests {
     use neqo_common::qinfo;
     use test_fixture::now;
 
-    use super::{ClassicCongestionControl, WindowAdjustment, PERSISTENT_CONG_THRESH};
+    use super::{ClassicCongestionControl, PERSISTENT_CONG_THRESH, WindowAdjustment};
     use crate::{
+        Pmtud,
         cc::{
+            CWND_INITIAL_PKTS, CongestionControl, CongestionControlAlgorithm, CongestionEvent,
             classic_cc::Phase,
             cubic::Cubic,
             new_reno::NewReno,
             tests::{IP_ADDR, MTU, RTT},
-            CongestionControl, CongestionControlAlgorithm, CongestionEvent, CWND_INITIAL_PKTS,
         },
         packet,
         recovery::{self, sent},
         rtt::RttEstimate,
         stats::CongestionControlStats,
-        Pmtud,
     };
 
     const PTO: Duration = RTT;
@@ -1649,7 +1664,8 @@ mod tests {
         let cwnd_recovered = cc.cwnd();
         assert!(
             cwnd_recovered >= cc.cwnd_initial(),
-            "cwnd should have grown back, but cwnd_recovered is less than cwnd_initial {cwnd_recovered} < {}", cc.cwnd_initial()
+            "cwnd should have grown back, but cwnd_recovered is less than cwnd_initial {cwnd_recovered} < {}",
+            cc.cwnd_initial()
         );
 
         // Now detect spurious (late)

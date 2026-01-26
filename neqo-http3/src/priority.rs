@@ -9,7 +9,7 @@ use std::fmt;
 use neqo_transport::StreamId;
 use sfv::{BareItem, Dictionary, Integer, Item, ListEntry, Parser};
 
-use crate::{frames::HFrame, Error, Res};
+use crate::{Error, Res, frames::HFrame};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Priority {
@@ -155,7 +155,7 @@ impl PriorityHandler {
 mod test {
     use neqo_transport::StreamId;
 
-    use crate::{priority::PriorityHandler, HFrame, Priority};
+    use crate::{HFrame, Priority, priority::PriorityHandler};
 
     #[test]
     fn priority_updates_ignore_same() {

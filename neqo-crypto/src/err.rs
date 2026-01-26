@@ -168,7 +168,7 @@ mod tests {
     use test_fixture::fixture_init;
 
     use crate::{
-        err::{self, is_blocked, secstatus_to_res, Error, PRErrorCode, PR_SetError},
+        err::{self, Error, PR_SetError, PRErrorCode, is_blocked, secstatus_to_res},
         ssl::{SECFailure, SECSuccess},
     };
 

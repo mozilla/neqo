@@ -10,9 +10,9 @@ use criterion::{BenchmarkGroup, Criterion};
 use test_fixture::{
     boxed, fixture_init,
     sim::{
+        ReadySimulator, Simulator,
         http3_connection::{Node, Requests, Responses},
         network::{Delay, TailDrop},
-        ReadySimulator, Simulator,
     },
 };
 

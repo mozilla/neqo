@@ -15,7 +15,7 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{qdebug, Dscp, Ecn};
+use neqo_common::{Dscp, Ecn, qdebug};
 use strum::IntoEnumIterator as _;
 
 use crate::{cc::CongestionEvent, ecn, packet};

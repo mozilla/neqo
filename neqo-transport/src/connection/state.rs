@@ -9,10 +9,11 @@ use std::{cmp::min, rc::Rc, time::Instant};
 use neqo_common::{Buffer, Encoder};
 
 use crate::{
+    CloseReason, Error,
     frame::{FrameEncoder as _, FrameType},
     packet,
     path::PathRef,
-    recovery, CloseReason, Error,
+    recovery,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

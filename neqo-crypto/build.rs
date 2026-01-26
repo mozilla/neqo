@@ -87,7 +87,9 @@ fn setup_clang() {
     };
     let libclang_dir = mozbuild_root.join("clang").join("lib");
     if libclang_dir.is_dir() {
-        env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
+        unsafe {
+            env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
+        }
         println!("rustc-env:LIBCLANG_PATH={}", libclang_dir.to_str().unwrap());
     } else {
         println!("warning: LIBCLANG_PATH isn't set; maybe run ./mach bootstrap with gecko");
@@ -387,8 +389,8 @@ fn setup_standalone(nss: &str) -> Vec<String> {
 #[cfg(feature = "gecko")]
 fn setup_for_gecko() -> Vec<String> {
     use mozbuild::{
-        config::{BINDGEN_SYSTEM_FLAGS, NSPR_CFLAGS, NSS_CFLAGS},
         TOPOBJDIR,
+        config::{BINDGEN_SYSTEM_FLAGS, NSPR_CFLAGS, NSS_CFLAGS},
     };
 
     let fold_libs = mozbuild::config::MOZ_FOLD_LIBS;

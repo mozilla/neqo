@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use super::hframe::HFrameType;
-use crate::{frames::reader::FrameDecoder, Res};
+use crate::{Res, frames::reader::FrameDecoder};
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum Frame {
