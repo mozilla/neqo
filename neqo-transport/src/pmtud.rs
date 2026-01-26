@@ -817,9 +817,9 @@ mod tests {
         use test_fixture::now;
 
         use crate::{
-            pmtud::BlackHoleDetector,
-            recovery::{sent, Token},
             Pmtud,
+            pmtud::BlackHoleDetector,
+            recovery::{Token, sent},
         };
 
         const BASE_PLPMTU: usize = Pmtud::default_plpmtu(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
@@ -993,7 +993,7 @@ mod tests {
             // Larger packet doesn't change min.
             let pkt = make_packet(2, now, 1450);
             assert!(detector.on_loss(&[pkt], now)); // Triggers detection
-                                                    // After reset, min_lost_size is None.
+            // After reset, min_lost_size is None.
             assert!(detector.min_lost_size.is_none());
         }
 
