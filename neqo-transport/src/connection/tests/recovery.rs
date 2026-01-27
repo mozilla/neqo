@@ -21,8 +21,9 @@ use super::{
     send_something,
 };
 use crate::{
-    CloseReason, Error, Pmtud, Stats, StreamType,
+    CloseReason, Error, Stats, StreamType,
     connection::{test_internal::FrameWriter, tests::cwnd_min},
+    default_plpmtu,
     frame::FrameType,
     packet,
     recovery::{
@@ -458,7 +459,7 @@ fn handshake_ack_pto() {
     let mut server = default_server();
     // This is a greasing transport parameter, and large enough that the
     // server needs to send two Handshake packets.
-    let big = TransportParameter::Bytes(vec![0; Pmtud::default_plpmtu(DEFAULT_ADDR.ip())]);
+    let big = TransportParameter::Bytes(vec![0; default_plpmtu(DEFAULT_ADDR.ip())]);
     server
         .set_local_tparam(TestTransportParameter, big)
         .unwrap();
@@ -965,7 +966,7 @@ fn pto_handshake_space_when_server_flight_lost() {
     let mut server = default_server();
     // This is a greasing transport parameter, and large enough that the
     // server needs to send two Handshake packets.
-    let big = TransportParameter::Bytes(vec![0; Pmtud::default_plpmtu(DEFAULT_ADDR.ip())]);
+    let big = TransportParameter::Bytes(vec![0; default_plpmtu(DEFAULT_ADDR.ip())]);
     server
         .set_local_tparam(TestTransportParameter, big)
         .unwrap();

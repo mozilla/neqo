@@ -11,10 +11,7 @@ use test_fixture::{
     boxed,
     sim::{
         Simulator,
-        connection::{
-            Node, ReachState, ReceiveData, SendData, SendDataExpectNoPmtudChange,
-            SendDataExpectPmtudChange,
-        },
+        connection::{Node, ReachState, ReceiveData, SendData, SendDataCheckPmtud},
         network::{Delay, Drop, DynamicMtu, RandomDelay, TailDrop},
     },
     simulate,
@@ -224,7 +221,7 @@ fn pmtud_mtu_decrease() {
     let sim = Simulator::new(
         "pmtud_mtu_decrease",
         boxed![
-            Node::default_client(boxed![SendDataExpectPmtudChange::new(TRANSFER_AMOUNT)]),
+            Node::default_client(boxed![SendDataCheckPmtud::new(TRANSFER_AMOUNT, true)]), /* expect PMTU change */
             DynamicMtu::new(1500, 1300, 100),
             Delay::new(DELAY),
             Node::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
@@ -241,7 +238,7 @@ fn pmtud_no_false_trigger_random_loss() {
     let sim = Simulator::new(
         "pmtud_no_false_trigger_random_loss",
         boxed![
-            Node::default_client(boxed![SendDataExpectNoPmtudChange::new(TRANSFER_AMOUNT)]),
+            Node::default_client(boxed![SendDataCheckPmtud::new(TRANSFER_AMOUNT, false)]), /* expect no PMTU change */
             RandomDelay::new(DELAY_RANGE),
             Drop::percentage(10),
             Node::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
@@ -262,7 +259,7 @@ fn pmtud_no_false_trigger_burst_loss() {
     let sim = Simulator::new(
         "pmtud_no_false_trigger_burst_loss",
         boxed![
-            Node::default_client(boxed![SendDataExpectNoPmtudChange::new(TRANSFER_AMOUNT)]),
+            Node::default_client(boxed![SendDataCheckPmtud::new(TRANSFER_AMOUNT, false)]), /* expect no PMTU change */
             // Small 8KB queue causes burst drops when cwnd grows past it.
             TailDrop::new(1_000_000, 8_192, false, Duration::from_millis(50)),
             Node::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),

@@ -7,7 +7,7 @@
 use std::time::Instant;
 
 use neqo_common::Datagram;
-use neqo_transport::{Output, Pmtud};
+use neqo_transport::{Output, header_size};
 
 use super::{Node, Rng};
 
@@ -31,7 +31,7 @@ impl Node for Mtu {
     fn init(&mut self, _rng: Rng, _now: Instant) {}
 
     fn process(&mut self, d: Option<Datagram>, _now: Instant) -> Output {
-        d.filter(|dgram| Pmtud::header_size(dgram.destination().ip()) + dgram.len() <= self.mtu)
+        d.filter(|dgram| header_size(dgram.destination().ip()) + dgram.len() <= self.mtu)
             .into()
     }
 }
@@ -41,21 +41,22 @@ impl Node for Mtu {
 #[derive(Debug)]
 pub struct DynamicMtu {
     initial_mtu: usize,
-    reduced_mtu: usize,
+    new_mtu: usize,
+    /// Number of packets to pass before switching to `new_mtu`.
     switch_after: usize,
     packet_count: usize,
 }
 
 impl DynamicMtu {
     /// Creates a new [`DynamicMtu`] that starts at `initial_mtu` and switches
-    /// to `reduced_mtu` after `switch_after` packets have passed.
+    /// to `new_mtu` after `switch_after` packets have passed.
     ///
     /// Both MTU values include IP and UDP header size.
     #[must_use]
-    pub const fn new(initial_mtu: usize, reduced_mtu: usize, switch_after: usize) -> Self {
+    pub const fn new(initial_mtu: usize, new_mtu: usize, switch_after: usize) -> Self {
         Self {
             initial_mtu,
-            reduced_mtu,
+            new_mtu,
             switch_after,
             packet_count: 0,
         }
@@ -63,7 +64,7 @@ impl DynamicMtu {
 
     const fn current_mtu(&self) -> usize {
         if self.packet_count >= self.switch_after {
-            self.reduced_mtu
+            self.new_mtu
         } else {
             self.initial_mtu
         }
@@ -81,7 +82,7 @@ impl Node for DynamicMtu {
     fn process(&mut self, d: Option<Datagram>, _now: Instant) -> Output {
         d.filter(|dgram| {
             self.packet_count += 1;
-            Pmtud::header_size(dgram.destination().ip()) + dgram.len() <= self.current_mtu()
+            header_size(dgram.destination().ip()) + dgram.len() <= self.current_mtu()
         })
         .into()
     }

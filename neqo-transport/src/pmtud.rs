@@ -34,6 +34,29 @@ const MTU_SIZES_V6: &[usize] = &[
 const_assert!(MTU_SIZES_V4.len() == MTU_SIZES_V6.len());
 const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();
 
+/// Returns the size of the IP and UDP headers for the given IP address family.
+#[must_use]
+pub const fn header_size(remote_ip: IpAddr) -> usize {
+    match remote_ip {
+        IpAddr::V4(_) => 20 + 8,
+        IpAddr::V6(_) => 40 + 8,
+    }
+}
+
+/// Returns the MTU search table for the given remote IP address family.
+const fn search_table(remote_ip: IpAddr) -> &'static [usize] {
+    match remote_ip {
+        IpAddr::V4(_) => MTU_SIZES_V4,
+        IpAddr::V6(_) => MTU_SIZES_V6,
+    }
+}
+
+/// Returns the default PLPMTU for the given remote IP address.
+#[must_use]
+pub const fn default_plpmtu(remote_ip: IpAddr) -> usize {
+    search_table(remote_ip)[0] - header_size(remote_ip)
+}
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum Probe {
     NotNeeded,
@@ -62,23 +85,6 @@ impl Pmtud {
     /// Time to wait before probing for a larger MTU after a probe failure.
     const RAISE_TIMER: Duration = Duration::from_secs(600);
 
-    /// Returns the MTU search table for the given remote IP address family.
-    const fn search_table(remote_ip: IpAddr) -> &'static [usize] {
-        match remote_ip {
-            IpAddr::V4(_) => MTU_SIZES_V4,
-            IpAddr::V6(_) => MTU_SIZES_V6,
-        }
-    }
-
-    /// Size of the IPv4/IPv6 and UDP headers, in bytes.
-    #[must_use]
-    pub const fn header_size(remote_ip: IpAddr) -> usize {
-        match remote_ip {
-            IpAddr::V4(_) => 20 + 8,
-            IpAddr::V6(_) => 40 + 8,
-        }
-    }
-
     #[must_use]
     #[allow(
         clippy::allow_attributes,
@@ -86,19 +92,20 @@ impl Pmtud {
         reason = "FIXME: False positive with MSRV 1.87"
     )]
     pub fn new(remote_ip: IpAddr, iface_mtu: Option<usize>) -> Self {
-        let search_table = Self::search_table(remote_ip);
-        let header_size = Self::header_size(remote_ip);
-        let base_plpmtu = search_table[0] - header_size;
+        let search_table = search_table(remote_ip);
+        let header_size = header_size(remote_ip);
+        let probe_index = 0;
+        let min_mtu = search_table[probe_index];
         Self {
             search_table,
             header_size,
-            mtu: search_table[0],
+            mtu: min_mtu,
             iface_mtu: iface_mtu.unwrap_or(usize::MAX),
-            probe_index: 0,
+            probe_index,
             probe_count: 0,
             probe_state: Probe::NotNeeded,
             raise_timer: None,
-            black_hole: BlackHoleDetector::new(base_plpmtu),
+            black_hole: BlackHoleDetector::new(min_mtu - header_size),
         }
     }
 
@@ -164,7 +171,6 @@ impl Pmtud {
 
     /// Returns the maximum Packetization Layer Path MTU for the configured
     /// address family. Note that this ignores the interface MTU.
-    #[expect(clippy::missing_panics_doc, reason = "search table is never empty")]
     #[must_use]
     pub const fn address_family_max_mtu(&self) -> usize {
         *self.search_table.last().expect("search table is empty")
@@ -223,7 +229,7 @@ impl Pmtud {
     ) {
         // Only restart PMTUD if we aren't already at the minimum MTU.
         if self.mtu > self.min_mtu() && self.black_hole.on_loss(lost_packets, now) {
-            stats.pmtud_change += 1;
+            stats.pmtud_count += 1;
             self.start(now, stats);
             return;
         }
@@ -253,7 +259,7 @@ impl Pmtud {
     pub fn on_pto(&mut self, pto_packets: &[sent::Packet], stats: &mut Stats, now: Instant) {
         // Only restart PMTUD if we aren't already at the minimum MTU.
         if self.mtu > self.min_mtu() && self.black_hole.on_pto(pto_packets, now) {
-            stats.pmtud_change += 1;
+            stats.pmtud_count += 1;
             self.start(now, stats);
         }
     }
@@ -294,13 +300,6 @@ impl Pmtud {
         self.probe_count = 0; // For the first time
         self.probe_index += 1; // At this size
         qdebug!("PMTUD started with probe size {}", self.probe_mtu());
-    }
-
-    /// Returns the default PLPMTU for the given remote IP address.
-    #[must_use]
-    pub const fn default_plpmtu(remote_ip: IpAddr) -> usize {
-        let search_table = Self::search_table(remote_ip);
-        search_table[0] - Self::header_size(remote_ip)
     }
 }
 
@@ -361,20 +360,21 @@ impl BlackHoleDetector {
             return;
         }
 
-        let max_acked = acked_pkts
+        let Some(max_acked) = acked_pkts
             .iter()
             .filter(|p| p.on_primary_path())
             .map(sent::Packet::len)
-            .max();
+            .max()
+        else {
+            return;
+        };
 
-        if let Some(max_acked) = max_acked {
-            if self.min_lost_size.is_some_and(|min| max_acked >= min) {
-                qtrace!(
-                    "PMTUD black hole detection reset: ACK for {max_acked} bytes >= min_lost {:?}",
-                    self.min_lost_size
-                );
-                self.reset();
-            }
+        if self.min_lost_size.is_some_and(|min| max_acked >= min) {
+            qtrace!(
+                "PMTUD black hole detection reset: ACK for {max_acked} bytes >= min_lost {:?}",
+                self.min_lost_size
+            );
+            self.reset();
         }
     }
 
@@ -442,8 +442,9 @@ mod tests {
     use neqo_common::{Encoder, qdebug, qinfo};
     use test_fixture::{fixture_init, now};
 
+    use super::{Pmtud, header_size};
     use crate::{
-        Pmtud, Stats,
+        Stats,
         crypto::CryptoDxState,
         packet,
         pmtud::{BlackHoleDetector, Probe, SEARCH_TABLE_LEN},
@@ -527,7 +528,7 @@ mod tests {
         assert_eq!(stats_before.pmtud_tx + 1, stats.pmtud_tx);
 
         let packet = make_pmtud_probe(pn, now, encoder.len());
-        if encoder.len() + Pmtud::header_size(addr) <= mtu {
+        if encoder.len() + header_size(addr) <= mtu {
             pmtud.on_packets_acked(&[packet], now, stats);
             assert_eq!(stats_before.pmtud_ack + 1, stats.pmtud_ack);
         } else {
@@ -742,21 +743,21 @@ mod tests {
         // Set PMTUD to minimum MTU.
         pmtud.start(now, &mut stats);
         assert_eq!(pmtud.mtu, pmtud.min_mtu());
-        let initial_pmtud_change = stats.pmtud_change;
+        let initial_pmtud_count = stats.pmtud_count;
 
         trigger_black_hole(&mut pmtud, &mut stats, now);
 
-        // pmtud_change should NOT have incremented because we're at min_mtu.
+        // pmtud_count should NOT have incremented because we're at min_mtu.
         assert_eq!(
-            initial_pmtud_change, stats.pmtud_change,
+            initial_pmtud_count, stats.pmtud_count,
             "Black hole detection should not trigger restart when at min_mtu"
         );
         assert_eq!(pmtud.mtu, pmtud.min_mtu());
     }
 
-    /// Tests that black hole detection increments `pmtud_change` when triggered above `min_mtu`.
+    /// Tests that black hole detection increments `pmtud_count` when triggered above `min_mtu`.
     #[test]
-    fn black_hole_increments_pmtud_change() {
+    fn black_hole_increments_pmtud_count() {
         let now = now();
         let mut pmtud = Pmtud::new(V4, None);
         let mut stats = Stats::default();
@@ -766,13 +767,13 @@ mod tests {
         pmtud.stop(idx, now, &mut stats);
         assert_eq!(pmtud.mtu, 1500);
         assert!(pmtud.mtu > pmtud.min_mtu());
-        assert_eq!(stats.pmtud_change, 0);
+        assert_eq!(stats.pmtud_count, 0);
 
         trigger_black_hole(&mut pmtud, &mut stats, now);
 
         assert_eq!(
-            stats.pmtud_change, 1,
-            "pmtud_change should be exactly 1 after one black hole detection"
+            stats.pmtud_count, 1,
+            "pmtud_count should be exactly 1 after one black hole detection"
         );
     }
 
@@ -816,13 +817,13 @@ mod tests {
 
         use test_fixture::now;
 
+        use super::super::default_plpmtu;
         use crate::{
-            Pmtud,
             pmtud::BlackHoleDetector,
             recovery::{Token, sent},
         };
 
-        const BASE_PLPMTU: usize = Pmtud::default_plpmtu(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+        const BASE_PLPMTU: usize = default_plpmtu(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
 
         fn make_packet(pn: u64, sent_time: Instant, len: usize) -> sent::Packet {
             sent::make_packet(pn, sent_time, len)

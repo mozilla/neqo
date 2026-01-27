@@ -12,7 +12,9 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_crypto::AuthenticationStatus;
-use neqo_transport::{ConnectionParameters, Pmtud, StreamId, StreamType, recv_stream, send_stream};
+use neqo_transport::{
+    ConnectionParameters, StreamId, StreamType, default_plpmtu, recv_stream, send_stream,
+};
 use test_fixture::{
     CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
     DEFAULT_SERVER_NAME, anti_replay, fixture_init, now,
@@ -25,7 +27,7 @@ use crate::{
 };
 
 // Leave space for large QUIC header.
-const DATAGRAM_SIZE: u64 = Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) as u64 - 40;
+const DATAGRAM_SIZE: u64 = default_plpmtu(DEFAULT_ADDR.ip()) as u64 - 40;
 
 pub fn wt_default_parameters() -> Http3Parameters {
     Http3Parameters::default()

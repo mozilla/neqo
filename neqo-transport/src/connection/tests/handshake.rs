@@ -36,12 +36,12 @@ use super::{
     handshake, maybe_authenticate, resumed_server, send_something, zero_len_cid_client,
 };
 use crate::{
-    CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
-    Version,
+    CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, StreamType, Version,
     connection::{
         AddressValidation,
         tests::{exchange_ticket, new_client, new_server},
     },
+    default_plpmtu,
     events::ConnectionEvent,
     server::ValidateAddress,
     stats::FrameStats,
@@ -929,7 +929,7 @@ fn anti_amplification() {
 
     // With a gigantic transport parameter, the server is unable to complete
     // the handshake within the amplification limit.
-    let very_big = TransportParameter::Bytes(vec![0; Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) * 3]);
+    let very_big = TransportParameter::Bytes(vec![0; default_plpmtu(DEFAULT_ADDR.ip()) * 3]);
     server
         .set_local_tparam(TestTransportParameter, very_big)
         .unwrap();

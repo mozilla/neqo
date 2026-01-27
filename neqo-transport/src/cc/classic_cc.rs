@@ -18,7 +18,7 @@ use rustc_hash::FxHashMap as HashMap;
 
 use super::CongestionControl;
 use crate::{
-    Pmtud, cc::CongestionEvent, packet, qlog, recovery::sent, rtt::RttEstimate,
+    cc::CongestionEvent, packet, pmtud::Pmtud, qlog, recovery::sent, rtt::RttEstimate,
     sender::PACING_BURST_SIZE, stats::CongestionControlStats,
 };
 
@@ -833,7 +833,6 @@ mod tests {
 
     use super::{ClassicCongestionControl, PERSISTENT_CONG_THRESH, WindowAdjustment};
     use crate::{
-        Pmtud,
         cc::{
             CWND_INITIAL_PKTS, CongestionControl, CongestionControlAlgorithm, CongestionEvent,
             classic_cc::Phase,
@@ -842,6 +841,7 @@ mod tests {
             tests::{IP_ADDR, MTU, RTT},
         },
         packet,
+        pmtud::Pmtud,
         recovery::{self, sent},
         rtt::RttEstimate,
         stats::CongestionControlStats,
