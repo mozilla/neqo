@@ -94,22 +94,29 @@ runs:
       if: ${{ runner.os == 'Windows' }}
       run: rm /usr/bin/link.exe || true
 
+    # Use cargo-binstall for faster tool installation via pre-built binaries.
+    # Previously disabled due to: (1) binstall MSRV was too high, and (2) macOS issues.
+    # Both resolved: binstall MSRV is currently 1.79.0 (below ours), and macOS issues
+    # were fixed in late 2024/2025 (cargo-bins/cargo-binstall#1953, #2049).
     - name: Install Rust tools
       shell: bash
       if: ${{ inputs.tools != '' }}
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
         TOOLS: ${{ inputs.tools }}
+        RUNNER_OS: ${{ runner.os }}
       run: |
+        curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+
         for tool in $(echo $TOOLS | tr -d ","); do
           if [ "$tool" == "samply" ]; then
             # TODO: Install released version once `--presymbolicate` (https://github.com/mstange/samply/pull/634) is released.
             cargo install --git https://github.com/mstange/samply --rev f6ff5dedc73ab84a8ef45231f41cd3e721fb5cd4 samply
-          elif [ "$OS" != "linux" ] && [ "$tool" == "cargo-careful" ]; then
+          elif [ "$RUNNER_OS" != "Linux" ] && [ "$tool" == "cargo-careful" ]; then
             # TODO: There is an issue with the binary releases of cargo-careful for non-Linux platforms.
             cargo install cargo-careful
           else
-            # FIXME: See https://github.com/Swatinem/rust-cache/issues/204 for why `--force`.
-            cargo install --locked --force "$tool"
+            # Use binstall for pre-built binaries; fall back to cargo install if unavailable.
+            cargo binstall --no-confirm "$tool" || cargo install --locked "$tool"
           fi
         done
