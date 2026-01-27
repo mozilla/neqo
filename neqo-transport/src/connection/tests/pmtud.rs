@@ -15,15 +15,16 @@ use test_fixture::{DEFAULT_ADDR_V4, fixture_init, now};
 
 use super::Connection;
 use crate::{
-    ConnectionParameters, Output, Pmtud, StreamType,
+    ConnectionParameters, Output, StreamType,
     connection::tests::{
         AT_LEAST_PTO, CountingConnectionIdGenerator, DEFAULT_RTT, connect, default_server,
         fill_stream, new_client, new_server, send_something,
     },
+    default_plpmtu, header_size,
 };
 
 /// Default PLPMTU for IPv6 connections.
-const DEFAULT_PLPMTU: usize = Pmtud::default_plpmtu(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+const DEFAULT_PLPMTU: usize = default_plpmtu(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
 
 /// Test that one can reach the maximum MTU with GSO enabled.
 #[test]
@@ -129,7 +130,7 @@ fn vpn_migration_triggers_pmtud() {
     let mut now = now();
     let mut client = new_client(ConnectionParameters::default().pmtud(true));
     let mut server = new_server(ConnectionParameters::default().pmtud(true));
-    let header_size = Pmtud::header_size(
+    let header_size = header_size(
         client
             .paths
             .primary()
@@ -203,7 +204,7 @@ fn pto_triggers_black_hole_detection() {
     let mut now = now();
     let mut client = new_client(ConnectionParameters::default().pmtud(true));
     let mut server = new_server(ConnectionParameters::default().pmtud(true));
-    let header_size = Pmtud::header_size(
+    let header_size = header_size(
         client
             .paths
             .primary()
@@ -230,7 +231,7 @@ fn pto_triggers_black_hole_detection() {
     // Drop the packet.
 
     // Record state before PTO.
-    let pmtud_change_before = client.stats().pmtud_change;
+    let pmtud_count_before = client.stats().pmtud_count;
 
     // Advance time to trigger PTO.
     now += AT_LEAST_PTO;
@@ -240,8 +241,8 @@ fn pto_triggers_black_hole_detection() {
     assert!(pto_dgram.is_some(), "Client should send PTO packet");
 
     // Verify black hole detection triggered.
-    let pmtud_change_after = client.stats().pmtud_change;
-    assert_eq!(pmtud_change_after, pmtud_change_before + 1,);
+    let pmtud_count_after = client.stats().pmtud_count;
+    assert_eq!(pmtud_count_after, pmtud_count_before + 1,);
 
     // Verify PMTUD restarted - MTU should be back to minimum.
     assert_eq!(
