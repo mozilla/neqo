@@ -284,8 +284,8 @@ pub struct Stats {
     pub pmtud_iface_mtu: usize,
     /// Probed PMTU of the current path.
     pub pmtud_pmtu: usize,
-    /// Number of times a path MTU changed unexpectedly.
-    pub pmtud_change: usize,
+    /// Number of times we started PMTUD.
+    pub pmtud_count: usize,
 
     /// Whether the connection was resumed successfully.
     pub resumed: bool,
@@ -404,11 +404,11 @@ impl Debug for Stats {
         )?;
         writeln!(
             f,
-            "  pmtud: {} sent {} acked {} lost {} change {} iface_mtu {} pmtu",
+            "  pmtud: {} sent {} acked {} lost {} count {} iface_mtu {} pmtu",
             self.pmtud_tx,
             self.pmtud_ack,
             self.pmtud_lost,
-            self.pmtud_change,
+            self.pmtud_count,
             self.pmtud_iface_mtu,
             self.pmtud_pmtu
         )?;

@@ -346,13 +346,14 @@ impl Goal for ReceiveData {
 
 /// Sends data and verifies that PMTUD black hole detection count matches expectation.
 #[derive(Debug)]
-struct SendDataCheckPmtud {
+pub struct SendDataCheckPmtud {
     inner: SendData,
     expect_change: bool,
 }
 
 impl SendDataCheckPmtud {
-    const fn new(amount: usize, expect_change: bool) -> Self {
+    #[must_use]
+    pub const fn new(amount: usize, expect_change: bool) -> Self {
         Self {
             inner: SendData::new(amount),
             expect_change,
@@ -378,71 +379,11 @@ impl Goal for SendDataCheckPmtud {
         let status = self.inner.handle_event(c, e, now);
         if status == GoalStatus::Done {
             assert_eq!(
-                c.stats().pmtud_change > 0,
+                c.stats().pmtud_count > 0,
                 self.expect_change,
                 "PMTUD black hole detection mismatch"
             );
         }
         status
-    }
-}
-
-/// Sends data and verifies that PMTUD black hole detection triggered on the sender.
-#[derive(Debug)]
-pub struct SendDataExpectPmtudChange(SendDataCheckPmtud);
-
-impl SendDataExpectPmtudChange {
-    #[must_use]
-    pub const fn new(amount: usize) -> Self {
-        Self(SendDataCheckPmtud::new(amount, true))
-    }
-}
-
-impl Goal for SendDataExpectPmtudChange {
-    fn init(&mut self, c: &mut Connection, now: Instant) {
-        self.0.init(c, now);
-    }
-
-    fn process(&mut self, c: &mut Connection, now: Instant) -> GoalStatus {
-        self.0.process(c, now)
-    }
-
-    fn handle_event(
-        &mut self,
-        c: &mut Connection,
-        e: &ConnectionEvent,
-        now: Instant,
-    ) -> GoalStatus {
-        self.0.handle_event(c, e, now)
-    }
-}
-
-/// Sends data and verifies that PMTUD black hole detection did NOT trigger.
-#[derive(Debug)]
-pub struct SendDataExpectNoPmtudChange(SendDataCheckPmtud);
-
-impl SendDataExpectNoPmtudChange {
-    #[must_use]
-    pub const fn new(amount: usize) -> Self {
-        Self(SendDataCheckPmtud::new(amount, false))
-    }
-}
-
-impl Goal for SendDataExpectNoPmtudChange {
-    fn init(&mut self, c: &mut Connection, now: Instant) {
-        self.0.init(c, now);
-    }
-
-    fn process(&mut self, c: &mut Connection, now: Instant) -> GoalStatus {
-        self.0.process(c, now)
-    }
-
-    fn handle_event(
-        &mut self,
-        c: &mut Connection,
-        e: &ConnectionEvent,
-        now: Instant,
-    ) -> GoalStatus {
-        self.0.handle_event(c, e, now)
     }
 }
