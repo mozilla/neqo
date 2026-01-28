@@ -510,10 +510,10 @@ impl Http3Client {
             },
             now,
         );
-        if let Err(e) = &output {
-            if e.connection_error() {
-                self.close(now, e.code(), "");
-            }
+        if let Err(e) = &output
+            && e.connection_error()
+        {
+            self.close(now, e.code(), "");
         }
         output
     }
@@ -552,10 +552,10 @@ impl Http3Client {
             },
             now,
         );
-        if let Err(e) = &output {
-            if e.connection_error() {
-                self.close(now, e.code(), "");
-            }
+        if let Err(e) = &output
+            && e.connection_error()
+        {
+            self.close(now, e.code(), "");
         }
         output
     }
@@ -654,10 +654,10 @@ impl Http3Client {
         let res = self
             .base_handler
             .read_data(&mut self.conn, stream_id, buf, now);
-        if let Err(e) = &res {
-            if e.connection_error() {
-                self.close(now, e.code(), "");
-            }
+        if let Err(e) = &res
+            && e.connection_error()
+        {
+            self.close(now, e.code(), "");
         }
         res
     }
@@ -719,10 +719,10 @@ impl Http3Client {
             headers,
         );
 
-        if let Err(e) = &output {
-            if e.connection_error() {
-                self.close(now, e.code(), "");
-            }
+        if let Err(e) = &output
+            && e.connection_error()
+        {
+            self.close(now, e.code(), "");
         }
         output
     }
@@ -747,10 +747,10 @@ impl Http3Client {
             headers,
         );
 
-        if let Err(e) = &output {
-            if e.connection_error() {
-                self.close(now, e.code(), "");
-            }
+        if let Err(e) = &output
+            && e.connection_error()
+        {
+            self.close(now, e.code(), "");
         }
         output
     }

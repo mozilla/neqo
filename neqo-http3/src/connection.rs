@@ -1296,14 +1296,13 @@ impl Http3Connection {
         now: Instant,
     ) -> Res<()> {
         let mut recv_stream = self.recv_streams.get_mut(&stream_id);
-        if let Some(r) = &mut recv_stream {
-            if !r
+        if let Some(r) = &mut recv_stream
+            && !r
                 .http_stream()
                 .ok_or(Error::InvalidStreamId)?
                 .extended_connect_wait_for_response()
-            {
-                return Err(Error::InvalidStreamId);
-            }
+        {
+            return Err(Error::InvalidStreamId);
         }
 
         let send_stream = self.send_streams.get_mut(&stream_id);
@@ -1780,12 +1779,12 @@ impl Http3Connection {
         conn: &mut Connection,
     ) -> Option<Box<dyn RecvStream>> {
         let stream = self.recv_streams.remove(&stream_id);
-        if let Some(s) = &stream {
-            if s.stream_type() == Http3StreamType::ExtendedConnect {
-                self.send_streams.remove(&stream_id)?;
-                if let Some(wt) = s.extended_connect_session() {
-                    self.remove_extended_connect(&wt, conn);
-                }
+        if let Some(s) = &stream
+            && s.stream_type() == Http3StreamType::ExtendedConnect
+        {
+            self.send_streams.remove(&stream_id)?;
+            if let Some(wt) = s.extended_connect_session() {
+                self.remove_extended_connect(&wt, conn);
             }
         }
         stream
@@ -1797,16 +1796,14 @@ impl Http3Connection {
         conn: &mut Connection,
     ) -> Option<Box<dyn SendStream>> {
         let stream = self.send_streams.remove(&stream_id);
-        if let Some(s) = &stream {
-            if s.stream_type() == Http3StreamType::ExtendedConnect {
-                if let Some(wt) = self
-                    .recv_streams
-                    .remove(&stream_id)?
-                    .extended_connect_session()
-                {
-                    self.remove_extended_connect(&wt, conn);
-                }
-            }
+        if let Some(s) = &stream
+            && s.stream_type() == Http3StreamType::ExtendedConnect
+            && let Some(wt) = self
+                .recv_streams
+                .remove(&stream_id)?
+                .extended_connect_session()
+        {
+            self.remove_extended_connect(&wt, conn);
         }
         stream
     }

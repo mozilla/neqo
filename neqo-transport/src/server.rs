@@ -331,12 +331,11 @@ impl Server {
         }
         c.set_validation(&self.address_validation);
         c.set_qlog(self.create_qlog_trace(orig_dcid.unwrap_or(initial.dst_cid).as_cid_ref(), now));
-        if let Some(cfg) = &self.ech_config {
-            if c.server_enable_ech(cfg.config, &cfg.public_name, &cfg.sk, &cfg.pk)
+        if let Some(cfg) = &self.ech_config
+            && c.server_enable_ech(cfg.config, &cfg.public_name, &cfg.sk, &cfg.pk)
                 .is_err()
-            {
-                qwarn!("[{self}] Unable to enable ECH");
-            }
+        {
+            qwarn!("[{self}] Unable to enable ECH");
         }
     }
 
@@ -590,11 +589,6 @@ impl Server {
         }
 
         // Process output datagrams.
-        #[allow(
-            clippy::allow_attributes,
-            clippy::needless_match,
-            reason = "FIXME: false positive with MSRV 1.87 (and later?)"
-        )]
         let maybe_callback = match self.process_next_output(now, max_datagrams) {
             // Return immediately. Do any maintenance on next call.
             o @ OutputBatch::DatagramBatch(_) => return o,

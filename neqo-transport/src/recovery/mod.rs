@@ -722,11 +722,11 @@ impl Loss {
         self.confirmed_time = Some(now);
         // Up until now, the ApplicationData space has been ignored for PTO.
         // So maybe fire a PTO.
-        if let Some(pto) = self.pto_time(rtt, PacketNumberSpace::ApplicationData) {
-            if pto < now {
-                let probes = enum_set!(PacketNumberSpace::ApplicationData);
-                self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
-            }
+        if let Some(pto) = self.pto_time(rtt, PacketNumberSpace::ApplicationData)
+            && pto < now
+        {
+            let probes = enum_set!(PacketNumberSpace::ApplicationData);
+            self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
         }
     }
 
