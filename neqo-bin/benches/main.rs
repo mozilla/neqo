@@ -14,6 +14,7 @@ use std::{env, hint::black_box, net::SocketAddr, path::PathBuf, str::FromStr as 
 
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use neqo_bin::{client, server};
+use test_fixture::bench::{self, NOISE_THRESHOLD};
 use tokio::runtime::Builder;
 
 struct Benchmark {
@@ -62,6 +63,7 @@ fn transfer(c: &mut Criterion) {
             .as_ref()
             .map_or_else(|| name.to_string(), |suffix| format!("{name}{suffix}"));
         let mut group = c.benchmark_group("transfer");
+        group.noise_threshold(NOISE_THRESHOLD);
         group.throughput(if num_requests == 1 {
             Throughput::Bytes((upload_size + download_size) as u64)
         } else {
@@ -87,7 +89,7 @@ fn transfer(c: &mut Criterion) {
                             server_handle.send(()).unwrap();
                         })
                     },
-                    BatchSize::PerIteration,
+                    BatchSize::LargeInput,
                 );
         });
         group.finish();
@@ -122,5 +124,9 @@ fn spawn_server() -> (tokio::sync::oneshot::Sender<()>, SocketAddr) {
     (done_sender, addr_receiver.recv().unwrap())
 }
 
-criterion_group!(benches, transfer);
+criterion_group! {
+    name = benches;
+    config = bench::config_walltime();
+    targets = transfer
+}
 criterion_main!(benches);

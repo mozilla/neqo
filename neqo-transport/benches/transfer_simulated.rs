@@ -16,6 +16,7 @@
 use std::time::Duration;
 
 use criterion::{Throughput, criterion_group, criterion_main};
+use test_fixture::bench;
 
 #[path = "transfer_common.rs"]
 mod common;
@@ -38,7 +39,7 @@ fn benchmark(c: &mut criterion::Criterion) {
 
 criterion_group! {
     name = transfer;
-    config = common::criterion_config();
+    config = bench::config_simulation();
     targets = benchmark
 }
 criterion_main!(transfer);
