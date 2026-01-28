@@ -47,16 +47,6 @@ PATCH_DIR = Path("build/rust")
 # (after stripping comments/whitespace) is considered an empty stub.
 MIN_SUBSTANTIAL_CODE_LENGTH = 10
 
-LICENSE_HEADER = """\
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-// Empty stub - this crate is not used on supported platforms.
-"""
-
 
 @dataclass
 class GeckoPatch:
@@ -141,28 +131,32 @@ def fetch_gecko_patches() -> dict[str, GeckoPatch]:
         code = re.sub(r"//.*", "", code)
         code = code.strip()
 
+        # Determine patch kind based on code content.
         if not code or len(code) < MIN_SUBSTANTIAL_CODE_LENGTH:
-            patches[name] = GeckoPatch(kind="empty")
+            kind = "empty"
         elif is_simple_wrapper(code):
-            # Fetch Cargo.toml for wrapper patches.
-            cargo_toml = None
-            try:
-                cargo_url = f"{GECKO_RAW_URL}/build/rust/{name}/Cargo.toml"
-                with urlopen(cargo_url) as response:
-                    cargo_toml = response.read().decode()
-            except Exception:
-                # Can't fetch Cargo.toml, treat as complex.
-                patches[name] = GeckoPatch(kind="complex")
-                continue
-
-            patches[name] = GeckoPatch(
-                kind="wrapper",
-                cargo_toml=cargo_toml,
-                lib_rs=lib_content,
-                lib_path=lib_rel_path,
-            )
+            kind = "wrapper"
         else:
             patches[name] = GeckoPatch(kind="complex")
+            continue
+
+        # Fetch Cargo.toml for empty and wrapper patches.
+        cargo_toml = None
+        try:
+            cargo_url = f"{GECKO_RAW_URL}/build/rust/{name}/Cargo.toml"
+            with urlopen(cargo_url) as response:
+                cargo_toml = response.read().decode()
+        except Exception:
+            # Can't fetch Cargo.toml, treat as complex.
+            patches[name] = GeckoPatch(kind="complex")
+            continue
+
+        patches[name] = GeckoPatch(
+            kind=kind,
+            cargo_toml=cargo_toml,
+            lib_rs=lib_content,
+            lib_path=lib_rel_path,
+        )
 
     return patches
 
@@ -284,55 +278,33 @@ def is_registry_version(info: dict) -> bool:
     return source is not None and source.startswith("registry")
 
 
-def create_empty_patch(crate: str, version: str) -> bool:
-    """Create an empty patch crate. Returns True if created, False if exists."""
-    patch_path = PATCH_DIR / crate
-    if patch_path.exists():
-        return False
+def create_gecko_patch(crate: str, patch: GeckoPatch) -> bool:
+    """Create or update a patch by copying Gecko's files.
 
-    # Use version as-is if it's already a 999 version, otherwise generate one.
-    if "999" in version:
-        patch_version = version
-    else:
-        parts = version.split(".")
-        major, minor = parts[0], parts[1] if len(parts) > 1 else "0"
-        patch_version = f"{major}.{minor}.999"
-
-    patch_path.mkdir(parents=True, exist_ok=True)
-
-    cargo_toml = f"""\
-[package]
-name = "{crate}"
-version = "{patch_version}"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-
-[lib]
-path = "lib.rs"
-"""
-    (patch_path / "Cargo.toml").write_text(cargo_toml)
-    (patch_path / "lib.rs").write_text(LICENSE_HEADER)
-    return True
-
-
-def create_wrapper_patch(crate: str, patch: GeckoPatch) -> bool:
-    """Create a wrapper patch by copying Gecko's files. Returns True if created."""
-    patch_path = PATCH_DIR / crate
-    if patch_path.exists():
-        return False
-
+    Returns True if files were created or changed, False if unchanged.
+    """
     if not patch.cargo_toml or not patch.lib_rs or not patch.lib_path:
         return False
 
-    patch_path.mkdir(parents=True, exist_ok=True)
-
-    # Write Cargo.toml as-is from Gecko.
-    (patch_path / "Cargo.toml").write_text(patch.cargo_toml)
-
-    # Write lib.rs, creating subdirectory if needed (e.g., src/lib.rs).
+    patch_path = PATCH_DIR / crate
+    cargo_file = patch_path / "Cargo.toml"
     lib_file = patch_path / patch.lib_path
+
+    # Check if files already exist with same content.
+    unchanged = (
+        cargo_file.exists()
+        and cargo_file.read_text(encoding="utf-8") == patch.cargo_toml
+        and lib_file.exists()
+        and lib_file.read_text(encoding="utf-8") == patch.lib_rs
+    )
+    if unchanged:
+        return False
+
+    # Create directories and write files.
+    patch_path.mkdir(parents=True, exist_ok=True)
+    cargo_file.write_text(patch.cargo_toml, encoding="utf-8")
     lib_file.parent.mkdir(parents=True, exist_ok=True)
-    lib_file.write_text(patch.lib_rs)
+    lib_file.write_text(patch.lib_rs, encoding="utf-8")
 
     return True
 
@@ -386,6 +358,13 @@ def main():
         file=sys.stderr,
     )
 
+    # Sync existing patches with Gecko's content.
+    # This ensures we track any changes Gecko makes to their patches.
+    for name, patch in gecko_patches.items():
+        if patch.kind in ("empty", "wrapper") and (PATCH_DIR / name).exists():
+            if create_gecko_patch(name, patch):
+                print(f"# Synced {patch.kind} patch: {PATCH_DIR}/{name}")
+
     # Collect version updates needed, grouped by (name, our_version) -> gecko_version.
     # This handles multiple versions of the same crate.
     patches_created: list[tuple[str, str]] = []  # [(name, our_version), ...]
@@ -434,14 +413,9 @@ def main():
                     )
                     continue
 
-                if patch.kind == "empty":
-                    if create_empty_patch(name, gecko_ver):
-                        print(f"# Created empty patch: {PATCH_DIR}/{name}")
-                    for our_ver in our_vers:
-                        patches_created.append((name, our_ver))
-                elif patch.kind == "wrapper":
-                    if create_wrapper_patch(name, patch):
-                        print(f"# Created wrapper patch: {PATCH_DIR}/{name}")
+                if patch.kind in ("empty", "wrapper"):
+                    if create_gecko_patch(name, patch):
+                        print(f"# Updated {patch.kind} patch: {PATCH_DIR}/{name}")
                     for our_ver in our_vers:
                         patches_created.append((name, our_ver))
                 else:  # complex
