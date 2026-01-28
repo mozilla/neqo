@@ -9,15 +9,20 @@
 Compare Cargo.lock with Gecko's and output cargo update commands.
 
 This script compares our Cargo.lock with Firefox/Gecko's Cargo.lock and outputs
-cargo update commands to align versions. For crates that Gecko patches to empty
-stubs (platform-specific crates not needed on desktop), it creates matching
-empty patches in build/rust/.
+cargo update commands to align versions. For crates that Gecko patches, it
+creates matching patches in build/rust/:
+
+- Empty stubs: Platform-specific crates not needed on desktop
+- Wrapper patches: Simple re-exports bridging API changes between versions
 
 Usage: Run from the workspace root (not inside test/).
 """
 
+import json
+import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from graphlib import TopologicalSorter
 from pathlib import Path
 from urllib.request import urlopen
@@ -25,7 +30,10 @@ from urllib.request import urlopen
 import tomlkit
 from packaging.version import Version
 
-GECKO_LOCKFILE_URL = "https://raw.githubusercontent.com/mozilla-firefox/firefox/refs/heads/main/Cargo.lock"
+GECKO_LOCKFILE_URL = (
+    "https://raw.githubusercontent.com"
+    "/mozilla-firefox/firefox/refs/heads/main/Cargo.lock"
+)
 GECKO_BUILD_RUST_URL = (
     "https://api.github.com/repos/mozilla-firefox/firefox/contents/build/rust"
 )
@@ -50,16 +58,52 @@ LICENSE_HEADER = """\
 """
 
 
-def fetch_gecko_empty_patches() -> set[str]:
-    """Fetch Gecko's build/rust/ directory and identify empty patch crates.
+@dataclass
+class GeckoPatch:
+    """Information about a Gecko patch crate."""
 
-    Empty patches are stubs for platform-specific crates that Gecko doesn't need.
-    They contain only a license header, no actual code or re-exports.
+    kind: str  # "empty", "wrapper", or "complex"
+    cargo_toml: str | None = None  # Content of Cargo.toml (for wrappers)
+    lib_rs: str | None = None  # Content of lib.rs (for wrappers)
+    lib_path: str | None = (
+        None  # Relative path to lib.rs (e.g., "lib.rs" or "src/lib.rs")
+    )
+
+
+def is_simple_wrapper(code: str) -> bool:
+    """Check if code consists only of `pub use` re-export statements.
+
+    A simple wrapper patch only re-exports items from another crate,
+    with no additional logic, type definitions, or implementations.
     """
-    import json
-    import re
+    # Remove block comments.
+    code = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
+    # Remove line comments.
+    code = re.sub(r"//.*", "", code)
+    # Remove whitespace and newlines for analysis.
+    code = code.strip()
 
-    empty_patches = set()
+    if not code:
+        return False
+
+    # Split into statements (semicolon-terminated).
+    # Handle the case where `pub use` might span multiple lines.
+    statements = [s.strip() for s in code.split(";") if s.strip()]
+
+    # All statements must be `pub use` or `pub(crate) use` etc.
+    use_pattern = re.compile(r"^pub(\s*\([^)]*\))?\s+use\s+")
+    return all(use_pattern.match(stmt) for stmt in statements)
+
+
+def fetch_gecko_patches() -> dict[str, GeckoPatch]:
+    """Fetch Gecko's build/rust/ directory and classify patch crates.
+
+    Returns a dict mapping crate name to GeckoPatch with:
+    - kind="empty": Stub crates with no code (just license header)
+    - kind="wrapper": Simple re-export wrappers (only `pub use` statements)
+    - kind="complex": Patches with actual logic (require manual handling)
+    """
+    patches = {}
 
     # Fetch directory listing from GitHub API.
     try:
@@ -67,7 +111,7 @@ def fetch_gecko_empty_patches() -> set[str]:
             entries = json.loads(response.read().decode())
     except Exception as e:
         print(f"Warning: Could not fetch Gecko patches list: {e}", file=sys.stderr)
-        return empty_patches
+        return patches
 
     for entry in entries:
         if entry.get("type") != "dir":
@@ -77,10 +121,13 @@ def fetch_gecko_empty_patches() -> set[str]:
 
         # Try to fetch lib.rs (could be at lib.rs or src/lib.rs).
         lib_content = None
+        lib_rel_path = None
         for lib_path in [f"build/rust/{name}/lib.rs", f"build/rust/{name}/src/lib.rs"]:
             try:
                 with urlopen(f"{GECKO_RAW_URL}/{lib_path}") as response:
                     lib_content = response.read().decode()
+                    # Extract relative path within the patch directory.
+                    lib_rel_path = lib_path.split(f"{name}/", 1)[1]
                     break
             except Exception:
                 continue
@@ -89,23 +136,35 @@ def fetch_gecko_empty_patches() -> set[str]:
             continue
 
         # Check if it's empty (only comments and whitespace, no actual code).
-        # Remove comments and check if anything substantial remains.
         code = lib_content
-        # Remove block comments.
         code = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
-        # Remove line comments.
         code = re.sub(r"//.*", "", code)
-        # Remove whitespace.
         code = code.strip()
 
-        # If nothing remains, or only a single short line, it's empty.
-        # Re-export patches have "pub use something::*;" which we exclude.
-        if not code or (
-            len(code) < MIN_SUBSTANTIAL_CODE_LENGTH and "pub use" not in lib_content
-        ):
-            empty_patches.add(name)
+        if not code or len(code) < MIN_SUBSTANTIAL_CODE_LENGTH:
+            patches[name] = GeckoPatch(kind="empty")
+        elif is_simple_wrapper(code):
+            # Fetch Cargo.toml for wrapper patches.
+            cargo_toml = None
+            try:
+                cargo_url = f"{GECKO_RAW_URL}/build/rust/{name}/Cargo.toml"
+                with urlopen(cargo_url) as response:
+                    cargo_toml = response.read().decode()
+            except Exception:
+                # Can't fetch Cargo.toml, treat as complex.
+                patches[name] = GeckoPatch(kind="complex")
+                continue
 
-    return empty_patches
+            patches[name] = GeckoPatch(
+                kind="wrapper",
+                cargo_toml=cargo_toml,
+                lib_rs=lib_content,
+                lib_path=lib_rel_path,
+            )
+        else:
+            patches[name] = GeckoPatch(kind="complex")
+
+    return patches
 
 
 def find_dev_only_packages() -> set[str]:
@@ -115,7 +174,7 @@ def find_dev_only_packages() -> set[str]:
     """
     # Parse workspace Cargo.toml to find members.
     workspace_toml = Path("Cargo.toml")
-    with open(workspace_toml, "r") as f:
+    with open(workspace_toml, "r", encoding="utf-8") as f:
         workspace = tomlkit.load(f)
 
     members = workspace.get("workspace", {}).get("members", [])
@@ -128,7 +187,7 @@ def find_dev_only_packages() -> set[str]:
         member_toml = Path(member) / "Cargo.toml"
         if not member_toml.exists():
             continue
-        with open(member_toml, "r") as f:
+        with open(member_toml, "r", encoding="utf-8") as f:
             cargo = tomlkit.load(f)
 
         # Collect normal dependencies.
@@ -151,7 +210,7 @@ def find_dev_only_packages() -> set[str]:
         dev_build_roots.add(dep)
 
     # Load lockfile to trace transitive dependencies.
-    with open("Cargo.lock", "r") as f:
+    with open("Cargo.lock", "r", encoding="utf-8") as f:
         lock = tomlkit.load(f)
 
     pkg_deps = {}
@@ -186,33 +245,43 @@ def load_lockfile(src: str) -> dict:
     if src.startswith(("http://", "https://")):
         with urlopen(src) as response:
             return tomlkit.loads(response.read().decode())
-    with open(src, "r") as f:
+    with open(src, "r", encoding="utf-8") as f:
         return tomlkit.load(f)
 
 
-def parse_packages(lock: dict, prefer_registry: bool = False) -> dict[str, dict]:
-    """Parse lockfile into a dict of name -> {version, deps, source}."""
-    packages = {}
+def parse_packages(lock: dict) -> dict[str, dict[str, dict]]:
+    """Parse lockfile into a dict of name -> {version -> {deps, source}}.
+
+    Tracks all versions of each package, not just one.
+    """
+    packages: dict[str, dict[str, dict]] = {}
     for pkg in lock.get("package", []):
         name = pkg["name"]
-        source = pkg.get("source")
         version = pkg["version"]
+        source = pkg.get("source")
 
-        # When prefer_registry is True, prefer crates.io versions over local patches.
-        if name in packages:
-            if prefer_registry:
-                # Skip local patches (no source) and our own 999 patches.
-                if not source or "999" in version:
-                    continue
-            elif not source:
-                continue
+        if name not in packages:
+            packages[name] = {}
 
-        packages[name] = {
-            "version": version,
+        packages[name][version] = {
             "deps": [d.split()[0] for d in pkg.get("dependencies", [])],
             "source": source,
         }
     return packages
+
+
+def semver_range(version: str) -> str:
+    """Extract major.minor semver range from a version string."""
+    parts = version.split(".")
+    if len(parts) >= 2:
+        return f"{parts[0]}.{parts[1]}"
+    return parts[0]
+
+
+def is_registry_version(info: dict) -> bool:
+    """Check if a package version is from a registry (not a local patch)."""
+    source = info.get("source")
+    return source is not None and source.startswith("registry")
 
 
 def create_empty_patch(crate: str, version: str) -> bool:
@@ -246,10 +315,32 @@ path = "lib.rs"
     return True
 
 
+def create_wrapper_patch(crate: str, patch: GeckoPatch) -> bool:
+    """Create a wrapper patch by copying Gecko's files. Returns True if created."""
+    patch_path = PATCH_DIR / crate
+    if patch_path.exists():
+        return False
+
+    if not patch.cargo_toml or not patch.lib_rs or not patch.lib_path:
+        return False
+
+    patch_path.mkdir(parents=True, exist_ok=True)
+
+    # Write Cargo.toml as-is from Gecko.
+    (patch_path / "Cargo.toml").write_text(patch.cargo_toml)
+
+    # Write lib.rs, creating subdirectory if needed (e.g., src/lib.rs).
+    lib_file = patch_path / patch.lib_path
+    lib_file.parent.mkdir(parents=True, exist_ok=True)
+    lib_file.write_text(patch.lib_rs)
+
+    return True
+
+
 def add_patch_to_cargo_toml(crate: str) -> bool:
     """Add a patch entry to Cargo.toml. Returns True if added, False if exists."""
     cargo_toml_path = Path("Cargo.toml")
-    doc = tomlkit.parse(cargo_toml_path.read_text())
+    doc = tomlkit.parse(cargo_toml_path.read_text(encoding="utf-8"))
 
     # Ensure [patch.crates-io] section exists.
     if "patch" not in doc:
@@ -263,14 +354,15 @@ def add_patch_to_cargo_toml(crate: str) -> bool:
 
     # Add the patch entry.
     doc["patch"]["crates-io"][crate] = {"path": f"{PATCH_DIR}/{crate}"}
-    cargo_toml_path.write_text(tomlkit.dumps(doc))
+    cargo_toml_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
     return True
 
 
 def main():
-    # Fetch list of Gecko's empty patches.
-    print("Fetching Gecko empty patches list...", file=sys.stderr)
-    gecko_empty_patches = fetch_gecko_empty_patches()
+    """Update Cargo.lock to align with Gecko's versions."""
+    # Fetch and classify Gecko's patches.
+    print("Fetching Gecko patches...", file=sys.stderr)
+    gecko_patches = fetch_gecko_patches()
 
     # Load both lockfiles.
     print(f"Fetching {GECKO_LOCKFILE_URL}...", file=sys.stderr)
@@ -285,7 +377,7 @@ def main():
         sys.exit("Error: Cargo.lock not found. Run from the workspace root.")
 
     gecko_pkgs = parse_packages(gecko_lock)
-    our_pkgs = parse_packages(our_lock, prefer_registry=True)
+    our_pkgs = parse_packages(our_lock)
 
     # Find common packages (intersection).
     common = set(gecko_pkgs) & set(our_pkgs)
@@ -294,70 +386,109 @@ def main():
         file=sys.stderr,
     )
 
-    # Find version differences, skipping workspace crates.
-    different = {}
-    patches_created = []
+    # Collect version updates needed, grouped by (name, our_version) -> gecko_version.
+    # This handles multiple versions of the same crate.
+    patches_created: list[tuple[str, str]] = []  # [(name, our_version), ...]
+    version_updates: dict[tuple[str, str], str] = {}  # (name, our_ver) -> gecko_ver
 
     for name in common:
-        gecko_pkg = gecko_pkgs[name]
-        our_pkg = our_pkgs[name]
+        gecko_versions = gecko_pkgs[name]  # {version -> info}
+        our_versions = our_pkgs[name]  # {version -> info}
 
-        # Skip workspace crates (no source).
-        if not our_pkg["source"]:
+        # Skip workspace crates (no source on any version).
+        if all(not is_registry_version(info) for info in our_versions.values()):
             continue
 
-        if gecko_pkg["version"] == our_pkg["version"]:
-            continue
+        # Group versions by semver range (major.minor).
+        gecko_by_range: dict[str, list[str]] = {}
+        for ver in gecko_versions:
+            gecko_by_range.setdefault(semver_range(ver), []).append(ver)
 
-        gecko_version = gecko_pkg["version"]
+        our_by_range: dict[str, list[str]] = {}
+        for ver, info in our_versions.items():
+            if is_registry_version(info):
+                our_by_range.setdefault(semver_range(ver), []).append(ver)
 
-        # Handle Gecko 999 patches.
-        if "999" in gecko_version:
-            if name in gecko_empty_patches:
-                # Use Gecko's version (e.g., 0.3.999) to match their semver patching.
-                if create_empty_patch(name, gecko_version):
-                    print(f"# Created empty patch: {PATCH_DIR}/{name}")
-                patches_created.append(name)
-            else:
-                print(
-                    f"# Skipping Gecko non-empty patch for {name} (requires manual handling)"
-                )
-            continue
+        # For each semver range we have, check what Gecko has.
+        for sv_range, our_vers in our_by_range.items():
+            gecko_vers = gecko_by_range.get(sv_range, [])
 
-        different[name] = gecko_pkg
+            if not gecko_vers:
+                # Gecko doesn't have this range; nothing to align.
+                continue
+
+            # Find Gecko's version for this range (prefer 999 patch, else registry).
+            gecko_999 = [v for v in gecko_vers if "999" in v]
+            gecko_registry = [v for v in gecko_vers if "999" not in v]
+
+            if gecko_999:
+                # Gecko uses a 999 patch for this range.
+                gecko_ver = gecko_999[0]
+                patch = gecko_patches.get(name)
+
+                if patch is None:
+                    print(
+                        f"# Skipping {name} {sv_range}.x: "
+                        f"Gecko uses 999 patch but patch not found",
+                        file=sys.stderr,
+                    )
+                    continue
+
+                if patch.kind == "empty":
+                    if create_empty_patch(name, gecko_ver):
+                        print(f"# Created empty patch: {PATCH_DIR}/{name}")
+                    for our_ver in our_vers:
+                        patches_created.append((name, our_ver))
+                elif patch.kind == "wrapper":
+                    if create_wrapper_patch(name, patch):
+                        print(f"# Created wrapper patch: {PATCH_DIR}/{name}")
+                    for our_ver in our_vers:
+                        patches_created.append((name, our_ver))
+                else:  # complex
+                    print(
+                        f"# Skipping Gecko complex patch for {name} "
+                        f"(requires manual handling)"
+                    )
+            elif gecko_registry:
+                # Gecko uses a registry version; update ours to match.
+                gecko_ver = gecko_registry[0]
+                for our_ver in our_vers:
+                    if our_ver != gecko_ver:
+                        version_updates[(name, our_ver)] = gecko_ver
 
     # Add created patches to Cargo.toml and update Cargo.lock to use them.
-    for crate in patches_created:
-        if add_patch_to_cargo_toml(crate):
-            print(f"# Added {crate} to [patch.crates-io] in Cargo.toml")
-        # Run cargo update to pick up the patch (even if already in Cargo.toml).
+    patches_added: set[str] = set()
+    for name, our_ver in patches_created:
+        if name not in patches_added:
+            if add_patch_to_cargo_toml(name):
+                print(f"# Added {name} to [patch.crates-io] in Cargo.toml")
+            patches_added.add(name)
+
+        # Run cargo update to pick up the patch, specifying the version being replaced.
         result = subprocess.run(
-            ["cargo", "update", "-p", crate],
+            ["cargo", "update", "-p", f"{name}@{our_ver}"],
             capture_output=True,
             text=True,
+            check=False,
         )
         if result.returncode == 0:
-            print(f"# Updated {crate} to use patch")
+            print(f"# Updated {name}@{our_ver} to use patch")
 
-    if not different:
+    if not version_updates:
         print("All packages have the same versions (excluding Gecko patches)")
         return
 
-    # Re-read our lockfile in case patches changed it.
-    our_pkgs = parse_packages(load_lockfile("Cargo.lock"), prefer_registry=True)
+    # Build dependency graph for topological sort.
+    # We need to update dependents before dependencies.
+    all_names = {name for name, _ in version_updates}
+    graph: dict[str, list[str]] = {name: [] for name in all_names}
 
-    # Filter out packages no longer in our lockfile.
-    different = {k: v for k, v in different.items() if k in our_pkgs}
-
-    if not different:
-        print("All packages have the same versions (excluding Gecko patches)")
-        return
-
-    # Topological sort: dependents before dependencies.
-    graph = {
-        name: [d for d in pkg["deps"] if d in different]
-        for name, pkg in different.items()
-    }
+    our_pkgs = parse_packages(load_lockfile("Cargo.lock"))
+    for name in all_names:
+        for ver, info in our_pkgs.get(name, {}).items():
+            for dep in info["deps"]:
+                if dep in all_names:
+                    graph[name].append(dep)
 
     updated = []
     downgraded = []
@@ -370,96 +501,105 @@ def main():
         failed.clear()
 
         # Re-read lockfile to get current versions after any updates.
-        our_pkgs = parse_packages(load_lockfile("Cargo.lock"), prefer_registry=True)
+        our_pkgs = parse_packages(load_lockfile("Cargo.lock"))
 
         for name in TopologicalSorter(graph).static_order():
-            if name not in our_pkgs:
-                continue  # Package no longer in lockfile.
-
-            gecko_version = different[name]["version"]
-            our_version = our_pkgs[name]["version"]
-
-            if gecko_version == our_version:
-                continue  # Already at target version.
-
-            is_downgrade = parse_version(gecko_version) < parse_version(our_version)
-
-            action = "Downgrading" if is_downgrade else "Updating"
-            # Use name@version to avoid ambiguity when multiple versions exist.
-            cmd = [
-                "cargo",
-                "update",
-                "-p",
-                f"{name}@{our_version}",
-                "--precise",
-                gecko_version,
+            # Find pending updates for this package.
+            pending = [
+                (our_ver, gecko_ver)
+                for (n, our_ver), gecko_ver in version_updates.items()
+                if n == name
             ]
-            print(f"{action} {name}: {our_version} -> {gecko_version}")
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                # Extract the actual error (skip "Updating crates.io index" line).
-                err_lines = [
-                    ln
-                    for ln in result.stderr.strip().split("\n")
-                    if not ln.startswith("Updating") and ln.strip()
-                ]
-                failed[name] = (
-                    our_version,
-                    gecko_version,
-                    err_lines[0] if err_lines else "Unknown error",
-                )
-            else:
-                made_progress = True
-                if is_downgrade:
-                    downgraded.append(name)
-                else:
-                    updated.append(name)
 
-    # Summary
+            for our_ver, gecko_ver in pending:
+                # Check if we still have this version.
+                if name not in our_pkgs or our_ver not in our_pkgs[name]:
+                    continue
+
+                # Check if already at target.
+                if our_ver == gecko_ver:
+                    continue
+
+                is_downgrade = parse_version(gecko_ver) < parse_version(our_ver)
+                action = "Downgrading" if is_downgrade else "Updating"
+
+                cmd = [
+                    "cargo",
+                    "update",
+                    "-p",
+                    f"{name}@{our_ver}",
+                    "--precise",
+                    gecko_ver,
+                ]
+                print(f"{action} {name}: {our_ver} -> {gecko_ver}")
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, check=False
+                )
+
+                if result.returncode != 0:
+                    err_lines = [
+                        ln
+                        for ln in result.stderr.strip().split("\n")
+                        if not ln.startswith("Updating") and ln.strip()
+                    ]
+                    failed[(name, our_ver)] = (
+                        gecko_ver,
+                        err_lines[0] if err_lines else "Unknown error",
+                    )
+                else:
+                    made_progress = True
+                    if is_downgrade:
+                        downgraded.append((name, our_ver, gecko_ver))
+                    else:
+                        updated.append((name, our_ver, gecko_ver))
+
+    # Summary.
     print()
     if updated:
         print(f"Updated {len(updated)} package(s)")
     if downgraded:
         print(f"Downgraded {len(downgraded)} package(s)")
+
     if failed:
         # Determine which failures are due to dev-only dependencies.
         dev_only = find_dev_only_packages()
 
         # Parse lockfile to find what requires each failed package.
-        with open("Cargo.lock", "r") as f:
+        with open("Cargo.lock", "r", encoding="utf-8") as f:
             lock = tomlkit.load(f)
-        dependents = {}
+        dependents: dict[str, list[str]] = {}
         for pkg in lock.get("package", []):
             for dep in pkg.get("dependencies", []):
                 dep_name = dep.split()[0]
-                if dep_name in failed:
-                    dependents.setdefault(dep_name, []).append(pkg["name"])
+                dependents.setdefault(dep_name, []).append(pkg["name"])
 
         dev_failures = {}
         real_failures = {}
-        for name, (ours, theirs, err) in failed.items():
-            # Check if all dependents are dev-only packages.
+        for (name, our_ver), (gecko_ver, err) in failed.items():
             pkg_dependents = dependents.get(name, [])
             if pkg_dependents and all(d in dev_only for d in pkg_dependents):
-                dev_failures[name] = (ours, theirs, pkg_dependents)
+                dev_failures[(name, our_ver)] = (gecko_ver, pkg_dependents)
             else:
-                real_failures[name] = (ours, theirs, err)
+                real_failures[(name, our_ver)] = (gecko_ver, err)
 
         if real_failures:
             print(f"Failed {len(real_failures)} package(s):")
-            for name, (ours, theirs, err) in real_failures.items():
-                print(f"  {name}: {ours} -> {theirs}: {err}")
+            for (name, our_ver), (gecko_ver, err) in real_failures.items():
+                print(f"  {name}: {our_ver} -> {gecko_ver}: {err}")
 
         if dev_failures:
             print(
-                f"\nSkipped {len(dev_failures)} package(s) due to dev-dependency constraints:"
+                f"\nSkipped {len(dev_failures)} package(s) "
+                f"due to dev-dependency constraints:"
             )
             print(
-                "  (These don't affect Gecko integration since Gecko ignores dev-dependencies)"
+                "  (These don't affect Gecko integration "
+                "since Gecko ignores dev-dependencies)"
             )
-            for name, (ours, theirs, blockers) in dev_failures.items():
+            for (name, our_ver), (gecko_ver, blockers) in dev_failures.items():
                 print(
-                    f"  {name}: {ours} -> {theirs} (blocked by: {', '.join(blockers)})"
+                    f"  {name}: {our_ver} -> {gecko_ver} "
+                    f"(blocked by: {', '.join(blockers)})"
                 )
 
 
