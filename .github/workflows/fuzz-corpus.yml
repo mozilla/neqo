@@ -2,10 +2,14 @@ name: Check for new fuzzing samples
 on:
   workflow_dispatch:
     inputs:
-      monthly-only:
-        description: 'Only process monthly fuzzers (client_initial, server_initial)'
-        type: boolean
-        default: false
+      fuzzers:
+        description: 'Which fuzzers to process'
+        type: choice
+        options:
+          - all
+          - weekly
+          - monthly
+        default: all
   schedule:
     # Weekly: Run at 12:00 AM on Sunday.
     - cron: '0 0 * * 0'
@@ -29,7 +33,7 @@ jobs:
       contents: write # Needed to push branches.
 
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: true # zizmor: ignore[artipacked] We need to push branches.
 
@@ -46,11 +50,28 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
+      - id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FUZZERS_INPUT: ${{ inputs.fuzzers }}
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          # Determine which fuzzers to run based on trigger type
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # Manual trigger: use input directly
+            echo "fuzzers=$FUZZERS_INPUT" >> "$GITHUB_OUTPUT"
+          elif [ "$SCHEDULE" = "0 0 * * 0" ]; then
+            # Weekly schedule (Sunday)
+            echo "fuzzers=weekly" >> "$GITHUB_OUTPUT"
+          else
+            # Monthly schedule (1st of month)
+            echo "fuzzers=all" >> "$GITHUB_OUTPUT"
+          fi
+
       - env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHA: ${{ github.sha }}
-          # Monthly schedule or manual trigger with monthly-only=true
-          MONTHLY_ONLY: ${{ github.event.schedule == '0 0 1 * *' || inputs.monthly-only }}
+          FUZZER_FILTER: ${{ steps.filter.outputs.fuzzers }}
         run: |
           ./test/make-fuzz-corpus.sh
           # If there are no new corpus samples, exit.

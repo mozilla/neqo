@@ -12,10 +12,10 @@ use neqo_common::event::Provider as EventProvider;
 use neqo_crypto::ResumptionToken;
 
 use crate::{
+    AppError, Stats,
     connection::State,
     quic_datagrams::DatagramTracking,
     stream_id::{StreamId, StreamType},
-    AppError, Stats,
 };
 
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]

@@ -10,19 +10,19 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider as _, qdebug, qinfo, qtrace, Header, MessageType, Role};
+use neqo_common::{Header, MessageType, Role, event::Provider as _, qdebug, qinfo, qtrace};
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, DatagramTracking, StreamId, StreamType,
 };
 
 use crate::{
+    Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler,
+    ReceiveOutput, Res,
     connection::{Http3Connection, Http3State, SessionAcceptAction},
     frames::HFrame,
     recv_message::{RecvMessage, RecvMessageInfo},
     send_message::SendMessage,
     server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents},
-    Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler,
-    ReceiveOutput, Res,
 };
 
 #[derive(Debug)]
@@ -443,13 +443,20 @@ impl Http3ServerHandler {
                         HFrame::Goaway { .. } | HFrame::CancelPush { .. } => {
                             Err(Error::HttpFrameUnexpected)
                         }
-                        HFrame::PriorityUpdatePush { element_id, priority } => {
+                        HFrame::PriorityUpdatePush {
+                            element_id,
+                            priority,
+                        } => {
                             // TODO: check if the element_id references a promised push stream or
                             // is greater than the maximum Push ID.
-                            self.events.priority_update(StreamId::from(element_id), priority);
+                            self.events
+                                .priority_update(StreamId::from(element_id), priority);
                             Ok(())
                         }
-                        HFrame::PriorityUpdateRequest { element_id, priority } => {
+                        HFrame::PriorityUpdateRequest {
+                            element_id,
+                            priority,
+                        } => {
                             // check that the element_id references a request stream
                             // within the client-sided bidirectional stream limit
                             let element_stream_id = StreamId::new(element_id);
@@ -457,7 +464,7 @@ impl Http3ServerHandler {
                                 || !element_stream_id.is_client_initiated()
                                 || !conn.is_stream_id_allowed(element_stream_id)
                             {
-                                return Err(Error::HttpId)
+                                return Err(Error::HttpId);
                             }
 
                             self.events.priority_update(element_stream_id, priority);
@@ -490,10 +497,10 @@ impl Http3ServerHandler {
     ) -> Res<(usize, bool)> {
         qdebug!("[{self}] read_data from stream {stream_id}");
         let res = self.base_handler.read_data(conn, stream_id, buf, now);
-        if let Err(e) = &res {
-            if e.connection_error() {
-                self.close(conn, now, e);
-            }
+        if let Err(e) = &res
+            && e.connection_error()
+        {
+            self.close(conn, now, e);
         }
         res
     }

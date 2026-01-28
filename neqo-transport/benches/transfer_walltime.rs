@@ -13,7 +13,7 @@
 
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, BatchSize::SmallInput};
+use criterion::{BatchSize::SmallInput, criterion_group, criterion_main};
 
 #[path = "transfer_common.rs"]
 mod common;

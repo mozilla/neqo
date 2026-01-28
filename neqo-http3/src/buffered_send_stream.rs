@@ -9,7 +9,7 @@ use std::time::Instant;
 use neqo_common::Encoder;
 use neqo_transport::{Connection, StreamId};
 
-use crate::{qlog, Res};
+use crate::{Res, qlog};
 
 #[derive(Debug, PartialEq, Eq, Default)]
 pub enum BufferedStream {

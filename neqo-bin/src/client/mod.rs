@@ -9,7 +9,7 @@
 use std::{
     collections::VecDeque,
     fmt::Display,
-    fs::{create_dir_all, File, OpenOptions},
+    fs::{File, OpenOptions, create_dir_all},
     io::{self, BufWriter, ErrorKind},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _},
     num::NonZeroUsize,
@@ -21,14 +21,15 @@ use std::{
 
 use clap::Parser;
 use futures::{
-    future::{select, Either},
     FutureExt as _, TryFutureExt as _,
+    future::{Either, select},
 };
 use http::Uri as Url;
-use neqo_common::{qdebug, qerror, qinfo, qlog::Qlog, Datagram, Role};
+use neqo_common::{Datagram, Role, qdebug, qerror, qinfo, qlog::Qlog};
 use neqo_crypto::{
+    Cipher, ResumptionToken,
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
-    init, Cipher, ResumptionToken,
+    init,
 };
 use neqo_http3::Header;
 use neqo_transport::{AppError, CloseReason, ConnectionId, OutputBatch, Version};
@@ -368,7 +369,7 @@ enum CloseState {
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
     fn process_multiple_output(&mut self, now: Instant, max_datagrams: NonZeroUsize)
-        -> OutputBatch;
+    -> OutputBatch;
     fn process_multiple_input<'a>(
         &mut self,
         dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
@@ -472,7 +473,9 @@ impl<'a, H: Handler> Runner<'a, H> {
                         Err(e)
                             if e.raw_os_error() == Some(libc::EIO) && dgram.num_datagrams() > 1 =>
                         {
-                            qinfo!("`libc::sendmsg` failed with {e}; quinn-udp will halt segmentation offload");
+                            qinfo!(
+                                "`libc::sendmsg` failed with {e}; quinn-udp will halt segmentation offload"
+                            );
                             // Drop the packets and let QUIC handle retransmission.
                             break;
                         }
@@ -495,10 +498,7 @@ impl<'a, H: Handler> Runner<'a, H> {
     }
 
     async fn process_multiple_input(&mut self) -> Res<()> {
-        loop {
-            let Some(dgrams) = self.socket.recv(self.local_addr, &mut self.recv_buf)? else {
-                break;
-            };
+        while let Some(dgrams) = self.socket.recv(self.local_addr, &mut self.recv_buf)? {
             self.client.process_multiple_input(dgrams, Instant::now());
             self.process_output().await?;
         }
@@ -538,7 +538,7 @@ const fn local_addr_for(remote_addr: &SocketAddr, local_port: u16) -> SocketAddr
     }
 }
 
-fn urls_by_origin(urls: &[Url]) -> impl Iterator<Item = ((String, u16), VecDeque<Url>)> {
+fn urls_by_origin(urls: &[Url]) -> impl Iterator<Item = ((String, u16), VecDeque<Url>)> + use<> {
     urls.iter()
         .fold(
             HashMap::<(String, u16), VecDeque<Url>>::default(),

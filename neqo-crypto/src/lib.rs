@@ -48,12 +48,12 @@ pub use self::{
     auth::AuthenticationStatus,
     constants::*,
     ech::{
-        encode_config as encode_ech_config, generate_keys as generate_ech_keys, AeadId, KdfId,
-        KemId, SymmetricSuite,
+        AeadId, KdfId, KemId, SymmetricSuite, encode_config as encode_ech_config,
+        generate_keys as generate_ech_keys,
     },
     err::{Error, PRErrorCode, Res},
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
-    p11::{random, randomize, PrivateKey, PublicKey, SymKey},
+    p11::{PrivateKey, PublicKey, SymKey, random, randomize},
     replay::AntiReplay,
     secrets::SecretDirection,
     ssl::Opt,
@@ -204,7 +204,9 @@ where
     if data.is_null() || len == 0 {
         &[]
     } else {
-        #[expect(clippy::disallowed_methods, reason = "This is non-null.")]
-        std::slice::from_raw_parts(data, len)
+        unsafe {
+            #[expect(clippy::disallowed_methods, reason = "This is non-null.")]
+            std::slice::from_raw_parts(data, len)
+        }
     }
 }

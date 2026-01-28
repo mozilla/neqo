@@ -6,23 +6,24 @@
 
 use std::time::Duration;
 
-use neqo_common::{event::Provider as _, Datagram, Ecn, Tos};
+use neqo_common::{Datagram, Ecn, Tos, event::Provider as _};
 use strum::IntoEnumIterator as _;
 use test_fixture::{
+    DEFAULT_ADDR_V4,
     assertions::{assert_v4_path, assert_v6_path},
-    fixture_init, now, DEFAULT_ADDR_V4,
+    fixture_init, now,
 };
 
 use crate::{
+    ConnectionEvent, ConnectionId, ConnectionParameters, Output, StreamType,
     connection::tests::{
-        assert_path_challenge_min_len, connect_force_idle, connect_force_idle_with_modifier,
-        default_client, default_server, handshake_with_modifier, migration::get_cid, new_client,
-        new_server, send_and_receive, send_something, send_something_with_modifier,
-        send_with_modifier_and_receive, DEFAULT_RTT,
+        DEFAULT_RTT, assert_path_challenge_min_len, connect_force_idle,
+        connect_force_idle_with_modifier, default_client, default_server, handshake_with_modifier,
+        migration::get_cid, new_client, new_server, send_and_receive, send_something,
+        send_something_with_modifier, send_with_modifier_and_receive,
     },
     ecn, packet,
     path::Path,
-    ConnectionEvent, ConnectionId, ConnectionParameters, Output, StreamType,
 };
 
 fn assert_ecn_enabled(tos: Tos) {
@@ -571,7 +572,7 @@ fn ecn_migration_bleach_ce_data() {
 fn ecn_migration_bleach_drop_data() {
     let (before, after, migrated) = migration_with_modifiers(bleach(), drop(), ecn::TEST_COUNT);
     assert_ecn_disabled(before); // ECN validation fails before migration due to bleaching.
-                                 // Migration failed, ECN on original path is still disabled.
+    // Migration failed, ECN on original path is still disabled.
     assert_ecn_disabled(after);
     assert!(!migrated);
 }
@@ -652,7 +653,7 @@ fn ecn_migration_ce_ce_data() {
 fn ecn_migration_ce_drop_data() {
     let (before, after, migrated) = migration_with_modifiers(ce(), drop(), ecn::TEST_COUNT);
     assert_ecn_enabled(before); // ECN validation concludes before migration, despite all CE marks.
-                                // Migration failed, ECN on original path is still enabled.
+    // Migration failed, ECN on original path is still enabled.
     assert_ecn_enabled(after);
     assert!(!migrated);
 }

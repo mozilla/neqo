@@ -13,7 +13,7 @@ use std::{
 
 use neqo_common::{qdebug, qtrace};
 
-use crate::cc::{classic_cc::WindowAdjustment, CongestionEvent};
+use crate::cc::{CongestionEvent, classic_cc::WindowAdjustment};
 
 /// Convert an integer congestion window value into a floating point value.
 /// This has the effect of reducing larger values to `1<<53`.

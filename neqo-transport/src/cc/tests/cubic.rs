@@ -20,9 +20,9 @@ use test_fixture::now;
 use super::{IP_ADDR, MTU, RTT};
 use crate::{
     cc::{
-        classic_cc::ClassicCongestionControl,
-        cubic::{convert_to_f64, Cubic},
         CongestionControl as _, CongestionEvent,
+        classic_cc::ClassicCongestionControl,
+        cubic::{Cubic, convert_to_f64},
     },
     pmtud::Pmtud,
     recovery::sent,

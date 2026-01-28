@@ -6,20 +6,20 @@
 
 use std::time::Duration;
 
-use neqo_common::{qdebug, qinfo, Datagram, Ecn};
+use neqo_common::{Datagram, Ecn, qdebug, qinfo};
 
 use super::{
-    super::Output, ack_bytes, assert_full_cwnd, connect_rtt_idle, cwnd, cwnd_avail, cwnd_packets,
-    default_client, default_server, fill_cwnd, induce_persistent_congestion, send_something,
-    CLIENT_HANDSHAKE_1RTT_PACKETS, DEFAULT_RTT, POST_HANDSHAKE_CWND,
+    super::Output, CLIENT_HANDSHAKE_1RTT_PACKETS, DEFAULT_RTT, POST_HANDSHAKE_CWND, ack_bytes,
+    assert_full_cwnd, connect_rtt_idle, cwnd, cwnd_avail, cwnd_packets, default_client,
+    default_server, fill_cwnd, induce_persistent_congestion, send_something,
 };
 use crate::{
+    CongestionControlAlgorithm, ConnectionParameters,
     connection::tests::{connect_with_rtt, new_client, new_server, now},
     packet,
     recovery::{ACK_ONLY_SIZE_LIMIT, PACKET_THRESHOLD},
     sender::PACING_BURST_SIZE,
     stream_id::StreamType,
-    CongestionControlAlgorithm, ConnectionParameters,
 };
 
 #[test]

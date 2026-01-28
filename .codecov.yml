@@ -4,6 +4,17 @@ ignore:
   - "neqo-bin"
   - "test-fixture"
 
+# Coverage flags for each platform. Carryforward reuses cached coverage if an upload fails.
+flags:
+  linux:
+    carryforward: true
+  macos:
+    carryforward: true
+  windows:
+    carryforward: true
+  freebsd:
+    carryforward: true
+
 # Add any new components to the list below.
 component_management:
   individual_components:
@@ -40,6 +51,13 @@ comment:
 
 coverage:
   status:
+    # Only post coverage status on pull requests, not on merge queue commits.
+    # This prevents PRs from failing in the merge queue due to coverage changes
+    # introduced by other recently-merged PRs.
     project:
       default:
         threshold: 0.05%
+        only_pulls: true
+    patch:
+      default:
+        only_pulls: true

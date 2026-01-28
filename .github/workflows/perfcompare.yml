@@ -31,7 +31,7 @@ jobs:
 
     steps:
       - name: Checkout mozilla/neqo
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: mozilla/neqo
           path: neqo
@@ -43,27 +43,27 @@ jobs:
           git fetch --no-tags --depth=1 origin main
 
       - name: Checkout microsoft/msquic
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: microsoft/msquic
-          ref: v2.5.5
+          ref: v2.5.6
           path: msquic
           submodules: 'recursive'
           persist-credentials: false
           clean: false
 
       - name: Checkout google/quiche
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: google/quiche
-          ref: f9f012c06eeabf39ccfbaaf6ea4bf5bda932d25b # Google doesn't tag release, just update the hash occasionally
+          ref: c52d86fe10442363e4e8c5a66e639187c419d7c0 # Google doesn't tag release, just update the hash occasionally
           path: google-quiche
           submodules: 'recursive'
           persist-credentials: false
           clean: false
 
       - name: Checkout cloudflare/quiche
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: cloudflare/quiche
           ref: 0.24.5
@@ -73,10 +73,10 @@ jobs:
           clean: false
 
       - name: Checkout aws/s2n-quic
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: aws/s2n-quic
-          ref: v1.69.0
+          ref: v1.72.0
           path: s2n-quic
           submodules: 'recursive'
           persist-credentials: false

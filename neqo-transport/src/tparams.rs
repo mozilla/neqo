@@ -14,21 +14,22 @@ use std::{
 };
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{hex, qdebug, qinfo, qtrace, Buffer, Decoder, Encoder, Role};
+use neqo_common::{Buffer, Decoder, Encoder, Role, hex, qdebug, qinfo, qtrace};
 use neqo_crypto::{
+    HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
     constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
-    random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
+    random,
 };
 use strum::FromRepr;
 
 use crate::{
+    Error, Res,
     cid::{ConnectionId, ConnectionIdEntry, ConnectionIdManager},
     packet::MIN_INITIAL_PACKET_SIZE,
     stateless_reset::Token as Srt,
     tracking::DEFAULT_REMOTE_ACK_DELAY,
     version::{self, Version},
-    Error, Res,
 };
 
 #[derive(Debug, Clone, Enum, PartialEq, Eq, Copy, FromRepr)]
@@ -900,14 +901,14 @@ where
 mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
-    use neqo_common::{qdebug, Decoder, Encoder};
     use TransportParameterId::*;
+    use neqo_common::{Decoder, Encoder, qdebug};
 
     use super::PreferredAddress;
     use crate::{
+        ConnectionId, Error, Version,
         stateless_reset::Token as Srt,
         tparams::{TransportParameter, TransportParameterId, TransportParameters},
-        ConnectionId, Error, Version,
     };
 
     #[test]
@@ -984,13 +985,7 @@ mod tests {
         F: FnOnce(&mut Option<SocketAddrV4>, &mut Option<SocketAddrV6>, &mut ConnectionId),
     {
         let mut spa = make_spa();
-        if let TransportParameter::PreferredAddress {
-            ref mut v4,
-            ref mut v6,
-            ref mut cid,
-            ..
-        } = &mut spa
-        {
+        if let TransportParameter::PreferredAddress { v4, v6, cid, .. } = &mut spa {
             wrecker(v4, v6, cid);
         } else {
             unreachable!();
