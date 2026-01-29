@@ -18,10 +18,11 @@ use crate::{
     stream_id::{StreamId, StreamType},
 };
 
-#[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub enum OutgoingDatagramOutcome {
     DroppedTooBig,
     DroppedQueueFull,
+    Sent,
     Lost,
     Acked,
 }
