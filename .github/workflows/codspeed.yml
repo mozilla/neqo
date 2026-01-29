@@ -29,63 +29,130 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       benches: ${{ steps.benches.outputs.benches }}
+      walltime-benches: ${{ steps.benches.outputs.walltime_benches }}
+      has-walltime: ${{ steps.benches.outputs.has_walltime }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
       - id: benches
         run: |
-          # Create a GitHub matrix where each entry is a bench with its
+          # Create GitHub matrices where each entry is a bench with its
           # associated crate, benchmarking mode, and runner taken from the
-          # Cargo metadata. Walltime benchmarks run on Codspeed runners,
-          # simulation and memory benchmarks run on GitHub runners.
-          # Each benchmark is run twice: once for CPU profiling (simulation
-          # or walltime) and once for memory profiling.
+          # Cargo metadata. Walltime benchmarks are split into a separate
+          # matrix since they are built on GitHub runners and only run on
+          # CodSpeed runners, while simulation and memory benchmarks build
+          # and run on GitHub runners.
           # Memory profiling can be disabled by setting codspeed.memory = false
           # in the package.metadata.bench entry.
-          {
-            echo -n "benches="
-            cargo metadata --no-deps --format-version 1 | jq -c '
-              [.packages[] |
-                . as $pkg |
-                .targets[] |
-                select(.kind[] == "bench") |
-                select(has("required-features")) |
-                .name as $bench_name |
-                (($pkg.metadata.bench // []) | map(select(.name == $bench_name)) | .[0]) as $bench_meta |
-                (($bench_meta.codspeed.mode) // "simulation") as $cpu_mode |
-                (if $bench_meta.codspeed.memory == null then true else $bench_meta.codspeed.memory end) as $memory_enabled |
-                (
-                  # CPU profiling entry (simulation or walltime)
+          ALL_BENCHES=$(cargo metadata --no-deps --format-version 1 | jq -c '
+            [.packages[] |
+              . as $pkg |
+              .targets[] |
+              select(.kind[] == "bench") |
+              select(has("required-features")) |
+              .name as $bench_name |
+              (($pkg.metadata.bench // []) | map(select(.name == $bench_name)) | .[0]) as $bench_meta |
+              (($bench_meta.codspeed.mode) // "simulation") as $cpu_mode |
+              (if $bench_meta.codspeed.memory == null then true else $bench_meta.codspeed.memory end) as $memory_enabled |
+              (
+                # CPU profiling entry (simulation or walltime)
+                {
+                  crate: $pkg.name,
+                  bench: $bench_name,
+                  mode: $cpu_mode
+                },
+                # Memory profiling entry (only if enabled)
+                if $memory_enabled then
                   {
                     crate: $pkg.name,
                     bench: $bench_name,
-                    mode: $cpu_mode,
-                    runner: (if $cpu_mode == "walltime" then {group: "codspeed", labels: "codspeed-macro"} else "ubuntu-24.04" end)
-                  },
-                  # Memory profiling entry (only if enabled)
-                  if $memory_enabled then
-                    {
-                      crate: $pkg.name,
-                      bench: $bench_name,
-                      mode: "memory",
-                      runner: "ubuntu-24.04"
-                    }
-                  else
-                    empty
-                  end
-                )
-              ]'
-          } >> "${GITHUB_OUTPUT}"
+                    mode: "memory"
+                  }
+                else
+                  empty
+                end
+              )
+            ]')
+
+          NON_WALLTIME=$(echo "$ALL_BENCHES" | jq -c '[.[] | select(.mode != "walltime") | . + {runner: "ubuntu-24.04"}]')
+          WALLTIME=$(echo "$ALL_BENCHES" | jq -c '[.[] | select(.mode == "walltime")]')
+          HAS_WALLTIME=$(echo "$WALLTIME" | jq 'length > 0')
+
+          {
+            echo "benches=$NON_WALLTIME"
+            echo "walltime_benches=$WALLTIME"
+            echo "has_walltime=$HAS_WALLTIME"
+          } >> "$GITHUB_OUTPUT"
+
+  # Build all walltime benchmarks on GitHub ARM runners.
+  # CodSpeed's macro runners are aarch64, so we build on ARM for compatibility.
+  # Using ubuntu-22.04 for glibc compatibility with CodSpeed runners.
+  build-walltime:
+    name: Build walltime benchmarks
+    runs-on: ubuntu-22.04-arm
+    needs: bench-matrix
+    if: ${{ needs.bench-matrix.outputs.has-walltime == 'true' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/rust
+        with:
+          version: stable
+          tools: cargo-codspeed
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/nss
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+
+      - name: Build all walltime benchmarks
+        env:
+          WALLTIME_BENCHES: ${{ needs.bench-matrix.outputs.walltime-benches }}
+        run: |
+          echo "$WALLTIME_BENCHES" | jq -r '.[] | "\(.crate) \(.bench)"' | while read -r crate bench; do
+            echo "::group::Building $crate::$bench"
+            cargo codspeed build --package "$crate" --locked --features bench --bench "$bench" --measurement-mode walltime
+            echo "::endgroup::"
+          done
+
+      - name: Bundle build artifacts
+        run: |
+          mkdir -p dist/lib
+          cp -r target/codspeed dist/
+          cp -r test-fixture dist/
+          if [ -d "$NSS_DIR/../dist/Release/lib" ]; then
+            # Built from source
+            cp -L "$NSS_DIR"/../dist/Release/lib/*.so dist/lib/ 2>/dev/null || true
+            cp -L "$NSS_DIR"/../dist/Release/lib/*.so.* dist/lib/ 2>/dev/null || true
+          else
+            # System NSS - copy from standard library path
+            for lib in nss3 nssutil3 smime3 ssl3 nspr4 plc4 plds4; do
+              cp -L /usr/lib/*/lib${lib}.so* dist/lib/ 2>/dev/null || true
+            done
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: codspeed-walltime-builds
+          path: dist
+          retention-days: 1
 
   benchmarks:
-    name: Run bench
+    name: Run ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
     runs-on: ${{ matrix.bench.runner }}
+    needs: bench-matrix
+    if: ${{ needs.bench-matrix.outputs.benches != '[]' }}
     strategy:
+      fail-fast: false
       matrix:
         bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
-    needs: bench-matrix
-
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -116,4 +183,49 @@ jobs:
         with:
           mode: ${{ matrix.bench.mode }}
           run: cargo codspeed run
+          token: ${{ secrets.CODSPEED_TOKEN }}
+
+  benchmarks-walltime:
+    name: Run ${{ matrix.bench.bench }} (walltime)
+    runs-on: # zizmor: ignore[self-hosted-runner]
+      group: codspeed
+      labels: codspeed-macro
+    needs: [bench-matrix, build-walltime]
+    if: ${{ needs.bench-matrix.outputs.has-walltime == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        bench: ${{ fromJson(needs.bench-matrix.outputs.walltime-benches) }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/rust
+        with:
+          version: stable
+          tools: cargo-codspeed
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: codspeed-walltime-builds
+          path: dist
+
+      - name: Set up build artifacts
+        run: |
+          mkdir -p target
+          mv dist/codspeed target/
+          find target/codspeed -type f -exec chmod +x {} +
+          {
+            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/dist/lib:$LD_LIBRARY_PATH"
+            echo "NSS_DB_PATH=$GITHUB_WORKSPACE/dist/test-fixture/db"
+          } >> "$GITHUB_ENV"
+
+      - name: Run bench & upload results
+        uses: CodSpeedHQ/action@0700edb451d0e9f2426f99bd6977027e550fb2a6 # v4.7.0
+        with:
+          mode: walltime
+          run: cargo codspeed run --package ${{ matrix.bench.crate }} --bench ${{ matrix.bench.bench }}
           token: ${{ secrets.CODSPEED_TOKEN }}
