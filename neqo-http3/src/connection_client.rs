@@ -2844,31 +2844,31 @@ mod tests {
         // check request body is received.
         // Then send a response.
         while let Some(e) = server.conn.next_event() {
-            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                if stream_id == request_stream_id {
-                    // Read the DATA frame.
-                    let mut buf = vec![1_u8; INITIAL_LOCAL_MAX_STREAM_DATA];
-                    let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert!(fin);
-                    assert_eq!(
-                        amount,
-                        request_body.len() + expected_data_frame_header.len()
-                    );
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = e
+                && stream_id == request_stream_id
+            {
+                // Read the DATA frame.
+                let mut buf = vec![1_u8; INITIAL_LOCAL_MAX_STREAM_DATA];
+                let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
+                assert!(fin);
+                assert_eq!(
+                    amount,
+                    request_body.len() + expected_data_frame_header.len()
+                );
 
-                    // Check the DATA frame header
-                    assert_eq!(
-                        &buf[..expected_data_frame_header.len()],
-                        expected_data_frame_header
-                    );
+                // Check the DATA frame header
+                assert_eq!(
+                    &buf[..expected_data_frame_header.len()],
+                    expected_data_frame_header
+                );
 
-                    // Check data.
-                    assert_eq!(&buf[expected_data_frame_header.len()..amount], request_body);
+                // Check data.
+                assert_eq!(&buf[expected_data_frame_header.len()..amount], request_body);
 
-                    // send response - 200  Content-Length: 3
-                    // with content: 'abc'.
-                    _ = server.conn.stream_send(stream_id, HTTP_RESPONSE_2).unwrap();
-                    server.conn.stream_close_send(stream_id).unwrap();
-                }
+                // send response - 200  Content-Length: 3
+                // with content: 'abc'.
+                _ = server.conn.stream_send(stream_id, HTTP_RESPONSE_2).unwrap();
+                server.conn.stream_close_send(stream_id).unwrap();
             }
         }
 
@@ -2940,44 +2940,44 @@ mod tests {
 
         // Check received frames and send a response.
         while let Some(e) = server.conn.next_event() {
-            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                if stream_id == request_stream_id {
-                    // Read DATA frames.
-                    let mut buf = vec![1_u8; INITIAL_LOCAL_MAX_STREAM_DATA];
-                    let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert!(fin);
-                    assert_eq!(
-                        amount,
-                        expected_first_data_frame_header.len()
-                            + first_frame.len()
-                            + expected_second_data_frame_header.len()
-                            + expected_second_data_frame.len()
-                    );
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = e
+                && stream_id == request_stream_id
+            {
+                // Read DATA frames.
+                let mut buf = vec![1_u8; INITIAL_LOCAL_MAX_STREAM_DATA];
+                let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
+                assert!(fin);
+                assert_eq!(
+                    amount,
+                    expected_first_data_frame_header.len()
+                        + first_frame.len()
+                        + expected_second_data_frame_header.len()
+                        + expected_second_data_frame.len()
+                );
 
-                    // Check the first DATA frame header
-                    let end = expected_first_data_frame_header.len();
-                    assert_eq!(&buf[..end], expected_first_data_frame_header);
+                // Check the first DATA frame header
+                let end = expected_first_data_frame_header.len();
+                assert_eq!(&buf[..end], expected_first_data_frame_header);
 
-                    // Check the first frame data.
-                    let start = end;
-                    let end = end + first_frame.len();
-                    assert_eq!(&buf[start..end], first_frame);
+                // Check the first frame data.
+                let start = end;
+                let end = end + first_frame.len();
+                assert_eq!(&buf[start..end], first_frame);
 
-                    // Check the second DATA frame header
-                    let start2 = end;
-                    let end2 = end + expected_second_data_frame_header.len();
-                    assert_eq!(&buf[start2..end2], expected_second_data_frame_header);
+                // Check the second DATA frame header
+                let start2 = end;
+                let end2 = end + expected_second_data_frame_header.len();
+                assert_eq!(&buf[start2..end2], expected_second_data_frame_header);
 
-                    // Check the second frame data.
-                    let start3 = end2;
-                    let end3 = end2 + expected_second_data_frame.len();
-                    assert_eq!(&buf[start3..end3], expected_second_data_frame);
+                // Check the second frame data.
+                let start3 = end2;
+                let end3 = end2 + expected_second_data_frame.len();
+                assert_eq!(&buf[start3..end3], expected_second_data_frame);
 
-                    // send response - 200  Content-Length: 3
-                    // with content: 'abc'.
-                    _ = server.conn.stream_send(stream_id, HTTP_RESPONSE_2).unwrap();
-                    server.conn.stream_close_send(stream_id).unwrap();
-                }
+                // send response - 200  Content-Length: 3
+                // with content: 'abc'.
+                _ = server.conn.stream_send(stream_id, HTTP_RESPONSE_2).unwrap();
+                server.conn.stream_close_send(stream_id).unwrap();
             }
         }
 
