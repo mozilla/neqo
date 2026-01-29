@@ -416,7 +416,7 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: stable
-          tools: cargo-codspeed
+          tools: cargo-codspeed, samply
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./.github/actions/nss
@@ -434,6 +434,11 @@ jobs:
           mode: ${{ matrix.bench.mode }}
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }}
+
+      - uses: ./.github/actions/perf-profile
+        with:
+          name: ${{ matrix.bench.crate }}-${{ matrix.bench.bench }}-${{ matrix.bench.mode }}
+          command: cargo codspeed run --package ${{ matrix.bench.crate }} --bench ${{ matrix.bench.bench }}
 
   benchmarks-walltime:
     name: Run ${{ matrix.bench.bench }} (walltime)
@@ -454,7 +459,7 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: stable
-          tools: cargo-codspeed
+          tools: cargo-codspeed, samply
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -478,6 +483,11 @@ jobs:
           mode: walltime
           run: cargo codspeed run --package ${{ matrix.bench.crate }} --bench ${{ matrix.bench.bench }}
           token: ${{ secrets.CODSPEED_TOKEN }}
+
+      - uses: ./.github/actions/perf-profile
+        with:
+          name: ${{ matrix.bench.crate }}-${{ matrix.bench.bench }}-walltime
+          command: cargo codspeed run --package ${{ matrix.bench.crate }} --bench ${{ matrix.bench.bench }}
 
   perfcompare:
     name: ${{ matrix.client }}-${{ matrix.server }}${{ matrix.cubic && '-cubic' || '' }}${{ matrix.pacing && '' || '-nopacing' }}
@@ -509,6 +519,12 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+
+      - uses: ./.github/actions/rust
+        with:
+          version: stable
+          tools: samply
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -625,5 +641,85 @@ jobs:
           fi
 
       - name: Stop server
-        if: always()
         run: kill "$SERVER_PID" 2>/dev/null || true
+
+      # Record perf samples with 20x larger transfer for better profiling data
+      - name: Setup perf profiling
+        run: |
+          PERF_SIZE=$((TRANSFER_SIZE * 20))
+          truncate -s "$PERF_SIZE" "testdata/$PERF_SIZE"
+          # Update client command with larger size
+          PERF_CLIENT_CMD="${CLIENT_CMD//$TRANSFER_SIZE/$PERF_SIZE}"
+          {
+            echo "PERF_SIZE=$PERF_SIZE"
+            echo "PERF_CLIENT_CMD=$PERF_CLIENT_CMD"
+          } >> "$GITHUB_ENV"
+
+      - name: Record server perf sample
+        run: |
+          # shellcheck disable=SC2086
+          perf record -F2999 --call-graph fp -g -o "$BENCH_NAME.server.perf" -- $SERVER_CMD &
+          echo "PERF_SERVER_PID=$!" >> "$GITHUB_ENV"
+          sleep 1
+
+      - name: Record client perf sample
+        working-directory: /tmp
+        run: |
+          # shellcheck disable=SC2086
+          perf record -F2999 --call-graph fp -g -o "$BENCH_NAME.client.perf" -- $PERF_CLIENT_CMD || true
+
+      - name: Stop perf server
+        if: always()
+        run: kill "$PERF_SERVER_PID" 2>/dev/null || true
+
+      - name: Post-process perf data
+        working-directory: /tmp
+        run: |
+          for role in client server; do
+            if [ -f "$BENCH_NAME.$role.perf" ]; then
+              samply import "$BENCH_NAME.$role.perf" -o "$BENCH_NAME.$role.perf.samply.json.gz" --save-only --presymbolicate
+            fi
+          done
+
+      - name: Upload perf data
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: perf-${{ env.BENCH_NAME }}
+          path: /tmp/*.perf.samply.json.gz
+          retention-days: 90
+          if-no-files-found: ignore
+
+  pr-comment:
+    name: PR Comment
+    needs: [benchmarks, benchmarks-walltime, perfcompare]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Generate comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          ARTIFACTS=$(gh api "/repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" \
+            --jq '.artifacts | map(select(.name | startswith("perf-"))) | sort_by(.name) | .[] | "- [\(.name)](https://github.com/'"$REPOSITORY"'/actions/runs/'"$RUN_ID"'/artifacts/\(.id))"')
+          {
+            echo "### Performance Profiles"
+            echo
+            if [ -n "$ARTIFACTS" ]; then
+              echo "The following performance profiles are available for [profiler.firefox.com](https://profiler.firefox.com/):"
+              echo
+              echo "$ARTIFACTS"
+            else
+              echo "No performance profiles were generated."
+            fi
+          } > results.md
+
+      - uses: ./.github/actions/pr-comment-data-export
+        with:
+          name: ${{ github.workflow }}
+          contents: results.md

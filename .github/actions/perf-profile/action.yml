@@ -1,0 +1,44 @@
+name: Perf Profile
+description: Record perf sample and process with samply
+
+inputs:
+  name:
+    description: Name for the profile output
+    required: true
+  command:
+    description: Command to profile
+    required: true
+  working-directory:
+    description: Working directory for profiling
+    default: ${{ github.workspace }}
+
+runs:
+  using: composite
+  steps:
+    - name: Record perf sample
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PROFILE_NAME: ${{ inputs.name }}
+        PROFILE_CMD: ${{ inputs.command }}
+      run: |
+        # shellcheck disable=SC2086
+        perf record -F2999 --call-graph fp -g -o "$PROFILE_NAME.perf" -- $PROFILE_CMD || true
+
+    - name: Post-process perf data
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PROFILE_NAME: ${{ inputs.name }}
+      run: |
+        if [ -f "$PROFILE_NAME.perf" ]; then
+          samply import "$PROFILE_NAME.perf" -o "$PROFILE_NAME.perf.samply.json.gz" --save-only --presymbolicate
+        fi
+
+    - name: Upload perf data
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      with:
+        name: perf-${{ inputs.name }}
+        path: ${{ inputs.working-directory }}/*.perf.samply.json.gz
+        retention-days: 90
+        if-no-files-found: ignore
