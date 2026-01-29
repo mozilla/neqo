@@ -1073,6 +1073,12 @@ impl Path {
         }
     }
 
+    /// Called when PTO fires. Notifies PMTUD to detect black holes when no ACKs are received.
+    pub fn on_pto(&mut self, pto_packets: &[sent::Packet], stats: &mut Stats, now: Instant) {
+        debug_assert!(self.is_primary());
+        self.sender.on_pto(pto_packets, stats, now);
+    }
+
     /// Determine whether we should be setting a PTO for this path. This is true when either the
     /// path is valid or when there is enough remaining in the amplification limit to fit a
     /// full-sized path (i.e., the path MTU).

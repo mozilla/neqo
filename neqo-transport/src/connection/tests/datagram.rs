@@ -13,9 +13,9 @@ use super::{
     AT_LEAST_PTO, assert_error, connect_force_idle, default_server, new_client, new_server, now,
 };
 use crate::{
-    CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Pmtud,
-    StreamType,
+    CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, StreamType,
     connection::tests::DEFAULT_ADDR,
+    default_plpmtu,
     events::{ConnectionEvent, OutgoingDatagramOutcome},
     frame::FrameType,
     packet,
@@ -24,7 +24,7 @@ use crate::{
 };
 
 // FIXME: The 27 here is a magic constant that the original code also (implicitly) had.
-const DATAGRAM_LEN_MTU: usize = Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) - 27;
+const DATAGRAM_LEN_MTU: usize = default_plpmtu(DEFAULT_ADDR.ip()) - 27;
 const DATA_MTU: &[u8] = &[1; DATAGRAM_LEN_MTU];
 const DATA_BIGGER_THAN_MTU: &[u8] = &[0; 2 * DATAGRAM_LEN_MTU];
 const_assert!(DATA_BIGGER_THAN_MTU.len() > DATAGRAM_LEN_MTU);
