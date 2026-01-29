@@ -7,11 +7,14 @@
 // A collection for sent packets.
 
 use std::{
+    cell::RefCell,
     collections::BTreeMap,
     ops::RangeInclusive,
     rc::Rc,
     time::{Duration, Instant},
 };
+
+use neqo_common::{Pool, PooledVec};
 
 use crate::{packet, recovery};
 
@@ -219,12 +222,16 @@ impl Packets {
     /// The values returned will be reversed, so that the most recent packet appears first.
     /// This is because ACK frames arrive with ranges starting from the largest acknowledged
     /// and we want to match that.
-    pub fn take_ranges<R>(&mut self, acked_ranges: R) -> Vec<Packet>
+    pub fn take_ranges<R>(
+        &mut self,
+        acked_ranges: R,
+        pool: &Rc<RefCell<Pool<Vec<Packet>>>>,
+    ) -> PooledVec<Packet>
     where
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
         R::IntoIter: ExactSizeIterator,
     {
-        let mut result = Vec::new();
+        let mut result = PooledVec::new(Rc::clone(pool));
 
         // Start with all packets. We will add unacknowledged packets back.
         //  [---------------------------packets----------------------------]
@@ -334,6 +341,8 @@ mod tests {
         time::{Duration, Instant},
     };
 
+    use neqo_common::Pool;
+
     use super::{Packet, Packets};
     use crate::{packet, recovery};
 
@@ -379,7 +388,8 @@ mod tests {
 
     fn remove_one(pkts: &mut Packets, idx: packet::Number) {
         assert_eq!(pkts.len(), 3);
-        let store = pkts.take_ranges([idx..=idx]);
+        let pool = Pool::shared();
+        let store = pkts.take_ranges([idx..=idx], &pool);
         let mut it = store.into_iter();
         assert_eq!(idx, it.next().unwrap().pn());
         assert!(it.next().is_none());
@@ -408,7 +418,8 @@ mod tests {
 
         {
             // Reverse the expectations here as this iterator reverses its output.
-            let store = pkts.take_ranges([0..=2]);
+            let pool = Pool::shared();
+            let store = pkts.take_ranges([0..=2], &pool);
             let mut it = store.into_iter();
             assert_eq!(it.next().unwrap().pn(), 2);
             assert_eq!(it.next().unwrap().pn(), 0);
@@ -455,7 +466,8 @@ mod tests {
     fn ignore_unknown() {
         let mut pkts = Packets::default();
         pkts.track(pkt(0));
-        assert!(pkts.take_ranges([1..=1]).is_empty());
+        let pool = Pool::shared();
+        assert!(pkts.take_ranges([1..=1], &pool).is_empty());
     }
 
     #[test]

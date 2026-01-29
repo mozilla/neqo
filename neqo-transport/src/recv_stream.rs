@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Role, qtrace};
+use neqo_common::{Buffer, Pool, Poolable, Role, qtrace};
 use smallvec::SmallVec;
 use strum::Display;
 
@@ -101,11 +101,14 @@ impl RecvStreams {
         let mut removed_uni = 0;
         self.streams.retain(|id, s| {
             let dead = s.is_terminal() && (id.is_uni() || !send_streams.exists(*id));
-            if dead && id.is_remote_initiated(role) {
-                if id.is_bidi() {
-                    removed_bidi += 1;
-                } else {
-                    removed_uni += 1;
+            if dead {
+                s.release_rx_buffer();
+                if id.is_remote_initiated(role) {
+                    if id.is_bidi() {
+                        removed_bidi += 1;
+                    } else {
+                        removed_uni += 1;
+                    }
                 }
             }
             !dead
@@ -361,6 +364,14 @@ impl RxStreamOrderer {
     }
 }
 
+impl Poolable for RxStreamOrderer {
+    fn reset(&mut self) {
+        self.data_ranges.clear();
+        self.retired = 0;
+        self.received = 0;
+    }
+}
+
 /// QUIC receiving states, based on -transport 3.2.
 #[derive(Debug, Display)]
 // Because a dead_code warning is easier than clippy::unused_self, see https://github.com/rust-lang/rust/issues/68408
@@ -407,19 +418,32 @@ enum RecvStreamState {
 }
 
 impl RecvStreamState {
-    fn new(
+    const fn new(
         max_bytes: u64,
         stream_id: StreamId,
         session_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
+        recv_buf: RxStreamOrderer,
     ) -> Self {
         Self::Recv {
             fc: ReceiverFlowControl::new(stream_id, max_bytes),
-            recv_buf: RxStreamOrderer::new(),
+            recv_buf,
             session_fc,
         }
     }
 
     const fn recv_buf(&self) -> Option<&RxStreamOrderer> {
+        match self {
+            Self::Recv { recv_buf, .. }
+            | Self::SizeKnown { recv_buf, .. }
+            | Self::DataRecvd { recv_buf, .. } => Some(recv_buf),
+            Self::DataRead { .. }
+            | Self::AbortReading { .. }
+            | Self::WaitForReset { .. }
+            | Self::ResetRecvd { .. } => None,
+        }
+    }
+
+    const fn recv_buf_mut(&mut self) -> Option<&mut RxStreamOrderer> {
         match self {
             Self::Recv { recv_buf, .. }
             | Self::SizeKnown { recv_buf, .. }
@@ -515,6 +539,7 @@ pub struct RecvStream {
     stream_id: StreamId,
     state: RecvStreamState,
     conn_events: ConnectionEvents,
+    rx_buffer_pool: Rc<RefCell<Pool<RxStreamOrderer>>>,
     keep_alive: Option<Rc<()>>,
 }
 
@@ -524,11 +549,14 @@ impl RecvStream {
         max_stream_data: u64,
         session_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
         conn_events: ConnectionEvents,
+        rx_buffer_pool: Rc<RefCell<Pool<RxStreamOrderer>>>,
     ) -> Self {
+        let recv_buf = rx_buffer_pool.borrow_mut().acquire();
         Self {
             stream_id,
-            state: RecvStreamState::new(max_stream_data, stream_id, session_fc),
+            state: RecvStreamState::new(max_stream_data, stream_id, session_fc, recv_buf),
             conn_events,
+            rx_buffer_pool,
             keep_alive: None,
         }
     }
@@ -762,6 +790,15 @@ impl RecvStream {
         )
     }
 
+    /// Release the `RxStreamOrderer` back to the pool.
+    ///
+    /// Call this before dropping a terminal stream to recycle its buffer.
+    pub fn release_rx_buffer(&mut self) {
+        if let Some(buf) = self.state.recv_buf_mut() {
+            self.rx_buffer_pool.borrow_mut().release(mem::take(buf));
+        }
+    }
+
     // App got all data but did not get the fin signal.
     const fn needs_to_inform_app_about_fin(&self) -> bool {
         matches!(self.state, RecvStreamState::DataRecvd { .. })
@@ -984,7 +1021,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{Encoder, qtrace};
+    use neqo_common::{Encoder, Pool, qtrace};
 
     use super::RecvStream;
     use crate::{
@@ -996,6 +1033,10 @@ mod tests {
     };
 
     const SESSION_WINDOW: usize = 1024;
+
+    fn rx_buffer_pool() -> Rc<RefCell<Pool<RxStreamOrderer>>> {
+        Rc::new(RefCell::new(Pool::new()))
+    }
 
     fn recv_ranges(ranges: &[Range<u64>], available: usize) {
         const ZEROES: &[u8] = &[0; 100];
@@ -1253,6 +1294,7 @@ mod tests {
             1024,
             Rc::new(RefCell::new(ReceiverFlowControl::new((), 1024 * 1024))),
             conn_events,
+            rx_buffer_pool(),
         );
 
         // test receiving a contig frame and reading it works
@@ -1481,6 +1523,7 @@ mod tests {
             INITIAL_LOCAL_MAX_STREAM_DATA as u64,
             Rc::new(RefCell::new(ReceiverFlowControl::new((), session_fc))),
             conn_events,
+            rx_buffer_pool(),
         )
     }
 
@@ -1552,6 +1595,7 @@ mod tests {
             fc_limit,
             session_fc,
             ConnectionEvents::default(),
+            rx_buffer_pool(),
         )
     }
 
@@ -1627,6 +1671,7 @@ mod tests {
             INITIAL_LOCAL_MAX_STREAM_DATA as u64,
             Rc::clone(&session_fc),
             ConnectionEvents::default(),
+            rx_buffer_pool(),
         );
 
         s.inbound_stream_frame(true, 0, &[0; SESSION_WINDOW])

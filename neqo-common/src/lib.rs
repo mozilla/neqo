@@ -16,6 +16,7 @@ pub mod header;
 pub mod hrtime;
 mod incrdecoder;
 pub mod log;
+pub mod pool;
 pub mod qlog;
 pub mod tos;
 
@@ -32,6 +33,7 @@ pub use self::{
     datagram::Datagram,
     header::Header,
     incrdecoder::{IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint},
+    pool::{Pool, Poolable, PooledVec, PooledVecIntoIter},
     tos::{Dscp, Ecn, Tos},
 };
 

@@ -10,15 +10,17 @@ pub mod sent;
 mod token;
 
 use std::{
+    cell::RefCell,
     cmp::{max, min},
     fmt::{self, Display, Formatter},
     ops::RangeInclusive,
+    rc::Rc,
     time::{Duration, Instant},
 };
 
 use enum_map::EnumMap;
 use enumset::enum_set;
-use neqo_common::{qdebug, qinfo, qlog::Qlog, qtrace, qwarn};
+use neqo_common::{Pool, PooledVec, qdebug, qinfo, qlog::Qlog, qtrace, qwarn};
 use strum::IntoEnumIterator as _;
 pub use token::{StreamRecoveryToken, Token, Tokens};
 
@@ -30,6 +32,9 @@ use crate::{
     stats::{Stats, StatsCell},
     tracking::{PacketNumberSpace, PacketNumberSpaceSet},
 };
+
+/// Pool for reusing acked packet vectors.
+pub type PacketPool = Rc<RefCell<Pool<Vec<sent::Packet>>>>;
 
 pub const PACKET_THRESHOLD: u64 = 3;
 /// `ACK_ONLY_SIZE_LIMIT` is the minimum size of the congestion window.
@@ -265,12 +270,17 @@ impl LossRecoverySpace {
     /// ...and a boolean indicating if any of those packets were ack-eliciting.
     /// This operates more efficiently because it assumes that the input is sorted
     /// in the order that an ACK frame is (from the top).
-    fn remove_acked<R>(&mut self, acked_ranges: R, stats: &mut Stats) -> (Vec<sent::Packet>, bool)
+    fn remove_acked<R>(
+        &mut self,
+        acked_ranges: R,
+        stats: &mut Stats,
+        pool: &PacketPool,
+    ) -> (PooledVec<sent::Packet>, bool)
     where
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
         R::IntoIter: ExactSizeIterator,
     {
-        let acked = self.sent_packets.take_ranges(acked_ranges);
+        let acked = self.sent_packets.take_ranges(acked_ranges, pool);
         let mut eliciting = false;
         for p in &acked {
             self.remove_packet(p);
@@ -490,6 +500,8 @@ pub struct Loss {
     /// The factor by which the PTO period is reduced.
     /// This enables faster probing at a cost in additional lost packets.
     fast_pto: u8,
+    /// Pool for reusing packet vectors.
+    packet_pool: PacketPool,
 }
 
 impl Loss {
@@ -502,6 +514,7 @@ impl Loss {
             qlog: Qlog::default(),
             stats,
             fast_pto,
+            packet_pool: Pool::shared(),
         }
     }
 
@@ -621,21 +634,27 @@ impl Loss {
         ack_ecn: Option<&ecn::Count>,
         ack_delay: Duration,
         now: Instant,
-    ) -> (Vec<sent::Packet>, Vec<sent::Packet>)
+    ) -> (PooledVec<sent::Packet>, PooledVec<sent::Packet>)
     where
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
         R::IntoIter: ExactSizeIterator,
     {
         let Some(space) = self.spaces.get_mut(pn_space) else {
             qinfo!("ACK on discarded space");
-            return (Vec::new(), Vec::new());
+            return (
+                PooledVec::new(Rc::clone(&self.packet_pool)),
+                PooledVec::new(Rc::clone(&self.packet_pool)),
+            );
         };
 
-        let (acked_packets, any_ack_eliciting) =
-            space.remove_acked(acked_ranges, &mut self.stats.borrow_mut());
+        let (acked_packets, any_ack_eliciting) = space.remove_acked(
+            acked_ranges,
+            &mut self.stats.borrow_mut(),
+            &self.packet_pool,
+        );
         let Some(largest_acked_pkt) = acked_packets.first() else {
             // No new information.
-            return (Vec::new(), Vec::new());
+            return (acked_packets, PooledVec::new(Rc::clone(&self.packet_pool)));
         };
 
         // Track largest PN acked per space
@@ -668,10 +687,10 @@ impl Loss {
         // another probe.  Removing them too soon would result in not sending on PTO.
         let cleanup_delay = self.pto_period(primary_path.borrow().rtt());
         let Some(sp) = self.spaces.get_mut(pn_space) else {
-            return (Vec::new(), Vec::new());
+            return (acked_packets, PooledVec::new(Rc::clone(&self.packet_pool)));
         };
         let loss_delay = primary_path.borrow().rtt().loss_delay();
-        let mut lost = Vec::new();
+        let mut lost = PooledVec::new(Rc::clone(&self.packet_pool));
         sp.detect_lost_packets(now, loss_delay, cleanup_delay, &mut lost);
         self.stats.borrow_mut().lost += lost.len();
 
@@ -913,13 +932,13 @@ impl Loss {
         }
     }
 
-    pub fn timeout(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
+    pub fn timeout(&mut self, primary_path: &PathRef, now: Instant) -> PooledVec<sent::Packet> {
         qtrace!("[{self}] timeout {now:?}");
 
         let loss_delay = primary_path.borrow().rtt().loss_delay();
         let confirmed = self.confirmed();
 
-        let mut lost_packets = Vec::new();
+        let mut lost_packets = PooledVec::new(Rc::clone(&self.packet_pool));
         for space in self.spaces.iter_mut() {
             let first = lost_packets.len(); // The first packet lost in this space.
             let pto = Self::pto_period_inner(
@@ -997,7 +1016,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use neqo_common::qlog::Qlog;
+    use neqo_common::{Pool, PooledVec, qlog::Qlog};
     use test_fixture::{DEFAULT_ADDR, now};
 
     use super::{FAST_PTO_SCALE, LossRecoverySpace, PacketNumberSpace, PtoState, SendProfile};
@@ -1036,7 +1055,7 @@ mod tests {
             ack_ecn: Option<&ecn::Count>,
             ack_delay: Duration,
             now: Instant,
-        ) -> (Vec<sent::Packet>, Vec<sent::Packet>) {
+        ) -> (PooledVec<sent::Packet>, PooledVec<sent::Packet>) {
             self.lr
                 .on_ack_received(&self.path, pn_space, acked_ranges, ack_ecn, ack_delay, now)
         }
@@ -1045,7 +1064,7 @@ mod tests {
             self.lr.on_packet_sent(&self.path, sent_packet, now);
         }
 
-        pub fn timeout(&mut self, now: Instant) -> Vec<sent::Packet> {
+        pub fn timeout(&mut self, now: Instant) -> PooledVec<sent::Packet> {
             self.lr.timeout(&self.path, now)
         }
 
@@ -1223,16 +1242,17 @@ mod tests {
     fn remove_acked() {
         let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
         let mut stats = Stats::default();
+        let pool = Pool::shared();
         add_sent(&mut lrs, 10);
-        let (acked, _) = lrs.remove_acked(vec![], &mut stats);
+        let (acked, _) = lrs.remove_acked(vec![], &mut stats, &pool);
         assert!(acked.is_empty());
-        let (acked, _) = lrs.remove_acked(vec![7..=8, 2..=4], &mut stats);
+        let (acked, _) = lrs.remove_acked(vec![7..=8, 2..=4], &mut stats, &pool);
         match_acked(&acked, &[8, 7, 4, 3, 2]);
-        let (acked, _) = lrs.remove_acked(vec![8..=11], &mut stats);
+        let (acked, _) = lrs.remove_acked(vec![8..=11], &mut stats, &pool);
         match_acked(&acked, &[10, 9]);
-        let (acked, _) = lrs.remove_acked(vec![0..=2], &mut stats);
+        let (acked, _) = lrs.remove_acked(vec![0..=2], &mut stats, &pool);
         match_acked(&acked, &[1, 0]);
-        let (acked, _) = lrs.remove_acked(vec![5..=6], &mut stats);
+        let (acked, _) = lrs.remove_acked(vec![5..=6], &mut stats, &pool);
         match_acked(&acked, &[6, 5]);
     }
 

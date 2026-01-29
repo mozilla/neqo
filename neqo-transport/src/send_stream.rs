@@ -18,7 +18,7 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use neqo_common::{Buffer, Encoder, Role, qdebug, qerror, qtrace};
+use neqo_common::{Buffer, Encoder, Pool, Poolable, Role, qdebug, qerror, qtrace};
 use smallvec::SmallVec;
 use static_assertions::const_assert;
 
@@ -457,6 +457,14 @@ impl RangeTracker {
     }
 }
 
+impl Poolable for RangeTracker {
+    fn reset(&mut self) {
+        self.acked = 0;
+        self.used.clear();
+        self.first_unmarked = None;
+    }
+}
+
 /// Buffer to contain queued bytes and track their state.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct TxBuffer {
@@ -574,6 +582,13 @@ impl TxBuffer {
     }
 }
 
+impl Poolable for TxBuffer {
+    fn reset(&mut self) {
+        self.send_buf.clear();
+        self.ranges.reset();
+    }
+}
+
 /// QUIC sending stream states, based on -transport 3.1.
 #[derive(Debug)]
 pub enum State {
@@ -687,6 +702,7 @@ pub struct SendStream {
     stream_id: StreamId,
     state: State,
     conn_events: ConnectionEvents,
+    tx_buffer_pool: Rc<RefCell<Pool<TxBuffer>>>,
     priority: TransmissionPriority,
     retransmission_priority: RetransmissionPriority,
     retransmission_offset: u64,
@@ -702,6 +718,7 @@ impl SendStream {
         max_stream_data: u64,
         conn_fc: Rc<RefCell<SenderFlowControl<()>>>,
         conn_events: ConnectionEvents,
+        tx_buffer_pool: Rc<RefCell<Pool<TxBuffer>>>,
     ) -> Self {
         let ss = Self {
             stream_id,
@@ -710,6 +727,7 @@ impl SendStream {
                 conn_fc,
             },
             conn_events,
+            tx_buffer_pool,
             priority: TransmissionPriority::default(),
             retransmission_priority: RetransmissionPriority::default(),
             retransmission_offset: 0,
@@ -1194,6 +1212,15 @@ impl SendStream {
         )
     }
 
+    /// Release the `TxBuffer` back to the pool.
+    ///
+    /// Call this before dropping a terminal stream to recycle its buffer.
+    pub fn release_tx_buffer(&mut self) {
+        if let Some(buf) = self.state.tx_buf_mut() {
+            self.tx_buffer_pool.borrow_mut().release(mem::take(buf));
+        }
+    }
+
     /// # Errors
     /// When `buf` is empty or when the stream is already closed.
     pub fn send(&mut self, buf: &[u8]) -> Res<usize> {
@@ -1230,7 +1257,7 @@ impl SendStream {
             self.state.transition(State::Send {
                 fc: owned_fc,
                 conn_fc: owned_conn_fc,
-                send_buf: TxBuffer::new(),
+                send_buf: self.tx_buffer_pool.borrow_mut().acquire(),
             });
         }
 
@@ -1271,13 +1298,13 @@ impl SendStream {
         match &mut self.state {
             State::Ready { .. } => {
                 self.state.transition(State::DataSent {
-                    send_buf: TxBuffer::new(),
+                    send_buf: self.tx_buffer_pool.borrow_mut().acquire(),
                     fin_sent: false,
                     fin_acked: false,
                 });
             }
             State::Send { send_buf, .. } => {
-                let owned_buf = mem::replace(send_buf, TxBuffer::new());
+                let owned_buf = mem::take(send_buf);
                 self.state.transition(State::DataSent {
                     send_buf: owned_buf,
                     fin_sent: false,
@@ -1649,6 +1676,7 @@ impl SendStreams {
     pub fn remove_terminal(&mut self) {
         self.map.retain(|stream_id, stream| {
             if stream.is_terminal() {
+                stream.release_tx_buffer();
                 if stream.is_fair() {
                     match stream.sendorder() {
                         None => self.regular.remove(*stream_id),
@@ -1781,7 +1809,7 @@ pub struct RecoveryToken {
 mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
-    use neqo_common::{Encoder, MAX_VARINT, event::Provider as _, hex_with_len, qtrace};
+    use neqo_common::{Encoder, MAX_VARINT, Pool, event::Provider as _, hex_with_len, qtrace};
 
     use super::RecoveryToken;
     use crate::{
@@ -1797,6 +1825,10 @@ mod tests {
 
     fn connection_fc(limit: u64) -> Rc<RefCell<SenderFlowControl<()>>> {
         Rc::new(RefCell::new(SenderFlowControl::new((), limit)))
+    }
+
+    fn tx_buffer_pool() -> Rc<RefCell<Pool<TxBuffer>>> {
+        Rc::new(RefCell::new(Pool::new()))
     }
 
     #[test]
@@ -2384,7 +2416,13 @@ mod tests {
         let conn_fc = connection_fc(4096);
         let conn_events = ConnectionEvents::default();
 
-        let mut s = SendStream::new(4.into(), 1024, Rc::clone(&conn_fc), conn_events);
+        let mut s = SendStream::new(
+            4.into(),
+            1024,
+            Rc::clone(&conn_fc),
+            conn_events,
+            tx_buffer_pool(),
+        );
         assert_eq!(s.to_string(), "SendStream 4");
 
         let res = s.send(&[4; 100]).unwrap();
@@ -2443,7 +2481,13 @@ mod tests {
         let conn_fc = connection_fc(2);
         let mut conn_events = ConnectionEvents::default();
 
-        let mut s = SendStream::new(4.into(), 0, Rc::clone(&conn_fc), conn_events.clone());
+        let mut s = SendStream::new(
+            4.into(),
+            0,
+            Rc::clone(&conn_fc),
+            conn_events.clone(),
+            tx_buffer_pool(),
+        );
 
         // Stream is initially blocked (conn:2, stream:0)
         // and will not accept data.
@@ -2491,7 +2535,13 @@ mod tests {
         let conn_fc = connection_fc(0);
         let mut conn_events = ConnectionEvents::default();
 
-        let mut s = SendStream::new(4.into(), 0, Rc::clone(&conn_fc), conn_events.clone());
+        let mut s = SendStream::new(
+            4.into(),
+            0,
+            Rc::clone(&conn_fc),
+            conn_events.clone(),
+            tx_buffer_pool(),
+        );
         // Set watermark at 3.
         s.set_writable_event_low_watermark(NonZeroUsize::new(3).unwrap());
 
@@ -2538,7 +2588,13 @@ mod tests {
         let conn_fc = connection_fc(2);
         let mut conn_events = ConnectionEvents::default();
 
-        let _s = SendStream::new(4.into(), 100, conn_fc, conn_events.clone());
+        let _s = SendStream::new(
+            4.into(),
+            100,
+            conn_fc,
+            conn_events.clone(),
+            tx_buffer_pool(),
+        );
 
         // Creating a new stream with conn and stream credits should result in
         // an event.
@@ -2564,7 +2620,7 @@ mod tests {
         let conn_fc = connection_fc(100);
         let conn_events = ConnectionEvents::default();
 
-        let mut s = SendStream::new(0.into(), 100, conn_fc, conn_events);
+        let mut s = SendStream::new(0.into(), 100, conn_fc, conn_events, tx_buffer_pool());
         s.send(&[0; 10]).unwrap();
         s.close();
 
@@ -2656,7 +2712,7 @@ mod tests {
         let conn_fc = connection_fc(100);
         let conn_events = ConnectionEvents::default();
 
-        let mut s = SendStream::new(0.into(), 100, conn_fc, conn_events);
+        let mut s = SendStream::new(0.into(), 100, conn_fc, conn_events, tx_buffer_pool());
         s.send(&[0; 10]).unwrap();
 
         let mut ss = SendStreams::default();
@@ -2735,7 +2791,13 @@ mod tests {
         let conn_events = ConnectionEvents::default();
 
         let stream_id = StreamId::from(4);
-        let mut s = SendStream::new(stream_id, 2, Rc::clone(&conn_fc), conn_events);
+        let mut s = SendStream::new(
+            stream_id,
+            2,
+            Rc::clone(&conn_fc),
+            conn_events,
+            tx_buffer_pool(),
+        );
 
         // Only two bytes can be sent due to the stream limit.
         assert_eq!(s.send(b"abc").unwrap(), 2);
@@ -2792,6 +2854,7 @@ mod tests {
             FC_LIMIT,
             connection_fc(FC_LIMIT),
             ConnectionEvents::default(),
+            tx_buffer_pool(),
         );
         assert_eq!(s.avail(), TxBuffer::MAX_SIZE);
     }
@@ -2802,7 +2865,13 @@ mod tests {
         let conn_events = ConnectionEvents::default();
 
         let stream_id = StreamId::from(4);
-        let mut s = SendStream::new(stream_id, 2, Rc::clone(&conn_fc), conn_events);
+        let mut s = SendStream::new(
+            stream_id,
+            2,
+            Rc::clone(&conn_fc),
+            conn_events,
+            tx_buffer_pool(),
+        );
 
         // Stream is initially blocked (conn:5, stream:2)
         // and will not accept atomic write of 3 bytes.
@@ -2859,7 +2928,13 @@ mod tests {
         let conn_fc = connection_fc(len_u64);
         let conn_events = ConnectionEvents::default();
 
-        let mut s = SendStream::new(StreamId::new(100), 0, conn_fc, conn_events);
+        let mut s = SendStream::new(
+            StreamId::new(100),
+            0,
+            conn_fc,
+            conn_events,
+            tx_buffer_pool(),
+        );
         s.set_max_stream_data(len_u64);
 
         // Send all the data, then the fin.
@@ -2883,7 +2958,7 @@ mod tests {
         let conn_events = ConnectionEvents::default();
 
         let id = StreamId::new(100);
-        let mut s = SendStream::new(id, 0, conn_fc, conn_events);
+        let mut s = SendStream::new(id, 0, conn_fc, conn_events, tx_buffer_pool());
         s.set_max_stream_data(len_u64);
 
         // Send all the data, then the fin.
@@ -2919,6 +2994,7 @@ mod tests {
             MAX_VARINT,
             conn_fc,
             ConnectionEvents::default(),
+            tx_buffer_pool(),
         );
 
         let mut send_buf = TxBuffer::new();
@@ -3131,7 +3207,7 @@ mod tests {
         let conn_events = ConnectionEvents::default();
 
         let id = StreamId::new(100);
-        let mut s = SendStream::new(id, 0, conn_fc, conn_events);
+        let mut s = SendStream::new(id, 0, conn_fc, conn_events, tx_buffer_pool());
         s.set_max_stream_data(len_u64);
 
         // Initial stats should be all 0.

@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Role, qtrace, qwarn};
+use neqo_common::{Buffer, Pool, Role, qtrace, qwarn};
 
 use crate::{
     ConnectionEvents, Error, Res,
@@ -20,8 +20,8 @@ use crate::{
     frame::Frame,
     packet,
     recovery::{self, StreamRecoveryToken},
-    recv_stream::{RecvStream, RecvStreams},
-    send_stream::{SendStream, SendStreams, TransmissionPriority},
+    recv_stream::{RecvStream, RecvStreams, RxStreamOrderer},
+    send_stream::{SendStream, SendStreams, TransmissionPriority, TxBuffer},
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     tparams::{
@@ -66,6 +66,8 @@ pub struct Streams {
     receiver_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
     remote_stream_limits: RemoteStreamLimits,
     local_stream_limits: LocalStreamLimits,
+    tx_buffer_pool: Rc<RefCell<Pool<TxBuffer>>>,
+    rx_buffer_pool: Rc<RefCell<Pool<RxStreamOrderer>>>,
     send: SendStreams,
     recv: RecvStreams,
 }
@@ -87,6 +89,8 @@ impl Streams {
             receiver_fc: Rc::new(RefCell::new(ReceiverFlowControl::new((), max_data))),
             remote_stream_limits: RemoteStreamLimits::new(limit_bidi, limit_uni, role),
             local_stream_limits: LocalStreamLimits::new(role),
+            tx_buffer_pool: Rc::new(RefCell::new(Pool::new())),
+            rx_buffer_pool: Rc::new(RefCell::new(Pool::new())),
             send: SendStreams::default(),
             recv: RecvStreams::default(),
         }
@@ -359,6 +363,7 @@ impl Streams {
                     recv_initial_max_stream_data,
                     Rc::clone(&self.receiver_fc),
                     self.events.clone(),
+                    Rc::clone(&self.rx_buffer_pool),
                 ),
             );
 
@@ -380,6 +385,7 @@ impl Streams {
                         send_initial_max_stream_data,
                         Rc::clone(&self.sender_fc),
                         self.events.clone(),
+                        Rc::clone(&self.tx_buffer_pool),
                     ),
                 );
             }
@@ -442,6 +448,7 @@ impl Streams {
                     send_limit,
                     Rc::clone(&self.sender_fc),
                     self.events.clone(),
+                    Rc::clone(&self.tx_buffer_pool),
                 );
                 self.send.insert(new_id, stream);
 
@@ -464,6 +471,7 @@ impl Streams {
                             recv_initial_max_stream_data,
                             Rc::clone(&self.receiver_fc),
                             self.events.clone(),
+                            Rc::clone(&self.rx_buffer_pool),
                         ),
                     );
                 }

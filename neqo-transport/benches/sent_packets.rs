@@ -12,6 +12,7 @@
 use std::{hint::black_box, time::Instant};
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use neqo_common::Pool;
 use neqo_transport::{
     packet,
     recovery::{self, sent},
@@ -41,11 +42,12 @@ fn sent_packets() -> sent::Packets {
 /// while the acknowledgment rate will ensure that most of the
 /// outstanding packets remain in flight.
 fn take_ranges(c: &mut Criterion) {
+    let pool = Pool::shared();
     c.bench_function("sent::Packets::take_ranges", |b| {
         b.iter_batched_ref(
             sent_packets,
             // Take the first 90 packets, minus some gaps.
-            |pkts| black_box(pkts.take_ranges([70..=89, 40..=59, 10..=29])),
+            |pkts| black_box(pkts.take_ranges([70..=89, 40..=59, 10..=29], &pool)),
             criterion::BatchSize::SmallInput,
         );
     });
