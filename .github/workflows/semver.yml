@@ -24,10 +24,6 @@ jobs:
         with:
           tools: cargo-semver-checks
           token: ${{ secrets.GITHUB_TOKEN }}
-      - id: nss-version
-        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/nss
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - run: cargo semver-checks --default-features --baseline-rev origin/main -p mtu

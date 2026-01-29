@@ -3,8 +3,13 @@ description: Install NSS
 
 inputs:
   minimum-version:
-    description: "Minimum required version of NSS"
-    required: true
+    description: "Minimum required version of NSS. If not provided, reads from version-file."
+    required: false
+    default: ""
+  version-file:
+    description: "Path to file containing the minimum NSS version (relative to workspace root)"
+    required: false
+    default: "neqo-crypto/min_version.txt"
   target:
     description: "Target for cross-compilation"
     default: ""
@@ -12,6 +17,22 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Determine minimum NSS version
+      id: min-version
+      shell: bash
+      env:
+        MIN_VERSION_INPUT: ${{ inputs.minimum-version }}
+        VERSION_FILE: ${{ inputs.version-file }}
+      run: |
+        if [ -n "$MIN_VERSION_INPUT" ]; then
+          echo "minimum=$MIN_VERSION_INPUT" >> "$GITHUB_OUTPUT"
+        elif [ -f "$VERSION_FILE" ]; then
+          echo "minimum=$(cat "$VERSION_FILE")" >> "$GITHUB_OUTPUT"
+        else
+          echo "::error::No minimum-version provided and version file '$VERSION_FILE' not found"
+          exit 1
+        fi
+
     - name: Install system NSS (Linux)
       shell: bash
       if: ${{ runner.os == 'Linux' && inputs.target == '' && (runner.environment != 'self-hosted' || contains(runner.name, 'CodSpeed')) }}
@@ -31,7 +52,7 @@ runs:
     - name: Check system NSS version
       id: system_nss
       env:
-        MIN_VERSION: ${{ inputs.minimum-version }}
+        MIN_VERSION: ${{ steps.min-version.outputs.minimum }}
       shell: bash
       if: inputs.target == ''
       run: |
