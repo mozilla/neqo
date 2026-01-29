@@ -1,0 +1,47 @@
+name: Setup test environment
+description: Create test data directory with certificates and test files for perfcompare
+
+inputs:
+  sizes:
+    description: Space-separated list of file sizes to create (in bytes)
+    required: true
+  mtu:
+    description: Set loopback MTU (requires sudo, leave empty to skip)
+    default: ''
+
+outputs:
+  sizes:
+    description: Space-separated list of created file sizes
+    value: ${{ steps.setup.outputs.sizes }}
+
+runs:
+  using: composite
+  steps:
+    - id: setup
+      shell: bash
+      env:
+        TESTDATA_PATH: testdata
+        FILE_SIZES: ${{ inputs.sizes }}
+        MTU: ${{ inputs.mtu }}
+      run: |
+        # Set MTU if specified
+        if [ -n "$MTU" ]; then
+          sudo ip link set dev lo mtu "$MTU"
+        fi
+
+        # Create testdata directory
+        mkdir -p "$TESTDATA_PATH"
+
+        # Generate self-signed certificate
+        openssl req -nodes -new -x509 \
+          -keyout "$TESTDATA_PATH/key" \
+          -out "$TESTDATA_PATH/cert" \
+          -subj "/CN=localhost" \
+          2>/dev/null
+
+        # Create test files
+        for size in $FILE_SIZES; do
+          truncate -s "$size" "$TESTDATA_PATH/$size"
+        done
+
+        echo "sizes=$FILE_SIZES" >> "$GITHUB_OUTPUT"

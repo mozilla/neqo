@@ -12,15 +12,6 @@ env:
   RUSTUP_TOOLCHAIN: stable
   # Performance comparison settings
   TRANSFER_SIZE: 33554432  # 32 MiB
-  # Runner image for build jobs. Keep in sync with runs-on values below.
-  BUILD_RUNNER: ubuntu-22.04-arm
-  # Bump this to invalidate all caches for other reasons
-  CACHE_VERSION: v6
-  # Pinned versions for external implementations
-  MSQUIC_VERSION: v2.5.6
-  GOOGLE_QUICHE_REF: c52d86fe10442363e4e8c5a66e639187c419d7c0
-  CLOUDFLARE_QUICHE_VERSION: 0.24.5
-  S2N_QUIC_VERSION: v1.72.0
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -38,52 +29,15 @@ jobs:
     name: Determine bench matrix
     runs-on: ubuntu-24.04
     outputs:
-      benches: ${{ steps.benches.outputs.benches }}
-      walltime-benches: ${{ steps.benches.outputs.walltime_benches }}
-      has-walltime: ${{ steps.benches.outputs.has_walltime }}
+      benches: ${{ steps.matrix.outputs.benches }}
+      walltime-benches: ${{ steps.matrix.outputs.walltime-benches }}
+      has-walltime: ${{ steps.matrix.outputs.has-walltime }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - id: benches
-        run: |
-          ALL_BENCHES=$(cargo metadata --no-deps --format-version 1 | jq -c '
-            [.packages[] |
-              . as $pkg |
-              .targets[] |
-              select(.kind[] == "bench") |
-              select(has("required-features")) |
-              .name as $bench_name |
-              (($pkg.metadata.bench // []) | map(select(.name == $bench_name)) | .[0]) as $bench_meta |
-              (($bench_meta.codspeed.mode) // "simulation") as $cpu_mode |
-              (if $bench_meta.codspeed.memory == null then true else $bench_meta.codspeed.memory end) as $memory_enabled |
-              (
-                {
-                  crate: $pkg.name,
-                  bench: $bench_name,
-                  mode: $cpu_mode
-                },
-                if $memory_enabled then
-                  {
-                    crate: $pkg.name,
-                    bench: $bench_name,
-                    mode: "memory"
-                  }
-                else
-                  empty
-                end
-              )
-            ]')
-
-          NON_WALLTIME=$(echo "$ALL_BENCHES" | jq -c '[.[] | select(.mode != "walltime") | . + {runner: "ubuntu-24.04"}]')
-          WALLTIME=$(echo "$ALL_BENCHES" | jq -c '[.[] | select(.mode == "walltime")]')
-          HAS_WALLTIME=$(echo "$WALLTIME" | jq 'length > 0')
-
-          {
-            echo "benches=$NON_WALLTIME"
-            echo "walltime_benches=$WALLTIME"
-            echo "has_walltime=$HAS_WALLTIME"
-          } >> "$GITHUB_OUTPUT"
+      - id: matrix
+        uses: ./.github/actions/bench-matrix
 
   # Build neqo for walltime benchmarks and perfcompare on ARM64.
   # CodSpeed's macro runners are aarch64, so we build on ARM for compatibility.
@@ -91,6 +45,7 @@ jobs:
   build-neqo:
     name: Build neqo
     runs-on: ubuntu-22.04-arm
+    needs: bench-matrix
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -107,21 +62,14 @@ jobs:
       - name: Build neqo binaries
         run: |
           export RUSTFLAGS="-C force-frame-pointers=yes"
-          cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
+          cargo build --locked --profile bench --features bench --bin neqo-client --bin neqo-server
 
       - name: Build walltime benchmarks
+        if: needs.bench-matrix.outputs.has-walltime == 'true'
+        env:
+          WALLTIME_BENCHES: ${{ needs.bench-matrix.outputs.walltime-benches }}
         run: |
-          cargo metadata --no-deps --format-version 1 | jq -r '
-            [.packages[] |
-              . as $pkg |
-              .targets[] |
-              select(.kind[] == "bench") |
-              select(has("required-features")) |
-              .name as $bench_name |
-              (($pkg.metadata.bench // []) | map(select(.name == $bench_name)) | .[0]) as $bench_meta |
-              select(($bench_meta.codspeed.mode) == "walltime") |
-              "\($pkg.name) \($bench_name)"
-            ] | .[]' | while read -r crate bench; do
+          echo "$WALLTIME_BENCHES" | jq -r '.[] | "\(.crate) \(.bench)"' | while read -r crate bench; do
             echo "::group::Building $crate::$bench"
             cargo codspeed build --package "$crate" --locked --features bench --bench "$bench" --measurement-mode walltime
             echo "::endgroup::"
@@ -156,128 +104,31 @@ jobs:
     name: Build msquic
     runs-on: ubuntu-22.04-arm
     steps:
-      - name: Restore cached build
-        id: cache-restore
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          path: dist/msquic
-          key: ${{ env.CACHE_VERSION }}-msquic-${{ env.MSQUIC_VERSION }}-${{ env.BUILD_RUNNER }}
-
-      - name: Checkout
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: microsoft/msquic
-          ref: ${{ env.MSQUIC_VERSION }}
-          submodules: recursive
+          sparse-checkout: .github/actions
           persist-credentials: false
 
-      - name: Install dependencies
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build
-
-      - name: Build
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p build
-          cd build
-          cmake -GNinja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DQUIC_BUILD_TOOLS=1 \
-            -DQUIC_BUILD_PERF=1 \
-            -DQUIC_BUILD_SHARED=OFF \
-            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" \
-            ..
-          cmake --build .
-
-      - name: Bundle binaries
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p dist/msquic
-          cp build/bin/Release/quicinterop build/bin/Release/quicinteropserver dist/msquic/
-
-      - name: Save cache
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      - uses: ./.github/actions/quic-build
         with:
-          path: dist/msquic
-          key: ${{ env.CACHE_VERSION }}-msquic-${{ env.MSQUIC_VERSION }}-${{ env.BUILD_RUNNER }}
-
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: build-msquic
-          path: dist/msquic
-          retention-days: 1
+          impl: msquic
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-name: build-msquic
 
   build-google:
     name: Build google/quiche
     runs-on: ubuntu-22.04-arm
     steps:
-      - name: Install bazelisk
-        id: bazel-version
-        env:
-          ARCH: ${{ runner.arch == 'ARM64' && 'arm64' || 'amd64' }}
-        run: |
-          sudo curl -fsSL -o /usr/local/bin/bazel "https://github.com/bazelbuild/bazelisk/releases/download/v1.25.0/bazelisk-linux-$ARCH"
-          sudo chmod +x /usr/local/bin/bazel
-          echo "version=$(bazel --version | head -1)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore cached build
-        id: cache-restore
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          path: dist/google-quiche
-          key: ${{ env.CACHE_VERSION }}-google-quiche-${{ env.GOOGLE_QUICHE_REF }}-${{ env.BUILD_RUNNER }}-${{ steps.bazel-version.outputs.version }}
-
-      - name: Checkout
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: google/quiche
-          ref: ${{ env.GOOGLE_QUICHE_REF }}
-          submodules: recursive
+          sparse-checkout: .github/actions
           persist-credentials: false
 
-      # TODO: Remove this step when we move to ubuntu-24.04 or newer.
-      - name: Use GCC 13
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        run: |
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100
-
-      - name: Build
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        run: |
-          bazel build -c opt \
-            --action_env=CC=gcc-13 \
-            --action_env=CXX=g++-13 \
-            --linkopt=-l:libstdc++.a \
-            --linkopt=-l:libgcc.a \
-            --linkopt=-lpthread \
-            --linkopt=-lm \
-            quiche:quic_server quiche:quic_client
-          bazel shutdown
-
-      - name: Bundle binaries
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p dist/google-quiche
-          cp bazel-bin/quiche/quic_server bazel-bin/quiche/quic_client dist/google-quiche/
-
-      - name: Save cache
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      - uses: ./.github/actions/quic-build
         with:
-          path: dist/google-quiche
-          key: ${{ env.CACHE_VERSION }}-google-quiche-${{ env.GOOGLE_QUICHE_REF }}-${{ env.BUILD_RUNNER }}-${{ steps.bazel-version.outputs.version }}
-
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: build-google
-          path: dist/google-quiche
-          retention-days: 1
+          impl: google
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-name: build-google
 
   build-quiche:
     name: Build cloudflare/quiche
@@ -286,58 +137,13 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: .github/actions
-          path: neqo
           persist-credentials: false
 
-      - uses: ./neqo/.github/actions/rust
+      - uses: ./.github/actions/quic-build
         with:
-          version: stable
+          impl: quiche
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Get Rust version
-        id: rust-version
-        run: echo "hash=$(rustc +stable --version | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore cached build
-        id: cache-restore
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: dist/quiche
-          key: ${{ env.CACHE_VERSION }}-cloudflare-quiche-${{ env.CLOUDFLARE_QUICHE_VERSION }}-${{ env.BUILD_RUNNER }}-rust-${{ steps.rust-version.outputs.hash }}
-
-      - name: Checkout cloudflare/quiche
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: cloudflare/quiche
-          ref: ${{ env.CLOUDFLARE_QUICHE_VERSION }}
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Build
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        run: |
-          export RUSTFLAGS="-C force-frame-pointers=yes"
-          cargo build --release --bin quiche-client --bin quiche-server
-
-      - name: Bundle binaries
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p dist/quiche
-          cp target/release/quiche-client target/release/quiche-server dist/quiche/
-
-      - name: Save cache
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: dist/quiche
-          key: ${{ env.CACHE_VERSION }}-cloudflare-quiche-${{ env.CLOUDFLARE_QUICHE_VERSION }}-${{ env.BUILD_RUNNER }}-rust-${{ steps.rust-version.outputs.hash }}
-
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: build-quiche
-          path: dist/quiche
-          retention-days: 1
+          artifact-name: build-quiche
 
   build-s2n:
     name: Build s2n-quic
@@ -346,58 +152,13 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: .github/actions
-          path: neqo
           persist-credentials: false
 
-      - uses: ./neqo/.github/actions/rust
+      - uses: ./.github/actions/quic-build
         with:
-          version: stable
+          impl: s2n
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Get Rust version
-        id: rust-version
-        run: echo "hash=$(rustc +stable --version | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore cached build
-        id: cache-restore
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: dist/s2n-quic
-          key: ${{ env.CACHE_VERSION }}-s2n-quic-${{ env.S2N_QUIC_VERSION }}-${{ env.BUILD_RUNNER }}-rust-${{ steps.rust-version.outputs.hash }}
-
-      - name: Checkout aws/s2n-quic
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: aws/s2n-quic
-          ref: ${{ env.S2N_QUIC_VERSION }}
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Build
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        run: |
-          export RUSTFLAGS="-C force-frame-pointers=yes"
-          cargo build --release --bin s2n-quic-qns
-
-      - name: Bundle binaries
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p dist/s2n-quic
-          cp target/release/s2n-quic-qns dist/s2n-quic/
-
-      - name: Save cache
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: dist/s2n-quic
-          key: ${{ env.CACHE_VERSION }}-s2n-quic-${{ env.S2N_QUIC_VERSION }}-${{ env.BUILD_RUNNER }}-rust-${{ steps.rust-version.outputs.hash }}
-
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: build-s2n
-          path: dist/s2n-quic
-          retention-days: 1
+          artifact-name: build-s2n
 
   benchmarks:
     name: Run ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
@@ -416,7 +177,7 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: stable
-          tools: cargo-codspeed, samply
+          tools: cargo-codspeed
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./.github/actions/nss
@@ -434,11 +195,6 @@ jobs:
           mode: ${{ matrix.bench.mode }}
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }}
-
-      - uses: ./.github/actions/perf-profile
-        with:
-          name: ${{ matrix.bench.crate }}-${{ matrix.bench.bench }}-${{ matrix.bench.mode }}
-          command: cargo codspeed run --package ${{ matrix.bench.crate }} --bench ${{ matrix.bench.bench }}
 
   benchmarks-walltime:
     name: Run ${{ matrix.bench.bench }} (walltime)
@@ -459,7 +215,7 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: stable
-          tools: cargo-codspeed, samply
+          tools: cargo-codspeed
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -484,13 +240,8 @@ jobs:
           run: cargo codspeed run --package ${{ matrix.bench.crate }} --bench ${{ matrix.bench.bench }}
           token: ${{ secrets.CODSPEED_TOKEN }}
 
-      - uses: ./.github/actions/perf-profile
-        with:
-          name: ${{ matrix.bench.crate }}-${{ matrix.bench.bench }}-walltime
-          command: cargo codspeed run --package ${{ matrix.bench.crate }} --bench ${{ matrix.bench.bench }}
-
   perfcompare:
-    name: ${{ matrix.client }}-${{ matrix.server }}${{ matrix.cubic && '-cubic' || '' }}${{ matrix.pacing && '' || '-nopacing' }}
+    name: ${{ matrix.client }}-${{ matrix.server }}${{ matrix.cubic && '-cubic' || '' }}${{ matrix.pacing == false && '-nopacing' || '' }}
     needs: [build-neqo, build-msquic, build-google, build-quiche, build-s2n]
     runs-on: # zizmor: ignore[self-hosted-runner]
       group: codspeed
@@ -499,10 +250,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # neqo vs neqo: all cc/pacing combinations
           - {client: neqo,   server: neqo,   cubic: true,  pacing: true}
           - {client: neqo,   server: neqo,   cubic: true,  pacing: false}
           - {client: neqo,   server: neqo,   cubic: false, pacing: true}
           - {client: neqo,   server: neqo,   cubic: false, pacing: false}
+          # Same-implementation baselines (cubic/pacing not applicable)
+          - {client: msquic, server: msquic}
+          - {client: google, server: google}
+          - {client: quiche, server: quiche}
+          - {client: s2n,    server: s2n}
+          # neqo vs others
           - {client: neqo,   server: msquic, cubic: true,  pacing: true}
           - {client: msquic, server: neqo,   cubic: true,  pacing: true}
           - {client: neqo,   server: google, cubic: true,  pacing: true}
@@ -511,9 +269,6 @@ jobs:
           - {client: quiche, server: neqo,   cubic: true,  pacing: true}
           - {client: neqo,   server: s2n,    cubic: true,  pacing: true}
           - {client: s2n,    server: neqo,   cubic: true,  pacing: true}
-    env:
-      HOST: 127.0.0.1
-      PORT: 4433
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -523,27 +278,31 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: stable
-          tools: samply
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        if: matrix.client == 'neqo' || matrix.server == 'neqo'
         with:
           name: build-neqo
           path: build-neqo
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        if: matrix.client != 'neqo' || matrix.server != 'neqo'
+        if: matrix.client != 'neqo'
         with:
-          name: build-${{ matrix.client != 'neqo' && matrix.client || matrix.server }}
-          path: build-${{ matrix.client != 'neqo' && matrix.client || matrix.server }}
+          name: build-${{ matrix.client }}
+          path: build-${{ matrix.client }}
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        if: matrix.server != 'neqo' && matrix.server != matrix.client
+        with:
+          name: build-${{ matrix.server }}
+          path: build-${{ matrix.server }}
 
-      - run: chmod +x build-*/* build-neqo/codspeed/*/*
+      - run: chmod +x build-*/*
 
       - name: Setup test environment
-        run: |
-          sudo ip link set dev lo mtu 1500
-          mkdir -p testdata
-          openssl req -nodes -new -x509 -keyout testdata/key -out testdata/cert -subj "/CN=localhost"
-          truncate -s "$TRANSFER_SIZE" "testdata/$TRANSFER_SIZE"
+        uses: ./.github/actions/testdata-setup
+        with:
+          sizes: ${{ env.TRANSFER_SIZE }}
+          mtu: '1500'
 
       - name: Set environment
         run: |
@@ -553,55 +312,29 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Generate commands
+        id: commands
+        uses: ./.github/actions/perfcompare-commands
+        with:
+          client: ${{ matrix.client }}
+          server: ${{ matrix.server }}
+          size: ${{ env.TRANSFER_SIZE }}
+          cubic: ${{ matrix.cubic }}
+          pacing: ${{ matrix.pacing }}
+          neqo-path: ${{ github.workspace }}/build-neqo
+          msquic-path: ${{ github.workspace }}/build-msquic
+          google-path: ${{ github.workspace }}/build-google
+          quiche-path: ${{ github.workspace }}/build-quiche
+          s2n-path: ${{ github.workspace }}/build-s2n
+          testdata-path: ${{ github.workspace }}/testdata
+
+      - name: Set command environment
         env:
-          CLIENT: ${{ matrix.client }}
-          SERVER: ${{ matrix.server }}
-          CUBIC: ${{ matrix.cubic }}
-          PACING: ${{ matrix.pacing }}
+          BENCH_NAME: ${{ steps.commands.outputs.bench-name }}
+          SERVER_CMD: ${{ steps.commands.outputs.server-cmd }}
+          CLIENT_CMD: ${{ steps.commands.outputs.client-cmd }}
         run: |
-          NAME="$CLIENT-$SERVER"
-          CC=$([[ "$CUBIC" == "true" ]] && echo "cubic" || echo "newreno")
-          NEQO_ARGS="--cc $CC -Q 1"
-          if [[ "$PACING" != "true" ]]; then
-            NEQO_ARGS="$NEQO_ARGS --no-pacing"
-          fi
-          # Add interop flag when communicating with s2n or msquic
-          INTEROP=""
-          if [[ "$CLIENT" == "s2n" || "$SERVER" == "s2n" || "$CLIENT" == "msquic" || "$SERVER" == "msquic" ]]; then
-            INTEROP="-a hq-interop"
-          fi
-          # Add cc/pacing to name for neqo-neqo benchmarks
-          if [[ "$CLIENT" == "neqo" && "$SERVER" == "neqo" ]]; then
-            NAME="$NAME-$CC"
-            [[ "$PACING" != "true" ]] && NAME="$NAME-nopacing"
-          fi
-
-          # Use full paths since CodSpeed doesn't inherit GITHUB_PATH
-          NEQO="$GITHUB_WORKSPACE/build-neqo"
-          MSQUIC="$GITHUB_WORKSPACE/build-msquic"
-          GOOGLE="$GITHUB_WORKSPACE/build-google"
-          QUICHE="$GITHUB_WORKSPACE/build-quiche"
-          S2N="$GITHUB_WORKSPACE/build-s2n"
-          TESTDATA="$GITHUB_WORKSPACE/testdata"
-
-          case "$SERVER" in
-            neqo)   SERVER_CMD="$NEQO/neqo-server $NEQO_ARGS $INTEROP $HOST:$PORT" ;;
-            msquic) SERVER_CMD="$MSQUIC/quicinteropserver -root:$TESTDATA -listen:$HOST -port:$PORT -file:$TESTDATA/cert -key:$TESTDATA/key -noexit" ;;
-            google) SERVER_CMD="$GOOGLE/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TESTDATA/cert --key_file $TESTDATA/key" ;;
-            quiche) SERVER_CMD="$QUICHE/quiche-server --root $TESTDATA --listen $HOST:$PORT --cert $TESTDATA/cert --key $TESTDATA/key" ;;
-            s2n)    SERVER_CMD="$S2N/s2n-quic-qns interop server --www-dir $TESTDATA --certificate $TESTDATA/cert --private-key $TESTDATA/key --ip $HOST --port $PORT" ;;
-          esac
-
-          case "$CLIENT" in
-            neqo)   CLIENT_CMD="$NEQO/neqo-client $NEQO_ARGS $INTEROP --output-dir . https://$HOST:$PORT/$TRANSFER_SIZE" ;;
-            msquic) CLIENT_CMD="$MSQUIC/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$TRANSFER_SIZE" ;;
-            google) CLIENT_CMD="bash -c \"$GOOGLE/quic_client --disable_certificate_verification https://$HOST:$PORT/$TRANSFER_SIZE > $TRANSFER_SIZE\"" ;;
-            quiche) CLIENT_CMD="$QUICHE/quiche-client --no-verify --dump-responses . https://$HOST:$PORT/$TRANSFER_SIZE" ;;
-            s2n)    CLIENT_CMD="$S2N/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$TRANSFER_SIZE" ;;
-          esac
-
           {
-            echo "BENCH_NAME=$NAME"
+            echo "BENCH_NAME=$BENCH_NAME"
             echo "SERVER_CMD=$SERVER_CMD"
             echo "CLIENT_CMD=$CLIENT_CMD"
           } >> "$GITHUB_ENV"
@@ -641,85 +374,6 @@ jobs:
           fi
 
       - name: Stop server
+        if: always()
         run: kill "$SERVER_PID" 2>/dev/null || true
 
-      # Record perf samples with 20x larger transfer for better profiling data
-      - name: Setup perf profiling
-        run: |
-          PERF_SIZE=$((TRANSFER_SIZE * 20))
-          truncate -s "$PERF_SIZE" "testdata/$PERF_SIZE"
-          # Update client command with larger size
-          PERF_CLIENT_CMD="${CLIENT_CMD//$TRANSFER_SIZE/$PERF_SIZE}"
-          {
-            echo "PERF_SIZE=$PERF_SIZE"
-            echo "PERF_CLIENT_CMD=$PERF_CLIENT_CMD"
-          } >> "$GITHUB_ENV"
-
-      - name: Record server perf sample
-        run: |
-          # shellcheck disable=SC2086
-          perf record -F2999 --call-graph fp -g -o "$BENCH_NAME.server.perf" -- $SERVER_CMD &
-          echo "PERF_SERVER_PID=$!" >> "$GITHUB_ENV"
-          sleep 1
-
-      - name: Record client perf sample
-        working-directory: /tmp
-        run: |
-          # shellcheck disable=SC2086
-          perf record -F2999 --call-graph fp -g -o "$BENCH_NAME.client.perf" -- $PERF_CLIENT_CMD || true
-
-      - name: Stop perf server
-        if: always()
-        run: kill "$PERF_SERVER_PID" 2>/dev/null || true
-
-      - name: Post-process perf data
-        working-directory: /tmp
-        run: |
-          for role in client server; do
-            if [ -f "$BENCH_NAME.$role.perf" ]; then
-              samply import "$BENCH_NAME.$role.perf" -o "$BENCH_NAME.$role.perf.samply.json.gz" --save-only --presymbolicate
-            fi
-          done
-
-      - name: Upload perf data
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: perf-${{ env.BENCH_NAME }}
-          path: /tmp/*.perf.samply.json.gz
-          retention-days: 90
-          if-no-files-found: ignore
-
-  pr-comment:
-    name: PR Comment
-    needs: [benchmarks, benchmarks-walltime, perfcompare]
-    if: always() && github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Generate comment
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPOSITORY: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-        run: |
-          ARTIFACTS=$(gh api "/repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" \
-            --jq '.artifacts | map(select(.name | startswith("perf-"))) | sort_by(.name) | .[] | "- [\(.name)](https://github.com/'"$REPOSITORY"'/actions/runs/'"$RUN_ID"'/artifacts/\(.id))"')
-          {
-            echo "### Performance Profiles"
-            echo
-            if [ -n "$ARTIFACTS" ]; then
-              echo "The following performance profiles are available for [profiler.firefox.com](https://profiler.firefox.com/):"
-              echo
-              echo "$ARTIFACTS"
-            else
-              echo "No performance profiles were generated."
-            fi
-          } > results.md
-
-      - uses: ./.github/actions/pr-comment-data-export
-        with:
-          name: ${{ github.workflow }}
-          contents: results.md

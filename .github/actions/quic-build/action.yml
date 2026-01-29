@@ -1,0 +1,200 @@
+name: Build QUIC implementation
+description: Build a QUIC implementation (msquic, google/quiche, cloudflare/quiche, s2n-quic)
+
+inputs:
+  impl:
+    description: Implementation to build (msquic, google, quiche, s2n)
+    required: true
+  token:
+    description: GitHub token for API access
+    required: true
+  artifact-name:
+    description: Artifact name (if set, uploads binaries as artifact)
+    default: ''
+
+outputs:
+  binaries:
+    description: Space-separated list of built binaries
+    value: ${{ steps.build.outputs.binaries || steps.binaries-cached.outputs.binaries }}
+  cache-hit:
+    description: Whether cache was hit
+    value: ${{ steps.cache-restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    # Pinned versions for reproducible builds
+    # Update these when bumping dependency versions
+    # Bump CACHE_VERSION to invalidate all caches (e.g., after changing build flags)
+    - name: Set versions
+      shell: bash
+      run: |
+        {
+          echo "CACHE_VERSION=v2"
+          echo "MSQUIC_VERSION=v2.5.6"
+          echo "GOOGLE_QUICHE_REF=c52d86fe10442363e4e8c5a66e639187c419d7c0"
+          echo "CLOUDFLARE_QUICHE_VERSION=0.24.5"
+          echo "S2N_QUIC_VERSION=v1.72.0"
+        } >> "$GITHUB_ENV"
+
+    - name: Install Rust
+      if: inputs.impl == 'quiche' || inputs.impl == 's2n'
+      uses: ./.github/actions/rust
+      with:
+        version: stable
+        token: ${{ inputs.token }}
+
+    - name: Determine cache key
+      id: cache-key
+      shell: bash
+      env:
+        IMPL: ${{ inputs.impl }}
+        RUNNER_OS: ${{ runner.os }}
+        RUNNER_ARCH: ${{ runner.arch }}
+      run: |
+        # Determine version based on implementation
+        case "$IMPL" in
+          msquic) VERSION="$MSQUIC_VERSION" ;;
+          google) VERSION="$GOOGLE_QUICHE_REF" ;;
+          quiche) VERSION="$CLOUDFLARE_QUICHE_VERSION" ;;
+          s2n)    VERSION="$S2N_QUIC_VERSION" ;;
+        esac
+
+        # Get Rust version hash for Rust-based builds
+        if [[ "$IMPL" == "quiche" || "$IMPL" == "s2n" ]]; then
+          RUST_HASH=$(rustc --version 2>/dev/null | sha256sum | cut -d' ' -f1 || echo "no-rust")
+          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH-rust-$RUST_HASH" >> "$GITHUB_OUTPUT"
+        elif [[ "$IMPL" == "google" ]]; then
+          BAZEL_VER=$(bazel --version 2>/dev/null | head -1 || echo "unknown")
+          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH-$BAZEL_VER" >> "$GITHUB_OUTPUT"
+        else
+          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Restore cache
+      id: cache-restore
+      uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: binaries
+        key: ${{ steps.cache-key.outputs.key }}
+
+    - name: Build
+      id: build
+      if: steps.cache-restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        IMPL: ${{ inputs.impl }}
+        OUTPUT_PATH: binaries
+        MSQUIC_VERSION: ${{ env.MSQUIC_VERSION }}
+        GOOGLE_QUICHE_REF: ${{ env.GOOGLE_QUICHE_REF }}
+        CLOUDFLARE_QUICHE_VERSION: ${{ env.CLOUDFLARE_QUICHE_VERSION }}
+        S2N_QUIC_VERSION: ${{ env.S2N_QUIC_VERSION }}
+      run: |
+        mkdir -p "$OUTPUT_PATH"
+
+        case "$IMPL" in
+          msquic)
+            git clone --depth 1 --recurse-submodules -b "$MSQUIC_VERSION" https://github.com/microsoft/msquic msquic-src
+            cd msquic-src
+            mkdir build && cd build
+            cmake -GNinja \
+              -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+              -DQUIC_BUILD_TOOLS=1 \
+              -DQUIC_BUILD_PERF=1 \
+              -DQUIC_BUILD_SHARED=OFF \
+              -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" \
+              ..
+            cmake --build .
+            cp bin/Release/quicinterop bin/Release/quicinteropserver "../../$OUTPUT_PATH/"
+            cd ../..
+            rm -rf msquic-src
+            echo "binaries=quicinterop quicinteropserver" >> "$GITHUB_OUTPUT"
+            ;;
+
+          google)
+            # Install bazelisk if not present
+            if ! command -v bazel &> /dev/null; then
+              ARCH=$([[ "$(uname -m)" == "aarch64" ]] && echo "arm64" || echo "amd64")
+              sudo curl -fsSL -o /usr/local/bin/bazel \
+                "https://github.com/bazelbuild/bazelisk/releases/download/v1.25.0/bazelisk-linux-$ARCH"
+              sudo chmod +x /usr/local/bin/bazel
+            fi
+            git clone --depth 1 https://github.com/google/quiche google-quiche-src
+            cd google-quiche-src
+            git fetch --depth 1 origin "$GOOGLE_QUICHE_REF"
+            git checkout FETCH_HEAD
+            # Use GCC 13 if available (needed for older Ubuntu)
+            if command -v gcc-13 &> /dev/null; then
+              sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 || true
+              sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100 || true
+              BAZEL_OPTS="--action_env=CC=gcc-13 --action_env=CXX=g++-13"
+            fi
+            # shellcheck disable=SC2086
+            bazel build -c opt \
+              ${BAZEL_OPTS:-} \
+              --linkopt=-l:libstdc++.a \
+              --linkopt=-l:libgcc.a \
+              --linkopt=-lpthread \
+              --linkopt=-lm \
+              quiche:quic_server quiche:quic_client
+            bazel shutdown
+            cp bazel-bin/quiche/quic_server bazel-bin/quiche/quic_client "../$OUTPUT_PATH/"
+            cd ..
+            rm -rf google-quiche-src
+            echo "binaries=quic_server quic_client" >> "$GITHUB_OUTPUT"
+            ;;
+
+          quiche)
+            git clone --depth 1 -b "$CLOUDFLARE_QUICHE_VERSION" https://github.com/cloudflare/quiche quiche-src
+            cd quiche-src
+            cargo build --release --bin quiche-client --bin quiche-server
+            cp target/release/quiche-client target/release/quiche-server "../$OUTPUT_PATH/"
+            cd ..
+            rm -rf quiche-src
+            echo "binaries=quiche-client quiche-server" >> "$GITHUB_OUTPUT"
+            ;;
+
+          s2n)
+            git clone --depth 1 -b "$S2N_QUIC_VERSION" https://github.com/aws/s2n-quic s2n-quic-src
+            cd s2n-quic-src
+            cargo build --release --bin s2n-quic-qns
+            cp target/release/s2n-quic-qns "../$OUTPUT_PATH/"
+            cd ..
+            rm -rf s2n-quic-src
+            echo "binaries=s2n-quic-qns" >> "$GITHUB_OUTPUT"
+            ;;
+
+          *)
+            echo "Unknown implementation: $IMPL"
+            exit 1
+            ;;
+        esac
+
+    - name: Set binaries output on cache hit
+      if: steps.cache-restore.outputs.cache-hit == 'true'
+      id: binaries-cached
+      shell: bash
+      env:
+        IMPL: ${{ inputs.impl }}
+      run: |
+        case "$IMPL" in
+          msquic) echo "binaries=quicinterop quicinteropserver" >> "$GITHUB_OUTPUT" ;;
+          google) echo "binaries=quic_server quic_client" >> "$GITHUB_OUTPUT" ;;
+          quiche) echo "binaries=quiche-client quiche-server" >> "$GITHUB_OUTPUT" ;;
+          s2n)    echo "binaries=s2n-quic-qns" >> "$GITHUB_OUTPUT" ;;
+        esac
+
+    - name: Save cache
+      if: steps.cache-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: binaries
+        key: ${{ steps.cache-key.outputs.key }}
+
+    - name: Upload artifact
+      if: inputs.artifact-name != ''
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: binaries
+        retention-days: 1
