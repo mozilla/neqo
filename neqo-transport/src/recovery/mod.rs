@@ -908,7 +908,11 @@ impl Loss {
             qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
             self.fire_pto(pn_space, allow_probes, now);
 
-            // Notify PMTUD about PTO.
+            // Notify PMTUD about PTO. The PTO itself is the trigger for black hole
+            // detection, not the specific packets. If any large packets are among
+            // those selected for PTO retransmission, this indicates the connection
+            // may be experiencing a black hole. Note: if only small packets are
+            // outstanding (e.g., at end of transfer), this won't trigger detection.
             primary_path.borrow_mut().on_pto(
                 &lost[pto_packets_start..],
                 &mut self.stats.borrow_mut(),

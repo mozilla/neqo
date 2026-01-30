@@ -379,7 +379,7 @@ impl Goal for SendDataCheckPmtud {
         let status = self.inner.handle_event(c, e, now);
         if status == GoalStatus::Done {
             assert_eq!(
-                c.stats().pmtud_count > 0,
+                c.stats().pmtud_restarts > 0,
                 self.expect_change,
                 "PMTUD black hole detection mismatch"
             );
