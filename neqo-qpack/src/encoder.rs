@@ -476,11 +476,11 @@ impl Encoder {
 
         if !stream_is_blocker {
             // The streams was not a blocker, check if the stream is a blocker now.
-            if let Some(max_ref) = ref_entries.iter().max() {
-                if *max_ref >= self.table.get_acked_inserts_cnt() {
-                    debug_assert!(self.blocked_stream_cnt <= self.max_blocked_streams);
-                    self.blocked_stream_cnt += 1;
-                }
+            if let Some(max_ref) = ref_entries.iter().max()
+                && *max_ref >= self.table.get_acked_inserts_cnt()
+            {
+                debug_assert!(self.blocked_stream_cnt <= self.max_blocked_streams);
+                self.blocked_stream_cnt += 1;
             }
         }
 

@@ -232,11 +232,11 @@ impl SendData {
     }
 
     fn make_stream(&mut self, c: &mut Connection) {
-        if self.stream_id.is_none() {
-            if let Ok(stream_id) = c.stream_create(StreamType::UniDi) {
-                qdebug!("[{c}] made stream {stream_id} for sending");
-                self.stream_id = Some(stream_id);
-            }
+        if self.stream_id.is_none()
+            && let Ok(stream_id) = c.stream_create(StreamType::UniDi)
+        {
+            qdebug!("[{c}] made stream {stream_id} for sending");
+            self.stream_id = Some(stream_id);
         }
     }
 

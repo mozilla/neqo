@@ -166,14 +166,14 @@ impl SenderFlowControl<()> {
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
-        if let Some(limit) = self.blocked_needed() {
-            if builder.write_varint_frame(&[FrameType::DataBlocked.into(), limit]) {
-                stats.data_blocked += 1;
-                tokens.push(recovery::Token::Stream(StreamRecoveryToken::DataBlocked(
-                    limit,
-                )));
-                self.blocked_sent();
-            }
+        if let Some(limit) = self.blocked_needed()
+            && builder.write_varint_frame(&[FrameType::DataBlocked.into(), limit])
+        {
+            stats.data_blocked += 1;
+            tokens.push(recovery::Token::Stream(StreamRecoveryToken::DataBlocked(
+                limit,
+            )));
+            self.blocked_sent();
         }
     }
 }
@@ -185,21 +185,21 @@ impl SenderFlowControl<StreamId> {
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
-        if let Some(limit) = self.blocked_needed() {
-            if builder.write_varint_frame(&[
+        if let Some(limit) = self.blocked_needed()
+            && builder.write_varint_frame(&[
                 FrameType::StreamDataBlocked.into(),
                 self.subject.as_u64(),
                 limit,
-            ]) {
-                stats.stream_data_blocked += 1;
-                tokens.push(recovery::Token::Stream(
-                    StreamRecoveryToken::StreamDataBlocked {
-                        stream_id: self.subject,
-                        limit,
-                    },
-                ));
-                self.blocked_sent();
-            }
+            ])
+        {
+            stats.stream_data_blocked += 1;
+            tokens.push(recovery::Token::Stream(
+                StreamRecoveryToken::StreamDataBlocked {
+                    stream_id: self.subject,
+                    limit,
+                },
+            ));
+            self.blocked_sent();
         }
     }
 }

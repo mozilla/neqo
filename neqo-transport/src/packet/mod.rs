@@ -815,12 +815,6 @@ impl<'a> Public<'a> {
         }
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::missing_asserts_for_indexing,
-        reason = "Checked, but clippy doesn't recognize it."
-        // FIXME: Check if MSRV >= 1.88 fixes this.
-    )]
     /// Decrypt the header of the packet.
     fn decrypt_header(&mut self, crypto: &CryptoDxState) -> Res<(bool, Number, Range<usize>)> {
         debug_assert_ne!(self.packet_type, Type::Retry);

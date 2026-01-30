@@ -55,7 +55,7 @@ jobs:
           platforms: linux/amd64
           outputs: type=docker,dest=/tmp/${{ matrix.name }}.tar
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=min
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:

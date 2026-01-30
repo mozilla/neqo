@@ -896,10 +896,10 @@ impl Path {
     /// Process a timer for this path.
     /// This returns true if the path is viable and can be kept alive.
     pub fn process_timeout(&mut self, now: Instant, pto: Duration, stats: &mut Stats) -> bool {
-        if let ProbeState::Probing { sent, .. } = &self.state {
-            if now >= *sent + pto {
-                self.probe(stats);
-            }
+        if let ProbeState::Probing { sent, .. } = &self.state
+            && now >= *sent + pto
+        {
+            self.probe(stats);
         }
         if matches!(self.state, ProbeState::Failed) {
             // Retire failed paths immediately.

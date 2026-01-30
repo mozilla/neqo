@@ -571,10 +571,9 @@ impl AckTracker {
         }
         if self.spaces[PacketNumberSpace::Initial].is_none()
             && self.spaces[PacketNumberSpace::Handshake].is_none()
+            && let Some(recvd) = &self.spaces[PacketNumberSpace::ApplicationData]
         {
-            if let Some(recvd) = &self.spaces[PacketNumberSpace::ApplicationData] {
-                return recvd.ack_time();
-            }
+            return recvd.ack_time();
         }
 
         // Ignore any time that is in the past relative to `now`.

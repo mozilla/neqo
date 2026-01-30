@@ -497,10 +497,10 @@ impl Http3ServerHandler {
     ) -> Res<(usize, bool)> {
         qdebug!("[{self}] read_data from stream {stream_id}");
         let res = self.base_handler.read_data(conn, stream_id, buf, now);
-        if let Err(e) = &res {
-            if e.connection_error() {
-                self.close(conn, now, e);
-            }
+        if let Err(e) = &res
+            && e.connection_error()
+        {
+            self.close(conn, now, e);
         }
         res
     }

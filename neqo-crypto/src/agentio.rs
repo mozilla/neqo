@@ -158,22 +158,12 @@ impl Drop for AgentIoInputContext<'_> {
     }
 }
 
-// TODO: Derive Default when MSRV >= 1.88 (Default for raw pointers stabilized in 1.88).
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct AgentIoInput {
     // input is data that is read by TLS.
     input: *const u8,
     // input_available is how much data is left for reading.
     available: usize,
-}
-
-impl Default for AgentIoInput {
-    fn default() -> Self {
-        Self {
-            input: null(),
-            available: 0,
-        }
-    }
 }
 
 impl AgentIoInput {
