@@ -231,7 +231,7 @@ fn pto_triggers_black_hole_detection() {
     // Drop the packet.
 
     // Record state before PTO.
-    let pmtud_count_before = client.stats().pmtud_count;
+    let pmtud_restarts_before = client.stats().pmtud_restarts;
 
     // Advance time to trigger PTO.
     now += AT_LEAST_PTO;
@@ -241,8 +241,8 @@ fn pto_triggers_black_hole_detection() {
     assert!(pto_dgram.is_some(), "Client should send PTO packet");
 
     // Verify black hole detection triggered.
-    let pmtud_count_after = client.stats().pmtud_count;
-    assert_eq!(pmtud_count_after, pmtud_count_before + 1,);
+    let pmtud_restarts_after = client.stats().pmtud_restarts;
+    assert_eq!(pmtud_restarts_after, pmtud_restarts_before + 1,);
 
     // Verify PMTUD restarted - MTU should be back to minimum.
     assert_eq!(
