@@ -284,8 +284,8 @@ pub struct Stats {
     pub pmtud_iface_mtu: usize,
     /// Probed PMTU of the current path.
     pub pmtud_pmtu: usize,
-    /// Number of times we started PMTUD.
-    pub pmtud_count: usize,
+    /// Number of times PMTUD was restarted due to black hole detection.
+    pub pmtud_restarts: usize,
 
     /// Whether the connection was resumed successfully.
     pub resumed: bool,
@@ -408,7 +408,7 @@ impl Debug for Stats {
             self.pmtud_tx,
             self.pmtud_ack,
             self.pmtud_lost,
-            self.pmtud_count,
+            self.pmtud_restarts,
             self.pmtud_iface_mtu,
             self.pmtud_pmtu
         )?;

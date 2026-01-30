@@ -182,7 +182,7 @@ impl Pmtud {
     }
 
     /// Checks whether a PMTUD probe has been acknowledged, and if so, updates the PMTUD state.
-    /// May also initiate a new probe process for a larger MTU.
+    /// May also initiate a new probe process for a larger MTU. Also checks for black holes.
     pub fn on_packets_acked(
         &mut self,
         acked_pkts: &[sent::Packet],
@@ -229,7 +229,7 @@ impl Pmtud {
     ) {
         // Only restart PMTUD if we aren't already at the minimum MTU.
         if self.mtu > self.min_mtu() && self.black_hole.on_loss(lost_packets, now) {
-            stats.pmtud_count += 1;
+            stats.pmtud_restarts += 1;
             self.start(now, stats);
             return;
         }
@@ -259,7 +259,7 @@ impl Pmtud {
     pub fn on_pto(&mut self, pto_packets: &[sent::Packet], stats: &mut Stats, now: Instant) {
         // Only restart PMTUD if we aren't already at the minimum MTU.
         if self.mtu > self.min_mtu() && self.black_hole.on_pto(pto_packets, now) {
-            stats.pmtud_count += 1;
+            stats.pmtud_restarts += 1;
             self.start(now, stats);
         }
     }
@@ -355,6 +355,9 @@ impl BlackHoleDetector {
 
     /// Handle ACK of packets. If a large packet was acknowledged,
     /// the path is working for that size, so reset detection.
+    ///
+    /// Unlike loss detection, we include probe packets here since their ACKs
+    /// prove the path works at that size. We only filter by primary path.
     fn on_ack(&mut self, acked_pkts: &[sent::Packet]) {
         if self.min_lost_size.is_none() {
             return;
@@ -743,21 +746,21 @@ mod tests {
         // Set PMTUD to minimum MTU.
         pmtud.start(now, &mut stats);
         assert_eq!(pmtud.mtu, pmtud.min_mtu());
-        let initial_pmtud_count = stats.pmtud_count;
+        let initial_pmtud_restarts = stats.pmtud_restarts;
 
         trigger_black_hole(&mut pmtud, &mut stats, now);
 
-        // pmtud_count should NOT have incremented because we're at min_mtu.
+        // pmtud_restarts should NOT have incremented because we're at min_mtu.
         assert_eq!(
-            initial_pmtud_count, stats.pmtud_count,
+            initial_pmtud_restarts, stats.pmtud_restarts,
             "Black hole detection should not trigger restart when at min_mtu"
         );
         assert_eq!(pmtud.mtu, pmtud.min_mtu());
     }
 
-    /// Tests that black hole detection increments `pmtud_count` when triggered above `min_mtu`.
+    /// Tests that black hole detection increments `pmtud_restarts` when triggered above `min_mtu`.
     #[test]
-    fn black_hole_increments_pmtud_count() {
+    fn black_hole_increments_pmtud_restarts() {
         let now = now();
         let mut pmtud = Pmtud::new(V4, None);
         let mut stats = Stats::default();
@@ -767,13 +770,13 @@ mod tests {
         pmtud.stop(idx, now, &mut stats);
         assert_eq!(pmtud.mtu, 1500);
         assert!(pmtud.mtu > pmtud.min_mtu());
-        assert_eq!(stats.pmtud_count, 0);
+        assert_eq!(stats.pmtud_restarts, 0);
 
         trigger_black_hole(&mut pmtud, &mut stats, now);
 
         assert_eq!(
-            stats.pmtud_count, 1,
-            "pmtud_count should be exactly 1 after one black hole detection"
+            stats.pmtud_restarts, 1,
+            "pmtud_restarts should be exactly 1 after one black hole detection"
         );
     }
 
@@ -1054,6 +1057,26 @@ mod tests {
             let new_time = now + Duration::from_millis(100);
             let pkt = make_packet(20, new_time, 1400);
             assert!(detector.on_pto(&[pkt], now));
+        }
+
+        #[test]
+        fn burst_loss_counts_as_single_event() {
+            let now = now();
+            let mut detector = BlackHoleDetector::new(BASE_PLPMTU);
+
+            // Simulate losing two bursts of 10 large packets in a single loss event.
+            for i in 1..=2 {
+                let burst: Vec<_> = (0..10).map(|i| make_packet(i, now, 1400)).collect();
+                assert!(!detector.on_loss(&burst, now));
+                assert_eq!(detector.loss_count, i);
+                assert_eq!(detector.min_lost_size, Some(1400));
+            }
+
+            // A third burst triggers detection.
+            let burst: Vec<_> = (20..30).map(|i| make_packet(i, now, 1400)).collect();
+            assert!(detector.on_loss(&burst, now));
+            assert_eq!(detector.loss_count, 0);
+            assert!(detector.min_lost_size.is_none());
         }
     }
 }
