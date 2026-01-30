@@ -30,15 +30,18 @@ from urllib.request import urlopen
 import tomlkit
 from packaging.version import Version
 
-GECKO_LOCKFILE_URL = (
-    "https://raw.githubusercontent.com"
-    "/mozilla-firefox/firefox/refs/heads/main/Cargo.lock"
-)
-GECKO_BUILD_RUST_URL = (
-    "https://api.github.com/repos/mozilla-firefox/firefox/contents/build/rust"
-)
-GECKO_RAW_URL = (
-    "https://raw.githubusercontent.com/mozilla-firefox/firefox/refs/heads/main"
+from lockfile_utils import (
+    GECKO_BUILD_RUST_URL,
+    GECKO_RAW_URL,
+    build_dependents_map,
+    find_dev_only_packages,
+    find_neqo_only_deps,
+    get_duplicate_packages,
+    is_registry_package,
+    load_lockfile,
+    load_lockfiles,
+    parse_packages,
+    semver_range,
 )
 
 PATCH_DIR = Path("build/rust")
@@ -161,121 +164,9 @@ def fetch_gecko_patches() -> dict[str, GeckoPatch]:
     return patches
 
 
-def find_dev_only_packages() -> set[str]:
-    """Find packages that are only dev-dependencies or build-dependencies.
-
-    These don't affect Gecko integration since Gecko doesn't use our dev/build deps.
-    """
-    # Parse workspace Cargo.toml to find members.
-    workspace_toml = Path("Cargo.toml")
-    with open(workspace_toml, "r", encoding="utf-8") as f:
-        workspace = tomlkit.load(f)
-
-    members = workspace.get("workspace", {}).get("members", [])
-
-    # Collect direct dev and build dependencies from all workspace members.
-    dev_build_roots = set()
-    normal_deps = set()
-
-    for member in members:
-        member_toml = Path(member) / "Cargo.toml"
-        if not member_toml.exists():
-            continue
-        with open(member_toml, "r", encoding="utf-8") as f:
-            cargo = tomlkit.load(f)
-
-        # Collect normal dependencies.
-        for dep in cargo.get("dependencies", {}):
-            normal_deps.add(dep)
-
-        # Collect dev-dependencies.
-        for dep in cargo.get("dev-dependencies", {}):
-            dev_build_roots.add(dep)
-
-        # Collect build-dependencies.
-        for dep in cargo.get("build-dependencies", {}):
-            dev_build_roots.add(dep)
-
-    # Also check workspace-level dev/build dependencies.
-    ws_deps = workspace.get("workspace", {})
-    for dep in ws_deps.get("dev-dependencies", {}):
-        dev_build_roots.add(dep)
-    for dep in ws_deps.get("build-dependencies", {}):
-        dev_build_roots.add(dep)
-
-    # Load lockfile to trace transitive dependencies.
-    with open("Cargo.lock", "r", encoding="utf-8") as f:
-        lock = tomlkit.load(f)
-
-    pkg_deps = {}
-    for pkg in lock.get("package", []):
-        name = pkg["name"]
-        deps = [d.split()[0] for d in pkg.get("dependencies", [])]
-        pkg_deps[name] = deps
-
-    # Find all packages transitively reachable from dev/build roots.
-    dev_only = set()
-    to_visit = list(dev_build_roots - normal_deps)  # Only those not also normal deps.
-
-    while to_visit:
-        pkg = to_visit.pop()
-        if pkg in dev_only:
-            continue
-        dev_only.add(pkg)
-        for dep in pkg_deps.get(pkg, []):
-            if dep not in dev_only and dep not in normal_deps:
-                to_visit.append(dep)
-
-    return dev_only
-
-
 def parse_version(v: str) -> Version:
     """Parse version string into a comparable Version object."""
     return Version(v)
-
-
-def load_lockfile(src: str) -> dict:
-    """Load a Cargo.lock from a path or URL."""
-    if src.startswith(("http://", "https://")):
-        with urlopen(src) as response:
-            return tomlkit.loads(response.read().decode())
-    with open(src, "r", encoding="utf-8") as f:
-        return tomlkit.load(f)
-
-
-def parse_packages(lock: dict) -> dict[str, dict[str, dict]]:
-    """Parse lockfile into a dict of name -> {version -> {deps, source}}.
-
-    Tracks all versions of each package, not just one.
-    """
-    packages: dict[str, dict[str, dict]] = {}
-    for pkg in lock.get("package", []):
-        name = pkg["name"]
-        version = pkg["version"]
-        source = pkg.get("source")
-
-        if name not in packages:
-            packages[name] = {}
-
-        packages[name][version] = {
-            "deps": [d.split()[0] for d in pkg.get("dependencies", [])],
-            "source": source,
-        }
-    return packages
-
-
-def semver_range(version: str) -> str:
-    """Extract major.minor semver range from a version string."""
-    parts = version.split(".")
-    if len(parts) >= 2:
-        return f"{parts[0]}.{parts[1]}"
-    return parts[0]
-
-
-def is_registry_version(info: dict) -> bool:
-    """Check if a package version is from a registry (not a local patch)."""
-    source = info.get("source")
-    return source is not None and source.startswith("registry")
 
 
 def create_gecko_patch(crate: str, patch: GeckoPatch) -> bool:
@@ -309,6 +200,160 @@ def create_gecko_patch(crate: str, patch: GeckoPatch) -> bool:
     return True
 
 
+def remove_patch_from_cargo_toml(crate: str) -> bool:
+    """Remove a patch entry from Cargo.toml. Returns True if removed, False if not found."""
+    cargo_toml_path = Path("Cargo.toml")
+    doc = tomlkit.parse(cargo_toml_path.read_text(encoding="utf-8"))
+
+    if "patch" not in doc or "crates-io" not in doc["patch"]:
+        return False
+
+    if crate not in doc["patch"]["crates-io"]:
+        return False
+
+    del doc["patch"]["crates-io"][crate]
+
+    # Clean up empty sections.
+    if not doc["patch"]["crates-io"]:
+        del doc["patch"]["crates-io"]
+    if not doc["patch"]:
+        del doc["patch"]
+
+    cargo_toml_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    return True
+
+
+def remove_gecko_patch(crate: str) -> bool:
+    """Remove a patch directory. Returns True if removed, False if not found."""
+    import shutil
+
+    patch_path = PATCH_DIR / crate
+    if not patch_path.exists():
+        return False
+
+    shutil.rmtree(patch_path)
+    return True
+
+
+def cleanup_unused_patches(
+    our_lock: dict, gecko_lock: dict, gecko_patches: dict[str, GeckoPatch]
+) -> list[str]:
+    """Remove patches that are no longer needed.
+
+    A patch is no longer needed if:
+    - We no longer depend on that crate, OR
+    - Gecko no longer uses a 999 version for that crate, OR
+    - Gecko's patch is now complex (requires manual handling)
+
+    Returns list of removed patch names.
+    """
+    removed = []
+
+    if not PATCH_DIR.exists():
+        return removed
+
+    # Get crates we depend on.
+    our_crates = {pkg["name"] for pkg in our_lock.get("package", [])}
+
+    for patch_path in PATCH_DIR.iterdir():
+        if not patch_path.is_dir():
+            continue
+
+        crate = patch_path.name
+        reason = None
+
+        # Check if we still depend on this crate.
+        if crate not in our_crates:
+            reason = "no longer a dependency"
+        else:
+            # Check if Gecko still uses a 999 version for this crate.
+            gecko_versions = [
+                pkg["version"]
+                for pkg in gecko_lock.get("package", [])
+                if pkg["name"] == crate
+            ]
+            has_999_version = any("999" in v for v in gecko_versions)
+
+            if not has_999_version:
+                reason = "Gecko no longer uses 999 patch"
+            elif gecko_patches.get(crate, GeckoPatch(kind="unknown")).kind == "complex":
+                reason = "Gecko patch is now complex"
+
+        if reason:
+            if remove_patch_from_cargo_toml(crate):
+                print(f"# Removed {crate} from [patch.crates-io] ({reason})")
+            if remove_gecko_patch(crate):
+                print(f"# Removed patch directory: {PATCH_DIR}/{crate}")
+                removed.append(crate)
+
+    return removed
+
+
+def update_neqo_only_packages(packages: list[str]) -> dict[str, tuple[str, str]]:
+    """Update all neqo-only packages together to their latest versions.
+
+    Updates all packages at once, which allows transitive dependencies to unify.
+    For example, if both enumset and serde_with need darling, updating them together
+    allows them to share a single darling version.
+
+    Returns a dict of package name -> (old_version, new_version) for updated packages.
+    """
+    if not packages:
+        return {}
+
+    # Save current lockfile state.
+    original_lock = load_lockfile("Cargo.lock")
+    original_versions = {
+        pkg["name"]: pkg["version"]
+        for pkg in original_lock.get("package", [])
+        if pkg["name"] in packages
+    }
+    original_duplicates = get_duplicate_packages(original_lock)
+
+    # Update all packages at once.
+    cmd = ["cargo", "update"] + [arg for p in packages for arg in ["-p", p]]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return {}
+
+    # Check results.
+    new_lock = load_lockfile("Cargo.lock")
+    new_versions = {
+        pkg["name"]: pkg["version"]
+        for pkg in new_lock.get("package", [])
+        if pkg["name"] in packages
+    }
+    new_duplicates = get_duplicate_packages(new_lock)
+
+    # Check for new duplicate packages (same name, multiple versions).
+    added_duplicates = set(new_duplicates.keys()) - set(original_duplicates.keys())
+    if added_duplicates:
+        # New duplicates introduced. Revert and report.
+        print(f"  Update would introduce duplicate dependencies:")
+        for name in sorted(added_duplicates):
+            print(f"    {name}: {', '.join(new_duplicates[name])}")
+
+        # Revert all changes.
+        for name, version in original_versions.items():
+            subprocess.run(
+                ["cargo", "update", "-p", name, "--precise", version],
+                capture_output=True,
+                check=False,
+            )
+        print(f"  Reverted to original versions")
+        return {}
+
+    # Collect updated packages.
+    updated = {}
+    for name in packages:
+        old_ver = original_versions.get(name)
+        new_ver = new_versions.get(name)
+        if old_ver and new_ver and old_ver != new_ver:
+            updated[name] = (old_ver, new_ver)
+
+    return updated
+
+
 def add_patch_to_cargo_toml(crate: str) -> bool:
     """Add a patch entry to Cargo.toml. Returns True if added, False if exists."""
     cargo_toml_path = Path("Cargo.toml")
@@ -337,16 +382,7 @@ def main():
     gecko_patches = fetch_gecko_patches()
 
     # Load both lockfiles.
-    print(f"Fetching {GECKO_LOCKFILE_URL}...", file=sys.stderr)
-    try:
-        gecko_lock = load_lockfile(GECKO_LOCKFILE_URL)
-    except Exception as e:
-        sys.exit(f"Error fetching Gecko lockfile: {e}")
-
-    try:
-        our_lock = load_lockfile("Cargo.lock")
-    except FileNotFoundError:
-        sys.exit("Error: Cargo.lock not found. Run from the workspace root.")
+    our_lock, gecko_lock = load_lockfiles()
 
     gecko_pkgs = parse_packages(gecko_lock)
     our_pkgs = parse_packages(our_lock)
@@ -358,6 +394,14 @@ def main():
         file=sys.stderr,
     )
 
+    # Clean up patches that are no longer needed.
+    removed_patches = cleanup_unused_patches(our_lock, gecko_lock, gecko_patches)
+    if removed_patches:
+        # Refresh lockfile after removing patches.
+        subprocess.run(["cargo", "update"], capture_output=True, check=False)
+        our_lock = load_lockfile("Cargo.lock")
+        our_pkgs = parse_packages(our_lock)
+
     # Sync existing patches with Gecko's content.
     # This ensures we track any changes Gecko makes to their patches.
     for name, patch in gecko_patches.items():
@@ -365,17 +409,25 @@ def main():
             if create_gecko_patch(name, patch):
                 print(f"# Synced {patch.kind} patch: {PATCH_DIR}/{name}")
 
+    # Find packages that only neqo depends on in Gecko.
+    # We'll update these to latest rather than aligning with Gecko.
+    neqo_only = find_neqo_only_deps(gecko_lock, our_lock)
+
     # Collect version updates needed, grouped by (name, our_version) -> gecko_version.
     # This handles multiple versions of the same crate.
+    # Exclude neqo-only packages since we want to update those to latest.
     patches_created: list[tuple[str, str]] = []  # [(name, our_version), ...]
     version_updates: dict[tuple[str, str], str] = {}  # (name, our_ver) -> gecko_ver
 
     for name in common:
+        # Skip neqo-only packages - we'll update those to latest, not align with Gecko.
+        if name in neqo_only:
+            continue
         gecko_versions = gecko_pkgs[name]  # {version -> info}
         our_versions = our_pkgs[name]  # {version -> info}
 
         # Skip workspace crates (no source on any version).
-        if all(not is_registry_version(info) for info in our_versions.values()):
+        if all(not is_registry_package(info) for info in our_versions.values()):
             continue
 
         # Group versions by semver range (major.minor).
@@ -385,7 +437,7 @@ def main():
 
         our_by_range: dict[str, list[str]] = {}
         for ver, info in our_versions.items():
-            if is_registry_version(info):
+            if is_registry_package(info):
                 our_by_range.setdefault(semver_range(ver), []).append(ver)
 
         # For each semver range we have, check what Gecko has.
@@ -448,8 +500,32 @@ def main():
         if result.returncode == 0:
             print(f"# Updated {name}@{our_ver} to use patch")
 
+    # Update neqo-only packages to latest (these were excluded from version alignment).
+    neqo_only_in_common = neqo_only & common
+
+    if neqo_only_in_common:
+        # Filter to registry packages only.
+        packages_to_update = []
+        for name in sorted(neqo_only_in_common):
+            our_versions = our_pkgs.get(name, {})
+            if any(is_registry_package(info) for info in our_versions.values()):
+                packages_to_update.append(name)
+
+        if packages_to_update:
+            print(f"\nUpdating {len(packages_to_update)} neqo-only packages...")
+            print("(These only neqo depends on in Gecko, so we can update freely)")
+
+            updated = update_neqo_only_packages(packages_to_update)
+
+            if updated:
+                for name, (old_ver, new_ver) in sorted(updated.items()):
+                    print(f"  {name}: {old_ver} -> {new_ver}")
+                print(f"Updated {len(updated)} neqo-only package(s)")
+            else:
+                print("All neqo-only packages already at newest compatible version")
+
     if not version_updates:
-        print("All packages have the same versions (excluding Gecko patches)")
+        print("\nAll shared packages aligned with Gecko versions")
         return
 
     # Build dependency graph for topological sort.
@@ -537,15 +613,7 @@ def main():
     if failed:
         # Determine which failures are due to dev-only dependencies.
         dev_only = find_dev_only_packages()
-
-        # Parse lockfile to find what requires each failed package.
-        with open("Cargo.lock", "r", encoding="utf-8") as f:
-            lock = tomlkit.load(f)
-        dependents: dict[str, list[str]] = {}
-        for pkg in lock.get("package", []):
-            for dep in pkg.get("dependencies", []):
-                dep_name = dep.split()[0]
-                dependents.setdefault(dep_name, []).append(pkg["name"])
+        dependents = build_dependents_map(load_lockfile("Cargo.lock"))
 
         dev_failures = {}
         real_failures = {}
