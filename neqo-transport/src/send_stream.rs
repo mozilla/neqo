@@ -1189,9 +1189,10 @@ impl SendStream {
 
     pub fn set_max_stream_data(&mut self, limit: u64) {
         qdebug!("setting max_stream_data to {limit}");
+        let previous_limit = self.avail();
         if let State::Ready { fc, .. } | State::Send { fc, .. } = &mut self.state {
-            let previous_limit = fc.available();
-            if let Some(current_limit) = fc.update(limit) {
+            if fc.update(limit).is_some() {
+                let current_limit = self.avail();
                 self.maybe_emit_writable_event(previous_limit, current_limit);
             }
         }
