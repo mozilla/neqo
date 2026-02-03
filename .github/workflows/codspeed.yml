@@ -233,6 +233,51 @@ jobs:
             echo "NSS_DB_PATH=$GITHUB_WORKSPACE/dist/test-fixture/db"
           } >> "$GITHUB_ENV"
 
+      # Disable turboboost, hyperthreading and use performance governor.
+      - name: Prepare machine
+        run: |
+          echo "::group::CPU Information"
+          echo "=== /proc/cpuinfo ==="
+          cat /proc/cpuinfo || echo "::error::Failed to read /proc/cpuinfo"
+          echo "=== CPU topology ==="
+          lscpu || echo "::error::lscpu not available"
+          echo "=== Online CPUs ==="
+          cat /sys/devices/system/cpu/online || echo "::error::Failed to read online CPUs"
+          echo "=== CPU max frequencies (to identify big/little cores) ==="
+          for f in /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq; do
+            if [ -f "$f" ]; then
+              cpu=$(echo "$f" | grep -o 'cpu[0-9]*')
+              freq=$(cat "$f")
+              echo "$cpu: $freq kHz"
+            fi
+          done
+          echo "::endgroup::"
+
+          echo "::group::Applying CPU tuning"
+          # Set CPU governor to performance for all CPUs
+          for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+            if [ -f "$gov" ]; then
+              if ! echo performance | sudo tee "$gov" > /dev/null 2>&1; then
+                echo "::error::Failed to set performance governor for $gov"
+              fi
+            fi
+          done
+          # Disable SMT/hyperthreading if available
+          if [ -f /sys/devices/system/cpu/smt/control ]; then
+            if ! echo off | sudo tee /sys/devices/system/cpu/smt/control > /dev/null 2>&1; then
+              echo "::error::Failed to disable SMT"
+            fi
+          fi
+          # Disable boost via per-policy boost control
+          for boost in /sys/devices/system/cpu/cpufreq/policy*/boost; do
+            if [ -f "$boost" ]; then
+              if ! echo 0 | sudo tee "$boost" > /dev/null 2>&1; then
+                echo "::error::Failed to disable boost for $boost"
+              fi
+            fi
+          done
+          echo "::endgroup::"
+
       - name: Run bench & upload results
         uses: CodSpeedHQ/action@0700edb451d0e9f2426f99bd6977027e550fb2a6 # v4.7.0
         with:
@@ -311,6 +356,95 @@ jobs:
             echo "NSS_DB_PATH=$GITHUB_WORKSPACE/build-neqo/test-fixture/db"
           } >> "$GITHUB_ENV"
 
+      # Disable turboboost, hyperthreading and use performance governor.
+      # Also determine suitable physical cores for pinning client and server.
+      - name: Prepare machine
+        run: |
+          echo "::group::CPU Information"
+          echo "=== /proc/cpuinfo ==="
+          cat /proc/cpuinfo || echo "::error::Failed to read /proc/cpuinfo"
+          echo "=== CPU topology ==="
+          lscpu || echo "::error::lscpu not available"
+          echo "=== Online CPUs ==="
+          cat /sys/devices/system/cpu/online || echo "::error::Failed to read online CPUs"
+          echo "=== CPU max frequencies (to identify big/little cores) ==="
+          for f in /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq; do
+            if [ -f "$f" ]; then
+              cpu=$(echo "$f" | grep -o 'cpu[0-9]*')
+              freq=$(cat "$f")
+              echo "$cpu: $freq kHz"
+            fi
+          done
+          echo "::endgroup::"
+
+          echo "::group::Applying CPU tuning"
+          # Set CPU governor to performance for all CPUs
+          for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+            if [ -f "$gov" ]; then
+              if ! echo performance | sudo tee "$gov" > /dev/null 2>&1; then
+                echo "::error::Failed to set performance governor for $gov"
+              fi
+            fi
+          done
+          # Disable SMT/hyperthreading if available
+          if [ -f /sys/devices/system/cpu/smt/control ]; then
+            if ! echo off | sudo tee /sys/devices/system/cpu/smt/control > /dev/null 2>&1; then
+              echo "::error::Failed to disable SMT"
+            fi
+          fi
+          # Disable boost via per-policy boost control
+          for boost in /sys/devices/system/cpu/cpufreq/policy*/boost; do
+            if [ -f "$boost" ]; then
+              if ! echo 0 | sudo tee "$boost" > /dev/null 2>&1; then
+                echo "::error::Failed to disable boost for $boost"
+              fi
+            fi
+          done
+          echo "::endgroup::"
+
+          echo "::group::Selecting CPUs for pinning"
+          # Find physical cores by looking at core_id. Cores with the same core_id are SMT siblings.
+          # We want two different physical cores for server and client.
+          declare -A core_to_cpu
+          for cpu_path in /sys/devices/system/cpu/cpu[0-9]*; do
+            cpu=$(basename "$cpu_path")
+            cpu_num=${cpu#cpu}
+            core_id_file="$cpu_path/topology/core_id"
+            if [ -f "$core_id_file" ]; then
+              core_id=$(cat "$core_id_file")
+              # Only keep the first CPU for each physical core
+              if [ -z "${core_to_cpu[$core_id]}" ]; then
+                core_to_cpu[$core_id]=$cpu_num
+              fi
+            fi
+          done
+          # Get list of unique physical cores
+          mapfile -t physical_cpus < <(printf '%s\n' "${core_to_cpu[@]}")
+          echo "Physical core CPU mapping: ${core_to_cpu[*]}"
+          echo "Available physical cores (first CPU of each): ${physical_cpus[*]}"
+
+          # Select two different physical cores, preferring higher-numbered ones
+          # (to avoid interference with system processes typically on CPU 0)
+          mapfile -t sorted < <(printf '%s\n' "${physical_cpus[@]}" | sort -rn)
+          if [ ${#sorted[@]} -ge 2 ]; then
+            SERVER_CPU=${sorted[0]}
+            CLIENT_CPU=${sorted[1]}
+          elif [ ${#sorted[@]} -eq 1 ]; then
+            SERVER_CPU=${sorted[0]}
+            CLIENT_CPU=${sorted[0]}
+            echo "::warning::Only one physical core available, server and client will share CPU $SERVER_CPU"
+          else
+            SERVER_CPU=0
+            CLIENT_CPU=1
+            echo "::warning::Could not determine physical cores, using CPUs 0 and 1"
+          fi
+          echo "Selected SERVER_CPU=$SERVER_CPU, CLIENT_CPU=$CLIENT_CPU"
+          {
+            echo "SERVER_CPU=$SERVER_CPU"
+            echo "CLIENT_CPU=$CLIENT_CPU"
+          } >> "$GITHUB_ENV"
+          echo "::endgroup::"
+
       - name: Generate commands
         id: commands
         uses: ./.github/actions/perfcompare-commands
@@ -342,7 +476,7 @@ jobs:
       - name: Start server
         run: |
           # shellcheck disable=SC2086
-          $SERVER_CMD &
+          taskset -c "$SERVER_CPU" $SERVER_CMD &
           echo "SERVER_PID=$!" >> "$GITHUB_ENV"
           sleep 1
 
@@ -351,7 +485,7 @@ jobs:
           {
             echo "benchmarks:"
             echo "  - name: \"$BENCH_NAME\""
-            echo "    exec: $CLIENT_CMD"
+            echo "    exec: taskset -c $CLIENT_CPU $CLIENT_CMD"
             echo "    options:"
             echo "      min-rounds: 500"
           } > codspeed.yml
