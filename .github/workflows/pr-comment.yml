@@ -8,7 +8,7 @@ name: PR Comment
 
 on:
   workflow_run:
-    workflows: ["QNS PR", "cargo bench", "Performance comparison", "Vendor"]
+    workflows: ["QNS PR", "cargo bench", "Performance comparison"]
     types:
       - completed # zizmor: ignore[dangerous-triggers]
 

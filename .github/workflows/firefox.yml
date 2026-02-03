@@ -5,6 +5,23 @@ on:
     types: [opened, synchronize, reopened]
   merge_group:
   workflow_dispatch:
+    inputs:
+      build:
+        description: 'Build Firefox after vendoring'
+        type: boolean
+        default: false
+      linux:
+        description: 'Build on Linux'
+        type: boolean
+        default: true
+      macos:
+        description: 'Build on macOS'
+        type: boolean
+        default: true
+      windows:
+        description: 'Build on Windows'
+        type: boolean
+        default: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -127,8 +144,11 @@ jobs:
             exit 1
           fi
 
+      # Build steps only run on manual dispatch with build enabled
       - name: Maximize build space (Linux)
-        if: runner.os == 'Linux'
+        if: |
+          github.event_name == 'workflow_dispatch' &&
+          inputs.build && inputs.linux && runner.os == 'Linux'
         run: |
           sudo rm -rf /usr/local/lib/android || true
           sudo rm -rf /usr/share/dotnet || true
@@ -144,7 +164,11 @@ jobs:
           df -h
 
       - name: Build Firefox
-        continue-on-error: true
+        if: |
+          github.event_name == 'workflow_dispatch' && inputs.build &&
+          ((runner.os == 'Linux' && inputs.linux) ||
+           (runner.os == 'macOS' && inputs.macos) ||
+           (runner.os == 'Windows' && inputs.windows))
         working-directory: firefox
         env:
           NAME: ${{ runner.os == 'macOS' && 'Nightly' || 'bin' }}
@@ -155,60 +179,14 @@ jobs:
           ./mach build && tar -cf ../Firefox.tar -C ../obj-firefox/dist "$NAME$EXT"
 
       - name: Export Firefox artifact
-        continue-on-error: true
+        if: |
+          github.event_name == 'workflow_dispatch' && inputs.build &&
+          ((runner.os == 'Linux' && inputs.linux) ||
+           (runner.os == 'macOS' && inputs.macos) ||
+           (runner.os == 'Windows' && inputs.windows))
         id: upload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: ${{ runner.os }}-Firefox.tgz
           path: Firefox.tar
           compression-level: 9
-
-      - name: Export artifact URL
-        continue-on-error: true
-        env:
-          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
-        run: |
-          [ -n "$ARTIFACT_URL" ] && echo "$ARTIFACT_URL" >> artifact
-
-      - name: Upload artifact URL
-        continue-on-error: true
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: artifact-${{ runner.os }}-Firefox
-          path: artifact
-          retention-days: 1
-
-  comment:
-    name: Comment on PR
-    needs: vendor
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          pattern: 'artifact-*'
-          path: artifacts
-
-      - run: |
-          {
-            echo "### Firefox builds for this PR"
-            echo "The following builds are available for testing. Crossed-out builds did not succeed."
-            for os in Linux macOS Windows; do
-              artifact="artifacts/artifact-$os-Firefox/artifact"
-              if [ -e "$artifact" ]; then
-                echo "* **$os**: [Release]($(cat "$artifact"))"
-              else
-                echo "* **$os**: ~~Release~~"
-              fi
-            done
-          } > comment.md
-          cat comment.md > "$GITHUB_STEP_SUMMARY"
-
-      - uses: ./.github/actions/pr-comment-data-export
-        with:
-          name: ${{ github.workflow }}
-          contents: comment.md
