@@ -34,6 +34,7 @@ use crate::{
         ConnectType,
         extended_connect::{
             self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
+            send_group::SendGroupId,
             webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         },
     },
@@ -1064,6 +1065,21 @@ impl Http3Connection {
             .map_err(|_| Error::InvalidStreamId)
     }
 
+    /// Set the stream `SendGroup`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidStreamId` if the stream id doesn't exist or the stream doesn't support send groups
+    pub fn stream_set_sendgroup(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        sendgroup: SendGroupId,
+    ) -> Res<()> {
+        conn.stream_sendgroup(stream_id, Some(sendgroup.as_u64()))
+            .map_err(|_| Error::InvalidStreamId)
+    }
+
     /// Set the stream Fairness.   Fair streams will share bandwidth with other
     /// streams of the same sendOrder group (or the unordered group).  Unfair streams
     /// will give bandwidth preferentially to the lowest streamId with data to send.
@@ -1372,9 +1388,121 @@ impl Http3Connection {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::stats::WebTransportSessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
-        self.extended_connect_close_session(conn, session_id, error, message, now)
+        // Capture stats BEFORE closing the session
+        let stats = self.webtransport_session_stats(session_id)?;
+        // Now close the session
+        self.extended_connect_close_session(conn, session_id, error, message, now)?;
+        Ok(stats)
+    }
+
+    /// Get all WebTransport session stream IDs.
+    pub(crate) fn webtransport_session_ids(&self) -> Vec<StreamId> {
+        self.send_streams
+            .iter()
+            .filter_map(|(id, s)| {
+                if s.stream_type() == Http3StreamType::ExtendedConnect {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Get the negotiated protocol for a WebTransport session.
+    ///
+    /// Returns `None` if no protocol was negotiated or session doesn't exist.
+    pub(crate) fn webtransport_session_protocol(
+        &self,
+        session_id: StreamId,
+    ) -> Res<Option<String>> {
+        self.send_streams
+            .get(&session_id)
+            .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
+            .map(|s| s.session_protocol())
+            .ok_or(Error::InvalidStreamId)
+    }
+
+    /// Create a new send group for a WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_create_send_group(
+        &mut self,
+        session_id: StreamId,
+    ) -> Res<SendGroupId> {
+        self.send_streams
+            .get_mut(&session_id)
+            .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
+            .and_then(|s| s.create_send_group())
+            .ok_or(Error::InvalidStreamId)
+    }
+
+    /// Validate that a send group belongs to the specified WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_validate_send_group(
+        &self,
+        session_id: StreamId,
+        group_id: SendGroupId,
+    ) -> Res<bool> {
+        self.send_streams
+            .get(&session_id)
+            .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
+            .map(|s| s.validate_send_group(group_id))
+            .ok_or(Error::InvalidStreamId)
+    }
+
+    /// Get statistics for a WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_session_stats(
+        &self,
+        session_id: StreamId,
+    ) -> Res<extended_connect::stats::WebTransportSessionStats> {
+        self.recv_streams
+            .get(&session_id)
+            .and_then(|s| s.extended_connect_session())
+            .and_then(|s| s.borrow().stats())
+            .ok_or(Error::InvalidStreamId)
+    }
+
+    pub(crate) fn webtransport_set_anticipated_incoming_uni(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        self.recv_streams
+            .get(&session_id)
+            .and_then(|s| s.extended_connect_session())
+            .map(|s| {
+                s.borrow_mut().set_anticipated_incoming_uni(value);
+            })
+            .ok_or(Error::InvalidStreamId)?;
+        conn.set_remote_max_streams_uni(u64::from(value));
+        Ok(())
+    }
+
+    pub(crate) fn webtransport_set_anticipated_incoming_bidi(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        self.recv_streams
+            .get(&session_id)
+            .and_then(|s| s.extended_connect_session())
+            .map(|s| {
+                s.borrow_mut().set_anticipated_incoming_bidi(value);
+            })
+            .ok_or(Error::InvalidStreamId)?;
+        conn.set_remote_max_streams_bidi(u64::from(value));
+        Ok(())
     }
 
     pub(crate) fn connect_udp_close_session(
@@ -1445,6 +1573,53 @@ impl Http3Connection {
             send_events,
             recv_events,
             true,
+            None,
+        )?;
+        Ok(stream_id)
+    }
+
+    pub(crate) fn webtransport_create_stream_local_with_send_group(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        stream_type: StreamType,
+        send_events: Box<dyn SendStreamEvents>,
+        recv_events: Box<dyn RecvStreamEvents>,
+        send_group: Option<SendGroupId>,
+    ) -> Res<StreamId> {
+        qtrace!("Create new WebTransport stream session={session_id} type={stream_type:?} send_group={send_group:?}");
+
+        // Validate send group if provided
+        if let Some(group_id) = send_group {
+            if !self.webtransport_validate_send_group(session_id, group_id)? {
+                return Err(Error::InvalidState);
+            }
+        }
+
+        let wt = self
+            .recv_streams
+            .get(&session_id)
+            .ok_or(Error::InvalidStreamId)?
+            .extended_connect_session()
+            .ok_or(Error::InvalidStreamId)?;
+        if !wt.borrow().is_active() {
+            return Err(Error::InvalidStreamId);
+        }
+
+        let stream_id = conn
+            .stream_create(stream_type)
+            .map_err(|e| Error::map_stream_create_errors(&e))?;
+        // Set outgoing WebTransport streams to be fair (share bandwidth)
+        conn.stream_fairness(stream_id, true)?;
+
+        self.webtransport_create_stream_internal(
+            wt,
+            stream_id,
+            session_id,
+            send_events,
+            recv_events,
+            true,
+            send_group,
         )?;
         Ok(stream_id)
     }
@@ -1472,8 +1647,34 @@ impl Http3Connection {
             send_events,
             recv_events,
             false,
+            None,
         )?;
         Ok(())
+    }
+
+    pub(crate) fn webtransport_send_stream_atomic(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        data: &[u8],
+        now: Instant,
+    ) -> Res<bool> {
+        use crate::features::extended_connect::webtransport_streams::WebTransportSendStream;
+
+        // Get the send stream
+        let send_stream = self
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?;
+
+        // Try to downcast to WebTransportSendStream
+        let wt_stream = send_stream
+            .as_any_mut()
+            .downcast_mut::<WebTransportSendStream>()
+            .ok_or(Error::InvalidStreamId)?;
+
+        // Use send_atomic which ensures init buffer is sent first
+        wt_stream.send_atomic(conn, data, now)
     }
 
     fn webtransport_create_stream_internal(
@@ -1484,8 +1685,12 @@ impl Http3Connection {
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
         local: bool,
+        send_group: Option<SendGroupId>,
     ) -> Res<()> {
         webtransport_session.borrow_mut().add_stream(stream_id)?;
+        webtransport_session
+            .borrow_mut()
+            .record_stream_opened(local);
         if stream_id.stream_type() == StreamType::UniDi {
             if local {
                 self.send_streams.insert(
@@ -1496,6 +1701,7 @@ impl Http3Connection {
                         send_events,
                         webtransport_session,
                         true,
+                        send_group,
                     )),
                 );
             } else {
@@ -1518,6 +1724,7 @@ impl Http3Connection {
                     send_events,
                     Rc::clone(&webtransport_session),
                     local,
+                    send_group,
                 )),
                 Box::new(WebTransportRecvStream::new(
                     stream_id,
@@ -1536,7 +1743,7 @@ impl Http3Connection {
         conn: &mut Connection,
         buf: &[u8],
         id: I,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.extended_connect_send_datagram(session_id, conn, buf, id)
     }
 
@@ -1546,7 +1753,7 @@ impl Http3Connection {
         conn: &mut Connection,
         buf: &[u8],
         id: I,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.extended_connect_send_datagram(session_id, conn, buf, id)
     }
 
@@ -1556,7 +1763,7 @@ impl Http3Connection {
         conn: &mut Connection,
         buf: &[u8],
         id: I,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.recv_streams
             .get_mut(&session_id)
             .ok_or(Error::InvalidStreamId)?
@@ -1564,6 +1771,83 @@ impl Http3Connection {
             .ok_or(Error::InvalidStreamId)?
             .borrow_mut()
             .send_datagram(conn, buf, id)
+    }
+
+    pub fn webtransport_set_datagram_high_water_mark(
+        &mut self,
+        session_id: StreamId,
+        mark: f64,
+    ) -> Res<()> {
+        self.recv_streams
+            .get_mut(&session_id)
+            .ok_or(Error::InvalidStreamId)?
+            .extended_connect_session()
+            .ok_or(Error::InvalidStreamId)?
+            .borrow_mut()
+            .set_datagram_high_water_mark(mark);
+        Ok(())
+    }
+
+    pub fn webtransport_set_datagram_max_age(
+        &mut self,
+        session_id: StreamId,
+        age_ms: f64,
+    ) -> Res<()> {
+        self.recv_streams
+            .get_mut(&session_id)
+            .ok_or(Error::InvalidStreamId)?
+            .extended_connect_session()
+            .ok_or(Error::InvalidStreamId)?
+            .borrow_mut()
+            .set_datagram_max_age(age_ms);
+        Ok(())
+    }
+
+    pub fn webtransport_process_datagram_queue(
+        &mut self,
+        session_id: StreamId,
+        conn: &mut Connection,
+    ) -> Res<Vec<(u64, extended_connect::datagram_queue::DatagramOutcome)>> {
+        Ok(self
+            .recv_streams
+            .get_mut(&session_id)
+            .ok_or(Error::InvalidStreamId)?
+            .extended_connect_session()
+            .ok_or(Error::InvalidStreamId)?
+            .borrow_mut()
+            .process_datagram_queue(conn))
+    }
+
+    pub(crate) fn process_all_datagram_queues(
+        &mut self,
+        conn: &mut Connection,
+    ) -> Vec<(
+        StreamId,
+        u64,
+        crate::features::extended_connect::datagram_queue::DatagramOutcome,
+    )> {
+        let session_ids: Vec<StreamId> = self
+            .recv_streams
+            .iter()
+            .filter_map(|(id, stream)| {
+                if stream.extended_connect_session().is_some() {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut all_outcomes = Vec::new();
+        for session_id in session_ids {
+            if let Ok(outcomes) = self.webtransport_process_datagram_queue(session_id, conn) {
+                // Collect all outcomes with session_id
+                for (tracking_id, outcome) in outcomes {
+                    all_outcomes.push((session_id, tracking_id, outcome));
+                }
+            }
+        }
+        all_outcomes
     }
 
     /// If the control stream has received frames `MaxPushId`, `Goaway`, `PriorityUpdateRequest` or

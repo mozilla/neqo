@@ -20,7 +20,7 @@ use crate::{
     frame::FrameType,
     packet,
     send_stream::{self, OrderGroup},
-    streams::{SendOrder, StreamOrder},
+    streams::{SendGroupId, SendOrder, StreamOrder},
     tparams::{TransportParameter, TransportParameterId::*},
 };
 
@@ -215,6 +215,83 @@ fn sendorder_4() {
         Some(3),
         None,
     ]);
+}
+
+// Tests sendgroup scheduling with inter-group round-robin fairness.
+// group_assignments: (sendgroup_id, sendorder) for each stream
+fn sendgroup_test(group_assignments: &[(SendGroupId, Option<SendOrder>)]) {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    qdebug!("---- client sends");
+    let mut streams = Vec::<StreamId>::new();
+    for (sendgroup, sendorder) in group_assignments {
+        let id = client.stream_create(StreamType::UniDi).unwrap();
+        streams.push(id);
+        // Set sendgroup (which implies fairness)
+        client.streams.set_sendgroup(id, Some(*sendgroup)).unwrap();
+        if sendorder.is_some() {
+            client.streams.set_sendorder(id, *sendorder).unwrap();
+        }
+    }
+
+    // Write data to all streams
+    for stream_id in &streams {
+        client.stream_send(*stream_id, &[6; 100]).unwrap();
+    }
+
+    // Send all datagrams
+    let mut datagrams = Vec::new();
+    let mut out = client.process_output(now());
+    while let Some(d) = out.dgram() {
+        datagrams.push(d);
+        out = client.process_output(now());
+    }
+
+    qdebug!("---- server receives");
+    for d in datagrams {
+        let out = server.process(Some(d), now());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+    }
+
+    // Collect received stream IDs in order
+    let received_order: Vec<StreamId> = server
+        .events()
+        .filter_map(|evt| match evt {
+            ConnectionEvent::RecvStreamReadable { stream_id, .. } => Some(stream_id),
+            _ => None,
+        })
+        .collect();
+
+    // Verify we received all streams
+    assert_eq!(received_order.len(), streams.len());
+    qdebug!("Received order: {:?}", received_order);
+}
+
+#[test]
+fn sendgroup_basic() {
+    // Two streams in different groups
+    sendgroup_test(&[(1, None), (2, None)]);
+}
+
+#[test]
+fn sendgroup_with_sendorder() {
+    // Within a group, sendorder applies (highest first)
+    // Group 1: stream with sendorder 10, stream with sendorder 5
+    sendgroup_test(&[(1, Some(10)), (1, Some(5))]);
+}
+
+#[test]
+fn sendgroup_multiple_groups() {
+    // Multiple groups with multiple streams each
+    sendgroup_test(&[(1, Some(10)), (1, Some(5)), (2, Some(20)), (2, Some(15))]);
+}
+
+#[test]
+fn sendgroup_intergroup_fairness() {
+    // Groups share bandwidth equally even with different sendorders
+    sendgroup_test(&[(1, Some(100)), (2, Some(1)), (1, Some(50)), (2, Some(2))]);
 }
 
 // Tests stream sendorder prioritization

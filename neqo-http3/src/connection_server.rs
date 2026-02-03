@@ -210,7 +210,7 @@ impl Http3ServerHandler {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<crate::features::extended_connect::stats::WebTransportSessionStats> {
         self.needs_processing = true;
         self.base_handler
             .webtransport_close_session(conn, session_id, error, message, now)
@@ -264,6 +264,7 @@ impl Http3ServerHandler {
         self.needs_processing = true;
         self.base_handler
             .webtransport_send_datagram(session_id, conn, buf, id)
+            .map(|_| ())
     }
 
     pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
@@ -276,6 +277,7 @@ impl Http3ServerHandler {
         self.needs_processing = true;
         self.base_handler
             .connect_udp_send_datagram(session_id, conn, buf, id)
+            .map(|_| ())
     }
 
     /// Process HTTTP3 layer.
@@ -289,6 +291,9 @@ impl Http3ServerHandler {
         if !self.check_result(conn, now, &res) && self.base_handler.state().active() {
             let res = self.base_handler.process_sending(conn, now);
             self.check_result(conn, now, &res);
+
+            // Process datagram queues to send any queued datagrams
+            let _outcomes = self.base_handler.process_all_datagram_queues(conn);
         }
     }
 

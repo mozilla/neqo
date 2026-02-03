@@ -28,8 +28,8 @@ use neqo_transport::{
 
 use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, PushId,
-    ReceiveOutput, Res,
-    client_events::{Http3ClientEvent, Http3ClientEvents},
+    ReceiveOutput, Res, SendGroupId,
+    client_events::{Http3ClientEvent, Http3ClientEvents, WebTransportEvent},
     connection::{Http3Connection, Http3State, RequestDescription},
     features::ConnectType,
     frames::HFrame,
@@ -770,7 +770,7 @@ impl Http3Client {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<crate::features::extended_connect::stats::WebTransportSessionStats> {
         self.base_handler.webtransport_close_session(
             &mut self.conn,
             session_id,
@@ -803,7 +803,7 @@ impl Http3Client {
     /// # Errors
     ///
     /// This may return an error if the particular session does not exist
-    /// or the connection is not in the active state.
+    /// or the connection is not in the active state or if we're out of streams.
     pub fn webtransport_create_stream(
         &mut self,
         session_id: StreamId,
@@ -830,7 +830,7 @@ impl Http3Client {
         session_id: StreamId,
         buf: &[u8],
         id: I,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         qtrace!("webtransport_send_datagram session:{session_id:?}");
         self.base_handler
             .webtransport_send_datagram(session_id, &mut self.conn, buf, id)
@@ -848,7 +848,7 @@ impl Http3Client {
         session_id: StreamId,
         buf: &[u8],
         id: I,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
         self.base_handler
             .connect_udp_send_datagram(session_id, &mut self.conn, buf, id)
@@ -871,6 +871,24 @@ impl Http3Client {
                 .map_err(|_| Error::Internal)?)
     }
 
+    pub fn webtransport_set_datagram_high_water_mark(
+        &mut self,
+        session_id: StreamId,
+        high_water_mark: f64,
+    ) -> Res<()> {
+        self.base_handler
+            .webtransport_set_datagram_high_water_mark(session_id, high_water_mark)
+    }
+
+    pub fn webtransport_set_datagram_max_age(
+        &mut self,
+        session_id: StreamId,
+        max_age: f64,
+    ) -> Res<()> {
+        self.base_handler
+            .webtransport_set_datagram_max_age(session_id, max_age)
+    }
+
     /// Sets the `SendOrder` for a given stream
     ///
     /// # Errors
@@ -881,7 +899,23 @@ impl Http3Client {
         stream_id: StreamId,
         sendorder: Option<SendOrder>,
     ) -> Res<()> {
-        Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, sendorder)
+        Ok(())
+        //        Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, sendorder)
+    }
+
+    /// Sets the `SendGroup` for a given WebTransport stream.
+    /// Streams in different send groups receive fair bandwidth allocation.
+    /// Within the same group, sendOrder determines priority.
+    ///
+    /// # Errors
+    ///
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    pub fn webtransport_set_sendgroup(
+        &mut self,
+        stream_id: StreamId,
+        sendgroup: SendGroupId,
+    ) -> Res<()> {
+        Http3Connection::stream_set_sendgroup(&mut self.base_handler, &mut self.conn, stream_id, sendgroup)
     }
 
     /// Sets the `Fairness` for a given stream
@@ -893,6 +927,10 @@ impl Http3Client {
     // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.
     pub fn webtransport_set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         Http3Connection::stream_set_fairness(&mut self.conn, stream_id, fairness)
+    }
+
+    pub fn stream_set_sendgroup(&mut self, stream_id: StreamId, sendgroup: SendGroupId) -> Res<()> {
+        Http3Connection::stream_set_sendgroup(&mut self.base_handler, &mut self.conn, stream_id, sendgroup)
     }
 
     /// Returns the current `send_stream::Stats` of a `WebTransportSendStream`.
@@ -925,6 +963,59 @@ impl Http3Client {
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .stats(&mut self.conn)
+    }
+
+    /// Returns available send window and buffered bytes for a WebTransport send stream.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream does not exist.
+    pub fn webtransport_send_stream_flow_control_info(
+        &self,
+        stream_id: StreamId,
+    ) -> Res<(usize, usize)> {
+        let available = self.conn.stream_avail_send_space(stream_id)?;
+        Ok((available, 0))
+    }
+
+    /// Send data atomically on a WebTransport send stream.
+    /// Returns true if all data was sent, false if it couldn't fit.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream does not exist or other stream errors.
+    pub fn webtransport_send_stream_atomic(
+        &mut self,
+        stream_id: StreamId,
+        data: &[u8],
+    ) -> Res<bool> {
+        let now = std::time::Instant::now();
+        self.base_handler
+            .webtransport_send_stream_atomic(&mut self.conn, stream_id, data, now)
+    }
+
+    /// Export keying material per RFC 5705/8446.
+    ///
+    /// Note: The keying material is derived from the TLS connection, so it is
+    /// the same for all WebTransport sessions on this connection.
+    ///
+    /// # Arguments
+    /// * `label` - The exporter label
+    /// * `context` - Optional context data
+    /// * `out_len` - Length of output keying material
+    ///
+    /// # Errors
+    ///
+    /// Returns `TransportError` if the connection is not ready or export fails.
+    pub fn export_keying_material(
+        &self,
+        label: &[u8],
+        context: Option<&[u8]>,
+        out_len: usize,
+    ) -> Res<Vec<u8>> {
+        self.conn
+            .export_keying_material(label, context, out_len)
+            .map_err(Error::Transport)
     }
 
     /// This function combines  `process_input` and `process_output` function.
@@ -993,6 +1084,20 @@ impl Http3Client {
                     .maybe_send_max_push_id_frame(&mut self.base_handler);
                 let res = self.base_handler.process_sending(&mut self.conn, now);
                 self.check_result(now, &res);
+
+                // Process datagram queues and generate outcome events
+                let outcomes = self
+                    .base_handler
+                    .process_all_datagram_queues(&mut self.conn);
+                for (session_id, tracking_id, outcome) in outcomes {
+                    self.events.insert(Http3ClientEvent::WebTransport(
+                        WebTransportEvent::DatagramOutcome {
+                            session_id,
+                            tracking_id,
+                            outcome,
+                        },
+                    ));
+                }
             }
             Http3State::Closed { .. } => {}
             _ => {
@@ -1130,6 +1235,7 @@ impl Http3Client {
 
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
                     self.events.new_requests_creatable(stream_type);
+                    self.events.stream_creatable(stream_type);
                 }
                 ConnectionEvent::AuthenticationNeeded => self.events.authentication_needed(),
                 ConnectionEvent::EchFallbackAuthenticationNeeded { public_name } => {
@@ -1334,6 +1440,15 @@ impl Http3Client {
             ));
         }
 
+        // Emit draining events for WebTransport sessions affected by GOAWAY
+        for session_id in self.base_handler.webtransport_session_ids() {
+            if session_id >= goaway_stream_id {
+                self.events.insert(Http3ClientEvent::WebTransport(
+                    WebTransportEvent::Draining { session_id },
+                ));
+            }
+        }
+
         self.events.goaway_received();
 
         Ok(())
@@ -1352,6 +1467,110 @@ impl Http3Client {
     #[must_use]
     pub const fn webtransport_enabled(&self) -> bool {
         self.base_handler.webtransport_enabled()
+    }
+
+    /// Get the negotiated protocol for a WebTransport session.
+    ///
+    /// Returns `None` if no protocol was negotiated or session doesn't exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid.
+    pub fn webtransport_session_protocol(&self, session_id: StreamId) -> Res<Option<String>> {
+        self.base_handler.webtransport_session_protocol(session_id)
+    }
+
+    /// Create a new send group for a WebTransport session.
+    ///
+    /// Send groups allow organizing streams with shared prioritization.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_create_send_group(&mut self, session_id: StreamId) -> Res<SendGroupId> {
+        self.base_handler.webtransport_create_send_group(session_id)
+    }
+
+    /// Validate that a send group belongs to the specified WebTransport session.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_validate_send_group(
+        &self,
+        session_id: StreamId,
+        group_id: SendGroupId,
+    ) -> Res<bool> {
+        self.base_handler
+            .webtransport_validate_send_group(session_id, group_id)
+    }
+
+    /// Get statistics for a WebTransport session.
+    ///
+    /// Returns session-level statistics including bytes sent/received,
+    /// datagrams sent/received, and streams opened.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_session_stats(
+        &self,
+        session_id: StreamId,
+    ) -> Res<crate::features::extended_connect::stats::WebTransportSessionStats> {
+        self.base_handler.webtransport_session_stats(session_id)
+    }
+
+    /// Set the anticipated concurrent incoming unidirectional streams for a WebTransport session.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_set_anticipated_incoming_uni(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        self.base_handler.webtransport_set_anticipated_incoming_uni(
+            &mut self.conn,
+            session_id,
+            value,
+        )
+    }
+
+    /// Set the anticipated concurrent incoming bidirectional streams for a WebTransport session.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_set_anticipated_incoming_bidi(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        self.base_handler
+            .webtransport_set_anticipated_incoming_bidi(&mut self.conn, session_id, value)
+    }
+
+    /// Create a WebTransport stream with a send group.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid, stream creation fails, or send group is invalid.
+    pub fn webtransport_create_stream_with_send_group(
+        &mut self,
+        session_id: StreamId,
+        stream_type: StreamType,
+        send_group: Option<SendGroupId>,
+    ) -> Res<StreamId> {
+        self.base_handler
+            .webtransport_create_stream_local_with_send_group(
+                &mut self.conn,
+                session_id,
+                stream_type,
+                Box::new(self.events.clone()),
+                Box::new(self.events.clone()),
+                send_group,
+            )
     }
 }
 

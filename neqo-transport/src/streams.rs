@@ -34,6 +34,7 @@ use crate::{
 };
 
 pub type SendOrder = i64;
+pub type SendGroupId = u64;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct StreamOrder {
@@ -427,6 +428,16 @@ impl Streams {
     }
 
     /// # Errors
+    /// When the stream does not exist.
+    pub fn set_sendgroup(
+        &mut self,
+        stream_id: StreamId,
+        sendgroup: Option<SendGroupId>,
+    ) -> Res<()> {
+        self.send.set_sendgroup(stream_id, sendgroup)
+    }
+
+    /// # Errors
     /// When a stream cannot be created, which might be temporary.
     pub fn stream_create(&mut self, st: StreamType) -> Res<StreamId> {
         match self.local_stream_limits.take_stream_id(st) {
@@ -470,6 +481,14 @@ impl Streams {
                 Ok(new_id)
             }
         }
+    }
+
+    pub fn set_remote_max_streams_bidi(&mut self, max: u64) {
+        self.remote_stream_limits[StreamType::BiDi].set_max_active(max);
+    }
+
+    pub fn set_remote_max_streams_uni(&mut self, max: u64) {
+        self.remote_stream_limits[StreamType::UniDi].set_max_active(max);
     }
 
     pub fn handle_max_data(&mut self, maximum_data: u64) {

@@ -20,7 +20,8 @@ use crate::{
     CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
     SendStream, Stream,
     features::extended_connect::{
-        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
+        send_group::SendGroupId, stats::WebTransportSessionStats, ExtendedConnectEvents,
+        ExtendedConnectType, HeaderListener, Headers,
     },
     frames::HFrame,
     priority::PriorityHandler,
@@ -282,6 +283,39 @@ impl Session {
                         );
                         State::Done
                     } else {
+                        // Extract negotiated protocol from headers
+                        // The wt-protocol header value is a structured field string (RFC 8941)
+                        // Format: "protocol" or "protocol"; param=value
+                        // We need to extract just the unquoted protocol name
+                        let negotiated_protocol = headers
+                            .iter()
+                            .find(|h| h.name().eq_ignore_ascii_case("wt-protocol"))
+                            .and_then(|h| from_utf8(h.value()).ok())
+                            .and_then(|s| {
+                                qtrace!("wt-protocol header value: {:?}", s);
+                                // Split on ';' to remove parameters
+                                let main_value = s.split(';').next()?.trim();
+                                qtrace!(
+                                    "wt-protocol main_value after split/trim: {:?}",
+                                    main_value
+                                );
+                                // Remove surrounding quotes
+                                if main_value.len() >= 2
+                                    && main_value.starts_with('"')
+                                    && main_value.ends_with('"')
+                                {
+                                    let extracted = main_value[1..main_value.len() - 1].to_string();
+                                    qtrace!("wt-protocol extracted: {:?}", extracted);
+                                    Some(extracted)
+                                } else {
+                                    // If not quoted, it's malformed per spec - reject it
+                                    qtrace!("wt-protocol malformed (not quoted): {:?}", main_value);
+                                    None
+                                }
+                            });
+
+                        self.protocol.set_protocol(negotiated_protocol);
+
                         self.events.session_start(
                             self.protocol.connect_type(),
                             self.id,
@@ -379,27 +413,88 @@ impl Session {
     ///
     /// Returns an error if the datagram exceeds the remote datagram size limit.
     pub(crate) fn send_datagram<I: Into<DatagramTracking>>(
-        &self,
+        &mut self,
         conn: &mut Connection,
         buf: &[u8],
         id: I,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state == State::Active {
+            conn.max_datagram_size().map_err(|e| {
+                if matches!(e, neqo_transport::Error::NotAvailable) {
+                    neqo_transport::Error::TooMuchData
+                } else {
+                    e
+                }
+            })?;
+
             let mut dgram_data = Encoder::default();
             dgram_data.encode_varint(self.id.as_u64() / 4);
             self.protocol.write_datagram_prefix(&mut dgram_data);
             dgram_data.encode(buf);
-            conn.send_datagram(dgram_data.into(), id)?;
+
+            let datagram_id = id.into();
+            let id_u64 = match datagram_id {
+                DatagramTracking::Id(id_val) => id_val,
+                DatagramTracking::None => 0,
+            };
+
+            let (below_watermark, _dropped) = self
+                .protocol
+                .enqueue_datagram(Bytes::from(Vec::<u8>::from(dgram_data)), id_u64);
+            // Note: _dropped outcomes from queue-full are currently not reported as events
+            // They will be silent drops. This could be improved in the future.
+
+            self.protocol.record_bytes_sent(buf.len() as u64);
+            Ok(below_watermark)
         } else {
             qdebug!("[{self}]: cannot send datagram in {:?} state.", self.state);
             debug_assert!(false);
-            return Err(Error::Unavailable);
+            Err(Error::Unavailable)
         }
-        Ok(())
     }
 
-    pub(crate) fn datagram(&self, datagram: Bytes) {
+    pub(crate) fn process_datagram_queue(
+        &mut self,
+        conn: &mut Connection,
+    ) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
+        let outcomes = self
+            .protocol
+            .process_datagram_queue(&mut |data, id| match conn
+                .send_datagram(data.to_vec(), DatagramTracking::Id(id))
+            {
+                Ok(()) => Ok(()),
+                Err(_) => Err(()),
+            });
+
+        let sent_count = outcomes
+            .iter()
+            .filter(|(_, outcome)| *outcome == super::datagram_queue::DatagramOutcome::Sent)
+            .count();
+        for _ in 0..sent_count {
+            self.protocol.record_datagram_sent();
+        }
+
+        outcomes
+    }
+
+    pub(crate) fn set_datagram_high_water_mark(&mut self, mark: f64) {
+        self.protocol.set_datagram_high_water_mark(mark);
+    }
+
+    pub(crate) fn set_datagram_max_age(&mut self, age_ms: f64) {
+        self.protocol.set_datagram_max_age(age_ms);
+    }
+
+    pub(crate) fn set_anticipated_incoming_uni(&mut self, value: u16) {
+        self.protocol.set_anticipated_incoming_uni(value);
+    }
+
+    pub(crate) fn set_anticipated_incoming_bidi(&mut self, value: u16) {
+        self.protocol.set_anticipated_incoming_bidi(value);
+    }
+
+    pub(crate) fn datagram(&mut self, datagram: Bytes) {
         if self.state != State::Active {
             qdebug!("[{self}]: received datagram on {:?} session.", self.state);
             return;
@@ -408,13 +503,29 @@ impl Session {
         // dgram_context_id returns the payload after stripping any context ID
         match self.protocol.dgram_context_id(datagram) {
             Ok(slice) => {
+                let len = slice.len() as u64;
                 self.events
                     .new_datagram(self.id, slice, self.protocol.connect_type());
+                self.protocol.record_datagram_received();
+                self.protocol.record_bytes_received(len);
             }
             Err(e) => {
                 qdebug!("[{self}]: received datagram with invalid context identifier: {e}");
             }
         }
+    }
+
+    pub(crate) fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        self.protocol.validate_send_group(group_id)
+    }
+
+    pub(crate) fn record_stream_opened(&mut self, local: bool) {
+        self.protocol.record_stream_opened(local);
+    }
+
+    #[must_use]
+    pub(crate) fn stats(&self) -> Option<WebTransportSessionStats> {
+        self.protocol.stats()
     }
 
     fn has_data_to_send(&self) -> bool {
@@ -429,6 +540,18 @@ impl Session {
 impl Stream for Rc<RefCell<Session>> {
     fn stream_type(&self) -> Http3StreamType {
         Http3StreamType::ExtendedConnect
+    }
+
+    fn session_protocol(&self) -> Option<String> {
+        self.borrow().protocol.protocol().map(|s| s.to_string())
+    }
+
+    fn create_send_group(&mut self) -> Option<SendGroupId> {
+        self.borrow_mut().protocol.create_send_group()
+    }
+
+    fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        self.borrow().protocol.validate_send_group(group_id)
     }
 }
 
@@ -509,6 +632,10 @@ impl SendStream for Rc<RefCell<Session>> {
     fn handle_stop_sending(&mut self, close_type: CloseType) {
         self.borrow_mut().close(close_type);
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 /// An extended connect protocol.
@@ -562,9 +689,69 @@ pub(crate) trait Protocol: Debug + Display {
         (HashSet::default(), HashSet::default())
     }
 
+    fn set_offered_protocols(&mut self, _protocols: Vec<String>) {
+        // Default implementation does nothing
+    }
+
+    fn set_protocol(&mut self, _protocol: Option<String>) {
+        // Default implementation does nothing
+    }
+
+    fn protocol(&self) -> Option<&str> {
+        // Default implementation returns None
+        None
+    }
+
+    fn create_send_group(&mut self) -> Option<SendGroupId> {
+        // Default implementation returns None
+        None
+    }
+
+    fn validate_send_group(&self, _group_id: SendGroupId) -> bool {
+        // Default implementation returns false
+        false
+    }
+
+    fn record_bytes_sent(&mut self, _bytes: u64) {}
+
+    fn record_bytes_received(&mut self, _bytes: u64) {}
+
+    fn record_datagram_sent(&mut self) {}
+
+    fn record_datagram_received(&mut self) {}
+
+    fn record_stream_opened(&mut self, _local: bool) {}
+
+    fn stats(&self) -> Option<WebTransportSessionStats> {
+        None
+    }
+
     fn write_datagram_prefix(&self, encoder: &mut Encoder);
 
     fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError>;
+
+    fn set_datagram_high_water_mark(&mut self, _mark: f64) {}
+
+    fn set_datagram_max_age(&mut self, _age_ms: f64) {}
+
+    fn set_anticipated_incoming_uni(&mut self, _value: u16) {}
+
+    fn set_anticipated_incoming_bidi(&mut self, _value: u16) {}
+
+    fn enqueue_datagram(
+        &mut self,
+        _data: Bytes,
+        _id: u64,
+    ) -> (bool, Option<(u64, super::datagram_queue::DatagramOutcome)>) {
+        (true, None)
+    }
+
+    fn process_datagram_queue(
+        &mut self,
+        _send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>,
+    ) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
+        Vec::new()
+    }
 }
 
 #[derive(Debug, Error)]

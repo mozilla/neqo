@@ -34,6 +34,9 @@ pub enum WebTransportEvent {
         reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     },
+    Draining {
+        session_id: StreamId,
+    },
     NewStream {
         stream_id: StreamId,
         session_id: StreamId,
@@ -41,6 +44,11 @@ pub enum WebTransportEvent {
     Datagram {
         session_id: StreamId,
         datagram: Bytes,
+    },
+    DatagramOutcome {
+        session_id: StreamId,
+        tracking_id: u64,
+        outcome: extended_connect::datagram_queue::DatagramOutcome,
     },
 }
 
@@ -112,6 +120,8 @@ pub enum Http3ClientEvent {
     PushReset { push_id: PushId, error: AppError },
     /// New stream can be created
     RequestsCreatable,
+    /// Stream quota increased - more streams of the specified type can be created
+    StreamCreatable { stream_type: StreamType },
     /// Cert authentication needed
     AuthenticationNeeded,
     /// Encrypted client hello fallback occurred.  The certificate for the
@@ -328,6 +338,10 @@ impl Http3ClientEvents {
         if stream_type == StreamType::BiDi {
             self.insert(Http3ClientEvent::RequestsCreatable);
         }
+    }
+
+    pub(crate) fn stream_creatable(&self, stream_type: StreamType) {
+        self.insert(Http3ClientEvent::StreamCreatable { stream_type });
     }
 
     /// Add a new `AuthenticationNeeded` event

@@ -52,7 +52,7 @@ use crate::{
     stateless_reset::Token as Srt,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
-    streams::{SendOrder, Streams},
+    streams::{SendGroupId, SendOrder, Streams},
     tparams::{
         self,
         TransportParameterId::{
@@ -897,6 +897,25 @@ impl Connection {
     #[must_use]
     pub fn peer_certificate(&self) -> Option<CertificateInfo> {
         self.crypto.tls().peer_certificate()
+    }
+
+    /// Export keying material per RFC 5705/8446.
+    ///
+    /// This can only be called after the handshake is complete.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if connection is not in a connected state or export fails.
+    pub fn export_keying_material(
+        &self,
+        label: &[u8],
+        context: Option<&[u8]>,
+        out_len: usize,
+    ) -> Res<Vec<u8>> {
+        self.crypto
+            .tls()
+            .export_keying_material(label, context, out_len)
+            .map_err(|_| Error::NotConnected)
     }
 
     /// Call by application when the peer cert has been verified.
@@ -2281,6 +2300,7 @@ impl Connection {
         builder: &mut packet::Builder<&mut Vec<u8>>,
         tokens: &mut recovery::Tokens,
         now: Instant,
+        is_pmtud_probe: bool,
     ) {
         let rtt = self.paths.primary().map_or_else(
             || RttEstimate::new(self.conn_params.get_initial_rtt()).estimate(),
@@ -2338,9 +2358,12 @@ impl Connection {
         }
 
         // Datagrams are best-effort and unreliable.  Let streams starve them for now.
-        self.quic_datagrams.write_frames(builder, tokens, stats);
-        if builder.is_full() {
-            return;
+        // Skip datagrams in PMTUD probe packets to avoid losing user data when probes are lost.
+        if !is_pmtud_probe {
+            self.quic_datagrams.write_frames(builder, tokens, stats);
+            if builder.is_full() {
+                return;
+            }
         }
 
         // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
@@ -2467,11 +2490,11 @@ impl Connection {
 
         if primary {
             if space == PacketNumberSpace::ApplicationData {
-                if self.state.connected()
+                let is_pmtud_probe = self.state.connected()
                     && path.borrow().pmtud().needs_probe()
                     && !coalesced // Only send PMTUD probes using non-coalesced packets.
-                    && full_mtu
-                {
+                    && full_mtu;
+                if is_pmtud_probe {
                     path.borrow_mut().pmtud_mut().send_probe(
                         builder,
                         &mut tokens,
@@ -2479,7 +2502,7 @@ impl Connection {
                     );
                     ack_eliciting = true;
                 }
-                self.write_appdata_frames(builder, &mut tokens, now);
+                self.write_appdata_frames(builder, &mut tokens, now, is_pmtud_probe);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
                 self.crypto.write_frame(
@@ -3629,6 +3652,16 @@ impl Connection {
         self.streams.stream_create(st)
     }
 
+    /// Set the maximum number of concurrent incoming bidirectional streams.
+    pub fn set_remote_max_streams_bidi(&mut self, max: u64) {
+        self.streams.set_remote_max_streams_bidi(max);
+    }
+
+    /// Set the maximum number of concurrent incoming unidirectional streams.
+    pub fn set_remote_max_streams_uni(&mut self, max: u64) {
+        self.streams.set_remote_max_streams_uni(max);
+    }
+
     /// Set the priority of a stream.
     ///
     /// # Errors
@@ -3664,6 +3697,20 @@ impl Connection {
     /// When the stream does not exist.
     pub fn stream_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         self.streams.set_fairness(stream_id, fairness)
+    }
+
+    /// Set the `SendGroup` of a stream for inter-group bandwidth fairness.
+    /// Streams in different SendGroups share bandwidth equally (round-robin).
+    /// Within a SendGroup, sendorder determines priority.
+    ///
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn stream_sendgroup(
+        &mut self,
+        stream_id: StreamId,
+        sendgroup: Option<SendGroupId>,
+    ) -> Res<()> {
+        self.streams.set_sendgroup(stream_id, sendgroup)
     }
 
     /// # Errors

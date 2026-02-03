@@ -31,7 +31,7 @@ use crate::{
     recovery::{self, StreamRecoveryToken},
     stats::FrameStats,
     stream_id::StreamId,
-    streams::SendOrder,
+    streams::{SendGroupId, SendOrder},
     tparams::{
         TransportParameterId::{InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni},
         TransportParameters,
@@ -691,6 +691,7 @@ pub struct SendStream {
     retransmission_priority: RetransmissionPriority,
     retransmission_offset: u64,
     sendorder: Option<SendOrder>,
+    sendgroup: Option<SendGroupId>,
     bytes_sent: u64,
     fair: bool,
     writable_event_low_watermark: NonZeroUsize,
@@ -714,6 +715,7 @@ impl SendStream {
             retransmission_priority: RetransmissionPriority::default(),
             retransmission_offset: 0,
             sendorder: None,
+            sendgroup: None,
             bytes_sent: 0,
             fair: false,
             writable_event_low_watermark: NonZeroUsize::MIN,
@@ -770,6 +772,15 @@ impl SendStream {
 
     pub const fn set_sendorder(&mut self, sendorder: Option<SendOrder>) {
         self.sendorder = sendorder;
+    }
+
+    #[must_use]
+    pub const fn sendgroup(&self) -> Option<SendGroupId> {
+        self.sendgroup
+    }
+
+    pub fn set_sendgroup(&mut self, sendgroup: Option<SendGroupId>) {
+        self.sendgroup = sendgroup;
     }
 
     /// If all data has been buffered or written, how much was sent.
@@ -1178,9 +1189,10 @@ impl SendStream {
 
     pub fn set_max_stream_data(&mut self, limit: u64) {
         qdebug!("setting max_stream_data to {limit}");
+        let previous_limit = self.avail();
         if let State::Ready { fc, .. } | State::Send { fc, .. } = &mut self.state {
-            let previous_limit = fc.available();
-            if let Some(current_limit) = fc.update(limit) {
+            if fc.update(limit).is_some() {
+                let current_limit = self.avail();
                 self.maybe_emit_writable_event(previous_limit, current_limit);
             }
         }
@@ -1467,6 +1479,48 @@ impl Iterator for OrderGroupIter<'_> {
 }
 
 #[derive(Debug, Default)]
+pub struct SendGroupStreams {
+    regular: OrderGroup,
+    sendordered: BTreeMap<SendOrder, OrderGroup>,
+}
+
+impl SendGroupStreams {
+    fn group_mut(&mut self, sendorder: Option<SendOrder>) -> &mut OrderGroup {
+        if let Some(order) = sendorder {
+            self.sendordered.entry(order).or_default()
+        } else {
+            &mut self.regular
+        }
+    }
+
+    pub fn insert(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) {
+        self.group_mut(sendorder).insert(stream_id);
+    }
+
+    pub fn remove(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) {
+        if let Some(order) = sendorder {
+            if let Some(group) = self.sendordered.get_mut(&order) {
+                group.remove(stream_id);
+            }
+        } else {
+            self.regular.remove(stream_id);
+        }
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.regular.stream_ids().is_empty()
+            && self.sendordered.values().all(|g| g.stream_ids().is_empty())
+    }
+
+    pub fn iter(&mut self) -> impl Iterator<Item = StreamId> + '_ {
+        self.regular
+            .iter()
+            .chain(self.sendordered.values_mut().rev().flat_map(|g| g.iter()))
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct SendStreams {
     map: IndexMap<StreamId, SendStream>,
 
@@ -1500,6 +1554,13 @@ pub struct SendStreams {
     // Streams which are owned by the IndexMap.
     sendordered: BTreeMap<SendOrder, OrderGroup>,
     regular: OrderGroup, // streams with no SendOrder set, sorted in stream_id order
+
+    // SendGroups for inter-group fairness scheduling.
+    // Streams in sendgroups share bandwidth equally across groups (round-robin),
+    // while within a group, sendorder determines priority.
+    sendgroups: BTreeMap<SendGroupId, SendGroupStreams>,
+    sendgroup_keys: Vec<SendGroupId>, // ordered list of sendgroup IDs for round-robin
+    sendgroup_next: usize,            // index into sendgroup_keys for round-robin
 }
 
 impl SendStreams {
@@ -1546,16 +1607,26 @@ impl SendStreams {
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
         self.set_fairness(stream_id, true)?;
         if let Some(stream) = self.map.get_mut(&stream_id) {
-            // don't grab stream here; causes borrow errors
             let old_sendorder = stream.sendorder();
+            let sendgroup = stream.sendgroup();
             if old_sendorder != sendorder {
-                // we have to remove it from the list it was in, and reinsert it with the new
-                // sendorder key
-                let mut group = self.group_mut(old_sendorder);
-                group.remove(stream_id);
-                self.get_mut(stream_id)?.set_sendorder(sendorder);
-                group = self.group_mut(sendorder);
-                group.insert(stream_id);
+                if let Some(group_id) = sendgroup {
+                    // Stream is in a sendgroup - manage it within SendGroupStreams
+                    if let Some(group_streams) = self.sendgroups.get_mut(&group_id) {
+                        group_streams.remove(stream_id, old_sendorder);
+                        self.get_mut(stream_id)?.set_sendorder(sendorder);
+                        if let Some(group_streams) = self.sendgroups.get_mut(&group_id) {
+                            group_streams.insert(stream_id, sendorder);
+                        }
+                    }
+                } else {
+                    // Stream is ungrouped - manage it in the ungrouped structures
+                    let mut group = self.group_mut(old_sendorder);
+                    group.remove(stream_id);
+                    self.get_mut(stream_id)?.set_sendorder(sendorder);
+                    group = self.group_mut(sendorder);
+                    group.insert(stream_id);
+                }
                 qtrace!(
                     "ordering of stream_ids: {:?}",
                     self.sendordered.values().collect::<Vec::<_>>()
@@ -1575,38 +1646,118 @@ impl SendStreams {
     pub fn set_fairness(&mut self, stream_id: StreamId, make_fair: bool) -> Res<()> {
         let stream: &mut SendStream = self.map.get_mut(&stream_id).ok_or(Error::InvalidStreamId)?;
         let was_fair = stream.fair;
+        let sendgroup = stream.sendgroup();
         stream.set_fairness(make_fair);
         if !was_fair && make_fair {
-            // Move to the regular OrderGroup.
+            // Move to the appropriate OrderGroup (ungrouped regular, or sendgroup).
+            // Note: if stream is in a sendgroup, it's already tracked there, so
+            // we only need to handle the ungrouped case here.
 
             // We know sendorder can't have been set, since
             // set_sendorder() will call this routine if it's not
             // already set as fair.
 
-            // This normally is only called when a new stream is created.  If
-            // so, because of how we allocate StreamIds, it should always have
-            // the largest value.  This means we can just append it to the
-            // regular vector.  However, if we were ever to change this
-            // invariant, things would break subtly.
+            if sendgroup.is_none() {
+                // Only add to ungrouped structures if not in a sendgroup.
+                // This normally is only called when a new stream is created.  If
+                // so, because of how we allocate StreamIds, it should always have
+                // the largest value.  This means we can just append it to the
+                // regular vector.  However, if we were ever to change this
+                // invariant, things would break subtly.
 
-            // To be safe we can try to insert at the end and if not
-            // fall back to binary-search insertion
-            if matches!(self.regular.stream_ids().last(), Some(last) if stream_id > *last) {
+                // To be safe we can try to insert at the end and if not
+                // fall back to binary-search insertion
+                if matches!(self.regular.stream_ids().last(), Some(last) if stream_id > *last) {
+                    self.regular.push(stream_id);
+                } else {
+                    self.regular.insert(stream_id);
+                }
+            }
+        } else if was_fair && !make_fair {
+            // remove from the OrderGroup - but only if not in a sendgroup
+            if sendgroup.is_none() {
+                let stream = self.map.get(&stream_id).ok_or(Error::InvalidStreamId)?;
+                let group = if let Some(sendorder) = stream.sendorder() {
+                    self.sendordered
+                        .get_mut(&sendorder)
+                        .ok_or(Error::Internal)?
+                } else {
+                    &mut self.regular
+                };
+                group.remove(stream_id);
+            }
+            // Note: Streams in sendgroups always have fairness=true, so this
+            // branch shouldn't be reached for them.
+        }
+        Ok(())
+    }
+
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_errors_doc,
+        reason = "OK here."
+    )]
+    pub fn set_sendgroup(
+        &mut self,
+        stream_id: StreamId,
+        sendgroup: Option<SendGroupId>,
+    ) -> Res<()> {
+        // Sendgroup implies fairness
+        self.set_fairness(stream_id, true)?;
+
+        let stream = self.map.get_mut(&stream_id).ok_or(Error::InvalidStreamId)?;
+        let old_sendgroup = stream.sendgroup();
+        let sendorder = stream.sendorder();
+
+        if old_sendgroup == sendgroup {
+            return Ok(());
+        }
+
+        // Remove from old location
+        if let Some(old_group_id) = old_sendgroup {
+            // Remove from old sendgroup
+            if let Some(group_streams) = self.sendgroups.get_mut(&old_group_id) {
+                group_streams.remove(stream_id, sendorder);
+                // Clean up empty sendgroup
+                if group_streams.is_empty() {
+                    self.sendgroups.remove(&old_group_id);
+                    self.sendgroup_keys.retain(|&k| k != old_group_id);
+                }
+            }
+        } else {
+            // Remove from ungrouped structures
+            if let Some(order) = sendorder {
+                if let Some(group) = self.sendordered.get_mut(&order) {
+                    group.remove(stream_id);
+                }
+            } else {
+                self.regular.remove(stream_id);
+            }
+        }
+
+        // Update stream's sendgroup
+        self.get_mut(stream_id)?.set_sendgroup(sendgroup);
+
+        // Insert into new location
+        if let Some(new_group_id) = sendgroup {
+            // Add to new sendgroup
+            let group_streams = self.sendgroups.entry(new_group_id).or_default();
+            group_streams.insert(stream_id, sendorder);
+            // Add to sendgroup_keys if new
+            if !self.sendgroup_keys.contains(&new_group_id) {
+                self.sendgroup_keys.push(new_group_id);
+            }
+        } else {
+            // Add to ungrouped structures
+            if let Some(order) = sendorder {
+                self.sendordered.entry(order).or_default().insert(stream_id);
+            } else if matches!(self.regular.stream_ids().last(), Some(last) if stream_id > *last) {
                 self.regular.push(stream_id);
             } else {
                 self.regular.insert(stream_id);
             }
-        } else if was_fair && !make_fair {
-            // remove from the OrderGroup
-            let group = if let Some(sendorder) = stream.sendorder {
-                self.sendordered
-                    .get_mut(&sendorder)
-                    .ok_or(Error::Internal)?
-            } else {
-                &mut self.regular
-            };
-            group.remove(stream_id);
         }
+
         Ok(())
     }
 
@@ -1644,17 +1795,29 @@ impl SendStreams {
         self.map.clear();
         self.sendordered.clear();
         self.regular.clear();
+        self.sendgroups.clear();
+        self.sendgroup_keys.clear();
+        self.sendgroup_next = 0;
     }
 
     pub fn remove_terminal(&mut self) {
         self.map.retain(|stream_id, stream| {
             if stream.is_terminal() {
                 if stream.is_fair() {
-                    match stream.sendorder() {
-                        None => self.regular.remove(*stream_id),
-                        Some(sendorder) => {
-                            if let Some(group) = self.sendordered.get_mut(&sendorder) {
-                                group.remove(*stream_id);
+                    let sendorder = stream.sendorder();
+                    if let Some(group_id) = stream.sendgroup() {
+                        // Stream is in a sendgroup
+                        if let Some(group_streams) = self.sendgroups.get_mut(&group_id) {
+                            group_streams.remove(*stream_id, sendorder);
+                        }
+                    } else {
+                        // Stream is ungrouped
+                        match sendorder {
+                            None => self.regular.remove(*stream_id),
+                            Some(order) => {
+                                if let Some(group) = self.sendordered.get_mut(&order) {
+                                    group.remove(*stream_id);
+                                }
                             }
                         }
                     }
@@ -1664,6 +1827,16 @@ impl SendStreams {
             }
             true
         });
+
+        // Clean up empty sendgroups
+        self.sendgroups
+            .retain(|_, group_streams| !group_streams.is_empty());
+        self.sendgroup_keys
+            .retain(|k| self.sendgroups.contains_key(k));
+        // Reset sendgroup_next if it's out of bounds
+        if self.sendgroup_next >= self.sendgroup_keys.len() {
+            self.sendgroup_next = 0;
+        }
     }
 
     pub(crate) fn write_frames<B: Buffer>(
@@ -1711,11 +1884,13 @@ impl SendStreams {
             if !stream.is_fair() {
                 qtrace!("   {stream}");
                 if !stream.write_frames(priority, builder, tokens, stats) {
-                    break;
+                    return;
                 }
             }
         }
-        qtrace!("fair streams:");
+
+        // Process fair ungrouped streams (regular + sendordered)
+        qtrace!("fair ungrouped streams:");
         let stream_ids = self.regular.iter().chain(
             self.sendordered
                 .values_mut()
@@ -1730,7 +1905,46 @@ impl SendStreams {
                     qtrace!("   None");
                 }
                 if !stream.write_frames(priority, builder, tokens, stats) {
-                    break;
+                    return;
+                }
+            }
+        }
+
+        // Process sendgroups with inter-group round-robin.
+        // Each call to write_frames starts from a different sendgroup,
+        // rotating through them to ensure fairness across groups.
+        if self.sendgroup_keys.is_empty() {
+            return;
+        }
+
+        qtrace!(
+            "sendgroup streams (starting at group index {}):",
+            self.sendgroup_next
+        );
+        let num_groups = self.sendgroup_keys.len();
+        let start_idx = self.sendgroup_next;
+
+        // Advance sendgroup_next for the next call
+        self.sendgroup_next = (self.sendgroup_next + 1) % num_groups;
+
+        // Iterate through all groups starting from start_idx
+        for i in 0..num_groups {
+            let group_idx = (start_idx + i) % num_groups;
+            let group_id = self.sendgroup_keys[group_idx];
+
+            if let Some(group_streams) = self.sendgroups.get_mut(&group_id) {
+                qtrace!("  sendgroup {}:", group_id);
+                for stream_id in group_streams.iter() {
+                    if let Some(stream) = self.map.get_mut(&stream_id) {
+                        if let Some(order) = stream.sendorder() {
+                            qtrace!("    {stream_id} ({order})");
+                        } else {
+                            qtrace!("    {stream_id} (no order)");
+                        }
+                        if !stream.write_frames(priority, builder, tokens, stats) {
+                            return;
+                        }
+                    }
                 }
             }
         }
