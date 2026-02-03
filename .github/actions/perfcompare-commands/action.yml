@@ -1,0 +1,113 @@
+name: Generate perfcompare commands
+description: Generate server and client commands for QUIC performance comparison
+
+inputs:
+  client:
+    description: Client implementation (neqo, msquic, google, quiche, s2n)
+    required: true
+  server:
+    description: Server implementation (neqo, msquic, google, quiche, s2n)
+    required: true
+  size:
+    description: Transfer size in bytes
+    required: true
+  cubic:
+    description: Use cubic congestion control (neqo only)
+    default: 'true'
+  pacing:
+    description: Enable pacing (neqo only)
+    default: 'true'
+  neqo-path:
+    description: Path to neqo binaries
+    default: 'binaries'
+  msquic-path:
+    description: Path to msquic binaries
+    default: 'binaries'
+  google-path:
+    description: Path to google/quiche binaries
+    default: 'binaries'
+  quiche-path:
+    description: Path to cloudflare/quiche binaries
+    default: 'binaries'
+  s2n-path:
+    description: Path to s2n-quic binaries
+    default: 'binaries'
+  testdata-path:
+    description: Path to test data (certs, files)
+    default: 'testdata'
+
+outputs:
+  bench-name:
+    description: Benchmark name
+    value: ${{ steps.generate.outputs.bench_name }}
+  server-cmd:
+    description: Server command
+    value: ${{ steps.generate.outputs.server_cmd }}
+  client-cmd:
+    description: Client command
+    value: ${{ steps.generate.outputs.client_cmd }}
+
+runs:
+  using: composite
+  steps:
+    - id: generate
+      shell: bash
+      env:
+        CLIENT: ${{ inputs.client }}
+        SERVER: ${{ inputs.server }}
+        HOST: 127.0.0.1
+        PORT: 4433
+        SIZE: ${{ inputs.size }}
+        CUBIC: ${{ inputs.cubic }}
+        PACING: ${{ inputs.pacing }}
+        NEQO: ${{ inputs.neqo-path }}
+        MSQUIC: ${{ inputs.msquic-path }}
+        GOOGLE: ${{ inputs.google-path }}
+        QUICHE: ${{ inputs.quiche-path }}
+        S2N: ${{ inputs.s2n-path }}
+        TESTDATA: ${{ inputs.testdata-path }}
+      run: |
+        NAME="$CLIENT-$SERVER"
+
+        # Neqo-specific arguments
+        CC=$([[ "$CUBIC" == "true" ]] && echo "cubic" || echo "newreno")
+        NEQO_ARGS="--cc $CC -Q 1"
+        if [[ "$PACING" != "true" ]]; then
+          NEQO_ARGS="$NEQO_ARGS --no-pacing"
+        fi
+
+        # Add interop flag when communicating with s2n or msquic
+        INTEROP=""
+        if [[ "$CLIENT" == "s2n" || "$SERVER" == "s2n" || "$CLIENT" == "msquic" || "$SERVER" == "msquic" ]]; then
+          INTEROP="-a hq-interop"
+        fi
+
+        # Add cc/pacing to name for neqo-neqo benchmarks
+        if [[ "$CLIENT" == "neqo" && "$SERVER" == "neqo" ]]; then
+          NAME="$NAME-$CC"
+          [[ "$PACING" != "true" ]] && NAME="$NAME-nopacing"
+        fi
+
+        # Server command
+        case "$SERVER" in
+          neqo)   SERVER_CMD="$NEQO/neqo-server $NEQO_ARGS $INTEROP $HOST:$PORT" ;;
+          msquic) SERVER_CMD="$MSQUIC/quicinteropserver -root:$TESTDATA -listen:$HOST -port:$PORT -file:$TESTDATA/cert -key:$TESTDATA/key -noexit" ;;
+          google) SERVER_CMD="$GOOGLE/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TESTDATA/cert --key_file $TESTDATA/key" ;;
+          quiche) SERVER_CMD="$QUICHE/quiche-server --root $TESTDATA --listen $HOST:$PORT --cert $TESTDATA/cert --key $TESTDATA/key" ;;
+          s2n)    SERVER_CMD="$S2N/s2n-quic-qns interop server --www-dir $TESTDATA --certificate $TESTDATA/cert --private-key $TESTDATA/key --ip $HOST --port $PORT" ;;
+        esac
+
+        # Client command
+        case "$CLIENT" in
+          neqo)   CLIENT_CMD="$NEQO/neqo-client $NEQO_ARGS $INTEROP --output-dir . https://$HOST:$PORT/$SIZE" ;;
+          msquic) CLIENT_CMD="$MSQUIC/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE" ;;
+          google) CLIENT_CMD="bash -c \"$GOOGLE/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE\"" ;;
+          quiche) CLIENT_CMD="$QUICHE/quiche-client --no-verify --dump-responses . https://$HOST:$PORT/$SIZE" ;;
+          s2n)    CLIENT_CMD="$S2N/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE" ;;
+        esac
+
+        {
+          echo "bench_name=$NAME"
+          echo "server_cmd=$SERVER_CMD"
+          echo "client_cmd=$CLIENT_CMD"
+        } >> "$GITHUB_OUTPUT"
