@@ -113,6 +113,10 @@ jobs:
             echo ""
           done >> supply-chain/audits.toml
 
+          # Hide .git to prevent mach from running git operations
+          mv .git .git.bak
+          trap 'mv .git.bak .git' EXIT
+
           if ./mach vendor rust --ignore-modified 2>&1 | tee vendor.log; then
             echo "Vendoring succeeded"
             exit 0
