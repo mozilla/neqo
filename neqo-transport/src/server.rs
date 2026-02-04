@@ -247,6 +247,12 @@ impl Server {
             AddressValidationResult::Validate => {
                 qinfo!("[{self}] Send retry for {:?}", initial.dst_cid);
 
+                // RFC 9000: Initial packets MUST use a DCID of at least 8 bytes.
+                if initial.dst_cid.len() < 8 {
+                    qinfo!("[{self}] DCID too short ({} bytes), dropping packet", initial.dst_cid.len());
+                    return Output::None;
+                }
+
                 let res = self.address_validation.borrow().generate_retry_token(
                     &initial.dst_cid,
                     dgram.source(),
