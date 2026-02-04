@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-use neqo_common::{Bytes, Header, header::HeadersExt as _};
+use neqo_common::{Bytes, Header, header::HeadersExt as _, qwarn};
 use neqo_transport::{AppError, StreamId};
 
 use crate::{
@@ -88,6 +88,8 @@ pub enum ConnectUdpEvent {
 #[derive(Debug, Default, Clone)]
 pub struct Http3ServerConnEvents {
     events: Rc<RefCell<VecDeque<Http3ServerConnEvent>>>,
+    /// Rejected Extended CONNECT requests: (`stream_id`, `status_code`).
+    rejected_extended_connects: Rc<RefCell<Vec<(StreamId, u16)>>>,
 }
 
 impl SendStreamEvents for Http3ServerConnEvents {
@@ -159,11 +161,22 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
                     headers,
                 }));
             }
-            Some(_) => {
-                unimplemented!("Extended connect other than webtransport or connect-udp")
+            Some(protocol) => {
+                // RFC 9220: Server SHOULD respond with 501 (Not Implemented)
+                qwarn!(
+                    "Unsupported extended CONNECT protocol: {:?}",
+                    String::from_utf8_lossy(protocol)
+                );
+                self.rejected_extended_connects
+                    .borrow_mut()
+                    .push((stream_id, 501));
             }
             None => {
-                unimplemented!("connect without :protocol header");
+                // Missing :protocol - malformed request
+                qwarn!("Extended CONNECT request without :protocol header");
+                self.rejected_extended_connects
+                    .borrow_mut()
+                    .push((stream_id, 400));
             }
         }
     }
@@ -261,6 +274,11 @@ impl Http3ServerConnEvents {
         self.events.borrow_mut().pop_front()
     }
 
+    /// Take all rejected Extended CONNECT requests for processing.
+    pub fn take_rejected_extended_connects(&self) -> Vec<(StreamId, u16)> {
+        std::mem::take(&mut *self.rejected_extended_connects.borrow_mut())
+    }
+
     pub fn connection_state_change(&self, state: Http3State) {
         self.insert(Http3ServerConnEvent::StateChange(state));
     }
@@ -283,7 +301,10 @@ impl Http3ServerConnEvents {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::Http3ServerConnEvents;
+    use neqo_common::Header;
+    use neqo_transport::StreamId;
+
+    use super::{Http3ServerConnEvents, HttpRecvStreamEvents as _};
     use crate::connection::Http3State;
 
     #[test]
@@ -292,5 +313,36 @@ mod tests {
         assert!(!events.has_events());
         events.connection_state_change(Http3State::Connected);
         assert!(events.has_events());
+    }
+
+    #[test]
+    fn extended_connect_unknown_protocol() {
+        let events = Http3ServerConnEvents::default();
+        let headers = vec![
+            Header::new(":method", "CONNECT"),
+            Header::new(":protocol", "unknown-protocol"),
+            Header::new(":authority", "example.com"),
+            Header::new(":path", "/"),
+        ];
+        events.extended_connect_new_session(StreamId::new(0), headers);
+
+        // RFC 9220: Server SHOULD respond with 501 (Not Implemented)
+        let rejected = events.take_rejected_extended_connects();
+        assert_eq!(rejected, vec![(StreamId::new(0), 501)]);
+    }
+
+    #[test]
+    fn extended_connect_missing_protocol() {
+        let events = Http3ServerConnEvents::default();
+        let headers = vec![
+            Header::new(":method", "CONNECT"),
+            Header::new(":authority", "example.com"),
+            Header::new(":path", "/"),
+        ];
+        events.extended_connect_new_session(StreamId::new(0), headers);
+
+        // Malformed request - missing :protocol
+        let rejected = events.take_rejected_extended_connects();
+        assert_eq!(rejected, vec![(StreamId::new(0), 400)]);
     }
 }
