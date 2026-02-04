@@ -33,7 +33,7 @@ strum = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false }
+criterion = { workspace = true }
 neqo-transport = { path = ".", features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 
