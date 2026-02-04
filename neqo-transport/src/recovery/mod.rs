@@ -867,6 +867,8 @@ impl Loss {
         let mut pto_space = None;
         // The spaces in which we will allow probing.
         let mut allow_probes = PacketNumberSpaceSet::default();
+        // Track where PTO packets start in the lost vector.
+        let pto_packets_start = lost.len();
         for pn_space in PacketNumberSpace::iter() {
             let Some(t) = self.pto_time(primary_path.borrow().rtt(), pn_space) else {
                 continue;
@@ -905,6 +907,17 @@ impl Loss {
         if let Some(pn_space) = pto_space {
             qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
             self.fire_pto(pn_space, allow_probes, now);
+
+            // Notify PMTUD about PTO. The PTO itself is the trigger for black hole
+            // detection, not the specific packets. If any large packets are among
+            // those selected for PTO retransmission, this indicates the connection
+            // may be experiencing a black hole. Note: if only small packets are
+            // outstanding (e.g., at end of transfer), this won't trigger detection.
+            primary_path.borrow_mut().on_pto(
+                &lost[pto_packets_start..],
+                &mut self.stats.borrow_mut(),
+                now,
+            );
 
             // Maybe prime the Handshake PTO when PTO fires in Initial space.
             if pn_space == PacketNumberSpace::Initial {
