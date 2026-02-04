@@ -472,9 +472,8 @@ fn keep_alive_lost() {
 
     assert!(client.process(out, now).dgram().is_none());
 
-    // TODO: if we run server.process with current value of now, the server will
-    // return some small timeout for the recovery although it does not have
-    // any outstanding data. Therefore we call it after AT_LEAST_PTO.
+    // Advance past the recovery timeout. Without this, the server returns a small
+    // timeout for recovery even though it has no outstanding data.
     now += AT_LEAST_PTO;
     assert_idle(
         &mut server,

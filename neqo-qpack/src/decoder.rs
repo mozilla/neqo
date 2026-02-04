@@ -160,7 +160,8 @@ impl Decoder {
 
     /// # Errors
     ///
-    /// May return an error in case of any transport error. TODO: define transport errors.
+    /// May return [`Error::Internal`] if the decoder stream is not initialized,
+    /// or [`Error::DecoderStream`] if sending on the decoder stream fails.
     ///
     /// # Panics
     ///
