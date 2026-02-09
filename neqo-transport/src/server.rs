@@ -251,7 +251,10 @@ impl Server {
                 //
                 // <https://www.rfc-editor.org/rfc/rfc9000.html#section-7.2>
                 if initial.dst_cid.len() < 8 {
-                    qerror!("[{self}] DCID too short ({} bytes), dropping packet", initial.dst_cid.len());
+                    qerror!(
+                        "[{self}] DCID too short ({} bytes), dropping packet",
+                        initial.dst_cid.len()
+                    );
                     return Output::None;
                 }
 

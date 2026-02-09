@@ -579,7 +579,11 @@ fn retry_short_dcid() {
             &mut short_dcid_packet[short_dcid_header.len()..],
         )
         .unwrap();
-    header_protection::apply(&hp_short, &mut short_dcid_packet, pn_offset..(pn_offset + pn_len));
+    header_protection::apply(
+        &hp_short,
+        &mut short_dcid_packet,
+        pn_offset..(pn_offset + pn_len),
+    );
 
     let dgram_with_short_dcid = Datagram::new(
         client_initial1.source(),
@@ -589,5 +593,8 @@ fn retry_short_dcid() {
     );
 
     let retry = server.process(Some(dgram_with_short_dcid), now()).dgram();
-    assert!(retry.is_none(), "Server should drop Initial with short DCID");
+    assert!(
+        retry.is_none(),
+        "Server should drop Initial with short DCID"
+    );
 }
