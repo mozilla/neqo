@@ -153,6 +153,16 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
         return Err(Error::InvalidHeader);
     }
 
+    // RFC 9114 Section 4.4: bare CONNECT MUST NOT include :scheme or :path.
+    if message_type == MessageType::Request
+        && method_value == Some(b"CONNECT".as_ref())
+        && protocol_value.is_none()
+        && (pseudo_state.contains(PseudoHeaderState::Scheme)
+            || pseudo_state.contains(PseudoHeaderState::Path))
+    {
+        return Err(Error::InvalidHeader);
+    }
+
     Ok(())
 }
 
@@ -317,5 +327,18 @@ mod tests {
             Header::new(":scheme", "https"),
         ];
         assert!(headers_valid(&headers, MessageType::Request).is_err());
+    }
+
+    #[test]
+    fn bare_connect_with_forbidden_headers() {
+        // RFC 9114 Section 4.4: bare CONNECT MUST NOT include :scheme or :path.
+        for field in [":scheme", ":path"] {
+            let headers = vec![
+                Header::new(":method", "CONNECT"),
+                Header::new(":authority", "proxy.example.com:443"),
+                Header::new(field, "value"),
+            ];
+            assert!(headers_valid(&headers, MessageType::Request).is_err());
+        }
     }
 }

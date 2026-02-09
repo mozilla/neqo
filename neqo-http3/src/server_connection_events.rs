@@ -88,8 +88,10 @@ pub enum ConnectUdpEvent {
 #[derive(Debug, Default, Clone)]
 pub struct Http3ServerConnEvents {
     events: Rc<RefCell<VecDeque<Http3ServerConnEvent>>>,
-    /// Rejected Extended CONNECT requests: (`stream_id`, `status_code`).
-    rejected_extended_connects: Rc<RefCell<Vec<(StreamId, u16)>>>,
+    /// Rejected CONNECT requests pending response: (`stream_id`, `http_status_code`).
+    /// Deferred because the `HttpRecvStreamEvents` trait doesn't pass `Connection`;
+    /// processed later in `Http3ServerHandler::handle_rejected_connects`.
+    rejected_connects: Rc<RefCell<Vec<(StreamId, u16)>>>,
 }
 
 impl SendStreamEvents for Http3ServerConnEvents {
@@ -167,16 +169,13 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
                     "Unsupported extended CONNECT protocol: {:?}",
                     String::from_utf8_lossy(protocol)
                 );
-                self.rejected_extended_connects
+                self.rejected_connects
                     .borrow_mut()
                     .push((stream_id, 501));
             }
             None => {
-                // Missing :protocol - malformed request
-                qwarn!("Extended CONNECT request without :protocol header");
-                self.rejected_extended_connects
-                    .borrow_mut()
-                    .push((stream_id, 400));
+                // This is only called from `recv_message.rs` when `:protocol` is present.
+                unreachable!("extended_connect_new_session requires :protocol header");
             }
         }
     }
@@ -274,9 +273,9 @@ impl Http3ServerConnEvents {
         self.events.borrow_mut().pop_front()
     }
 
-    /// Take all rejected Extended CONNECT requests for processing.
-    pub fn take_rejected_extended_connects(&self) -> Vec<(StreamId, u16)> {
-        std::mem::take(&mut *self.rejected_extended_connects.borrow_mut())
+    /// Take all rejected CONNECT requests for processing.
+    pub fn take_rejected_connects(&self) -> Vec<(StreamId, u16)> {
+        std::mem::take(&mut *self.rejected_connects.borrow_mut())
     }
 
     pub fn connection_state_change(&self, state: Http3State) {
@@ -327,22 +326,24 @@ mod tests {
         events.extended_connect_new_session(StreamId::new(0), headers);
 
         // RFC 9220: Server SHOULD respond with 501 (Not Implemented)
-        let rejected = events.take_rejected_extended_connects();
+        let rejected = events.take_rejected_connects();
         assert_eq!(rejected, vec![(StreamId::new(0), 501)]);
     }
 
     #[test]
-    fn extended_connect_missing_protocol() {
+    fn bare_connect_emits_headers_event() {
         let events = Http3ServerConnEvents::default();
+        let stream_info =
+            crate::Http3StreamInfo::new(StreamId::new(0), crate::Http3StreamType::Http);
         let headers = vec![
             Header::new(":method", "CONNECT"),
             Header::new(":authority", "example.com"),
-            Header::new(":path", "/"),
         ];
-        events.extended_connect_new_session(StreamId::new(0), headers);
+        events.header_ready(&stream_info, headers, false, false);
 
-        // Malformed request - missing :protocol
-        let rejected = events.take_rejected_extended_connects();
-        assert_eq!(rejected, vec![(StreamId::new(0), 400)]);
+        // Bare CONNECT is passed through to the application as a Headers event.
+        assert!(events.has_events());
+        let rejected = events.take_rejected_connects();
+        assert!(rejected.is_empty());
     }
 }
