@@ -55,6 +55,32 @@ impl Default for RecvBuf {
     }
 }
 
+fn try_send_transmit(
+    state: &UdpSocketState,
+    socket: quinn_udp::UdpSockRef<'_>,
+    transmit: &Transmit<'_>,
+) -> io::Result<()> {
+    match state.try_send(socket, transmit) {
+        Ok(()) => {
+            qtrace!(
+                "sent {} bytes to {}",
+                transmit.contents.len(),
+                transmit.destination,
+            );
+            Ok(())
+        }
+        Err(e) if is_emsgsize(&e) => {
+            qdebug!(
+                "Failed to send {} bytes to {}. PMTUD probe? Ignoring error: {e}",
+                transmit.contents.len(),
+                transmit.destination,
+            );
+            Ok(())
+        }
+        e => e,
+    }
+}
+
 pub fn send_inner(
     state: &UdpSocketState,
     socket: quinn_udp::UdpSockRef<'_>,
@@ -67,33 +93,7 @@ pub fn send_inner(
         segment_size: Some(d.datagram_size().get()),
         src_ip: None,
     };
-
-    match state.try_send(socket, &transmit) {
-        Ok(()) => {}
-        Err(e) if is_emsgsize(&e) => {
-            qdebug!(
-                "Failed to send datagram of size {} bytes, in {} segments, each {} bytes, from {} to {}. PMTUD probe? Ignoring error: {e}",
-                d.data().len(),
-                d.num_datagrams(),
-                d.datagram_size().get(),
-                d.source(),
-                d.destination()
-            );
-            return Ok(());
-        }
-        e @ Err(_) => return e,
-    }
-
-    qtrace!(
-        "sent {} bytes, in {} segments, each {} bytes, from {} to {} ",
-        d.data().len(),
-        d.num_datagrams(),
-        d.datagram_size().get(),
-        d.source(),
-        d.destination(),
-    );
-
-    Ok(())
+    try_send_transmit(state, socket, &transmit)
 }
 
 #[expect(
@@ -240,6 +240,27 @@ impl<S: SocketRef> Socket<S> {
         send_inner(&self.state, (&self.inner).into(), d)
     }
 
+    /// Send datagrams from a borrowed buffer, avoiding allocation.
+    ///
+    /// When `segment_size` is `Some`, the buffer is split into segments of that
+    /// size and sent using GSO in a single syscall.
+    pub fn send_buffer(
+        &self,
+        destination: SocketAddr,
+        tos: Tos,
+        data: &[u8],
+        segment_size: Option<usize>,
+    ) -> io::Result<()> {
+        let transmit = Transmit {
+            destination,
+            ecn: EcnCodepoint::from_bits(Into::<u8>::into(tos)),
+            contents: data,
+            segment_size,
+            src_ip: None,
+        };
+        try_send_transmit(&self.state, (&self.inner).into(), &transmit)
+    }
+
     /// Returns the maximum number of GSO segments supported by this socket.
     pub fn max_gso_segments(&self) -> usize {
         self.state.max_gso_segments()
@@ -282,6 +303,29 @@ mod tests {
         // Reverse non-blocking flag set by `UdpSocketState` to make the test non-racy.
         socket.inner.set_nonblocking(false)?;
         Ok(socket)
+    }
+
+    fn recv_segments(
+        receiver: &Socket<std::net::UdpSocket>,
+        expected_count: usize,
+        expected_segment_size: usize,
+    ) {
+        let receiver_addr = receiver.inner.local_addr().unwrap();
+        let mut num_received = 0;
+        let mut recv_buf = RecvBuf::default();
+        while num_received < expected_count {
+            receiver
+                .recv(receiver_addr, &mut recv_buf)
+                .expect("receive to succeed")
+                .for_each(|d| {
+                    assert_eq!(
+                        expected_segment_size,
+                        d.len(),
+                        "Expect received datagrams to have same length as sent datagrams"
+                    );
+                    num_received += 1;
+                });
+        }
     }
 
     #[test]
@@ -410,7 +454,6 @@ mod tests {
 
         let sender = socket()?;
         let receiver = socket()?;
-        let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         let max_gso_segments = sender.max_gso_segments();
         let msg = vec![0xAB; SEGMENT_SIZE * max_gso_segments];
@@ -423,23 +466,43 @@ mod tests {
         );
 
         sender.send(&batch)?;
+        recv_segments(&receiver, max_gso_segments, SEGMENT_SIZE);
 
-        // Allow for one GSO sendmsg to result in multiple GRO recvmmsg.
-        let mut num_received = 0;
-        let mut recv_buf = RecvBuf::default();
-        while num_received < max_gso_segments {
-            receiver
-                .recv(receiver_addr, &mut recv_buf)
-                .expect("receive to succeed")
-                .for_each(|d| {
-                    assert_eq!(
-                        SEGMENT_SIZE,
-                        d.len(),
-                        "Expect received datagrams to have same length as sent datagrams"
-                    );
-                    num_received += 1;
-                });
-        }
+        Ok(())
+    }
+
+    #[test]
+    fn send_buffer_single() -> Result<(), io::Error> {
+        let sender = socket()?;
+        let receiver = socket()?;
+
+        let payload = b"Hello via send_buffer!";
+        sender.send_buffer(receiver.inner.local_addr()?, Tos::default(), payload, None)?;
+        recv_segments(&receiver, 1, payload.len());
+
+        Ok(())
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(any(target_os = "linux", target_os = "windows")),
+        ignore = "GSO not available"
+    )]
+    fn send_buffer_gso() -> Result<(), io::Error> {
+        const SEGMENT_SIZE: usize = 128;
+
+        let sender = socket()?;
+        let receiver = socket()?;
+
+        let max_gso_segments = sender.max_gso_segments();
+        let payload = vec![0xCD; SEGMENT_SIZE * max_gso_segments];
+        sender.send_buffer(
+            receiver.inner.local_addr()?,
+            Tos::default(),
+            &payload,
+            Some(SEGMENT_SIZE),
+        )?;
+        recv_segments(&receiver, max_gso_segments, SEGMENT_SIZE);
 
         Ok(())
     }
