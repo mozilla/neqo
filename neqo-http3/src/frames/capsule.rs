@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{qdebug, Bytes, Encoder};
+use neqo_common::{Bytes, Encoder, qdebug};
 
 use super::{hframe::HFrameType, reader::FrameDecoder};
 use crate::Res;
@@ -35,13 +35,13 @@ impl Capsule {
 
 impl FrameDecoder<Self> for Capsule {
     fn decode(frame_type: HFrameType, _frame_len: u64, data: Option<&[u8]>) -> Res<Option<Self>> {
-        if frame_type == CAPSULE_TYPE_DATAGRAM {
-            if let Some(payload) = data {
-                qdebug!("Decoded Datagram Capsule len={}", payload.len());
-                return Ok(Some(Self::Datagram {
-                    payload: Bytes::from(payload.to_vec()),
-                }));
-            }
+        if frame_type == CAPSULE_TYPE_DATAGRAM
+            && let Some(payload) = data
+        {
+            qdebug!("Decoded Datagram Capsule len={}", payload.len());
+            return Ok(Some(Self::Datagram {
+                payload: Bytes::from(payload.to_vec()),
+            }));
         }
         Ok(None)
     }
@@ -54,8 +54,6 @@ impl FrameDecoder<Self> for Capsule {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::Encoder;
-
     use super::*;
 
     #[test]

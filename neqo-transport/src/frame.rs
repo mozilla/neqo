@@ -8,14 +8,13 @@
 
 use std::ops::RangeInclusive;
 
-use neqo_common::{qtrace, Buffer, Decoder, Encoder, MAX_VARINT};
+use neqo_common::{Buffer, Decoder, Encoder, MAX_VARINT, qtrace};
 use strum::FromRepr;
 
 use crate::{
-    ecn, packet,
+    AppError, ConnectionId, Error, Res, TransportError, ecn, packet,
     stateless_reset::Token as Srt,
     stream_id::{StreamId, StreamType},
-    AppError, ConnectionId, Error, Res, TransportError,
 };
 
 #[repr(u64)]
@@ -517,7 +516,7 @@ impl<'a> Frame<'a> {
                 application_error_code: dv(dec)?,
                 final_size: match dec.decode_varint() {
                     Some(v) => v,
-                    _ => return Err(Error::NoMoreData),
+                    None => return Err(Error::NoMoreData),
                 },
             }),
             FrameType::Ack => decode_ack(dec, false),
@@ -727,9 +726,9 @@ mod tests {
     use neqo_common::{Decoder, Encoder};
 
     use crate::{
+        CloseError, ConnectionId, Error, StreamId, StreamType, Token as Srt,
         ecn::Count,
         frame::{AckRange, Frame, FrameType},
-        CloseError, ConnectionId, Error, StreamId, StreamType, Token as Srt,
     };
 
     fn just_dec(f: &Frame, s: &str) {
@@ -1088,7 +1087,7 @@ mod tests {
 
     #[test]
     fn frame_decode_enforces_bound_on_ack_range() {
-        let mut e = Encoder::new();
+        let mut e = Encoder::default();
 
         e.encode_varint(FrameType::Ack);
         e.encode_varint(0u64); // largest acknowledged
@@ -1112,7 +1111,7 @@ mod tests {
     /// See bug in <https://github.com/mozilla/neqo/issues/2838>.
     #[test]
     fn padding_frame_u16_overflow() {
-        let mut e = Encoder::new();
+        let mut e = Encoder::default();
         e.encode_varint(FrameType::Padding);
         // `Frame::Padding` uses u16 to store length. Try to overflow length.
         e.pad_to(u16::MAX as usize + 1, 0);
@@ -1126,6 +1125,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::too_many_lines, reason = "OK in tests.")]
     fn dump() {
         let s = |id| StreamId::from(id);
         assert_eq!(Frame::Padding(5).dump(), "Padding { len: 5 }");

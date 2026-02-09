@@ -6,7 +6,7 @@
 
 use std::{mem, time::Instant};
 
-use neqo_common::{qdebug, qinfo, Datagram};
+use neqo_common::{Datagram, qdebug, qinfo};
 
 use crate::crypto::Epoch;
 
@@ -38,7 +38,7 @@ impl SavedDatagrams {
     }
 
     /// Return whether either store of datagrams is currently full.
-    pub fn is_either_full(&self) -> bool {
+    pub const fn is_either_full(&self) -> bool {
         self.handshake.len() == Self::CAPACITY || self.application_data.len() == Self::CAPACITY
     }
 

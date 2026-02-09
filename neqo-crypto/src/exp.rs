@@ -11,7 +11,7 @@ macro_rules! experimental_api {
         #[allow(clippy::allow_attributes, clippy::too_many_arguments, reason = "Inherent in macro use.")]
         #[allow(clippy::allow_attributes, clippy::missing_safety_doc, reason = "Inherent in macro use.")]
         #[allow(clippy::allow_attributes, clippy::missing_errors_doc, reason = "Inherent in macro use.")]
-        pub unsafe fn $n ( $( $a : $t ),* ) -> Result<(), $crate::err::Error> {
+        pub unsafe fn $n ( $( $a : $t ),* ) -> Result<(), $crate::err::Error> { unsafe {
             struct ExperimentalAPI(*mut std::ffi::c_void);
             unsafe impl Send for ExperimentalAPI {}
             unsafe impl Sync for ExperimentalAPI {}
@@ -27,6 +27,6 @@ macro_rules! experimental_api {
             let f: unsafe extern "C" fn( $( $t ),* ) -> $crate::ssl::SECStatus = ::std::mem::transmute(f.0);
             let rv = f( $( $a ),* );
             $crate::err::secstatus_to_res(rv)
-        }
+        }}
     };
 }

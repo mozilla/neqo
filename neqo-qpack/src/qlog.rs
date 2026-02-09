@@ -10,8 +10,8 @@ use std::time::Instant;
 
 use neqo_common::{hex, qlog::Qlog};
 use qlog::events::{
-    qpack::{QPackInstruction, QpackInstructionParsed, QpackInstructionTypeName},
     EventData, RawInfo,
+    qpack::{QPackInstruction, QpackInstructionParsed, QpackInstructionTypeName},
 };
 
 pub fn qpack_read_insert_count_increment_instruction(

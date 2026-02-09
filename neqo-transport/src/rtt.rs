@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qlog::Qlog, qtrace, Buffer};
+use neqo_common::{Buffer, qlog::Qlog, qtrace};
 
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
@@ -83,7 +83,7 @@ impl RttEstimate {
         self.ack_delay = other.ack_delay.clone();
     }
 
-    pub fn set_ack_delay(&mut self, ack_delay: PeerAckDelay) {
+    pub const fn set_ack_delay(&mut self, ack_delay: PeerAckDelay) {
         self.ack_delay = ack_delay;
     }
 
@@ -199,7 +199,7 @@ impl RttEstimate {
         self.ack_delay.write_frames(builder, tokens, stats);
     }
 
-    pub fn frame_lost(&mut self, lost: &AckRate) {
+    pub const fn frame_lost(&mut self, lost: &AckRate) {
         self.ack_delay.frame_lost(lost);
     }
 

@@ -23,7 +23,7 @@ use neqo_common::{hex, hex_with_len, qtrace};
 
 use crate::{
     constants::{ContentType, Epoch},
-    err::{nspr, Error, PR_SetError, Res},
+    err::{Error, PR_SetError, Res, nspr},
     null_safe_slice, prio, ssl,
 };
 
@@ -106,10 +106,10 @@ impl RecordList {
         let Ok(ct) = ContentType::try_from(ct) else {
             return ssl::SECFailure;
         };
-        let Some(records) = arg.cast::<Self>().as_mut() else {
+        let Some(records) = (unsafe { arg.cast::<Self>().as_mut() }) else {
             return ssl::SECFailure;
         };
-        let slice = null_safe_slice(data, len);
+        let slice = unsafe { null_safe_slice(data, len) };
         records.append(epoch, ct, slice);
         ssl::SECSuccess
     }
@@ -158,7 +158,7 @@ impl Drop for AgentIoInputContext<'_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct AgentIoInput {
     // input is data that is read by TLS.
     input: *const u8,
@@ -211,7 +211,7 @@ impl Display for AgentIoInput {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AgentIo {
     // input collects the input we might provide to TLS.
     input: AgentIoInput,
@@ -221,18 +221,8 @@ pub struct AgentIo {
 }
 
 impl AgentIo {
-    pub const fn new() -> Self {
-        Self {
-            input: AgentIoInput {
-                input: null(),
-                available: 0,
-            },
-            output: Vec::new(),
-        }
-    }
-
     unsafe fn borrow(fd: &mut PrFd) -> &mut Self {
-        (**fd).secret.cast::<Self>().as_mut().unwrap()
+        unsafe { (**fd).secret.cast::<Self>().as_mut().unwrap() }
     }
 
     pub fn wrap<'a: 'c, 'b: 'c, 'c>(&'a mut self, input: &'b [u8]) -> AgentIoInputContext<'c> {
@@ -260,22 +250,23 @@ impl Display for AgentIo {
 }
 
 unsafe extern "C" fn agent_close(fd: PrFd) -> PrStatus {
-    (*fd).secret = null_mut();
-    if let Some(dtor) = (*fd).dtor {
-        dtor(fd);
+    unsafe {
+        (*fd).secret = null_mut();
+        if let Some(dtor) = (*fd).dtor {
+            dtor(fd);
+        }
     }
     PR_SUCCESS
 }
 
 unsafe extern "C" fn agent_read(mut fd: PrFd, buf: *mut c_void, amount: prio::PRInt32) -> PrStatus {
-    let io = AgentIo::borrow(&mut fd);
-    if let Ok(a) = usize::try_from(amount) {
-        match io.input.read_input(buf.cast(), a) {
-            Ok(_) => PR_SUCCESS,
-            Err(_) => PR_FAILURE,
-        }
-    } else {
-        PR_FAILURE
+    let io = unsafe { AgentIo::borrow(&mut fd) };
+    let Ok(a) = usize::try_from(amount) else {
+        return PR_FAILURE;
+    };
+    match io.input.read_input(buf.cast(), a) {
+        Ok(_) => PR_SUCCESS,
+        Err(_) => PR_FAILURE,
     }
 }
 
@@ -286,17 +277,16 @@ unsafe extern "C" fn agent_recv(
     flags: prio::PRIntn,
     _timeout: prio::PRIntervalTime,
 ) -> prio::PRInt32 {
-    let io = AgentIo::borrow(&mut fd);
+    let io = unsafe { AgentIo::borrow(&mut fd) };
     if flags != 0 {
         return PR_FAILURE;
     }
-    if let Ok(a) = usize::try_from(amount) {
-        io.input.read_input(buf.cast(), a).map_or(PR_FAILURE, |v| {
-            prio::PRInt32::try_from(v).unwrap_or(PR_FAILURE)
-        })
-    } else {
-        PR_FAILURE
-    }
+    let Ok(a) = usize::try_from(amount) else {
+        return PR_FAILURE;
+    };
+    io.input.read_input(buf.cast(), a).map_or(PR_FAILURE, |v| {
+        prio::PRInt32::try_from(v).unwrap_or(PR_FAILURE)
+    })
 }
 
 unsafe extern "C" fn agent_write(
@@ -304,7 +294,7 @@ unsafe extern "C" fn agent_write(
     buf: *const c_void,
     amount: prio::PRInt32,
 ) -> PrStatus {
-    let io = AgentIo::borrow(&mut fd);
+    let io = unsafe { AgentIo::borrow(&mut fd) };
     usize::try_from(amount).map_or(PR_FAILURE, |a| {
         io.save_output(buf.cast(), a);
         amount
@@ -318,8 +308,7 @@ unsafe extern "C" fn agent_send(
     flags: prio::PRIntn,
     _timeout: prio::PRIntervalTime,
 ) -> prio::PRInt32 {
-    let io = AgentIo::borrow(&mut fd);
-
+    let io = unsafe { AgentIo::borrow(&mut fd) };
     if flags != 0 {
         return PR_FAILURE;
     }
@@ -330,12 +319,12 @@ unsafe extern "C" fn agent_send(
 }
 
 unsafe extern "C" fn agent_available(mut fd: PrFd) -> prio::PRInt32 {
-    let io = AgentIo::borrow(&mut fd);
+    let io = unsafe { AgentIo::borrow(&mut fd) };
     io.input.available.try_into().unwrap_or(PR_FAILURE)
 }
 
 unsafe extern "C" fn agent_available64(mut fd: PrFd) -> prio::PRInt64 {
-    let io = AgentIo::borrow(&mut fd);
+    let io = unsafe { AgentIo::borrow(&mut fd) };
     io.input
         .available
         .try_into()
@@ -346,8 +335,8 @@ unsafe extern "C" fn agent_available64(mut fd: PrFd) -> prio::PRInt64 {
     clippy::cast_possible_truncation,
     reason = "Cast is safe because prio::PR_AF_INET is 2."
 )]
-unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrStatus {
-    let Some(a) = addr.as_mut() else {
+const unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrStatus {
+    let Some(a) = (unsafe { addr.as_mut() }) else {
         return PR_FAILURE;
     };
     a.inet.family = prio::PR_AF_INET as prio::PRUint16;
@@ -356,12 +345,16 @@ unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrS
     PR_SUCCESS
 }
 
-unsafe extern "C" fn agent_getsockopt(_fd: PrFd, opt: *mut prio::PRSocketOptionData) -> PrStatus {
-    if let Some(o) = opt.as_mut() {
-        if o.option == prio::PRSockOption::PR_SockOpt_Nonblocking {
-            o.value.non_blocking = 1;
-            return PR_SUCCESS;
-        }
+const unsafe extern "C" fn agent_getsockopt(
+    _fd: PrFd,
+    opt: *mut prio::PRSocketOptionData,
+) -> PrStatus {
+    let Some(o) = (unsafe { opt.as_mut() }) else {
+        return PR_FAILURE;
+    };
+    if o.option == prio::PRSockOption::PR_SockOpt_Nonblocking {
+        o.value.non_blocking = 1;
+        return PR_SUCCESS;
     }
     PR_FAILURE
 }
@@ -404,3 +397,60 @@ pub const METHODS: &prio::PRIOMethods = &prio::PRIOMethods {
     reserved_fn_1: None,
     reserved_fn_0: None,
 };
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::ptr::addr_of_mut;
+
+    use super::*;
+
+    #[test]
+    fn ingest_errors() {
+        let mut records = RecordList::default();
+        let data = [0u8];
+        unsafe {
+            assert_eq!(
+                RecordList::ingest(
+                    null_mut(),
+                    999,
+                    0x17,
+                    data.as_ptr(),
+                    1,
+                    addr_of_mut!(records).cast()
+                ),
+                ssl::SECFailure
+            );
+            assert_eq!(
+                RecordList::ingest(null_mut(), 0, 0x17, data.as_ptr(), 1, null_mut()),
+                ssl::SECFailure
+            );
+            // Test invalid content type (value outside u8 range)
+            assert_eq!(
+                RecordList::ingest(
+                    null_mut(),
+                    0,
+                    256,
+                    data.as_ptr(),
+                    1,
+                    addr_of_mut!(records).cast()
+                ),
+                ssl::SECFailure
+            );
+        }
+    }
+
+    #[test]
+    fn formatting() {
+        let record = Record::new(Epoch::ApplicationData, 0x17, &[1, 2, 3]);
+        let dbg = format!("{record:?}");
+        assert_eq!(&dbg[..6], "Record");
+
+        let input = AgentIoInput::default();
+        let disp = format!("{input}");
+        assert_eq!(&disp[..12], "AgentIoInput");
+
+        let io = AgentIo::default();
+        assert_eq!(format!("{io}"), "AgentIo");
+    }
+}

@@ -14,21 +14,22 @@ use std::{
 };
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{hex, qdebug, qinfo, qtrace, Buffer, Decoder, Encoder, Role};
+use neqo_common::{Buffer, Decoder, Encoder, Role, hex, qdebug, qinfo, qtrace};
 use neqo_crypto::{
+    HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
     constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
-    random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
+    random,
 };
 use strum::FromRepr;
 
 use crate::{
+    Error, Res,
     cid::{ConnectionId, ConnectionIdEntry, ConnectionIdManager},
     packet::MIN_INITIAL_PACKET_SIZE,
     stateless_reset::Token as Srt,
     tracking::DEFAULT_REMOTE_ACK_DELAY,
     version::{self, Version},
-    Error, Res,
 };
 
 #[derive(Debug, Clone, Enum, PartialEq, Eq, Copy, FromRepr)]
@@ -742,7 +743,7 @@ impl TransportParametersHandler {
     }
 
     #[must_use]
-    pub fn local_mut(&mut self) -> &mut TransportParameters {
+    pub const fn local_mut(&mut self) -> &mut TransportParameters {
         &mut self.local
     }
 
@@ -900,14 +901,14 @@ where
 mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
-    use neqo_common::{qdebug, Decoder, Encoder};
     use TransportParameterId::*;
+    use neqo_common::{Decoder, Encoder, qdebug};
 
     use super::PreferredAddress;
     use crate::{
+        ConnectionId, Error, Version,
         stateless_reset::Token as Srt,
         tparams::{TransportParameter, TransportParameterId, TransportParameters},
-        ConnectionId, Error, Version,
     };
 
     #[test]
@@ -969,7 +970,7 @@ mod tests {
             0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
         ];
         let spa = make_spa();
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         spa.encode(&mut enc, PreferredAddress);
         assert_eq!(enc.as_ref(), ENCODED);
 
@@ -984,13 +985,7 @@ mod tests {
         F: FnOnce(&mut Option<SocketAddrV4>, &mut Option<SocketAddrV6>, &mut ConnectionId),
     {
         let mut spa = make_spa();
-        if let TransportParameter::PreferredAddress {
-            ref mut v4,
-            ref mut v6,
-            ref mut cid,
-            ..
-        } = &mut spa
-        {
+        if let TransportParameter::PreferredAddress { v4, v6, cid, .. } = &mut spa {
             wrecker(v4, v6, cid);
         } else {
             unreachable!();
@@ -1002,7 +997,7 @@ mod tests {
     /// It then encodes it, working from the knowledge that the `encode` function
     /// doesn't care about validity, and decodes it.  The result should be failure.
     fn assert_invalid_spa(spa: &TransportParameter) {
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         spa.encode(&mut enc, PreferredAddress);
         assert_eq!(
             TransportParameter::decode(&mut enc.as_decoder()).unwrap_err(),
@@ -1012,7 +1007,7 @@ mod tests {
 
     /// This is for those rare mutations that are acceptable.
     fn assert_valid_spa(spa: &TransportParameter) {
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         spa.encode(&mut enc, PreferredAddress);
         let mut dec = enc.as_decoder();
         let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
@@ -1063,7 +1058,7 @@ mod tests {
     #[test]
     fn preferred_address_truncated() {
         let spa = make_spa();
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         spa.encode(&mut enc, PreferredAddress);
         let mut dec = Decoder::from(&enc.as_ref()[..enc.len() - 1]);
         assert_eq!(
@@ -1206,7 +1201,7 @@ mod tests {
             other: vec![0x1a2a_3a4a, 0x5a6a_7a8a],
         };
 
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         vn.encode(&mut enc, VersionInformation);
         assert_eq!(enc.as_ref(), ENCODED);
 
@@ -1249,7 +1244,7 @@ mod tests {
     #[test]
     fn versions_equal_0rtt() {
         let mut current = TransportParameters::default();
-        qdebug!("Current = {:?}", current);
+        qdebug!("Current = {current:?}");
         current.set(
             VersionInformation,
             TransportParameter::Versions {

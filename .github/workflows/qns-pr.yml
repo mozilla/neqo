@@ -35,7 +35,7 @@ jobs:
         with:
           cache-binary: true
 
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
           ref: ${{ matrix.ref }}
@@ -55,7 +55,7 @@ jobs:
           platforms: linux/amd64
           outputs: type=docker,dest=/tmp/${{ matrix.name }}.tar
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=min
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -73,7 +73,7 @@ jobs:
       URL: https://github.com/mozilla/neqo
       ROLE: both
     steps:
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: '* Docker image'
           path: /tmp
@@ -158,18 +158,18 @@ jobs:
       # quic-interop-runner requires Docker v28.1. GitHub's ubuntu-24.04 comes
       # with v28.0.4. Install newer version.
       - name: Set up Docker
-        uses: docker/setup-docker-action@e61617a16c407a86262fb923c35a616ddbe070b3 # v4.6.0
+        uses: docker/setup-docker-action@e43656e248c0bd0647d3f5c195d116aacf6fcaf4 # v4.7.0
         with:
           version: 'v28.1.0'
 
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: 'pr Docker image'
           path: /tmp
 
       - run: docker load --input "/tmp/pr.tar"
 
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         if: contains(matrix.pair, 'neqo-main')
         with:
           name: 'main Docker image'
@@ -186,7 +186,7 @@ jobs:
           echo "client=$(echo "$PAIR" | cut -d% -f1)" >> "$GITHUB_OUTPUT"
           echo "server=$(echo "$PAIR" | cut -d% -f2)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
@@ -211,10 +211,10 @@ jobs:
     needs: [docker-image, run-qns, implementations]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: '*results'
           path: results
@@ -252,6 +252,11 @@ jobs:
             for BRANCH in "$RUN" "$MAIN_RUN"; do
               if [ ! -s "$BRANCH/result.json" ]; then
                 echo "* $PAIR: $BRANCH result missing" >> "$ROLE.failed.md"
+                continue 2
+              fi
+              # Skip if .results is null or missing
+              if ! jq -e '.results' "$BRANCH/result.json" > /dev/null 2>&1; then
+                echo "* $PAIR: $BRANCH has no results" >> "$ROLE.failed.md"
                 continue 2
               fi
               jq < "$BRANCH/result.json" '
@@ -328,15 +333,11 @@ jobs:
             echo
             for GROUP in succeeded unsupported; do
               echo "### ${GROUP^} Interop Tests"
-              if [ -e "client.$GROUP.md" ] || [ -e "server.$GROUP.md" ]; then
-                echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
-                echo "#### $PR as client"
-                cat "client.$GROUP.md"
-                echo "#### $PR as server"
-                cat "server.$GROUP.md"
-              else
-                echo "None :question:"
-              fi
+              echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
+              echo "#### $PR as client"
+              cat "client.$GROUP.md" 2>/dev/null || echo "None :question:"
+              echo "#### $PR as server"
+              cat "server.$GROUP.md" 2>/dev/null || echo "None :question:"
             done
             echo
             echo "</details>"

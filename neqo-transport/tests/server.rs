@@ -9,20 +9,21 @@ mod common;
 use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
 
 use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
-use neqo_common::{qtrace, Datagram, Decoder, Encoder, Role};
+use neqo_common::{Datagram, Decoder, Encoder, Role, qtrace};
 use neqo_crypto::{
-    generate_ech_keys, AeadTrait as _, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult,
-    ZeroRttChecker,
+    AeadTrait as _, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
+    generate_ech_keys,
 };
 use neqo_transport::{
+    CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Output, State,
+    StreamType, Version,
     server::{ConnectionRef, Server, ValidateAddress},
-    version, CloseReason, Connection, ConnectionParameters, Error, Output, State, StreamType,
-    Version, MIN_INITIAL_PACKET_SIZE,
+    version,
 };
 use test_fixture::{
-    assertions, datagram, default_client,
+    CountingConnectionIdGenerator, assertions, datagram, default_client,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
-    new_client, now, split_datagram, CountingConnectionIdGenerator,
+    new_client, now, split_datagram,
 };
 
 /// Take a pair of connections in any state and complete the handshake.
@@ -452,7 +453,7 @@ fn bad_client_initial() {
     payload_enc.encode([0x08, 0x02, 0x00, 0x00]); // Add a stream frame.
 
     // Make a new header with a 1 byte packet number length.
-    let mut header_enc = Encoder::new();
+    let mut header_enc = Encoder::default();
     header_enc
         .encode_byte(0xc1) // Initial with 2 byte packet number.
         .encode_uint(4, Version::Version1.wire_version())
@@ -544,7 +545,7 @@ fn bad_client_initial_connection_close() {
     payload_enc.encode([0x1c, 0x01, 0x00, 0x00]); // Add a CONNECTION_CLOSE frame.
 
     // Make a new header with a 1 byte packet number length.
-    let mut header_enc = Encoder::new();
+    let mut header_enc = Encoder::default();
     header_enc
         .encode_byte(0xc0) // Initial with 1 byte packet number.
         .encode_uint(4, Version::default().wire_version())
@@ -886,12 +887,14 @@ fn ech() {
     assert!(client.tls_info().unwrap().ech_accepted());
     assert!(server_instance.borrow().tls_info().unwrap().ech_accepted());
     assert!(client.tls_preinfo().unwrap().ech_accepted().unwrap());
-    assert!(server_instance
-        .borrow()
-        .tls_preinfo()
-        .unwrap()
-        .ech_accepted()
-        .unwrap());
+    assert!(
+        server_instance
+            .borrow()
+            .tls_preinfo()
+            .unwrap()
+            .ech_accepted()
+            .unwrap()
+    );
 }
 
 #[test]

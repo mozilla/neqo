@@ -13,15 +13,15 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qdebug, qtrace, Buffer, Encoder, Header, MessageType};
+use neqo_common::{Buffer, Encoder, Header, MessageType, qdebug, qtrace};
 use neqo_qpack as qpack;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
-    frames::HFrame,
-    headers_checks::{headers_valid, is_interim, trailers_valid},
     BufferedStream, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpSendStream, Res,
     SendStream, SendStreamEvents, Stream,
+    frames::HFrame,
+    headers_checks::{headers_valid, is_interim, trailers_valid},
 };
 
 const MIN_DATA_FRAME_SIZE: usize = 3; // Minimal DATA frame size: 2 (header) + 1 (payload)
@@ -93,7 +93,7 @@ impl MessageState {
         }
     }
 
-    fn fin(&mut self) -> Res<()> {
+    const fn fin(&mut self) -> Res<()> {
         match &self {
             Self::WaitingForHeaders | Self::Done => Err(Error::InvalidInput),
             Self::WaitingForData | Self::TrailersSet => {
@@ -322,6 +322,6 @@ impl HttpSendStream for SendMessage {
 
 impl Display for SendMessage {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "SendMesage {}", self.stream_id())
+        write!(f, "SendMessage {}", self.stream_id())
     }
 }

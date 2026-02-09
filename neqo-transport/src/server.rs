@@ -19,23 +19,23 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as _, hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn, Datagram, Role,
-    Tos,
+    Datagram, Role, Tos, event::Provider as _, hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace,
+    qwarn,
 };
 use neqo_crypto::{
-    encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
-    ZeroRttChecker,
+    AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult, ZeroRttChecker,
+    encode_ech_config,
 };
 use rustc_hash::FxHashSet as HashSet;
 
 pub use crate::addr_valid::ValidateAddress;
 use crate::{
+    ConnectionParameters, OutputBatch, Res, Version,
     addr_valid::{AddressValidation, AddressValidationResult},
     cid::{ConnectionId, ConnectionIdGenerator, ConnectionIdRef},
     connection::{Connection, Output, State},
-    packet::{self, Public, MIN_INITIAL_PACKET_SIZE},
+    packet::{self, MIN_INITIAL_PACKET_SIZE, Public},
     saved::SavedDatagram,
-    ConnectionParameters, OutputBatch, Res, Version,
 };
 
 /// A `ServerZeroRttChecker` is a simple wrapper around a single checker.
@@ -331,12 +331,11 @@ impl Server {
         }
         c.set_validation(&self.address_validation);
         c.set_qlog(self.create_qlog_trace(orig_dcid.unwrap_or(initial.dst_cid).as_cid_ref(), now));
-        if let Some(cfg) = &self.ech_config {
-            if c.server_enable_ech(cfg.config, &cfg.public_name, &cfg.sk, &cfg.pk)
+        if let Some(cfg) = &self.ech_config
+            && c.server_enable_ech(cfg.config, &cfg.public_name, &cfg.sk, &cfg.pk)
                 .is_err()
-            {
-                qwarn!("[{self}] Unable to enable ECH");
-            }
+        {
+            qwarn!("[{self}] Unable to enable ECH");
         }
     }
 
@@ -475,11 +474,9 @@ impl Server {
                     self.conn_params.get_versions().all(),
                 );
                 qdebug!(
-                    "[{self}] type={:?} path:{} {}->{} {:?} len {}",
+                    "[{self}] type={:?} path:{} {destination}->{source} {:?} len {}",
                     packet::Type::VersionNegotiation,
                     packet.dcid(),
-                    destination,
-                    source,
                     Tos::default(),
                     vn.len(),
                 );

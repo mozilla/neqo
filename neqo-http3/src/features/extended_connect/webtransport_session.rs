@@ -11,16 +11,16 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qtrace, Bytes, Encoder, Role};
+use neqo_common::{Bytes, Encoder, Role, qtrace};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
+    Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
     features::extended_connect::{
-        session::{DgramContextIdError, Protocol, State},
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
+        session::{DgramContextIdError, Protocol, State},
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
-    Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
 };
 
 #[derive(Debug)]

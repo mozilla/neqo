@@ -110,7 +110,7 @@ mod mac {
     }
     type mach_timebase_info_t = *mut mach_timebase_info;
     type mach_timebase_info_data_t = mach_timebase_info;
-    extern "C" {
+    unsafe extern "C" {
         fn mach_timebase_info(info: mach_timebase_info_t) -> kern_return_t;
     }
 
@@ -131,7 +131,7 @@ mod mac {
 
     // These function definitions are taken from a comment in <thread_policy.h>.
     // Why they are inaccessible is unknown, but they work as declared.
-    extern "C" {
+    unsafe extern "C" {
         fn thread_policy_set(
             thread: thread_t,
             flavor: thread_policy_flavor_t,
@@ -151,7 +151,7 @@ mod mac {
     type __darwin_pthread_t = *mut _opaque_pthread_t;
     type pthread_t = __darwin_pthread_t;
 
-    extern "C" {
+    unsafe extern "C" {
         fn pthread_self() -> pthread_t;
         fn pthread_mach_thread_np(thread: pthread_t) -> mach_port_t;
     }
@@ -172,7 +172,7 @@ mod mac {
         const NANOS_PER_MSEC: f64 = 1_000_000.0;
         let mut timebase_info = mach_timebase_info_data_t::default();
         unsafe {
-            mach_timebase_info(&mut timebase_info);
+            mach_timebase_info(&raw mut timebase_info);
         }
         f64::from(timebase_info.denom) * NANOS_PER_MSEC / f64::from(timebase_info.numer)
     }
@@ -203,8 +203,8 @@ mod mac {
                 pthread_mach_thread_np(pthread_self()),
                 THREAD_TIME_CONSTRAINT_POLICY,
                 addr_of_mut!(policy).cast(), // horror!
-                &mut count,
-                &mut get_default,
+                &raw mut count,
+                &raw mut get_default,
             )
         };
         policy

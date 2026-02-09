@@ -14,13 +14,13 @@ use std::{
 use windows::Win32::{
     NetworkManagement::{
         IpHelper::{
-            if_indextoname, FreeMibTable, GetBestInterfaceEx, GetIpInterfaceTable,
-            MIB_IPINTERFACE_ROW, MIB_IPINTERFACE_TABLE,
+            FreeMibTable, GetBestInterfaceEx, GetIpInterfaceTable, MIB_IPINTERFACE_ROW,
+            MIB_IPINTERFACE_TABLE, if_indextoname,
         },
         Ndis::IF_MAX_STRING_SIZE,
     },
     Networking::WinSock::{
-        AF_INET, AF_INET6, IN6_ADDR, IN6_ADDR_0, IN_ADDR, IN_ADDR_0, SOCKADDR, SOCKADDR_IN,
+        AF_INET, AF_INET6, IN_ADDR, IN_ADDR_0, IN6_ADDR, IN6_ADDR_0, SOCKADDR, SOCKADDR_IN,
         SOCKADDR_IN6, SOCKADDR_INET,
     },
 };
@@ -30,7 +30,7 @@ use crate::default_err;
 struct MibTablePtr(*mut MIB_IPINTERFACE_TABLE);
 
 impl MibTablePtr {
-    fn mut_ptr_ptr(&mut self) -> *mut *mut MIB_IPINTERFACE_TABLE {
+    const fn mut_ptr_ptr(&mut self) -> *mut *mut MIB_IPINTERFACE_TABLE {
         ptr::from_mut(&mut self.0)
     }
 }
@@ -115,7 +115,7 @@ pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
     // Make a slice
     let ifaces = unsafe {
         slice::from_raw_parts::<MIB_IPINTERFACE_ROW>(
-            &(*if_table.0).Table[0],
+            &raw const (*if_table.0).Table[0],
             (*if_table.0).NumEntries as usize,
         )
     };

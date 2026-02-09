@@ -39,16 +39,10 @@ mod quic_datagrams;
 pub mod recovery;
 #[cfg(not(feature = "bench"))]
 mod recovery;
-mod saved;
-// #[cfg(feature = "bench")]
 pub mod recv_stream;
-// #[cfg(not(feature = "bench"))]
-// mod recv_stream;
 mod rtt;
-// #[cfg(feature = "bench")]
+mod saved;
 pub mod send_stream;
-// #[cfg(not(feature = "bench"))]
-// mod send_stream;
 mod sender;
 pub mod server;
 mod sni;
@@ -67,11 +61,11 @@ pub use self::{
         EmptyConnectionIdGenerator, RandomConnectionIdGenerator,
     },
     connection::{
+        Connection, Output, OutputBatch, State, ZeroRttState,
         params::{
             ConnectionParameters, INITIAL_LOCAL_MAX_DATA, INITIAL_LOCAL_MAX_STREAM_DATA,
             MAX_LOCAL_MAX_STREAM_DATA,
         },
-        Connection, Output, OutputBatch, State, ZeroRttState,
     },
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,

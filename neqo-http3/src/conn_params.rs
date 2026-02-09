@@ -146,7 +146,9 @@ impl Http3Parameters {
     #[must_use]
     pub fn get_http3_datagram(&self) -> bool {
         if self.http3_datagram && self.conn_params.get_datagram_size() == 0 {
-            qdebug!("HTTP/3 setting SETTINGS_H3_DATAGRAM is enabled but QUIC transport parameter max_datagram_frame_size is 0. Datagrams will be sent via HTTP DATAGRAM Capsules.");
+            qdebug!(
+                "HTTP/3 setting SETTINGS_H3_DATAGRAM is enabled but QUIC transport parameter max_datagram_frame_size is 0. Datagrams will be sent via HTTP DATAGRAM Capsules."
+            );
         }
         self.http3_datagram
     }

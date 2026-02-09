@@ -13,16 +13,16 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qdebug, Bytes, Encoder, Header};
+use neqo_common::{Bytes, Encoder, Header, qdebug};
 use neqo_transport::{
-    server::ConnectionRef, AppError, Connection, DatagramTracking, StreamId, StreamType,
+    AppError, Connection, DatagramTracking, StreamId, StreamType, server::ConnectionRef,
 };
 
 use crate::{
+    Error, Http3StreamInfo, Http3StreamType, Priority, Res,
     connection::{Http3State, SessionAcceptAction},
     connection_server::Http3ServerHandler,
     features::extended_connect,
-    Error, Http3StreamInfo, Http3StreamType, Priority, Res,
 };
 
 #[derive(Debug, Clone)]
@@ -591,7 +591,7 @@ impl Http3ServerEvents {
     }
 
     /// Take all events
-    pub fn events(&self) -> impl Iterator<Item = Http3ServerEvent> {
+    pub fn events(&self) -> impl Iterator<Item = Http3ServerEvent> + use<> {
         self.events.replace(VecDeque::new()).into_iter()
     }
 

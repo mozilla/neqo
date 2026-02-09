@@ -4,15 +4,6 @@ on:
   pull_request:
     branches: ["main"]
   workflow_dispatch:
-    inputs:
-      bencher:
-        type: choice
-        description: Which benchmarking testbed to run on.
-        required: true
-        default: on-prem
-        options:
-          - on-prem
-          - gcp
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
@@ -35,14 +26,14 @@ permissions:
 jobs:
   bench:
     name: cargo bench
-    runs-on: ${{ inputs.bencher == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || 'self-hosted' }}
+    runs-on: 'self-hosted' # zizmor: ignore[self-hosted-runner]
     defaults:
       run:
         shell: bash
 
     steps:
       - name: Checkout mozilla/neqo
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: mozilla/neqo
           path: neqo
@@ -121,8 +112,6 @@ jobs:
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               $BENCH -- --bench --save-baseline main --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results-main.txt
           done
-          # Copy the main branch results to a separate directory for bencher.dev.
-          cp -r target/criterion ../criterion-main
           git checkout -
           cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
           BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
@@ -141,7 +130,6 @@ jobs:
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
               perf -- $PERF_OPT -o "../$NAME.perf" $BENCH --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
           done
-          cp -r target/criterion ../criterion
 
       # Re-enable turboboost, hyperthreading and use powersave governor. Remove all CPU sets.
       - name: Restore machine
@@ -164,7 +152,7 @@ jobs:
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          TESTBED: ${{ inputs.bencher == 'gcp' && 'GCP' || 'On-prem' }}
+          TESTBED: 'On-prem'
         run: |
           SHA=$(cd neqo && git log origin/main -1 --format=%H)
           echo "$SHA" > main-sha.txt
@@ -214,8 +202,6 @@ jobs:
             event.json
             results.*
             results-main.*
-            criterion
-            criterion-main
           compression-level: 9
 
       - name: Export PR comment data
@@ -240,4 +226,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- binaries comment-data criterion criterion-main "$COMPARE_TMP" || true
+          rm -r -- binaries comment-data "$COMPARE_TMP" || true

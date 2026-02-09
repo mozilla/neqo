@@ -10,7 +10,7 @@ use neqo_transport::StreamType;
 use test_fixture::{default_client, default_server, now};
 
 use crate::frames::{
-    reader::FrameDecoder, FrameReader, HFrame, StreamReaderConnectionWrapper, WebTransportFrame,
+    FrameReader, HFrame, StreamReaderConnectionWrapper, WebTransportFrame, reader::FrameDecoder,
 };
 
 pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T {
@@ -62,21 +62,15 @@ pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T
 
 pub fn enc_dec_hframe(f: &HFrame, st: &str, remaining: usize) {
     let mut d = Encoder::default();
-
     f.encode(&mut d);
-
     let frame = enc_dec::<HFrame>(&d, st, remaining);
-
     assert_eq!(*f, frame);
 }
 
 pub fn enc_dec_wtframe(f: &WebTransportFrame, st: &str, remaining: usize) {
     let mut d = Encoder::default();
-
     f.encode(&mut d);
-
     let frame = enc_dec::<WebTransportFrame>(&d, st, remaining);
-
     assert_eq!(*f, frame);
 }
 

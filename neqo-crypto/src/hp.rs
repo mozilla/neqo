@@ -14,14 +14,14 @@ use std::{
 
 use crate::{
     constants::{
-        Cipher, Version, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
-        TLS_CHACHA20_POLY1305_SHA256,
+        Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
+        Version,
     },
-    err::{secstatus_to_res, Error, Res},
+    err::{Error, Res, secstatus_to_res},
     p11::{
-        Context, Item, PK11SymKey, PK11_CipherOp, PK11_CreateContextBySymKey, PK11_Encrypt,
-        PK11_GetBlockSize, SymKey, CKA_ENCRYPT, CKM_AES_ECB, CKM_CHACHA20, CK_ATTRIBUTE_TYPE,
-        CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE,
+        CK_ATTRIBUTE_TYPE, CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE, CKA_ENCRYPT, CKM_AES_ECB,
+        CKM_CHACHA20, Context, Item, PK11_CipherOp, PK11_CreateContextBySymKey, PK11_Encrypt,
+        PK11_GetBlockSize, PK11SymKey, SymKey,
     },
 };
 
@@ -94,7 +94,7 @@ impl Key {
                 c_uint::try_from(l.len())?,
                 mech,
                 key_size,
-                &mut secret,
+                &raw mut secret,
             )
         }?;
         let key = SymKey::from_ptr(secret).or(Err(Error::Hkdf))?;
@@ -149,7 +149,7 @@ impl Key {
                     PK11_CipherOp(
                         **context.borrow_mut(),
                         output.as_mut_ptr(),
-                        &mut output_len,
+                        &raw mut output_len,
                         c_int::try_from(output.len())?,
                         sample.as_ptr().cast(),
                         c_int::try_from(Self::SAMPLE_SIZE)?,
@@ -174,7 +174,7 @@ impl Key {
                         CK_MECHANISM_TYPE::from(CKM_CHACHA20),
                         addr_of_mut!(param_item),
                         output[..].as_mut_ptr(),
-                        &mut output_len,
+                        &raw mut output_len,
                         c_uint::try_from(output.len())?,
                         [0; Self::SAMPLE_SIZE].as_ptr(),
                         c_uint::try_from(Self::SAMPLE_SIZE)?,
@@ -184,5 +184,23 @@ impl Key {
                 Ok(output)
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use crate::{
+        constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
+        hkdf,
+        hp::Key,
+    };
+
+    #[test]
+    fn debug_format() {
+        test_fixture::fixture_init();
+        let prk = hkdf::import_key(TLS_VERSION_1_3, &[0; 32]).unwrap();
+        let key = Key::extract(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &prk, "test").unwrap();
+        assert_eq!(format!("{key:?}"), "hp::Key");
     }
 }

@@ -119,7 +119,7 @@ impl Packet {
 
     /// Clears the flag that had this packet on the primary path.
     /// Used when migrating to clear out state.
-    pub fn clear_primary_path(&mut self) {
+    pub const fn clear_primary_path(&mut self) {
         self.primary_path = false;
     }
 
@@ -153,7 +153,7 @@ impl Packet {
     }
 
     /// Declare the packet as lost.  Returns `true` if this is the first time.
-    pub fn declare_lost(&mut self, now: Instant) -> bool {
+    pub const fn declare_lost(&mut self, now: Instant) -> bool {
         if self.lost() {
             false
         } else {
@@ -179,7 +179,7 @@ impl Packet {
     /// On PTO, we need to get the recovery tokens so that we can ensure that
     /// the frames we sent can be sent again in the PTO packet(s).  Do that just once.
     #[must_use]
-    pub fn pto(&mut self) -> bool {
+    pub const fn pto(&mut self) -> bool {
         if self.pto || self.lost() {
             false
         } else {
@@ -249,7 +249,7 @@ impl Packets {
             // > values in **descending packet number order**.
             //
             // <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.1>
-            debug_assert!(previous_range_start.map_or(true, |s| s > *range.end()));
+            debug_assert!(previous_range_start.is_none_or(|s| s > *range.end()));
             previous_range_start = Some(*range.start());
 
             // Thus none of the following ACK ranges will acknowledge packets in
@@ -281,7 +281,7 @@ impl Packets {
     }
 
     /// Empty out the packets, but keep the offset.
-    pub fn drain_all(&mut self) -> impl Iterator<Item = Packet> {
+    pub fn drain_all(&mut self) -> impl Iterator<Item = Packet> + use<> {
         std::mem::take(&mut self.packets).into_values()
     }
 

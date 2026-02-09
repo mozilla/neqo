@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider as _, qdebug, qinfo, qtrace, Datagram};
+use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent,
@@ -309,7 +309,7 @@ impl Requests {
             }
             status = GoalStatus::Active;
             *remaining -= sent;
-            qtrace!("sent {sent} remaining {}", remaining);
+            qtrace!("sent {sent} remaining {remaining}");
             if *remaining == 0 {
                 c.stream_close_send(stream_id, now).unwrap();
                 self.remaining.remove(&stream_id);
@@ -411,7 +411,7 @@ impl Goal for Responses {
                 let remaining = self.remaining.get_mut(&stream_id).unwrap();
 
                 *remaining -= len;
-                qtrace!("received {} remaining {}", len, remaining);
+                qtrace!("received {len} remaining {remaining}");
                 if *remaining == 0 {
                     assert!(fin);
                     stream
@@ -438,9 +438,9 @@ mod tests {
     use crate::{
         boxed,
         sim::{
+            Simulator,
             http3_connection::{Node, Requests, Responses},
             network::TailDrop,
-            Simulator,
         },
     };
 

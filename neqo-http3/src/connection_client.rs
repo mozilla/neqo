@@ -15,18 +15,20 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::Qlog, qtrace, qwarn,
-    Datagram, Decoder, Encoder, Header, MessageType, Role,
+    Datagram, Decoder, Encoder, Header, MessageType, Role, event::Provider as EventProvider, hex,
+    hex_with_len, qdebug, qinfo, qlog::Qlog, qtrace, qwarn,
 };
-use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
+use neqo_crypto::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, agent::CertificateInfo};
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
-    recv_stream, send_stream, streams::SendOrder, AppError, Connection, ConnectionEvent,
-    ConnectionId, ConnectionIdGenerator, DatagramTracking, Output, OutputBatch,
-    Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
+    AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, DatagramTracking,
+    Output, OutputBatch, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
+    recv_stream, send_stream, streams::SendOrder,
 };
 
 use crate::{
+    Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, PushId,
+    ReceiveOutput, Res,
     client_events::{Http3ClientEvent, Http3ClientEvents},
     connection::{Http3Connection, Http3State, RequestDescription},
     features::ConnectType,
@@ -35,8 +37,6 @@ use crate::{
     recv_message::{RecvMessage, RecvMessageInfo},
     request_target::RequestTarget,
     settings::HSettings,
-    Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, PushId,
-    ReceiveOutput, Res,
 };
 
 // This is used for filtering send_streams and recv_Streams with a stream_ids greater than or equal
@@ -386,7 +386,7 @@ impl Http3Client {
     ///
     /// Never, because clients always have this field.
     #[must_use]
-    pub fn connection_id(&self) -> &ConnectionId {
+    pub const fn connection_id(&self) -> &ConnectionId {
         self.conn.odcid().expect("Client always has odcid")
     }
 
@@ -510,10 +510,10 @@ impl Http3Client {
             },
             now,
         );
-        if let Err(e) = &output {
-            if e.connection_error() {
-                self.close(now, e.code(), "");
-            }
+        if let Err(e) = &output
+            && e.connection_error()
+        {
+            self.close(now, e.code(), "");
         }
         output
     }
@@ -552,10 +552,10 @@ impl Http3Client {
             },
             now,
         );
-        if let Err(e) = &output {
-            if e.connection_error() {
-                self.close(now, e.code(), "");
-            }
+        if let Err(e) = &output
+            && e.connection_error()
+        {
+            self.close(now, e.code(), "");
         }
         output
     }
@@ -654,10 +654,10 @@ impl Http3Client {
         let res = self
             .base_handler
             .read_data(&mut self.conn, stream_id, buf, now);
-        if let Err(e) = &res {
-            if e.connection_error() {
-                self.close(now, e.code(), "");
-            }
+        if let Err(e) = &res
+            && e.connection_error()
+        {
+            self.close(now, e.code(), "");
         }
         res
     }
@@ -719,10 +719,10 @@ impl Http3Client {
             headers,
         );
 
-        if let Err(e) = &output {
-            if e.connection_error() {
-                self.close(now, e.code(), "");
-            }
+        if let Err(e) = &output
+            && e.connection_error()
+        {
+            self.close(now, e.code(), "");
         }
         output
     }
@@ -747,10 +747,10 @@ impl Http3Client {
             headers,
         );
 
-        if let Err(e) = &output {
-            if e.connection_error() {
-                self.close(now, e.code(), "");
-            }
+        if let Err(e) = &output
+            && e.connection_error()
+        {
+            self.close(now, e.code(), "");
         }
         output
     }
@@ -1295,7 +1295,7 @@ impl Http3Client {
                 self.base_handler
                     .set_state(Http3State::GoingAway(goaway_stream_id));
             }
-            Http3State::GoingAway(ref mut stream_id) => {
+            Http3State::GoingAway(stream_id) => {
                 if goaway_stream_id > *stream_id {
                     return Err(Error::HttpGoaway);
                 }
@@ -1378,29 +1378,28 @@ impl EventProvider for Http3Client {
 mod tests {
     use std::time::Duration;
 
-    use neqo_common::{event::Provider as _, qtrace, Datagram, Decoder, Encoder};
+    use http::Uri;
+    use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, qtrace};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
-        Version, INITIAL_LOCAL_MAX_STREAM_DATA, MIN_INITIAL_PACKET_SIZE,
+        CloseReason, ConnectionEvent, ConnectionParameters, INITIAL_LOCAL_MAX_STREAM_DATA,
+        MIN_INITIAL_PACKET_SIZE, Output, State, StreamId, StreamType, Version,
     };
     use test_fixture::{
-        anti_replay, default_server_h3, fixture_init, new_server, now,
         CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
-        DEFAULT_SERVER_NAME,
+        DEFAULT_SERVER_NAME, anti_replay, default_server_h3, fixture_init, new_server, now,
     };
-    use url::Url;
 
     use super::{
         AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
         Http3Parameters, Http3State, Rc, RefCell,
     };
     use crate::{
+        Http3Server, Priority, PushId, RecvStream as _,
         frames::{HFrame, HFrameType},
         qpack_encoder_receiver::EncoderRecvStream,
-        settings::{HSetting, HSettingType, H3_RESERVED_SETTINGS},
-        Http3Server, Priority, PushId, RecvStream as _,
+        settings::{H3_RESERVED_SETTINGS, HSetting, HSettingType},
     };
 
     fn assert_closed(client: &Http3Client, expected: &Error) {
@@ -1836,7 +1835,7 @@ mod tests {
             .fetch(
                 now(),
                 "GET",
-                &Url::parse("https://something.com/").unwrap(),
+                &Uri::from_static("https://something.com/"),
                 headers,
                 Priority::default(),
             )
@@ -2168,9 +2167,11 @@ mod tests {
                     request_stream_id,
                     headers,
                 } => {
-                    assert!(push_promises
-                        .iter()
-                        .any(|p| p.push_id == push_id && p.ref_stream_id == request_stream_id));
+                    assert!(
+                        push_promises
+                            .iter()
+                            .any(|p| p.push_id == push_id && p.ref_stream_id == request_stream_id)
+                    );
                     check_pushpromise_header(&headers[..]);
                     num_push_promises += 1;
                 }
@@ -2845,31 +2846,31 @@ mod tests {
         // check request body is received.
         // Then send a response.
         while let Some(e) = server.conn.next_event() {
-            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                if stream_id == request_stream_id {
-                    // Read the DATA frame.
-                    let mut buf = vec![1_u8; INITIAL_LOCAL_MAX_STREAM_DATA];
-                    let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert!(fin);
-                    assert_eq!(
-                        amount,
-                        request_body.len() + expected_data_frame_header.len()
-                    );
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = e
+                && stream_id == request_stream_id
+            {
+                // Read the DATA frame.
+                let mut buf = vec![1_u8; INITIAL_LOCAL_MAX_STREAM_DATA];
+                let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
+                assert!(fin);
+                assert_eq!(
+                    amount,
+                    request_body.len() + expected_data_frame_header.len()
+                );
 
-                    // Check the DATA frame header
-                    assert_eq!(
-                        &buf[..expected_data_frame_header.len()],
-                        expected_data_frame_header
-                    );
+                // Check the DATA frame header
+                assert_eq!(
+                    &buf[..expected_data_frame_header.len()],
+                    expected_data_frame_header
+                );
 
-                    // Check data.
-                    assert_eq!(&buf[expected_data_frame_header.len()..amount], request_body);
+                // Check data.
+                assert_eq!(&buf[expected_data_frame_header.len()..amount], request_body);
 
-                    // send response - 200  Content-Length: 3
-                    // with content: 'abc'.
-                    _ = server.conn.stream_send(stream_id, HTTP_RESPONSE_2).unwrap();
-                    server.conn.stream_close_send(stream_id).unwrap();
-                }
+                // send response - 200  Content-Length: 3
+                // with content: 'abc'.
+                _ = server.conn.stream_send(stream_id, HTTP_RESPONSE_2).unwrap();
+                server.conn.stream_close_send(stream_id).unwrap();
             }
         }
 
@@ -2941,44 +2942,44 @@ mod tests {
 
         // Check received frames and send a response.
         while let Some(e) = server.conn.next_event() {
-            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                if stream_id == request_stream_id {
-                    // Read DATA frames.
-                    let mut buf = vec![1_u8; INITIAL_LOCAL_MAX_STREAM_DATA];
-                    let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert!(fin);
-                    assert_eq!(
-                        amount,
-                        expected_first_data_frame_header.len()
-                            + first_frame.len()
-                            + expected_second_data_frame_header.len()
-                            + expected_second_data_frame.len()
-                    );
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = e
+                && stream_id == request_stream_id
+            {
+                // Read DATA frames.
+                let mut buf = vec![1_u8; INITIAL_LOCAL_MAX_STREAM_DATA];
+                let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
+                assert!(fin);
+                assert_eq!(
+                    amount,
+                    expected_first_data_frame_header.len()
+                        + first_frame.len()
+                        + expected_second_data_frame_header.len()
+                        + expected_second_data_frame.len()
+                );
 
-                    // Check the first DATA frame header
-                    let end = expected_first_data_frame_header.len();
-                    assert_eq!(&buf[..end], expected_first_data_frame_header);
+                // Check the first DATA frame header
+                let end = expected_first_data_frame_header.len();
+                assert_eq!(&buf[..end], expected_first_data_frame_header);
 
-                    // Check the first frame data.
-                    let start = end;
-                    let end = end + first_frame.len();
-                    assert_eq!(&buf[start..end], first_frame);
+                // Check the first frame data.
+                let start = end;
+                let end = end + first_frame.len();
+                assert_eq!(&buf[start..end], first_frame);
 
-                    // Check the second DATA frame header
-                    let start2 = end;
-                    let end2 = end + expected_second_data_frame_header.len();
-                    assert_eq!(&buf[start2..end2], expected_second_data_frame_header);
+                // Check the second DATA frame header
+                let start2 = end;
+                let end2 = end + expected_second_data_frame_header.len();
+                assert_eq!(&buf[start2..end2], expected_second_data_frame_header);
 
-                    // Check the second frame data.
-                    let start3 = end2;
-                    let end3 = end2 + expected_second_data_frame.len();
-                    assert_eq!(&buf[start3..end3], expected_second_data_frame);
+                // Check the second frame data.
+                let start3 = end2;
+                let end3 = end2 + expected_second_data_frame.len();
+                assert_eq!(&buf[start3..end3], expected_second_data_frame);
 
-                    // send response - 200  Content-Length: 3
-                    // with content: 'abc'.
-                    _ = server.conn.stream_send(stream_id, HTTP_RESPONSE_2).unwrap();
-                    server.conn.stream_close_send(stream_id).unwrap();
-                }
+                // send response - 200  Content-Length: 3
+                // with content: 'abc'.
+                _ = server.conn.stream_send(stream_id, HTTP_RESPONSE_2).unwrap();
+                server.conn.stream_close_send(stream_id).unwrap();
             }
         }
 
@@ -4360,15 +4361,17 @@ mod tests {
     #[test]
     fn zero_rtt_before_resumption_token() {
         let mut client = default_http3_client();
-        assert!(client
-            .fetch(
-                now(),
-                "GET",
-                ("https", "something.com", "/"),
-                &[],
-                Priority::default()
-            )
-            .is_err());
+        assert!(
+            client
+                .fetch(
+                    now(),
+                    "GET",
+                    ("https", "something.com", "/"),
+                    &[],
+                    Priority::default()
+                )
+                .is_err()
+        );
     }
 
     #[test]
@@ -7159,10 +7162,11 @@ mod tests {
     #[test]
     fn client_control_stream_create_failed() {
         let mut client = default_http3_client();
-        let mut server = TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator>(
-            DEFAULT_ALPN_H3,
-            ConnectionParameters::default().max_streams(StreamType::UniDi, 0),
-        ));
+        let mut server =
+            TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator, &str>(
+                DEFAULT_ALPN_H3,
+                ConnectionParameters::default().max_streams(StreamType::UniDi, 0),
+            ));
         handshake_client_error(&mut client, &mut server, &Error::StreamLimit);
     }
 
@@ -7170,10 +7174,11 @@ mod tests {
     #[test]
     fn client_qpack_stream_create_failed() {
         let mut client = default_http3_client();
-        let mut server = TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator>(
-            DEFAULT_ALPN_H3,
-            ConnectionParameters::default().max_streams(StreamType::UniDi, 2),
-        ));
+        let mut server =
+            TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator, &str>(
+                DEFAULT_ALPN_H3,
+                ConnectionParameters::default().max_streams(StreamType::UniDi, 2),
+            ));
         handshake_client_error(&mut client, &mut server, &Error::StreamLimit);
     }
 
@@ -7457,9 +7462,11 @@ mod tests {
             .unwrap();
 
         // now queue a priority_update packet for that stream
-        assert!(client
-            .priority_update(request_stream_id, Priority::new(6, false))
-            .unwrap());
+        assert!(
+            client
+                .priority_update(request_stream_id, Priority::new(6, false))
+                .unwrap()
+        );
 
         let md_before = server.conn.stats().frame_tx.max_data;
 

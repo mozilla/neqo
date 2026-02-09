@@ -16,7 +16,7 @@ use std::{
     cell::RefCell,
     fmt::Display,
     fs,
-    future::{poll_fn, Future},
+    future::poll_fn,
     io::{self},
     net::{SocketAddr, ToSocketAddrs as _},
     num::NonZeroUsize,
@@ -30,13 +30,14 @@ use std::{
 
 use clap::Parser;
 use futures::{
-    future::{select, select_all, Either},
     FutureExt as _,
+    future::{Either, select, select_all},
 };
-use neqo_common::{qdebug, qerror, qinfo, qwarn, Datagram};
+use neqo_common::{Datagram, qdebug, qerror, qinfo, qwarn};
 use neqo_crypto::{
+    AntiReplay, Cipher,
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
-    init_db, AntiReplay, Cipher,
+    init_db,
 };
 use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version};
 use neqo_udp::{DatagramIter, RecvBuf};
@@ -219,9 +220,9 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
 
 #[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub trait HttpServer: Display {
-    fn process_multiple<'a>(
+    fn process_multiple<'a, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
         &mut self,
-        dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
+        dgrams: D,
         now: Instant,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch;
@@ -331,7 +332,9 @@ impl<S: HttpServer + Unpin> Runner<S> {
                                 if e.raw_os_error() == Some(libc::EIO)
                                     && dgram.num_datagrams() > 1 =>
                             {
-                                qinfo!("`libc::sendmsg` failed with {e}; quinn-udp will halt segmentation offload");
+                                qinfo!(
+                                    "`libc::sendmsg` failed with {e}; quinn-udp will halt segmentation offload"
+                                );
                                 // Drop the packets and let QUIC handle retransmission.
                                 break;
                             }
@@ -399,8 +402,8 @@ impl<S: HttpServer + Unpin> Runner<S> {
             .map_or_else(|| Either::Right(futures::future::pending()), Either::Left)
             .map(|()| Ok(Ready::Timeout));
 
-        let server_ready =
-            poll_fn(|cx| Pin::new(&mut self.server).poll(cx)).map(|()| Ok(Ready::Server));
+        let server_ready = poll_fn(|cx| HttpServer::poll(Pin::new(&mut self.server), cx))
+            .map(|()| Ok(Ready::Server));
 
         select(
             select(sockets_ready, timeout_ready).map(|either| either.factor_first().0),

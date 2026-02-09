@@ -11,13 +11,13 @@ use std::time::{Duration, Instant};
 use neqo_common::{qdebug, qlog::Qlog};
 
 use crate::{
+    ConnectionParameters, Stats,
     cc::{ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno},
     pace::Pacer,
     pmtud::Pmtud,
     recovery::sent,
     rtt::RttEstimate,
     stats::CongestionControlStats,
-    ConnectionParameters, Stats,
 };
 
 /// The number of packets we allow to burst from the pacer.

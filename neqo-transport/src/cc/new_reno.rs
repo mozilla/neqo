@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::cc::{classic_cc::WindowAdjustment, CongestionEvent};
+use crate::cc::{CongestionEvent, classic_cc::WindowAdjustment};
 
 #[derive(Debug, Default)]
 pub struct NewReno {}
@@ -47,4 +47,8 @@ impl WindowAdjustment for NewReno {
     }
 
     fn on_app_limited(&mut self) {}
+
+    fn save_undo_state(&mut self) {}
+
+    fn restore_undo_state(&mut self) {}
 }

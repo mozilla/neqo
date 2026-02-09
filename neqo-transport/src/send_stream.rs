@@ -8,8 +8,8 @@
 
 use std::{
     cell::RefCell,
-    cmp::{max, min, Ordering},
-    collections::{btree_map::Entry, BTreeMap, VecDeque},
+    cmp::{Ordering, max, min},
+    collections::{BTreeMap, VecDeque, btree_map::Entry},
     fmt::{self, Display, Formatter},
     mem,
     num::NonZeroUsize,
@@ -18,11 +18,12 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use neqo_common::{qdebug, qerror, qtrace, Buffer, Encoder, Role};
+use neqo_common::{Buffer, Encoder, Role, qdebug, qerror, qtrace};
 use smallvec::SmallVec;
 use static_assertions::const_assert;
 
 use crate::{
+    AppError, Error, MAX_LOCAL_MAX_STREAM_DATA, Res,
     events::ConnectionEvents,
     fc::SenderFlowControl,
     frame::{Frame, FrameEncoder as _, FrameType},
@@ -35,7 +36,6 @@ use crate::{
         TransportParameterId::{InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni},
         TransportParameters,
     },
-    AppError, Error, Res, MAX_LOCAL_MAX_STREAM_DATA,
 };
 
 /// The priority that is assigned to sending data for the stream.
@@ -316,36 +316,36 @@ impl RangeTracker {
             .map(|(&k, _)| k)
             .collect::<SmallVec<[u64; 8]>>();
 
-        if let Entry::Occupied(next_entry) = self.used.entry(new_end) {
-            if next_entry.get().1 == RangeState::Sent {
-                // Check if the very next entry is the same type as this, so it can be merged.
-                let (extra_len, _) = next_entry.remove();
-                new_len += extra_len;
-            }
+        if let Entry::Occupied(next_entry) = self.used.entry(new_end)
+            && next_entry.get().1 == RangeState::Sent
+        {
+            // Check if the very next entry is the same type as this, so it can be merged.
+            let (extra_len, _) = next_entry.remove();
+            new_len += extra_len;
         }
 
         // Merge with any preceding sent range that might overlap,
         // or cut the head of this if the preceding range is acked.
         let prev = self.used.range(..new_off).next_back();
-        if let Some((&prev_off, &(prev_len, prev_state))) = prev {
-            if prev_off + prev_len >= new_off {
-                let overlap = prev_off + prev_len - new_off;
-                new_len = new_len.saturating_sub(overlap);
-                if new_len == 0 {
-                    // The previous range completely covers this one (no more to do).
-                    return;
-                }
+        if let Some((&prev_off, &(prev_len, prev_state))) = prev
+            && prev_off + prev_len >= new_off
+        {
+            let overlap = prev_off + prev_len - new_off;
+            new_len = new_len.saturating_sub(overlap);
+            if new_len == 0 {
+                // The previous range completely covers this one (no more to do).
+                return;
+            }
 
-                if prev_state == RangeState::Acked {
-                    // The previous range is acked, so it cuts this one.
-                    new_off += overlap;
-                } else {
-                    // Extend the current range backwards.
-                    new_off = prev_off;
-                    new_len += prev_len;
-                    // The previous range will be updated below.
-                    // It might need to be cut because of a covered acked range.
-                }
+            if prev_state == RangeState::Acked {
+                // The previous range is acked, so it cuts this one.
+                new_off += overlap;
+            } else {
+                // Extend the current range backwards.
+                new_off = prev_off;
+                new_len += prev_len;
+                // The previous range will be updated below.
+                // It might need to be cut because of a covered acked range.
             }
         }
 
@@ -611,7 +611,7 @@ pub enum State {
 }
 
 impl State {
-    fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
+    const fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
         match self {
             Self::Send { send_buf, .. } | Self::DataSent { send_buf, .. } => Some(send_buf),
             Self::Ready { .. }
@@ -631,7 +631,7 @@ impl State {
     }
 
     fn transition(&mut self, new_state: Self) {
-        qtrace!("SendStream state {:?} -> {:?}", self, new_state);
+        qtrace!("SendStream state {self:?} -> {new_state:?}");
         *self = new_state;
     }
 }
@@ -745,7 +745,7 @@ impl SendStream {
         true
     }
 
-    pub fn set_fairness(&mut self, make_fair: bool) {
+    pub const fn set_fairness(&mut self, make_fair: bool) {
         self.fair = make_fair;
     }
 
@@ -754,7 +754,7 @@ impl SendStream {
         self.fair
     }
 
-    pub fn set_priority(
+    pub const fn set_priority(
         &mut self,
         transmission: TransmissionPriority,
         retransmission: RetransmissionPriority,
@@ -768,7 +768,7 @@ impl SendStream {
         self.sendorder
     }
 
-    pub fn set_sendorder(&mut self, sendorder: Option<SendOrder>) {
+    pub const fn set_sendorder(&mut self, sendorder: Option<SendOrder>) {
         self.sendorder = sendorder;
     }
 
@@ -1059,10 +1059,10 @@ impl SendStream {
         stats: &mut FrameStats,
     ) {
         // Send STREAM_DATA_BLOCKED at normal priority always.
-        if priority == self.priority {
-            if let State::Ready { fc, .. } | State::Send { fc, .. } = &mut self.state {
-                fc.write_frames(builder, tokens, stats);
-            }
+        if priority == self.priority
+            && let State::Ready { fc, .. } | State::Send { fc, .. } = &mut self.state
+        {
+            fc.write_frames(builder, tokens, stats);
         }
     }
 
@@ -1082,10 +1082,8 @@ impl SendStream {
             self.send_blocked_if_space_needed(0);
         }
 
-        if fin {
-            if let State::DataSent { fin_sent, .. } = &mut self.state {
-                *fin_sent = true;
-            }
+        if fin && let State::DataSent { fin_sent, .. } = &mut self.state {
+            *fin_sent = true;
         }
     }
 
@@ -1145,15 +1143,14 @@ impl SendStream {
             buf.mark_as_lost(offset, len);
         }
 
-        if fin {
-            if let State::DataSent {
+        if fin
+            && let State::DataSent {
                 fin_sent,
                 fin_acked,
                 ..
             } = &mut self.state
-            {
-                *fin_sent = *fin_acked;
-            }
+        {
+            *fin_sent = *fin_acked;
         }
     }
 
@@ -1175,7 +1172,7 @@ impl SendStream {
     /// event.
     ///
     /// See [`crate::Connection::stream_set_writable_event_low_watermark`].
-    pub fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
+    pub const fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
         self.writable_event_low_watermark = watermark;
     }
 
@@ -1342,7 +1339,7 @@ impl SendStream {
     }
 
     #[cfg(test)]
-    pub(crate) fn state(&mut self) -> &mut State {
+    pub(crate) const fn state(&mut self) -> &mut State {
         &mut self.state
     }
 
@@ -1399,7 +1396,7 @@ pub struct OrderGroupIter<'a> {
 }
 
 impl OrderGroup {
-    pub fn iter(&mut self) -> OrderGroupIter<'_> {
+    pub const fn iter(&mut self) -> OrderGroupIter<'_> {
         // Ids may have been deleted since we last iterated
         if self.next >= self.vec.len() {
             self.next = 0;
@@ -1428,7 +1425,7 @@ impl OrderGroup {
         self.vec.truncate(position);
     }
 
-    fn update_next(&mut self) -> usize {
+    const fn update_next(&mut self) -> usize {
         let next = self.next;
         self.next = (self.next + 1) % self.vec.len();
         next
@@ -1784,10 +1781,11 @@ pub struct RecoveryToken {
 mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
-    use neqo_common::{event::Provider as _, hex_with_len, qtrace, Encoder, MAX_VARINT};
+    use neqo_common::{Encoder, MAX_VARINT, event::Provider as _, hex_with_len, qtrace};
 
     use super::RecoveryToken;
     use crate::{
+        ConnectionEvents, INITIAL_LOCAL_MAX_STREAM_DATA, StreamId,
         connection::{RetransmissionPriority, TransmissionPriority},
         events::ConnectionEvent,
         fc::SenderFlowControl,
@@ -1795,7 +1793,6 @@ mod tests {
         recovery::{self, StreamRecoveryToken},
         send_stream::{RangeState, RangeTracker, SendStream, SendStreams, State, TxBuffer},
         stats::FrameStats,
-        ConnectionEvents, StreamId, INITIAL_LOCAL_MAX_STREAM_DATA,
     };
 
     fn connection_fc(limit: u64) -> Rc<RefCell<SenderFlowControl<()>>> {
@@ -2578,7 +2575,7 @@ mod tests {
 
         let mut tokens = recovery::Tokens::new();
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
 
         // Write a small frame: no fin.
         let written = builder.len();
@@ -2667,7 +2664,7 @@ mod tests {
 
         let mut tokens = recovery::Tokens::new();
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         ss.write_frames(
             TransmissionPriority::default(),
             &mut builder,
@@ -2746,7 +2743,7 @@ mod tests {
 
         // This doesn't report blocking yet.
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
@@ -2813,7 +2810,7 @@ mod tests {
 
         // Assert that STREAM_DATA_BLOCKED is sent.
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
@@ -2901,7 +2898,7 @@ mod tests {
 
         // No frame should be sent here.
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         s.write_stream_frame(
@@ -2953,7 +2950,7 @@ mod tests {
         }
 
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let header_len = builder.len();
         builder.set_limit(header_len + space);
 
@@ -3055,7 +3052,7 @@ mod tests {
             s.close();
 
             let mut builder =
-                packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+                packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
             let header_len = builder.len();
             // Add 2 for the frame type and stream ID, then add the extra.
             builder.set_limit(header_len + data.len() + 2 + extra);
@@ -3073,7 +3070,7 @@ mod tests {
         }
 
         // The minimum amount of extra space for getting another frame in.
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         enc.encode_varint(u64::try_from(data.len()).unwrap());
         let len_buf = Vec::from(enc);
         let minimum_extra = len_buf.len() + packet::Builder::MINIMUM_FRAME_SIZE;

@@ -15,19 +15,18 @@ use std::{
 
 use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
-use log::{log_enabled, Level};
-use neqo_common::{qdebug, qtrace, qwarn, Buffer, Ecn, MAX_VARINT};
+use log::{Level, log_enabled};
+use neqo_common::{Buffer, Ecn, MAX_VARINT, qdebug, qtrace, qwarn};
 use neqo_crypto::Epoch;
 use smallvec::SmallVec;
 use strum::{Display, EnumIter};
 
 use crate::{
-    ecn,
+    Error, Res, Stats, ecn,
     frame::{FrameEncoder as _, FrameType},
     packet,
     recovery::{self},
     stats::FrameStats,
-    Error, Res, Stats,
 };
 
 #[derive(Debug, PartialOrd, Ord, EnumSetType, Enum, EnumIter, Display)]
@@ -147,7 +146,7 @@ impl PacketRange {
     /// When a packet containing the range `other` is acknowledged,
     /// clear the `ack_needed` attribute on this.
     /// Requires that other is equal to this, or a larger range.
-    pub fn acknowledged(&mut self, other: &Self) {
+    pub const fn acknowledged(&mut self, other: &Self) {
         if (other.smallest <= self.smallest) && (other.largest >= self.largest) {
             self.ack_needed = false;
         }
@@ -245,7 +244,7 @@ impl RecvdPackets {
     }
 
     /// Get the ECN counts.
-    pub fn ecn_marks(&mut self) -> &mut ecn::Count {
+    pub const fn ecn_marks(&mut self) -> &mut ecn::Count {
         &mut self.ecn_count
     }
 
@@ -255,7 +254,7 @@ impl RecvdPackets {
     }
 
     /// Update acknowledgment delay parameters.
-    pub fn ack_freq(
+    pub const fn ack_freq(
         &mut self,
         seqno: u64,
         tolerance: packet::Number,
@@ -572,10 +571,9 @@ impl AckTracker {
         }
         if self.spaces[PacketNumberSpace::Initial].is_none()
             && self.spaces[PacketNumberSpace::Handshake].is_none()
+            && let Some(recvd) = &self.spaces[PacketNumberSpace::ApplicationData]
         {
-            if let Some(recvd) = &self.spaces[PacketNumberSpace::ApplicationData] {
-                return recvd.ack_time();
-            }
+            return recvd.ack_time();
         }
 
         // Ignore any time that is in the past relative to `now`.
@@ -632,14 +630,14 @@ mod tests {
     use test_fixture::now;
 
     use super::{
-        AckTracker, Duration, Instant, PacketNumberSpace, RecvdPackets, MAX_TRACKED_RANGES,
+        AckTracker, Duration, Instant, MAX_TRACKED_RANGES, PacketNumberSpace, RecvdPackets,
     };
     use crate::{
+        Stats,
         frame::Frame,
         packet,
         recovery::{self},
         stats::FrameStats,
-        Stats,
     };
 
     const RTT: Duration = Duration::from_millis(100);
@@ -776,7 +774,7 @@ mod tests {
 
     fn write_frame_at(rp: &mut RecvdPackets, now: Instant) {
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut stats = FrameStats::default();
         let mut tokens = recovery::Tokens::new();
         rp.write_frame(now, RTT, &mut builder, &mut tokens, &mut stats);
@@ -936,16 +934,18 @@ mod tests {
         let mut stats = Stats::default();
         let mut tracker = AckTracker::default();
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         tracker
             .get_mut(PacketNumberSpace::Initial)
             .unwrap()
             .set_received(now(), 0, true, &mut stats)
             .unwrap();
         // The reference time for `ack_time` has to be in the past or we filter out the timer.
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_some());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_some()
+        );
 
         let mut tokens = recovery::Tokens::new();
         let mut frame_stats = FrameStats::default();
@@ -965,17 +965,21 @@ mod tests {
             .unwrap()
             .set_received(now(), 1, true, &mut stats)
             .unwrap();
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_some());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_some()
+        );
 
         // Now drop that space.
         tracker.drop_space(PacketNumberSpace::Initial);
 
         assert!(tracker.get_mut(PacketNumberSpace::Initial).is_none());
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_none());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_none()
+        );
         tracker.write_frame(
             PacketNumberSpace::Initial,
             now(),
@@ -1000,12 +1004,14 @@ mod tests {
             .unwrap()
             .set_received(now(), 0, true, &mut Stats::default())
             .unwrap();
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_some());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_some()
+        );
 
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         builder.set_limit(10);
 
         let mut stats = FrameStats::default();
@@ -1035,12 +1041,14 @@ mod tests {
             .unwrap()
             .set_received(now(), 2, true, &mut stats)
             .unwrap();
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_some());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_some()
+        );
 
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, packet::LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         // The code pessimistically assumes that each range needs 16 bytes to express.
         // So this won't be enough for a second range.
         builder.set_limit(RecvdPackets::USEFUL_ACK_LEN + 8);
@@ -1106,10 +1114,12 @@ mod tests {
             PacketNumberSpace::from(packet::Type::Short),
             PacketNumberSpace::ApplicationData
         );
-        assert!(std::panic::catch_unwind(|| {
-            PacketNumberSpace::from(packet::Type::VersionNegotiation)
-        })
-        .is_err());
+        assert!(
+            std::panic::catch_unwind(|| {
+                PacketNumberSpace::from(packet::Type::VersionNegotiation)
+            })
+            .is_err()
+        );
     }
 
     #[test]

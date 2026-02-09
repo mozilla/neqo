@@ -9,16 +9,16 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qdebug, qtrace, Bytes, Decoder, Encoder};
+use neqo_common::{Bytes, Decoder, Encoder, qdebug, qtrace};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
-    features::extended_connect::{
-        session::{DgramContextIdError, State},
-        CloseReason, ExtendedConnectEvents, ExtendedConnectType, Protocol,
-    },
-    frames::{capsule::Capsule, FrameReader, StreamReaderRecvStreamWrapper},
     Error, RecvStream, Res, SendStream,
+    features::extended_connect::{
+        CloseReason, ExtendedConnectEvents, ExtendedConnectType, Protocol,
+        session::{DgramContextIdError, State},
+    },
+    frames::{FrameReader, StreamReaderRecvStreamWrapper, capsule::Capsule},
 };
 
 #[derive(Debug)]
@@ -39,7 +39,7 @@ impl Session {
 
 impl Display for Session {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "ConnectUdpSession",)
+        write!(f, "ConnectUdpSession")
     }
 }
 
@@ -151,6 +151,7 @@ impl Protocol for Session {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::Bytes;
     use neqo_transport::StreamId;

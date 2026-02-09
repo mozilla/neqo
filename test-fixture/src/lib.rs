@@ -21,16 +21,17 @@ use std::{
 };
 
 use neqo_common::{
+    Datagram, Decoder, Ecn, Role,
     event::Provider as _,
     hex,
-    qlog::{new_trace, Qlog},
-    qtrace, Datagram, Decoder, Ecn, Role,
+    qlog::{Qlog, new_trace},
+    qtrace,
 };
-use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
+use neqo_crypto::{AllowZeroRtt, AntiReplay, AuthenticationStatus, init_db, random};
 use neqo_http3::{Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State};
 use neqo_transport::{
-    version, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
-    ConnectionIdRef, ConnectionParameters, State, Version,
+    Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
+    ConnectionIdRef, ConnectionParameters, State, Version, version,
 };
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 
@@ -72,7 +73,7 @@ pub fn fixture_init() {
 // This needs to be > 2ms to avoid it being rounded to zero.
 // NSS operates in milliseconds and halves any value it is provided.
 // But make it a second, so that tests with reasonable RTTs don't fail.
-pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(1000);
+pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(1);
 
 /// A baseline time for all tests.  This needs to be earlier than what `now()` produces
 /// because of the need to have a span of time elapse for anti-replay purposes.
@@ -217,13 +218,13 @@ pub fn default_client() -> Connection {
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server() -> Connection {
-    new_server::<CountingConnectionIdGenerator>(DEFAULT_ALPN, ConnectionParameters::default())
+    new_server::<CountingConnectionIdGenerator, &str>(DEFAULT_ALPN, ConnectionParameters::default())
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server_h3() -> Connection {
-    new_server::<CountingConnectionIdGenerator>(
+    new_server::<CountingConnectionIdGenerator, &str>(
         DEFAULT_ALPN_H3,
         ConnectionParameters::default().pacing(false),
     )
@@ -235,7 +236,7 @@ pub fn default_server_h3() -> Connection {
 ///
 /// If this doesn't work.
 #[must_use]
-pub fn new_server<G>(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection
+pub fn new_server<G, A: AsRef<str>>(alpn: &[A], params: ConnectionParameters) -> Connection
 where
     G: ConnectionIdGenerator + Default + 'static,
 {

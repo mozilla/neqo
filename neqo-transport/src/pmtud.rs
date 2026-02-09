@@ -9,14 +9,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qinfo, Buffer};
+use neqo_common::{Buffer, qdebug, qinfo};
 use static_assertions::const_assert;
 
 use crate::{
+    Stats,
     frame::{FrameEncoder as _, FrameType},
     packet,
     recovery::{self, sent},
-    Stats,
 };
 
 // Values <= 1500 based on: A. Custura, G. Fairhurst and I. Learmonth, "Exploring Usable Path MTU in
@@ -145,7 +145,7 @@ impl Pmtud {
     /// address family. Note that this ignores the interface MTU.
     #[expect(clippy::missing_panics_doc, reason = "search table is never empty")]
     #[must_use]
-    pub fn address_family_max_mtu(&self) -> usize {
+    pub const fn address_family_max_mtu(&self) -> usize {
         *self.search_table.last().expect("search table is empty")
     }
 
@@ -275,15 +275,15 @@ mod tests {
         time::Instant,
     };
 
-    use neqo_common::{qdebug, qinfo, Encoder};
+    use neqo_common::{Encoder, qdebug, qinfo};
     use test_fixture::{fixture_init, now};
 
     use crate::{
+        Pmtud, Stats,
         crypto::CryptoDxState,
         packet,
-        pmtud::{Probe, PMTU_RAISE_TIMER, SEARCH_TABLE_LEN},
-        recovery::{self, sent, SendProfile},
-        Pmtud, Stats,
+        pmtud::{PMTU_RAISE_TIMER, Probe, SEARCH_TABLE_LEN},
+        recovery::{self, SendProfile, sent},
     };
 
     /// Test helper to create a sent PMTUD probe packet.
@@ -343,7 +343,7 @@ mod tests {
         } else {
             profile.limit() - AEAD_EXPANSION
         };
-        let mut builder = packet::Builder::short(Encoder::new(), false, None::<&[u8]>, limit);
+        let mut builder = packet::Builder::short(Encoder::default(), false, None::<&[u8]>, limit);
         let pn = prot.next_pn();
         builder.pn(pn, 4);
         builder.enable_padding(true);

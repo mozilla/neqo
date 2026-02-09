@@ -50,6 +50,23 @@ cargo fuzz build --dev
 # Now, only merge in those newly-generated samples that increase coverage.
 # "cargo fuzz" cannot do this, so use the underlying LLVM fuzzer binary directly.
 for fuzzer in $(cargo fuzz list); do
+    # client_initial and server_initial are processed monthly; others weekly.
+    # FUZZER_FILTER: "all" = all targets, "monthly" = monthly only, "weekly" = weekly only.
+    case "$fuzzer" in
+        client_initial|server_initial)
+            if [ "${FUZZER_FILTER-all}" = "weekly" ]; then
+                echo "$fuzzer fuzzer: Skipping (monthly-only target)"
+                continue
+            fi
+            ;;
+        *)
+            if [ "${FUZZER_FILTER-all}" = "monthly" ]; then
+                echo "$fuzzer fuzzer: Skipping (weekly target)"
+                continue
+            fi
+            ;;
+    esac
+
     echo
     generated="$TMP/$fuzzer"
     if [ ! -d "$generated" ]; then

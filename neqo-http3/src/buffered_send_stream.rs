@@ -9,7 +9,7 @@ use std::time::Instant;
 use neqo_common::Encoder;
 use neqo_transport::{Connection, StreamId};
 
-use crate::{qlog, Res};
+use crate::{Res, qlog};
 
 #[derive(Debug, PartialEq, Eq, Default)]
 pub enum BufferedStream {
@@ -147,7 +147,7 @@ impl BufferedStream {
     }
 
     #[must_use]
-    pub fn has_buffered_data(&self) -> bool {
+    pub const fn has_buffered_data(&self) -> bool {
         if let Self::Initialized { buf, .. } = self {
             !buf.is_empty()
         } else {

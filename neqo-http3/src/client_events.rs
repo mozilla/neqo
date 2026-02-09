@@ -6,16 +6,16 @@
 
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-use neqo_common::{event::Provider as EventProvider, qtrace, Bytes, Header};
+use neqo_common::{Bytes, Header, event::Provider as EventProvider, qtrace};
 use neqo_crypto::ResumptionToken;
 use neqo_transport::{AppError, StreamId, StreamType};
 
 use crate::{
+    CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, PushId, RecvStreamEvents, Res,
+    SendStreamEvents,
     connection::Http3State,
     features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
     settings::HSettingType,
-    CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, PushId, RecvStreamEvents, Res,
-    SendStreamEvents,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -432,7 +432,7 @@ impl Http3ClientEvents {
                     succeeded,
                 )));
             }
-            _ => qtrace!("HSetting {:?} {succeeded} not handled", feature_type),
+            _ => qtrace!("HSetting {feature_type:?} {succeeded} not handled"),
         }
     }
 }
