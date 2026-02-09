@@ -658,7 +658,6 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         self.current = stored;
 
         if self.current.phase.in_slow_start() {
-            cc_stats.slow_start_exited = false;
             cc_stats.slow_start_exit_cwnd = None;
         }
         qinfo!("[{self}] Spurious cong event -> RESTORED;",);
@@ -788,7 +787,6 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         cc_stats.congestion_events[congestion_event] += 1;
         cc_stats.cwnd = self.current.congestion_window;
         if self.current.phase.in_slow_start() {
-            cc_stats.slow_start_exited = true;
             cc_stats.slow_start_exit_cwnd = Some(self.current.congestion_window);
         }
 
@@ -1601,7 +1599,7 @@ mod tests {
             &mut cc_stats,
         );
         assert_eq!(cc.current.phase, Phase::RecoveryStart);
-        assert!(cc_stats.slow_start_exited);
+        assert!(cc_stats.slow_start_exit_cwnd.is_some());
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
         assert_eq!(
             cc.cwnd(),
@@ -1645,7 +1643,7 @@ mod tests {
             &mut cc_stats,
         );
         assert_eq!(cc.current.phase, Phase::SlowStart);
-        assert!(!cc_stats.slow_start_exited);
+        assert!(cc_stats.slow_start_exit_cwnd.is_none());
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 1);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
@@ -1846,7 +1844,7 @@ mod tests {
         let mut cc_stats = CongestionControlStats::default();
 
         assert!(cc.current.phase.in_slow_start());
-        assert!(!cc_stats.slow_start_exited);
+        assert!(cc_stats.slow_start_exit_cwnd.is_none());
 
         let pkt1 = sent::make_packet(1, now, 1000);
         cc.on_packet_sent(&pkt1, now);
@@ -1862,7 +1860,7 @@ mod tests {
         }
 
         assert!(!cc.current.phase.in_slow_start());
-        assert!(cc_stats.slow_start_exited);
+        assert!(cc_stats.slow_start_exit_cwnd.is_some());
     }
 
     #[test]
@@ -1903,7 +1901,7 @@ mod tests {
 
         // Should have exited slow start with cwnd captured AFTER reduction
         assert!(!cc.current.phase.in_slow_start());
-        assert!(cc_stats.slow_start_exited);
+        assert!(cc_stats.slow_start_exit_cwnd.is_some());
         assert_eq!(cc_stats.slow_start_exit_cwnd, Some(cc.cwnd()));
 
         // Send recovery packet
@@ -1915,7 +1913,7 @@ mod tests {
         cc.on_packets_acked(&[pkt1], &rtt_estimate, now, &mut cc_stats);
 
         assert!(cc.current.phase.in_slow_start());
-        assert!(!cc_stats.slow_start_exited);
+        assert!(cc_stats.slow_start_exit_cwnd.is_none());
         assert_eq!(cc_stats.slow_start_exit_cwnd, None);
     }
 

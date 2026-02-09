@@ -144,8 +144,6 @@ pub struct CongestionControlStats {
     /// The latter indicates instances where the congestion control algorithm
     /// overreacted to perceived losses.
     pub congestion_events: EnumMap<CongestionEvent, usize>,
-    /// Whether this connection has exited slow start.
-    pub slow_start_exited: bool,
     /// The congestion window size (in bytes) when we exited slow start.
     /// None if we haven't exited slow start or if we re-entered after spurious congestion.
     /// When exiting via congestion event, this is the cwnd AFTER the reduction.
@@ -392,16 +390,15 @@ impl Debug for Stats {
         writeln!(f, "  cc:")?;
         writeln!(
             f,
-            "    ce_loss {} ce_ecn {} ce_spurious {} final_cwnd {}",
+            "    ce_loss {} ce_ecn {} ce_spurious {}",
             self.cc.congestion_events[CongestionEvent::Loss],
             self.cc.congestion_events[CongestionEvent::Ecn],
             self.cc.congestion_events[CongestionEvent::Spurious],
-            self.cc.cwnd
         )?;
         writeln!(
             f,
-            "    ss_exit {} exit_cwnd {:?}",
-            self.cc.slow_start_exited, self.cc.slow_start_exit_cwnd
+            "    final_cwnd {} ss_exit_cwnd {:?}",
+            self.cc.cwnd, self.cc.slow_start_exit_cwnd
         )?;
         writeln!(
             f,
@@ -457,8 +454,8 @@ fn debug() {
   rx: 0 drop 0 dup 0 saved 0
   tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
   cc:
-    ce_loss 0 ce_ecn 0 ce_spurious 0 final_cwnd 0
-    ss_exit false exit_cwnd None
+    ce_loss 0 ce_ecn 0 ce_spurious 0
+    final_cwnd 0 ss_exit_cwnd None
   pmtud: 0 sent 0 acked 0 lost 0 iface_mtu 0 pmtu
   resumed: false
   frames rx:
