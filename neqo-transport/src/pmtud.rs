@@ -221,7 +221,8 @@ impl Pmtud {
     }
 
     /// Checks whether a PMTUD probe has been lost. If it has been lost more than `Self::MAX_PROBES`
-    /// times, the PMTUD process is stopped at the current MTU.
+    /// times, the PMTUD process is stopped at the current MTU. Also checks for black holes via
+    /// the [`BlackHoleDetector`], restarting PMTUD from minimum if one is detected.
     pub fn on_packets_lost(
         &mut self,
         lost_packets: &[sent::Packet],
