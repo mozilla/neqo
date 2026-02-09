@@ -657,6 +657,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         );
         self.current = stored;
 
+        // If we are restoring back to slow start then we should undo the stat recording.
         if self.current.phase.in_slow_start() {
             cc_stats.slow_start_exit_cwnd = None;
         }
@@ -786,6 +787,8 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
         cc_stats.congestion_events[congestion_event] += 1;
         cc_stats.cwnd = self.current.congestion_window;
+        // If we were in slow start when `on_congestion_event` was called we will exit slow start
+        // and should record the exit congestion window.
         if self.current.phase.in_slow_start() {
             cc_stats.slow_start_exit_cwnd = Some(self.current.congestion_window);
         }
