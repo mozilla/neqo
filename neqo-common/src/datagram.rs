@@ -256,6 +256,10 @@ impl Batch {
         })
     }
 
+    pub fn extend_from_slice(&mut self, data: &[u8]) {
+        self.d.extend_from_slice(data);
+    }
+
     pub fn iter_mut(&mut self) -> impl Iterator<Item = Datagram<&mut [u8]>> {
         self.d
             .chunks_mut(self.datagram_size.get())
@@ -418,6 +422,28 @@ mod tests {
         assert_eq!(batch.data(), &[1, 2, 3]);
         let d2: Datagram = batch.try_into().unwrap();
         assert_eq!(d2.as_ref(), &[1, 2, 3]);
+    }
+
+    #[test]
+    fn batch_extend_from_slice() {
+        let mut batch = datagram::Batch::new(
+            DEFAULT_ADDR,
+            DEFAULT_ADDR,
+            Tos::default(),
+            NonZeroUsize::new(4).unwrap(),
+            vec![1, 2, 3, 4],
+        );
+        assert_eq!(batch.num_datagrams(), 1);
+
+        batch.extend_from_slice(&[5, 6, 7, 8]);
+        assert_eq!(batch.num_datagrams(), 2);
+
+        batch.extend_from_slice(&[9, 10]);
+        assert_eq!(batch.num_datagrams(), 3);
+        let datagrams: Vec<_> = batch.iter().collect();
+        assert_eq!(datagrams[0].d, &[1, 2, 3, 4]);
+        assert_eq!(datagrams[1].d, &[5, 6, 7, 8]);
+        assert_eq!(datagrams[2].d, &[9, 10]);
     }
 
     #[test]
