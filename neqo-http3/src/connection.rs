@@ -866,13 +866,17 @@ impl Http3Connection {
                 ]
             }
             Some(ConnectType::Extended(protocol)) => {
-                vec![
+                let mut h = vec![
                     Header::new(":method", request.method),
                     Header::new(":scheme", request.target.scheme()),
                     Header::new(":authority", request.target.authority()),
                     Header::new(":path", request.target.path()),
                     Header::new(":protocol", protocol.to_string()),
-                ]
+                ];
+                if protocol == ExtendedConnectType::ConnectUdp {
+                    h.push(Header::new("capsule-protocol", "?1"));
+                }
+                h
             }
         };
 
@@ -1331,9 +1335,14 @@ impl Http3Connection {
                 Ok(())
             }
             (Some(s), Some(_r), SessionAcceptAction::Accept) => {
+                let mut response_headers = vec![Header::new(":status", "200")];
+                if connect_type == ExtendedConnectType::ConnectUdp {
+                    response_headers.push(Header::new("capsule-protocol", "?1"));
+                }
+
                 if s.http_stream()
                     .ok_or(Error::InvalidStreamId)?
-                    .send_headers(&[Header::new(":status", "200")], conn)
+                    .send_headers(&response_headers, conn)
                     .is_ok()
                 {
                     let extended_conn = Rc::new(RefCell::new(
@@ -1536,8 +1545,9 @@ impl Http3Connection {
         conn: &mut Connection,
         buf: &[u8],
         id: I,
+        now: Instant,
     ) -> Res<()> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id)
+        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 
     pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
@@ -1546,8 +1556,9 @@ impl Http3Connection {
         conn: &mut Connection,
         buf: &[u8],
         id: I,
+        now: Instant,
     ) -> Res<()> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id)
+        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 
     fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
@@ -1556,6 +1567,7 @@ impl Http3Connection {
         conn: &mut Connection,
         buf: &[u8],
         id: I,
+        now: Instant,
     ) -> Res<()> {
         self.recv_streams
             .get_mut(&session_id)
@@ -1563,7 +1575,7 @@ impl Http3Connection {
             .extended_connect_session()
             .ok_or(Error::InvalidStreamId)?
             .borrow_mut()
-            .send_datagram(conn, buf, id)
+            .send_datagram(conn, buf, id, now)
     }
 
     /// If the control stream has received frames `MaxPushId`, `Goaway`, `PriorityUpdateRequest` or

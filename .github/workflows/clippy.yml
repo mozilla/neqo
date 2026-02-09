@@ -51,12 +51,7 @@ jobs:
           tools: cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: nss-version
-        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
-
       - uses: ./.github/actions/nss
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       # Use cargo-hack to run clippy on each crate individually with its
       # respective default features only. Can reveal warnings otherwise
