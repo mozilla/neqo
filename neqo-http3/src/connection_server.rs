@@ -289,19 +289,8 @@ impl Http3ServerHandler {
 
         let res = self.check_connection_events(conn, now);
         if !self.check_result(conn, now, &res) && self.base_handler.state().active() {
-            self.handle_rejected_connects(conn, now);
             let res = self.base_handler.process_sending(conn, now);
             self.check_result(conn, now, &res);
-        }
-    }
-
-    /// Handle rejected CONNECT requests by sending automatic error responses.
-    fn handle_rejected_connects(&mut self, conn: &mut Connection, now: Instant) {
-        for (stream_id, status) in self.events.take_rejected_connects() {
-            let headers = [Header::new(":status", status.to_string())];
-            if self.send_headers(stream_id, &headers, conn).is_ok() {
-                _ = self.stream_close_send(stream_id, conn, now);
-            }
         }
     }
 

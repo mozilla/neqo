@@ -331,7 +331,6 @@ mod tests {
 
     #[test]
     fn bare_connect_with_forbidden_headers() {
-        // RFC 9114 Section 4.4: bare CONNECT MUST NOT include :scheme or :path.
         for field in [":scheme", ":path"] {
             let headers = vec![
                 Header::new(":method", "CONNECT"),
