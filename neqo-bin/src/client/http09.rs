@@ -287,7 +287,7 @@ impl<'b> Handler<'b> {
                 false
             }
             Err(e) => {
-                panic!("Error creating stream {e:?}");
+                return Err(e.into());
             }
         }
     }
