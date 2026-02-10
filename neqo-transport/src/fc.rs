@@ -1246,6 +1246,13 @@ mod test {
             let half_rtt = rtt / 2;
             let bdp = bandwidth * u64::try_from(rtt.as_millis()).unwrap() / 1_000 / 8;
 
+            if bdp <= DATA_FRAME_SIZE {
+                // Skip very low BDPs, i.e. BDPs smaller than one UDP datagram.
+                // Latency calculations in test assume it can transfer
+                // DATA_FRAME_SIZE bytes in 1 RTT.
+                continue;
+            }
+
             let mut now = test_fixture::now();
 
             let mut send_to_recv = VecDeque::new();
