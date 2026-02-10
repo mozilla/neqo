@@ -17,14 +17,177 @@ Usage: Run from the workspace root (not inside test/).
 
 import sys
 
+from packaging.version import Version
+
 from lockfile_utils import (
     find_dependents,
     find_dev_only_packages,
-    find_neqo_only_deps,
+    find_neqo_or_workspace_deps,
     get_all_versions,
+    group_by_semver_range,
     load_lockfiles,
     semver_range,
 )
+
+
+def find_version_issues(
+    ours: list[tuple[str, str]], theirs: list[tuple[str, str]]
+) -> list[tuple[str, str, str | None]]:
+    """Find version mismatches between our and Gecko's versions of a package.
+
+    Returns list of (description, our_ver, gecko_ver) tuples for each issue.
+    """
+    gecko_by_range = group_by_semver_range([v for v, _s in theirs])
+    issues: list[tuple[str, str, str | None]] = []
+
+    for v, _s in ours:
+        sv_range = semver_range(v)
+        gecko_in_range = gecko_by_range.get(sv_range, [])
+
+        if not gecko_in_range:
+            issues.append((f"we have {v}, Gecko doesn't have {sv_range}.x", v, None))
+        else:
+            gecko_ver = max(gecko_in_range, key=Version)
+            if (
+                v != gecko_ver
+                and not v.endswith(".999")
+                and not gecko_ver.endswith(".999")
+            ):
+                issues.append((f"{v} vs {gecko_ver}", v, gecko_ver))
+
+    return issues
+
+
+def compare_versions(
+    our_versions: dict, gecko_versions: dict, common: list[str]
+) -> tuple[list, list]:
+    """Compare versions for common packages and classify as match or mismatch.
+
+    Returns (matches, mismatches) where:
+    - matches: [(name, our_str, their_str), ...]
+    - mismatches: [(name, our_str, their_str, status, issues), ...]
+    """
+    mismatches = []
+    matches = []
+
+    for name in common:
+        ours = our_versions[name]
+        theirs = gecko_versions[name]
+
+        our_str = ", ".join(sorted({v for v, _s in ours}))
+        their_str = ", ".join(sorted({v for v, _s in theirs}))
+
+        issues = find_version_issues(ours, theirs)
+
+        if issues:
+            status = "✗ " + "; ".join(desc for desc, _, _ in issues)
+            mismatches.append((name, our_str, their_str, status, issues))
+        else:
+            matches.append((name, our_str, their_str))
+
+    return matches, mismatches
+
+
+def is_ahead_of_gecko(
+    our_ver: str, gecko_ver: str | None, gecko_versions_for_name: list[tuple[str, str]]
+) -> bool:
+    """Check if our version is ahead of (newer than) the Gecko version.
+
+    If gecko_ver is None, compares against Gecko's highest version for the package.
+    """
+    if gecko_ver is not None:
+        return Version(our_ver) > Version(gecko_ver)
+    gecko_max = max(
+        (Version(v) for v, _ in gecko_versions_for_name),
+        default=Version("0"),
+    )
+    return Version(our_ver) > gecko_max
+
+
+def filter_neqo_only_mismatches(
+    mismatches: list,
+    matches: list,
+    gecko_versions: dict,
+    gecko_lock: dict,
+    our_lock: dict,
+) -> tuple[list, list, set[str]]:
+    """Filter mismatches for neqo-only packages where our version is ahead.
+
+    These are expected since update-lockfile.py updates neqo-only deps to latest.
+    Also filters transitive cases: packages whose version in our lockfile is only
+    pulled in by neqo-only (or workspace) crates.
+
+    Returns (filtered_matches, filtered_mismatches, neqo_only).
+    """
+    neqo_only, neqo_or_workspace = find_neqo_or_workspace_deps(gecko_lock, our_lock)
+
+    filtered = []
+    for name, our_str, their_str, status, issues in mismatches:
+        if name not in neqo_or_workspace:
+            filtered.append((name, our_str, their_str, status, issues))
+            continue
+
+        remaining = [
+            (desc, our_ver, gecko_ver)
+            for desc, our_ver, gecko_ver in issues
+            if not is_ahead_of_gecko(our_ver, gecko_ver, gecko_versions[name])
+        ]
+
+        if not remaining:
+            matches.append((name, our_str, their_str))
+        else:
+            new_status = "✗ " + "; ".join(d for d, _, _ in remaining)
+            filtered.append((name, our_str, their_str, new_status, remaining))
+
+    return matches, filtered, neqo_only
+
+
+def categorize_mismatch(
+    name: str, issues: list, neqo_only: set[str], dev_only: set[str], our_lock: dict
+) -> str:
+    """Categorize a mismatch as neqo-only, dev/build only, or PRODUCTION."""
+    if name in neqo_only:
+        return "neqo-only"
+
+    for _desc, our_ver, _gecko_ver in issues:
+        dependents = find_dependents(our_lock, name, our_ver)
+        if not dependents:
+            dependents = find_dependents(our_lock, name)
+        if not all(d.split()[0] in dev_only for d in dependents):
+            return "PRODUCTION"
+
+    return "dev/build only"
+
+
+def print_mismatches(
+    mismatches: list,
+    matches: list,
+    neqo_only: set[str],
+    our_lock: dict,
+) -> int:
+    """Print mismatches with categories and summary. Returns exit code."""
+    print(f"\n{'=' * 110}")
+    print(f"MISMATCHES ({len(mismatches)}):")
+    print(f"{'=' * 110}")
+
+    dev_only = find_dev_only_packages()
+    counts = {"neqo-only": 0, "dev/build only": 0, "PRODUCTION": 0}
+
+    for name, our_str, their_str, status, issues in mismatches:
+        category = categorize_mismatch(name, issues, neqo_only, dev_only, our_lock)
+        counts[category] += 1
+        print(f"{name:<30} {our_str:<25} {their_str:<25} {status}")
+        print(f"  ({category})")
+
+    print(f"\nSummary: {len(matches)} matches, {len(mismatches)} mismatches")
+    print(
+        f"  - {counts['neqo-only']} neqo-only "
+        f"(we updated, Gecko will get on next vendor)"
+    )
+    print(f"  - {counts['dev/build only']} dev/build-only (don't affect Gecko)")
+    print(f"  - {counts['PRODUCTION']} production (need attention)")
+
+    return 1 if counts["PRODUCTION"] > 0 else 0
 
 
 def main():
@@ -40,96 +203,20 @@ def main():
     print(f"{'Package':<30} {'Our Version(s)':<25} {'Gecko Version(s)':<25} {'Status'}")
     print("=" * 110)
 
-    mismatches = []
-    matches = []
+    matches, mismatches = compare_versions(our_versions, gecko_versions, common)
 
-    for name in common:
-        ours = our_versions[name]
-        theirs = gecko_versions[name]
-
-        our_vers = set(v for v, s in ours)
-        their_vers = set(v for v, s in theirs)
-
-        our_str = ", ".join(sorted(our_vers))
-        their_str = ", ".join(sorted(their_vers))
-
-        their_ranges = {semver_range(v) for v in their_vers}
-
-        # Track issues with the specific mismatched version
-        issues: list[tuple[str, str, str | None]] = (
-            []
-        )  # (description, our_ver, gecko_ver)
-
-        for v, s in ours:
-            sv_range = semver_range(v)
-            gecko_in_range = [gv for gv, gs in theirs if gv.startswith(sv_range)]
-
-            if not gecko_in_range:
-                if sv_range not in their_ranges:
-                    issues.append(
-                        (f"we have {v}, Gecko doesn't have {sv_range}.x", v, None)
-                    )
-            else:
-                gecko_ver = gecko_in_range[0]
-                if v != gecko_ver:
-                    if "999" not in v and "999" not in gecko_ver:
-                        issues.append((f"{v} vs {gecko_ver}", v, gecko_ver))
-
-        if issues:
-            status = "✗ " + "; ".join(desc for desc, _, _ in issues)
-            mismatches.append((name, our_str, their_str, status, issues))
-        else:
-            matches.append((name, our_str, their_str))
+    if mismatches:
+        matches, mismatches, neqo_only = filter_neqo_only_mismatches(
+            mismatches, matches, gecko_versions, gecko_lock, our_lock
+        )
 
     for name, our_str, their_str in matches:
         print(f"{name:<30} {our_str:<25} {their_str:<25} ✓ Match")
 
     if mismatches:
-        print(f"\n{'=' * 110}")
-        print(f"MISMATCHES ({len(mismatches)}):")
-        print(f"{'=' * 110}")
-
-        dev_only = find_dev_only_packages()
-        neqo_only = find_neqo_only_deps(gecko_lock, our_lock)
-
-        neqo_only_count = 0
-        dev_mismatch_count = 0
-        prod_mismatch_count = 0
-
-        for name, our_str, their_str, status, issues in mismatches:
-            # Determine the category for this mismatch.
-            if name in neqo_only:
-                category = "neqo-only"
-                neqo_only_count += 1
-            else:
-                # Check if it's dev-only.
-                is_dev_only = True
-                for desc, our_ver, gecko_ver in issues:
-                    dependents = find_dependents(our_lock, name, our_ver)
-                    if not dependents:
-                        dependents = find_dependents(our_lock, name)
-                    all_dev = all(d.split()[0] in dev_only for d in dependents)
-                    if not all_dev:
-                        is_dev_only = False
-                        break
-
-                if is_dev_only:
-                    category = "dev/build only"
-                    dev_mismatch_count += 1
-                else:
-                    category = "PRODUCTION"
-                    prod_mismatch_count += 1
-
-            print(f"{name:<30} {our_str:<25} {their_str:<25} {status}")
-            print(f"  ({category})")
-
-        print(f"\nSummary: {len(matches)} matches, {len(mismatches)} mismatches")
-        print(f"  - {neqo_only_count} neqo-only (we updated, Gecko will get on next vendor)")
-        print(f"  - {dev_mismatch_count} dev/build-only (don't affect Gecko)")
-        print(f"  - {prod_mismatch_count} production (need attention)")
-
-        if prod_mismatch_count > 0:
-            sys.exit(1)
+        exit_code = print_mismatches(mismatches, matches, neqo_only, our_lock)
+        if exit_code:
+            sys.exit(exit_code)
     else:
         print(f"\nAll {len(matches)} common packages match!")
 

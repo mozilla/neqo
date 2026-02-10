@@ -34,8 +34,6 @@ RUN set -eux; \
 RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 -o
 
 COPY --from=planner /app/recipe.json recipe.json
-# Copy patch crates needed by Cargo.toml [patch.crates-io]
-COPY build/rust build/rust
 # Build dependencies
 RUN cargo chef cook --release --recipe-path recipe.json
 # Build application

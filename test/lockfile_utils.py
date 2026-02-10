@@ -20,9 +20,9 @@ GECKO_RAW_URL = (
     "https://raw.githubusercontent.com/mozilla-firefox/firefox/refs/heads/main"
 )
 GECKO_LOCKFILE_URL = f"{GECKO_RAW_URL}/Cargo.lock"
-GECKO_BUILD_RUST_URL = (
-    "https://api.github.com/repos/mozilla-firefox/firefox/contents/build/rust"
-)
+
+# Timeout in seconds for HTTP requests.
+HTTP_TIMEOUT = 30
 
 
 def github_api_request(url: str) -> bytes:
@@ -32,15 +32,17 @@ def github_api_request(url: str) -> bytes:
     if token:
         headers["Authorization"] = f"token {token}"
 
+    headers["User-Agent"] = "neqo-lockfile-scripts"
+    headers["Accept"] = "application/vnd.github+json"
     request = Request(url, headers=headers)
-    with urlopen(request) as response:
+    with urlopen(request, timeout=HTTP_TIMEOUT) as response:
         return response.read()
 
 
 def load_lockfile(src: str) -> dict:
     """Load a Cargo.lock from a path or URL."""
     if src.startswith(("http://", "https://")):
-        with urlopen(src) as response:
+        with urlopen(src, timeout=HTTP_TIMEOUT) as response:
             return tomlkit.loads(response.read().decode())
     with open(src, "r", encoding="utf-8") as f:
         return tomlkit.load(f)
@@ -71,6 +73,17 @@ def semver_range(version: str) -> str:
     if len(parts) >= 2:
         return f"{parts[0]}.{parts[1]}"
     return parts[0]
+
+
+def group_by_semver_range(versions: list[str]) -> dict[str, list[str]]:
+    """Group version strings by their major.minor semver range.
+
+    Returns a dict of "major.minor" -> [version, ...].
+    """
+    by_range: dict[str, list[str]] = {}
+    for ver in versions:
+        by_range.setdefault(semver_range(ver), []).append(ver)
+    return by_range
 
 
 def parse_packages(lock: dict) -> dict[str, dict[str, dict]]:
@@ -137,18 +150,42 @@ def find_dependents(lock: dict, package: str, version: str | None = None) -> lis
     return dependents
 
 
-def build_dependents_map(lock: dict) -> dict[str, list[str]]:
-    """Build a map of package name -> list of dependent package names.
+def build_dependents_map(lock: dict) -> dict[str, set[str]]:
+    """Build a map of package name -> set of dependent package names.
 
     Unlike find_dependents, this builds the full map once for efficiency
     when checking multiple packages.
     """
-    dependents: dict[str, list[str]] = {}
+    dependents: dict[str, set[str]] = {}
     for pkg in lock.get("package", []):
         for dep in pkg.get("dependencies", []):
             dep_name = dep.split()[0]
-            dependents.setdefault(dep_name, []).append(pkg["name"])
+            dependents.setdefault(dep_name, set()).add(pkg["name"])
     return dependents
+
+
+def workspace_crates(lock: dict) -> set[str]:
+    """Return the set of workspace crate names (packages with no source)."""
+    return {pkg["name"] for pkg in lock.get("package", []) if not pkg.get("source")}
+
+
+def expand_dependents_closure(
+    seeds: set[str], dependents_map: dict[str, set[str]]
+) -> set[str]:
+    """Expand a seed set by iteratively adding packages whose dependents are all in the set.
+
+    Uses a fixed-point algorithm: if every dependent of a package is already
+    in the result set, that package is added too. Repeats until stable.
+    """
+    result = set(seeds)
+    changed = True
+    while changed:
+        changed = False
+        for pkg, deps in dependents_map.items():
+            if pkg not in result and deps and deps <= result:
+                result.add(pkg)
+                changed = True
+    return result
 
 
 def is_registry_package(info: dict) -> bool:
@@ -167,7 +204,7 @@ def fetch_netwerk_crates() -> set[str]:
 
     crates = set()
 
-    # Search for Cargo.toml files in netwerk/.
+    # Search for Cargo.toml files in netwerk/ (fewer than 100 expected).
     query = urllib.parse.quote(
         "filename:Cargo.toml path:netwerk repo:mozilla-firefox/firefox"
     )
@@ -175,6 +212,11 @@ def fetch_netwerk_crates() -> set[str]:
 
     try:
         data = json.loads(github_api_request(search_url).decode())
+        if data.get("incomplete_results"):
+            print(
+                "Warning: GitHub search returned incomplete results.",
+                file=sys.stderr,
+            )
     except Exception as e:
         print(f"Warning: Could not search Gecko repo: {e}", file=sys.stderr)
         return crates
@@ -184,7 +226,7 @@ def fetch_netwerk_crates() -> set[str]:
         path = item.get("path", "")
         try:
             raw_url = f"{GECKO_RAW_URL}/{path}"
-            with urlopen(raw_url) as response:
+            with urlopen(raw_url, timeout=HTTP_TIMEOUT) as response:
                 content = response.read().decode()
                 for line in content.split("\n"):
                     if line.strip().startswith("name"):
@@ -192,8 +234,8 @@ def fetch_netwerk_crates() -> set[str]:
                             name = line.split('"')[1]
                             crates.add(name)
                             break
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Warning: Could not fetch {path}: {e}", file=sys.stderr)
 
     return crates
 
@@ -204,12 +246,7 @@ def find_neqo_only_deps(gecko_lock: dict, our_lock: dict) -> set[str]:
     These packages can be freely updated since Gecko will get new versions
     when neqo is vendored.
     """
-    # Our workspace crate names (local crates have no source).
-    our_crates = {
-        pkg["name"]
-        for pkg in our_lock.get("package", [])
-        if not pkg.get("source")
-    }
+    our_crates = workspace_crates(our_lock)
 
     # Gecko crates that are part of the neqo/networking stack (under netwerk/).
     print("Fetching netwerk crates from Gecko...", file=sys.stderr)
@@ -220,38 +257,38 @@ def find_neqo_only_deps(gecko_lock: dict, our_lock: dict) -> set[str]:
         if pkg["name"] in netwerk_crates or pkg["name"].startswith("neqo")
     }
 
-    # Build reverse dependency graph for Gecko: pkg -> set of dependents.
-    gecko_dependents: dict[str, set[str]] = {}
-    for pkg in gecko_lock.get("package", []):
-        for dep in pkg.get("dependencies", []):
-            dep_name = dep.split()[0]
-            gecko_dependents.setdefault(dep_name, set()).add(pkg["name"])
+    # Find all packages whose only dependents are neqo crates (transitively).
+    seeds = our_crates | gecko_neqo_crates
+    gecko_dependents = build_dependents_map(gecko_lock)
+    neqo_only = expand_dependents_closure(seeds, gecko_dependents)
 
-    # Find all packages that are only depended on by neqo crates (transitively).
-    # Start with our crates + Gecko's neqo crates, then expand to include packages
-    # whose only dependents are already in the neqo-only set.
-    neqo_only = our_crates | gecko_neqo_crates
-    changed = True
-    while changed:
-        changed = False
-        for pkg, dependents in gecko_dependents.items():
-            if pkg in neqo_only:
-                continue
-            # If all dependents of this pkg are neqo-only, then this pkg is too.
-            if dependents and dependents <= neqo_only:
-                neqo_only.add(pkg)
-                changed = True
-
-    return neqo_only - our_crates - gecko_neqo_crates  # Exclude seed crates.
+    return neqo_only - seeds  # Exclude seed crates.
 
 
-def find_dev_only_packages() -> set[str]:
-    """Find packages that are only dev-dependencies or build-dependencies.
+def find_neqo_or_workspace_deps(
+    gecko_lock: dict, our_lock: dict
+) -> tuple[set[str], set[str]]:
+    """Find neqo-only deps and expand transitively using our lockfile.
 
-    These don't affect Gecko integration since Gecko doesn't use our dev/build deps.
+    Returns (neqo_only, neqo_or_workspace) where:
+    - neqo_only: packages only neqo depends on in Gecko's graph
+    - neqo_or_workspace: neqo_only expanded with packages whose dependents
+      in our lockfile are all neqo-only or workspace crates
     """
-    workspace_toml = Path("Cargo.toml")
-    with open(workspace_toml, "r", encoding="utf-8") as f:
+    neqo_only = find_neqo_only_deps(gecko_lock, our_lock)
+    neqo_or_workspace = expand_dependents_closure(
+        neqo_only | workspace_crates(our_lock),
+        build_dependents_map(our_lock),
+    )
+    return neqo_only, neqo_or_workspace
+
+
+def collect_dep_categories() -> tuple[set[str], set[str]]:
+    """Collect normal and dev/build dependency names from workspace Cargo.toml files.
+
+    Returns (normal_deps, dev_build_roots).
+    """
+    with open("Cargo.toml", "r", encoding="utf-8") as f:
         workspace = tomlkit.load(f)
 
     members = workspace.get("workspace", {}).get("members", [])
@@ -266,27 +303,30 @@ def find_dev_only_packages() -> set[str]:
         with open(member_toml, "r", encoding="utf-8") as f:
             cargo = tomlkit.load(f)
 
-        for dep in cargo.get("dependencies", {}):
-            normal_deps.add(dep)
-        for dep in cargo.get("dev-dependencies", {}):
-            dev_build_roots.add(dep)
-        for dep in cargo.get("build-dependencies", {}):
-            dev_build_roots.add(dep)
+        normal_deps.update(cargo.get("dependencies", {}))
+        dev_build_roots.update(cargo.get("dev-dependencies", {}))
+        dev_build_roots.update(cargo.get("build-dependencies", {}))
 
     ws_deps = workspace.get("workspace", {})
-    for dep in ws_deps.get("dev-dependencies", {}):
-        dev_build_roots.add(dep)
-    for dep in ws_deps.get("build-dependencies", {}):
-        dev_build_roots.add(dep)
+    dev_build_roots.update(ws_deps.get("dev-dependencies", {}))
+    dev_build_roots.update(ws_deps.get("build-dependencies", {}))
+
+    return normal_deps, dev_build_roots
+
+
+def find_dev_only_packages() -> set[str]:
+    """Find packages that are only dev-dependencies or build-dependencies.
+
+    These don't affect Gecko integration since Gecko doesn't use our dev/build deps.
+    """
+    normal_deps, dev_build_roots = collect_dep_categories()
 
     with open("Cargo.lock", "r", encoding="utf-8") as f:
         lock = tomlkit.load(f)
 
     pkg_deps: dict[str, list[str]] = {}
     for pkg in lock.get("package", []):
-        name = pkg["name"]
-        deps = [d.split()[0] for d in pkg.get("dependencies", [])]
-        pkg_deps[name] = deps
+        pkg_deps[pkg["name"]] = [d.split()[0] for d in pkg.get("dependencies", [])]
 
     dev_only = set()
     to_visit = list(dev_build_roots - normal_deps)

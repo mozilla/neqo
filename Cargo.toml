@@ -147,14 +147,3 @@ debug = true
 [profile.mutants]
 inherits = "test"
 debug = "none"
-
-[patch.crates-io]
-backtrace = { path = "build/rust/backtrace" }
-hermit-abi = { path = "build/rust/hermit-abi" }
-r-efi = { path = "build/rust/r-efi" }
-
-[patch.crates-io.getrandom]
-path = "build/rust/getrandom"
-
-[patch.crates-io.wasi]
-path = "build/rust/wasi"
