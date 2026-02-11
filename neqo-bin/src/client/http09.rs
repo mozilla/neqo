@@ -287,7 +287,9 @@ impl<'b> Handler<'b> {
                 false
             }
             Err(e) => {
-                return Err(e.into());
+                qwarn!("Unexpected error creating stream {e:?}");
+                self.url_queue.push_front(url);
+                false
             }
         }
     }
