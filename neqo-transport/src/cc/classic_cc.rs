@@ -1900,7 +1900,14 @@ mod tests {
         // Cause congestion event to exit slow start
         let pkt1 = sent::make_packet(1, now, 1000);
         cc.on_packet_sent(&pkt1, now);
-        cc.on_packets_lost(Some(now), None, PTO, &[pkt1.clone()], now, &mut cc_stats);
+        cc.on_packets_lost(
+            Some(now),
+            None,
+            PTO,
+            std::slice::from_ref(&pkt1),
+            now,
+            &mut cc_stats,
+        );
 
         // Should have exited slow start with cwnd captured AFTER reduction
         assert!(!cc.current.phase.in_slow_start());
