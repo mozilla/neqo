@@ -144,8 +144,13 @@ pub struct CongestionControlStats {
     /// The latter indicates instances where the congestion control algorithm
     /// overreacted to perceived losses.
     pub congestion_events: EnumMap<CongestionEvent, usize>,
-    /// Whether this connection has exited slow start.
-    pub slow_start_exited: bool,
+    /// The congestion window size (in bytes) when we exited slow start.
+    /// None if we haven't exited slow start or if we re-entered after spurious congestion.
+    /// When exiting via congestion event, this is the cwnd AFTER the reduction.
+    pub slow_start_exit_cwnd: Option<usize>,
+    /// The current congestion window size (in bytes). Updated throughout the connection
+    /// lifetime.
+    pub cwnd: usize,
 }
 /// ECN counts by QUIC [`packet::Type`].
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -382,14 +387,19 @@ impl Debug for Stats {
             "  tx: {} lost {} lateack {} ptoack {} unackdrop {}",
             self.packets_tx, self.lost, self.late_ack, self.pto_ack, self.unacked_range_dropped
         )?;
+        writeln!(f, "  cc:")?;
         writeln!(
             f,
-            "  cc: ce_loss {} ce_ecn {} ce_spurious {}",
+            "    ce_loss {} ce_ecn {} ce_spurious {}",
             self.cc.congestion_events[CongestionEvent::Loss],
             self.cc.congestion_events[CongestionEvent::Ecn],
             self.cc.congestion_events[CongestionEvent::Spurious],
         )?;
-        writeln!(f, "  ss_exit: {}", self.cc.slow_start_exited)?;
+        writeln!(
+            f,
+            "    final_cwnd {} ss_exit_cwnd {:?}",
+            self.cc.cwnd, self.cc.slow_start_exit_cwnd
+        )?;
         writeln!(
             f,
             "  pmtud: {} sent {} acked {} lost {} iface_mtu {} pmtu",
@@ -433,4 +443,45 @@ impl Debug for StatsCell {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.stats.borrow().fmt(f)
     }
+}
+
+#[test]
+fn debug() {
+    let stats = Stats::default();
+    assert_eq!(
+        format!("{stats:?}"),
+        "stats for\u{0020}
+  rx: 0 drop 0 dup 0 saved 0
+  tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
+  cc:
+    ce_loss 0 ce_ecn 0 ce_spurious 0
+    final_cwnd 0 ss_exit_cwnd None
+  pmtud: 0 sent 0 acked 0 lost 0 iface_mtu 0 pmtu
+  resumed: false
+  frames rx:
+    crypto 0 done 0 token 0 close 0
+    ack 0 (max 0) ping 0 padding 0
+    stream 0 reset 0 stop 0
+    max: stream 0 data 0 stream_data 0
+    blocked: stream 0 data 0 stream_data 0
+    datagram 0
+    ncid 0 rcid 0 pchallenge 0 presponse 0
+    ack_frequency 0
+  frames tx:
+    crypto 0 done 0 token 0 close 0
+    ack 0 (max 0) ping 0 padding 0
+    stream 0 reset 0 stop 0
+    max: stream 0 data 0 stream_data 0
+    blocked: stream 0 data 0 stream_data 0
+    datagram 0
+    ncid 0 rcid 0 pchallenge 0 presponse 0
+    ack_frequency 0
+  ecn:
+    tx:
+    acked:
+    rx:
+    path validation outcomes: ValidationCount({Capable: 0, NotCapable(BlackHole): 0, NotCapable(Bleaching): 0, NotCapable(ReceivedUnsentECT1): 0})
+    mark transitions:
+  dscp: \n"
+    );
 }
