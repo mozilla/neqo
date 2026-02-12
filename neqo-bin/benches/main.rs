@@ -12,7 +12,7 @@
 
 use std::{env, hint::black_box, net::SocketAddr, path::PathBuf, str::FromStr as _};
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
+use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use neqo_bin::{client, server};
 use tokio::runtime::Builder;
 

@@ -11,16 +11,16 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qtrace, Bytes, Encoder, Role};
+use neqo_common::{Bytes, Encoder, Role, qtrace};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
+    Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
     features::extended_connect::{
-        session::{DgramContextIdError, Protocol, State},
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
+        session::{DgramContextIdError, Protocol, State},
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
-    Error, Http3StreamInfo, Http3StreamType, RecvStream, Res,
 };
 
 #[derive(Debug)]
@@ -208,5 +208,32 @@ impl Protocol for Session {
     fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError> {
         // WebTransport does not use a prefix (i.e. context ID).
         Ok(datagram)
+    }
+
+    fn datagram_capsule_support(&self) -> bool {
+        // HTTP/3 WebTransport requires QUIC datagram support. In other words,
+        // HTTP/3 WebTransport never falls back to HTTP datagram capsules.
+        //
+        // > WebTransport over HTTP/3 also requires support for QUIC datagrams.
+        // > To indicate support, both the client and the server send a
+        // > max_datagram_frame_size transport parameter with a value greater than
+        // > 0 (see Section 3 of [QUIC-DATAGRAM]).
+        //
+        // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-3.1>
+        false
+    }
+
+    fn write_datagram_capsule(
+        &self,
+        _control_stream_send: &mut Box<dyn SendStream>,
+        _conn: &mut Connection,
+        _buf: &[u8],
+        _now: Instant,
+    ) -> Res<()> {
+        debug_assert!(
+            false,
+            "[{self}] WebTransport does not support datagram capsules."
+        );
+        Ok(())
     }
 }

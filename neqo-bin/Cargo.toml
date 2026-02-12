@@ -27,7 +27,7 @@ bench = false
 workspace = true
 
 [dependencies]
-clap = { version = "4.5", default-features = false, features = [
+clap = { version = "4", default-features = false, features = [
         "std",
         "help",
         "usage",
@@ -35,7 +35,7 @@ clap = { version = "4.5", default-features = false, features = [
         "suggestions",
         "derive",
 ] }
-clap-verbosity-flag = { version = "3.0", default-features = false, features = ["log"] }
+clap-verbosity-flag = { version = "3", default-features = false, features = ["log"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = { workspace = true, features = ["std"] }
 http = { workspace = true }
@@ -75,6 +75,7 @@ bench = false
 [[package.metadata.bench]]
 name = "main"
 codspeed.mode = "walltime" # Use "walltime" mode for "main" bench with codspeed.
+codspeed.memory = false # FIXME: Disabled due to high variance in results.
 
 [[bench]]
 name = "main"

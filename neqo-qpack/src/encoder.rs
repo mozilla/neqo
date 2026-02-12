@@ -11,19 +11,19 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qdebug, qerror, qlog::Qlog, qtrace, Header};
+use neqo_common::{Header, qdebug, qerror, qlog::Qlog, qtrace};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use crate::{
+    Error, Res, Settings,
     decoder_instructions::{DecoderInstruction, DecoderInstructionReader},
     encoder_instructions::EncoderInstruction,
     header_block::HeaderEncoder,
     qlog,
     reader::ReceiverConnWrapper,
     stats::Stats,
-    table::{HeaderTable, LookupResult, ADDITIONAL_TABLE_ENTRY_SIZE},
-    Error, Res, Settings,
+    table::{ADDITIONAL_TABLE_ENTRY_SIZE, HeaderTable, LookupResult},
 };
 
 pub const QPACK_UNI_STREAM_TYPE_ENCODER: u64 = 0x2;
@@ -476,11 +476,11 @@ impl Encoder {
 
         if !stream_is_blocker {
             // The streams was not a blocker, check if the stream is a blocker now.
-            if let Some(max_ref) = ref_entries.iter().max() {
-                if *max_ref >= self.table.get_acked_inserts_cnt() {
-                    debug_assert!(self.blocked_stream_cnt <= self.max_blocked_streams);
-                    self.blocked_stream_cnt += 1;
-                }
+            if let Some(max_ref) = ref_entries.iter().max()
+                && *max_ref >= self.table.get_acked_inserts_cnt()
+            {
+                debug_assert!(self.blocked_stream_cnt <= self.max_blocked_streams);
+                self.blocked_stream_cnt += 1;
             }
         }
 
@@ -556,8 +556,8 @@ mod tests {
 
     use neqo_transport::{ConnectionParameters, StreamId, StreamType};
     use test_fixture::{
-        default_client, default_server, handshake, new_server, now, CountingConnectionIdGenerator,
-        DEFAULT_ALPN,
+        CountingConnectionIdGenerator, DEFAULT_ALPN, default_client, default_server, handshake,
+        new_server, now,
     };
 
     use super::{Connection, Encoder, Error, Header, Res};
@@ -666,10 +666,12 @@ mod tests {
             .unwrap();
         let out = encoder.peer_conn.process_output(now);
         drop(encoder.conn.process(out.dgram(), now));
-        assert!(encoder
-            .encoder
-            .read_instructions(&mut encoder.conn, encoder.recv_stream_id, now)
-            .is_ok());
+        assert!(
+            encoder
+                .encoder
+                .read_instructions(&mut encoder.conn, encoder.recv_stream_id, now)
+                .is_ok()
+        );
     }
 
     const CAP_INSTRUCTION_200: &[u8] = &[0x02, 0x3f, 0xa9, 0x01];

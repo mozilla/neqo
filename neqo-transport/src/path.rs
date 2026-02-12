@@ -13,10 +13,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{datagram, hex, qdebug, qinfo, qlog::Qlog, qtrace, qwarn, Buffer, Encoder, Tos};
+use neqo_common::{Buffer, Encoder, Tos, datagram, hex, qdebug, qinfo, qlog::Qlog, qtrace, qwarn};
 use neqo_crypto::random;
 
 use crate::{
+    ConnectionParameters, Stats,
     ackrate::{AckRate, PeerAckDelay},
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn,
@@ -28,7 +29,6 @@ use crate::{
     sender::PacketSender,
     stateless_reset::Token as Srt,
     stats::FrameStats,
-    ConnectionParameters, Stats,
 };
 
 /// The maximum number of paths that `Paths` will track.
@@ -896,10 +896,10 @@ impl Path {
     /// Process a timer for this path.
     /// This returns true if the path is viable and can be kept alive.
     pub fn process_timeout(&mut self, now: Instant, pto: Duration, stats: &mut Stats) -> bool {
-        if let ProbeState::Probing { sent, .. } = &self.state {
-            if now >= *sent + pto {
-                self.probe(stats);
-            }
+        if let ProbeState::Probing { sent, .. } = &self.state
+            && now >= *sent + pto
+        {
+            self.probe(stats);
         }
         if matches!(self.state, ProbeState::Failed) {
             // Retire failed paths immediately.

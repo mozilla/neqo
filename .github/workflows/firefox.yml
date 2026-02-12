@@ -1,10 +1,27 @@
-name: Firefox
+name: Vendor
 on:
+  pull_request:
+    branches: ["main"]
+    types: [opened, synchronize, reopened]
+  merge_group:
   workflow_dispatch:
-  # Don't run this as part of CI anymore; takes too many resources and fails too often.
-  # pull_request:
-  #   branches: ["main"]
-  #   types: [opened, synchronize, reopened, ready_for_review]
+    inputs:
+      build:
+        description: 'Build Firefox after vendoring'
+        type: boolean
+        default: false
+      linux:
+        description: 'Build on Linux'
+        type: boolean
+        default: true
+      macos:
+        description: 'Build on macOS'
+        type: boolean
+        default: true
+      windows:
+        description: 'Build on Windows'
+        type: boolean
+        default: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -13,34 +30,129 @@ concurrency:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 env:
-  FIREFOX: Firefox
+  CARGO_TERM_COLOR: always
+  MOZILLABUILD_VERSION: 4.2.1
 
 jobs:
-  firefox:
-    name: Build Firefox
-    # if: ${{ github.event.pull_request.draft == false }}
+  vendor:
+    name: Vendor into Gecko
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
-        type: [debug, release]
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
     env:
       MOZBUILD_STATE_PATH: ${{ github.workspace }}/mozbuild
-      CARGO_HOME: ${{ github.workspace }}/cargo
 
     steps:
-      - name: Check out Neqo
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Check out neqo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          path: neqo
           persist-credentials: false
 
-      - name: Maximize build space
-        if: ${{ runner.os == 'Linux' }}
+      - name: Check out Gecko
+        id: gecko
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: mozilla-firefox/firefox
+          path: firefox
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      # FIXME: Caching mozbuild toolchains disabled because cache entries are 1-5 GB
+
+      - name: Install MozillaBuild (Windows)
+        if: runner.os == 'Windows'
+        run: choco install -y mozillabuild --version "$MOZILLABUILD_VERSION"
+
+      # FIXME: macos-15 runners have a Python version that is too new for mach
+      - name: Set up Python (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Vendor neqo into Gecko
+        id: vendor
+        working-directory: firefox
+        run: |
+          {
+            echo "mk_add_options MOZ_OBJDIR=../obj-firefox"
+            echo "ac_add_options --enable-application=browser"
+            echo "ac_add_options --disable-tests"
+            echo "ac_add_options --enable-release"
+          } > mozconfig
+
+          cargo metadata --manifest-path ../neqo/Cargo.toml --format-version 1 --no-deps | jq '[.packages[] | {name, version}]' > ../neqo-versions.json
+
+          NEQO_CRATES="mtu neqo-common neqo-crypto neqo-http3 neqo-qpack neqo-transport neqo-udp"
+          {
+            echo '[patch."https://github.com/mozilla/neqo"]'
+            for crate in $NEQO_CRATES; do
+              echo "$crate = { path = \"../neqo/$crate\" }"
+            done
+          } >> Cargo.toml
+
+          # shellcheck disable=SC2086
+          cargo update $NEQO_CRATES
+
+          for crate in $NEQO_CRATES; do
+            version=$(jq -r ".[] | select(.name == \"$crate\") | .version" ../neqo-versions.json)
+            echo "[[audits.$crate]]"
+            echo "who = \"CI\""
+            echo "criteria = \"safe-to-deploy\""
+            echo "version = \"$version\""
+            echo "notes = \"Placeholder created by CI.\""
+            echo ""
+          done >> supply-chain/audits.toml
+
+          # Hide .git to prevent mach from running git operations
+          mv .git .git.bak
+          trap 'mv .git.bak .git' EXIT
+
+          if ./mach vendor rust --ignore-modified 2>&1 | tee vendor.log; then
+            echo "Vendoring succeeded"
+            exit 0
+          fi
+
+          if [ ! -s vendor.log ]; then
+            echo "::error::Vendoring failed with no output"
+            exit 1
+          fi
+
+          # Check if this is a vet-related failure
+          if grep -qE "Vet error|Missing audit for" vendor.log; then
+            # Extract all crate names from crate:version patterns in the log
+            FAILING_CRATES=$(grep -oE '[a-zA-Z_][a-zA-Z0-9_-]*:[0-9]+\.[0-9]+' vendor.log | cut -d: -f1 | sort -u) || true
+            echo "Vet failures detected for: $FAILING_CRATES"
+            # Check if any failing crate is a neqo crate
+            for crate in $NEQO_CRATES; do
+              if echo "$FAILING_CRATES" | grep -qxF "$crate"; then
+                echo "::error::Vet failure for neqo crate: $crate"
+                cat vendor.log
+                exit 1
+              fi
+            done
+            echo "::warning::Vet failures are unrelated to neqo, forcing"
+            ./mach vendor rust --ignore-modified --force
+          else
+            echo "::error::Vendoring failed for non-vet reasons:"
+            cat vendor.log
+            exit 1
+          fi
+
+      # Build steps only run on manual dispatch with build enabled
+      - name: Maximize build space (Linux)
+        if: |
+          github.event_name == 'workflow_dispatch' &&
+          inputs.build && inputs.linux && runner.os == 'Linux'
         run: |
           sudo rm -rf /usr/local/lib/android || true
           sudo rm -rf /usr/share/dotnet || true
@@ -55,150 +167,30 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
           df -h
 
-      - name: Check out Firefox
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          repository: mozilla/gecko-dev
-          path: mozilla-unified
-          persist-credentials: false
-
-      - name: Install deps (Windows)
-        if: ${{ runner.os == 'Windows' }}
-        run: choco install -y mozillabuild --version 4.0.2
-
-      - name: Install Rust
-        uses: ./.github/actions/rust
-        with:
-          version: stable
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Bootstrap Firefox
-        env:
-          RUNNER_OS: ${{ runner.os }}
-          MATRIX_TYPE: ${{ matrix.type }}
-        run: |
-          cd mozilla-unified
-          {
-            echo "mk_add_options MOZ_OBJDIR=../$FIREFOX"
-            echo "ac_add_options --with-ccache=sccache"
-            echo "ac_add_options --enable-application=browser"
-            # Work around https://bugzilla.mozilla.org/show_bug.cgi?id=1894031
-            if [ "$RUNNER_OS" != "Windows" ] || [ "$MATRIX_TYPE" != "debug" ]; then
-              echo "ac_add_options --disable-tests"
-            fi
-            echo "ac_add_options --enable-$MATRIX_TYPE"
-          } >> mozconfig
-          ./mach bootstrap --application-choice browser
-
-      - name: Plumb in Neqo
-        run: |
-          # Get qlog and mtu version used by neqo
-          cargo generate-lockfile
-          QLOG_VERSION=$(cargo pkgid qlog | cut -d@ -f2)
-          MTU_VERSION=$(cargo pkgid mtu | cut -d@ -f2)
-          rm Cargo.lock
-          cd mozilla-unified
-          {
-            echo '[[audits.qlog]]'
-            echo 'who = "CI"'
-            echo 'criteria = "safe-to-deploy"'
-            echo "version = \"$QLOG_VERSION\""
-            echo '[[audits.mtu]]'
-            echo 'who = "CI"'
-            echo 'criteria = "safe-to-deploy"'
-            echo "version = \"$MTU_VERSION\""
-          } >> supply-chain/audits.toml
-          sed -i'' -e "s/qlog =.*/qlog = \"$QLOG_VERSION\"/" netwerk/socket/neqo_glue/Cargo.toml
-          {
-            echo '[patch."https://github.com/mozilla/neqo"]'
-            echo 'neqo-http3 = { path = "../neqo-http3" }'
-            echo 'neqo-transport = { path = "../neqo-transport" }'
-            echo 'neqo-common = { path = "../neqo-common" }'
-            echo 'neqo-qpack = { path = "../neqo-qpack" }'
-            echo 'neqo-crypto = { path = "../neqo-crypto" }'
-          } >> Cargo.toml
-          {
-            echo '[[trusted.windows-bindgen]]'
-            echo 'criteria = "safe-to-deploy"'
-            echo 'user-id = 64539 # Kenny Kerr (kennykerr)'
-            echo 'start = "2021-11-15"'
-            echo 'end = "2024-09-12"'
-            echo '[[trusted.windows-metadata]]'
-            echo 'criteria = "safe-to-deploy"'
-            echo 'user-id = 64539 # Kenny Kerr (kennykerr)'
-            echo 'start = "2021-11-15"'
-            echo 'end = "2024-09-12"'
-          } >> supply-chain/audits.toml
-          cargo update neqo-http3 neqo-transport neqo-common neqo-qpack neqo-crypto
-          ./mach vendor rust --ignore-modified
-
       - name: Build Firefox
+        if: |
+          github.event_name == 'workflow_dispatch' && inputs.build &&
+          ((runner.os == 'Linux' && inputs.linux) ||
+           (runner.os == 'macOS' && inputs.macos) ||
+           (runner.os == 'Windows' && inputs.windows))
+        working-directory: firefox
         env:
           NAME: ${{ runner.os == 'macOS' && 'Nightly' || 'bin' }}
-          TYPE: ${{ runner.os == 'macOS' && matrix.type == 'debug' && 'Debug' || '' }}
           EXT: ${{ runner.os == 'macOS' && '.app' || '' }}
           RUNNER_OS: ${{ runner.os }}
         run: |
-          cd mozilla-unified
-          # Work around "ERROR: WINDOWSSDKDIR cannot be set when using the bootstrapped WINSYSROOT"
-          # (Capitalization "WindowsSdkDir" matters)
           [ "$RUNNER_OS" == "Windows" ] && unset WindowsSdkDir
-          ./mach build && tar -cf "../$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT"
+          ./mach build && tar -cf ../Firefox.tar -C ../obj-firefox/dist "$NAME$EXT"
 
-      - name: Export binary
+      - name: Export Firefox artifact
+        if: |
+          github.event_name == 'workflow_dispatch' && inputs.build &&
+          ((runner.os == 'Linux' && inputs.linux) ||
+           (runner.os == 'macOS' && inputs.macos) ||
+           (runner.os == 'Windows' && inputs.windows))
         id: upload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: ${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}.tgz
-          path: ${{ env.FIREFOX }}.tar
+          name: ${{ runner.os }}-Firefox.tgz
+          path: Firefox.tar
           compression-level: 9
-
-      - env:
-          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
-        run: echo "$ARTIFACT_URL" >> artifact
-
-      - name: Export artifact URL
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: artifact-${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}
-          path: artifact
-          retention-days: 1
-
-  comment:
-    name: Comment on PR
-    # if: ${{ github.event.pull_request.draft == false }}
-    needs: firefox
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          persist-credentials: false
-
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          pattern: 'artifact-*'
-          path: artifacts
-
-      - run: |
-          {
-            echo "### Firefox builds for this PR"
-            echo "The following builds are available for testing. Crossed-out builds did not succeed."
-            for os in Linux macOS Windows; do
-              echo -n "* **$os**:"
-              for type in debug release; do
-                artifact="artifacts/artifact-$os-$FIREFOX-$type/artifact"
-                if [ -e "$artifact" ]; then
-                  echo -n " [${type^}]($(cat "$artifact"))"
-                else
-                  echo -n " ~~${type^}~~"
-                fi
-              done
-              echo
-            done
-          } > comment.md
-          cat comment.md > "$GITHUB_STEP_SUMMARY"
-
-      - uses: ./.github/actions/pr-comment-data-export
-        with:
-          name: ${{ github.workflow }}
-          contents: comment.md

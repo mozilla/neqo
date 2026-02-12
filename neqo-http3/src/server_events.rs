@@ -13,16 +13,16 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qdebug, Bytes, Encoder, Header};
+use neqo_common::{Bytes, Encoder, Header, qdebug};
 use neqo_transport::{
-    server::ConnectionRef, AppError, Connection, DatagramTracking, StreamId, StreamType,
+    AppError, Connection, DatagramTracking, StreamId, StreamType, server::ConnectionRef,
 };
 
 use crate::{
+    Error, Http3StreamInfo, Http3StreamType, Priority, Res,
     connection::{Http3State, SessionAcceptAction},
     connection_server::Http3ServerHandler,
     features::extended_connect,
-    Error, Http3StreamInfo, Http3StreamType, Priority, Res,
 };
 
 #[derive(Debug, Clone)]
@@ -336,7 +336,12 @@ impl WebTransportRequest {
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
-    pub fn send_datagram<I: Into<DatagramTracking>>(&self, buf: &[u8], id: I) -> Res<()> {
+    pub fn send_datagram<I: Into<DatagramTracking>>(
+        &self,
+        buf: &[u8],
+        id: I,
+        now: Instant,
+    ) -> Res<()> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
             .handler
@@ -346,6 +351,7 @@ impl WebTransportRequest {
                 session_id,
                 buf,
                 id,
+                now,
             )
     }
 
@@ -455,7 +461,12 @@ impl ConnectUdpRequest {
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
-    pub fn send_datagram<I: Into<DatagramTracking>>(&self, buf: &[u8], id: I) -> Res<()> {
+    pub fn send_datagram<I: Into<DatagramTracking>>(
+        &self,
+        buf: &[u8],
+        id: I,
+        now: Instant,
+    ) -> Res<()> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
             .handler
@@ -465,6 +476,7 @@ impl ConnectUdpRequest {
                 session_id,
                 buf,
                 id,
+                now,
             )
     }
 
@@ -579,7 +591,7 @@ impl Http3ServerEvents {
     }
 
     /// Take all events
-    pub fn events(&self) -> impl Iterator<Item = Http3ServerEvent> {
+    pub fn events(&self) -> impl Iterator<Item = Http3ServerEvent> + use<> {
         self.events.replace(VecDeque::new()).into_iter()
     }
 

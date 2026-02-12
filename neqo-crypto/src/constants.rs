@@ -7,7 +7,7 @@
 use enum_map::Enum;
 use strum::FromRepr;
 
-use crate::{ssl, Error};
+use crate::{Error, ssl};
 
 // Ideally all of these would be enums, but size matters and we need to allow
 // for values outside of those that are defined here.

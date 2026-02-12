@@ -6,14 +6,14 @@
 
 use std::time::{Duration, Instant};
 
-use neqo_common::{qtrace, qwarn, Encoder};
+use neqo_common::{Encoder, qtrace, qwarn};
 use test_fixture::now;
 
 use super::{
     super::{Connection, ConnectionParameters, IdleTimeout, Output, State},
-    connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, default_client,
-    default_server, maybe_authenticate, new_client, new_server, send_and_receive, send_something,
-    AT_LEAST_PTO, DEFAULT_STREAM_DATA,
+    AT_LEAST_PTO, DEFAULT_STREAM_DATA, connect, connect_force_idle, connect_rtt_idle,
+    connect_with_rtt, default_client, default_server, maybe_authenticate, new_client, new_server,
+    send_and_receive, send_something,
 };
 use crate::{
     packet, recovery,
@@ -681,7 +681,7 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     //    IDLE_TIMEOUT / 2)
     //  - PTO timer will trigger again. (at the start time + pto + 2*pto)
     //  - Idle time out  will trigger (at the timeout + IDLE_TIMEOUT)
-    const IDLE_TIMEOUT: Duration = Duration::from_millis(6000);
+    const IDLE_TIMEOUT: Duration = Duration::from_secs(6);
 
     // This test makes too many assumptions about single-packet flights and PTOs for multi-packet
     // MLKEM flights to work.

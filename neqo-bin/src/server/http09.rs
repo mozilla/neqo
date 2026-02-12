@@ -16,17 +16,17 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider as _, hex, qdebug, qerror, qinfo, qwarn, Datagram};
-use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay};
+use neqo_common::{Datagram, event::Provider as _, hex, qdebug, qerror, qinfo, qwarn};
+use neqo_crypto::{AllowZeroRtt, AntiReplay, generate_ech_keys, random};
 use neqo_http3::Error;
 use neqo_transport::{
-    server::{ConnectionRef, Server, ValidateAddress},
     ConnectionEvent, ConnectionIdGenerator, OutputBatch, State, StreamId,
+    server::{ConnectionRef, Server, ValidateAddress},
 };
 use rustc_hash::FxHashMap as HashMap;
 
-use super::{qns_read_response, Args};
-use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};
+use super::{Args, qns_read_response};
+use crate::{STREAM_IO_BUFFER_SIZE, send_data::SendData};
 
 #[derive(Default)]
 struct HttpStreamState {

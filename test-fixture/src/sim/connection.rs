@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider as _, qdebug, qinfo, qtrace, Datagram};
+use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator, Output, State,
@@ -35,7 +35,7 @@ pub trait Goal: Debug {
     /// Handle an event from the provided connection, returning `true` when the
     /// goal is achieved.
     fn handle_event(&mut self, c: &mut Connection, e: &ConnectionEvent, now: Instant)
-        -> GoalStatus;
+    -> GoalStatus;
 }
 
 pub struct Node {
@@ -232,11 +232,11 @@ impl SendData {
     }
 
     fn make_stream(&mut self, c: &mut Connection) {
-        if self.stream_id.is_none() {
-            if let Ok(stream_id) = c.stream_create(StreamType::UniDi) {
-                qdebug!("[{c}] made stream {stream_id} for sending");
-                self.stream_id = Some(stream_id);
-            }
+        if self.stream_id.is_none()
+            && let Ok(stream_id) = c.stream_create(StreamType::UniDi)
+        {
+            qdebug!("[{c}] made stream {stream_id} for sending");
+            self.stream_id = Some(stream_id);
         }
     }
 

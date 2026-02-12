@@ -22,7 +22,7 @@ use std::os::raw::{c_uint, c_void};
 
 use crate::{
     constants::Epoch,
-    err::{secstatus_to_res, Res},
+    err::{Res, secstatus_to_res},
 };
 
 include!(concat!(env!("OUT_DIR"), "/nss_ssl.rs"));

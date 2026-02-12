@@ -12,10 +12,10 @@ use std::{
     time::Duration,
 };
 
-use clap::{builder::TypedValueParser as _, Parser};
+use clap::{Parser, builder::TypedValueParser as _};
 use neqo_transport::{
-    tparams::PreferredAddress, CongestionControlAlgorithm, ConnectionParameters, StreamType,
-    Version, DEFAULT_INITIAL_RTT,
+    CongestionControlAlgorithm, ConnectionParameters, DEFAULT_INITIAL_RTT, StreamType, Version,
+    tparams::PreferredAddress,
 };
 use strum::VariantNames as _;
 use thiserror::Error;
