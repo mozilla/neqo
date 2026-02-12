@@ -316,36 +316,36 @@ impl RangeTracker {
             .map(|(&k, _)| k)
             .collect::<SmallVec<[u64; 8]>>();
 
-        if let Entry::Occupied(next_entry) = self.used.entry(new_end) {
-            if next_entry.get().1 == RangeState::Sent {
-                // Check if the very next entry is the same type as this, so it can be merged.
-                let (extra_len, _) = next_entry.remove();
-                new_len += extra_len;
-            }
+        if let Entry::Occupied(next_entry) = self.used.entry(new_end)
+            && next_entry.get().1 == RangeState::Sent
+        {
+            // Check if the very next entry is the same type as this, so it can be merged.
+            let (extra_len, _) = next_entry.remove();
+            new_len += extra_len;
         }
 
         // Merge with any preceding sent range that might overlap,
         // or cut the head of this if the preceding range is acked.
         let prev = self.used.range(..new_off).next_back();
-        if let Some((&prev_off, &(prev_len, prev_state))) = prev {
-            if prev_off + prev_len >= new_off {
-                let overlap = prev_off + prev_len - new_off;
-                new_len = new_len.saturating_sub(overlap);
-                if new_len == 0 {
-                    // The previous range completely covers this one (no more to do).
-                    return;
-                }
+        if let Some((&prev_off, &(prev_len, prev_state))) = prev
+            && prev_off + prev_len >= new_off
+        {
+            let overlap = prev_off + prev_len - new_off;
+            new_len = new_len.saturating_sub(overlap);
+            if new_len == 0 {
+                // The previous range completely covers this one (no more to do).
+                return;
+            }
 
-                if prev_state == RangeState::Acked {
-                    // The previous range is acked, so it cuts this one.
-                    new_off += overlap;
-                } else {
-                    // Extend the current range backwards.
-                    new_off = prev_off;
-                    new_len += prev_len;
-                    // The previous range will be updated below.
-                    // It might need to be cut because of a covered acked range.
-                }
+            if prev_state == RangeState::Acked {
+                // The previous range is acked, so it cuts this one.
+                new_off += overlap;
+            } else {
+                // Extend the current range backwards.
+                new_off = prev_off;
+                new_len += prev_len;
+                // The previous range will be updated below.
+                // It might need to be cut because of a covered acked range.
             }
         }
 
@@ -1059,10 +1059,10 @@ impl SendStream {
         stats: &mut FrameStats,
     ) {
         // Send STREAM_DATA_BLOCKED at normal priority always.
-        if priority == self.priority {
-            if let State::Ready { fc, .. } | State::Send { fc, .. } = &mut self.state {
-                fc.write_frames(builder, tokens, stats);
-            }
+        if priority == self.priority
+            && let State::Ready { fc, .. } | State::Send { fc, .. } = &mut self.state
+        {
+            fc.write_frames(builder, tokens, stats);
         }
     }
 
@@ -1082,10 +1082,8 @@ impl SendStream {
             self.send_blocked_if_space_needed(0);
         }
 
-        if fin {
-            if let State::DataSent { fin_sent, .. } = &mut self.state {
-                *fin_sent = true;
-            }
+        if fin && let State::DataSent { fin_sent, .. } = &mut self.state {
+            *fin_sent = true;
         }
     }
 
@@ -1145,15 +1143,14 @@ impl SendStream {
             buf.mark_as_lost(offset, len);
         }
 
-        if fin {
-            if let State::DataSent {
+        if fin
+            && let State::DataSent {
                 fin_sent,
                 fin_acked,
                 ..
             } = &mut self.state
-            {
-                *fin_sent = *fin_acked;
-            }
+        {
+            *fin_sent = *fin_acked;
         }
     }
 

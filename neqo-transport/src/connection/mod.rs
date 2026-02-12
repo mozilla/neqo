@@ -1131,11 +1131,11 @@ impl Connection {
             qtrace!("[{self}] Idle timer {idle_time:?}");
             delays.push(idle_time);
 
-            if self.streams.need_keep_alive() {
-                if let Some(keep_alive_time) = self.idle_timeout.next_keep_alive(now, pto) {
-                    qtrace!("[{self}] Keep alive timer {keep_alive_time:?}");
-                    delays.push(keep_alive_time);
-                }
+            if self.streams.need_keep_alive()
+                && let Some(keep_alive_time) = self.idle_timeout.next_keep_alive(now, pto)
+            {
+                qtrace!("[{self}] Keep alive timer {keep_alive_time:?}");
+                delays.push(keep_alive_time);
             }
 
             if let Some(lr_time) = self.loss_recovery.next_timeout(&path) {
@@ -1143,11 +1143,9 @@ impl Connection {
                 delays.push(lr_time);
             }
 
-            if paced {
-                if let Some(pace_time) = path.sender().next_paced(rtt.estimate()) {
-                    qtrace!("[{self}] Pacing timer {pace_time:?}");
-                    delays.push(pace_time);
-                }
+            if paced && let Some(pace_time) = path.sender().next_paced(rtt.estimate()) {
+                qtrace!("[{self}] Pacing timer {pace_time:?}");
+                delays.push(pace_time);
             }
 
             if let Some(path_time) = self.paths.next_timeout(pto) {
@@ -1264,11 +1262,11 @@ impl Connection {
         }
         let output = self.process_multiple_output(now, max_datagrams);
         #[cfg(feature = "build-fuzzing-corpus")]
-        if self.test_frame_writer.is_none() {
-            if let OutputBatch::DatagramBatch(batch) = &output {
-                for dgram in batch.iter() {
-                    neqo_common::write_item_to_fuzzing_corpus("packet", &dgram);
-                }
+        if self.test_frame_writer.is_none()
+            && let OutputBatch::DatagramBatch(batch) = &output
+        {
+            for dgram in batch.iter() {
+                neqo_common::write_item_to_fuzzing_corpus("packet", &dgram);
             }
         }
         output
@@ -2291,11 +2289,11 @@ impl Connection {
 
         let stats = &mut self.stats.borrow_mut();
         let frame_stats = &mut stats.frame_tx;
-        if self.role == Role::Server {
-            if let Some(t) = self.state_signaling.write_done(builder) {
-                tokens.push(t);
-                frame_stats.handshake_done += 1;
-            }
+        if self.role == Role::Server
+            && let Some(t) = self.state_signaling.write_done(builder)
+        {
+            tokens.push(t);
+            frame_stats.handshake_done += 1;
         }
 
         self.streams

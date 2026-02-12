@@ -83,12 +83,7 @@ jobs:
           tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful ' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: nss-version
-        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
-
       - uses: ./.github/actions/nss
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - name: Check
         run: |

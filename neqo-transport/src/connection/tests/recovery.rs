@@ -17,8 +17,8 @@ use super::{
     super::{Connection, ConnectionParameters, Output, State},
     AT_LEAST_PTO, DEFAULT_ADDR, DEFAULT_RTT, DEFAULT_STREAM_DATA, POST_HANDSHAKE_CWND,
     assert_full_cwnd, connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, cwnd,
-    default_client, default_server, fill_cwnd, maybe_authenticate, new_client, new_server,
-    send_and_receive, send_something,
+    default_client, default_server, fill_cwnd, maybe_authenticate, new_client, send_and_receive,
+    send_something,
 };
 use crate::{
     CloseReason, Error, Pmtud, Stats, StreamType,
@@ -1042,63 +1042,52 @@ fn pto_handshake_space_when_server_flight_lost() {
 fn server_resends_1rtt_on_undecryptable_handshake() {
     const HALF_RTT: Duration = Duration::from_millis(10);
     let mut now = now();
+    let mut client = default_client();
+    let mut server = default_server();
 
-    // Disable packet number randomization to make the test deterministic.
-    let params = ConnectionParameters::default().randomize_first_pn(false);
-    let mut client = new_client(params.clone());
-    let mut server = new_server(params);
+    // Flight 1: Client Initial (2 datagrams)
+    let c_init1 = client.process_output(now).dgram().unwrap();
+    let c_init2 = client.process_output(now).dgram().unwrap();
 
-    // Complete the handshake up to the point where client is Connected.
-    let pkt = client.process_output(now).dgram();
-    let pkt2 = client.process_output(now).dgram();
+    // Flight 2: Server Initial + Handshake (2 datagrams)
     now += HALF_RTT;
-    server.process_input(pkt.unwrap(), now);
-    let pkt = server.process(pkt2, now).dgram();
+    server.process_input(c_init1, now);
+    let s_hs1 = server.process(Some(c_init2), now).dgram().unwrap();
+    let s_hs2 = server.process_output(now).dgram().unwrap();
+
+    // Flight 3: Client receives server flight, reaches AuthenticationNeeded
     now += HALF_RTT;
-    let pkt = client.process(pkt, now).dgram();
-    now += HALF_RTT;
-    let pkt = server.process(pkt, now).dgram();
-    now += HALF_RTT;
-    let pkt = client.process(pkt, now).dgram();
-    now += HALF_RTT;
-    let pkt = server.process(pkt, now).dgram();
-    assert!(pkt.is_none());
-    now += HALF_RTT;
-    client.authenticated(AuthenticationStatus::Ok, now);
+    client.process_input(s_hs1, now);
+    client.process_input(s_hs2, now);
+    assert!(maybe_authenticate(&mut client));
 
     // Client sends Handshake Finished, enters Connected state.
     let client_finished = client.process_output(now).dgram();
     assert_eq!(*client.state(), State::Connected);
-    now += HALF_RTT;
 
     // Server receives client Finished, enters Confirmed state.
-    // Server sends Handshake ACK + 1-RTT `HANDSHAKE_DONE`.
+    now += HALF_RTT;
     let server_confirmed_time = now;
-    let _s_hs_done = server.process(client_finished, now).dgram();
+    _ = server.process(client_finished, now).dgram();
     assert_eq!(*server.state(), State::Confirmed);
     assert_eq!(server.stats().frame_tx.handshake_done, 1);
 
-    // Retransmit the Finished.
-    let client_pto = client.process_output(now).callback();
-    now += client_pto;
-    let c_hs_retrans = client.process_output(now).dgram();
-    assert!(c_hs_retrans.is_some());
+    // Retransmit the Finished via PTO.
+    now += client.process_output(now).callback();
+    let c_hs_retrans = client.process_output(now).dgram().unwrap();
 
-    // The retransmission is coalesced (Handshake + 1-RTT).
-    // Split it and only send the Handshake portion to the server.
-    let (c_hs_only, _) = split_datagram(c_hs_retrans.as_ref().unwrap());
+    // Split and send only the Handshake portion to the server.
+    let (c_hs_only, _) = split_datagram(&c_hs_retrans);
     assert!(is_handshake(&c_hs_only));
 
-    // Server receives the Handshake retransmission shortly after it entered
-    // Confirmed state (before its own PTO would fire). This receive_time is
-    // back in time relative to the client's current time.
+    // Server receives the Handshake retransmission shortly after entering Confirmed
+    // (back in time relative to the client, before server's PTO fires).
     let receive_time = server_confirmed_time + Duration::from_millis(1);
     let dropped_before = server.stats().dropped_rx;
     server.process_input(c_hs_only, receive_time);
     assert_eq!(server.stats().dropped_rx, dropped_before + 1);
 
-    // The server should resend 1-RTT data (`HANDSHAKE_DONE`) in response to an
-    // undecryptable Handshake packet.
+    // Server should resend HANDSHAKE_DONE.
     let s_response = server.process_output(receive_time).dgram();
     assert!(s_response.is_some());
     assert_eq!(server.stats().frame_tx.handshake_done, 2);

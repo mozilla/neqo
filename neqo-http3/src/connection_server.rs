@@ -260,10 +260,11 @@ impl Http3ServerHandler {
         session_id: StreamId,
         buf: &[u8],
         id: I,
+        now: Instant,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler
-            .webtransport_send_datagram(session_id, conn, buf, id)
+            .webtransport_send_datagram(session_id, conn, buf, id, now)
     }
 
     pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
@@ -272,10 +273,11 @@ impl Http3ServerHandler {
         session_id: StreamId,
         buf: &[u8],
         id: I,
+        now: Instant,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler
-            .connect_udp_send_datagram(session_id, conn, buf, id)
+            .connect_udp_send_datagram(session_id, conn, buf, id, now)
     }
 
     /// Process HTTTP3 layer.
@@ -497,10 +499,10 @@ impl Http3ServerHandler {
     ) -> Res<(usize, bool)> {
         qdebug!("[{self}] read_data from stream {stream_id}");
         let res = self.base_handler.read_data(conn, stream_id, buf, now);
-        if let Err(e) = &res {
-            if e.connection_error() {
-                self.close(conn, now, e);
-            }
+        if let Err(e) = &res
+            && e.connection_error()
+        {
+            self.close(conn, now, e);
         }
         res
     }

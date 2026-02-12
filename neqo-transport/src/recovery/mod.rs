@@ -71,7 +71,7 @@ impl SendProfile {
     }
 
     #[must_use]
-    pub fn new_paced() -> Self {
+    pub const fn new_paced() -> Self {
         // When pacing, we still allow ACK frames to be sent.
         Self {
             limit: ACK_ONLY_SIZE_LIMIT - 1,
@@ -715,11 +715,11 @@ impl Loss {
         self.confirmed_time = Some(now);
         // Up until now, the ApplicationData space has been ignored for PTO.
         // So maybe fire a PTO.
-        if let Some(pto) = self.pto_time(rtt, PacketNumberSpace::ApplicationData) {
-            if pto < now {
-                let probes = enum_set!(PacketNumberSpace::ApplicationData);
-                self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
-            }
+        if let Some(pto) = self.pto_time(rtt, PacketNumberSpace::ApplicationData)
+            && pto < now
+        {
+            let probes = enum_set!(PacketNumberSpace::ApplicationData);
+            self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
         }
     }
 

@@ -92,13 +92,13 @@ pub struct Http3ServerConnEvents {
 
 impl SendStreamEvents for Http3ServerConnEvents {
     fn send_closed(&self, stream_info: &Http3StreamInfo, close_type: CloseType) {
-        if close_type != CloseType::Done {
-            if let Some(error) = close_type.error() {
-                self.insert(Http3ServerConnEvent::StreamStopSending {
-                    stream_info: *stream_info,
-                    error,
-                });
-            }
+        if close_type != CloseType::Done
+            && let Some(error) = close_type.error()
+        {
+            self.insert(Http3ServerConnEvent::StreamStopSending {
+                stream_info: *stream_info,
+                error,
+            });
         }
     }
 

@@ -29,12 +29,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - id: nss-version
-        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
-
       - uses: ./.github/actions/nss
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - uses: ./.github/actions/rust
         with:
@@ -66,12 +61,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - id: nss-version
-        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
-
       - uses: ./.github/actions/nss
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - uses: ./.github/actions/rust
         with:
