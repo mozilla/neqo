@@ -7,8 +7,8 @@
 use neqo_transport::StreamType;
 
 use crate::{
-    features::extended_connect::{tests::webtransport::WtTest, CloseReason},
     Error,
+    features::extended_connect::{CloseReason, tests::webtransport::WtTest},
 };
 
 #[test]

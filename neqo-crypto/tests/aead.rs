@@ -8,8 +8,9 @@
 #![cfg(not(feature = "disable-encryption"))]
 
 use neqo_crypto::{
+    Aead, AeadTrait as _,
     constants::{Cipher, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-    hkdf, Aead, AeadTrait as _,
+    hkdf,
 };
 use test_fixture::fixture_init;
 

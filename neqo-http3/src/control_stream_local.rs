@@ -14,7 +14,7 @@ use neqo_common::qtrace;
 use neqo_transport::{Connection, StreamId, StreamType};
 use rustc_hash::FxHashMap as HashMap;
 
-use crate::{frames::HFrame, BufferedStream, Error, Http3StreamType, RecvStream, Res};
+use crate::{BufferedStream, Error, Http3StreamType, RecvStream, Res, frames::HFrame};
 
 pub const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
 

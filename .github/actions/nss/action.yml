@@ -3,8 +3,13 @@ description: Install NSS
 
 inputs:
   minimum-version:
-    description: "Minimum required version of NSS"
-    required: true
+    description: "Minimum required version of NSS. If not provided, reads from version-file."
+    required: false
+    default: ""
+  version-file:
+    description: "Path to file containing the minimum NSS version (relative to workspace root)"
+    required: false
+    default: "neqo-crypto/min_version.txt"
   target:
     description: "Target for cross-compilation"
     default: ""
@@ -12,6 +17,22 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Determine minimum NSS version
+      id: min-version
+      shell: bash
+      env:
+        MIN_VERSION_INPUT: ${{ inputs.minimum-version }}
+        VERSION_FILE: ${{ inputs.version-file }}
+      run: |
+        if [ -n "$MIN_VERSION_INPUT" ]; then
+          echo "minimum=$MIN_VERSION_INPUT" >> "$GITHUB_OUTPUT"
+        elif [ -f "$VERSION_FILE" ]; then
+          echo "minimum=$(cat "$VERSION_FILE")" >> "$GITHUB_OUTPUT"
+        else
+          echo "::error::No minimum-version provided and version file '$VERSION_FILE' not found"
+          exit 1
+        fi
+
     - name: Install system NSS (Linux)
       shell: bash
       if: ${{ runner.os == 'Linux' && inputs.target == '' && (runner.environment != 'self-hosted' || contains(runner.name, 'CodSpeed')) }}
@@ -31,7 +52,7 @@ runs:
     - name: Check system NSS version
       id: system_nss
       env:
-        MIN_VERSION: ${{ inputs.minimum-version }}
+        MIN_VERSION: ${{ steps.min-version.outputs.minimum }}
       shell: bash
       if: inputs.target == ''
       run: |
@@ -104,10 +125,13 @@ runs:
         . /etc/os-release
         echo "codename=-$UBUNTU_CODENAME" >> "$GITHUB_OUTPUT"
 
-    - name: Cache NSS
+    # Use restore-only here so PRs don't create redundant caches. PRs restore
+    # from main; only main saves new caches. This reduces churn and evictions.
+    # Downside: PRs that change NSS version/build will rebuild on every CI run.
+    - name: Restore NSS cache
       id: cache
       if: ${{ !steps.system_nss.outputs.suitable }}
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
       with:
         path: dist
         key: nss-${{ inputs.target || runner.os }}${{ steps.ubuntu_release.outputs.codename }}-${{ runner.arch }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
@@ -119,7 +143,7 @@ runs:
         CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
       shell: bash
       run: |
-        if [ ! "$CACHE_HIT" ]; then
+        if [ "$CACHE_HIT" != "true" ]; then
           echo "Building NSS from source"
           echo "build_nss=1" >> "$GITHUB_OUTPUT"
         else
@@ -239,3 +263,10 @@ runs:
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
           $NSS_DIR/build.sh -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static
         fi
+
+    - name: Save NSS cache
+      if: ${{ steps.check_build.outputs.build_nss && github.event_name != 'pull_request' }}
+      uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      with:
+        path: dist
+        key: nss-${{ inputs.target || runner.os }}${{ steps.ubuntu_release.outputs.codename }}-${{ runner.arch }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}

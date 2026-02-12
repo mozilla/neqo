@@ -19,13 +19,13 @@ use neqo_common::{Bytes, Header, Role};
 use neqo_transport::StreamId;
 
 use crate::{
+    Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res, SendStreamEvents,
     client_events::Http3ClientEvents,
     features::{
-        extended_connect::session::{CloseReason, Protocol},
         NegotiationState,
+        extended_connect::session::{CloseReason, Protocol},
     },
     settings::{HSettingType, HSettings},
-    Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res, SendStreamEvents,
 };
 
 pub(crate) trait ExtendedConnectEvents: Debug {

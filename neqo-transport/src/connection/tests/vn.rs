@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use neqo_common::{event::Provider as _, Decoder, Dscp, Encoder};
+use neqo_common::{Decoder, Dscp, Encoder, event::Provider as _};
 use test_fixture::{
     assertions::{self, assert_initial, assert_version},
     datagram, now, split_datagram, strip_padding,
@@ -18,14 +18,14 @@ use super::{
     send_something,
 };
 use crate::{
+    ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Stats, Version,
     connection::{
         test_internal,
-        tests::{connect_rtt_idle_with_modifier, AT_LEAST_PTO},
+        tests::{AT_LEAST_PTO, connect_rtt_idle_with_modifier},
     },
     frame::FrameType,
     packet::{self},
     tparams::{TransportParameter, TransportParameterId::*},
-    ConnectionParameters, Error, Stats, Version, MIN_INITIAL_PACKET_SIZE,
 };
 
 // The expected PTO duration after the first Initial is sent.
@@ -508,9 +508,11 @@ fn compatible_upgrade_0rtt_rejected() {
     assertions::assert_coalesced_0rtt(&initial2);
     server.process_input(initial, now());
     server.process_input(initial2, now());
-    assert!(!server
-        .events()
-        .any(|e| matches!(e, ConnectionEvent::NewStream { .. })));
+    assert!(
+        !server
+            .events()
+            .any(|e| matches!(e, ConnectionEvent::NewStream { .. }))
+    );
 
     // Finalize the connection.  Don't use connect() because it uses
     // maybe_authenticate() too liberally and that eats the events we want to check.

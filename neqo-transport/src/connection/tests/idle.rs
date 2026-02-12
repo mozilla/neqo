@@ -6,14 +6,14 @@
 
 use std::time::{Duration, Instant};
 
-use neqo_common::{qtrace, qwarn, Encoder};
+use neqo_common::{Encoder, qtrace, qwarn};
 use test_fixture::now;
 
 use super::{
     super::{Connection, ConnectionParameters, IdleTimeout, Output, State},
-    connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, default_client,
-    default_server, maybe_authenticate, new_client, new_server, send_and_receive, send_something,
-    AT_LEAST_PTO, DEFAULT_STREAM_DATA,
+    AT_LEAST_PTO, DEFAULT_STREAM_DATA, connect, connect_force_idle, connect_rtt_idle,
+    connect_with_rtt, default_client, default_server, maybe_authenticate, new_client, new_server,
+    send_and_receive, send_something,
 };
 use crate::{
     packet, recovery,

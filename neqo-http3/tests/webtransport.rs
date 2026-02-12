@@ -17,8 +17,8 @@ use neqo_http3::{
 };
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use test_fixture::{
-    anti_replay, exchange_packets, fixture_init, now, CountingConnectionIdGenerator, DEFAULT_ADDR,
-    DEFAULT_ALPN_H3, DEFAULT_KEYS, DEFAULT_SERVER_NAME,
+    CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
+    DEFAULT_SERVER_NAME, anti_replay, exchange_packets, fixture_init, now,
 };
 
 fn connect() -> (Http3Client, Http3Server) {
@@ -466,7 +466,7 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
     wt_server_session
         .response(&SessionAcceptAction::Accept, now)
         .unwrap();
-    wt_server_session.send_datagram(b"PING", None).unwrap();
+    wt_server_session.send_datagram(b"PING", None, now).unwrap();
     let accept_and_wt_datagram = server
         .process_output(now)
         .dgram()

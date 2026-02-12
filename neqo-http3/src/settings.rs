@@ -6,7 +6,7 @@
 
 use std::ops::Deref;
 
-use neqo_common::{qdebug, Buffer, Decoder, Encoder};
+use neqo_common::{Buffer, Decoder, Encoder, qdebug};
 use neqo_crypto::{ZeroRttCheckResult, ZeroRttChecker};
 
 use crate::{Error, Http3Parameters, Res};
@@ -149,10 +149,10 @@ impl HSettings {
             let t = dec.decode_varint();
             let v = dec.decode_varint();
 
-            if let Some(settings_type) = t {
-                if H3_RESERVED_SETTINGS.contains(&settings_type) {
-                    return Err(Error::HttpSettings);
-                }
+            if let Some(settings_type) = t
+                && H3_RESERVED_SETTINGS.contains(&settings_type)
+            {
+                return Err(Error::HttpSettings);
             }
             match (t, v) {
                 (Some(SETTINGS_MAX_HEADER_LIST_SIZE), Some(value)) => self

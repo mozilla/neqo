@@ -15,15 +15,15 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{header::HeadersExt as _, hex, qdebug, qerror, qinfo, Datagram, Header};
-use neqo_crypto::{generate_ech_keys, random, AntiReplay};
+use neqo_common::{Datagram, Header, header::HeadersExt as _, hex, qdebug, qerror, qinfo};
+use neqo_crypto::{AntiReplay, generate_ech_keys, random};
 use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
 };
-use neqo_transport::{server::ValidateAddress, ConnectionIdGenerator, OutputBatch};
+use neqo_transport::{ConnectionIdGenerator, OutputBatch, server::ValidateAddress};
 use rustc_hash::FxHashMap as HashMap;
 
-use super::{qns_read_response, Args};
+use super::{Args, qns_read_response};
 use crate::send_data::SendData;
 
 pub struct HttpServer {
@@ -159,14 +159,13 @@ impl super::HttpServer for HttpServer {
                     }
                 }
                 Http3ServerEvent::DataWritable { stream } => {
-                    if self.posts.get_mut(&stream).is_none() {
-                        if let Some(remaining) = self.remaining_data.get_mut(&stream.stream_id()) {
-                            let done =
-                                remaining.send(|chunk| stream.send_data(chunk, now).unwrap());
-                            if done {
-                                self.remaining_data.remove(&stream.stream_id());
-                                stream.stream_close_send(now).unwrap();
-                            }
+                    if self.posts.get_mut(&stream).is_none()
+                        && let Some(remaining) = self.remaining_data.get_mut(&stream.stream_id())
+                    {
+                        let done = remaining.send(|chunk| stream.send_data(chunk, now).unwrap());
+                        if done {
+                            self.remaining_data.remove(&stream.stream_id());
+                            stream.stream_close_send(now).unwrap();
                         }
                     }
                 }
@@ -175,25 +174,23 @@ impl super::HttpServer for HttpServer {
                     if let Some((received, _)) = self.posts.get_mut(&stream) {
                         *received += data.len();
                     }
-                    if fin {
-                        if let Some((received, response_size)) = self.posts.remove(&stream) {
-                            let mut response = response_size.map_or_else(
-                                || SendData::from(received.to_string().into_bytes()),
-                                SendData::zeroes,
-                            );
+                    if fin && let Some((received, response_size)) = self.posts.remove(&stream) {
+                        let mut response = response_size.map_or_else(
+                            || SendData::from(received.to_string().into_bytes()),
+                            SendData::zeroes,
+                        );
 
-                            stream
-                                .send_headers(&[
-                                    Header::new(":status", "200"),
-                                    Header::new("content-length", response.len().to_string()),
-                                ])
-                                .unwrap();
-                            let done = response.send(|chunk| stream.send_data(chunk, now).unwrap());
-                            if done {
-                                stream.stream_close_send(now).unwrap();
-                            } else {
-                                self.remaining_data.insert(stream.stream_id(), response);
-                            }
+                        stream
+                            .send_headers(&[
+                                Header::new(":status", "200"),
+                                Header::new("content-length", response.len().to_string()),
+                            ])
+                            .unwrap();
+                        let done = response.send(|chunk| stream.send_data(chunk, now).unwrap());
+                        if done {
+                            stream.stream_close_send(now).unwrap();
+                        } else {
+                            self.remaining_data.insert(stream.stream_id(), response);
                         }
                     }
                 }

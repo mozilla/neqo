@@ -15,17 +15,18 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Buffer, Encoder, Role};
+use neqo_common::{Buffer, Encoder, Role, hex, hex_snip_middle, qdebug, qinfo, qtrace};
 pub use neqo_crypto::Epoch;
 use neqo_crypto::{
-    hkdf, hp, random, Aead, AeadTrait as _, Agent, AntiReplay, Cipher, Error as CryptoError,
-    HandshakeState, PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey,
-    ZeroRttChecker, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
-    TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1,
-    TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
+    Aead, AeadTrait as _, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState,
+    PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, TLS_AES_128_GCM_SHA256,
+    TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1,
+    TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519,
+    TLS_VERSION_1_3, ZeroRttChecker, hkdf, hp, random,
 };
 
 use crate::{
+    ConnectionParameters, Error, Res,
     cid::ConnectionIdRef,
     frame::{FrameEncoder as _, FrameType},
     packet::{self},
@@ -37,7 +38,6 @@ use crate::{
     tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler},
     tracking::PacketNumberSpace,
     version::Version,
-    ConnectionParameters, Error, Res,
 };
 
 /// The number of invocations remaining on a write cipher before we try
@@ -483,7 +483,9 @@ impl CryptoDxState {
         cipher: Cipher,
         min_pn: packet::Number,
     ) -> Res<Self> {
-        qdebug!("Making {direction:?} {epoch:?} CryptoDxState, v={version:?} cipher={cipher} min_pn={min_pn}",);
+        qdebug!(
+            "Making {direction:?} {epoch:?} CryptoDxState, v={version:?} cipher={cipher} min_pn={min_pn}",
+        );
         let hplabel = String::from(version.label_prefix()) + "hp";
         Ok(Self {
             version,
@@ -1176,10 +1178,10 @@ impl CryptoStates {
         debug_assert!(self.app_write.is_none());
         debug_assert_ne!(self.cipher, 0);
         let mut app = CryptoDxAppData::new(version, CryptoDxDirection::Write, secret, self.cipher)?;
-        if let Some(z) = &self.zero_rtt {
-            if z.direction == CryptoDxDirection::Write {
-                app.dx.continuation(z)?;
-            }
+        if let Some(z) = &self.zero_rtt
+            && z.direction == CryptoDxDirection::Write
+        {
+            app.dx.continuation(z)?;
         }
         self.zero_rtt = None;
         self.app_write = Some(app);
@@ -1249,12 +1251,12 @@ impl CryptoStates {
     /// If that is close, update them if possible.  Failing to update at
     /// this stage is cause for a fatal error.
     pub fn auto_update(&mut self) -> Res<()> {
-        if let Some(app_write) = self.app_write.as_ref() {
-            if app_write.dx.should_update() {
-                qinfo!("[{self}] Initiating automatic key update");
-                if !self.maybe_update_write()? {
-                    return Err(Error::KeysExhausted);
-                }
+        if let Some(app_write) = self.app_write.as_ref()
+            && app_write.dx.should_update()
+        {
+            qinfo!("[{self}] Initiating automatic key update");
+            if !self.maybe_update_write()? {
+                return Err(Error::KeysExhausted);
             }
         }
         Ok(())
@@ -1529,10 +1531,10 @@ impl CryptoStreams {
     /// Resend any Initial or Handshake CRYPTO frames that might be outstanding.
     /// This can help speed up handshake times.
     pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
-        if space != PacketNumberSpace::ApplicationData {
-            if let Some(cs) = self.get_mut(space) {
-                cs.tx.unmark_sent();
-            }
+        if space != PacketNumberSpace::ApplicationData
+            && let Some(cs) = self.get_mut(space)
+        {
+            cs.tx.unmark_sent();
         }
     }
 
