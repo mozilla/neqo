@@ -69,6 +69,7 @@ codspeed.mode = "simulation"
 [[package.metadata.bench]]
 name = "streams_walltime"
 codspeed.mode = "walltime"
+codspeed.memory = false # FIXME: Disabled due to high variance in results.
 
 [[bench]]
 name = "streams_walltime"
