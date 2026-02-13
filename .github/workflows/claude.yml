@@ -34,9 +34,17 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+
+      - name: Restore trusted instruction files from base branch
+        env:
+          BASE_REPO: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --depth=1 "https://github.com/$BASE_REPO" "$BASE_SHA"
+          # Overwrite instruction files with the trusted base-branch versions.
+          git checkout FETCH_HEAD -- .github/copilot-instructions.md 2>/dev/null || true
 
       - name: Run Claude Code Review
         id: claude
@@ -86,8 +94,6 @@ jobs:
 
             Follow the detailed instructions in `.github/copilot-instructions.md`
             as you prepare your review for the different focus areas listed above.
-            If that file is changed as part of a PR, use the changed version instead
-            of the file in the main branch.
 
             Provide detailed feedback using inline comments for specific issues,
             including GitHub suggestions in the comments whenever possible.

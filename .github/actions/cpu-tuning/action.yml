@@ -1,0 +1,108 @@
+name: CPU tuning for benchmarks
+description: Configure CPU for consistent benchmark performance (disable turbo boost, SMT, set performance governor)
+
+inputs:
+  select-cpus:
+    description: Whether to select physical CPUs for pinning (outputs server-cpu and client-cpu)
+    default: 'false'
+
+outputs:
+  server-cpu:
+    description: CPU number to pin server to (only set if select-cpus is true)
+    value: ${{ steps.select-cpus.outputs.server-cpu }}
+  client-cpu:
+    description: CPU number to pin client to (only set if select-cpus is true)
+    value: ${{ steps.select-cpus.outputs.client-cpu }}
+
+runs:
+  using: composite
+  steps:
+    - name: Show CPU information
+      shell: bash
+      run: |
+        lscpu || echo "::warning::lscpu not available"
+        cat /sys/devices/system/cpu/online || echo "::warning::Failed to read online CPUs"
+        echo "CPU max frequencies (to identify big/little cores)"
+        for f in /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq; do
+          if [ -f "$f" ]; then
+            cpu=$(echo "$f" | grep -o 'cpu[0-9]*')
+            freq=$(cat "$f")
+            echo "$cpu: $freq kHz"
+          fi
+        done
+
+    - name: Apply CPU tuning
+      shell: bash
+      run: |
+        tune_sysfs() {
+          local file="$1" desired="$2" desc="$3" skip="${4:-}"
+          [ -f "$file" ] || return 0
+          local current
+          current=$(cat "$file" 2>/dev/null) || return 0
+          if [ -n "$skip" ]; then
+            if [[ "$current" =~ $skip ]]; then
+              echo "$desc: already ok ($current)"
+              return 0
+            fi
+          elif [ "$current" = "$desired" ]; then
+            echo "$desc: already set to $desired"
+            return 0
+          fi
+          if ! echo "$desired" | sudo tee "$file" > /dev/null 2>&1; then
+            echo "::warning::$desc: failed to set $desired (current: $current)"
+          fi
+        }
+
+        for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+          tune_sysfs "$gov" "performance" "CPU governor ($gov)"
+        done
+        tune_sysfs /sys/devices/system/cpu/smt/control "off" "SMT" "^(off|forceoff|notsupported|notimplemented)$"
+        for boost in /sys/devices/system/cpu/cpufreq/policy*/boost; do
+          tune_sysfs "$boost" "0" "Boost ($boost)"
+        done
+
+    - name: Select CPUs for pinning
+      id: select-cpus
+      if: inputs.select-cpus == 'true'
+      shell: bash
+      run: |
+        # Find physical cores by looking at core_id. Cores with the same core_id are SMT siblings.
+        # We want two different physical cores for server and client.
+        declare -A core_to_cpu
+        for cpu_path in /sys/devices/system/cpu/cpu[0-9]*; do
+          cpu=$(basename "$cpu_path")
+          cpu_num=${cpu#cpu}
+          core_id_file="$cpu_path/topology/core_id"
+          if [ -f "$core_id_file" ]; then
+            core_id=$(cat "$core_id_file")
+            # Only keep the first CPU for each physical core
+            if [ -z "${core_to_cpu[$core_id]}" ]; then
+              core_to_cpu[$core_id]=$cpu_num
+            fi
+          fi
+        done
+        # Get list of unique physical cores
+        mapfile -t physical_cpus < <(printf '%s\n' "${core_to_cpu[@]}")
+        echo "Physical core CPU mapping: ${core_to_cpu[*]}"
+        echo "Available physical cores (first CPU of each): ${physical_cpus[*]}"
+
+        # Select two different physical cores, preferring higher-numbered ones
+        # (to avoid interference with system processes typically on CPU 0)
+        mapfile -t sorted < <(printf '%s\n' "${physical_cpus[@]}" | sort -rn)
+        if [ ${#sorted[@]} -ge 2 ]; then
+          SERVER_CPU=${sorted[0]}
+          CLIENT_CPU=${sorted[1]}
+        elif [ ${#sorted[@]} -eq 1 ]; then
+          SERVER_CPU=${sorted[0]}
+          CLIENT_CPU=${sorted[0]}
+          echo "::warning::Only one physical core available, server and client will share CPU $SERVER_CPU"
+        else
+          SERVER_CPU=0
+          CLIENT_CPU=1
+          echo "::warning::Could not determine physical cores, using CPUs 0 and 1"
+        fi
+        echo "Selected SERVER_CPU=$SERVER_CPU, CLIENT_CPU=$CLIENT_CPU"
+        {
+          echo "server-cpu=$SERVER_CPU"
+          echo "client-cpu=$CLIENT_CPU"
+        } >> "$GITHUB_OUTPUT"

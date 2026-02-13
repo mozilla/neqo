@@ -495,6 +495,7 @@ fn connect_udp_operation_on_fetch_stream() {
 }
 
 #[test]
+#[expect(clippy::too_many_lines, reason = "OK for a test.")]
 fn session_lifecycle_with_http_datagram_capsule() {
     fixture_init();
     neqo_common::log::init(None);

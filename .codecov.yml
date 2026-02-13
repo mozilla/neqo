@@ -1,8 +1,10 @@
 # neqo has no test coverage for its example client and server, and for the fuzzing code.
+# Also ignore the test fixture and the bindings for the `mtu` component.
 ignore:
   - "fuzz"
   - "neqo-bin"
   - "test-fixture"
+  - "mtu/src/bindings"
 
 # Coverage flags for each platform. Carryforward reuses cached coverage if an upload fails.
 flags:
