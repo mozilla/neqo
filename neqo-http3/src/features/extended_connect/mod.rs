@@ -49,6 +49,7 @@ pub(crate) trait ExtendedConnectEvents: Debug {
         reason: CloseReason,
         headers: Option<Vec<Header>>,
     );
+    fn session_draining(&self, connect_type: ExtendedConnectType, stream_id: StreamId);
     fn extended_connect_new_stream(
         &self,
         stream_info: Http3StreamInfo,

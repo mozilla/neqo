@@ -1486,7 +1486,7 @@ impl Http3Client {
 
         // Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY is "a signal to
         // applications to initiate shutdown for all WebTransport sessions":
-        // https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#name-interaction-with-the-http-3
+        // https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#name-interaction-with-the-http-3
         //
         // Emit Draining BEFORE resetting streams, because handle_stream_reset below
         // removes sessions with IDs >= goaway_stream_id from the stream tables, making
@@ -1657,6 +1657,21 @@ impl Http3Client {
             Box::new(self.events.clone()),
             send_group,
         )
+    }
+}
+
+impl Http3Client {
+    /// Write a `WT_DRAIN_SESSION` capsule to the given WebTransport session's send stream.
+    ///
+    /// Only used in tests to simulate graceful session drain initiated by the client.
+    #[cfg(test)]
+    pub fn test_wt_drain_session(
+        &mut self,
+        session_id: StreamId,
+        now: Instant,
+    ) -> Res<()> {
+        self.base_handler
+            .test_wt_drain_session(&mut self.conn, session_id, now)
     }
 }
 
