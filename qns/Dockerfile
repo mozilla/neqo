@@ -16,21 +16,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # We unfortunately need to build NSS from source, because the Debian package is
 # not compiled with support for SSLKEYLOGFILE.
 # See https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=842292
-# When NSPR and NSS versions are bumped, make sure to also update them in
-# .github/actions/nss/action.yml.
+# Versions and checksums are defined in .github/actions/nss/nss-versions.env.
 ENV NSS_DIR=/nss \
     NSS_TARGET=Release \
     NSS_PREBUILT=1 \
     NSPR_DIR=/nspr \
-    LD_LIBRARY_PATH=/dist/Release/lib \
-    NSPR_VERSION=4.38.2 \
-    NSS_VERSION=3.120
+    LD_LIBRARY_PATH=/dist/Release/lib
 
+COPY .github/actions/nss/nss-versions.env /tmp/
 RUN set -eux; \
+    . /tmp/nss-versions.env; \
     mkdir -p "$NSPR_DIR" "$NSS_DIR"; \
-    curl -L "https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz" | tar xz --strip-components=2 -C "$NSPR_DIR"; \
+    curl -L -o /tmp/nspr.tar.gz "https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz"; \
+    echo "$NSPR_SHA256  /tmp/nspr.tar.gz" | sha256sum -c; \
+    tar xzf /tmp/nspr.tar.gz --strip-components=2 -C "$NSPR_DIR"; \
+    rm /tmp/nspr.tar.gz; \
     NSS_TAG=$(echo "$NSS_VERSION" | tr '.' '_'); \
-    curl -L "https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_VERSION}.tar.gz" | tar xz --strip-components=2 -C "$NSS_DIR";
+    curl -L -o /tmp/nss.tar.gz "https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_VERSION}.tar.gz"; \
+    echo "$NSS_SHA256  /tmp/nss.tar.gz" | sha256sum -c; \
+    tar xzf /tmp/nss.tar.gz --strip-components=2 -C "$NSS_DIR"; \
+    rm /tmp/nss.tar.gz;
 RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 -o
 
 COPY --from=planner /app/recipe.json recipe.json

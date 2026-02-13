@@ -1,16 +1,17 @@
 name: CodSpeed
 on:
   push:
-    branches: ["main"] # To generate a performance baseline.
+    branches: ["main"]
   pull_request:
     branches: ["main"]
-  # `workflow_dispatch` allows CodSpeed to trigger backtest
-  # performance analysis in order to generate initial data.
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  RUSTUP_TOOLCHAIN: stable
+  # Performance comparison settings
+  TRANSFER_SIZE: 33554432  # 32 MiB
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -28,71 +29,23 @@ jobs:
     name: Determine bench matrix
     runs-on: ubuntu-24.04
     outputs:
-      benches: ${{ steps.benches.outputs.benches }}
-      walltime-benches: ${{ steps.benches.outputs.walltime_benches }}
-      has-walltime: ${{ steps.benches.outputs.has_walltime }}
+      benches: ${{ steps.matrix.outputs.benches }}
+      walltime-benches: ${{ steps.matrix.outputs.walltime-benches }}
+      has-walltime: ${{ steps.matrix.outputs.has-walltime }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - id: benches
-        run: |
-          # Create GitHub matrices where each entry is a bench with its
-          # associated crate, benchmarking mode, and runner taken from the
-          # Cargo metadata. Walltime benchmarks are split into a separate
-          # matrix since they are built on GitHub runners and only run on
-          # CodSpeed runners, while simulation and memory benchmarks build
-          # and run on GitHub runners.
-          # Memory profiling can be disabled by setting codspeed.memory = false
-          # in the package.metadata.bench entry.
-          ALL_BENCHES=$(cargo metadata --no-deps --format-version 1 | jq -c '
-            [.packages[] |
-              . as $pkg |
-              .targets[] |
-              select(.kind[] == "bench") |
-              select(has("required-features")) |
-              .name as $bench_name |
-              (($pkg.metadata.bench // []) | map(select(.name == $bench_name)) | .[0]) as $bench_meta |
-              (($bench_meta.codspeed.mode) // "simulation") as $cpu_mode |
-              (if $bench_meta.codspeed.memory == null then true else $bench_meta.codspeed.memory end) as $memory_enabled |
-              (
-                # CPU profiling entry (simulation or walltime)
-                {
-                  crate: $pkg.name,
-                  bench: $bench_name,
-                  mode: $cpu_mode
-                },
-                # Memory profiling entry (only if enabled)
-                if $memory_enabled then
-                  {
-                    crate: $pkg.name,
-                    bench: $bench_name,
-                    mode: "memory"
-                  }
-                else
-                  empty
-                end
-              )
-            ]')
+      - id: matrix
+        uses: ./.github/actions/bench-matrix
 
-          NON_WALLTIME=$(echo "$ALL_BENCHES" | jq -c '[.[] | select(.mode != "walltime") | . + {runner: "ubuntu-24.04"}]')
-          WALLTIME=$(echo "$ALL_BENCHES" | jq -c '[.[] | select(.mode == "walltime")]')
-          HAS_WALLTIME=$(echo "$WALLTIME" | jq 'length > 0')
-
-          {
-            echo "benches=$NON_WALLTIME"
-            echo "walltime_benches=$WALLTIME"
-            echo "has_walltime=$HAS_WALLTIME"
-          } >> "$GITHUB_OUTPUT"
-
-  # Build all walltime benchmarks on GitHub ARM runners.
+  # Build neqo for walltime benchmarks and perfcompare on ARM64.
   # CodSpeed's macro runners are aarch64, so we build on ARM for compatibility.
   # Using ubuntu-22.04 for glibc compatibility with CodSpeed runners.
-  build-walltime:
-    name: Build walltime benchmarks
+  build-neqo:
+    name: Build neqo
     runs-on: ubuntu-22.04-arm
     needs: bench-matrix
-    if: ${{ needs.bench-matrix.outputs.has-walltime == 'true' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -106,38 +59,104 @@ jobs:
 
       - uses: ./.github/actions/nss
 
-      - name: Build all walltime benchmarks
+      - name: Build neqo binaries
+        run: |
+          export RUSTFLAGS="-C force-frame-pointers=yes"
+          cargo build --locked --profile bench --features bench --bin neqo-client --bin neqo-server
+
+      - name: Build walltime benchmarks
+        if: needs.bench-matrix.outputs.has-walltime == 'true'
         env:
           WALLTIME_BENCHES: ${{ needs.bench-matrix.outputs.walltime-benches }}
         run: |
           echo "$WALLTIME_BENCHES" | jq -r '.[] | "\(.crate) \(.bench)"' | while read -r crate bench; do
-            echo "::group::Building $crate::$bench"
             cargo codspeed build --package "$crate" --locked --features bench --bench "$bench" --measurement-mode walltime
-            echo "::endgroup::"
           done
 
-      - name: Bundle build artifacts
+      - name: Bundle artifacts
         run: |
           mkdir -p dist/lib
+          # Neqo binaries
+          cp target/release/neqo-client target/release/neqo-server dist/
+          # Codspeed benchmarks
           cp -r target/codspeed dist/
+          # Test fixture for certificate database
           cp -r test-fixture dist/
+          # NSS/NSPR libraries
           if [ -d "$NSS_DIR/../dist/Release/lib" ]; then
-            # Built from source
             cp -L "$NSS_DIR"/../dist/Release/lib/*.so dist/lib/ 2>/dev/null || true
             cp -L "$NSS_DIR"/../dist/Release/lib/*.so.* dist/lib/ 2>/dev/null || true
           else
-            # System NSS - copy from standard library path
             for lib in nss3 nssutil3 smime3 ssl3 nspr4 plc4 plds4; do
               cp -L /usr/lib/*/lib${lib}.so* dist/lib/ 2>/dev/null || true
             done
           fi
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: codspeed-walltime-builds
+          name: build-neqo
           path: dist
           retention-days: 1
+
+  build-msquic:
+    name: Build msquic
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - uses: ./.github/actions/quic-build
+        with:
+          impl: msquic
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-name: build-msquic
+
+  build-google:
+    name: Build google/quiche
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - uses: ./.github/actions/quic-build
+        with:
+          impl: google
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-name: build-google
+
+  build-quiche:
+    name: Build cloudflare/quiche
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - uses: ./.github/actions/quic-build
+        with:
+          impl: quiche
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-name: build-quiche
+
+  build-s2n:
+    name: Build s2n-quic
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - uses: ./.github/actions/quic-build
+        with:
+          impl: s2n
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-name: build-s2n
 
   benchmarks:
     name: Run ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
@@ -169,7 +188,7 @@ jobs:
         run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
 
       - name: Run bench & upload results
-        uses: CodSpeedHQ/action@0700edb451d0e9f2426f99bd6977027e550fb2a6 # v4.7.0
+        uses: CodSpeedHQ/action@4deb3275dd364fb96fb074c953133d29ec96f80f # v4.10.6
         with:
           mode: ${{ matrix.bench.mode }}
           run: cargo codspeed run
@@ -180,7 +199,7 @@ jobs:
     runs-on: # zizmor: ignore[self-hosted-runner]
       group: codspeed
       labels: codspeed-macro
-    needs: [bench-matrix, build-walltime]
+    needs: [bench-matrix, build-neqo]
     if: ${{ needs.bench-matrix.outputs.has-walltime == 'true' }}
     strategy:
       fail-fast: false
@@ -197,10 +216,9 @@ jobs:
           tools: cargo-codspeed
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download build artifacts
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          name: codspeed-walltime-builds
+          name: build-neqo
           path: dist
 
       - name: Set up build artifacts
@@ -213,9 +231,166 @@ jobs:
             echo "NSS_DB_PATH=$GITHUB_WORKSPACE/dist/test-fixture/db"
           } >> "$GITHUB_ENV"
 
+      - name: Prepare machine
+        uses: ./.github/actions/cpu-tuning
+
       - name: Run bench & upload results
-        uses: CodSpeedHQ/action@0700edb451d0e9f2426f99bd6977027e550fb2a6 # v4.7.0
+        uses: CodSpeedHQ/action@4deb3275dd364fb96fb074c953133d29ec96f80f # v4.10.6
         with:
           mode: walltime
           run: cargo codspeed run --package ${{ matrix.bench.crate }} --bench ${{ matrix.bench.bench }}
           token: ${{ secrets.CODSPEED_TOKEN }}
+
+  perfcompare:
+    name: ${{ matrix.client }}-${{ matrix.server }}${{ matrix.cubic && '-cubic' || '' }}${{ matrix.pacing == false && '-nopacing' || '' }}
+    needs: [build-neqo, build-msquic, build-google, build-quiche, build-s2n]
+    runs-on: # zizmor: ignore[self-hosted-runner]
+      group: codspeed
+      labels: codspeed-macro
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # neqo vs neqo: all cc/pacing combinations
+          - {client: neqo,   server: neqo,   cubic: true,  pacing: true}
+          - {client: neqo,   server: neqo,   cubic: true,  pacing: false}
+          - {client: neqo,   server: neqo,   cubic: false, pacing: true}
+          - {client: neqo,   server: neqo,   cubic: false, pacing: false}
+          # Same-implementation baselines (cubic/pacing not applicable)
+          - {client: msquic, server: msquic}
+          - {client: google, server: google}
+          - {client: quiche, server: quiche}
+          - {client: s2n,    server: s2n}
+          # neqo vs others
+          - {client: neqo,   server: msquic, cubic: true,  pacing: true}
+          - {client: msquic, server: neqo,   cubic: true,  pacing: true}
+          - {client: neqo,   server: google, cubic: true,  pacing: true}
+          - {client: google, server: neqo,   cubic: true,  pacing: true}
+          - {client: neqo,   server: quiche, cubic: true,  pacing: true}
+          - {client: quiche, server: neqo,   cubic: true,  pacing: true}
+          - {client: neqo,   server: s2n,    cubic: true,  pacing: true}
+          - {client: s2n,    server: neqo,   cubic: true,  pacing: true}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/rust
+        with:
+          version: stable
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        if: matrix.client == 'neqo' || matrix.server == 'neqo'
+        with:
+          name: build-neqo
+          path: build-neqo
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        if: matrix.client != 'neqo'
+        with:
+          name: build-${{ matrix.client }}
+          path: build-${{ matrix.client }}
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        if: matrix.server != 'neqo' && matrix.server != matrix.client
+        with:
+          name: build-${{ matrix.server }}
+          path: build-${{ matrix.server }}
+
+      - run: chmod +x build-*/*
+
+      - name: Setup test environment
+        uses: ./.github/actions/testdata-setup
+        with:
+          sizes: ${{ env.TRANSFER_SIZE }}
+          mtu: '1500'
+
+      - name: Set environment
+        run: |
+          {
+            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/build-neqo/lib:$LD_LIBRARY_PATH"
+            echo "NSS_DB_PATH=$GITHUB_WORKSPACE/build-neqo/test-fixture/db"
+          } >> "$GITHUB_ENV"
+
+      - name: Prepare machine
+        id: cpu-tuning
+        uses: ./.github/actions/cpu-tuning
+        with:
+          select-cpus: 'true'
+
+      - name: Set CPU pinning environment
+        env:
+          SERVER_CPU: ${{ steps.cpu-tuning.outputs.server-cpu }}
+          CLIENT_CPU: ${{ steps.cpu-tuning.outputs.client-cpu }}
+        run: |
+          {
+            echo "SERVER_CPU=$SERVER_CPU"
+            echo "CLIENT_CPU=$CLIENT_CPU"
+          } >> "$GITHUB_ENV"
+
+      - name: Generate commands
+        id: commands
+        uses: ./.github/actions/perfcompare-commands
+        with:
+          client: ${{ matrix.client }}
+          server: ${{ matrix.server }}
+          size: ${{ env.TRANSFER_SIZE }}
+          cubic: ${{ matrix.cubic }}
+          pacing: ${{ matrix.pacing }}
+          neqo-path: ${{ github.workspace }}/build-neqo
+          msquic-path: ${{ github.workspace }}/build-msquic
+          google-path: ${{ github.workspace }}/build-google
+          quiche-path: ${{ github.workspace }}/build-quiche
+          s2n-path: ${{ github.workspace }}/build-s2n
+          testdata-path: ${{ github.workspace }}/testdata
+
+      - name: Set command environment
+        env:
+          BENCH_NAME: ${{ steps.commands.outputs.bench-name }}
+          SERVER_CMD: ${{ steps.commands.outputs.server-cmd }}
+          CLIENT_CMD: ${{ steps.commands.outputs.client-cmd }}
+        run: |
+          {
+            echo "BENCH_NAME=$BENCH_NAME"
+            echo "SERVER_CMD=$SERVER_CMD"
+            echo "CLIENT_CMD=$CLIENT_CMD"
+          } >> "$GITHUB_ENV"
+
+      - name: Start server
+        run: |
+          # shellcheck disable=SC2086
+          taskset -c "$SERVER_CPU" $SERVER_CMD &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          sleep 1
+
+      - name: Create benchmark config
+        run: |
+          {
+            echo "benchmarks:"
+            echo "  - name: \"$BENCH_NAME\""
+            echo "    exec: taskset -c $CLIENT_CPU $CLIENT_CMD"
+            echo "    options:"
+            echo "      min-rounds: 500"
+          } > codspeed.yml
+
+      - name: Run benchmark
+        uses: CodSpeedHQ/action@4deb3275dd364fb96fb074c953133d29ec96f80f # v4.10.6
+        with:
+          mode: walltime
+          working-directory: /tmp
+          config: ${{ github.workspace }}/codspeed.yml
+          token: ${{ secrets.CODSPEED_TOKEN }}
+
+      - name: Verify transfer
+        working-directory: /tmp
+        run: |
+          SIZE=$(stat -c%s "$TRANSFER_SIZE" 2>/dev/null || stat -f%z "$TRANSFER_SIZE")
+          if [[ "$SIZE" -lt "$TRANSFER_SIZE" ]]; then
+            echo "Transfer failed: expected $TRANSFER_SIZE bytes, got $SIZE"
+            exit 1
+          fi
+
+      - name: Stop server
+        if: always()
+        run: kill "$SERVER_PID" 2>/dev/null || true
+

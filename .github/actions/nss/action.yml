@@ -95,25 +95,39 @@ runs:
       id: nss
       if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
-      env:
-        NSS_VERSION: "3.120" # TODO: Bump this periodically; also in qns/Dockerfile. Trailing zeroes are stripped w/o quotes!
       run: |
+        # Versions and checksums are defined in nss-versions.env next to this action.
+        source "$GITHUB_ACTION_PATH/nss-versions.env"
         NSS_TAG="${NSS_VERSION//./_}"
         NSS_URL="https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_VERSION}.tar.gz"
         echo "Retrieving NSS $NSS_VERSION from $NSS_URL"
-        curl -L "$NSS_URL" | tar xz --strip-components=1
+        curl -L -o nss.tar.gz "$NSS_URL"
+        if command -v sha256sum &>/dev/null; then
+          echo "$NSS_SHA256  nss.tar.gz" | sha256sum -c
+        else
+          echo "$NSS_SHA256  nss.tar.gz" | shasum -a 256 -c
+        fi
+        tar xzf nss.tar.gz --strip-components=1
+        rm nss.tar.gz
         echo "version=$NSS_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Retrieve NSPR
       id: nspr
       if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
-      env:
-        NSPR_VERSION: "4.38.2" # TODO: Bump this periodically; also in qns/Dockerfile. Trailing zeroes are stripped w/o quotes!
       run: |
+        # Versions and checksums are defined in nss-versions.env next to this action.
+        source "$GITHUB_ACTION_PATH/nss-versions.env"
         NSPR_URL="https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz"
         echo "Retrieving NSPR $NSPR_VERSION from $NSPR_URL"
-        curl -L "$NSPR_URL" | tar xz --strip-components=1
+        curl -L -o nspr.tar.gz "$NSPR_URL"
+        if command -v sha256sum &>/dev/null; then
+          echo "$NSPR_SHA256  nspr.tar.gz" | sha256sum -c
+        else
+          echo "$NSPR_SHA256  nspr.tar.gz" | shasum -a 256 -c
+        fi
+        tar xzf nspr.tar.gz --strip-components=1
+        rm nspr.tar.gz
         echo "version=$NSPR_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Store Ubuntu release code name (Linux)
