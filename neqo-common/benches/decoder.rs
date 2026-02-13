@@ -13,6 +13,7 @@ use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use neqo_common::Decoder;
+use test_fixture::bench;
 
 /// Fill the buffer with sequentially increasing values, wrapping at 255.
 fn fill_buffer(n: usize, mask: u8) -> Vec<u8> {
@@ -47,5 +48,9 @@ fn benchmark_decoder(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, benchmark_decoder);
+criterion_group! {
+    name = benches;
+    config = bench::config_fast();
+    targets = benchmark_decoder
+}
 criterion_main!(benches);

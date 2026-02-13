@@ -13,6 +13,7 @@ use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use neqo_transport::recv_stream::RxStreamOrderer;
+use test_fixture::bench;
 
 fn rx_stream_orderer() {
     let mut rx = RxStreamOrderer::new();
@@ -29,5 +30,9 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group! {
+    name = benches;
+    config = bench::config_fast();
+    targets = criterion_benchmark
+}
 criterion_main!(benches);

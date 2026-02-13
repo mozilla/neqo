@@ -801,6 +801,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "strum",
+ "test-fixture",
  "thiserror",
  "tokio",
 ]
@@ -1292,6 +1293,7 @@ dependencies = [
 name = "test-fixture"
 version = "0.22.2"
 dependencies = [
+ "codspeed-criterion-compat",
  "log",
  "neqo-common",
  "neqo-crypto",
