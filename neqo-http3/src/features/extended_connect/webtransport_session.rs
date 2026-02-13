@@ -39,6 +39,7 @@ pub struct Session {
     negotiated_protocol: Option<String>,
     /// Send groups registered for this session.
     send_groups: HashSet<SendGroupId>,
+    draining: bool,
 }
 
 impl Display for Session {
@@ -59,8 +60,16 @@ impl Session {
             pending_streams: HashSet::default(),
             negotiated_protocol: None,
             send_groups: HashSet::default(),
+            draining: false,
         }
     }
+
+    /// Mark session as draining. Returns `true` if this was the first call
+    /// (i.e. the session was not already draining).
+    pub(crate) const fn set_draining(&mut self) -> bool {
+        !mem::replace(&mut self.draining, true)
+    }
+
     /// Register a send group with a caller-provided ID for this session.
     ///
     /// Returns an error if the ID is already in use.
@@ -87,7 +96,7 @@ impl Protocol for Session {
         // > datagrams until they can be associated with an
         // > established session.
         //
-        // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#section-4.5>
+        // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.5>
         #[expect(clippy::iter_over_hash_type, reason = "no defined order necessary")]
         for stream_id in self.pending_streams.drain() {
             events.extended_connect_new_stream(
@@ -127,31 +136,52 @@ impl Protocol for Session {
             )
             .map_err(|_| Error::HttpGeneralProtocolStream)?;
         qtrace!("[{self}] Received frame: {f:?} fin={fin}");
-        if let Some(WebTransportFrame::CloseSession { error, message }) = f {
-            events.session_end(
-                ExtendedConnectType::WebTransport,
-                self.id,
-                CloseReason::Clean { error, message },
-                None,
-            );
-            if fin {
-                Ok(Some(State::Done))
-            } else {
-                Ok(Some(State::FinPending))
+        match f {
+            Some(WebTransportFrame::CloseSession { error, message }) => {
+                events.session_end(
+                    ExtendedConnectType::WebTransport,
+                    self.id,
+                    CloseReason::Clean { error, message },
+                    None,
+                );
+                if fin {
+                    Ok(Some(State::Done))
+                } else {
+                    Ok(Some(State::FinPending))
+                }
             }
-        } else if fin {
-            events.session_end(
-                ExtendedConnectType::WebTransport,
-                self.id,
-                CloseReason::Clean {
-                    error: 0,
-                    message: String::new(),
-                },
-                None,
-            );
-            Ok(Some(State::Done))
-        } else {
-            Ok(None)
+            Some(WebTransportFrame::DrainSession) => {
+                if self.set_draining() {
+                    events.session_draining(ExtendedConnectType::WebTransport, self.id);
+                }
+                if fin {
+                    events.session_end(
+                        ExtendedConnectType::WebTransport,
+                        self.id,
+                        CloseReason::Clean {
+                            error: 0,
+                            message: String::new(),
+                        },
+                        None,
+                    );
+                    Ok(Some(State::Done))
+                } else {
+                    Ok(None)
+                }
+            }
+            None if fin => {
+                events.session_end(
+                    ExtendedConnectType::WebTransport,
+                    self.id,
+                    CloseReason::Clean {
+                        error: 0,
+                        message: String::new(),
+                    },
+                    None,
+                );
+                Ok(Some(State::Done))
+            }
+            None => Ok(None),
         }
     }
 
@@ -188,7 +218,7 @@ impl Protocol for Session {
                 // > streams and datagrams until they can be associated with an
                 // > established session.
                 //
-                // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#section-4.5>
+                // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.5>
                 self.pending_streams.insert(stream_id);
             }
             State::Active => {
@@ -282,5 +312,130 @@ impl Protocol for Session {
             "[{self}] WebTransport does not support datagram capsules."
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::RefCell, cmp::min, rc::Rc, time::Instant};
+
+    use neqo_common::{Bytes, Encoder, Header, Role};
+    use neqo_transport::{Connection, StreamId};
+    use test_fixture::{default_client, now};
+
+    use super::{Protocol as _, Session, State};
+    use crate::{
+        CloseType, Http3StreamInfo, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream,
+        features::extended_connect::{CloseReason, ExtendedConnectEvents, ExtendedConnectType},
+        frames::WebTransportFrame,
+    };
+
+    /// Records the session events emitted while a control-stream frame is processed.
+    #[derive(Debug, Default, Clone)]
+    struct RecordingEvents {
+        draining: Rc<RefCell<Vec<StreamId>>>,
+        ended: Rc<RefCell<Vec<(StreamId, CloseReason)>>>,
+    }
+
+    impl ExtendedConnectEvents for RecordingEvents {
+        fn session_start(&self, _: ExtendedConnectType, _: StreamId, _: u16, _: Vec<Header>) {}
+        fn session_end(
+            &self,
+            _: ExtendedConnectType,
+            stream_id: StreamId,
+            reason: CloseReason,
+            _: Option<Vec<Header>>,
+        ) {
+            self.ended.borrow_mut().push((stream_id, reason));
+        }
+        fn session_draining(&self, _: ExtendedConnectType, stream_id: StreamId) {
+            self.draining.borrow_mut().push(stream_id);
+        }
+        fn extended_connect_new_stream(&self, _: Http3StreamInfo, _: bool) -> Res<()> {
+            Ok(())
+        }
+        fn new_datagram(&self, _: StreamId, _: Bytes, _: ExtendedConnectType) {}
+    }
+
+    /// A [`RecvStream`] that serves `data` and reports the stream FIN together with its final
+    /// bytes, so `FrameReader` yields the frame with `fin = true`. This is the one case the
+    /// integration harness can't produce, because neqo sends a capsule and its FIN as separate
+    /// stream frames.
+    #[derive(Debug)]
+    struct FinWithFrameStream {
+        data: Vec<u8>,
+        offset: usize,
+    }
+
+    impl Stream for FinWithFrameStream {
+        fn stream_type(&self) -> Http3StreamType {
+            Http3StreamType::ExtendedConnect
+        }
+    }
+
+    impl RecvStream for FinWithFrameStream {
+        fn receive(&mut self, _conn: &mut Connection, _now: Instant) -> Res<(ReceiveOutput, bool)> {
+            unreachable!()
+        }
+        fn reset(&mut self, _close_type: CloseType) -> Res<()> {
+            unreachable!()
+        }
+        fn read_data(
+            &mut self,
+            _conn: &mut Connection,
+            buf: &mut [u8],
+            _now: Instant,
+        ) -> Res<(usize, bool)> {
+            let n = min(buf.len(), self.data.len() - self.offset);
+            buf[..n].copy_from_slice(&self.data[self.offset..self.offset + n]);
+            self.offset += n;
+            Ok((n, self.offset == self.data.len()))
+        }
+    }
+
+    /// draft-ietf-webtrans-http3-14 §4.7: a `WT_DRAIN_SESSION` capsule read together with the
+    /// stream FIN drains and cleanly closes the session, returning `State::Done` and emitting a
+    /// `Draining` event followed by a clean `SessionClosed` (error 0).
+    #[test]
+    fn drain_session_with_fin_ends_session() {
+        let session_id = StreamId::new(0);
+        let mut session = Session::new(session_id, Role::Client);
+
+        let mut enc = Encoder::default();
+        WebTransportFrame::DrainSession.encode(&mut enc);
+        let mut recv: Box<dyn RecvStream> = Box::new(FinWithFrameStream {
+            data: enc.into(),
+            offset: 0,
+        });
+
+        let recorder = RecordingEvents::default();
+        let mut events: Box<dyn ExtendedConnectEvents> = Box::new(recorder.clone());
+        let mut conn = default_client();
+
+        let state = session
+            .read_control_stream(&mut conn, &mut events, &mut recv, now())
+            .unwrap();
+
+        assert_eq!(
+            state,
+            Some(State::Done),
+            "capsule with FIN should transition the session to Done"
+        );
+        assert_eq!(
+            *recorder.draining.borrow(),
+            vec![session_id],
+            "expected a single Draining event"
+        );
+        assert_eq!(
+            *recorder.ended.borrow(),
+            vec![(
+                session_id,
+                CloseReason::Clean {
+                    error: 0,
+                    message: String::new(),
+                }
+            )],
+            "expected a clean SessionClosed with error 0"
+        );
     }
 }
