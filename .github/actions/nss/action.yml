@@ -96,7 +96,7 @@ runs:
       if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
       env:
-        NSS_VERSION: "3.120" # TODO: Bump this periodically; also in qns/Dockerfile. Trailing zeroes are stripped w/o quotes!
+        NSS_VERSION: "3.121" # TODO: Bump this periodically; also in qns/Dockerfile. Trailing zeroes are stripped w/o quotes!
       run: |
         NSS_TAG="${NSS_VERSION//./_}"
         NSS_URL="https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_VERSION}.tar.gz"
