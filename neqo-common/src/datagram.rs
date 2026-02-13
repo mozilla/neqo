@@ -256,8 +256,18 @@ impl Batch {
         })
     }
 
-    pub fn extend_from_slice(&mut self, data: &[u8]) {
+    /// Append a single datagram's payload to the batch.
+    ///
+    /// Returns `true` if appended successfully, `false` if rejected because:
+    /// - `data` is empty or larger than `datagram_size`, or
+    /// - the last datagram in the batch is partial (not yet full-sized).
+    pub fn push_datagram(&mut self, data: &[u8]) -> bool {
+        let seg = self.datagram_size.get();
+        if data.is_empty() || data.len() > seg || !self.d.len().is_multiple_of(seg) {
+            return false;
+        }
         self.d.extend_from_slice(data);
+        true
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = Datagram<&mut [u8]>> {
@@ -424,26 +434,52 @@ mod tests {
         assert_eq!(d2.as_ref(), &[1, 2, 3]);
     }
 
-    #[test]
-    fn batch_extend_from_slice() {
-        let mut batch = datagram::Batch::new(
-            DEFAULT_ADDR,
-            DEFAULT_ADDR,
+    fn batch_with_data(data: Vec<u8>) -> datagram::Batch {
+        datagram::Batch::new(
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234),
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678),
             Tos::default(),
             NonZeroUsize::new(4).unwrap(),
-            vec![1, 2, 3, 4],
-        );
-        assert_eq!(batch.num_datagrams(), 1);
+            data,
+        )
+    }
 
-        batch.extend_from_slice(&[5, 6, 7, 8]);
+    #[test]
+    fn batch_push_datagram() {
+        let mut batch = batch_with_data(vec![1, 2, 3, 4]);
+
+        assert!(batch.push_datagram(&[5, 6, 7, 8]));
+        assert_eq!(batch.num_datagrams(), 2);
+        assert_eq!(batch.data(), &[1, 2, 3, 4, 5, 6, 7, 8]);
+
+        // Smaller final datagram succeeds.
+        assert!(batch.push_datagram(&[9, 10]));
+        assert_eq!(batch.num_datagrams(), 3);
+    }
+
+    #[test]
+    fn batch_push_datagram_rejects_after_partial() {
+        let mut batch = batch_with_data(vec![0u8; 5]);
         assert_eq!(batch.num_datagrams(), 2);
 
-        batch.extend_from_slice(&[9, 10]);
-        assert_eq!(batch.num_datagrams(), 3);
-        let datagrams: Vec<_> = batch.iter().collect();
-        assert_eq!(datagrams[0].d, &[1, 2, 3, 4]);
-        assert_eq!(datagrams[1].d, &[5, 6, 7, 8]);
-        assert_eq!(datagrams[2].d, &[9, 10]);
+        assert!(!batch.push_datagram(&[1, 2, 3, 4]));
+        assert_eq!(batch.num_datagrams(), 2);
+    }
+
+    #[test]
+    fn batch_push_datagram_rejects_oversized() {
+        let mut batch = batch_with_data(vec![1, 2, 3, 4]);
+
+        assert!(!batch.push_datagram(&[0u8; 5]));
+        assert_eq!(batch.num_datagrams(), 1);
+    }
+
+    #[test]
+    fn batch_push_datagram_rejects_empty() {
+        let mut batch = batch_with_data(vec![1, 2, 3, 4]);
+
+        assert!(!batch.push_datagram(&[]));
+        assert_eq!(batch.num_datagrams(), 1);
     }
 
     #[test]
