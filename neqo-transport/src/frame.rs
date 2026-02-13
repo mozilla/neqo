@@ -46,6 +46,7 @@ pub enum FrameType {
     StreamsBlockedUniDi = 0x17,
     NewConnectionId = 0x18,
     RetireConnectionId = 0x19,
+    ResetStreamAt = 0x24,
     PathChallenge = 0x1a,
     PathResponse = 0x1b,
     ConnectionCloseTransport = 0x1c,
@@ -164,6 +165,12 @@ pub enum Frame<'a> {
         application_error_code: AppError,
         final_size: u64,
     },
+    ResetStreamAt {
+        stream_id: StreamId,
+        application_error_code: AppError,
+        final_size: u64,
+        reliable_size: u64,
+    },
     StopSending {
         stream_id: StreamId,
         application_error_code: AppError,
@@ -253,6 +260,7 @@ impl<'a> Frame<'a> {
             Self::Ping => FrameType::Ping,
             Self::Ack { .. } => FrameType::Ack,
             Self::ResetStream { .. } => FrameType::ResetStream,
+            Self::ResetStreamAt { .. } => FrameType::ResetStreamAt,
             Self::StopSending { .. } => FrameType::StopSending,
             Self::Crypto { .. } => FrameType::Crypto,
             Self::NewToken { .. } => FrameType::NewToken,
@@ -293,6 +301,7 @@ impl<'a> Frame<'a> {
         matches!(
             self,
             Self::ResetStream { .. }
+                | Self::ResetStreamAt { .. }
                 | Self::StopSending { .. }
                 | Self::Stream { .. }
                 | Self::MaxData { .. }
@@ -517,6 +526,18 @@ impl<'a> Frame<'a> {
                 final_size: match dec.decode_varint() {
                     Some(v) => v,
                     None => return Err(Error::NoMoreData),
+                },
+            }),
+            FrameType::ResetStreamAt => Ok(Self::ResetStreamAt {
+                stream_id: StreamId::from(dv(dec)?),
+                application_error_code: dv(dec)?,
+                final_size: match dec.decode_varint() {
+                    Some(v) => v,
+                    _ => return Err(Error::NoMoreData),
+                },
+                reliable_size: match dec.decode_varint() {
+                    Some(v) => v,
+                    _ => return Err(Error::NoMoreData),
                 },
             }),
             FrameType::Ack => decode_ack(dec, false),

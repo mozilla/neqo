@@ -552,6 +552,8 @@ impl ConnectionParameters {
         }
         tps.local_mut()
             .set_integer(MaxDatagramFrameSize, self.datagram_size);
+        tps.local_mut()
+            .set_empty(TransportParameterId::ResetStreamAt);
         Ok(tps)
     }
 }
