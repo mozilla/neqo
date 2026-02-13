@@ -20,14 +20,14 @@ workspace = true
 # Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 enum-map = { workspace = true }
 enumset = { workspace = true }
-indexmap = { version = "2.2", default-features = false } # See https://github.com/mozilla/neqo/issues/1858
+indexmap = { version = "2", default-features = false } # See https://github.com/mozilla/neqo/issues/1858
 log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
 mtu = { path = "../mtu" }
 qlog = { workspace = true }
 rustc-hash = { workspace = true }
-smallvec = { version = "1.13", default-features = false, features = ["union", "const_generics"] }
+smallvec = { version = "1", default-features = false, features = ["union", "const_generics"] }
 static_assertions = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
@@ -64,6 +64,11 @@ codspeed.memory = false # FIXME: Disabled due to high variance in results.
 [[package.metadata.bench]]
 name = "transfer_simulated"
 codspeed.mode = "simulation"
+codspeed.memory = false # Memory profiling is incompatible with iter_custom() because CodSpeed's instrumentation hooks are bypassed.
+
+[[package.metadata.bench]]
+name = "min_bandwidth"
+codspeed.memory = false # Not a Criterion benchmark; plain fn main() with simulated time.
 
 [[bench]]
 name = "transfer_walltime"

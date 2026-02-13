@@ -41,9 +41,9 @@ runs:
       # it's already installed by checking if the SCCACHE_ENABLED environment variable is set
       # (which every "use" of this action needs to therefore set)
       #
-      # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
-      # is too small for this to be effective there.
-      if: ${{ env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted' }}
+      # Only enable sccache on Mozilla's self-hosted runners, not on GitHub-hosted or
+      # CodSpeed runners (detected via runner name).
+      if: ${{ env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted' && !contains(runner.name, 'codspeed') }}
       uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
     # See https://corrode.dev/blog/tips-for-faster-ci-builds/
@@ -57,8 +57,8 @@ runs:
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
         } >> "$GITHUB_ENV"
 
-    - name: Enable sscache
-      if: ${{ runner.environment != 'github-hosted' }}
+    - name: Enable sccache
+      if: ${{ runner.environment != 'github-hosted' && !contains(runner.name, 'codspeed') }}
       env:
         RUNNER_ENVIRONMENT: ${{ runner.environment }}
       shell: bash
@@ -105,7 +105,8 @@ runs:
         TOOLS: ${{ inputs.tools }}
         RUNNER_OS: ${{ runner.os }}
       run: |
-        curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+        curl -L --proto '=https' --tlsv1.2 -sSf \
+          https://raw.githubusercontent.com/cargo-bins/cargo-binstall/ec80feb9e330418e014932e5982599255eff6dbb/install-from-binstall-release.sh | bash # v1.17.4
 
         for tool in $(echo $TOOLS | tr -d ","); do
           if [ "$tool" == "samply" ]; then
