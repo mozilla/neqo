@@ -273,6 +273,18 @@ impl Http3Server {
                             headers,
                         );
                     }
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::Draining {
+                        session_id,
+                    }) => {
+                        // A remote endpoint sent WT_DRAIN_SESSION, signalling it wishes to
+                        // gracefully close the session. Expose this to the server application.
+                        self.events
+                            .webtransport_session_draining(ServerSession::new(
+                                conn.clone(),
+                                Rc::clone(handler),
+                                session_id,
+                            ));
+                    }
                     Http3ServerConnEvent::WebTransport(WebTransportEvent::SessionClosed {
                         stream_id,
                         reason,
