@@ -22,8 +22,8 @@ use std::{
     os::fd::AsRawFd,
     process::{Command, Stdio},
     sync::{
-        atomic::{AtomicU32, Ordering},
         Once,
+        atomic::{AtomicU32, Ordering},
     },
 };
 
