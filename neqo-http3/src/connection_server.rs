@@ -222,6 +222,22 @@ impl Http3ServerHandler {
         self.needs_processing = true;
     }
 
+    /// Write a `WT_DRAIN_SESSION` capsule to the given WebTransport session's send stream.
+    ///
+    /// Only used in tests to simulate the server initiating graceful session drain.
+    #[cfg(test)]
+    pub fn test_webtransport_drain_session(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        now: Instant,
+    ) -> Res<()> {
+        self.base_handler
+            .test_webtransport_drain_session(conn, session_id, now)?;
+        self.needs_processing = true;
+        Ok(())
+    }
+
     /// Whether this connection has events to process, data to send, or a
     /// queued datagram past its max-age: without the last check, a
     /// connection whose only pending work is an expired datagram is never
