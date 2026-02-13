@@ -3889,6 +3889,13 @@ impl Connection {
             .add_datagram(buf, id.into(), &mut self.stats.borrow_mut())
     }
 
+    /// Returns the number of QUIC datagrams that can still be queued for
+    /// sending before the queue is full.
+    #[must_use]
+    pub fn datagram_send_queue_capacity(&self) -> usize {
+        self.quic_datagrams.send_queue_capacity()
+    }
+
     /// Return the PLMTU of the primary path.
     ///
     /// # Panics
