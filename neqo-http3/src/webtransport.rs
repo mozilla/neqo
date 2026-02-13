@@ -778,6 +778,16 @@ pub enum ServerEvent {
         session: ServerSession,
         datagram: Bytes,
     },
+    /// The remote endpoint sent a `WT_DRAIN_SESSION` capsule, signalling that
+    /// it wishes to gracefully close this session.
+    ///
+    /// The server application should stop creating new streams on the session
+    /// and close it once existing activity is complete.
+    ///
+    /// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.7>
+    Draining {
+        session: ServerSession,
+    },
 }
 
 pub(crate) trait ServerEvents {
@@ -790,6 +800,7 @@ pub(crate) trait ServerEvents {
     );
     fn webtransport_new_stream(&self, stream: Http3OrWebTransportStream);
     fn webtransport_datagram(&self, session: ServerSession, datagram: Bytes);
+    fn webtransport_session_draining(&self, session: ServerSession);
 }
 
 impl ServerEvents for Http3ServerEvents {
@@ -823,6 +834,12 @@ impl ServerEvents for Http3ServerEvents {
         self.insert(Http3ServerEvent::WebTransport(ServerEvent::Datagram {
             session,
             datagram,
+        }));
+    }
+
+    fn webtransport_session_draining(&self, session: ServerSession) {
+        self.insert(Http3ServerEvent::WebTransport(ServerEvent::Draining {
+            session,
         }));
     }
 }

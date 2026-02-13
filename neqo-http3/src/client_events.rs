@@ -264,6 +264,14 @@ impl ExtendedConnectEvents for Http3ClientEvents {
         self.insert(event);
     }
 
+    fn session_draining(&self, connect_type: ExtendedConnectType, stream_id: StreamId) {
+        if connect_type == ExtendedConnectType::WebTransport {
+            self.insert(Http3ClientEvent::WebTransport(
+                WebTransportEvent::Draining { stream_id },
+            ));
+        }
+    }
+
     fn extended_connect_new_stream(
         &self,
         stream_info: Http3StreamInfo,
