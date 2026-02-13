@@ -67,7 +67,7 @@ pub use self::{
             MAX_LOCAL_MAX_STREAM_DATA,
         },
     },
-    events::{ConnectionEvent, ConnectionEvents},
+    events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::CloseError,
     packet::MIN_INITIAL_PACKET_SIZE,
     pmtud::Pmtud,
