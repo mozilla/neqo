@@ -15,12 +15,14 @@ use std::{
     io::{self, IoSliceMut},
     iter,
     net::SocketAddr,
+    num::NonZeroUsize,
     slice::{self, ChunksMut},
 };
 
 use log::{Level, log_enabled};
 use neqo_common::{Datagram, Tos, datagram, qdebug, qtrace};
-use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
+pub use quinn_udp::{EcnCodepoint, Transmit};
+use quinn_udp::{RecvMeta, UdpSocketState};
 
 /// Receive buffer size
 ///
@@ -60,24 +62,30 @@ fn try_send_transmit(
     socket: quinn_udp::UdpSockRef<'_>,
     transmit: &Transmit<'_>,
 ) -> io::Result<()> {
+    let total_len = transmit.contents.len();
+    let segment_size = transmit.segment_size.unwrap_or(total_len);
+    let segment_count = if segment_size > 0 {
+        total_len.div_ceil(segment_size)
+    } else {
+        0
+    };
     match state.try_send(socket, transmit) {
         Ok(()) => {
             qtrace!(
-                "sent {} bytes to {}",
-                transmit.contents.len(),
+                "sent {total_len} bytes ({segment_count} segments of {segment_size} bytes) to {}",
                 transmit.destination,
             );
             Ok(())
         }
         Err(e) if is_emsgsize(&e) => {
             qdebug!(
-                "Failed to send {} bytes to {}. PMTUD probe? Ignoring error: {e}",
-                transmit.contents.len(),
+                "Failed to send {total_len} bytes ({segment_count} segments of {segment_size} bytes) to {}. \
+                 PMTUD probe? Ignoring error: {e}",
                 transmit.destination,
             );
             Ok(())
         }
-        e => e,
+        Err(e) => Err(e),
     }
 }
 
@@ -243,19 +251,21 @@ impl<S: SocketRef> Socket<S> {
     /// Send datagrams from a borrowed buffer, avoiding allocation.
     ///
     /// When `segment_size` is `Some`, the buffer is split into segments of that
-    /// size and sent using GSO in a single syscall.
+    /// size and may be sent using GSO/USO where supported, potentially in a
+    /// single syscall. The final segment may be shorter if `data.len()` is not
+    /// a multiple of `segment_size`.
     pub fn send_buffer(
         &self,
         destination: SocketAddr,
         tos: Tos,
         data: &[u8],
-        segment_size: Option<usize>,
+        segment_size: Option<NonZeroUsize>,
     ) -> io::Result<()> {
         let transmit = Transmit {
             destination,
             ecn: EcnCodepoint::from_bits(Into::<u8>::into(tos)),
             contents: data,
-            segment_size,
+            segment_size: segment_size.map(NonZeroUsize::get),
             src_ip: None,
         };
         try_send_transmit(&self.state, (&self.inner).into(), &transmit)
@@ -307,15 +317,15 @@ mod tests {
 
     fn recv_segments(
         receiver: &Socket<std::net::UdpSocket>,
+        recv_buf: &mut RecvBuf,
         expected_count: usize,
         expected_segment_size: usize,
     ) {
         let receiver_addr = receiver.inner.local_addr().unwrap();
         let mut num_received = 0;
-        let mut recv_buf = RecvBuf::default();
         while num_received < expected_count {
             receiver
-                .recv(receiver_addr, &mut recv_buf)
+                .recv(receiver_addr, recv_buf)
                 .expect("receive to succeed")
                 .for_each(|d| {
                     assert_eq!(
@@ -448,8 +458,6 @@ mod tests {
         ignore = "GRO not available"
     )]
     fn many_datagrams_through_gso_gro() -> Result<(), io::Error> {
-        use std::num::NonZeroUsize;
-
         const SEGMENT_SIZE: usize = 128;
 
         let sender = socket()?;
@@ -466,7 +474,8 @@ mod tests {
         );
 
         sender.send(&batch)?;
-        recv_segments(&receiver, max_gso_segments, SEGMENT_SIZE);
+        let mut recv_buf = RecvBuf::default();
+        recv_segments(&receiver, &mut recv_buf, max_gso_segments, SEGMENT_SIZE);
 
         Ok(())
     }
@@ -478,7 +487,8 @@ mod tests {
 
         let payload = b"Hello via send_buffer!";
         sender.send_buffer(receiver.inner.local_addr()?, Tos::default(), payload, None)?;
-        recv_segments(&receiver, 1, payload.len());
+        let mut recv_buf = RecvBuf::default();
+        recv_segments(&receiver, &mut recv_buf, 1, payload.len());
 
         Ok(())
     }
@@ -500,9 +510,10 @@ mod tests {
             receiver.inner.local_addr()?,
             Tos::default(),
             &payload,
-            Some(SEGMENT_SIZE),
+            Some(NonZeroUsize::new(SEGMENT_SIZE).expect("SEGMENT_SIZE cannot be zero")),
         )?;
-        recv_segments(&receiver, max_gso_segments, SEGMENT_SIZE);
+        let mut recv_buf = RecvBuf::default();
+        recv_segments(&receiver, &mut recv_buf, max_gso_segments, SEGMENT_SIZE);
 
         Ok(())
     }
