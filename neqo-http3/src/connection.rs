@@ -1440,6 +1440,29 @@ impl Http3Connection {
             .collect()
     }
 
+    /// Write a `WT_DRAIN_SESSION` capsule to the given session's send stream.
+    ///
+    /// Only used in tests to simulate graceful session drain.
+    #[cfg(test)]
+    pub(crate) fn test_webtransport_drain_session(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        now: Instant,
+    ) -> Res<()> {
+        use neqo_common::Encoder;
+        let send_stream = self
+            .send_streams
+            .get_mut(&session_id)
+            .ok_or(Error::InvalidStreamId)?;
+        let mut enc = Encoder::default();
+        crate::frames::WebTransportFrame::DrainSession.encode(&mut enc);
+        let bytes: Vec<u8> = enc.into();
+        send_stream.send_data(conn, &bytes, now)?;
+        self.streams_with_pending_data.insert(session_id);
+        Ok(())
+    }
+
     /// Get the negotiated protocol for a WebTransport session.
     ///
     /// Returns `Ok(None)` if no protocol was negotiated.
@@ -1608,7 +1631,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub(crate) fn validate_wt_session(
+    pub(crate) fn validate_webtransport_session(
         &self,
         session_id: StreamId,
     ) -> Res<Rc<RefCell<extended_connect::session::Session>>> {
@@ -1634,7 +1657,7 @@ impl Http3Connection {
     ) -> Res<StreamId> {
         qtrace!("Create new WebTransport stream session={session_id} type={stream_type:?}");
 
-        let wt = self.validate_wt_session(session_id)?;
+        let wt = self.validate_webtransport_session(session_id)?;
 
         let stream_id = conn
             .stream_create(stream_type)
