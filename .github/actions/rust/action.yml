@@ -105,7 +105,8 @@ runs:
         TOOLS: ${{ inputs.tools }}
         RUNNER_OS: ${{ runner.os }}
       run: |
-        curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+        curl -L --proto '=https' --tlsv1.2 -sSf \
+          https://raw.githubusercontent.com/cargo-bins/cargo-binstall/ec80feb9e330418e014932e5982599255eff6dbb/install-from-binstall-release.sh | bash # v1.17.4
 
         for tool in $(echo $TOOLS | tr -d ","); do
           if [ "$tool" == "samply" ]; then
