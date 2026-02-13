@@ -188,7 +188,7 @@ jobs:
         run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
 
       - name: Run bench & upload results
-        uses: CodSpeedHQ/action@0700edb451d0e9f2426f99bd6977027e550fb2a6 # v4.7.0
+        uses: CodSpeedHQ/action@4deb3275dd364fb96fb074c953133d29ec96f80f # v4.10.6
         with:
           mode: ${{ matrix.bench.mode }}
           run: cargo codspeed run
@@ -235,7 +235,7 @@ jobs:
         uses: ./.github/actions/cpu-tuning
 
       - name: Run bench & upload results
-        uses: CodSpeedHQ/action@0700edb451d0e9f2426f99bd6977027e550fb2a6 # v4.7.0
+        uses: CodSpeedHQ/action@4deb3275dd364fb96fb074c953133d29ec96f80f # v4.10.6
         with:
           mode: walltime
           run: cargo codspeed run --package ${{ matrix.bench.crate }} --bench ${{ matrix.bench.bench }}
@@ -373,12 +373,12 @@ jobs:
             echo "      min-rounds: 500"
           } > codspeed.yml
 
-      # TODO: Pin to release version once CodSpeed releases config file support
       - name: Run benchmark
-        uses: CodSpeedHQ/action@main # zizmor: ignore[unpinned-uses]
+        uses: CodSpeedHQ/action@4deb3275dd364fb96fb074c953133d29ec96f80f # v4.10.6
         with:
           mode: walltime
           working-directory: /tmp
+          config: ${{ github.workspace }}/codspeed.yml
           token: ${{ secrets.CODSPEED_TOKEN }}
 
       - name: Verify transfer

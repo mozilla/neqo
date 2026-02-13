@@ -123,12 +123,16 @@ runs:
             cd google-quiche-src
             git fetch --depth 1 origin "$GOOGLE_QUICHE_REF"
             git checkout FETCH_HEAD
-            # Use GCC 13 if available (needed for older Ubuntu)
-            if command -v gcc-13 &> /dev/null; then
-              sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 || true
-              sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100 || true
-              BAZEL_OPTS="--action_env=CC=gcc-13 --action_env=CXX=g++-13"
+            # GCC 13+ required for com_google_googleurl (CWG 2518 static_assert(false) in templates)
+            if ! command -v gcc-13 &> /dev/null; then
+              [ "$APT_UPDATED" ] || sudo apt-get update
+              sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+              echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+              sudo apt-get install -y --no-install-recommends gcc-13 g++-13
             fi
+            sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 || true
+            sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100 || true
+            BAZEL_OPTS="--action_env=CC=gcc-13 --action_env=CXX=g++-13"
             # shellcheck disable=SC2086
             bazel build -c opt \
               ${BAZEL_OPTS:-} \
