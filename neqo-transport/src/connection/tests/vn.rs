@@ -103,7 +103,7 @@ fn version_negotiation_current_version() {
 
     let dgram = datagram(vn);
     let mut delay = client.process(Some(dgram), now()).callback();
-    delay += client.process_output(now() + delay).callback(); // TODO: Why is there first a 5ms pacing delay before the PTO?
+    delay += client.process_output(now() + delay).callback(); // Pacing delay clears before PTO fires.
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
@@ -125,7 +125,7 @@ fn version_negotiation_version0() {
 
     let dgram = datagram(vn);
     let mut delay = client.process(Some(dgram), now()).callback();
-    delay += client.process_output(now() + delay).callback(); // TODO: Why is there first a 5ms pacing delay before the PTO?
+    delay += client.process_output(now() + delay).callback(); // Pacing delay clears before PTO fires.
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
@@ -170,7 +170,7 @@ fn version_negotiation_corrupted() {
 
     let dgram = datagram(vn[..vn.len() - 1].to_vec());
     let mut delay = client.process(Some(dgram), now()).callback();
-    delay += client.process_output(now() + delay).callback(); // TODO: Why is there first a 5ms pacing delay before the PTO?
+    delay += client.process_output(now() + delay).callback(); // Pacing delay clears before PTO fires.
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
@@ -192,7 +192,7 @@ fn version_negotiation_empty() {
 
     let dgram = datagram(vn);
     let mut delay = client.process(Some(dgram), now()).callback();
-    delay += client.process_output(now() + delay).callback(); // TODO: Why is there first a 5ms pacing delay before the PTO?
+    delay += client.process_output(now() + delay).callback(); // Pacing delay clears before PTO fires.
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
@@ -237,7 +237,7 @@ fn version_negotiation_bad_cid() {
 
     let dgram = datagram(vn);
     let mut delay = client.process(Some(dgram), now()).callback();
-    delay += client.process_output(now() + delay).callback(); // TODO: Why is there first a 5ms pacing delay before the PTO?
+    delay += client.process_output(now() + delay).callback(); // Pacing delay clears before PTO fires.
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
