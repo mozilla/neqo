@@ -11,6 +11,9 @@ inputs:
   codecov-token:
     description: 'Codecov token, if Codecov upload is desired.'
     default: ''
+  generate-bindings:
+    description: 'Generate and output bindgen bindings for BSD platforms.'
+    default: 'false'
 
 runs:
   using: composite
@@ -21,18 +24,19 @@ runs:
         WD: ${{ inputs.working-directory }}
         PLATFORM: ${{ inputs.platform }}
         WORKSPACE: ${{ inputs.working-directory == '.' && '--workspace' || '' }}
+        GENERATE_BINDINGS: ${{ inputs.generate-bindings }}
       run: |
         cat <<EOF > prepare.sh
           # This executes as root
           set -ex
           pwd
           case "$PLATFORM" in
-            freebsd)    pkg install -y curl llvm nss pkgconf
+            freebsd)    pkg install -y curl llvm nss pkgconf rust-bindgen-cli
                         ;;
             openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
-                        pkg_add rust rust-clippy rust-rustfmt llvm-21.1.2p0 nss # rustup does not support OpenBSD at all
+                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-21.1.2p0 nss # rustup does not support OpenBSD at all
                         ;;
-            netbsd)     /usr/sbin/pkg_add pkgin && pkgin -y install curl clang nss pkgconf
+            netbsd)     /usr/sbin/pkg_add pkgin && pkgin -y install curl clang nss pkgconf rust-bindgen
                         ;;
             solaris)    pkg install clang-libs nss pkg-config
                         ;;
@@ -59,6 +63,7 @@ runs:
             openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
                         export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
                         export LLVM_PROFDATA=/usr/local/llvm21/bin/llvm-profdata
+                        export PATH="\$HOME/.cargo/bin:\$PATH"
                         [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on OpenBSD
                         ;;
             netbsd)     sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
@@ -75,6 +80,23 @@ runs:
                         [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on Solaris
                         ;;
           esac
+          # Generate bindings first if requested (before build, so we can bootstrap)
+          if [ "$GENERATE_BINDINGS" = "true" ]; then
+            # Solaris doesn't have a system package for bindgen
+            [ "$PLATFORM" = "solaris" ] && cargo install bindgen-cli --locked
+            bindgen --allowlist-type 'rt_msghdr|rt_metrics|if_data' \
+                    --allowlist-item 'RTAX_MAX|RTM_GET|RTM_VERSION|RTA_DST|RTA_IFP' \
+                    --generate-cstr --explicit-padding --with-derive-default \
+                    src/bindings/bsd.h > "$PLATFORM.rs"
+            # Compare generated bindings with committed bindings
+            # If different, exit early with success to trigger copyback
+            if ! diff -q "src/bindings/$PLATFORM.rs" "$PLATFORM.rs" > /dev/null 2>&1; then
+              echo "::warning::Bindings for $PLATFORM differ from committed version"
+              touch bindings-changed
+              exit 0
+            fi
+          fi
+
           cargo version
           cargo check --locked --all-targets $WORKSPACE \$EXCLUDE
           case "$PLATFORM" in
@@ -93,6 +115,7 @@ runs:
                         ;;
           esac
           cargo test --locked --no-fail-fast --release
+
           rm -rf target # Do not sync this back to host
         EOF
         {
@@ -102,13 +125,13 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
         curl -o "$WD/rustup.sh" --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
-        echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
+        echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD GENERATE_BINDINGS" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
       uses: vmactions/freebsd-vm@ba6bedee4a4884da2b782a41a64329a1c8e42ffb # v1.3.8
       with:
         usesh: true
-        disable-cache: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
@@ -117,7 +140,7 @@ runs:
       uses: vmactions/openbsd-vm@f5b9bc1261c3d4eed9639fcae0cf5dcc5374ca0c # v1.3.2
       with:
         usesh: true
-        disable-cache: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
@@ -126,7 +149,7 @@ runs:
       uses: vmactions/netbsd-vm@37b614756f0b44b02f5dab4fd9ecb27545d1785e # v1.3.2
       with:
         usesh: true
-        disable-cache: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
@@ -136,7 +159,7 @@ runs:
       with:
         release: "11.4-gcc"
         usesh: true
-        disable-cache: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
@@ -156,3 +179,9 @@ runs:
         token: ${{ inputs.codecov-token }}
         verbose: true
         flags: ${{ inputs.platform }}
+
+    - if: ${{ always() && inputs.generate-bindings == 'true' }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      with:
+        name: bindings-${{ inputs.platform }}
+        path: ${{ inputs.working-directory }}/${{ inputs.platform }}.rs
