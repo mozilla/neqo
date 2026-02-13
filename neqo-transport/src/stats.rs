@@ -284,6 +284,8 @@ pub struct Stats {
     pub pmtud_iface_mtu: usize,
     /// Probed PMTU of the current path.
     pub pmtud_pmtu: usize,
+    /// Number of times PMTUD was restarted due to black hole detection.
+    pub pmtud_restarts: usize,
 
     /// Whether the connection was resumed successfully.
     pub resumed: bool,
@@ -402,8 +404,13 @@ impl Debug for Stats {
         )?;
         writeln!(
             f,
-            "  pmtud: {} sent {} acked {} lost {} iface_mtu {} pmtu",
-            self.pmtud_tx, self.pmtud_ack, self.pmtud_lost, self.pmtud_iface_mtu, self.pmtud_pmtu
+            "  pmtud: {} sent {} acked {} lost {} count {} iface_mtu {} pmtu",
+            self.pmtud_tx,
+            self.pmtud_ack,
+            self.pmtud_lost,
+            self.pmtud_restarts,
+            self.pmtud_iface_mtu,
+            self.pmtud_pmtu
         )?;
         writeln!(f, "  resumed: {}", self.resumed)?;
         writeln!(f, "  frames rx:")?;

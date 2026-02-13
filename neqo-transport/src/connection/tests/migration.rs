@@ -40,7 +40,7 @@ use crate::{
     frame::FrameType,
     packet,
     path::Path,
-    pmtud::Pmtud,
+    pmtud::default_plpmtu,
     stats::FrameStats,
     tparams::{PreferredAddress, TransportParameter, TransportParameterId},
 };
@@ -723,7 +723,7 @@ fn fast_handshake(client: &mut Connection, server: &mut Connection) -> Option<Da
 }
 
 fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: SocketAddr) {
-    let mtu = Pmtud::default_plpmtu(hs_client.ip());
+    let mtu = default_plpmtu(hs_client.ip());
     let assert_orig_path = |d: &Datagram, full_mtu: bool| {
         assert_eq!(
             d.destination(),

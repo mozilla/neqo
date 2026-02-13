@@ -14,7 +14,7 @@ use std::{
 use enum_map::Enum;
 use neqo_common::qlog::Qlog;
 
-use crate::{Pmtud, recovery::sent, rtt::RttEstimate, stats::CongestionControlStats};
+use crate::{pmtud::Pmtud, recovery::sent, rtt::RttEstimate, stats::CongestionControlStats};
 
 mod classic_cc;
 mod cubic;

@@ -343,3 +343,47 @@ impl Goal for ReceiveData {
         }
     }
 }
+
+/// Sends data and verifies that PMTUD black hole detection count matches expectation.
+#[derive(Debug)]
+pub struct SendDataCheckPmtud {
+    inner: SendData,
+    expect_change: bool,
+}
+
+impl SendDataCheckPmtud {
+    #[must_use]
+    pub const fn new(amount: usize, expect_change: bool) -> Self {
+        Self {
+            inner: SendData::new(amount),
+            expect_change,
+        }
+    }
+}
+
+impl Goal for SendDataCheckPmtud {
+    fn init(&mut self, c: &mut Connection, now: Instant) {
+        self.inner.init(c, now);
+    }
+
+    fn process(&mut self, c: &mut Connection, now: Instant) -> GoalStatus {
+        self.inner.process(c, now)
+    }
+
+    fn handle_event(
+        &mut self,
+        c: &mut Connection,
+        e: &ConnectionEvent,
+        now: Instant,
+    ) -> GoalStatus {
+        let status = self.inner.handle_event(c, e, now);
+        if status == GoalStatus::Done {
+            assert_eq!(
+                c.stats().pmtud_restarts > 0,
+                self.expect_change,
+                "PMTUD black hole detection mismatch"
+            );
+        }
+        status
+    }
+}

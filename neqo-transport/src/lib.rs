@@ -70,7 +70,7 @@ pub use self::{
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
     packet::MIN_INITIAL_PACKET_SIZE,
-    pmtud::Pmtud,
+    pmtud::{default_plpmtu, header_size},
     quic_datagrams::DatagramTracking,
     rtt::DEFAULT_INITIAL_RTT,
     sni::find_sni,

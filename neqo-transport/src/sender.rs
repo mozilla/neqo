@@ -138,6 +138,12 @@ impl PacketSender {
         self.cc.on_ecn_ce_received(largest_acked_pkt, now, cc_stats)
     }
 
+    /// Called when PTO fires. Notifies PMTUD to detect black holes when no ACKs are received.
+    pub fn on_pto(&mut self, pto_packets: &[sent::Packet], stats: &mut Stats, now: Instant) {
+        self.pmtud_mut().on_pto(pto_packets, stats, now);
+        self.maybe_update_pacer_mtu();
+    }
+
     pub fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
         self.cc.discard(pkt, now);
     }
