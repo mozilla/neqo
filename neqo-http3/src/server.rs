@@ -1487,14 +1487,14 @@ mod tests {
     const SETTINGS_WITH_CONNECT: &[u8] =
         &[0x0, 0x4, 0x08, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64, 0x08, 0x01];
 
-    /// Set up a server and peer with an extended CONNECT request using an
+    /// Set up a server and client with an extended CONNECT request using an
     /// unknown `:protocol` queued on the stream. Packets have NOT been exchanged.
     fn setup_rejected_extended_connect() -> (Http3Server, PeerConnection, StreamId) {
         let mut server = create_server(http3params(DEFAULT_SETTINGS).connect(true));
-        let (mut peer, _token, mut encoder) =
+        let (mut client, _token, mut encoder) =
             connect_to_with_encoder(&mut server, SETTINGS_WITH_CONNECT, None);
 
-        let stream_id = peer.stream_create(StreamType::BiDi).unwrap();
+        let stream_id = client.stream_create(StreamType::BiDi).unwrap();
         let headers = vec![
             Header::new(":method", "CONNECT"),
             Header::new(":protocol", "unknown-protocol"),
@@ -1502,15 +1502,17 @@ mod tests {
             Header::new(":path", "/"),
             Header::new(":scheme", "https"),
         ];
-        let header_block = encoder.encode_header_block(&mut peer.conn, &headers, stream_id);
+        let header_block = encoder.encode_header_block(&mut client.conn, &headers, stream_id);
         let hframe = HFrame::Headers {
             header_block: header_block.to_vec(),
         };
         let mut frame_encoder = Encoder::default();
         hframe.encode(&mut frame_encoder);
-        peer.stream_send(stream_id, frame_encoder.as_ref()).unwrap();
+        client
+            .stream_send(stream_id, frame_encoder.as_ref())
+            .unwrap();
 
-        (server, peer, stream_id)
+        (server, client, stream_id)
     }
 
     fn assert_no_request_events(server: &Http3Server) {
@@ -1526,14 +1528,14 @@ mod tests {
         );
     }
 
-    /// Exchange packets between peer and server, then assert the server
+    /// Exchange packets between client and server, then assert the server
     /// did not emit any request events and the connection is still open.
-    fn process_rejected_connect(server: &mut Http3Server, peer: &mut PeerConnection) {
-        let out = peer.process_output(now());
+    fn process_rejected_connect(server: &mut Http3Server, client: &mut PeerConnection) {
+        let out = client.process_output(now());
         let out = server.process(out.dgram(), now());
-        let out = peer.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
         let out = server.process(out.dgram(), now());
-        _ = peer.process(out.dgram(), now());
+        _ = client.process(out.dgram(), now());
 
         assert_no_request_events(server);
         assert_not_closed(server);
@@ -1543,17 +1545,17 @@ mod tests {
     /// and the stream is closed without generating a public `Http3ServerEvent`.
     #[test]
     fn rejected_extended_connect_unknown_protocol() {
-        let (mut server, mut peer, stream_id) = setup_rejected_extended_connect();
-        process_rejected_connect(&mut server, &mut peer);
+        let (mut server, mut client, stream_id) = setup_rejected_extended_connect();
+        process_rejected_connect(&mut server, &mut client);
 
         // The server should have responded with 501 + FIN on the stream.
         let mut got_response = false;
-        while let Some(e) = peer.next_event() {
+        while let Some(e) = client.next_event() {
             if let ConnectionEvent::RecvStreamReadable { stream_id: sid } = e
                 && sid == stream_id
             {
                 let mut buf = [0_u8; 1024];
-                let (amount, fin) = peer.stream_recv(sid, &mut buf).unwrap();
+                let (amount, fin) = client.stream_recv(sid, &mut buf).unwrap();
                 assert!(amount > 0 || fin, "expected response data or FIN");
                 got_response = true;
             }
@@ -1562,15 +1564,29 @@ mod tests {
     }
 
     /// When the client sends `STOP_SENDING` before the server processes the
-    /// rejection, `send_headers` fails and the server falls back to `cancel_fetch`.
+    /// rejection, `send_headers` fails and the server falls back to
+    /// `cancel_fetch`, which sends `RESET_STREAM` to the client.
     #[test]
     fn rejected_extended_connect_fallback_on_stop_sending() {
-        let (mut server, mut peer, stream_id) = setup_rejected_extended_connect();
+        let (mut server, mut client, stream_id) = setup_rejected_extended_connect();
 
         // Client tells the server to stop sending before the CONNECT is processed.
-        peer.stream_stop_sending(stream_id, Error::HttpRequestRejected.code())
+        client
+            .stream_stop_sending(stream_id, Error::HttpRequestRejected.code())
             .unwrap();
 
-        process_rejected_connect(&mut server, &mut peer);
+        process_rejected_connect(&mut server, &mut client);
+
+        // Verify the client received a RESET_STREAM for the rejected stream.
+        assert!(client.events().any(|e| {
+            matches!(
+                e,
+                ConnectionEvent::RecvStreamReset {
+                    stream_id: sid,
+                    app_error,
+                } if sid == stream_id
+                    && app_error == Error::HttpRequestRejected.code()
+            )
+        }));
     }
 }
