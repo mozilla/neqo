@@ -396,7 +396,7 @@ impl Http3Connection {
     /// has data to send it will be added to the `streams_with_pending_data` list.
     ///
     /// Control and QPACK streams are handled differently and are never added to the list.
-    fn send_non_control_streams(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+    fn send_non_control_streams(&mut self, conn: &mut Connection, now: Instant) {
         let to_send = mem::take(&mut self.streams_with_pending_data);
         #[expect(
             clippy::iter_over_hash_type,
@@ -404,11 +404,18 @@ impl Http3Connection {
         )]
         for stream_id in to_send {
             let done = if let Some(s) = &mut self.send_streams.get_mut(&stream_id) {
-                s.send(conn, now)?;
-                if s.has_data_to_send() {
-                    self.streams_with_pending_data.insert(stream_id);
+                if let Err(e) = s.send(conn, now) {
+                    // Per RFC 9114 Section 8.1, stream-level send failures
+                    // (e.g., STOP_SENDING received) must not close the
+                    // connection. Remove the affected stream and continue.
+                    qdebug!("[{self}] Stream {stream_id} send error: {e}");
+                    true
+                } else {
+                    if s.has_data_to_send() {
+                        self.streams_with_pending_data.insert(stream_id);
+                    }
+                    s.done()
                 }
-                s.done()
             } else {
                 false
             };
@@ -416,7 +423,6 @@ impl Http3Connection {
                 self.remove_send_stream(stream_id, conn);
             }
         }
-        Ok(())
     }
 
     /// Call `send` for all streams that need to send data. See explanation for the main structure
@@ -426,7 +432,7 @@ impl Http3Connection {
         self.control_stream_local
             .send(conn, &mut self.recv_streams, now)?;
 
-        self.send_non_control_streams(conn, now)?;
+        self.send_non_control_streams(conn, now);
 
         self.qpack_decoder.borrow_mut().send(conn)?;
         match self.qpack_encoder.borrow_mut().send_encoder_updates(conn) {

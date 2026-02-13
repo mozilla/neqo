@@ -245,7 +245,10 @@ impl SendStream for SendMessage {
     /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
     /// info that the stream has been closed.)
     fn send(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
-        let sent = Error::map_error(self.stream.send_buffer(conn, now), Error::HttpInternal(5))?;
+        let sent = self
+            .stream
+            .send_buffer(conn, now)
+            .map_err(|e| Error::map_stream_send_errors(&e))?;
 
         qtrace!("[{self}] {sent} bytes sent");
         if !self.stream.has_buffered_data() {
