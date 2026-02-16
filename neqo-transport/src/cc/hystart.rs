@@ -177,6 +177,26 @@ impl HyStart {
     const fn maybe_exit_to_ca(&self) -> bool {
         self.current.css_round_count >= Self::CSS_ROUNDS
     }
+
+    #[cfg(test)]
+    pub const fn window_end(&self) -> Option<packet::Number> {
+        self.current.window_end
+    }
+
+    #[cfg(test)]
+    pub const fn rtt_sample_count(&self) -> usize {
+        self.current.rtt_sample_count
+    }
+
+    #[cfg(test)]
+    pub const fn current_round_min_rtt(&self) -> Duration {
+        self.current.current_round_min_rtt
+    }
+
+    #[cfg(test)]
+    pub const fn css_round_count(&self) -> usize {
+        self.current.css_round_count
+    }
 }
 
 impl SlowStart for HyStart {
