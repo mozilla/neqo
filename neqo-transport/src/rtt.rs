@@ -177,7 +177,6 @@ impl RttEstimate {
         self.first_sample_time
     }
 
-    #[cfg(test)]
     pub const fn latest(&self) -> Duration {
         self.latest_rtt
     }

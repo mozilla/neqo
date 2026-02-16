@@ -45,7 +45,7 @@ impl PacketSender {
                         pmtud,
                     )),
                     SlowStartAlgorithm::HyStart => Box::new(ClassicCongestionControl::new(
-                        HyStart::default(),
+                        HyStart::new(conn_params.pacing_enabled()),
                         NewReno::default(),
                         pmtud,
                     )),
@@ -57,7 +57,7 @@ impl PacketSender {
                         pmtud,
                     )),
                     SlowStartAlgorithm::HyStart => Box::new(ClassicCongestionControl::new(
-                        HyStart::default(),
+                        HyStart::new(conn_params.pacing_enabled()),
                         Cubic::default(),
                         pmtud,
                     )),
