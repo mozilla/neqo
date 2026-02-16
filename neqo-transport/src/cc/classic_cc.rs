@@ -109,7 +109,6 @@ pub trait WindowAdjustment: Display + Debug {
 
 pub struct SlowStartResult {
     pub cwnd_increase: usize,
-    pub unused_acked_bytes: usize,
     pub exit_slow_start: bool,
 }
 
@@ -118,15 +117,18 @@ pub struct SlowStartResult {
 /// Implementations define how the congestion window grows during the slow start phase and if and
 /// when slow start exits without a congestion event.
 pub trait SlowStart: Display + Debug {
+    fn on_packet_sent(&mut self, sent_pn: packet::Number);
     /// Handle packets being acknowledged during slow start.
     ///
-    /// Returns (`cwnd_increase`, `unused_acked_bytes`, `exit_slow_start`)
+    /// Returns (`cwnd_increase`, `exit_slow_start`)
     fn on_packets_acked(
         &mut self,
         curr_cwnd: usize,
         ssthresh: usize,
-        acked_bytes: usize,
         new_acked: usize,
+        rtt_est: &RttEstimate,
+        max_datagram_size: usize,
+        largest_acked: packet::Number,
     ) -> SlowStartResult;
 }
 
@@ -268,6 +270,9 @@ where
     ) {
         let mut is_app_limited = true;
         let mut new_acked = 0;
+        let largest_packet_acked = acked_pkts
+            .first()
+            .expect("`acked_pkts.first().is_some()` is checked in `Loss::on_ack_received`");
 
         // Supplying `true` for `rtt_est.pto(true)` here is best effort not to have to track
         // `recovery::Loss::confirmed()` all the way down to the congestion controller. Having too
@@ -324,14 +329,18 @@ where
             let result = self.ss_algorithm.on_packets_acked(
                 self.current.congestion_window,
                 self.current.ssthresh,
-                self.current.acked_bytes,
                 new_acked,
+                rtt_est,
+                self.max_datagram_size(),
+                largest_packet_acked.pn(),
             );
             self.current.congestion_window += result.cwnd_increase;
-            self.current.acked_bytes = result.unused_acked_bytes;
             qdebug!("[{self}] slow start += {}", result.cwnd_increase);
             if result.exit_slow_start {
+                qinfo!("Exited slow start by algorithm");
+                self.current.ssthresh = self.current.congestion_window;
                 self.set_phase(Phase::CongestionAvoidance, now);
+                cc_stats.slow_start_exit_cwnd = Some(self.current.ssthresh);
             }
         }
         // Congestion avoidance, above the slow start threshold.
@@ -496,6 +505,11 @@ where
     }
 
     fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant) {
+        // Pass next packet number to send into slow start algorithm for initial slow start phase.
+        if self.current.ssthresh == usize::MAX {
+            self.ss_algorithm.on_packet_sent(pkt.pn());
+        }
+
         // Record the recovery time and exit any transient phase.
         if self.current.phase.transient() {
             self.current.recovery_start = Some(pkt.pn());
