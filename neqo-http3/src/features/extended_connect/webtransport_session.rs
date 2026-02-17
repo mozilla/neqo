@@ -134,11 +134,33 @@ impl Session {
         }
     }
 
+    pub(crate) fn record_datagram_expired_outgoing(&mut self) {
+        self.stats.expired_outgoing += 1;
+    }
+
+    pub(crate) fn record_datagram_lost_outgoing(&mut self) {
+        self.stats.lost_outgoing += 1;
+    }
+
+    pub(crate) fn record_datagram_dropped_incoming(&mut self) {
+        self.stats.dropped_incoming += 1;
+    }
+
     #[must_use]
     pub(crate) fn stats(&self) -> WebTransportSessionStats {
         let mut stats = self.stats.clone();
         stats.timestamp = Some(Instant::now());
         stats
+    }
+
+    pub(crate) fn process_datagram_queue(&mut self, send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> Vec<(u64, DatagramOutcome)> {
+        let outcomes = self.datagram_queue.process_queue(send_fn);
+        for (_, outcome) in &outcomes {
+            if matches!(outcome, DatagramOutcome::DroppedTooOld) {
+                self.record_datagram_expired_outgoing();
+            }
+        }
+        outcomes
     }
 }
 
