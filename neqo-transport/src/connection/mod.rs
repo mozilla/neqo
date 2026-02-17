@@ -1788,6 +1788,8 @@ impl Connection {
                         break;
                     }
                 };
+            let packet_len = slc_len - remainder.len();
+            self.stats.borrow_mut().bytes_rx += packet_len;
             match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
                 PreprocessResult::Continue => (),
                 PreprocessResult::Next => break,
@@ -3586,6 +3588,8 @@ impl Connection {
         );
         let largest_acknowledged = acked_packets.first().map(sent::Packet::pn);
         qlog::packets_acked(&mut self.qlog, space, &acked_packets, now);
+        self.stats.borrow_mut().bytes_acked +=
+            acked_packets.iter().map(sent::Packet::len).sum::<usize>();
         for acked in acked_packets {
             for token in acked.tokens() {
                 match token {
