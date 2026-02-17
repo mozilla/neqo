@@ -28,17 +28,3 @@ pub struct SessionStats {
     pub lost_outgoing: u64,
     pub dropped_incoming: u64,
 }
-
-impl SessionStats {
-    #[must_use]
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "stats snapshot needs wall-clock time"
-    )]
-    pub fn new() -> Self {
-        Self {
-            timestamp: Some(Instant::now()),
-            ..Default::default()
-        }
-    }
-}
