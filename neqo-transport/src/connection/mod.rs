@@ -1768,6 +1768,7 @@ impl Connection {
         let tos = d.tos();
         let remote = d.source();
         let mut slc = d.as_mut();
+        self.stats.borrow_mut().bytes_rx += slc.len();
         let mut dcid = None;
         let pto = path.borrow().rtt().pto(self.confirmed());
 
@@ -3586,7 +3587,9 @@ impl Connection {
         );
         let largest_acknowledged = acked_packets.first().map(sent::Packet::pn);
         qlog::packets_acked(&mut self.qlog, space, &acked_packets, now);
+        let mut bytes_acked = 0;
         for acked in acked_packets {
+            bytes_acked += acked.len();
             for token in acked.tokens() {
                 match token {
                     recovery::Token::Stream(stream_token) => self.streams.acked(stream_token),
@@ -3610,10 +3613,12 @@ impl Connection {
         }
         self.handle_lost_packets(&lost_packets);
         qlog::packets_lost(&mut self.qlog, &lost_packets, now);
-        let stats = &mut self.stats.borrow_mut().frame_rx;
-        stats.ack += 1;
+        let mut stats = self.stats.borrow_mut();
+        stats.bytes_acked += bytes_acked;
+        stats.frame_rx.ack += 1;
         if let Some(largest_acknowledged) = largest_acknowledged {
-            stats.largest_acknowledged = max(stats.largest_acknowledged, largest_acknowledged);
+            stats.frame_rx.largest_acknowledged =
+                max(stats.frame_rx.largest_acknowledged, largest_acknowledged);
         }
         Ok(())
     }
