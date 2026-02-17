@@ -971,6 +971,8 @@ impl Connection {
             v.rtt = p.rtt().estimate();
             v.rttvar = p.rtt().rttvar();
             v.min_rtt = p.rtt().minimum();
+            v.cwnd = p.sender().cwnd();
+            v.bytes_in_flight = p.sender().bytes_in_flight();
         }
         v
     }
