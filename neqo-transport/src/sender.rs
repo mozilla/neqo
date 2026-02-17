@@ -73,6 +73,11 @@ impl PacketSender {
         self.cc.cwnd_avail()
     }
 
+    #[must_use]
+    pub fn bytes_in_flight(&self) -> usize {
+        self.cc.bytes_in_flight()
+    }
+
     #[cfg(test)]
     #[must_use]
     pub fn cwnd_min(&self) -> usize {
