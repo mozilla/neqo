@@ -62,7 +62,7 @@ impl Session {
             pending_streams: HashSet::default(),
             negotiated_protocol: None,
             send_groups: HashSet::default(),
-            stats: SessionStats::new(),
+            stats: SessionStats::default(),
         }
     }
     /// Register a send group with a caller-provided ID for this session.
@@ -120,13 +120,9 @@ impl Session {
     }
 
     #[must_use]
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "stats snapshot needs wall-clock time"
-    )]
-    pub(crate) fn stats(&self) -> SessionStats {
+    pub(crate) fn stats(&self, now: Instant) -> SessionStats {
         let mut stats = self.stats.clone();
-        stats.timestamp = Some(Instant::now());
+        stats.timestamp = Some(now);
         stats
     }
 }
@@ -322,8 +318,8 @@ impl Protocol for Session {
         Self::record_stream_opened(self, local);
     }
 
-    fn stats(&self) -> Option<SessionStats> {
-        Some(Self::stats(self))
+    fn stats(&self, now: Instant) -> Option<SessionStats> {
+        Some(Self::stats(self, now))
     }
 
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
