@@ -15,6 +15,10 @@ pub struct WebTransportSessionStats {
     pub datagrams_received: u64,
     pub streams_opened_local: u64,
     pub streams_opened_remote: u64,
+    pub expired_outgoing: u64,
+    pub expired_incoming: u64,
+    pub lost_outgoing: u64,
+    pub dropped_incoming: u64,
 }
 
 impl WebTransportSessionStats {

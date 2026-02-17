@@ -324,6 +324,10 @@ pub struct Stats {
     pub bytes_acked: usize,
     /// Minimum RTT observed.
     pub min_rtt: Duration,
+    /// Congestion window size.
+    pub cwnd: usize,
+    /// Bytes in flight (sent but not yet acked or declared lost).
+    pub bytes_in_flight: usize,
 
     /// ECN path validation count, indexed by validation outcome.
     pub ecn_path_validation: ecn::ValidationCount,
@@ -447,7 +451,12 @@ impl Debug for Stats {
             "  bytes: tx {} rx {} lost {} acked {}",
             self.bytes_tx, self.bytes_rx, self.bytes_lost, self.bytes_acked
         )?;
-        writeln!(f, "  min_rtt: {:?}", self.min_rtt)
+        writeln!(f, "  min_rtt: {:?}", self.min_rtt)?;
+        writeln!(
+            f,
+            "  cwnd: {} bytes_in_flight: {}",
+            self.cwnd, self.bytes_in_flight
+        )
     }
 }
 
