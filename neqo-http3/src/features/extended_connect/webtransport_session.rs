@@ -120,6 +120,21 @@ impl Session {
         }
     }
 
+    #[expect(dead_code, reason = "pending datagram stats update")]
+    pub(crate) const fn record_datagram_expired_outgoing(&mut self) {
+        self.stats.expired_outgoing += 1;
+    }
+
+    #[expect(dead_code, reason = "pending datagram stats update")]
+    pub(crate) const fn record_datagram_lost_outgoing(&mut self) {
+        self.stats.lost_outgoing += 1;
+    }
+
+    #[expect(dead_code, reason = "pending datagram stats update")]
+    pub(crate) const fn record_datagram_dropped_incoming(&mut self) {
+        self.stats.dropped_incoming += 1;
+    }
+
     #[must_use]
     #[expect(
         clippy::disallowed_methods,
