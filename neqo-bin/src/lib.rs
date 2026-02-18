@@ -14,8 +14,8 @@ use std::{
 
 use clap::{Parser, builder::TypedValueParser as _};
 use neqo_transport::{
-    tparams::PreferredAddress, CongestionControlAlgorithm, ConnectionParameters,
-    SlowStartAlgorithm, StreamType, Version, DEFAULT_INITIAL_RTT,
+    CongestionControlAlgorithm, ConnectionParameters, DEFAULT_INITIAL_RTT, SlowStartAlgorithm,
+    StreamType, Version, tparams::PreferredAddress,
 };
 use strum::VariantNames as _;
 use thiserror::Error;

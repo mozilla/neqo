@@ -17,12 +17,12 @@ use std::{
 
 use test_fixture::now;
 
-use super::{make_cc_cubic, RTT};
+use super::{RTT, make_cc_cubic};
 use crate::{
     cc::{
-        classic_cc::ClassicCongestionControl,
-        cubic::{convert_to_f64, Cubic},
         ClassicSlowStart, CongestionControl as _, CongestionEvent,
+        classic_cc::ClassicCongestionControl,
+        cubic::{Cubic, convert_to_f64},
     },
     recovery::sent,
     rtt::RttEstimate,

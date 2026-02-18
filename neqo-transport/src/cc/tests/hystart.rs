@@ -13,7 +13,7 @@ use test_fixture::now;
 
 use super::make_cc_hystart;
 use crate::{
-    cc::{classic_cc::SlowStart as _, hystart::HyStart, CongestionControl as _},
+    cc::{CongestionControl as _, classic_cc::SlowStart as _, hystart::HyStart},
     recovery::sent,
     rtt::RttEstimate,
     stats::CongestionControlStats,
