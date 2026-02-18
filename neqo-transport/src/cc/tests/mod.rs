@@ -11,11 +11,11 @@ use std::{
 
 use super::{CongestionControlAlgorithm, SlowStartAlgorithm};
 use crate::{
-    cc::{
-        classic_cc::ClassicCongestionControl, cubic::Cubic, hystart::HyStart, new_reno::NewReno,
-        ClassicSlowStart,
-    },
     Pmtud,
+    cc::{
+        ClassicSlowStart, classic_cc::ClassicCongestionControl, cubic::Cubic, hystart::HyStart,
+        new_reno::NewReno,
+    },
 };
 
 mod cubic;

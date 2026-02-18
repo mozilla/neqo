@@ -15,9 +15,9 @@ use std::time::Duration;
 
 use test_fixture::now;
 
-use super::{make_cc_newreno, RTT};
+use super::{RTT, make_cc_newreno};
 use crate::{
-    cc::{new_reno::NewReno, ClassicCongestionControl, ClassicSlowStart, CongestionControl as _},
+    cc::{ClassicCongestionControl, ClassicSlowStart, CongestionControl as _, new_reno::NewReno},
     packet,
     recovery::{self, sent},
     rtt::RttEstimate,
