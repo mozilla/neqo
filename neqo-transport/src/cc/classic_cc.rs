@@ -107,29 +107,35 @@ pub trait WindowAdjustment: Display + Debug {
     fn restore_undo_state(&mut self);
 }
 
-pub struct SlowStartResult {
-    pub cwnd_increase: usize,
-    pub exit_slow_start: bool,
-}
-
-/// Trait for slow start algorithms.
+/// Trait for slow start exit algorithms.
 ///
-/// Implementations define how the congestion window grows during the slow start phase and if and
-/// when slow start exits without a congestion event.
+/// Implementations define when and if to exit from slow start into congestion avoidance, how the
+/// slow start threshold (`ssthresh`) is set on exit and they can influence how fast the exponential
+/// congestion window growth rate during slow start is.
 pub trait SlowStart: Display + Debug {
+    /// Handle tracking RTT rounds through having the next packet number that is to be sent out
+    /// passed in.
     fn on_packet_sent(&mut self, sent_pn: packet::Number);
-    /// Handle packets being acknowledged during slow start.
+    /// Handle packets being acknowledged during initial slow start and do computations to decide if
+    /// initial slow start should be exited to congestion avoidance.
     ///
-    /// Returns (`cwnd_increase`, `exit_slow_start`)
-    fn on_packets_acked(
+    /// Returns `exit_to_ca`.
+    fn on_packets_acked(&mut self, rtt_est: &RttEstimate, largest_acked: packet::Number) -> bool;
+
+    /// Can apply changes to the exponential congestion window increase during initial slow start.
+    /// One example is the reduced growth in Conservative Slow Start (CSS) from HyStart++.
+    ///
+    /// Returns `cwnd_increase`.
+    fn maybe_change_cwnd_increase(
         &mut self,
-        curr_cwnd: usize,
-        ssthresh: usize,
-        new_acked: usize,
-        rtt_est: &RttEstimate,
+        cwnd_increase: usize,
         max_datagram_size: usize,
-        largest_acked: packet::Number,
-    ) -> SlowStartResult;
+    ) -> usize;
+
+    /// Handle exiting from initial slow start to congestion avoidance.
+    ///
+    /// Returns the `ssthresh` value to exit with.
+    fn on_exit_to_ca(&mut self, curr_cwnd: usize) -> usize;
 }
 
 #[derive(Debug)]
@@ -217,6 +223,11 @@ impl<S, T> ClassicCongestionControl<S, T> {
     pub const fn max_datagram_size(&self) -> usize {
         self.pmtud.plpmtu()
     }
+
+    /// Return if the Congestion Controller currently is in initial slow start.
+    pub const fn in_initial_slow_start(&self) -> bool {
+        self.current.ssthresh == usize::MAX
+    }
 }
 
 impl<S, T> CongestionControl for ClassicCongestionControl<S, T>
@@ -261,6 +272,10 @@ where
         &mut self.pmtud
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "The main congestion control function contains a lot of logic."
+    )]
     fn on_packets_acked(
         &mut self,
         acked_pkts: &[sent::Packet],
@@ -324,25 +339,59 @@ where
             return;
         }
 
-        // Slow start, up to the slow start threshold.
-        if self.current.congestion_window < self.current.ssthresh {
-            let result = self.ss_algorithm.on_packets_acked(
-                self.current.congestion_window,
-                self.current.ssthresh,
-                new_acked,
-                rtt_est,
-                self.max_datagram_size(),
-                largest_packet_acked.pn(),
-            );
-            self.current.congestion_window += result.cwnd_increase;
-            qdebug!("[{self}] slow start += {}", result.cwnd_increase);
-            if result.exit_slow_start {
+        // Initial slow start exit heuristics.
+        if self.in_initial_slow_start() {
+            let exit_to_ca = self
+                .ss_algorithm
+                .on_packets_acked(rtt_est, largest_packet_acked.pn());
+
+            if exit_to_ca {
                 qinfo!("Exited slow start by algorithm");
-                self.current.ssthresh = self.current.congestion_window;
+                let exit_cwnd = self
+                    .ss_algorithm
+                    .on_exit_to_ca(self.current.congestion_window);
+                // By setting `congestion_window` and `ssthresh` here the slow start growth block
+                // below will be skipped on this ACK already, i.e. there won't be exponential growth
+                // when slow start is exiting.
+                self.current.congestion_window = exit_cwnd;
+                self.current.ssthresh = exit_cwnd;
+                cc_stats.slow_start_exit_cwnd = Some(exit_cwnd);
                 self.set_phase(Phase::CongestionAvoidance, now);
-                cc_stats.slow_start_exit_cwnd = Some(self.current.ssthresh);
             }
         }
+
+        // Slow start growth, up to the slow start threshold.
+        if self.current.congestion_window < self.current.ssthresh {
+            let mut cwnd_increase = new_acked;
+
+            // If in initial slow start the slow start exit algorithm in use can apply changes to
+            // the congestion window increase. If not in initial slow start we cap growth at the
+            // previously established `ssthresh`.
+            if self.in_initial_slow_start() {
+                cwnd_increase = self
+                    .ss_algorithm
+                    .maybe_change_cwnd_increase(cwnd_increase, self.max_datagram_size());
+            } else {
+                cwnd_increase = min(
+                    cwnd_increase,
+                    self.current.ssthresh - self.current.congestion_window,
+                );
+            }
+
+            self.current.congestion_window += cwnd_increase;
+            qdebug!("[{self}] slow start += {cwnd_increase}");
+
+            // This can only happen after persistent congestion when we re-enter slow start while
+            // having a previously established `ssthresh` which has now been reached.
+            if self.current.congestion_window == self.current.ssthresh {
+                qinfo!(
+                    "Exited slow start because the threshold was reached, ssthresh: {}",
+                    self.current.ssthresh
+                );
+                self.set_phase(Phase::CongestionAvoidance, now);
+            }
+        }
+
         // Congestion avoidance, above the slow start threshold.
         if self.current.congestion_window >= self.current.ssthresh {
             // The following function return the amount acked bytes a controller needs
@@ -506,7 +555,7 @@ where
 
     fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant) {
         // Pass next packet number to send into slow start algorithm for initial slow start phase.
-        if self.current.ssthresh == usize::MAX {
+        if self.in_initial_slow_start() {
             self.ss_algorithm.on_packet_sent(pkt.pn());
         }
 
@@ -594,6 +643,13 @@ where
     #[cfg(test)]
     pub const fn cc_algorithm_mut(&mut self) -> &mut T {
         &mut self.cc_algorithm
+    }
+
+    /// Accessor for [`ClassicCongestionControl::ss_algorithm`]. Is used to call slow start
+    /// getters in tests.
+    #[cfg(test)]
+    pub const fn ss_algorithm(&self) -> &S {
+        &self.ss_algorithm
     }
 
     #[cfg(test)]

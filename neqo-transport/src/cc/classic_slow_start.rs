@@ -4,16 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    cmp::min,
-    fmt::{self, Display},
-};
+use std::fmt::{self, Display};
 
-use crate::{
-    cc::classic_cc::{SlowStart, SlowStartResult},
-    packet,
-    rtt::RttEstimate,
-};
+use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate};
 
 /// Classic slow start as described in RFC 9002.
 ///
@@ -34,31 +27,25 @@ impl Display for ClassicSlowStart {
 impl SlowStart for ClassicSlowStart {
     fn on_packet_sent(&mut self, _sent_pn: packet::Number) {}
 
-    fn on_packets_acked(
+    fn on_packets_acked(&mut self, _rtt_est: &RttEstimate, _largest_acked: packet::Number) -> bool {
+        // Standard slow start does not have any heuristic for exiting initial slow start. Always
+        // returns `exit_to_ca = false`.
+        false
+    }
+
+    fn maybe_change_cwnd_increase(
         &mut self,
-        curr_cwnd: usize,
-        ssthresh: usize,
-        new_acked: usize,
-        _rtt_est: &RttEstimate,
+        cwnd_increase: usize,
         _max_datagram_size: usize,
-        _largest_acked: packet::Number,
-    ) -> SlowStartResult {
-        debug_assert!(
-            ssthresh >= curr_cwnd,
-            "ssthresh {ssthresh} < curr_cwnd {curr_cwnd} while in slow start --> invalid state"
+    ) -> usize {
+        // Standard slow start does not make changes to the exponential growth during initial slow
+        // start, thus always return the same `cwnd_increase` value passed in.
+        cwnd_increase
+    }
+
+    fn on_exit_to_ca(&mut self, _curr_cwnd: usize) -> usize {
+        unreachable!(
+            "Since standard slow start never exits initial slow start through a heuristic this function should never be called."
         );
-
-        // After persistent congestion we already have an established `ssthresh`, so we only grow
-        // `cwnd` up to it.
-        let cwnd_increase = min(ssthresh - curr_cwnd, new_acked);
-
-        // This is only true if we come here after persistent congestion and have reached the
-        // established `ssthresh`.
-        let exit_slow_start = curr_cwnd + cwnd_increase == ssthresh;
-
-        SlowStartResult {
-            cwnd_increase,
-            exit_slow_start,
-        }
     }
 }
