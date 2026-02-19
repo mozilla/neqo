@@ -33,3 +33,6 @@ version = "0.4"
 unknown-registry = "deny"
 unknown-git = "deny"
 required-git-spec = "rev"
+allow-git = [
+    "https://github.com/mozilla/nss-rs.git",
+]

@@ -9,11 +9,11 @@
 use std::{cell::RefCell, rc::Rc};
 
 use neqo_common::{Dscp, event::Provider as _};
-use neqo_crypto::{AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionParameters, State, Stats,
     server::{ConnectionRef, Server, ValidateAddress},
 };
+use nss_rs::{AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use test_fixture::{CountingConnectionIdGenerator, default_client, now};
 
 /// # Panics

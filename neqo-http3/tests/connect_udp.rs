@@ -8,13 +8,13 @@
 
 use http::Uri;
 use neqo_common::{Datagram, Tos, event::Provider as _, header::HeadersExt as _, qinfo};
-use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     ConnectUdpEvent, ConnectUdpRequest, ConnectUdpServerEvent, Error, Http3Client,
     Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent, Http3State, Priority,
     SessionAcceptAction,
 };
 use neqo_transport::ConnectionParameters;
+use nss_rs::AuthenticationStatus;
 use test_fixture::{
     DEFAULT_ADDR, default_http3_client, default_http3_server, exchange_packets, fixture_init,
     http3_client_with_params, http3_server_with_params, now,

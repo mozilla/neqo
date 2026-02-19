@@ -535,10 +535,10 @@ version = "0.22.2"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
- "neqo-crypto",
  "neqo-http3",
  "neqo-qpack",
  "neqo-transport",
+ "nss-rs",
  "test-fixture",
 ]
 
@@ -793,10 +793,10 @@ dependencies = [
  "log",
  "neqo-bin",
  "neqo-common",
- "neqo-crypto",
  "neqo-http3",
  "neqo-transport",
  "neqo-udp",
+ "nss-rs",
  "qlog",
  "quinn-udp",
  "rustc-hash",
@@ -823,25 +823,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "neqo-crypto"
-version = "0.22.2"
-dependencies = [
- "bindgen",
- "enum-map",
- "log",
- "mozbuild",
- "neqo-common",
- "semver",
- "serde",
- "serde_derive",
- "strum",
- "test-fixture",
- "thiserror",
- "toml",
- "windows",
-]
-
-[[package]]
 name = "neqo-http3"
 version = "0.22.2"
 dependencies = [
@@ -850,10 +831,10 @@ dependencies = [
  "http",
  "log",
  "neqo-common",
- "neqo-crypto",
  "neqo-http3",
  "neqo-qpack",
  "neqo-transport",
+ "nss-rs",
  "qlog",
  "rustc-hash",
  "sfv",
@@ -887,8 +868,8 @@ dependencies = [
  "log",
  "mtu",
  "neqo-common",
- "neqo-crypto",
  "neqo-transport",
+ "nss-rs",
  "qlog",
  "rustc-hash",
  "smallvec",
@@ -933,6 +914,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "nss-rs"
+version = "0.3.0"
+source = "git+https://github.com/mozilla/nss-rs?rev=0b9edb5a11e7f3d26638ec4b190947d30611cc18#0b9edb5a11e7f3d26638ec4b190947d30611cc18"
+dependencies = [
+ "bindgen",
+ "enum-map",
+ "log",
+ "once_cell",
+ "pkcs11-bindings",
+ "semver",
+ "serde",
+ "serde_derive",
+ "strum",
+ "thiserror",
+ "toml",
+ "windows",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -973,6 +973,15 @@ name = "pin-utils"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
+
+[[package]]
+name = "pkcs11-bindings"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77f2b11de4fec7f1e085891d4a4bf16a8b1beb49978837a80d4e9e705b99295c"
+dependencies = [
+ "bindgen",
+]
 
 [[package]]
 name = "proc-macro2"
@@ -1294,9 +1303,9 @@ version = "0.22.2"
 dependencies = [
  "log",
  "neqo-common",
- "neqo-crypto",
  "neqo-http3",
  "neqo-transport",
+ "nss-rs",
  "qlog",
 ]
 

@@ -23,11 +23,11 @@ use std::{
 
 use http::Uri as Url;
 use neqo_common::{Datagram, event::Provider, qdebug, qinfo, qwarn};
-use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
     CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator, EmptyConnectionIdGenerator,
     Error, OutputBatch, RandomConnectionIdGenerator, State, StreamId, StreamType,
 };
+use nss_rs::{AuthenticationStatus, ResumptionToken};
 use rustc_hash::FxHashMap as HashMap;
 
 use super::{Args, CloseState, Res, get_output_file, qlog_new};

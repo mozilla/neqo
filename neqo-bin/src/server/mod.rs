@@ -34,13 +34,13 @@ use futures::{
     future::{Either, select, select_all},
 };
 use neqo_common::{Datagram, qdebug, qerror, qinfo, qwarn};
-use neqo_crypto::{
+use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version};
+use neqo_udp::{DatagramIter, RecvBuf};
+use nss_rs::{
     AntiReplay, Cipher,
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init_db,
 };
-use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version};
-use neqo_udp::{DatagramIter, RecvBuf};
 use thiserror::Error;
 use tokio::time::Sleep;
 
@@ -64,7 +64,7 @@ pub enum Error {
     #[error(transparent)]
     Transport(#[from] neqo_transport::Error),
     #[error(transparent)]
-    Crypto(#[from] neqo_crypto::Error),
+    Crypto(#[from] nss_rs::Error),
 }
 
 pub type Res<T> = Result<T, Error>;

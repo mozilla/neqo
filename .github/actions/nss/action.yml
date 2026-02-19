@@ -9,7 +9,7 @@ inputs:
   version-file:
     description: "Path to file containing the minimum NSS version (relative to workspace root)"
     required: false
-    default: "neqo-crypto/min_version.txt"
+    default: "nss-rs/min_version.txt"
   target:
     description: "Target for cross-compilation"
     default: ""
@@ -17,6 +17,13 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Checkout nss-rs
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        repository: mozilla/nss-rs
+        path: nss-rs
+        sparse-checkout: min_version.txt
+        persist-credentials: false
     - name: Determine minimum NSS version
       id: min-version
       shell: bash
@@ -251,7 +258,7 @@ runs:
           # It figures that NSPR would require monkey-patching to build on Android.
           sed -i'' 's/if test -z "$android_ndk" ; then/$as_echo "#define ANDROID 1" >>confdefs.h\n    ;;\nunreachable)\n    if test -z "$android_ndk" ; then/g' nspr/configure
           ./build-nss-android.sh "$(pwd)" "/tmp/dist" "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64" "$TARGET_PLATFORM" "$ANDROID_NDK_VERSION"
-          # Manually move the temporary build directory to the final location, which is what neqo-crypto expects.
+          # Manually move the temporary build directory to the final location, which is what nss-rs expects.
           find /tmp/tmp.* > tmp
           CERTUTIL="$(grep certutil tmp)"
           TARGET_DIR="$(dirname $(dirname $CERTUTIL))"

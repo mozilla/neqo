@@ -16,10 +16,10 @@ use std::{
 
 use enum_map::EnumMap;
 use neqo_common::{Buffer, Encoder, Role, hex, hex_snip_middle, qdebug, qinfo, qtrace};
-pub use neqo_crypto::Epoch;
-use neqo_crypto::{
-    Aead, AeadTrait as _, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState,
-    PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, TLS_AES_128_GCM_SHA256,
+pub use nss_rs::Epoch;
+use nss_rs::{
+    Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState, PrivateKey, PublicKey, Record,
+    RecordList, RecordProtection, ResumptionToken, SymKey, TLS_AES_128_GCM_SHA256,
     TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1,
     TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519,
     TLS_VERSION_1_3, ZeroRttChecker, hkdf, hp, random,
@@ -457,7 +457,7 @@ pub struct CryptoDxState {
     /// But we don't need to keep that, and QUIC isn't limited in how
     /// many times keys can be updated, so we don't use `u16` for this.
     epoch: usize,
-    aead: Aead,
+    aead: RecordProtection,
     hpkey: hp::Key,
     /// This tracks the range of packet numbers that have been seen.  This allows
     /// for verifying that packet numbers before a key update are strictly lower
@@ -491,7 +491,7 @@ impl CryptoDxState {
             version,
             direction,
             epoch: usize::from(epoch),
-            aead: Aead::new(TLS_VERSION_1_3, cipher, secret, version.label_prefix())?,
+            aead: RecordProtection::new(TLS_VERSION_1_3, cipher, secret, version.label_prefix())?,
             hpkey: hp::Key::extract(TLS_VERSION_1_3, cipher, secret, &hplabel)?,
             used_pn: min_pn..min_pn,
             min_pn,
@@ -578,7 +578,7 @@ impl CryptoDxState {
             version: self.version,
             direction: self.direction,
             epoch: self.epoch + 1,
-            aead: Aead::new(
+            aead: RecordProtection::new(
                 TLS_VERSION_1_3,
                 cipher,
                 next_secret,
@@ -1388,7 +1388,7 @@ impl CryptoStates {
                 version: Version::Version1,
                 direction: CryptoDxDirection::Read,
                 epoch,
-                aead: Aead::new(
+                aead: RecordProtection::new(
                     TLS_VERSION_1_3,
                     TLS_CHACHA20_POLY1305_SHA256,
                     &secret,
