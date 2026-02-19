@@ -42,14 +42,7 @@ fn maybe_enter_css(hystart: &mut HyStart, base_rtt: Duration, new_rtt: Duration)
 
     // Collect N_RTT_SAMPLE samples with base RTT and end first round
     for i in 0..=window_end {
-        hystart.on_packets_acked(
-            10 * SMSS,
-            usize::MAX,
-            SMSS,
-            &RttEstimate::new(base_rtt),
-            SMSS,
-            i,
-        );
+        hystart.on_packets_acked(&RttEstimate::new(base_rtt), i);
     }
 
     assert!(hystart.window_end().is_none());
@@ -62,14 +55,7 @@ fn maybe_enter_css(hystart: &mut HyStart, base_rtt: Duration, new_rtt: Duration)
 
     // Collect N_RTT_SAMPLE samples with new RTT and end second round
     for i in window_end + 1..=window_end2 {
-        hystart.on_packets_acked(
-            10 * SMSS,
-            usize::MAX,
-            SMSS,
-            &RttEstimate::new(new_rtt),
-            SMSS,
-            i,
-        );
+        hystart.on_packets_acked(&RttEstimate::new(new_rtt), i);
     }
 
     assert!(hystart.window_end().is_none());
@@ -104,11 +90,7 @@ fn round_tracking_lifecycle() {
     // Ack packets less than window_end - round should continue
     for pn in 0..(window_end - 1) {
         hystart.on_packets_acked(
-            10 * SMSS,
-            usize::MAX,
-            SMSS,
             &RttEstimate::new(Duration::from_millis(100)),
-            SMSS,
             pn, // All < window_end
         );
         assert_eq!(
@@ -120,11 +102,7 @@ fn round_tracking_lifecycle() {
 
     // Now ack window_end - this should end the round
     hystart.on_packets_acked(
-        10 * SMSS,
-        usize::MAX,
-        SMSS,
         &RttEstimate::new(Duration::from_millis(100)),
-        SMSS,
         window_end, // largest_acked=window_end, round ends
     );
     assert!(
@@ -153,14 +131,7 @@ fn rtt_sample_collection_tracks_minimum() {
     hystart.on_packet_sent(0);
 
     // First ACK with RTT of 100ms
-    hystart.on_packets_acked(
-        10 * SMSS,
-        usize::MAX,
-        SMSS,
-        &RttEstimate::new(BASE_RTT),
-        SMSS,
-        0,
-    );
+    hystart.on_packets_acked(&RttEstimate::new(BASE_RTT), 0);
     assert_eq!(hystart.rtt_sample_count(), 1);
     assert_eq!(
         hystart.current_round_min_rtt(),
@@ -169,14 +140,7 @@ fn rtt_sample_collection_tracks_minimum() {
     );
 
     // Second ACK with RTT of 80ms (lower) - should update minimum
-    hystart.on_packets_acked(
-        10 * SMSS,
-        usize::MAX,
-        SMSS,
-        &RttEstimate::new(LOW_RTT),
-        SMSS,
-        1,
-    );
+    hystart.on_packets_acked(&RttEstimate::new(LOW_RTT), 1);
     assert_eq!(hystart.rtt_sample_count(), 2);
     assert_eq!(
         hystart.current_round_min_rtt(),
@@ -185,14 +149,7 @@ fn rtt_sample_collection_tracks_minimum() {
     );
 
     // Third ACK with RTT of 120ms (higher) - should NOT update minimum
-    hystart.on_packets_acked(
-        10 * SMSS,
-        usize::MAX,
-        SMSS,
-        &RttEstimate::new(HIGH_RTT),
-        SMSS,
-        2,
-    );
+    hystart.on_packets_acked(&RttEstimate::new(HIGH_RTT), 2);
     assert_eq!(hystart.rtt_sample_count(), 3);
     assert_eq!(
         hystart.current_round_min_rtt(),
@@ -213,14 +170,7 @@ fn rtt_sample_count_increments_per_ack() {
     assert_eq!(hystart.rtt_sample_count(), 0);
 
     for i in 0..10 {
-        hystart.on_packets_acked(
-            10 * SMSS,
-            usize::MAX,
-            SMSS,
-            &RttEstimate::new(Duration::from_millis(100)),
-            SMSS,
-            i,
-        );
+        hystart.on_packets_acked(&RttEstimate::new(Duration::from_millis(100)), i);
         assert_eq!(hystart.rtt_sample_count(), (i + 1) as usize);
     }
 }
@@ -234,14 +184,7 @@ fn css_entry_not_triggered_with_insufficient_samples() {
     hystart.on_packet_sent(window_end1);
 
     for i in 0..=window_end1 {
-        hystart.on_packets_acked(
-            10 * SMSS,
-            usize::MAX,
-            SMSS,
-            &RttEstimate::new(Duration::from_millis(100)),
-            SMSS,
-            i,
-        );
+        hystart.on_packets_acked(&RttEstimate::new(Duration::from_millis(100)), i);
     }
 
     // Second round with increased RTT but insufficient samples
@@ -250,14 +193,7 @@ fn css_entry_not_triggered_with_insufficient_samples() {
 
     // Collect only N_RTT_SAMPLE - 1 samples, not enough to enter CSS with
     for i in (window_end1 + 1)..window_end2 {
-        hystart.on_packets_acked(
-            10 * SMSS,
-            usize::MAX,
-            SMSS,
-            &RttEstimate::new(Duration::from_millis(120)),
-            SMSS,
-            i,
-        );
+        hystart.on_packets_acked(&RttEstimate::new(Duration::from_millis(120)), i);
     }
 
     assert!(
@@ -352,18 +288,11 @@ fn css_growth_rate_is_one_quarter() {
     );
     assert!(hystart.in_css(), "Should have entered CSS");
 
-    let result = hystart.on_packets_acked(
-        10 * SMSS,
-        usize::MAX,
-        NEW_ACKED,
-        &RttEstimate::new(Duration::from_millis(120)),
-        SMSS,
-        10,
-    );
+    let cwnd_increase = hystart.maybe_change_cwnd_increase(NEW_ACKED, SMSS);
 
     // In CSS, growth is divided by CSS_GROWTH_DIVISOR
     assert_eq!(
-        result.cwnd_increase,
+        cwnd_increase,
         NEW_ACKED / HyStart::CSS_GROWTH_DIVISOR,
         "CSS growth should be 1/{} of new_acked",
         HyStart::CSS_GROWTH_DIVISOR
@@ -390,36 +319,25 @@ fn css_exit_after_n_rounds() {
 
         // Collect samples
         for i in 0..HyStart::N_RTT_SAMPLE {
-            hystart.on_packets_acked(
-                10 * SMSS,
-                usize::MAX,
-                SMSS,
-                &RttEstimate::new(Duration::from_millis(120)),
-                SMSS,
-                i as u64,
-            );
+            hystart.on_packets_acked(&RttEstimate::new(Duration::from_millis(120)), i as u64);
         }
 
         // End round by acking window_end
-        let result = hystart.on_packets_acked(
-            10 * SMSS,
-            usize::MAX,
-            SMSS,
+        let exit_to_ca = hystart.on_packets_acked(
             &RttEstimate::new(Duration::from_millis(120)),
-            SMSS,
             new_window_end,
         );
 
         if round < HyStart::CSS_ROUNDS {
             assert!(
-                !result.exit_slow_start,
+                !exit_to_ca,
                 "Should not exit before {} rounds completed but exited after round {round}",
                 HyStart::CSS_ROUNDS,
             );
             assert!(hystart.in_css(), "Should still be in CSS");
         } else {
             assert!(
-                result.exit_slow_start,
+                exit_to_ca,
                 "Should exit after {} rounds have completed",
                 HyStart::CSS_ROUNDS
             );
@@ -442,11 +360,7 @@ fn css_back_to_slow_start_on_rtt_decrease() {
     // RTT decreases below baseline - should exit CSS
     for i in 0..HyStart::N_RTT_SAMPLE {
         hystart.on_packets_acked(
-            10 * SMSS,
-            usize::MAX,
-            SMSS,
             &RttEstimate::new(LOWER_RTT),
-            SMSS,
             i as u64, // Less than window_end
         );
     }
@@ -472,16 +386,9 @@ fn css_exit_to_slow_start_restores_normal_growth() {
     assert!(hystart.in_css(), "Should have entered CSS");
 
     // Test CSS growth (1/CSS_GROWTH_DIVISOR rate)
-    let css_result = hystart.on_packets_acked(
-        10 * SMSS,
-        usize::MAX,
-        NEW_ACKED,
-        &RttEstimate::new(CSS_BASELINE_RTT),
-        SMSS,
-        10,
-    );
+    let cwnd_increase = hystart.maybe_change_cwnd_increase(NEW_ACKED, SMSS);
     assert_eq!(
-        css_result.cwnd_increase,
+        cwnd_increase,
         NEW_ACKED / HyStart::CSS_GROWTH_DIVISOR,
         "CSS growth should be 1/{}",
         HyStart::CSS_GROWTH_DIVISOR
@@ -492,11 +399,7 @@ fn css_exit_to_slow_start_restores_normal_growth() {
     hystart.on_packet_sent(new_window_end);
     for i in 0..HyStart::N_RTT_SAMPLE {
         hystart.on_packets_acked(
-            10 * SMSS,
-            usize::MAX,
-            SMSS,
             &RttEstimate::new(LOWER_RTT),
-            SMSS,
             i as u64, // Less than window_end
         );
     }
@@ -504,18 +407,8 @@ fn css_exit_to_slow_start_restores_normal_growth() {
     assert!(!hystart.in_css(), "Should have exited CSS");
 
     // Test normal slow start growth (1:1 rate)
-    let ss_result = hystart.on_packets_acked(
-        10 * SMSS,
-        usize::MAX,
-        NEW_ACKED,
-        &RttEstimate::new(LOWER_RTT),
-        SMSS,
-        30,
-    );
-    assert_eq!(
-        ss_result.cwnd_increase, NEW_ACKED,
-        "Normal SS growth should be 1:1"
-    );
+    let cwnd_increase = hystart.maybe_change_cwnd_increase(NEW_ACKED, SMSS);
+    assert_eq!(cwnd_increase, NEW_ACKED, "Normal SS growth should be 1:1");
 }
 
 #[test]
@@ -524,16 +417,9 @@ fn l_limit_paced_no_cap() {
     hystart.on_packet_sent(0);
 
     // Try to increase by more than NON_PACED_L * SMSS
-    let result = hystart.on_packets_acked(
-        10 * SMSS,
-        usize::MAX,
-        100 * SMSS,
-        &RttEstimate::new(Duration::from_millis(100)),
-        SMSS,
-        0,
-    );
+    let cwnd_increase = hystart.maybe_change_cwnd_increase(100 * SMSS, SMSS);
 
-    assert_eq!(result.cwnd_increase, 100 * SMSS, "Paced should have no cap");
+    assert_eq!(cwnd_increase, 100 * SMSS, "Paced should have no cap");
 }
 
 #[test]
@@ -542,17 +428,11 @@ fn l_limit_unpaced_is_capped() {
     hystart.on_packet_sent(0);
 
     // Try to increase by more than NON_PACED_L * SMSS
-    let result = hystart.on_packets_acked(
-        10 * SMSS,
-        usize::MAX,
-        100 * SMSS,
-        &RttEstimate::new(Duration::from_millis(100)),
-        SMSS,
-        0,
-    );
+    // Try to increase by more than NON_PACED_L * SMSS
+    let cwnd_increase = hystart.maybe_change_cwnd_increase(100 * SMSS, SMSS);
 
     assert_eq!(
-        result.cwnd_increase,
+        cwnd_increase,
         HyStart::NON_PACED_L * SMSS,
         "Unpaced should cap at L * SMSS"
     );
@@ -560,51 +440,63 @@ fn l_limit_unpaced_is_capped() {
 
 #[test]
 fn hystart_only_used_in_initial_slow_start() {
-    let mut hystart = make_hystart_paced();
+    let mut cc = make_cc_hystart(true);
+    let mut cc_stats = CongestionControlStats::default();
+    let mut now = now();
 
-    // In initial slow start (ssthresh = usize::MAX), HyStart++ is active
-    hystart.on_packet_sent(0);
+    let cwnd_initial = cc.cwnd();
 
-    let _result1 = hystart.on_packets_acked(
-        10 * SMSS,
-        usize::MAX, // ssthresh is default
-        SMSS,
-        &RttEstimate::new(Duration::from_millis(100)),
-        SMSS,
-        0,
+    // send a full congestion window worth of SMSS sized packets
+    let initial_cwnd_packets = cwnd_initial / SMSS;
+    let mut sent_packets = Vec::new();
+    for i in 0..initial_cwnd_packets {
+        let pkt = sent::make_packet(i as u64, now, SMSS);
+        cc.on_packet_sent(&pkt, now);
+        sent_packets.push(pkt);
+    }
+    now += Duration::from_millis(10);
+    // ack them in one ack frame
+    cc.on_packets_acked(
+        &sent_packets,
+        &RttEstimate::new(Duration::from_millis(10)),
+        now,
+        &mut cc_stats,
     );
 
-    // HyStart++ should be collecting samples
-    assert_eq!(hystart.rtt_sample_count(), 1);
-
-    // Now with ssthresh != usize::MAX, should fall back to classic
-    let _result2 = hystart.on_packets_acked(
-        10 * SMSS,
-        20 * SMSS, // ssthresh set
-        SMSS,
-        &RttEstimate::new(Duration::from_millis(100)),
-        SMSS,
+    assert_eq!(
+        cc.ss_algorithm().rtt_sample_count(),
         1,
+        "should take samples in initial slow start"
     );
+    assert_eq!(cc.cwnd(), cwnd_initial + initial_cwnd_packets * SMSS);
 
-    // Should be using classic slow start, so HyStart++ should not be collecting new samples
-    assert_eq!(hystart.rtt_sample_count(), 1);
-
-    // Classic slow start with ssthresh set: exit when reaching ssthresh
-    let result3 = hystart.on_packets_acked(
-        19 * SMSS,
-        20 * SMSS,
-        2 * SMSS,
-        &RttEstimate::new(Duration::from_millis(100)),
-        SMSS,
-        2,
-    );
-
-    // Should cap at ssthresh
-    assert_eq!(result3.cwnd_increase, SMSS, "Should cap at ssthresh");
+    cc.set_ssthresh(cc.cwnd() + SMSS);
     assert!(
-        result3.exit_slow_start,
-        "Should exit when reaching ssthresh"
+        !cc.in_initial_slow_start(),
+        "`ssthresh` is set so shouldn't be in initial slow start anymore"
+    );
+
+    // send and ack one packet that is bigger than the distance to slow start threshold to test that
+    // we stop growth at `ssthresh`.
+    let bigger_pkt = sent::make_packet(1, now, 2 * SMSS);
+    cc.on_packet_sent(&bigger_pkt, now);
+    now += Duration::from_millis(10);
+    cc.on_packets_acked(
+        &[bigger_pkt],
+        &RttEstimate::new(Duration::from_millis(10)),
+        now,
+        &mut cc_stats,
+    );
+
+    assert_eq!(
+        cc.ss_algorithm().rtt_sample_count(),
+        1,
+        "should not take new samples when we're not in initial slow start"
+    );
+    assert_eq!(
+        cc.cwnd(),
+        cc.ssthresh(),
+        "should only grow up to already established `ssthresh`"
     );
 }
 

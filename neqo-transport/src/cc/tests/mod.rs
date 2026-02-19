@@ -9,7 +9,6 @@ use std::{
     time::Duration,
 };
 
-use super::{CongestionControlAlgorithm, SlowStartAlgorithm};
 use crate::{
     Pmtud,
     cc::{
@@ -25,20 +24,6 @@ mod new_reno;
 pub const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 pub const MTU: Option<usize> = Some(1_500);
 pub const RTT: Duration = Duration::from_millis(100);
-
-#[test]
-fn congestion_control_algorithm_from_str() {
-    assert_eq!("cubic".parse(), Ok(CongestionControlAlgorithm::Cubic));
-    assert_eq!("reno".parse(), Ok(CongestionControlAlgorithm::NewReno));
-    assert!("invalid".parse::<CongestionControlAlgorithm>().is_err());
-}
-
-#[test]
-fn slow_start_algorithm_from_str() {
-    assert_eq!("classic".parse(), Ok(SlowStartAlgorithm::Classic));
-    assert_eq!("hystart".parse(), Ok(SlowStartAlgorithm::HyStart));
-    assert!("invalid".parse::<CongestionControlAlgorithm>().is_err());
-}
 
 /// Helper to create `ClassicCongestionControl` with New Reno for tests.
 pub fn make_cc_newreno() -> ClassicCongestionControl<ClassicSlowStart, NewReno> {
