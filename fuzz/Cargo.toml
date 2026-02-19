@@ -18,10 +18,10 @@ cargo-fuzz = true
 [dependencies]
 # Not used in Firefox, so we can be liberal with dependency versions
 neqo-common = { path = "../neqo-common" }
-neqo-crypto = { path = "../neqo-crypto" }
 neqo-http3 = { path = "../neqo-http3" }
 neqo-qpack = { path = "../neqo-qpack" }
 neqo-transport = { path = "../neqo-transport" }
+nss-rs = { workspace = true }
 test-fixture = { path = "../test-fixture" }
 
 [target.'cfg(not(windows))'.dependencies]

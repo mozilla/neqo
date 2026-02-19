@@ -59,12 +59,7 @@ jobs:
 
       - name: Get minimum NSS version
         id: nss-version
-        run: |
-          cd neqo
-          cat neqo-crypto/min_version.txt > versions.txt
-          git show origin/main:neqo-crypto/min_version.txt >> versions.txt
-          # Use the maximum version from both branches.
-          echo "minimum=$(sort -u versions.txt | tail -n1)" >> "$GITHUB_OUTPUT"
+        uses: ./neqo/.github/actions/minimum-version
 
       - name: Install NSS
         id: nss

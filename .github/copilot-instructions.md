@@ -4,7 +4,7 @@
 Neqo is Mozilla's production QUIC, HTTP/3, and QPACK implementation used in Firefox. Written in Rust with NSS as the TLS backend. The server functionality is experimental and not production-ready.
 
 **Repository Structure**: Cargo workspace with 9 member crates plus support directories.
-- **Core crates**: `neqo-common` (shared utilities), `neqo-crypto` (TLS/NSS bindings), `neqo-transport` (QUIC protocol), `neqo-http3` (HTTP/3), `neqo-qpack` (QPACK compression), `neqo-udp` (UDP socket handling)
+- **Core crates**: `neqo-common` (shared utilities), `neqo-transport` (QUIC protocol), `neqo-http3` (HTTP/3), `neqo-qpack` (QPACK compression), `neqo-udp` (UDP socket handling)
 - **Binary crate**: `neqo-bin` (CLI tools: `neqo-client`, `neqo-server`)
 - **Support crates**: `test-fixture` (test utilities), `fuzz` (fuzzing), `mtu` (MTU detection)
 - **Config files**: Root `.rustfmt.toml`, `.clippy.toml`, `.deny.toml`, `Cargo.toml` (workspace lints)
@@ -16,7 +16,7 @@ In addition to the instructions in this file, also follow the detailed instructi
 ## Building and Testing
 
 ### Prerequisites
-- NSS library version as specified in the `neqo-crypto/min_version.txt` file
+- NSS library version as specified in the `github.com/mozilla/nss-rs/min_version.txt` file
 - System NSS will be used if available and new enough; otherwise, build will fetch and compile NSS automatically
 
 ### Essential Commands (Always Use --locked)
@@ -90,9 +90,6 @@ Run these commands in order before submitting a PR. All must pass:
 neqo/
 ├── Cargo.toml          # Workspace manifest with shared dependencies and lints
 ├── neqo-common/        # Shared utilities: codecs, time, logging, qlog
-├── neqo-crypto/        # NSS bindings, TLS, AEAD, key derivation
-│   ├── bindings/       # NSS FFI bindings
-│   └── min_version.txt # Minimum NSS version
 ├── neqo-transport/     # QUIC protocol: connections, streams, recovery, congestion control
 ├── neqo-http3/         # HTTP/3 protocol: client/server, streams, settings
 ├── neqo-qpack/         # QPACK compression for HTTP/3 headers
@@ -112,7 +109,6 @@ neqo/
 - `.rustfmt.toml`: Format config (edition 2021, import grouping, comment formatting)
 - `.clippy.toml`: Clippy config (unwrap/dbg allowed in tests, disallows std::dbg macro, 32-byte pass-by-value limit)
 - `.deny.toml`: Cargo-deny config (license allowlist, advisory checks)
-- `neqo-crypto/min_version.txt`: NSS minimum version (checked by CI and build scripts)
 
 ## CI/CD Pipeline
 
@@ -160,7 +156,7 @@ cargo test --locked --features ci
 
 2. **Clippy warnings**: CI fails on any clippy warnings. Fix all warnings or add `#[expect(clippy::lint_name, reason = "justification")]`.
 
-3. **"error: could not compile `neqo-crypto`"**: NSS build failure. Check that you have required build tools (GYP, Ninja, Mercurial if building NSS from source).
+3. **"error: could not compile `nss-rs`"**: NSS build failure. Check that you have required build tools (GYP, Ninja, Mercurial if building NSS from source).
 
 ## Trust These Instructions
 

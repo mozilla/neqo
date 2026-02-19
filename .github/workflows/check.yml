@@ -183,7 +183,7 @@ jobs:
         with:
           persist-credentials: false
       - id: nss-version
-        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+        uses: ./neqo/.github/actions/minimum-version
       - uses: ./.github/actions/check-android
         with:
           target: ${{ matrix.target }}
