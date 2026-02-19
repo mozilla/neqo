@@ -18,9 +18,7 @@ use std::{
 };
 
 use neqo_common::{Datagram, event::Provider as _, qdebug};
-use neqo_crypto::{
-    AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys,
-};
+use nss_rs::{AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys};
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
 use test_fixture::{
@@ -1627,7 +1625,7 @@ fn grease_quic_bit_respects_current_handshake() {
 fn certificate_compression() {
     use std::sync::Mutex;
 
-    use neqo_crypto::agent::CertificateCompressor;
+    use nss_rs::agent::CertificateCompressor;
 
     // These statics work for concurrent test execution because the certificate is
     // effectively a fixed value. A more robust approach would use a hash-based lookup,
@@ -1640,7 +1638,7 @@ fn certificate_compression() {
         const ID: u16 = 0x1234;
         const NAME: &std::ffi::CStr = c"xor";
         const ENABLE_ENCODING: bool = true;
-        fn decode(input: &[u8], output: &mut [u8]) -> neqo_crypto::Res<()> {
+        fn decode(input: &[u8], output: &mut [u8]) -> nss_rs::Res<()> {
             output
                 .iter_mut()
                 .zip(input)
@@ -1648,7 +1646,7 @@ fn certificate_compression() {
             *DECODED.lock().unwrap() = output[..input.len()].to_vec();
             Ok(())
         }
-        fn encode(input: &[u8], output: &mut [u8]) -> neqo_crypto::Res<usize> {
+        fn encode(input: &[u8], output: &mut [u8]) -> nss_rs::Res<usize> {
             *ORIGINAL.lock().unwrap() = input.to_vec();
             output
                 .iter_mut()

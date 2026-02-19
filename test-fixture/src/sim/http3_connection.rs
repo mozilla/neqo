@@ -14,12 +14,12 @@ use std::{
 };
 
 use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
-use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent,
     Http3State, Priority,
 };
 use neqo_transport::{ConnectionParameters, Output, StreamId};
+use nss_rs::AuthenticationStatus;
 
 use crate::{
     boxed, http3_client_with_params, http3_server_with_params, now,

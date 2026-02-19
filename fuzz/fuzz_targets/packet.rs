@@ -11,7 +11,7 @@ fuzz_target!(|data: &[u8]| {
 
     static DECODER: OnceLock<RandomConnectionIdGenerator> = OnceLock::new();
     let decoder = DECODER.get_or_init(|| RandomConnectionIdGenerator::new(20));
-    neqo_crypto::init().unwrap();
+    nss_rs::init().unwrap();
 
     // Run the fuzzer
     _ = packet::Public::decode(&mut data.to_vec(), decoder);

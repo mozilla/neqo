@@ -24,7 +24,7 @@ struct Benchmark {
 }
 
 fn transfer(c: &mut Criterion) {
-    neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap()).unwrap();
+    nss_rs::init_db(PathBuf::from_str("../test-fixture/db").unwrap()).unwrap();
 
     let mtu_suffix = env::var("MTU").ok().map(|mtu| format!("/mtu-{mtu}"));
     for Benchmark {

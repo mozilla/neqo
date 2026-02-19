@@ -1,0 +1,15 @@
+name: Minimum NSS version
+description: Get minimum NSS version compatible with nss-rs
+
+runs:
+  using: composite
+  steps:
+    - name: Get minimum NSS version
+      shell: bash
+      run: |
+          pkg_dir=$(cargo metadata --format-version=1 -q \
+            | jq -r '.packages[]
+                     | select(.name=="nss-rs")
+                     | .manifest_path' \
+            | xargs dirname)
+          echo "minimum=$(cat "$pkg_dir/min_version.txt")" >> "$GITHUB_OUTPUT"

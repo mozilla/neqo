@@ -7,8 +7,8 @@
 use std::time::Duration;
 
 use neqo_common::{Encoder, event::Provider as _};
-use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{CloseReason, Connection, StreamType};
+use nss_rs::AuthenticationStatus;
 use test_fixture::{default_server_h3, now};
 
 use super::{connect, default_http3_client, default_http3_server, exchange_packets};

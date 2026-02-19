@@ -5,10 +5,10 @@
 // except according to those terms.
 
 use neqo_common::event::Provider as _;
-use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3Server, Http3ServerEvent, Http3State, Priority,
 };
+use nss_rs::AuthenticationStatus;
 use test_fixture::*;
 
 // Perform only QUIC transport handshake.
