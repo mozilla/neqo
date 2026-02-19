@@ -14,7 +14,7 @@ use std::{
 };
 
 use neqo_common::{Datagram, event::Provider as _, qdebug, qwarn};
-use neqo_crypto::{AllowZeroRtt, AntiReplay};
+use nss::{AllowZeroRtt, AntiReplay};
 use neqo_http3::Error;
 use neqo_transport::{
     ConnectionEvent, ConnectionIdGenerator, OutputBatch, State, StreamId,

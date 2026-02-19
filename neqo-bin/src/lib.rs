@@ -331,7 +331,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_qlog_file() {
-        neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap()).unwrap();
+        nss::init_db(PathBuf::from_str("../test-fixture/db").unwrap()).unwrap();
 
         let temp_dir = TempDir::new();
 

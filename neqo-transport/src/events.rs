@@ -9,7 +9,7 @@
 use std::{cell::RefCell, collections::VecDeque, num::NonZeroU64, rc::Rc};
 
 use neqo_common::event::Provider as EventProvider;
-use neqo_crypto::ResumptionToken;
+use nss::ResumptionToken;
 
 use crate::{
     AppError, Stats,

@@ -751,7 +751,7 @@ mod test {
     };
 
     use neqo_common::{Encoder, Role, qdebug};
-    use neqo_crypto::random;
+    use nss::random;
 
     use super::{
         AutoTuneSubject, LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits,

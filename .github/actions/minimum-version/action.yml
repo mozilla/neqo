@@ -1,0 +1,31 @@
+name: Minimum NSS version
+description: Get minimum NSS version compatible with nss-rs
+
+inputs:
+  directory:
+    description: "Directory in which neqo has been cloned"
+    required: false
+    default: "neqo"
+
+outputs:
+  minimum:
+    description: Minimum NSS version supported by nss-rs
+    value: ${{ steps.version.outputs.minimum }}
+
+runs:
+  using: composite
+  steps:
+    - name: Get minimum NSS version
+      id: version
+      shell: bash
+      env:
+        NEQO: ${{ inputs.directory }}
+      run: |
+          cd "$NEQO"
+          pkg_dir=$(cargo metadata --format-version=1 -q \
+            | jq -r '.packages[]
+                     | select(.name=="nss")
+                     | .manifest_path
+                     | gsub("\\\\"; "/")
+                     | sub("/[^/]+$"; "")')
+          echo "minimum=$(cat "$pkg_dir/min_version.txt")" >> "$GITHUB_OUTPUT"

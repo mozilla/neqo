@@ -33,7 +33,10 @@ version = "0.4"
 unknown-registry = "deny"
 unknown-git = "deny"
 required-git-spec = "rev"
-# TODO: Remove this once Gecko switches back to the official mio crate.
+
 allow-git = [
+    # TODO: Remove this once Gecko switches back to the official mio crate.
     "https://github.com/kinetiknz/mio",
+# TODO: Revert this once nss-rs is on crates.io
+    "https://github.com/mozilla/nss-rs.git",
 ]
