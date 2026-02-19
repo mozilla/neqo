@@ -16,10 +16,10 @@ use std::{
 
 use enum_map::EnumMap;
 use neqo_common::{Buffer, Encoder, Role, hex, hex_snip_middle, qdebug, qinfo, qtrace};
-pub use neqo_crypto::Epoch;
-use neqo_crypto::{
-    Aead, AeadTrait as _, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState,
-    PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, TLS_AES_128_GCM_SHA256,
+pub use nss_rs::Epoch;
+use nss_rs::{
+    Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState, PrivateKey, PublicKey, Record,
+    RecordList, RecordProtection as Aead, ResumptionToken, SymKey, TLS_AES_128_GCM_SHA256,
     TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1,
     TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519,
     TLS_VERSION_1_3, ZeroRttChecker, hkdf, hp, random,

@@ -5,8 +5,8 @@
 // except according to those terms.
 
 use neqo_common::Encoder;
-use neqo_crypto::AuthenticationStatus;
 use neqo_transport::StreamType;
+use nss_rs::AuthenticationStatus;
 use test_fixture::{default_client, default_server, now};
 
 use crate::frames::{

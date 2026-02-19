@@ -14,11 +14,11 @@ use std::{
 };
 
 use neqo_common::{Datagram, qtrace};
-use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
 use neqo_transport::{
     ConnectionIdGenerator, Output, OutputBatch,
     server::{ConnectionRef, Server, ValidateAddress},
 };
+use nss_rs::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
 use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
@@ -389,11 +389,11 @@ mod tests {
     };
 
     use neqo_common::{Encoder, event::Provider as _};
-    use neqo_crypto::{AuthenticationStatus, ResumptionToken, ZeroRttCheckResult, ZeroRttChecker};
     use neqo_qpack as qpack;
     use neqo_transport::{
         CloseReason, Connection, ConnectionEvent, State, StreamId, StreamType, ZeroRttState,
     };
+    use nss_rs::{AuthenticationStatus, ResumptionToken, ZeroRttCheckResult, ZeroRttChecker};
     use test_fixture::{
         CountingConnectionIdGenerator, DEFAULT_ALPN, DEFAULT_KEYS, anti_replay, default_client,
         fixture_init, now,

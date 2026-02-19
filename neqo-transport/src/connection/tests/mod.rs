@@ -15,7 +15,7 @@ use std::{
 
 use enum_map::EnumMap;
 use neqo_common::{Datagram, Decoder, Role, event::Provider as _, qdebug, qtrace};
-use neqo_crypto::{AllowZeroRtt, AuthenticationStatus, ResumptionToken, random};
+use nss_rs::{AllowZeroRtt, AuthenticationStatus, ResumptionToken, random};
 use test_fixture::{DEFAULT_ADDR, fixture_init, new_neqo_qlog, now};
 
 use super::{CloseReason, Connection, ConnectionId, Output, State, test_internal};

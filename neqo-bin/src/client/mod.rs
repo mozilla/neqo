@@ -26,14 +26,14 @@ use futures::{
 };
 use http::Uri as Url;
 use neqo_common::{Datagram, Role, qdebug, qerror, qinfo, qlog::Qlog};
-use neqo_crypto::{
+use neqo_http3::Header;
+use neqo_transport::{AppError, CloseReason, ConnectionId, OutputBatch, Version};
+use neqo_udp::RecvBuf;
+use nss_rs::{
     Cipher, ResumptionToken,
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init,
 };
-use neqo_http3::Header;
-use neqo_transport::{AppError, CloseReason, ConnectionId, OutputBatch, Version};
-use neqo_udp::RecvBuf;
 use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
 use tokio::time::Sleep;
@@ -60,7 +60,7 @@ pub enum Error {
     #[error("application error: {0}")]
     Application(AppError),
     #[error(transparent)]
-    Crypto(#[from] neqo_crypto::Error),
+    Crypto(#[from] nss_rs::Error),
 }
 
 impl From<CloseReason> for Error {
