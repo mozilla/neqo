@@ -16,11 +16,11 @@ use std::{
 };
 
 use neqo_common::{Datagram, Header, header::HeadersExt as _, hex, qdebug, qerror, qinfo};
-use neqo_crypto::{AntiReplay, generate_ech_keys, random};
 use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
 };
 use neqo_transport::{ConnectionIdGenerator, OutputBatch, server::ValidateAddress};
+use nss_rs::{AntiReplay, generate_ech_keys, random};
 use rustc_hash::FxHashMap as HashMap;
 
 use super::{Args, qns_read_response};

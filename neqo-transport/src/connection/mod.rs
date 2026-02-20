@@ -21,7 +21,7 @@ use neqo_common::{
     Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram, event::Provider as EventProvider,
     hex, hex_snip_middle, hex_with_len, hrtime, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn,
 };
-use neqo_crypto::{
+use nss_rs::{
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
     PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttChecker,
     agent::{CertificateCompressor, CertificateInfo},
@@ -3147,7 +3147,7 @@ impl Connection {
             }
             _ => {
                 qerror!("Crypto state should not be new or failed after successful handshake");
-                return Err(Error::Crypto(neqo_crypto::Error::Internal));
+                return Err(Error::Crypto(nss_rs::Error::Internal));
             }
         }
 

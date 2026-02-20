@@ -7,7 +7,7 @@
 use std::ops::Deref;
 
 use neqo_common::{Buffer, Decoder, Encoder, qdebug};
-use neqo_crypto::{ZeroRttCheckResult, ZeroRttChecker};
+use nss_rs::{ZeroRttCheckResult, ZeroRttChecker};
 
 use crate::{Error, Http3Parameters, Res};
 
@@ -437,8 +437,8 @@ mod tests {
 
     #[test]
     fn zero_rtt_checker() {
-        use neqo_crypto::{ZeroRttCheckResult, ZeroRttChecker as _};
         use neqo_transport::ConnectionParameters;
+        use nss_rs::{ZeroRttCheckResult, ZeroRttChecker as _};
 
         use crate::Http3Parameters;
 

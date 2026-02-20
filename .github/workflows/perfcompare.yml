@@ -101,8 +101,13 @@ jobs:
         id: nss-version
         run: |
           cd neqo
-          cat neqo-crypto/min_version.txt > versions.txt
-          git show origin/main:neqo-crypto/min_version.txt >> versions.txt
+          nss_rs_dir=$(cargo metadata --format-version=1 -q \
+            | jq -r ".packages[]
+                     | select(.name==\"nss-rs\")
+                     | .manifest_path" \
+            | xargs dirname)
+          cat "$nss_rs_dir/min_version.txt" > versions.txt
+          curl https://raw.githubusercontent.com/mozilla/nss-rs/refs/heads/main/min_version.txt >> versions.txt
           # Use the maximum version from both branches.
           echo "minimum=$(sort -u versions.txt | tail -n1)" >> "$GITHUB_OUTPUT"
 

@@ -7,7 +7,6 @@
 mod common;
 use common::assert_dscp;
 use neqo_common::{Datagram, Decoder, Encoder, Role};
-use neqo_crypto::AeadTrait as _;
 use neqo_transport::{
     CloseReason, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, State, StreamType, Version,
 };
@@ -314,7 +313,7 @@ fn handshake_mlkem768x25519() {
     let mut server = default_server();
 
     client
-        .set_groups(&[neqo_crypto::TLS_GRP_KEM_MLKEM768X25519])
+        .set_groups(&[nss_rs::TLS_GRP_KEM_MLKEM768X25519])
         .unwrap();
     client.send_additional_key_shares(0).unwrap();
 
@@ -323,11 +322,11 @@ fn handshake_mlkem768x25519() {
     assert_eq!(*server.state(), State::Confirmed);
     assert_eq!(
         client.tls_info().unwrap().key_exchange(),
-        neqo_crypto::TLS_GRP_KEM_MLKEM768X25519
+        nss_rs::TLS_GRP_KEM_MLKEM768X25519
     );
     assert_eq!(
         server.tls_info().unwrap().key_exchange(),
-        neqo_crypto::TLS_GRP_KEM_MLKEM768X25519
+        nss_rs::TLS_GRP_KEM_MLKEM768X25519
     );
 }
 

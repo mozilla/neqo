@@ -7,7 +7,7 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{event::Provider as _, qdebug};
-use neqo_crypto::{AllowZeroRtt, AntiReplay};
+use nss_rs::{AllowZeroRtt, AntiReplay};
 use test_fixture::{assertions, now};
 
 use super::{

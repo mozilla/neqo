@@ -15,7 +15,7 @@ use std::{
 
 use enum_map::Enum;
 use neqo_common::{Buffer, Decoder, Encoder, hex, hex_with_len, qtrace, qwarn};
-use neqo_crypto::{AeadTrait as _, random};
+use nss_rs::random;
 use strum::{EnumIter, FromRepr};
 
 use crate::{
@@ -1713,14 +1713,14 @@ mod tests {
 
     #[test]
     fn decode_empty() {
-        neqo_crypto::init().unwrap();
+        nss_rs::init().unwrap();
         let res = Public::decode(&mut [], &EmptyConnectionIdGenerator::default());
         assert!(res.is_err());
     }
 
     #[test]
     fn decode_too_short() {
-        neqo_crypto::init().unwrap();
+        nss_rs::init().unwrap();
         let mut data = [179, 255, 0, 0, 29, 0, 0];
         let res = Public::decode(&mut data, &EmptyConnectionIdGenerator::default());
         assert!(res.is_err());

@@ -13,11 +13,11 @@ use std::{
 };
 
 use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
-use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator, Output, State,
     StreamId, StreamType,
 };
+use nss_rs::AuthenticationStatus;
 
 use crate::{
     boxed,

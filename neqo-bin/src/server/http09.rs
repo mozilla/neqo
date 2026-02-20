@@ -17,12 +17,12 @@ use std::{
 };
 
 use neqo_common::{Datagram, event::Provider as _, hex, qdebug, qerror, qinfo, qwarn};
-use neqo_crypto::{AllowZeroRtt, AntiReplay, generate_ech_keys, random};
 use neqo_http3::Error;
 use neqo_transport::{
     ConnectionEvent, ConnectionIdGenerator, OutputBatch, State, StreamId,
     server::{ConnectionRef, Server, ValidateAddress},
 };
+use nss_rs::{AllowZeroRtt, AntiReplay, generate_ech_keys, random};
 use rustc_hash::FxHashMap as HashMap;
 
 use super::{Args, qns_read_response};

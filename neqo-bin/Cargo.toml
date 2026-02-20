@@ -42,10 +42,10 @@ http = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
-neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-transport = { path = "./../neqo-transport" }
 neqo-udp = { path = "./../neqo-udp" }
+nss-rs = { workspace = true }
 qlog = { workspace = true }
 quinn-udp = { workspace = true }
 rustc-hash = { workspace = true }

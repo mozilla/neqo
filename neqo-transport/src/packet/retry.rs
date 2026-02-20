@@ -7,17 +7,17 @@
 use std::cell::RefCell;
 
 use neqo_common::qerror;
-use neqo_crypto::{Aead, AeadTrait as _, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3, hkdf};
+use nss_rs::{RecordProtection, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3, hkdf};
 
 use crate::{Error, Res, version::Version};
 
 /// The AEAD used for Retry is fixed, so use thread local storage.
-fn make_aead(version: Version) -> Aead {
+fn make_aead(version: Version) -> RecordProtection {
     #[cfg(debug_assertions)]
-    ::neqo_crypto::assert_initialized();
+    ::nss_rs::assert_initialized();
 
     let secret = hkdf::import_key(TLS_VERSION_1_3, version.retry_secret()).expect("can import key");
-    Aead::new(
+    RecordProtection::new(
         TLS_VERSION_1_3,
         TLS_AES_128_GCM_SHA256,
         &secret,
@@ -26,14 +26,14 @@ fn make_aead(version: Version) -> Aead {
     .expect("can create AEAD")
 }
 #[cfg(feature = "draft-29")]
-thread_local!(static RETRY_AEAD_29: RefCell<Aead> = RefCell::new(make_aead(Version::Draft29)));
-thread_local!(static RETRY_AEAD_V1: RefCell<Aead> = RefCell::new(make_aead(Version::Version1)));
-thread_local!(static RETRY_AEAD_V2: RefCell<Aead> = RefCell::new(make_aead(Version::Version2)));
+thread_local!(static RETRY_AEAD_29: RefCell<RecordProtection> = RefCell::new(make_aead(Version::Draft29)));
+thread_local!(static RETRY_AEAD_V1: RefCell<RecordProtection> = RefCell::new(make_aead(Version::Version1)));
+thread_local!(static RETRY_AEAD_V2: RefCell<RecordProtection> = RefCell::new(make_aead(Version::Version2)));
 
 /// Run a function with the appropriate Retry AEAD.
 pub fn use_aead<F, T>(version: Version, f: F) -> Res<T>
 where
-    F: FnOnce(&Aead) -> Res<T>,
+    F: FnOnce(&RecordProtection) -> Res<T>,
 {
     match version {
         Version::Version2 => &RETRY_AEAD_V2,

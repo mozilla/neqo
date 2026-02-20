@@ -9,11 +9,11 @@
 use std::sync::OnceLock;
 
 use neqo_common::event::Provider as _;
-use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Error, Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Server,
     Http3ServerEvent, Priority,
 };
+use nss_rs::AuthenticationStatus;
 use test_fixture::*;
 
 const RESPONSE_DATA: &[u8] = &[0x61, 0x62, 0x63];

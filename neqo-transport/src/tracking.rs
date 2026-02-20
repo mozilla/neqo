@@ -17,7 +17,7 @@ use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use log::{Level, log_enabled};
 use neqo_common::{Buffer, Ecn, MAX_VARINT, qdebug, qtrace, qwarn};
-use neqo_crypto::Epoch;
+use nss_rs::Epoch;
 use smallvec::SmallVec;
 use strum::{Display, EnumIter};
 
