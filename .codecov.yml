@@ -53,12 +53,14 @@ comment:
 
 coverage:
   status:
-    # Only post coverage status on pull requests, not on merge queue commits.
-    # This prevents PRs from failing in the merge queue due to coverage changes
-    # introduced by other recently-merged PRs.
+    # Codecov compares against main HEAD rather than the PR's merge base
+    # (https://github.com/codecov/codecov-bash/issues/83), so unrelated coverage
+    # fluctuations from other merged PRs bleed into the delta. A wider threshold
+    # and `informational: true` mitigate some of this.
     project:
       default:
-        threshold: 0.05%
+        threshold: 0.2%
+        informational: true
         only_pulls: true
     patch:
       default:
