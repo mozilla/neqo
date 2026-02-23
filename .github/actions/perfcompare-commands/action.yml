@@ -44,8 +44,11 @@ outputs:
     description: Server command
     value: ${{ steps.generate.outputs.server_cmd }}
   client-cmd:
-    description: Client command
+    description: Client command (no disk writes, for benchmarking)
     value: ${{ steps.generate.outputs.client_cmd }}
+  client-cmd-save:
+    description: Client command (with disk writes, for transfer verification)
+    value: ${{ steps.generate.outputs.client_cmd_save }}
 
 runs:
   using: composite
@@ -97,17 +100,41 @@ runs:
           s2n)    SERVER_CMD="$S2N/s2n-quic-qns interop server --www-dir $TESTDATA --certificate $TESTDATA/cert --private-key $TESTDATA/key --ip $HOST --port $PORT" ;;
         esac
 
-        # Client command
+        # Client commands: CLIENT_CMD has no disk writes (for benchmarking),
+        # CLIENT_CMD_SAVE saves response data to disk (for transfer verification).
         case "$CLIENT" in
-          neqo)   CLIENT_CMD="$NEQO/neqo-client $NEQO_ARGS $INTEROP --output-dir . https://$HOST:$PORT/$SIZE" ;;
-          msquic) CLIENT_CMD="$MSQUIC/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE" ;;
-          google) CLIENT_CMD="bash -c \"$GOOGLE/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE\"" ;;
-          quiche) CLIENT_CMD="$QUICHE/quiche-client --no-verify --dump-responses . https://$HOST:$PORT/$SIZE" ;;
-          s2n)    CLIENT_CMD="$S2N/s2n-quic-qns interop client --tls rustls --disable-cert-verification --download-dir . --local-ip $HOST https://$HOST:$PORT/$SIZE" ;;
+          neqo)
+            BASE="$NEQO/neqo-client $NEQO_ARGS $INTEROP"; URL="https://$HOST:$PORT/$SIZE"
+            CLIENT_CMD="$BASE $URL"
+            CLIENT_CMD_SAVE="$BASE --output-dir . $URL"
+            ;;
+          msquic)
+            CLIENT_CMD="$MSQUIC/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
+            CLIENT_CMD_SAVE="$CLIENT_CMD"
+            ;;
+          google)
+            BASE="$GOOGLE/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE"
+            CLIENT_CMD="bash -c \"$BASE > /dev/null\""
+            CLIENT_CMD_SAVE="bash -c \"$BASE > $SIZE\""
+            ;;
+          quiche)
+            BASE="$QUICHE/quiche-client --no-verify"; URL="https://$HOST:$PORT/$SIZE"
+            # Without --dump-responses the response body goes to stdout; redirect to /dev/null.
+            CLIENT_CMD="bash -c \"$BASE $URL >/dev/null 2>&1\""
+            CLIENT_CMD_SAVE="$BASE --dump-responses . $URL"
+            ;;
+          s2n)
+            BASE="$S2N/s2n-quic-qns interop client --tls rustls --disable-cert-verification"
+            TAIL="--local-ip $HOST https://$HOST:$PORT/$SIZE"
+            # Without --download-dir the response body goes to stdout; redirect to /dev/null.
+            CLIENT_CMD="bash -c \"$BASE $TAIL >/dev/null 2>&1\""
+            CLIENT_CMD_SAVE="$BASE --download-dir . $TAIL"
+            ;;
         esac
 
         {
           echo "bench_name=$NAME"
           echo "server_cmd=$SERVER_CMD"
           echo "client_cmd=$CLIENT_CMD"
+          echo "client_cmd_save=$CLIENT_CMD_SAVE"
         } >> "$GITHUB_OUTPUT"

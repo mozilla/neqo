@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used, reason = "This is example code.")]
-
 //! An [HTTP 0.9](https://www.w3.org/Protocols/HTTP/AsImplemented.html) client implementation.
 
 use std::{
@@ -271,10 +269,14 @@ impl<'b> Handler<'b> {
             Ok(client_stream_id) => {
                 qinfo!("Created stream {client_stream_id} for {url}");
                 let req = format!("GET {}\r\n", url.path());
-                _ = client
+                if client
                     .stream_send(client_stream_id, req.as_bytes())
-                    .unwrap();
-                client.stream_close_send(client_stream_id).unwrap();
+                    .is_err()
+                {
+                    qwarn!("Failed to send request on stream {client_stream_id}");
+                    return false;
+                }
+                _ = client.stream_close_send(client_stream_id); // Stream may be closed; ignore errors.
                 let out_file =
                     get_output_file(&url, self.args.output_dir.as_ref(), &mut self.all_paths);
                 self.streams.insert(client_stream_id, out_file);
