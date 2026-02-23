@@ -76,7 +76,7 @@ runs:
                         ;;
           esac
           cargo version
-          cargo check --locked --all-targets $WORKSPACE \$EXCLUDE
+          cargo check --locked --all-targets $WORKSPACE \${EXCLUDE:-}
           case "$PLATFORM" in
             openbsd)    # clippy fails on OpenBSD, because libfuzzer-sys is not supported.
                         ;;
@@ -105,7 +105,7 @@ runs:
         echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
-      uses: vmactions/freebsd-vm@ba6bedee4a4884da2b782a41a64329a1c8e42ffb # v1.3.8
+      uses: vmactions/freebsd-vm@c9f815bc7aa0d34c9fdd0619b034a32d6ca7b57e # v1.4.2
       with:
         usesh: true
         disable-cache: true
@@ -114,7 +114,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'openbsd' }}
-      uses: vmactions/openbsd-vm@f5b9bc1261c3d4eed9639fcae0cf5dcc5374ca0c # v1.3.2
+      uses: vmactions/openbsd-vm@9a8e4351a4a0dc6238e7c69276dcbf6c03bea576 # v1.3.6
       with:
         usesh: true
         disable-cache: true
@@ -123,7 +123,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'netbsd' }}
-      uses: vmactions/netbsd-vm@37b614756f0b44b02f5dab4fd9ecb27545d1785e # v1.3.2
+      uses: vmactions/netbsd-vm@e04aec09540429f9cebb0e7941f7cd0c0fc3b44f # v1.3.6
       with:
         usesh: true
         disable-cache: true
@@ -132,7 +132,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'solaris' }}
-      uses: vmactions/solaris-vm@37d40b6627e80434541454b42841caa4cc77d0cf # v1.2.7
+      uses: vmactions/solaris-vm@69d382b4a775b25ea5955e6c1730e9d05047ca0d # v1.3.1
       with:
         release: "11.4-gcc"
         usesh: true
