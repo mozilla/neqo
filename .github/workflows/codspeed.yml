@@ -349,11 +349,13 @@ jobs:
           BENCH_NAME: ${{ steps.commands.outputs.bench-name }}
           SERVER_CMD: ${{ steps.commands.outputs.server-cmd }}
           CLIENT_CMD: ${{ steps.commands.outputs.client-cmd }}
+          CLIENT_CMD_SAVE: ${{ steps.commands.outputs.client-cmd-save }}
         run: |
           {
             echo "BENCH_NAME=$BENCH_NAME"
             echo "SERVER_CMD=$SERVER_CMD"
             echo "CLIENT_CMD=$CLIENT_CMD"
+            echo "CLIENT_CMD_SAVE=$CLIENT_CMD_SAVE"
           } >> "$GITHUB_ENV"
 
       - name: Start server
@@ -362,6 +364,18 @@ jobs:
           taskset -c "$SERVER_CPU" $SERVER_CMD &
           echo "SERVER_PID=$!" >> "$GITHUB_ENV"
           sleep 1
+
+      - name: Verify transfer
+        working-directory: /tmp
+        run: |
+          # shellcheck disable=SC2086
+          eval taskset -c "$CLIENT_CPU" $CLIENT_CMD_SAVE
+          SIZE=$(stat -c%s "$TRANSFER_SIZE" 2>/dev/null || stat -f%z "$TRANSFER_SIZE")
+          if [[ "$SIZE" -lt "$TRANSFER_SIZE" ]]; then
+            echo "Transfer failed: expected $TRANSFER_SIZE bytes, got $SIZE"
+            exit 1
+          fi
+          rm -f "$TRANSFER_SIZE"
 
       - name: Create benchmark config
         run: |
@@ -380,15 +394,6 @@ jobs:
           working-directory: /tmp
           config: ${{ github.workspace }}/codspeed.yml
           token: ${{ secrets.CODSPEED_TOKEN }}
-
-      - name: Verify transfer
-        working-directory: /tmp
-        run: |
-          SIZE=$(stat -c%s "$TRANSFER_SIZE" 2>/dev/null || stat -f%z "$TRANSFER_SIZE")
-          if [[ "$SIZE" -lt "$TRANSFER_SIZE" ]]; then
-            echo "Transfer failed: expected $TRANSFER_SIZE bytes, got $SIZE"
-            exit 1
-          fi
 
       - name: Stop server
         if: always()
