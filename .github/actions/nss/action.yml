@@ -311,11 +311,15 @@ runs:
             # skip it by clearing the RES variable in the Makefile template.
             sed -i'' 's/^RES=.*/RES=/' nspr/pr/src/Makefile.in
             if [ "$RUNNER_ARCH" == "ARM64" ]; then
-              # NSPR's configure detects CPU_ARCH via `uname -m`. On Windows ARM64 runners the shell
-              # process is x64-emulated, so uname returns x86_64, generating an x86 prcpucfg.h that
-              # conflicts with the _M_ARM64 macro defined by the ARM64 cross-compiler. Patch
-              # configure to return aarch64 directly so the generated headers match the compiler.
-              sed -i'' 's/CPU_ARCH=`uname -m`/CPU_ARCH=aarch64/g' nspr/configure
+              # NSPR's configure detects CPU_ARCH via `uname -m`. On Windows ARM64 runners the
+              # shell is x64-emulated, so uname returns x86_64. Without correction, configure's
+              # i*86|x86_64 case runs without USE_64 set, emitting -D_X86_=1 and -arch:IA32. This
+              # makes ntmisc.c's x86 inline asm visible to the ARM64 compiler (error C4235).
+              # Also, _winnt.cfg (prcpucfg.h) has no _M_ARM64 case; it relies on _AMD64_ for
+              # 64-bit Windows. Patching configure to set USE_64=1 forces the i*86|x86_64 case
+              # to emit _AMD64_=1 instead, giving _winnt.cfg its correct 64-bit branch (pointer
+              # and word sizes match ARM64's LLP64 ABI) and skipping the x86 inline asm blocks.
+              sed -i'' 's/CPU_ARCH=`uname -m`/CPU_ARCH=aarch64; USE_64=1/g' nspr/configure
             fi
           fi
           $NSS_DIR/build.sh -g -v -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static
