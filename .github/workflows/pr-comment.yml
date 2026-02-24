@@ -29,11 +29,28 @@ jobs:
       github.event.workflow_run.event == 'pull_request' &&
       (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure')
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # No checkout — eliminates .git/config overwrite attack surface.
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/pr-comment
-        with:
+          run-id: ${{ github.event.workflow_run.id }}
           name: ${{ github.event.workflow_run.name }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+          path: comment-data
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: pr-number
+        shell: bash
+        run: echo "number=$(cat comment-data/pr-number)" >> "$GITHUB_OUTPUT"
+
+      - shell: bash
+        run: |
+          {
+            echo
+            cat comment-data/log-md
+          } >> comment-data/contents || true
+
+      - uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3.0.1
+        with:
+          file-path: comment-data/contents
+          mode: recreate
+          pr-number: ${{ steps.pr-number.outputs.number }}
+          comment-tag: ${{ github.event.workflow_run.name }}-comment

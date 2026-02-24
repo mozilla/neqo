@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used, reason = "This is example code.")]
-
 //! An HTTP 3 client implementation.
 
 use std::{
@@ -32,7 +30,10 @@ use neqo_transport::{
 use rustc_hash::FxHashMap as HashMap;
 
 use super::{Args, CloseState, Res, get_output_file, qlog_new};
-use crate::{STREAM_IO_BUFFER_SIZE, send_data::SendData};
+use crate::{
+    STREAM_IO_BUFFER_SIZE,
+    send_data::{SendData, SendResult},
+};
 
 pub struct Handler {
     #[expect(clippy::struct_field_names, reason = "This name is more descriptive.")]
@@ -361,11 +362,14 @@ impl StreamHandler for UploadStreamHandler {
         stream_id: StreamId,
         now: Instant,
     ) {
-        let done = self
+        match self
             .data
-            .send(|chunk| client.send_data(stream_id, chunk, now).unwrap());
-        if done {
-            client.stream_close_send(stream_id, now).unwrap();
+            .send(|chunk| client.send_data(stream_id, chunk, now))
+        {
+            SendResult::StreamClosed => qwarn!("Stream {stream_id} is closed"),
+            // Stream may be closed; ignore errors.
+            SendResult::Done => _ = client.stream_close_send(stream_id, now),
+            SendResult::MoreData => {}
         }
     }
 }
@@ -420,7 +424,7 @@ impl UrlHandler {
                             self.args.output_dir.as_ref(),
                             &mut self.all_paths,
                         );
-                        client.stream_close_send(client_stream_id, now).unwrap();
+                        _ = client.stream_close_send(client_stream_id, now); // Stream may be closed; ignore errors.
                         Box::new(DownloadStreamHandler { out_file })
                     }
                     "POST" => Box::new(UploadStreamHandler {
