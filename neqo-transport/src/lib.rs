@@ -55,7 +55,7 @@ mod tracking;
 pub mod version;
 
 pub use self::{
-    cc::{CongestionControlAlgorithm, CongestionEvent, SlowStartAlgorithm},
+    cc::{CongestionControl, CongestionEvent, SlowStart},
     cid::{
         ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
         EmptyConnectionIdGenerator, RandomConnectionIdGenerator,

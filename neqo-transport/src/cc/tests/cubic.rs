@@ -20,7 +20,7 @@ use test_fixture::now;
 use super::{RTT, make_cc_cubic};
 use crate::{
     cc::{
-        ClassicSlowStart, CongestionControl as _, CongestionEvent,
+        ClassicSlowStart, CongestionController as _, CongestionEvent,
         classic_cc::ClassicCongestionControl,
         cubic::{Cubic, convert_to_f64},
     },
@@ -58,7 +58,7 @@ fn setup_congestion_avoidance(
     } else {
         convert_to_f64(cc.max_datagram_size()) * 3.0
     };
-    cc.cc_algorithm_mut().set_w_max(w_max);
+    cc.congestion_control_mut().set_w_max(w_max);
     // Fill cwnd and ack one packet to establish baseline.
     _ = fill_cwnd(&mut cc, 0, now());
     ack_packet(&mut cc, 0, now(), &mut cc_stats);
@@ -231,7 +231,9 @@ fn cubic_phase() {
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
     // Set w_max to a higher number make sure that cc is the cubic phase (cwnd is calculated
     // by the cubic equation).
-    cubic.cc_algorithm_mut().set_w_max(cwnd_initial_f64 * 10.0);
+    cubic
+        .congestion_control_mut()
+        .set_w_max(cwnd_initial_f64 * 10.0);
     // Set ssthresh to something small to make sure that cc is in the congection avoidance phase.
     cubic.set_ssthresh(1);
     let mut now = now();
@@ -288,7 +290,7 @@ fn congestion_event_slow_start() {
     _ = fill_cwnd(&mut cubic, 0, now());
     ack_packet(&mut cubic, 0, now(), &mut cc_stats);
 
-    assert_within(cubic.cc_algorithm().w_max(), 0.0, f64::EPSILON);
+    assert_within(cubic.congestion_control().w_max(), 0.0, f64::EPSILON);
 
     // cwnd is increased by 1 in slow start phase, after an ack.
     assert_eq!(
@@ -302,7 +304,7 @@ fn congestion_event_slow_start() {
     // w_max is equal to cwnd before decrease.
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
     assert_within(
-        cubic.cc_algorithm().w_max(),
+        cubic.congestion_control().w_max(),
         cwnd_initial_f64 + convert_to_f64(cubic.max_datagram_size()),
         f64::EPSILON,
     );
@@ -323,7 +325,11 @@ fn congestion_event_congestion_avoidance() {
     packet_lost(&mut cubic, 1, &mut cc_stats);
 
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
-    assert_within(cubic.cc_algorithm().w_max(), cwnd_initial_f64, f64::EPSILON);
+    assert_within(
+        cubic.congestion_control().w_max(),
+        cwnd_initial_f64,
+        f64::EPSILON,
+    );
     assert_eq!(cubic.cwnd(), cwnd_after_loss(cubic.cwnd_initial()));
     assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
 }
@@ -380,7 +386,7 @@ fn congestion_event_congestion_avoidance_fast_convergence() {
 
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
     assert_within(
-        cubic.cc_algorithm().w_max(),
+        cubic.congestion_control().w_max(),
         cwnd_initial_f64 * 10.0,
         f64::EPSILON,
     );
@@ -390,7 +396,7 @@ fn congestion_event_congestion_avoidance_fast_convergence() {
     packet_lost(&mut cubic, 1, &mut cc_stats);
 
     assert_within(
-        cubic.cc_algorithm().w_max(),
+        cubic.congestion_control().w_max(),
         cwnd_initial_f64 * Cubic::FAST_CONVERGENCE_FACTOR,
         f64::EPSILON,
     );
@@ -409,13 +415,15 @@ fn congestion_event_congestion_avoidance_no_overflow() {
 
     // Set w_max to something higher than cwnd so that the fast convergence is triggered.
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
-    cubic.cc_algorithm_mut().set_w_max(cwnd_initial_f64 * 10.0);
+    cubic
+        .congestion_control_mut()
+        .set_w_max(cwnd_initial_f64 * 10.0);
 
     _ = fill_cwnd(&mut cubic, 0, now());
     ack_packet(&mut cubic, 1, now(), &mut cc_stats);
 
     assert_within(
-        cubic.cc_algorithm().w_max(),
+        cubic.congestion_control().w_max(),
         cwnd_initial_f64 * 10.0,
         f64::EPSILON,
     );

@@ -17,7 +17,9 @@ use test_fixture::now;
 
 use super::{RTT, make_cc_newreno};
 use crate::{
-    cc::{ClassicCongestionControl, ClassicSlowStart, CongestionControl as _, new_reno::NewReno},
+    cc::{
+        ClassicCongestionControl, ClassicSlowStart, CongestionController as _, new_reno::NewReno,
+    },
     packet,
     recovery::{self, sent},
     rtt::RttEstimate,

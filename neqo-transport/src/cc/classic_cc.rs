@@ -16,7 +16,7 @@ use ::qlog::events::{EventData, quic::CongestionStateUpdated};
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::Qlog, qtrace};
 use rustc_hash::FxHashMap as HashMap;
 
-use super::CongestionControl;
+use super::CongestionController;
 use crate::{
     Pmtud, cc::CongestionEvent, packet, qlog, recovery::sent, rtt::RttEstimate,
     sender::PACING_BURST_SIZE, stats::CongestionControlStats,
@@ -109,17 +109,17 @@ pub trait WindowAdjustment: Display + Debug {
 
 /// Trait for slow start exit algorithms.
 ///
-/// Implementations define when and if to exit from slow start into congestion avoidance, how the
-/// slow start threshold (`ssthresh`) is set on exit and they can influence how fast the exponential
-/// congestion window growth rate during slow start is.
+/// Implementations define when and if to exit from slow start, how the slow start threshold
+/// (`ssthresh`) is set on exit and they can influence how fast the exponential congestion window
+/// growth rate during slow start is.
 pub trait SlowStart: Display + Debug {
     /// Handle tracking RTT rounds through having the next packet number that is to be sent out
     /// passed in.
     fn on_packet_sent(&mut self, sent_pn: packet::Number);
     /// Handle packets being acknowledged during initial slow start and do computations to decide if
-    /// initial slow start should be exited to congestion avoidance.
+    /// initial slow start should be exited.
     ///
-    /// Returns `exit_to_ca`.
+    /// Returns `exit_slow_start`.
     fn on_packets_acked(&mut self, rtt_est: &RttEstimate, largest_acked: packet::Number) -> bool;
 
     /// Can apply changes to the exponential congestion window increase during initial slow start.
@@ -132,10 +132,10 @@ pub trait SlowStart: Display + Debug {
         max_datagram_size: usize,
     ) -> usize;
 
-    /// Handle exiting from initial slow start to congestion avoidance.
+    /// Handle exiting from initial slow start.
     ///
     /// Returns the `ssthresh` value to exit with.
-    fn on_exit_to_ca(&mut self, curr_cwnd: usize) -> usize;
+    fn on_slow_start_exit(&mut self, curr_cwnd: usize) -> usize;
 }
 
 #[derive(Debug)]
@@ -178,8 +178,8 @@ impl State {
 
 #[derive(Debug)]
 pub struct ClassicCongestionControl<S, T> {
-    ss_algorithm: S,
-    cc_algorithm: T,
+    slow_start: S,
+    congestion_control: T,
     bytes_in_flight: usize,
     /// Packets that have supposedly been lost. These are used for spurious congestion event
     /// detection. Gets drained when the same packets are later acked and regularly purged from too
@@ -214,7 +214,7 @@ impl<S: Display, T: Display> Display for ClassicCongestionControl<S, T> {
         write!(
             f,
             "{}/{} CongCtrl [bif: {}, {}]",
-            self.ss_algorithm, self.cc_algorithm, self.bytes_in_flight, self.current
+            self.slow_start, self.congestion_control, self.bytes_in_flight, self.current
         )
     }
 }
@@ -230,7 +230,7 @@ impl<S, T> ClassicCongestionControl<S, T> {
     }
 }
 
-impl<S, T> CongestionControl for ClassicCongestionControl<S, T>
+impl<S, T> CongestionController for ClassicCongestionControl<S, T>
 where
     S: SlowStart,
     T: WindowAdjustment,
@@ -329,7 +329,7 @@ where
         }
 
         if is_app_limited {
-            self.cc_algorithm.on_app_limited();
+            self.congestion_control.on_app_limited();
             qdebug!(
                 "on_packets_acked this={self:p}, limited=1, bytes_in_flight={}, cwnd={}, phase={:?}, new_acked={new_acked}",
                 self.bytes_in_flight,
@@ -341,15 +341,15 @@ where
 
         // Initial slow start exit heuristics.
         if self.in_initial_slow_start() {
-            let exit_to_ca = self
-                .ss_algorithm
+            let exit_slow_start = self
+                .slow_start
                 .on_packets_acked(rtt_est, largest_packet_acked.pn());
 
-            if exit_to_ca {
-                qinfo!("Exited slow start by algorithm");
+            if exit_slow_start {
+                qdebug!("Exited slow start by algorithm");
                 let exit_cwnd = self
-                    .ss_algorithm
-                    .on_exit_to_ca(self.current.congestion_window);
+                    .slow_start
+                    .on_slow_start_exit(self.current.congestion_window);
                 // By setting `congestion_window` and `ssthresh` here the slow start growth block
                 // below will be skipped on this ACK already, i.e. there won't be exponential growth
                 // when slow start is exiting.
@@ -369,7 +369,7 @@ where
             // previously established `ssthresh`.
             if self.in_initial_slow_start() {
                 cwnd_increase = self
-                    .ss_algorithm
+                    .slow_start
                     .maybe_change_cwnd_increase(cwnd_increase, self.max_datagram_size());
             } else {
                 cwnd_increase = min(
@@ -379,12 +379,12 @@ where
             }
 
             self.current.congestion_window += cwnd_increase;
-            qdebug!("[{self}] slow start += {cwnd_increase}");
+            qtrace!("[{self}] slow start += {cwnd_increase}");
 
             // This can only happen after persistent congestion when we re-enter slow start while
             // having a previously established `ssthresh` which has now been reached.
             if self.current.congestion_window == self.current.ssthresh {
-                qinfo!(
+                qdebug!(
                     "Exited slow start because the threshold was reached, ssthresh: {}",
                     self.current.ssthresh
                 );
@@ -396,7 +396,7 @@ where
         if self.current.congestion_window >= self.current.ssthresh {
             // The following function return the amount acked bytes a controller needs
             // to collect to be allowed to increase its cwnd by MAX_DATAGRAM_SIZE.
-            let bytes_for_increase = self.cc_algorithm.bytes_for_cwnd_increase(
+            let bytes_for_increase = self.congestion_control.bytes_for_cwnd_increase(
                 self.current.congestion_window,
                 new_acked,
                 rtt_est.minimum(),
@@ -556,7 +556,7 @@ where
     fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant) {
         // Pass next packet number to send into slow start algorithm for initial slow start phase.
         if self.in_initial_slow_start() {
-            self.ss_algorithm.on_packet_sent(pkt.pn());
+            self.slow_start.on_packet_sent(pkt.pn());
         }
 
         // Record the recovery time and exit any transient phase.
@@ -605,11 +605,11 @@ where
     S: SlowStart,
     T: WindowAdjustment,
 {
-    pub fn new(ss_algorithm: S, cc_algorithm: T, pmtud: Pmtud) -> Self {
+    pub fn new(slow_start: S, congestion_control: T, pmtud: Pmtud) -> Self {
         let mtu = pmtud.plpmtu();
         Self {
-            ss_algorithm,
-            cc_algorithm,
+            slow_start,
+            congestion_control,
             bytes_in_flight: 0,
             maybe_lost_packets: HashMap::default(),
             qlog: Qlog::disabled(),
@@ -631,25 +631,25 @@ where
         self.current.ssthresh = v;
     }
 
-    /// Accessor for [`ClassicCongestionControl::cc_algorithm`]. Is used to call Cubic getters in
-    /// tests.
+    /// Accessor for [`ClassicCongestionControl::congestion_control`]. Is used to call Cubic getters
+    /// in tests.
     #[cfg(test)]
-    pub const fn cc_algorithm(&self) -> &T {
-        &self.cc_algorithm
+    pub const fn congestion_control(&self) -> &T {
+        &self.congestion_control
     }
 
-    /// Mutable accessor for [`ClassicCongestionControl::cc_algorithm`]. Is used to call Cubic
+    /// Mutable accessor for [`ClassicCongestionControl::congestion_control`]. Is used to call Cubic
     /// setters in tests.
     #[cfg(test)]
-    pub const fn cc_algorithm_mut(&mut self) -> &mut T {
-        &mut self.cc_algorithm
+    pub const fn congestion_control_mut(&mut self) -> &mut T {
+        &mut self.congestion_control
     }
 
-    /// Accessor for [`ClassicCongestionControl::ss_algorithm`]. Is used to call slow start
+    /// Accessor for [`ClassicCongestionControl::slow_start`]. Is used to call slow start
     /// getters in tests.
     #[cfg(test)]
-    pub const fn ss_algorithm(&self) -> &S {
-        &self.ss_algorithm
+    pub const fn slow_start(&self) -> &S {
+        &self.slow_start
     }
 
     #[cfg(test)]
@@ -751,7 +751,7 @@ where
             cc_stats.congestion_events[CongestionEvent::Spurious] += 1;
             return;
         }
-        self.cc_algorithm.restore_undo_state();
+        self.congestion_control.restore_undo_state();
 
         qdebug!(
             "Spurious cong event: recovering cc params from {} to {stored}",
@@ -869,10 +869,10 @@ where
 
         if congestion_event != CongestionEvent::Ecn {
             self.stored = Some(self.current.clone());
-            self.cc_algorithm.save_undo_state();
+            self.congestion_control.save_undo_state();
         }
 
-        let (cwnd, acked_bytes) = self.cc_algorithm.reduce_cwnd(
+        let (cwnd, acked_bytes) = self.congestion_control.reduce_cwnd(
             self.current.congestion_window,
             self.current.acked_bytes,
             self.max_datagram_size(),
@@ -936,7 +936,7 @@ mod tests {
     use super::{ClassicCongestionControl, PERSISTENT_CONG_THRESH, SlowStart, WindowAdjustment};
     use crate::{
         cc::{
-            CWND_INITIAL_PKTS, ClassicSlowStart, CongestionControl, CongestionEvent,
+            CWND_INITIAL_PKTS, ClassicSlowStart, CongestionController, CongestionEvent,
             classic_cc::Phase,
             cubic::Cubic,
             new_reno::NewReno,
@@ -980,7 +980,7 @@ mod tests {
     }
 
     fn persistent_congestion_by_algorithm(
-        mut cc: Box<dyn CongestionControl>,
+        mut cc: impl CongestionController,
         reduced_cwnd: usize,
         lost_packets: &[sent::Packet],
         persistent_expected: bool,
@@ -1004,11 +1004,11 @@ mod tests {
     }
 
     fn persistent_congestion(lost_packets: &[sent::Packet], persistent_expected: bool) {
-        let cc: Box<dyn CongestionControl> = Box::new(make_cc_newreno());
+        let cc = make_cc_newreno();
         let cwnd_initial = cc.cwnd_initial();
         persistent_congestion_by_algorithm(cc, cwnd_initial / 2, lost_packets, persistent_expected);
 
-        let cc: Box<dyn CongestionControl> = Box::new(make_cc_cubic());
+        let cc = make_cc_cubic();
         let cwnd_initial = cc.cwnd_initial();
         persistent_congestion_by_algorithm(
             cc,

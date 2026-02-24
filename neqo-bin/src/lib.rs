@@ -14,8 +14,8 @@ use std::{
 
 use clap::{Parser, builder::TypedValueParser as _};
 use neqo_transport::{
-    CongestionControlAlgorithm, ConnectionParameters, DEFAULT_INITIAL_RTT, SlowStartAlgorithm,
-    StreamType, Version, tparams::PreferredAddress,
+    CongestionControl, ConnectionParameters, DEFAULT_INITIAL_RTT, SlowStart, StreamType, Version,
+    tparams::PreferredAddress,
 };
 use strum::VariantNames as _;
 use thiserror::Error;
@@ -124,16 +124,16 @@ pub struct QuicParameters {
     pub initial_rtt_ms: u64,
 
     #[arg(long = "cc", default_value = "cubic",
-        value_parser = clap::builder::PossibleValuesParser::new(CongestionControlAlgorithm::VARIANTS)
-            .map(|s| s.parse::<CongestionControlAlgorithm>().unwrap()))]
+        value_parser = clap::builder::PossibleValuesParser::new(CongestionControl::VARIANTS)
+            .map(|s| s.parse::<CongestionControl>().unwrap()))]
     /// The congestion control algorithm to use.
-    pub cc_algorithm: CongestionControlAlgorithm,
+    pub congestion_control: CongestionControl,
 
     #[arg(long = "ss", default_value = "classic",
-        value_parser = clap::builder::PossibleValuesParser::new(SlowStartAlgorithm::VARIANTS)
-            .map(|s| s.parse::<SlowStartAlgorithm>().unwrap()))]
+        value_parser = clap::builder::PossibleValuesParser::new(SlowStart::VARIANTS)
+            .map(|s| s.parse::<SlowStart>().unwrap()))]
     /// The slow start algorithm to use.
-    pub ss_algorithm: SlowStartAlgorithm,
+    pub slow_start: SlowStart,
 
     #[arg(long = "no-pacing")]
     /// Whether to disable pacing.
@@ -166,8 +166,8 @@ impl Default for QuicParameters {
             idle_timeout: 30,
             initial_rtt_ms: u64::try_from(DEFAULT_INITIAL_RTT.as_millis())
                 .expect("this value will always be less than u64::MAX"),
-            cc_algorithm: CongestionControlAlgorithm::Cubic,
-            ss_algorithm: SlowStartAlgorithm::Classic,
+            congestion_control: CongestionControl::Cubic,
+            slow_start: SlowStart::Classic,
             no_pacing: false,
             no_pmtud: false,
             preferred_address_v4: None,
@@ -244,8 +244,8 @@ impl QuicParameters {
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .idle_timeout(Duration::from_secs(self.idle_timeout))
             .initial_rtt(Duration::from_millis(self.initial_rtt_ms))
-            .cc_algorithm(self.cc_algorithm)
-            .ss_algorithm(self.ss_algorithm)
+            .congestion_control(self.congestion_control)
+            .slow_start(self.slow_start)
             .pacing(!self.no_pacing)
             .pmtud(!self.no_pmtud)
             .sni_slicing(!self.no_sni_slicing);

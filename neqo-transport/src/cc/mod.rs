@@ -37,7 +37,7 @@ pub enum CongestionEvent {
     Spurious,
 }
 
-pub trait CongestionControl: Display + Debug {
+pub trait CongestionController: Display + Debug {
     fn set_qlog(&mut self, qlog: Qlog);
 
     #[must_use]
@@ -101,7 +101,7 @@ pub trait CongestionControl: Display + Debug {
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
 #[strum(ascii_case_insensitive)]
-pub enum CongestionControlAlgorithm {
+pub enum CongestionControl {
     #[strum(serialize = "newreno", serialize = "reno")]
     NewReno,
     #[strum(serialize = "cubic")]
@@ -111,7 +111,7 @@ pub enum CongestionControlAlgorithm {
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
 #[strum(ascii_case_insensitive)]
-pub enum SlowStartAlgorithm {
+pub enum SlowStart {
     #[strum(serialize = "classic")]
     #[default]
     Classic,

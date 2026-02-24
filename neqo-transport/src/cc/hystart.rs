@@ -10,11 +10,11 @@ use std::{
     time::Duration,
 };
 
-use neqo_common::{qdebug, qinfo};
+use neqo_common::{qdebug, qinfo, qtrace};
 
 use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate};
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct State {
     last_round_min_rtt: Duration,
     current_round_min_rtt: Duration,
@@ -52,7 +52,7 @@ impl State {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct HyStart {
     limit: usize,
     current: State,
@@ -102,32 +102,6 @@ impl HyStart {
     fn collect_rtt_sample(&mut self, rtt: Duration) {
         self.current.current_round_min_rtt = min(self.current.current_round_min_rtt, rtt);
         self.current.rtt_sample_count += 1;
-    }
-
-    /// > For each arriving ACK in slow start, where N is the number of previously unacknowledged
-    /// > bytes acknowledged in the arriving ACK:
-    /// >
-    /// > Update the cwnd:
-    /// >
-    /// > `cwnd = cwnd + min(N, L*SMSS)`
-    ///
-    /// <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-8>
-    ///
-    /// > For each arriving ACK in CSS, where N is the number of previously unacknowledged
-    /// > bytes acknowledged in the arriving ACK:
-    /// >
-    /// > Update the cwnd:
-    /// >
-    /// > `cwnd = cwnd + (min(N, L*SMSS) / CSS_GROWTH_DIVISOR)`
-    ///
-    /// <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-15>
-    fn calc_cwnd_increase(&self, cwnd_increase: usize, max_datagram_size: usize) -> usize {
-        let mut cwnd_increase = min(self.limit.saturating_mul(max_datagram_size), cwnd_increase);
-
-        if self.in_css() {
-            cwnd_increase /= Self::CSS_GROWTH_DIVISOR;
-        }
-        cwnd_increase
     }
 
     /// > HyStart++ measures rounds using sequence numbers, as follows:
@@ -194,11 +168,11 @@ impl SlowStart for HyStart {
     }
 
     fn on_packets_acked(&mut self, rtt_est: &RttEstimate, largest_acked: packet::Number) -> bool {
-        self.collect_rtt_sample(rtt_est.latest());
+        self.collect_rtt_sample(rtt_est.latest_rtt());
 
-        qdebug!(
+        qtrace!(
             "HyStart: on_packets_acked -> pn={largest_acked}, rtt={:?}, cur_min={:?}, last_min={:?}, samples={}, in_css={}, css_rounds={}, window_end={:?}",
-            rtt_est.latest(),
+            rtt_est.latest_rtt(),
             self.current.current_round_min_rtt,
             self.current.last_round_min_rtt,
             self.current.rtt_sample_count,
@@ -222,7 +196,7 @@ impl SlowStart for HyStart {
             && self.enough_samples()
             && self.current.current_round_min_rtt < self.current.css_baseline_min_rtt
         {
-            qinfo!(
+            qdebug!(
                 "HyStart: on_packets_acked -> exiting CSS after {} rounds because cur_min={:?} < baseline_min={:?}",
                 self.current.css_round_count,
                 self.current.current_round_min_rtt,
@@ -252,7 +226,7 @@ impl SlowStart for HyStart {
             );
             if self.current.current_round_min_rtt >= self.current.last_round_min_rtt + rtt_thresh {
                 self.current.css_baseline_min_rtt = self.current.current_round_min_rtt;
-                qinfo!(
+                qdebug!(
                     "HyStart: on_packets_acked -> entered CSS because cur_min={:?} >= last_min={:?} + thresh={rtt_thresh:?}",
                     self.current.current_round_min_rtt,
                     self.current.last_round_min_rtt
@@ -260,15 +234,13 @@ impl SlowStart for HyStart {
             }
         }
 
-        let mut exit_to_ca = false;
-
         // Check for end of round. If `window_end` is acked it is set to `None` to indicate end of a
         // round. [`SlowStart::on_packet_sent`] will then set it to the next packet number we send
         // out to start a new round.
         if let Some(window_end) = self.current.window_end
             && largest_acked >= window_end
         {
-            qdebug!(
+            qtrace!(
                 "HyStart: on_packets_acked -> round ended because largest_acked={largest_acked} >= window_end={window_end}"
             );
             self.current.window_end = None;
@@ -277,16 +249,17 @@ impl SlowStart for HyStart {
             // to exit to congestion avoidance have been completed.
             if self.in_css() {
                 self.current.css_round_count += 1;
-                exit_to_ca = self.current.css_round_count >= Self::CSS_ROUNDS;
+                let exit_slow_start = self.current.css_round_count >= Self::CSS_ROUNDS;
                 qinfo!(
-                    "HyStart: on_packets_acked -> exit={exit_to_ca} because css_rounds={} >= {}",
+                    "HyStart: on_packets_acked -> exit={exit_slow_start} because css_rounds={} >= {}",
                     self.current.css_round_count,
                     Self::CSS_ROUNDS
                 );
+                return exit_slow_start;
             }
         }
 
-        exit_to_ca
+        false
     }
 
     fn maybe_change_cwnd_increase(
@@ -294,14 +267,35 @@ impl SlowStart for HyStart {
         cwnd_increase: usize,
         max_datagram_size: usize,
     ) -> usize {
-        self.calc_cwnd_increase(cwnd_increase, max_datagram_size)
+        // > For each arriving ACK in slow start, where N is the number of previously unacknowledged
+        // > bytes acknowledged in the arriving ACK:
+        // >
+        // > Update the cwnd:
+        // >
+        // > `cwnd = cwnd + min(N, L*SMSS)`
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-8>
+        let mut cwnd_increase = min(self.limit.saturating_mul(max_datagram_size), cwnd_increase);
+
+        // > For each arriving ACK in CSS, where N is the number of previously unacknowledged
+        // > bytes acknowledged in the arriving ACK:
+        // >
+        // > Update the cwnd:
+        // >
+        // > `cwnd = cwnd + (min(N, L*SMSS) / CSS_GROWTH_DIVISOR)`
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-15>
+        if self.in_css() {
+            cwnd_increase /= Self::CSS_GROWTH_DIVISOR;
+        }
+        cwnd_increase
     }
 
     // > If CSS_ROUNDS rounds are complete, enter congestion avoidance by setting the ssthresh to
     // > the current cwnd.
     //
     // <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-23>
-    fn on_exit_to_ca(&mut self, curr_cwnd: usize) -> usize {
+    fn on_slow_start_exit(&mut self, curr_cwnd: usize) -> usize {
         curr_cwnd
     }
 }

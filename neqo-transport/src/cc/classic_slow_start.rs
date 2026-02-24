@@ -29,7 +29,7 @@ impl SlowStart for ClassicSlowStart {
 
     fn on_packets_acked(&mut self, _rtt_est: &RttEstimate, _largest_acked: packet::Number) -> bool {
         // Standard slow start does not have any heuristic for exiting initial slow start. Always
-        // returns `exit_to_ca = false`.
+        // returns `exit_slow_start = false`.
         false
     }
 
@@ -43,7 +43,7 @@ impl SlowStart for ClassicSlowStart {
         cwnd_increase
     }
 
-    fn on_exit_to_ca(&mut self, _curr_cwnd: usize) -> usize {
+    fn on_slow_start_exit(&mut self, _curr_cwnd: usize) -> usize {
         unreachable!(
             "Since standard slow start never exits initial slow start through a heuristic this function should never be called."
         );
