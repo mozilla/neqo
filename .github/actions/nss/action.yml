@@ -311,16 +311,14 @@ runs:
             # skip it by clearing the RES variable in the Makefile template.
             sed -i'' 's/^RES=.*/RES=/' nspr/pr/src/Makefile.in
             if [ "$RUNNER_ARCH" == "ARM64" ]; then
-              # NSPR's configure detects CPU_ARCH via `uname -m` and derives target_cpu via
-              # config.guess. On Windows ARM64 runners the shell process is x64-emulated, so both
-              # return x86_64/i686. This causes configure to define _X86_ and emit -arch:IA32 CFLAGS,
-              # making ntmisc.c's x86 inline asm visible to the ARM64 compiler (Error 2). Patch
-              # configure to set both CPU_ARCH and target_cpu to aarch64 so the ARM64 code path is
-              # taken and the correct headers and flags are generated.
-              sed -i'' 's/CPU_ARCH=`uname -m`/CPU_ARCH=aarch64; target_cpu=aarch64/g' nspr/configure
+              # NSPR's configure detects CPU_ARCH via `uname -m`. On Windows ARM64 runners the shell
+              # process is x64-emulated, so uname returns x86_64, generating an x86 prcpucfg.h that
+              # conflicts with the _M_ARM64 macro defined by the ARM64 cross-compiler. Patch
+              # configure to return aarch64 directly so the generated headers match the compiler.
+              sed -i'' 's/CPU_ARCH=`uname -m`/CPU_ARCH=aarch64/g' nspr/configure
             fi
           fi
-          $NSS_DIR/build.sh -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static
+          $NSS_DIR/build.sh -g -v -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static
         fi
 
     - name: Save NSS cache
