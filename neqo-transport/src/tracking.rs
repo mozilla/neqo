@@ -9,24 +9,24 @@
 use std::{
     cmp::min,
     collections::VecDeque,
+    fmt::{self, Display, Formatter},
     time::{Duration, Instant},
 };
 
 use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
-use log::{log_enabled, Level};
-use neqo_common::{qdebug, qtrace, qwarn, Buffer, Ecn, MAX_VARINT};
+use log::{Level, log_enabled};
+use neqo_common::{Buffer, Ecn, MAX_VARINT, qdebug, qtrace, qwarn};
 use neqo_crypto::Epoch;
 use smallvec::SmallVec;
 use strum::{Display, EnumIter};
 
 use crate::{
-    ecn,
+    Error, Res, Stats, ecn,
     frame::{FrameEncoder as _, FrameType},
     packet,
     recovery::{self},
     stats::FrameStats,
-    Error, Res, Stats,
 };
 
 #[derive(Debug, PartialOrd, Ord, EnumSetType, Enum, EnumIter, Display)]
@@ -80,8 +80,7 @@ pub enum InsertionResult {
     NotInserted,
 }
 
-#[derive(Clone, Debug, Default, derive_more::Display)]
-#[display("{largest}->{smallest}")]
+#[derive(Clone, Debug, Default)]
 pub struct PacketRange {
     largest: packet::Number,
     smallest: packet::Number,
@@ -154,6 +153,12 @@ impl PacketRange {
     }
 }
 
+impl Display for PacketRange {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}->{}", self.largest, self.smallest)
+    }
+}
+
 /// The default maximum ACK delay we use locally and advertise to the remote.
 pub const DEFAULT_LOCAL_ACK_DELAY: Duration = Duration::from_millis(20);
 /// The default maximum ACK delay we assume the remote uses.
@@ -184,8 +189,7 @@ impl AckToken {
 
 /// A structure that tracks what packets have been received,
 /// and what needs acknowledgement for a packet number space.
-#[derive(Debug, derive_more::Display)]
-#[display("Recvd-{space}")]
+#[derive(Debug)]
 pub struct RecvdPackets {
     space: PacketNumberSpace,
     ranges: VecDeque<PacketRange>,
@@ -509,6 +513,12 @@ impl RecvdPackets {
     }
 }
 
+impl Display for RecvdPackets {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Recvd-{}", self.space)
+    }
+}
+
 pub struct AckTracker {
     spaces: EnumMap<PacketNumberSpace, Option<RecvdPackets>>,
 }
@@ -561,10 +571,9 @@ impl AckTracker {
         }
         if self.spaces[PacketNumberSpace::Initial].is_none()
             && self.spaces[PacketNumberSpace::Handshake].is_none()
+            && let Some(recvd) = &self.spaces[PacketNumberSpace::ApplicationData]
         {
-            if let Some(recvd) = &self.spaces[PacketNumberSpace::ApplicationData] {
-                return recvd.ack_time();
-            }
+            return recvd.ack_time();
         }
 
         // Ignore any time that is in the past relative to `now`.
@@ -621,14 +630,14 @@ mod tests {
     use test_fixture::now;
 
     use super::{
-        AckTracker, Duration, Instant, PacketNumberSpace, RecvdPackets, MAX_TRACKED_RANGES,
+        AckTracker, Duration, Instant, MAX_TRACKED_RANGES, PacketNumberSpace, RecvdPackets,
     };
     use crate::{
+        Stats,
         frame::Frame,
         packet,
         recovery::{self},
         stats::FrameStats,
-        Stats,
     };
 
     const RTT: Duration = Duration::from_millis(100);
@@ -932,9 +941,11 @@ mod tests {
             .set_received(now(), 0, true, &mut stats)
             .unwrap();
         // The reference time for `ack_time` has to be in the past or we filter out the timer.
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_some());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_some()
+        );
 
         let mut tokens = recovery::Tokens::new();
         let mut frame_stats = FrameStats::default();
@@ -954,17 +965,21 @@ mod tests {
             .unwrap()
             .set_received(now(), 1, true, &mut stats)
             .unwrap();
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_some());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_some()
+        );
 
         // Now drop that space.
         tracker.drop_space(PacketNumberSpace::Initial);
 
         assert!(tracker.get_mut(PacketNumberSpace::Initial).is_none());
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_none());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_none()
+        );
         tracker.write_frame(
             PacketNumberSpace::Initial,
             now(),
@@ -989,9 +1004,11 @@ mod tests {
             .unwrap()
             .set_received(now(), 0, true, &mut Stats::default())
             .unwrap();
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_some());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_some()
+        );
 
         let mut builder =
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
@@ -1024,9 +1041,11 @@ mod tests {
             .unwrap()
             .set_received(now(), 2, true, &mut stats)
             .unwrap();
-        assert!(tracker
-            .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
-            .is_some());
+        assert!(
+            tracker
+                .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
+                .is_some()
+        );
 
         let mut builder =
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
@@ -1095,10 +1114,12 @@ mod tests {
             PacketNumberSpace::from(packet::Type::Short),
             PacketNumberSpace::ApplicationData
         );
-        assert!(std::panic::catch_unwind(|| {
-            PacketNumberSpace::from(packet::Type::VersionNegotiation)
-        })
-        .is_err());
+        assert!(
+            std::panic::catch_unwind(|| {
+                PacketNumberSpace::from(packet::Type::VersionNegotiation)
+            })
+            .is_err()
+        );
     }
 
     #[test]

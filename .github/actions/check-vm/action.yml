@@ -76,7 +76,7 @@ runs:
                         ;;
           esac
           cargo version
-          cargo check --locked --all-targets $WORKSPACE \$EXCLUDE
+          cargo check --locked --all-targets $WORKSPACE \${EXCLUDE:-}
           case "$PLATFORM" in
             openbsd)    # clippy fails on OpenBSD, because libfuzzer-sys is not supported.
                         ;;
@@ -105,42 +105,54 @@ runs:
         echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
-      uses: vmactions/freebsd-vm@670398e4236735b8b65805c3da44b7a511fb8b27 # v1.3.0
+      uses: vmactions/freebsd-vm@c9f815bc7aa0d34c9fdd0619b034a32d6ca7b57e # v1.4.2
       with:
         usesh: true
+        disable-cache: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'openbsd' }}
-      uses: vmactions/openbsd-vm@00753f2835e62704570734312de6f212069dfef7 # v1.3.1
+      uses: vmactions/openbsd-vm@9a8e4351a4a0dc6238e7c69276dcbf6c03bea576 # v1.3.6
       with:
         usesh: true
+        disable-cache: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'netbsd' }}
-      uses: vmactions/netbsd-vm@2ba9902c77c2ebdb7501e5e9308dea03f0f251c4 # v1.3.1
+      uses: vmactions/netbsd-vm@e04aec09540429f9cebb0e7941f7cd0c0fc3b44f # v1.3.6
       with:
         usesh: true
+        disable-cache: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'solaris' }}
-      uses: vmactions/solaris-vm@47bea106d03acaf91084e52548ee460556011602 # v1.1.8
+      uses: vmactions/solaris-vm@69d382b4a775b25ea5955e6c1730e9d05047ca0d # v1.3.1
       with:
         release: "11.4-gcc"
         usesh: true
+        disable-cache: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
-    - if: ${{ inputs.codecov-token != '' }}
+    - id: check-coverage
+      shell: bash
+      env:
+        WORKING_DIR: ${{ inputs.working-directory }}
+      run: test -f "$WORKING_DIR/codecov.json" && echo "exists=true" >> "$GITHUB_OUTPUT" || true
+
+    - if: ${{ steps.check-coverage.outputs.exists == 'true' }}
       uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
       with:
         files: codecov.json
+        working-directory: ${{ inputs.working-directory }}
         fail_ci_if_error: false
         token: ${{ inputs.codecov-token }}
         verbose: true
+        flags: ${{ inputs.platform }}

@@ -15,15 +15,16 @@
 
 use std::time::Duration;
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 #[path = "common.rs"]
 mod common;
 
 fn benchmark(c: &mut Criterion) {
     common::benchmark(c, |group, streams, data_size| {
+        let bench_name = format!("simulated/{streams}-streams/each-{data_size}-bytes");
         group.throughput(Throughput::Bytes((streams * data_size) as u64));
-        group.bench_function("simulated-time", |b| {
+        group.bench_function(&bench_name, |b| {
             b.iter_custom(|iters| {
                 let mut d_sum = Duration::ZERO;
                 for _i in 0..iters {

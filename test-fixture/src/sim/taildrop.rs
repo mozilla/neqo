@@ -9,11 +9,11 @@
 use std::{
     cmp::{max, min},
     collections::VecDeque,
-    fmt::{self, Display},
+    fmt::{self, Debug, Display},
     time::{Duration, Instant},
 };
 
-use neqo_common::{qinfo, qtrace, Datagram, Dscp, Ecn, Tos};
+use neqo_common::{Datagram, Dscp, Ecn, Tos, qinfo, qtrace};
 use neqo_transport::Output;
 
 use super::Node;
@@ -111,8 +111,7 @@ impl Display for Stats {
 }
 
 /// This models a link with a tail drop router at the front of it.
-#[derive(Clone, derive_more::Debug)]
-#[debug("taildrop")]
+#[derive(Clone)]
 pub struct TailDrop {
     /// An overhead associated with each entry.  This accounts for
     /// layer 2, IP, and UDP overheads.
@@ -341,6 +340,12 @@ impl Node for TailDrop {
     }
 }
 
+impl Debug for TailDrop {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("taildrop")
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
@@ -350,9 +355,9 @@ mod test {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{qinfo, Encoder};
+    use neqo_common::{Encoder, qinfo};
 
-    use crate::sim::{network::TailDrop, rng::Random, Node as _};
+    use crate::sim::{Node as _, network::TailDrop, rng::Random};
 
     fn mark_rate(used: usize, capacity: usize, trials: usize, salt: u64) -> usize {
         let mut enc = Encoder::default();

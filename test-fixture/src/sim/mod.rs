@@ -19,17 +19,17 @@ use std::{
     cell::RefCell,
     cmp::min,
     fmt::Debug,
-    fs::{create_dir_all, File},
+    fs::{File, create_dir_all},
     ops::{Deref, DerefMut},
     path::PathBuf,
     rc::Rc,
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qerror, qinfo, qtrace, Datagram, Encoder};
+use NodeState::{Active, Idle, Waiting};
+use neqo_common::{Datagram, Encoder, qdebug, qerror, qinfo, qtrace};
 use neqo_transport::Output;
 use rng::Random;
-use NodeState::{Active, Idle, Waiting};
 
 use crate::now;
 

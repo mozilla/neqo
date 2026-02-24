@@ -5,13 +5,15 @@
 // except according to those terms.
 
 use std::{
+    fmt::{self, Display, Formatter},
     mem,
     ops::{Deref, Div as _},
 };
 
-use neqo_common::{qtrace, Header};
+use neqo_common::{Header, qtrace};
 
 use crate::{
+    Error, Res,
     prefix::{
         BASE_PREFIX_NEGATIVE, BASE_PREFIX_POSITIVE, HEADER_FIELD_INDEX_DYNAMIC,
         HEADER_FIELD_INDEX_DYNAMIC_POST, HEADER_FIELD_INDEX_STATIC,
@@ -20,19 +22,23 @@ use crate::{
         NO_PREFIX,
     },
     qpack_send_buf::Encoder as _,
-    reader::{parse_utf8, ReceiverBufferWrapper},
+    reader::{ReceiverBufferWrapper, parse_utf8},
     table::HeaderTable,
-    Error, Res,
 };
 
-#[derive(Default, Debug, PartialEq, Eq, derive_more::Display)]
-#[display("HeaderEncoder")]
+#[derive(Default, Debug, PartialEq, Eq)]
 pub struct HeaderEncoder {
     buf: neqo_common::Encoder,
     base: u64,
     use_huffman: bool,
     max_entries: u64,
     max_dynamic_index_ref: Option<u64>,
+}
+
+impl Display for HeaderEncoder {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "HeaderEncoder")
+    }
 }
 
 impl HeaderEncoder {
@@ -75,7 +81,9 @@ impl HeaderEncoder {
     }
 
     pub fn encode_literal_with_name_ref(&mut self, is_static: bool, index: u64, value: &[u8]) {
-        qtrace!("[{self}] encode literal with name ref - index={index}, static={is_static}, value={value:x?}");
+        qtrace!(
+            "[{self}] encode literal with name ref - index={index}, static={is_static}, value={value:x?}"
+        );
         if is_static {
             self.buf
                 .encode_prefixed_encoded_int(HEADER_FIELD_LITERAL_NAME_REF_STATIC, index);
@@ -144,12 +152,16 @@ impl Deref for HeaderEncoder {
     }
 }
 
-#[derive(derive_more::Display)]
-#[display("HeaderDecoder")]
 pub struct HeaderDecoder<'a> {
     buf: ReceiverBufferWrapper<'a>,
     base: u64,
     req_insert_cnt: u64,
+}
+
+impl Display for HeaderDecoder<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "HeaderDecoder")
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

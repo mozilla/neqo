@@ -11,14 +11,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{hex, qinfo, qlog::Qlog, Decoder, Ecn};
+use neqo_common::{Decoder, Ecn, hex, qinfo, qlog::Qlog};
 use qlog::events::{
+    EventData, RawInfo,
     connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated},
     quic::{
         AckedRanges, ErrorSpace, MetricsUpdated, PacketDropped, PacketHeader, PacketLost,
         PacketReceived, PacketSent, QuicFrame, StreamType, VersionInformation,
     },
-    EventData, RawInfo,
 };
 use smallvec::SmallVec;
 

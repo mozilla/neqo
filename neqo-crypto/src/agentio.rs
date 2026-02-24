@@ -11,7 +11,9 @@
 
 use std::{
     cmp::min,
+    fmt::{self, Display, Formatter},
     mem,
+    ops::Deref,
     os::raw::{c_uint, c_void},
     pin::Pin,
     ptr::{null, null_mut},
@@ -21,7 +23,7 @@ use neqo_common::{hex, hex_with_len, qtrace};
 
 use crate::{
     constants::{ContentType, Epoch},
-    err::{nspr, Error, PR_SetError, Res},
+    err::{Error, PR_SetError, Res, nspr},
     null_safe_slice, prio, ssl,
 };
 
@@ -37,8 +39,7 @@ pub fn as_c_void<T: Unpin>(pin: &mut Pin<Box<T>>) -> *mut c_void {
 }
 
 /// A slice of the output.
-#[derive(Default, derive_more::Debug)]
-#[debug("Record {:?}:{:?} {}", epoch, ct, hex_with_len(&data[..]))]
+#[derive(Default)]
 pub struct Record {
     pub epoch: Epoch,
     pub ct: ContentType,
@@ -69,7 +70,19 @@ impl Record {
     }
 }
 
-#[derive(Debug, Default, derive_more::Deref)]
+impl fmt::Debug for Record {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Record {:?}:{:?} {}",
+            self.epoch,
+            self.ct,
+            hex_with_len(&self.data[..])
+        )
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct RecordList {
     records: Vec<Record>,
 }
@@ -93,10 +106,10 @@ impl RecordList {
         let Ok(ct) = ContentType::try_from(ct) else {
             return ssl::SECFailure;
         };
-        let Some(records) = arg.cast::<Self>().as_mut() else {
+        let Some(records) = (unsafe { arg.cast::<Self>().as_mut() }) else {
             return ssl::SECFailure;
         };
-        let slice = null_safe_slice(data, len);
+        let slice = unsafe { null_safe_slice(data, len) };
         records.append(epoch, ct, slice);
         ssl::SECSuccess
     }
@@ -108,6 +121,13 @@ impl RecordList {
             ssl::SSL_RecordLayerWriteCallback(fd, Some(Self::ingest), as_c_void(&mut records))
         }?;
         Ok(records)
+    }
+}
+
+impl Deref for RecordList {
+    type Target = Vec<Record>;
+    fn deref(&self) -> &Vec<Record> {
+        &self.records
     }
 }
 
@@ -138,23 +158,12 @@ impl Drop for AgentIoInputContext<'_> {
     }
 }
 
-// TODO: Derive Default when MSRV >= 1.88 (Default for raw pointers stabilized in 1.88).
-#[derive(Debug, derive_more::Display)]
-#[display("AgentIoInput {input:p}")]
+#[derive(Debug, Default)]
 struct AgentIoInput {
     // input is data that is read by TLS.
     input: *const u8,
     // input_available is how much data is left for reading.
     available: usize,
-}
-
-impl Default for AgentIoInput {
-    fn default() -> Self {
-        Self {
-            input: null(),
-            available: 0,
-        }
-    }
 }
 
 impl AgentIoInput {
@@ -196,8 +205,13 @@ impl AgentIoInput {
     }
 }
 
-#[derive(Debug, Default, derive_more::Display)]
-#[display("AgentIo")]
+impl Display for AgentIoInput {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "AgentIoInput {:p}", self.input)
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct AgentIo {
     // input collects the input we might provide to TLS.
     input: AgentIoInput,
@@ -208,7 +222,7 @@ pub struct AgentIo {
 
 impl AgentIo {
     unsafe fn borrow(fd: &mut PrFd) -> &mut Self {
-        (**fd).secret.cast::<Self>().as_mut().unwrap()
+        unsafe { (**fd).secret.cast::<Self>().as_mut().unwrap() }
     }
 
     pub fn wrap<'a: 'c, 'b: 'c, 'c>(&'a mut self, input: &'b [u8]) -> AgentIoInputContext<'c> {
@@ -229,23 +243,30 @@ impl AgentIo {
     }
 }
 
+impl Display for AgentIo {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "AgentIo")
+    }
+}
+
 unsafe extern "C" fn agent_close(fd: PrFd) -> PrStatus {
-    (*fd).secret = null_mut();
-    if let Some(dtor) = (*fd).dtor {
-        dtor(fd);
+    unsafe {
+        (*fd).secret = null_mut();
+        if let Some(dtor) = (*fd).dtor {
+            dtor(fd);
+        }
     }
     PR_SUCCESS
 }
 
 unsafe extern "C" fn agent_read(mut fd: PrFd, buf: *mut c_void, amount: prio::PRInt32) -> PrStatus {
-    let io = AgentIo::borrow(&mut fd);
-    if let Ok(a) = usize::try_from(amount) {
-        match io.input.read_input(buf.cast(), a) {
-            Ok(_) => PR_SUCCESS,
-            Err(_) => PR_FAILURE,
-        }
-    } else {
-        PR_FAILURE
+    let io = unsafe { AgentIo::borrow(&mut fd) };
+    let Ok(a) = usize::try_from(amount) else {
+        return PR_FAILURE;
+    };
+    match io.input.read_input(buf.cast(), a) {
+        Ok(_) => PR_SUCCESS,
+        Err(_) => PR_FAILURE,
     }
 }
 
@@ -256,17 +277,16 @@ unsafe extern "C" fn agent_recv(
     flags: prio::PRIntn,
     _timeout: prio::PRIntervalTime,
 ) -> prio::PRInt32 {
-    let io = AgentIo::borrow(&mut fd);
+    let io = unsafe { AgentIo::borrow(&mut fd) };
     if flags != 0 {
         return PR_FAILURE;
     }
-    if let Ok(a) = usize::try_from(amount) {
-        io.input.read_input(buf.cast(), a).map_or(PR_FAILURE, |v| {
-            prio::PRInt32::try_from(v).unwrap_or(PR_FAILURE)
-        })
-    } else {
-        PR_FAILURE
-    }
+    let Ok(a) = usize::try_from(amount) else {
+        return PR_FAILURE;
+    };
+    io.input.read_input(buf.cast(), a).map_or(PR_FAILURE, |v| {
+        prio::PRInt32::try_from(v).unwrap_or(PR_FAILURE)
+    })
 }
 
 unsafe extern "C" fn agent_write(
@@ -274,7 +294,7 @@ unsafe extern "C" fn agent_write(
     buf: *const c_void,
     amount: prio::PRInt32,
 ) -> PrStatus {
-    let io = AgentIo::borrow(&mut fd);
+    let io = unsafe { AgentIo::borrow(&mut fd) };
     usize::try_from(amount).map_or(PR_FAILURE, |a| {
         io.save_output(buf.cast(), a);
         amount
@@ -288,8 +308,7 @@ unsafe extern "C" fn agent_send(
     flags: prio::PRIntn,
     _timeout: prio::PRIntervalTime,
 ) -> prio::PRInt32 {
-    let io = AgentIo::borrow(&mut fd);
-
+    let io = unsafe { AgentIo::borrow(&mut fd) };
     if flags != 0 {
         return PR_FAILURE;
     }
@@ -300,12 +319,12 @@ unsafe extern "C" fn agent_send(
 }
 
 unsafe extern "C" fn agent_available(mut fd: PrFd) -> prio::PRInt32 {
-    let io = AgentIo::borrow(&mut fd);
+    let io = unsafe { AgentIo::borrow(&mut fd) };
     io.input.available.try_into().unwrap_or(PR_FAILURE)
 }
 
 unsafe extern "C" fn agent_available64(mut fd: PrFd) -> prio::PRInt64 {
-    let io = AgentIo::borrow(&mut fd);
+    let io = unsafe { AgentIo::borrow(&mut fd) };
     io.input
         .available
         .try_into()
@@ -317,7 +336,7 @@ unsafe extern "C" fn agent_available64(mut fd: PrFd) -> prio::PRInt64 {
     reason = "Cast is safe because prio::PR_AF_INET is 2."
 )]
 const unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrStatus {
-    let Some(a) = addr.as_mut() else {
+    let Some(a) = (unsafe { addr.as_mut() }) else {
         return PR_FAILURE;
     };
     a.inet.family = prio::PR_AF_INET as prio::PRUint16;
@@ -330,11 +349,12 @@ const unsafe extern "C" fn agent_getsockopt(
     _fd: PrFd,
     opt: *mut prio::PRSocketOptionData,
 ) -> PrStatus {
-    if let Some(o) = opt.as_mut() {
-        if o.option == prio::PRSockOption::PR_SockOpt_Nonblocking {
-            o.value.non_blocking = 1;
-            return PR_SUCCESS;
-        }
+    let Some(o) = (unsafe { opt.as_mut() }) else {
+        return PR_FAILURE;
+    };
+    if o.option == prio::PRSockOption::PR_SockOpt_Nonblocking {
+        o.value.non_blocking = 1;
+        return PR_SUCCESS;
     }
     PR_FAILURE
 }

@@ -5,11 +5,18 @@
 // except according to those terms.
 
 use std::{
-    cell::RefCell, fmt::Debug, ops::Deref, os::raw::c_uint, ptr::null_mut, slice::Iter as SliceIter,
+    cell::RefCell,
+    fmt::{self, Debug, Formatter},
+    ops::Deref,
+    os::raw::c_uint,
+    ptr::null_mut,
+    slice::Iter as SliceIter,
 };
 
+use neqo_common::hex_with_len;
+
 use crate::{
-    err::{secstatus_to_res, Error, Res},
+    err::{Error, Res, secstatus_to_res},
     null_safe_slice,
 };
 
@@ -34,42 +41,11 @@ pub use nss_p11::*;
 
 #[macro_export]
 macro_rules! scoped_ptr {
-    // With custom debug method
-    ($scoped:ident, $target:ty, $dtor:path, $debug_method:ident) => {
-        pub struct $scoped {
-            ptr: *mut $target,
-        }
-
-        impl $scoped {
-            fn debug_display(&self) -> String {
-                self.$debug_method().map_or_else(
-                    |_| concat!("Opaque ", stringify!($scoped)).to_string(),
-                    |b| format!(concat!(stringify!($scoped), " {}"), neqo_common::hex_with_len(b))
-                )
-            }
-        }
-
-        impl std::fmt::Debug for $scoped {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{}", self.debug_display())
-            }
-        }
-
-        scoped_ptr!(@impls $scoped, $target, $dtor);
-    };
-
-    // Without custom debug method
     ($scoped:ident, $target:ty, $dtor:path) => {
-        #[derive(Debug)]
         pub struct $scoped {
             ptr: *mut $target,
         }
 
-        scoped_ptr!(@impls $scoped, $target, $dtor);
-    };
-
-    // Common implementations
-    (@impls $scoped:ident, $target:ty, $dtor:path) => {
         impl $scoped {
             /// Create a new instance of `$scoped` from a pointer.
             ///
@@ -106,12 +82,7 @@ macro_rules! scoped_ptr {
 }
 
 scoped_ptr!(Certificate, CERTCertificate, CERT_DestroyCertificate);
-scoped_ptr!(
-    PublicKey,
-    SECKEYPublicKey,
-    SECKEY_DestroyPublicKey,
-    key_data
-);
+scoped_ptr!(PublicKey, SECKEYPublicKey, SECKEY_DestroyPublicKey);
 
 impl PublicKey {
     /// Get the HPKE serialization of the public key.
@@ -147,12 +118,17 @@ impl Clone for PublicKey {
     }
 }
 
-scoped_ptr!(
-    PrivateKey,
-    SECKEYPrivateKey,
-    SECKEY_DestroyPrivateKey,
-    key_data
-);
+impl Debug for PublicKey {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        if let Ok(b) = self.key_data() {
+            write!(f, "PublicKey {}", hex_with_len(b))
+        } else {
+            write!(f, "Opaque PublicKey")
+        }
+    }
+}
+
+scoped_ptr!(PrivateKey, SECKEYPrivateKey, SECKEY_DestroyPrivateKey);
 
 impl PrivateKey {
     /// Get the bits of the private key.
@@ -196,6 +172,16 @@ impl Clone for PrivateKey {
     }
 }
 
+impl Debug for PrivateKey {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        if let Ok(b) = self.key_data() {
+            write!(f, "PrivateKey {}", hex_with_len(b))
+        } else {
+            write!(f, "Opaque PrivateKey")
+        }
+    }
+}
+
 scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 
 impl Slot {
@@ -205,7 +191,7 @@ impl Slot {
     }
 }
 
-scoped_ptr!(SymKey, PK11SymKey, PK11_FreeSymKey, as_bytes);
+scoped_ptr!(SymKey, PK11SymKey, PK11_FreeSymKey);
 
 impl SymKey {
     /// You really don't want to use this.
@@ -233,6 +219,16 @@ impl Clone for SymKey {
     }
 }
 
+impl Debug for SymKey {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        if let Ok(b) = self.as_bytes() {
+            write!(f, "SymKey {}", hex_with_len(b))
+        } else {
+            write!(f, "Opaque SymKey")
+        }
+    }
+}
+
 impl Default for SymKey {
     fn default() -> Self {
         Self { ptr: null_mut() }
@@ -240,12 +236,16 @@ impl Default for SymKey {
 }
 
 unsafe fn destroy_pk11_context(ctxt: *mut PK11Context) {
-    PK11_DestroyContext(ctxt, PRBool::from(true));
+    unsafe {
+        PK11_DestroyContext(ctxt, PRBool::from(true));
+    }
 }
 scoped_ptr!(Context, PK11Context, destroy_pk11_context);
 
 unsafe fn destroy_secitem(item: *mut SECItem) {
-    SECITEM_FreeItem(item, PRBool::from(true));
+    unsafe {
+        SECITEM_FreeItem(item, PRBool::from(true));
+    }
 }
 scoped_ptr!(Item, SECItem, destroy_secitem);
 
@@ -292,7 +292,9 @@ impl Item {
 }
 
 unsafe fn destroy_secitem_array(array: *mut SECItemArray) {
-    SECITEM_FreeArray(array, PRBool::from(true));
+    unsafe {
+        SECITEM_FreeArray(array, PRBool::from(true));
+    }
 }
 scoped_ptr!(ItemArray, SECItemArray, destroy_secitem_array);
 
@@ -414,7 +416,7 @@ mod test {
     use test_fixture::fixture_init;
 
     use super::RandomCache;
-    use crate::{random, PrivateKey, PublicKey};
+    use crate::{PrivateKey, PublicKey, random};
 
     #[cfg(not(feature = "disable-random"))]
     #[test]

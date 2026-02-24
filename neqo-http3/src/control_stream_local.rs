@@ -4,23 +4,32 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{collections::VecDeque, time::Instant};
+use std::{
+    collections::VecDeque,
+    fmt::{self, Display, Formatter},
+    time::Instant,
+};
 
 use neqo_common::qtrace;
 use neqo_transport::{Connection, StreamId, StreamType};
 use rustc_hash::FxHashMap as HashMap;
 
-use crate::{frames::HFrame, BufferedStream, Error, Http3StreamType, RecvStream, Res};
+use crate::{BufferedStream, Error, Http3StreamType, RecvStream, Res, frames::HFrame};
 
 pub const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
 
 /// The local control stream, responsible for encoding frames and sending them
-#[derive(Debug, Default, derive_more::Display)]
-#[display("Local control stream {stream:?}")]
+#[derive(Debug, Default)]
 pub struct ControlStreamLocal {
     stream: BufferedStream,
     /// `stream_id`s of outstanding request streams
     outstanding_priority_update: VecDeque<StreamId>,
+}
+
+impl Display for ControlStreamLocal {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Local control stream {:?}", self.stream)
+    }
 }
 
 impl ControlStreamLocal {

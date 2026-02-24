@@ -6,9 +6,13 @@
 
 #![expect(clippy::unwrap_used, reason = "This is test code.")]
 
-use std::{cmp::min, fmt::Debug, time::Instant};
+use std::{
+    cmp::min,
+    fmt::{self, Debug},
+    time::Instant,
+};
 
-use neqo_common::{event::Provider as _, qdebug, qinfo, qtrace, Datagram};
+use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator, Output, State,
@@ -31,11 +35,9 @@ pub trait Goal: Debug {
     /// Handle an event from the provided connection, returning `true` when the
     /// goal is achieved.
     fn handle_event(&mut self, c: &mut Connection, e: &ConnectionEvent, now: Instant)
-        -> GoalStatus;
+    -> GoalStatus;
 }
 
-#[derive(derive_more::Debug)]
-#[debug("{}", c)]
 pub struct Node {
     c: Connection,
     setup_goals: Vec<Box<dyn Goal>>,
@@ -178,6 +180,12 @@ impl sim::Node for Node {
     }
 }
 
+impl Debug for Node {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(&self.c, f)
+    }
+}
+
 /// A target for a connection that involves reaching a given connection state.
 #[derive(Debug, Clone)]
 pub struct ReachState {
@@ -224,11 +232,11 @@ impl SendData {
     }
 
     fn make_stream(&mut self, c: &mut Connection) {
-        if self.stream_id.is_none() {
-            if let Ok(stream_id) = c.stream_create(StreamType::UniDi) {
-                qdebug!("[{c}] made stream {stream_id} for sending");
-                self.stream_id = Some(stream_id);
-            }
+        if self.stream_id.is_none()
+            && let Ok(stream_id) = c.stream_create(StreamType::UniDi)
+        {
+            qdebug!("[{c}] made stream {stream_id} for sending");
+            self.stream_id = Some(stream_id);
         }
     }
 

@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used, reason = "This is example code.")]
-
 //! An HTTP 3 client implementation.
 
 use std::{
@@ -21,7 +19,8 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};
+use http::Uri as Url;
+use neqo_common::{Datagram, event::Provider, hex, qdebug, qerror, qinfo, qwarn};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
@@ -29,10 +28,12 @@ use neqo_transport::{
     OutputBatch, RandomConnectionIdGenerator, StreamId,
 };
 use rustc_hash::FxHashMap as HashMap;
-use url::Url;
 
-use super::{get_output_file, qlog_new, Args, CloseState, Res};
-use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};
+use super::{Args, CloseState, Res, get_output_file, qlog_new};
+use crate::{
+    STREAM_IO_BUFFER_SIZE,
+    send_data::{SendData, SendResult},
+};
 
 pub struct Handler {
     #[expect(clippy::struct_field_names, reason = "This name is more descriptive.")]
@@ -305,11 +306,13 @@ impl StreamHandler for DownloadStreamHandler {
         }
 
         if fin {
-            if let Some(mut out_file) = self.out_file.take() {
-                out_file.flush()?;
-            } else {
-                qdebug!("<FIN[{stream_id}]>");
-            }
+            self.out_file.take().map_or_else(
+                || {
+                    qdebug!("<FIN[{stream_id}]>");
+                    Ok(())
+                },
+                |mut out_file| out_file.flush(),
+            )?;
         }
 
         Ok(())
@@ -359,11 +362,14 @@ impl StreamHandler for UploadStreamHandler {
         stream_id: StreamId,
         now: Instant,
     ) {
-        let done = self
+        match self
             .data
-            .send(|chunk| client.send_data(stream_id, chunk, now).unwrap());
-        if done {
-            client.stream_close_send(stream_id, now).unwrap();
+            .send(|chunk| client.send_data(stream_id, chunk, now))
+        {
+            SendResult::StreamClosed => qwarn!("Stream {stream_id} is closed"),
+            // Stream may be closed; ignore errors.
+            SendResult::Done => _ = client.stream_close_send(stream_id, now),
+            SendResult::MoreData => {}
         }
     }
 }
@@ -418,7 +424,7 @@ impl UrlHandler {
                             self.args.output_dir.as_ref(),
                             &mut self.all_paths,
                         );
-                        client.stream_close_send(client_stream_id, now).unwrap();
+                        _ = client.stream_close_send(client_stream_id, now); // Stream may be closed; ignore errors.
                         Box::new(DownloadStreamHandler { out_file })
                     }
                     "POST" => Box::new(UploadStreamHandler {

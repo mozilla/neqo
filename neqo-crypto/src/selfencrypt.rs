@@ -6,15 +6,15 @@
 
 use std::mem;
 
-use neqo_common::{hex, qinfo, qtrace, Encoder};
+use neqo_common::{Encoder, hex, qinfo, qtrace};
 
 use crate::{
+    Aead,
     aead::Aead as _,
     constants::{Cipher, Version},
     err::{Error, Res},
     hkdf,
-    p11::{random, SymKey},
-    Aead,
+    p11::{SymKey, random},
 };
 
 #[derive(Debug)]

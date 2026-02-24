@@ -4,29 +4,38 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{rc::Rc, time::Instant};
+use std::{
+    fmt::{self, Display, Formatter},
+    rc::Rc,
+    time::Instant,
+};
 
-use neqo_common::{event::Provider as _, qdebug, qinfo, qtrace, Header, MessageType, Role};
+use neqo_common::{Header, MessageType, Role, event::Provider as _, qdebug, qinfo, qtrace};
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, DatagramTracking, StreamId, StreamType,
 };
 
 use crate::{
+    Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler,
+    ReceiveOutput, Res,
     connection::{Http3Connection, Http3State, SessionAcceptAction},
     frames::HFrame,
     recv_message::{RecvMessage, RecvMessageInfo},
     send_message::SendMessage,
     server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents},
-    Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler,
-    ReceiveOutput, Res,
 };
 
-#[derive(Debug, derive_more::Display)]
-#[display("Http3 server connection")]
+#[derive(Debug)]
 pub struct Http3ServerHandler {
     base_handler: Http3Connection,
     events: Http3ServerConnEvents,
     needs_processing: bool,
+}
+
+impl Display for Http3ServerHandler {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Http3 server connection")
+    }
 }
 
 impl Http3ServerHandler {
@@ -251,10 +260,11 @@ impl Http3ServerHandler {
         session_id: StreamId,
         buf: &[u8],
         id: I,
+        now: Instant,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler
-            .webtransport_send_datagram(session_id, conn, buf, id)
+            .webtransport_send_datagram(session_id, conn, buf, id, now)
     }
 
     pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
@@ -263,10 +273,11 @@ impl Http3ServerHandler {
         session_id: StreamId,
         buf: &[u8],
         id: I,
+        now: Instant,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler
-            .connect_udp_send_datagram(session_id, conn, buf, id)
+            .connect_udp_send_datagram(session_id, conn, buf, id, now)
     }
 
     /// Process HTTTP3 layer.
@@ -434,13 +445,20 @@ impl Http3ServerHandler {
                         HFrame::Goaway { .. } | HFrame::CancelPush { .. } => {
                             Err(Error::HttpFrameUnexpected)
                         }
-                        HFrame::PriorityUpdatePush { element_id, priority } => {
+                        HFrame::PriorityUpdatePush {
+                            element_id,
+                            priority,
+                        } => {
                             // TODO: check if the element_id references a promised push stream or
                             // is greater than the maximum Push ID.
-                            self.events.priority_update(StreamId::from(element_id), priority);
+                            self.events
+                                .priority_update(StreamId::from(element_id), priority);
                             Ok(())
                         }
-                        HFrame::PriorityUpdateRequest { element_id, priority } => {
+                        HFrame::PriorityUpdateRequest {
+                            element_id,
+                            priority,
+                        } => {
                             // check that the element_id references a request stream
                             // within the client-sided bidirectional stream limit
                             let element_stream_id = StreamId::new(element_id);
@@ -448,7 +466,7 @@ impl Http3ServerHandler {
                                 || !element_stream_id.is_client_initiated()
                                 || !conn.is_stream_id_allowed(element_stream_id)
                             {
-                                return Err(Error::HttpId)
+                                return Err(Error::HttpId);
                             }
 
                             self.events.priority_update(element_stream_id, priority);
@@ -481,10 +499,10 @@ impl Http3ServerHandler {
     ) -> Res<(usize, bool)> {
         qdebug!("[{self}] read_data from stream {stream_id}");
         let res = self.base_handler.read_data(conn, stream_id, buf, now);
-        if let Err(e) = &res {
-            if e.connection_error() {
-                self.close(conn, now, e);
-            }
+        if let Err(e) = &res
+            && e.connection_error()
+        {
+            self.close(conn, now, e);
         }
         res
     }

@@ -6,7 +6,7 @@
 
 use std::ops::Range;
 
-use neqo_common::{qtrace, Decoder};
+use neqo_common::{Decoder, qtrace};
 
 /// Finds the range where the SNI extension lives, or returns `None`.
 #[must_use]

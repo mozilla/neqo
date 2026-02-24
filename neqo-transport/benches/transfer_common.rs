@@ -11,9 +11,9 @@ use neqo_transport::{ConnectionParameters, State};
 use test_fixture::{
     boxed,
     sim::{
+        ReadySimulator, Simulator,
         connection::{Node, ReachState, ReceiveData, SendData},
         network::{Delay, TailDrop},
-        ReadySimulator, Simulator,
     },
 };
 
@@ -69,14 +69,14 @@ where
         ("same-seed", Some(FIXED_SEED)),
     ];
 
+    let mut group = c.benchmark_group("transfer");
+    group.noise_threshold(0.03);
     for (label, seed) in configs {
         for pacing in [false, true] {
-            let mut group = c.benchmark_group(format!("transfer/pacing-{pacing}/{label}"));
-            group.noise_threshold(0.03);
             measure(&mut group, label, seed, pacing);
-            group.finish();
         }
     }
+    group.finish();
 }
 
 /// Returns the criterion configuration for transfer benchmarks.

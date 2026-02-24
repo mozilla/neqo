@@ -8,10 +8,10 @@
 #![cfg(test)]
 
 use neqo_crypto::{
+    Error,
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     init,
     selfencrypt::SelfEncrypt,
-    Error,
 };
 
 #[test]

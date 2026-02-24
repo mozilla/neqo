@@ -4,13 +4,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    fmt::{self, Display, Formatter},
+};
 
 use neqo_common::qtrace;
 
 use crate::{
-    static_table::{StaticTableEntry, HEADER_STATIC_TABLE},
     Error, Res,
+    static_table::{HEADER_STATIC_TABLE, StaticTableEntry},
 };
 
 pub const ADDITIONAL_TABLE_ENTRY_SIZE: usize = 32;
@@ -62,10 +65,7 @@ impl DynamicTableEntry {
     }
 }
 
-#[derive(Debug, derive_more::Display)]
-#[display(
-    "HeaderTable for (base={base} acked_inserts_cnt={acked_inserts_cnt} capacity={capacity})"
-)]
+#[derive(Debug)]
 pub struct HeaderTable {
     dynamic: VecDeque<DynamicTableEntry>,
     /// The total capacity (in QPACK bytes) of the table. This is set by
@@ -78,6 +78,16 @@ pub struct HeaderTable {
     /// This is number of inserts that are acked. this correspond to index of the first not acked.
     /// This is only used by the encoder.
     acked_inserts_cnt: u64,
+}
+
+impl Display for HeaderTable {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(
+            f,
+            "HeaderTable for (base={} acked_inserts_cnt={} capacity={})",
+            self.base, self.acked_inserts_cnt, self.capacity
+        )
+    }
 }
 
 impl HeaderTable {

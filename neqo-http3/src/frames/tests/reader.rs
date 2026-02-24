@@ -13,11 +13,11 @@ use neqo_transport::{Connection, StreamId, StreamType};
 use test_fixture::{connect, now};
 
 use crate::{
+    Error, PushId,
     frames::{
-        reader::FrameDecoder, FrameReader, HFrame, StreamReaderConnectionWrapper, WebTransportFrame,
+        FrameReader, HFrame, StreamReaderConnectionWrapper, WebTransportFrame, reader::FrameDecoder,
     },
     settings::{HSetting, HSettingType, HSettings},
-    Error, PushId,
 };
 
 struct FrameReaderTest {

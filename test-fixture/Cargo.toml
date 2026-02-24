@@ -16,14 +16,12 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-derive_more = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "../neqo-common", features = ["test-fixture"] }
 neqo-crypto = { path = "../neqo-crypto" }
 neqo-http3 = { path = "../neqo-http3", features = ["draft-29"] }
 neqo-transport = { path = "../neqo-transport", features = ["draft-29"] }
 qlog = { workspace = true }
-strum = { workspace = true }
 
 [features]
 bench = [

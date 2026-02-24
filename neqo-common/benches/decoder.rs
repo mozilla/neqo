@@ -11,7 +11,7 @@
 
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use neqo_common::Decoder;
 
 /// Fill the buffer with sequentially increasing values, wrapping at 255.

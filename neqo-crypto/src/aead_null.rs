@@ -4,17 +4,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::fmt;
+
 use crate::{
     aead::Aead,
     constants::{Cipher, Version},
-    err::{sec::SEC_ERROR_BAD_DATA, Error, Res},
+    err::{Error, Res, sec::SEC_ERROR_BAD_DATA},
     p11::SymKey,
 };
 
 pub const AEAD_NULL_TAG: &[u8] = &[0x0a; 16];
 
-#[derive(derive_more::Debug)]
-#[debug("[NULL AEAD]")]
 pub struct AeadNull {}
 
 impl AeadNull {
@@ -84,5 +84,11 @@ impl Aead for AeadNull {
 
     fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
         self.decrypt_check(count, aad, data)
+    }
+}
+
+impl fmt::Debug for AeadNull {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[NULL AEAD]")
     }
 }

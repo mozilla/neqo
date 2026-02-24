@@ -19,8 +19,8 @@ autobenches = false
 workspace = true
 
 [dependencies]
-derive_more = { workspace = true }
 enumset = { workspace = true }
+http = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
@@ -31,7 +31,6 @@ rustc-hash = { workspace = true }
 sfv = { version = "0.14", default-features = false, features = ["parsed-types"] }
 strum = { workspace = true }
 thiserror = { workspace = true }
-url = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false }
@@ -63,11 +62,15 @@ ignored = ["criterion", "log"]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
 
-[package.metadata.bench.streams_walltime]
-codspeed.mode = "walltime"
-
-[package.metadata.bench.streams_simulated]
+[[package.metadata.bench]]
+name = "streams_simulated"
 codspeed.mode = "simulation"
+codspeed.memory = false # Memory profiling is incompatible with iter_custom() because CodSpeed's instrumentation hooks are bypassed.
+
+[[package.metadata.bench]]
+name = "streams_walltime"
+codspeed.mode = "walltime"
+codspeed.memory = false # FIXME: Disabled due to high variance in results.
 
 [[bench]]
 name = "streams_walltime"

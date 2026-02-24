@@ -11,13 +11,13 @@ use std::{
 
 use crate::{
     constants::{
-        Cipher, Version, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
-        TLS_CHACHA20_POLY1305_SHA256, TLS_VERSION_1_3,
+        Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
+        TLS_VERSION_1_3, Version,
     },
     err::{Error, Res},
     p11::{
-        Item, PK11Origin, PK11SymKey, PK11_ImportDataKey, Slot, SymKey, CKA_DERIVE,
-        CKM_HKDF_DERIVE, CK_ATTRIBUTE_TYPE, CK_MECHANISM_TYPE,
+        CK_ATTRIBUTE_TYPE, CK_MECHANISM_TYPE, CKA_DERIVE, CKM_HKDF_DERIVE, Item,
+        PK11_ImportDataKey, PK11Origin, PK11SymKey, Slot, SymKey,
     },
     random,
 };

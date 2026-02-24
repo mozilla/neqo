@@ -4,7 +4,7 @@ authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
 version = "0.3.0"
-edition = "2021"
+edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "Obtain the local network interface MTU towards a given IP address."
@@ -43,5 +43,10 @@ gecko = ["dep:mozbuild"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
+bench = false
+
+[[bin]]
+name = "mtu-lookup"
+path = "src/bin/mtu-lookup.rs"
 bench = false
 

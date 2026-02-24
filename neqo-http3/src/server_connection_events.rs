@@ -6,14 +6,14 @@
 
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-use neqo_common::{header::HeadersExt as _, Bytes, Header};
+use neqo_common::{Bytes, Header, header::HeadersExt as _};
 use neqo_transport::{AppError, StreamId};
 
 use crate::{
-    connection::Http3State,
-    features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
     CloseType, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents, Res,
     SendStreamEvents,
+    connection::Http3State,
+    features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
 };
 
 /// Server events for a single connection.
@@ -92,13 +92,13 @@ pub struct Http3ServerConnEvents {
 
 impl SendStreamEvents for Http3ServerConnEvents {
     fn send_closed(&self, stream_info: &Http3StreamInfo, close_type: CloseType) {
-        if close_type != CloseType::Done {
-            if let Some(error) = close_type.error() {
-                self.insert(Http3ServerConnEvent::StreamStopSending {
-                    stream_info: *stream_info,
-                    error,
-                });
-            }
+        if close_type != CloseType::Done
+            && let Some(error) = close_type.error()
+        {
+            self.insert(Http3ServerConnEvent::StreamStopSending {
+                stream_info: *stream_info,
+                error,
+            });
         }
     }
 

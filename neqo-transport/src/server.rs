@@ -10,6 +10,7 @@ use std::{
     cell::RefCell,
     cmp::min,
     collections::VecDeque,
+    fmt::{self, Display, Formatter},
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -18,23 +19,23 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as _, hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn, Datagram, Role,
-    Tos,
+    Datagram, Role, Tos, event::Provider as _, hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace,
+    qwarn,
 };
 use neqo_crypto::{
-    encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
-    ZeroRttChecker,
+    AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult, ZeroRttChecker,
+    encode_ech_config,
 };
 use rustc_hash::FxHashSet as HashSet;
 
 pub use crate::addr_valid::ValidateAddress;
 use crate::{
+    ConnectionParameters, OutputBatch, Res, Version,
     addr_valid::{AddressValidation, AddressValidationResult},
     cid::{ConnectionId, ConnectionIdGenerator, ConnectionIdRef},
     connection::{Connection, Output, State},
-    packet::{self, Public, MIN_INITIAL_PACKET_SIZE},
+    packet::{self, MIN_INITIAL_PACKET_SIZE, Public},
     saved::SavedDatagram,
-    ConnectionParameters, OutputBatch, Res, Version,
 };
 
 /// A `ServerZeroRttChecker` is a simple wrapper around a single checker.
@@ -99,8 +100,6 @@ impl EchConfig {
     }
 }
 
-#[derive(derive_more::Display)]
-#[display("Server")]
 pub struct Server {
     /// The names of certificates.
     certs: Vec<String>,
@@ -248,6 +247,17 @@ impl Server {
             AddressValidationResult::Validate => {
                 qinfo!("[{self}] Send retry for {:?}", initial.dst_cid);
 
+                // > This Destination Connection ID MUST be at least 8 bytes in length.
+                //
+                // <https://www.rfc-editor.org/rfc/rfc9000.html#section-7.2>
+                if initial.dst_cid.len() < 8 {
+                    qerror!(
+                        "[{self}] DCID too short ({} bytes), dropping packet",
+                        initial.dst_cid.len()
+                    );
+                    return Output::None;
+                }
+
                 let res = self.address_validation.borrow().generate_retry_token(
                     &initial.dst_cid,
                     dgram.source(),
@@ -332,12 +342,11 @@ impl Server {
         }
         c.set_validation(&self.address_validation);
         c.set_qlog(self.create_qlog_trace(orig_dcid.unwrap_or(initial.dst_cid).as_cid_ref(), now));
-        if let Some(cfg) = &self.ech_config {
-            if c.server_enable_ech(cfg.config, &cfg.public_name, &cfg.sk, &cfg.pk)
+        if let Some(cfg) = &self.ech_config
+            && c.server_enable_ech(cfg.config, &cfg.public_name, &cfg.sk, &cfg.pk)
                 .is_err()
-            {
-                qwarn!("[{self}] Unable to enable ECH");
-            }
+        {
+            qwarn!("[{self}] Unable to enable ECH");
         }
     }
 
@@ -591,11 +600,6 @@ impl Server {
         }
 
         // Process output datagrams.
-        #[allow(
-            clippy::allow_attributes,
-            clippy::needless_match,
-            reason = "FIXME: false positive with MSRV 1.87 (and later?)"
-        )]
         let maybe_callback = match self.process_next_output(now, max_datagrams) {
             // Return immediately. Do any maintenance on next call.
             o @ OutputBatch::DatagramBatch(_) => return o,
@@ -668,3 +672,9 @@ impl PartialEq for ConnectionRef {
 }
 
 impl Eq for ConnectionRef {}
+
+impl Display for Server {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Server")
+    }
+}

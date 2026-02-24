@@ -8,6 +8,7 @@ use std::{cmp::max, time::Duration};
 
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
+    CongestionControlAlgorithm, DEFAULT_INITIAL_RTT, Res,
     connection::{ConnectionIdManager, Role},
     rtt::GRANULARITY,
     stream_id::StreamType,
@@ -23,7 +24,6 @@ use crate::{
     },
     tracking::DEFAULT_LOCAL_ACK_DELAY,
     version::{self, Version},
-    CongestionControlAlgorithm, Res, DEFAULT_INITIAL_RTT,
 };
 
 /// Maximum number of bidirectional streams that the remote can open.
@@ -536,19 +536,19 @@ impl ConnectionParameters {
             TransportParameterId::IdleTimeout,
             u64::try_from(self.idle_timeout.as_millis()).unwrap_or(0),
         );
-        if let PreferredAddressConfig::Address(preferred) = &self.preferred_address {
-            if role == Role::Server {
-                let (cid, srt) = cid_manager.preferred_address_cid()?;
-                tps.local_mut().set(
-                    TransportParameterId::PreferredAddress,
-                    TransportParameter::PreferredAddress {
-                        v4: preferred.ipv4(),
-                        v6: preferred.ipv6(),
-                        cid,
-                        srt,
-                    },
-                );
-            }
+        if let PreferredAddressConfig::Address(preferred) = &self.preferred_address
+            && role == Role::Server
+        {
+            let (cid, srt) = cid_manager.preferred_address_cid()?;
+            tps.local_mut().set(
+                TransportParameterId::PreferredAddress,
+                TransportParameter::PreferredAddress {
+                    v4: preferred.ipv4(),
+                    v6: preferred.ipv6(),
+                    cid,
+                    srt,
+                },
+            );
         }
         tps.local_mut()
             .set_integer(MaxDatagramFrameSize, self.datagram_size);

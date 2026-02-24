@@ -1,0 +1,253 @@
+name: Profile
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUSTUP_TOOLCHAIN: stable
+  TRANSFER_SIZE: 33554432  # 32 MiB
+  PERF_OPT: record -F2999 --call-graph fp -g
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  bench-matrix:
+    name: Determine bench matrix
+    runs-on: ubuntu-24.04
+    outputs:
+      benches: ${{ steps.matrix.outputs.all }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - id: matrix
+        uses: ./.github/actions/bench-matrix
+
+  bench-profile:
+    name: Profile ${{ matrix.bench.bench }}
+    runs-on: ubuntu-24.04
+    needs: bench-matrix
+    if: ${{ needs.bench-matrix.outputs.benches != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/rust
+        with:
+          version: stable
+          tools: samply
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/nss
+
+      - name: Build benchmark
+        env:
+          CRATE: ${{ matrix.bench.crate }}
+          BENCH: ${{ matrix.bench.bench }}
+        run: |
+          cargo bench --package "$CRATE" --features bench --bench "$BENCH" --no-run 2>&1 | tee bench-build.txt
+          mkdir -p binaries
+          BENCH_BIN=$(grep Executable bench-build.txt | cut -d'(' -f2 | cut -d')' -f1)
+          cp "$BENCH_BIN" "binaries/$BENCH"
+
+      - name: Enable perf
+        run: sudo sysctl -w kernel.perf_event_paranoid=-1
+
+      - name: Run benchmark with perf
+        env:
+          NSS_DB_PATH: ${{ github.workspace }}/test-fixture/db
+          BENCH: ${{ matrix.bench.bench }}
+        run: |
+          # shellcheck disable=SC2086
+          perf $PERF_OPT -o "$BENCH.perf" -- "binaries/$BENCH" --bench --noplot || true
+
+      - name: Process with samply
+        env:
+          BENCH: ${{ matrix.bench.bench }}
+        run: |
+          if [ -f "$BENCH.perf" ]; then
+            samply import "$BENCH.perf" -o "$BENCH.samply.json.gz" --save-only --presymbolicate || true
+          fi
+
+      - name: Upload profile
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: bench-${{ matrix.bench.crate }}-${{ matrix.bench.bench }}
+          path: |
+            *.samply.json.gz
+            binaries
+          retention-days: 90
+          if-no-files-found: ignore
+
+  perfcompare-profile:
+    name: Profile ${{ matrix.client }}-${{ matrix.server }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {client: neqo, server: neqo}
+          - {client: neqo, server: msquic}
+          - {client: msquic, server: neqo}
+          - {client: neqo, server: quiche}
+          - {client: quiche, server: neqo}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/rust
+        with:
+          version: stable
+          tools: samply
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/nss
+
+      - name: Build neqo
+        run: |
+          cargo build --release --features bench --bin neqo-client --bin neqo-server
+          mkdir -p binaries
+          cp target/release/neqo-client target/release/neqo-server binaries/
+
+      - name: Build msquic
+        if: matrix.client == 'msquic' || matrix.server == 'msquic'
+        uses: ./.github/actions/quic-build
+        with:
+          impl: msquic
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build cloudflare/quiche
+        if: matrix.client == 'quiche' || matrix.server == 'quiche'
+        uses: ./.github/actions/quic-build
+        with:
+          impl: quiche
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Calculate perf size
+        run: echo "PERF_SIZE=$((TRANSFER_SIZE * 20))" >> "$GITHUB_ENV"
+
+      - name: Setup test environment
+        uses: ./.github/actions/testdata-setup
+        with:
+          sizes: ${{ env.PERF_SIZE }}
+
+      - name: Generate commands
+        id: commands
+        uses: ./.github/actions/perfcompare-commands
+        with:
+          client: ${{ matrix.client }}
+          server: ${{ matrix.server }}
+          size: ${{ env.PERF_SIZE }}
+
+      - name: Set command environment
+        env:
+          BENCH_NAME: ${{ steps.commands.outputs.bench-name }}
+          SERVER_CMD: ${{ steps.commands.outputs.server-cmd }}
+          CLIENT_CMD: ${{ steps.commands.outputs.client-cmd }}
+        run: |
+          {
+            echo "BENCH_NAME=$BENCH_NAME"
+            echo "SERVER_CMD=$SERVER_CMD"
+            echo "CLIENT_CMD=$CLIENT_CMD"
+          } >> "$GITHUB_ENV"
+
+      - name: Enable perf
+        run: sudo sysctl -w kernel.perf_event_paranoid=-1
+
+      - name: Record server perf
+        env:
+          NSS_DB_PATH: ${{ github.workspace }}/test-fixture/db
+        run: |
+          # shellcheck disable=SC2086
+          perf $PERF_OPT -o "$BENCH_NAME.server.perf" -- $SERVER_CMD &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          sleep 1
+
+      - name: Record client perf
+        working-directory: /tmp
+        env:
+          NSS_DB_PATH: ${{ github.workspace }}/test-fixture/db
+        run: |
+          # shellcheck disable=SC2086
+          perf $PERF_OPT -o "$BENCH_NAME.client.perf" -- $CLIENT_CMD || true
+
+      - name: Stop server
+        if: always()
+        run: kill "$SERVER_PID" 2>/dev/null || true
+
+      - name: Collect and process perf data
+        run: |
+          mkdir -p profiles
+          for role in server client; do
+            f="$BENCH_NAME.$role.perf"
+            [ -f "$f" ] || f="/tmp/$f"
+            [ -f "$f" ] || continue
+            echo "Processing $f..."
+            samply import "$f" -o "profiles/$BENCH_NAME.$role.samply.json.gz" --save-only --presymbolicate || true
+          done
+
+      - name: Upload profiles
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: perfcompare-${{ matrix.client }}-${{ matrix.server }}
+          path: |
+            profiles/*.samply.json.gz
+            binaries
+          retention-days: 90
+          if-no-files-found: ignore
+
+  pr-comment:
+    name: PR Comment
+    needs: [bench-profile, perfcompare-profile]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Generate comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          ARTIFACTS=$(gh api "/repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" \
+            --jq '.artifacts | map(select(.name | test("^bench-|^perfcompare-"))) | sort_by(.name) | .[] | "- [\(.name)](\(.archive_download_url | sub("api.github.com/repos"; "github.com") | sub("/zip"; "")))"')
+          {
+            echo "### Performance Profiles"
+            echo
+            if [ -n "$ARTIFACTS" ]; then
+              echo "Performance profiles for [profiler.firefox.com](https://profiler.firefox.com/):"
+              echo
+              echo "$ARTIFACTS"
+            else
+              echo "No performance profiles were generated."
+            fi
+          } > results.md
+
+      - uses: ./.github/actions/pr-comment-data-export
+        with:
+          name: ${{ github.workflow }}
+          contents: results.md

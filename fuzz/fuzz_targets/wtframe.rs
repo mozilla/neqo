@@ -8,8 +8,8 @@ fuzz_target!(|data: &[u8]| {
     use std::time::Instant;
 
     use neqo_http3::frames::{
-        reader::{FrameReader, StreamReader},
         WebTransportFrame,
+        reader::{FrameReader, StreamReader},
     };
     use test_fixture::now;
 

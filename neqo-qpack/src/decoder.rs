@@ -4,23 +4,24 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{qdebug, Encoder, Header};
+use std::fmt::{self, Display, Formatter};
+
+use neqo_common::{Encoder, Header, qdebug};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
+    Error, Res, Settings,
     decoder_instructions::DecoderInstruction,
     encoder_instructions::{DecodedEncoderInstruction, EncoderInstructionReader},
     header_block::{HeaderDecoder, HeaderDecoderResult},
     reader::{ReadByte, Reader, ReceiverConnWrapper},
     stats::Stats,
     table::HeaderTable,
-    Error, Res, Settings,
 };
 
 pub const QPACK_UNI_STREAM_TYPE_DECODER: u64 = 0x3;
 
-#[derive(Debug, derive_more::Display)]
-#[display("QPack {}", self.capacity())]
+#[derive(Debug)]
 pub struct Decoder {
     instruction_reader: EncoderInstructionReader,
     table: HeaderTable,
@@ -257,6 +258,12 @@ impl Decoder {
     #[must_use]
     pub fn stats(&self) -> Stats {
         self.stats.clone()
+    }
+}
+
+impl Display for Decoder {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "QPack {}", self.capacity())
     }
 }
 

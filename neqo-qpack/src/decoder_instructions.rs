@@ -4,16 +4,19 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::mem;
+use std::{
+    fmt::{self, Display, Formatter},
+    mem,
+};
 
 use neqo_common::{qdebug, qtrace};
 use neqo_transport::StreamId;
 
 use crate::{
+    Res,
     prefix::{DECODER_HEADER_ACK, DECODER_INSERT_COUNT_INCREMENT, DECODER_STREAM_CANCELLATION},
     qpack_send_buf::Encoder,
     reader::{IntReader, ReadByte},
-    Res,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -73,11 +76,16 @@ enum DecoderInstructionReaderState {
     },
 }
 
-#[derive(Debug, Default, derive_more::Display)]
-#[display("InstructionReader")]
+#[derive(Debug, Default)]
 pub struct DecoderInstructionReader {
     state: DecoderInstructionReaderState,
     instruction: DecoderInstruction,
+}
+
+impl Display for DecoderInstructionReader {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "InstructionReader")
+    }
 }
 
 impl DecoderInstructionReader {
@@ -143,7 +151,7 @@ mod test {
     use neqo_transport::StreamId;
 
     use super::{DecoderInstruction, DecoderInstructionReader};
-    use crate::{reader::test_receiver::TestReceiver, Error};
+    use crate::{Error, reader::test_receiver::TestReceiver};
 
     fn test_encoding_decoding(instruction: DecoderInstruction) {
         let mut buf = Encoder::default();

@@ -9,7 +9,7 @@
 use std::net::SocketAddr;
 
 use neqo_common::{Datagram, Decoder, Tos};
-use neqo_transport::{version, Pmtud, Version, MIN_INITIAL_PACKET_SIZE};
+use neqo_transport::{MIN_INITIAL_PACKET_SIZE, Pmtud, Version, version};
 
 use crate::{DEFAULT_ADDR, DEFAULT_ADDR_V4};
 

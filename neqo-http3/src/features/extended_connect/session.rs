@@ -7,16 +7,18 @@
 use std::{
     cell::RefCell,
     collections::HashSet,
-    fmt::{Debug, Display},
+    fmt::{self, Debug, Display, Formatter},
     rc::Rc,
     str::from_utf8,
     time::Instant,
 };
 
-use neqo_common::{qdebug, qtrace, Bytes, Encoder, Header, MessageType, Role};
+use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace};
 use neqo_transport::{AppError, Connection, DatagramTracking, StreamId};
 
 use crate::{
+    CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
+    SendStream, Stream,
     features::extended_connect::{
         ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
     },
@@ -24,8 +26,6 @@ use crate::{
     priority::PriorityHandler,
     recv_message::{RecvMessage, RecvMessageInfo},
     send_message::SendMessage,
-    CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
-    SendStream, Stream,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -49,8 +49,7 @@ impl From<CloseType> for CloseReason {
     }
 }
 
-#[derive(Debug, derive_more::Display)]
-#[display("{}-session={}", self.protocol.connect_type(), id)]
+#[derive(Debug)]
 pub(crate) struct Session {
     control_stream_recv: Box<dyn RecvStream>,
     control_stream_send: Box<dyn SendStream>,
@@ -74,6 +73,12 @@ pub(crate) enum State {
 impl State {
     pub(crate) const fn closing_state(self) -> bool {
         matches!(self, Self::FinPending | Self::Done)
+    }
+}
+
+impl Display for Session {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}-session={}", self.protocol.connect_type(), self.id)
     }
 }
 
@@ -372,25 +377,40 @@ impl Session {
 
     /// # Errors
     ///
-    /// Returns an error if the datagram exceeds the remote datagram size limit.
+    /// Returns an error if:
+    /// - The session is not in Active state (`Error::Unavailable`).
+    /// - QUIC datagram or HTTP DATAGRAM Capsule sending fails.
     pub(crate) fn send_datagram<I: Into<DatagramTracking>>(
-        &self,
+        &mut self,
         conn: &mut Connection,
         buf: &[u8],
         id: I,
+        now: Instant,
     ) -> Res<()> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
-        if self.state == State::Active {
-            let mut dgram_data = Encoder::default();
-            dgram_data.encode_varint(self.id.as_u64() / 4);
-            self.protocol.write_datagram_prefix(&mut dgram_data);
-            dgram_data.encode(buf);
-            conn.send_datagram(dgram_data.into(), id)?;
-        } else {
+        if self.state != State::Active {
             qdebug!("[{self}]: cannot send datagram in {:?} state.", self.state);
             debug_assert!(false);
             return Err(Error::Unavailable);
         }
+
+        if conn.remote_datagram_size() == 0 && self.protocol.datagram_capsule_support() {
+            qtrace!("[{self}] remote_datagram_size is 0, trying HTTP DATAGRAM Capsule");
+            return self.protocol.write_datagram_capsule(
+                &mut self.control_stream_send,
+                conn,
+                buf,
+                now,
+            );
+        }
+
+        let mut dgram_data = Encoder::default();
+        dgram_data.encode_varint(self.id.as_u64() / 4);
+        self.protocol.write_datagram_prefix(&mut dgram_data);
+        dgram_data.encode(buf);
+
+        conn.send_datagram(dgram_data.into(), id)?;
+        qtrace!("[{self}] sent datagram via QUIC datagram");
         Ok(())
     }
 
@@ -560,6 +580,19 @@ pub(crate) trait Protocol: Debug + Display {
     fn write_datagram_prefix(&self, encoder: &mut Encoder);
 
     fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError>;
+
+    /// Whether the extended CONNECT protocol supports sending datagrams as HTTP
+    /// DATAGRAM Capsules when QUIC datagrams are unavailable.
+    fn datagram_capsule_support(&self) -> bool;
+
+    /// Write a datagram as an HTTP DATAGRAM Capsule to the control stream.
+    fn write_datagram_capsule(
+        &self,
+        _control_stream_send: &mut Box<dyn SendStream>,
+        _conn: &mut Connection,
+        _buf: &[u8],
+        _now: Instant,
+    ) -> Res<()>;
 }
 
 #[derive(Debug, Error)]

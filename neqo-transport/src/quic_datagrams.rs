@@ -8,12 +8,13 @@
 
 use std::{cmp::min, collections::VecDeque};
 
-use neqo_common::{qdebug, Buffer, Encoder};
+use neqo_common::{Buffer, Encoder, qdebug};
 
 use crate::{
+    ConnectionEvents, Error, Res, Stats,
     events::OutgoingDatagramOutcome,
     frame::{FrameEncoder as _, FrameType},
-    packet, recovery, ConnectionEvents, Error, Res, Stats,
+    packet, recovery,
 };
 
 /// Length of a [`FrameType::Datagram`] or [`FrameType::DatagramWithLen`] in
@@ -40,9 +41,7 @@ impl From<Option<u64>> for DatagramTracking {
     }
 }
 
-#[derive(derive_more::AsRef)]
 pub struct QuicDatagram {
-    #[as_ref([u8])]
     data: Vec<u8>,
     tracking: DatagramTracking,
 }
@@ -52,6 +51,12 @@ impl QuicDatagram {
 
     const fn tracking(&self) -> &DatagramTracking {
         &self.tracking
+    }
+}
+
+impl AsRef<[u8]> for QuicDatagram {
+    fn as_ref(&self) -> &[u8] {
+        &self.data[..]
     }
 }
 

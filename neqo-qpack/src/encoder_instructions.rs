@@ -4,18 +4,21 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::mem;
+use std::{
+    fmt::{self, Display, Formatter},
+    mem,
+};
 
 use neqo_common::{qdebug, qtrace};
 
 use crate::{
+    Res,
     prefix::{
         ENCODER_CAPACITY, ENCODER_DUPLICATE, ENCODER_INSERT_WITH_NAME_LITERAL,
         ENCODER_INSERT_WITH_NAME_REF_DYNAMIC, ENCODER_INSERT_WITH_NAME_REF_STATIC, NO_PREFIX,
     },
     qpack_send_buf::Encoder,
     reader::{IntReader, LiteralReader, ReadByte, Reader},
-    Res,
 };
 
 // The encoder only uses InsertWithNameLiteral.
@@ -150,11 +153,20 @@ impl<'a> From<&'a EncoderInstruction<'a>> for DecodedEncoderInstruction {
     }
 }
 
-#[derive(Debug, Default, derive_more::Display)]
-#[display("EncoderInstructionReader state={state:?} instruction={instruction:?}")]
+#[derive(Debug, Default)]
 pub struct EncoderInstructionReader {
     state: EncoderInstructionReaderState,
     instruction: DecodedEncoderInstruction,
+}
+
+impl Display for EncoderInstructionReader {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(
+            f,
+            "EncoderInstructionReader state={:?} instruction: {:?}",
+            self.state, self.instruction
+        )
+    }
 }
 
 impl EncoderInstructionReader {
@@ -300,7 +312,7 @@ impl EncoderInstructionReader {
 mod test {
 
     use super::{EncoderInstruction, EncoderInstructionReader};
-    use crate::{reader::test_receiver::TestReceiver, Error};
+    use crate::{Error, reader::test_receiver::TestReceiver};
 
     fn test_encoding_decoding(instruction: &EncoderInstruction, use_huffman: bool) {
         let mut buf = neqo_common::Encoder::default();

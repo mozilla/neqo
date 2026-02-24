@@ -6,6 +6,7 @@
 
 use std::{
     cell::RefCell,
+    fmt::{self, Debug},
     os::raw::{c_char, c_int, c_uint},
     ptr::{addr_of_mut, null, null_mut},
     rc::Rc,
@@ -13,14 +14,14 @@ use std::{
 
 use crate::{
     constants::{
-        Cipher, Version, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
-        TLS_CHACHA20_POLY1305_SHA256,
+        Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
+        Version,
     },
-    err::{secstatus_to_res, Error, Res},
+    err::{Error, Res, secstatus_to_res},
     p11::{
-        Context, Item, PK11SymKey, PK11_CipherOp, PK11_CreateContextBySymKey, PK11_Encrypt,
-        PK11_GetBlockSize, SymKey, CKA_ENCRYPT, CKM_AES_ECB, CKM_CHACHA20, CK_ATTRIBUTE_TYPE,
-        CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE,
+        CK_ATTRIBUTE_TYPE, CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE, CKA_ENCRYPT, CKM_AES_ECB,
+        CKM_CHACHA20, Context, Item, PK11_CipherOp, PK11_CreateContextBySymKey, PK11_Encrypt,
+        PK11_GetBlockSize, PK11SymKey, SymKey,
     },
 };
 
@@ -37,18 +38,22 @@ experimental_api!(SSL_HkdfExpandLabelWithMech(
     secret: *mut *mut PK11SymKey,
 ));
 
-#[derive(Clone, derive_more::Debug)]
+#[derive(Clone)]
 pub enum Key {
     /// An AES encryption context.
     /// Note: as we need to clone this object, we clone the pointer and
     /// track references using `Rc`.  `PK11Context` can't be used with `PK11_CloneContext`
     /// as that is not supported for these contexts.
-    #[debug("hp::Key")]
     Aes(Rc<RefCell<Context>>),
     /// The `ChaCha20` mask has to invoke a new `PK11_Encrypt` every time as it needs to
     /// change the counter and nonce on each invocation.
-    #[debug("hp::Key")]
     Chacha(SymKey),
+}
+
+impl Debug for Key {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "hp::Key")
+    }
 }
 
 impl Key {

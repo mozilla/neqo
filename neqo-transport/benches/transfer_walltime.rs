@@ -13,14 +13,15 @@
 
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, BatchSize::SmallInput};
+use criterion::{BatchSize::SmallInput, criterion_group, criterion_main};
 
 #[path = "transfer_common.rs"]
 mod common;
 
 fn benchmark(c: &mut criterion::Criterion) {
     common::benchmark(c, |group, label, seed, pacing| {
-        group.bench_function("walltime", |b| {
+        let bench_name = format!("walltime/pacing-{pacing}/{label}");
+        group.bench_function(&bench_name, |b| {
             b.iter_batched(
                 || common::setup(label, seed, pacing),
                 |sim| black_box(sim.run()),

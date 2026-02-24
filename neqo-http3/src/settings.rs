@@ -4,7 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{qdebug, Buffer, Decoder, Encoder};
+use std::ops::Deref;
+
+use neqo_common::{Buffer, Decoder, Encoder, qdebug};
 use neqo_crypto::{ZeroRttCheckResult, ZeroRttChecker};
 
 use crate::{Error, Http3Parameters, Res};
@@ -70,7 +72,7 @@ impl HSetting {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, derive_more::Deref)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HSettings {
     settings: Vec<HSetting>,
 }
@@ -147,10 +149,10 @@ impl HSettings {
             let t = dec.decode_varint();
             let v = dec.decode_varint();
 
-            if let Some(settings_type) = t {
-                if H3_RESERVED_SETTINGS.contains(&settings_type) {
-                    return Err(Error::HttpSettings);
-                }
+            if let Some(settings_type) = t
+                && H3_RESERVED_SETTINGS.contains(&settings_type)
+            {
+                return Err(Error::HttpSettings);
             }
             match (t, v) {
                 (Some(SETTINGS_MAX_HEADER_LIST_SIZE), Some(value)) => self
@@ -209,6 +211,13 @@ impl HSettings {
             }
         }
         Ok(())
+    }
+}
+
+impl Deref for HSettings {
+    type Target = [HSetting];
+    fn deref(&self) -> &Self::Target {
+        &self.settings
     }
 }
 

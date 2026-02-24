@@ -11,12 +11,12 @@ use neqo_crypto::{AllowZeroRtt, AntiReplay};
 use test_fixture::{assertions, now};
 
 use super::{
-    super::Connection, connect, default_client, default_server, exchange_ticket, new_server,
-    resumed_server, CountingConnectionIdGenerator, Output,
+    super::Connection, CountingConnectionIdGenerator, Output, connect, default_client,
+    default_server, exchange_ticket, new_server, resumed_server,
 };
 use crate::{
-    events::ConnectionEvent, ConnectionParameters, Error, StreamType, Version,
-    MIN_INITIAL_PACKET_SIZE,
+    ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, StreamType, Version,
+    events::ConnectionEvent,
 };
 
 #[test]

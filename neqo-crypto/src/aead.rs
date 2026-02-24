@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use std::{
+    fmt,
     ops::Deref,
     os::raw::{c_char, c_uint},
     ptr::null_mut,
@@ -12,11 +13,11 @@ use std::{
 
 use crate::{
     constants::{Cipher, Version},
-    err::{sec::SEC_ERROR_BAD_DATA, Error, Res},
+    err::{Error, Res, sec::SEC_ERROR_BAD_DATA},
     experimental_api,
     p11::{PK11SymKey, SymKey},
     scoped_ptr,
-    ssl::{PRUint16, PRUint64, PRUint8, SSLAeadContext},
+    ssl::{PRUint8, PRUint16, PRUint64, SSLAeadContext},
 };
 
 /// Trait for AEAD (Authenticated Encryption with Associated Data) operations.
@@ -110,8 +111,6 @@ experimental_api!(SSL_AeadDecrypt(
 experimental_api!(SSL_DestroyAead(ctx: *mut SSLAeadContext));
 scoped_ptr!(AeadContext, SSLAeadContext, SSL_DestroyAead);
 
-#[derive(derive_more::Debug)]
-#[debug("[AEAD Context]")]
 pub struct RealAead {
     ctx: AeadContext,
 }
@@ -125,14 +124,16 @@ impl RealAead {
     ) -> Res<Self> {
         let p = prefix.as_bytes();
         let mut ctx: *mut SSLAeadContext = null_mut();
-        SSL_MakeAead(
-            version,
-            cipher,
-            secret,
-            p.as_ptr().cast(),
-            c_uint::try_from(p.len())?,
-            &raw mut ctx,
-        )?;
+        unsafe {
+            SSL_MakeAead(
+                version,
+                cipher,
+                secret,
+                p.as_ptr().cast(),
+                c_uint::try_from(p.len())?,
+                &raw mut ctx,
+            )?;
+        }
         Ok(Self {
             ctx: AeadContext::from_ptr(ctx)?,
         })
@@ -243,5 +244,11 @@ impl Aead for RealAead {
         }?;
         debug_assert_eq!(usize::try_from(l)?, data.len() - self.expansion());
         Ok(l.try_into()?)
+    }
+}
+
+impl fmt::Debug for RealAead {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[AEAD Context]")
     }
 }

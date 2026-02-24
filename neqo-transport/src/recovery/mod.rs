@@ -11,6 +11,7 @@ mod token;
 
 use std::{
     cmp::{max, min},
+    fmt::{self, Display, Formatter},
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
@@ -73,7 +74,7 @@ impl SendProfile {
     }
 
     #[must_use]
-    pub fn new_paced() -> Self {
+    pub const fn new_paced() -> Self {
         // When pacing, we still allow ACK frames to be sent.
         Self {
             limit: ACK_ONLY_SIZE_LIMIT - 1,
@@ -287,7 +288,7 @@ impl LossRecoverySpace {
     /// Remove all tracked packets from the space.
     /// This is called by a client when 0-RTT packets are dropped, when a Retry is received
     /// and when keys are dropped.
-    fn remove_ignored(&mut self) -> impl Iterator<Item = sent::Packet> {
+    fn remove_ignored(&mut self) -> impl Iterator<Item = sent::Packet> + use<> {
         self.in_flight_outstanding = 0;
         std::mem::take(&mut self.sent_packets).drain_all()
     }
@@ -377,7 +378,7 @@ impl LossRecoverySpaces {
     pub fn drop_space(
         &mut self,
         space: PacketNumberSpace,
-    ) -> impl IntoIterator<Item = sent::Packet> {
+    ) -> impl IntoIterator<Item = sent::Packet> + use<> {
         let sp = self.spaces[space].take();
         assert_ne!(
             space,
@@ -478,8 +479,7 @@ impl PtoState {
     }
 }
 
-#[derive(Debug, derive_more::Display)]
-#[display("recovery::Loss")]
+#[derive(Debug)]
 pub struct Loss {
     /// When the handshake was confirmed, if it has been.
     confirmed_time: Option<Instant>,
@@ -722,11 +722,11 @@ impl Loss {
         self.confirmed_time = Some(now);
         // Up until now, the ApplicationData space has been ignored for PTO.
         // So maybe fire a PTO.
-        if let Some(pto) = self.pto_time(rtt, PacketNumberSpace::ApplicationData) {
-            if pto < now {
-                let probes = enum_set!(PacketNumberSpace::ApplicationData);
-                self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
-            }
+        if let Some(pto) = self.pto_time(rtt, PacketNumberSpace::ApplicationData)
+            && pto < now
+        {
+            let probes = enum_set!(PacketNumberSpace::ApplicationData);
+            self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
         }
     }
 
@@ -981,6 +981,12 @@ impl Loss {
     }
 }
 
+impl Display for Loss {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "recovery::Loss")
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -992,17 +998,17 @@ mod tests {
     };
 
     use neqo_common::qlog::Qlog;
-    use test_fixture::{now, DEFAULT_ADDR};
+    use test_fixture::{DEFAULT_ADDR, now};
 
-    use super::{LossRecoverySpace, PacketNumberSpace, PtoState, SendProfile, FAST_PTO_SCALE};
+    use super::{FAST_PTO_SCALE, LossRecoverySpace, PacketNumberSpace, PtoState, SendProfile};
     use crate::{
+        ConnectionParameters, Token as Srt,
         cid::{ConnectionId, ConnectionIdEntry},
         ecn, packet,
         path::{Path, PathRef},
-        recovery::{self, sent, MAX_PTO_PACKET_COUNT},
+        recovery::{self, MAX_PTO_PACKET_COUNT, sent},
         stats::{Stats, StatsCell},
         tracking::PacketNumberSpaceSet,
-        ConnectionParameters, Token as Srt,
     };
 
     // Shorthand for a time in milliseconds.
@@ -1656,12 +1662,14 @@ mod tests {
         let now = expected_pto;
         let lost = lr.timeout(now);
         assert_eq!(2, lost.len());
-        assert!(lost
-            .iter()
-            .any(|x| x.packet_type() == packet::Type::Initial));
-        assert!(lost
-            .iter()
-            .any(|x| x.packet_type() == packet::Type::Handshake));
+        assert!(
+            lost.iter()
+                .any(|x| x.packet_type() == packet::Type::Initial)
+        );
+        assert!(
+            lost.iter()
+                .any(|x| x.packet_type() == packet::Type::Handshake)
+        );
 
         // The resulting send profile should probe spaces where packets were "lost".
         let profile = lr.send_profile(now);
@@ -1770,11 +1778,12 @@ mod tests {
     }
 
     fn assert_no_handshake_last_ack_eliciting(lr: &Fixture) {
-        assert!(lr
-            .spaces
-            .get(PacketNumberSpace::Handshake)
-            .and_then(|s| s.last_ack_eliciting)
-            .is_none());
+        assert!(
+            lr.spaces
+                .get(PacketNumberSpace::Handshake)
+                .and_then(|s| s.last_ack_eliciting)
+                .is_none()
+        );
     }
 
     #[test]

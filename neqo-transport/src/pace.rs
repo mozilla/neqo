@@ -8,6 +8,7 @@
 
 use std::{
     cmp::min,
+    fmt::{self, Debug, Display, Formatter},
     time::{Duration, Instant},
 };
 
@@ -16,9 +17,6 @@ use neqo_common::qtrace;
 use crate::rtt::GRANULARITY;
 
 /// A pacer that uses a leaky bucket.
-#[derive(derive_more::Display, derive_more::Debug)]
-#[display("Pacer {c}/{p}")]
-#[debug("Pacer@{:?} {}/{}..{}", t, c, p, m)]
 pub struct Pacer {
     /// Whether pacing is enabled.
     enabled: bool,
@@ -93,7 +91,7 @@ impl Pacer {
             u128::try_from(packet - self.c).expect("packet is larger than current credit");
         let d = r.saturating_mul(deficit);
         let add = d / u128::try_from(cwnd * Self::SPEEDUP).expect("usize fits into u128");
-        let w = u64::try_from(add).map(Duration::from_nanos).unwrap_or(rtt);
+        let w = u64::try_from(add).map_or(rtt, Duration::from_nanos);
 
         // If the increment is below the timer granularity, send immediately.
         if w < GRANULARITY {
@@ -142,6 +140,18 @@ impl Pacer {
     }
 }
 
+impl Display for Pacer {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Pacer {}/{}", self.c, self.p)
+    }
+}
+
+impl Debug for Pacer {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Pacer@{:?} {}/{}..{}", self.t, self.c, self.p, self.m)
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -151,7 +161,7 @@ mod tests {
 
     use super::Pacer;
 
-    const RTT: Duration = Duration::from_millis(1000);
+    const RTT: Duration = Duration::from_secs(1);
     const PACKET: usize = 1000;
     const CWND: usize = PACKET * 10;
 
