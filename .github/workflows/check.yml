@@ -100,6 +100,7 @@ jobs:
         env:
           RUST_LOG: trace
           RUST_BACKTRACE: 1
+          NSPR_LOG_MODULES: ${{ startsWith(matrix.os, 'windows-11-arm') && 'nss_mod_db:5' || '' }}
           RUST_TEST_TIME_UNIT: 10,30
           RUST_TEST_TIME_INTEGRATION: 10,30
           RUST_TEST_TIME_DOCTEST: 10,30
@@ -110,7 +111,8 @@ jobs:
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
-          if [ "$TOOLCHAIN" == "stable" ]; then
+          # cargo-llvm-cov produces "malformed instrumentation profile data" on Windows ARM64.
+          if [ "$TOOLCHAIN" == "stable" ] && ! { [ "$RUNNER_OS" = "Windows" ] && [ "$RUNNER_ARCH" = "ARM64" ]; }; then
             cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
             if [ -n "$CAREFUL" ]; then
@@ -152,7 +154,7 @@ jobs:
           flags: ${{ startsWith(matrix.os, 'ubuntu') && 'linux' || startsWith(matrix.os, 'macos') && 'macos' || 'windows' }}
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
+        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable' && !startsWith(matrix.os, 'windows-11-arm')
 
       - name: Save simulation seeds artifact
         if: ${{ always() }}
