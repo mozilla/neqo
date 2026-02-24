@@ -192,7 +192,6 @@ fn static_link() {
     }
     // Hardware specific libs.
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     if target_arch == "arm" || target_arch == "aarch64" {
         static_libs.push("armv8_c_lib");
     }
@@ -209,9 +208,7 @@ fn static_link() {
     if target_arch == "x86_64" {
         static_libs.push("hw-acc-crypto-avx");
         static_libs.push("hw-acc-crypto-avx2");
-        if target_os == "android" || target_os == "linux" {
-            static_libs.push("intel-gcm-wrap_c_lib");
-        }
+        static_libs.push("intel-gcm-wrap_c_lib");
     }
     for lib in static_libs {
         println!("cargo:rustc-link-lib=static={lib}");
