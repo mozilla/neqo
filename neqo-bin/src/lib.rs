@@ -331,7 +331,39 @@ mod tests {
 
     #[tokio::test]
     async fn write_qlog_file() {
-        neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap()).unwrap();
+        let db_path = PathBuf::from_str("../test-fixture/db").unwrap();
+        eprintln!("cwd: {:?}", std::env::current_dir().unwrap());
+        eprintln!("db_path canonical: {:?}", db_path.canonicalize());
+        neqo_crypto::init_db(&db_path).unwrap();
+        // Check PKCS#11 slot and cert availability
+        unsafe {
+            unsafe extern "C" {
+                fn PK11_GetInternalSlot() -> *mut std::ffi::c_void;
+                fn PK11_FindCertFromNickname(
+                    nickname: *const std::ffi::c_char,
+                    wincx: *mut std::ffi::c_void,
+                ) -> *mut std::ffi::c_void;
+                fn PK11_FindKeyByAnyCert(
+                    cert: *mut std::ffi::c_void,
+                    wincx: *mut std::ffi::c_void,
+                ) -> *mut std::ffi::c_void;
+                fn PR_GetError() -> i32;
+            }
+            let slot = PK11_GetInternalSlot();
+            eprintln!("PK11_GetInternalSlot: {slot:?}");
+            let nickname = std::ffi::CString::new("key").unwrap();
+            let cert = PK11_FindCertFromNickname(nickname.as_ptr(), std::ptr::null_mut());
+            eprintln!("PK11_FindCertFromNickname(\"key\"): {cert:?}");
+            if !cert.is_null() {
+                let key = PK11_FindKeyByAnyCert(cert, std::ptr::null_mut());
+                eprintln!("PK11_FindKeyByAnyCert: {key:?}");
+                if key.is_null() {
+                    eprintln!("PR_GetError after key lookup: {}", PR_GetError());
+                }
+            } else {
+                eprintln!("PR_GetError after cert lookup: {}", PR_GetError());
+            }
+        }
 
         let temp_dir = TempDir::new();
 
@@ -342,6 +374,30 @@ mod tests {
 
         let client = client::client(client_args);
         let (server, _local_addrs) = server::run(server_args).unwrap();
+        // Check cert+key after server::run()
+        unsafe {
+            unsafe extern "C" {
+                fn PK11_FindCertFromNickname(
+                    nickname: *const std::ffi::c_char,
+                    wincx: *mut std::ffi::c_void,
+                ) -> *mut std::ffi::c_void;
+                fn PK11_FindKeyByAnyCert(
+                    cert: *mut std::ffi::c_void,
+                    wincx: *mut std::ffi::c_void,
+                ) -> *mut std::ffi::c_void;
+                fn PR_GetError() -> i32;
+            }
+            let nickname = std::ffi::CString::new("key").unwrap();
+            let cert = PK11_FindCertFromNickname(nickname.as_ptr(), std::ptr::null_mut());
+            eprintln!("After server::run - cert: {cert:?}");
+            if !cert.is_null() {
+                let key = PK11_FindKeyByAnyCert(cert, std::ptr::null_mut());
+                eprintln!("After server::run - key: {key:?}");
+                if key.is_null() {
+                    eprintln!("PR_GetError after key lookup: {}", PR_GetError());
+                }
+            }
+        }
         tokio::select! {
             _ = client => {}
             res = server  => panic!("expect server not to terminate: {res:?}"),

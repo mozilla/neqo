@@ -148,7 +148,7 @@ runs:
       uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
       with:
         path: dist
-        key: nss-${{ inputs.target || runner.os }}${{ steps.ubuntu_release.outputs.codename }}-${{ runner.arch }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
+        key: nss-${{ inputs.target || runner.os }}${{ steps.ubuntu_release.outputs.codename }}-${{ runner.arch }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}-1
 
     - name: Check if build is needed
       id: check_build
@@ -182,19 +182,19 @@ runs:
     - name: Install build dependencies (Windows)
       shell: bash
       if: ${{ runner.os == 'Windows' && steps.check_build.outputs.build_nss }}
-      run: |
+      run: | # zizmor: ignore[github-env]
         # shellcheck disable=SC2028
         {
           echo C:/msys64/usr/bin
           echo C:/msys64/mingw64/bin
         } >> "$GITHUB_PATH"
         mkdir -p "$HOME/bin"
-        curl -o "$HOME/bin/nsinstall.py" -sSf https://raw.githubusercontent.com/mozilla/gecko-dev/refs/heads/master/config/nsinstall.py
+        curl -o "$HOME/bin/nsinstall.py" -sSf https://raw.githubusercontent.com/mozilla-firefox/firefox/refs/heads/main/config/nsinstall.py
         echo "#! /usr/bin/env python3" | cat - "$HOME/bin/nsinstall.py" > "$HOME/bin/nsinstall"
         chmod +x "$HOME/bin/nsinstall"
         mkdir -p "$HOME/bin/mozfile"
         for file in __init__.py mozfile.py; do
-          curl -o "$HOME/bin/mozfile/$file" -sSf "https://raw.githubusercontent.com/mozilla/gecko-dev/refs/heads/master/testing/mozbase/mozfile/mozfile/$file"
+          curl -o "$HOME/bin/mozfile/$file" -sSf "https://raw.githubusercontent.com/mozilla-firefox/firefox/refs/heads/main/testing/mozbase/mozfile/mozfile/$file"
         done
         echo "$HOME/bin" >> "$GITHUB_PATH"
         echo "gyp-next>=0.18.1" > req.txt
@@ -226,7 +226,6 @@ runs:
       env:
         NSS_DIR: ${{ github.workspace }}/nss
         RUNNER_OS: ${{ runner.os }}
-        RUNNER_ARCH: ${{ runner.arch }}
         WORKSPACE: ${{ github.workspace }}
       run: | # zizmor: ignore[github-env] We need to write to GITHUB_PATH on Windows.
         NSS_OUT="$WORKSPACE/dist/Release"
@@ -238,19 +237,6 @@ runs:
         } >> "$GITHUB_ENV"
         if [ "$RUNNER_OS" == "Windows" ]; then
           echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
-          if [ "$RUNNER_ARCH" == "ARM64" ]; then
-            {
-              echo "MSYSTEM=CLANGARM64"
-              echo "MINGW_PREFIX=/clangarm64"
-              echo "MINGW_PACKAGE_PREFIX=clangarm64"
-              echo "MINGW_CHOST=aarch64-w64-mingw32"
-              echo "MSYSTEM_CARCH=aarch64"
-              echo "MSYSTEM_CHOST=aarch64-w64-mingw32"
-              echo "PKG_CONFIG_PATH=/clangarm64/lib/pkgconfig:/clangarm64/share/pkgconfig"
-              echo "ACLOCAL_PATH=/clangarm64/share/aclocal:/usr/share/aclocal"
-              echo "CMAKE_PREFIX_PATH=/clangarm64:$CMAKE_PREFIX_PATH"
-            } >> "$GITHUB_ENV"
-          fi
         fi
 
     - name: Build
@@ -304,6 +290,7 @@ runs:
           cp -vaL "$LIB_DIR"/* "dist/Release/lib"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
+          NSS_EXTRA=""
           if [ "$RUNNER_OS" == "Windows" ]; then
             # The NSPR Makefile tries to compile a resource file (nspr.rc) via rc.exe, which fails
             # because rc.exe's preprocessor cannot parse ARM64-specific constructs in NSPR's headers.
@@ -313,16 +300,305 @@ runs:
             if [ "$RUNNER_ARCH" == "ARM64" ]; then
               # NSPR's configure detects CPU_ARCH via `uname -m`. On Windows ARM64 runners the
               # shell is x64-emulated, so uname returns x86_64. Without correction, configure's
-              # i*86|x86_64 case runs without USE_64 set, emitting -D_X86_=1 and -arch:IA32. This
-              # makes ntmisc.c's x86 inline asm visible to the ARM64 compiler (error C4235).
-              # Also, _winnt.cfg (prcpucfg.h) has no _M_ARM64 case; it relies on _AMD64_ for
-              # 64-bit Windows. Patching configure to set USE_64=1 forces the i*86|x86_64 case
-              # to emit _AMD64_=1 instead, giving _winnt.cfg its correct 64-bit branch (pointer
-              # and word sizes match ARM64's LLP64 ABI) and skipping the x86 inline asm blocks.
+              # i*86|x86_64 case runs without USE_64 set, emitting -D_X86_=1 and -arch:IA32.
+              # Setting USE_64=1 forces the i*86|x86_64 case to emit -D_AMD64_=1 instead,
+              # giving _winnt.cfg its correct 64-bit branch (pointer and word sizes matching
+              # ARM64's LLP64 ABI) and skipping ntmisc.c's x86 inline asm blocks (error C4235).
               sed -i'' 's/CPU_ARCH=`uname -m`/CPU_ARCH=aarch64; USE_64=1/g' nspr/configure
+              # On ARM64 Windows MSVC, the Win32 Interlocked functions are not exported
+              # from ARM64 kernel32.lib; they are only available as compiler intrinsics.
+              # _winnt.h is included transitively by all NSPR Windows source files via
+              # primpl.h -> prosdep.h, so patching it here covers every caller:
+              # - The _MD_ATOMIC_* macros use InterlockedIncrement/Decrement/Exchange/
+              #   ExchangeAdd: replace their bodies with the _Interlocked intrinsic variants.
+              # - InterlockedCompareExchange is called directly in ntio.c, prmwait.c, and
+              #   possibly others: add a #define after <windows.h> so the preprocessor
+              #   rewrites every call site to the intrinsic without enumerating files.
+              # prcpucfg.h is installed from _winnt.cfg during the NSPR build.
+              # ARM64 Windows uses the same LLP64 memory model as x64 (64-bit
+              # pointers, 32-bit long), so extending the x64 condition suffices.
+              patch nspr/pr/include/md/_winnt.cfg << 'PATCH'
+        --- a/pr/include/md/_winnt.cfg
+        +++ b/pr/include/md/_winnt.cfg
+        @@ -70,3 +70,3 @@
+
+        -#elif defined(_M_X64) || defined(_M_AMD64) || defined(_AMD64_)
+        +#elif defined(_M_X64) || defined(_M_AMD64) || defined(_AMD64_) || defined(_M_ARM64) || defined(_ARM64_)
+
+        PATCH
+              patch nspr/pr/include/md/_winnt.h << 'PATCH'
+        --- a/pr/include/md/_winnt.h
+        +++ b/pr/include/md/_winnt.h
+        @@ -1,2 +1,3 @@
+         #include <windows.h>
+        +#define InterlockedCompareExchange _InterlockedCompareExchange
+         #include <winsock.h>
+        @@ -1,4 +1,4 @@
+         #else /* non-x86 processors */
+        -#define _MD_ATOMIC_INCREMENT(x)       InterlockedIncrement((PLONG)x)
+        -#define _MD_ATOMIC_ADD(ptr,val)    (InterlockedExchangeAdd((PLONG)ptr, (LONG)val) + val)
+        -#define _MD_ATOMIC_DECREMENT(x)       InterlockedDecrement((PLONG)x)
+        +#define _MD_ATOMIC_INCREMENT(x)       _InterlockedIncrement((PLONG)x)
+        +#define _MD_ATOMIC_ADD(ptr,val)    (_InterlockedExchangeAdd((PLONG)ptr, (LONG)val) + val)
+        +#define _MD_ATOMIC_DECREMENT(x)       _InterlockedDecrement((PLONG)x)
+        @@ -1,2 +1,2 @@
+         #endif /* x86 */
+        -#define _MD_ATOMIC_SET(x,y)           InterlockedExchange((PLONG)x, (LONG)y)
+        +#define _MD_ATOMIC_SET(x,y)           _InterlockedExchange((PLONG)x, (LONG)y)
+        PATCH
+              # NSS config.gypi has no ARM64 MSVC block, so gyp's GetArch() defaults to
+              # "x86" and ninja uses environment.x86 and HostX86\x86\cl.exe regardless of
+              # --target=arm64. Adding the ARM64 block sets msvs_configuration_platform to
+              # 'ARM64', making GetArch() return "arm64".
+              patch "$NSS_DIR/coreconf/config.gypi" << 'PATCH'
+        --- a/coreconf/config.gypi
+        +++ b/coreconf/config.gypi
+        @@ -586,2 +586,15 @@
+                               '_AMD64_',
+        +                    ],
+        +                    'AdditionalOptions': [ '/EHsc' ],
+        +                  },
+        +                },
+        +              }],
+        +              [ 'target_arch=="arm64"', {
+        +                'msvs_configuration_platform': 'ARM64',
+        +                'msvs_settings': {
+        +                  'VCCLCompilerTool': {
+        +                    'PreprocessorDefinitions': [
+        +                      'WIN64',
+        +                      '_ARM64_',
+        +                      '__ARM_FEATURE_CRYPTO',
+                             ],
+        PATCH
+              # MSVC does not support __attribute__; replace the aligned(16) on the K256
+              # constant array with MSVC's __declspec(align(16)) equivalent.
+              patch "$NSS_DIR/lib/freebl/sha256-armv8.c" << 'PATCH'
+        --- a/lib/freebl/sha256-armv8.c
+        +++ b/lib/freebl/sha256-armv8.c
+        @@ -9,1 +9,7 @@
+         #endif
+        +
+        +#ifdef _MSC_VER
+        +#define SHA_ALIGN16 __declspec(align(16))
+        +#else
+        +#define SHA_ALIGN16 __attribute__((aligned(16)))
+        +#endif
+        PATCH
+              patch "$NSS_DIR/lib/freebl/sha256-armv8.c" << 'PATCH'
+        --- a/lib/freebl/sha256-armv8.c
+        +++ b/lib/freebl/sha256-armv8.c
+        @@ -23,3 +23,3 @@
+         /* SHA-256 constants, K256. */
+        -static const PRUint32 __attribute__((aligned(16))) K256[64] = {
+        +static const SHA_ALIGN16 PRUint32 K256[64] = {
+             0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+        PATCH
+              # sha_fast.h defines SHA_HW_t as PRUint64 on 64-bit platforms, except
+              # __aarch64__ (GCC/Clang). Add _M_ARM64 (MSVC) to the exclusion, so
+              # SHA_HW_t remains PRUint32. The ARM HW SHA-1 path (sha1-armv8.c)
+              # does vld1q_u32(&H[0]) expecting 4 contiguous 32-bit hash state
+              # values; with PRUint64, H[] has 8-byte stride and vld1q_u32 loads
+              # {A_lo, A_hi, B_lo, B_hi} instead of {A, B, C, D}.
+              patch "$NSS_DIR/lib/freebl/sha_fast.h" << 'PATCH'
+        --- a/lib/freebl/sha_fast.h
+        +++ b/lib/freebl/sha_fast.h
+        @@ -10,3 +10,3 @@
+        -#if defined(IS_64) && !defined(__sparc) && !defined(__aarch64__)
+        +#if defined(IS_64) && !defined(__sparc) && !defined(__aarch64__) && !defined(_M_ARM64)
+         typedef PRUint64 SHA_HW_t;
+         #define SHA1_USING_64_BIT 1
+        PATCH
+              # aes-armv8.c guards its body with __clang__||__GNUC__; extend to MSVC.
+              # All NEON AES intrinsics (vaeseq_u8 etc.) are available in MSVC ARM64.
+              # Also add a no-op __builtin_assume_aligned compat (MSVC has no equivalent).
+              patch "$NSS_DIR/lib/freebl/aes-armv8.c" << 'PATCH'
+        --- a/lib/freebl/aes-armv8.c
+        +++ b/lib/freebl/aes-armv8.c
+        @@ -7,6 +7,7 @@
+
+        -#if ((defined(__clang__) ||                                         \
+        +#if (((defined(__clang__) ||                                         \
+               (defined(__GNUC__) && defined(__GNUC_MINOR__) &&              \
+                (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ > 8)))) && \
+        -     defined(IS_LITTLE_ENDIAN))
+        +     defined(IS_LITTLE_ENDIAN)) || \
+        +     (defined(_MSC_VER) && defined(_M_ARM64)))
+
+        @@ -18,2 +19,6 @@
+
+        +#ifdef _MSC_VER
+        +#define __builtin_assume_aligned(ptr, align) (ptr)
+        +#endif
+        +
+         SECStatus
+        PATCH
+              # ghash-aarch64.c guards its body with __aarch64__ && (__clang__||__GNUC__).
+              # Extend to MSVC ARM64, add __builtin_bswap64 compat, and remove
+              # (poly64_t) casts on vget_low_p64 results. GCC/Clang vmull_p64 takes
+              # poly64_t scalars; MSVC takes poly64x1_t vectors. vget_low_p64 returns
+              # poly64x1_t, and MSVC rejects C-style casts to union types.
+              patch "$NSS_DIR/lib/freebl/ghash-aarch64.c" << 'PATCH'
+        --- a/lib/freebl/ghash-aarch64.c
+        +++ b/lib/freebl/ghash-aarch64.c
+        @@ -11,4 +11,4 @@
+         /* old gcc doesn't support some poly64x2_t intrinsic */
+        -#if defined(__aarch64__) && defined(IS_LITTLE_ENDIAN) && \
+        -    (defined(__clang__) || defined(__GNUC__) && __GNUC__ > 6)
+        +#if (defined(__aarch64__) || defined(_M_ARM64)) && defined(IS_LITTLE_ENDIAN) && \
+        +    (defined(__clang__) || (defined(__GNUC__) && __GNUC__ > 6) || defined(_MSC_VER))
+
+        @@ -16,2 +16,7 @@
+
+        +#ifdef _MSC_VER
+        +#include <intrin.h>
+        +#define __builtin_bswap64(x) _byteswap_uint64(x)
+        +#endif
+        +
+         PRBool
+        @@ -50,4 +55,4 @@
+                 z_low = vreinterpretq_u8_p128(
+        -            vmull_p64((poly64_t)vget_low_p64(vreinterpretq_p64_u64(ci)),
+        -                      (poly64_t)vget_low_p64(vreinterpretq_p64_u64(h))));
+        +            vmull_p64(vget_low_p64(vreinterpretq_p64_u64(ci)),
+        +                      vget_low_p64(vreinterpretq_p64_u64(h))));
+                 z_high = vreinterpretq_u8_p128(
+        @@ -57,4 +62,4 @@
+                 t_low = vreinterpretq_u8_p128(
+        -            vmull_p64((poly64_t)vget_low_p64(vreinterpretq_p64_u64(ci)),
+        -                      (poly64_t)vget_low_p64(t1)));
+        +            vmull_p64(vget_low_p64(vreinterpretq_p64_u64(ci)),
+        +                      vget_low_p64(t1)));
+                 t_high = vreinterpretq_u8_p128(vmull_high_p64(vreinterpretq_p64_u64(ci), t1));
+        @@ -70,4 +75,4 @@
+                            vreinterpretq_u64_p128(
+        -                           vmull_p64((poly64_t)vget_low_p64(vreinterpretq_p64_u8(z_high)),
+        -                                     (poly64_t)vget_low_p64(p))));
+        +                           vmull_p64(vget_low_p64(vreinterpretq_p64_u8(z_high)),
+        +                                     vget_low_p64(p))));
+             }
+        PATCH
+              # gcm.h uses __aarch64__ to include arm_neon.h and declare uint64x2_t
+              # struct members. Extend both checks to also match MSVC's _M_ARM64.
+              patch "$NSS_DIR/lib/freebl/gcm.h" << 'PATCH'
+        --- a/lib/freebl/gcm.h
+        +++ b/lib/freebl/gcm.h
+        @@ -29,3 +29,3 @@
+
+        -#ifdef __aarch64__
+        +#if defined(__aarch64__) || defined(_M_ARM64)
+         #include <arm_neon.h>
+        @@ -84,3 +84,3 @@
+             __m128i x, h;
+        -#elif defined(__aarch64__)
+        +#elif defined(__aarch64__) || defined(_M_ARM64)
+             uint64x2_t x, h;
+        PATCH
+              # blinit.c uses __aarch64__ to guard ARM64 feature detection. MSVC uses
+              # _M_ARM64 instead. The Windows path inside CheckARMSupport() already
+              # uses IsProcessorFeaturePresent(PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE).
+              patch "$NSS_DIR/lib/freebl/blinit.c" << 'PATCH'
+        --- a/lib/freebl/blinit.c
+        +++ b/lib/freebl/blinit.c
+        @@ -19,3 +19,3 @@
+
+        -#if defined(_WIN64) && defined(__aarch64__)
+        +#if defined(_WIN64) && (defined(__aarch64__) || defined(_M_ARM64))
+         #include <windows.h>
+        @@ -188,3 +188,3 @@
+
+        -#if defined(__aarch64__)
+        +#if defined(__aarch64__) || defined(_M_ARM64)
+
+        @@ -565,3 +565,3 @@
+             CheckX86CPUSupport();
+        -#elif (defined(__aarch64__) || defined(__arm__))
+        +#elif (defined(__aarch64__) || defined(__arm__) || defined(_M_ARM64))
+             CheckARMSupport();
+        PATCH
+              # gyp-next's GenerateEnvironmentFiles only creates environment.x86 and
+              # environment.x64. Patching it to add "arm64" causes it to create
+              # environment.arm64 and populate cl_paths["arm64"], which ninja uses
+              # for $cl_arm64 and environment.arm64 in every build rule.
+              MSVS_EMU=$(python3 -c "import gyp.msvs_emulation; print(gyp.msvs_emulation.__file__)")
+              patch "$MSVS_EMU" << 'PATCH'
+        --- a/pylib/gyp/msvs_emulation.py
+        +++ b/pylib/gyp/msvs_emulation.py
+        @@ -1,3 +1,3 @@
+             generation and use custom environment files prepared by yourself."""
+        -    archs = ("x86", "x64")
+        +    archs = ("x86", "x64", "arm64")
+             if generator_flags.get("ninja_use_custom_environment_files", 0):
+        PATCH
+              # gyp-next's ninja generator hardcodes win_env to only x86 and x64
+              # (causing KeyError on arm64), and has no ml_arm64 assembler variable.
+              NINJA_GEN=$(python3 -c "import gyp.generator.ninja; print(gyp.generator.ninja.__file__)")
+              patch "$NINJA_GEN" << 'PATCH'
+        --- a/generator/ninja.py
+        +++ b/generator/ninja.py
+        @@ -248,3 +248,3 @@
+                     self.win_env = {}
+        -            for arch in ("x86", "x64"):
+        +            for arch in ("x86", "x64", "arm64"):
+                         self.win_env[arch] = "environment." + arch
+        @@ -2341,2 +2341,3 @@
+                 master_ninja.variable("ml_x64", "ml64.exe")
+        +        master_ninja.variable("ml_arm64", "armasm64.exe")
+                 master_ninja.variable("mt", "mt.exe")
+        PATCH
+              # MSVSVersion.py's _SetupScriptInternal only accepts "x86" and "x64".
+              # Expand the assert to allow "arm64", and map it to the vcvarsall.bat
+              # argument "amd64_arm64" (x64-hosted cross-compiler targeting ARM64).
+              MSVS_VER=$(python3 -c "import gyp.MSVSVersion; print(gyp.MSVSVersion.__file__)")
+              patch "$MSVS_VER" << 'PATCH'
+        --- a/MSVSVersion.py
+        +++ b/MSVSVersion.py
+        @@ -89,3 +89,3 @@
+                 environment."""
+        -        assert target_arch in ("x86", "x64"), "target_arch not supported"
+        +        assert target_arch in ("x86", "x64", "arm64"), "target_arch not supported"
+                 # If WindowsSDKDir is set and SetEnv.Cmd exists then we are using the
+        @@ -111,4 +111,4 @@
+                     # Always use a native executable, cross-compiling if necessary.
+        -            host_arch = "amd64" if is_host_arch_x64 else "x86"
+        -            msvc_target_arch = "amd64" if target_arch == "x64" else "x86"
+        +            host_arch = "amd64" if is_host_arch_x64 else ("arm64" if os.environ.get("PROCESSOR_ARCHITECTURE") == "ARM64" else "x86")
+        +            msvc_target_arch = {"x64": "amd64"}.get(target_arch, target_arch)
+                     arg = host_arch
+        PATCH
+              # NSS's coreconf/msvc.sh only handles ia32 and x64; it exits with an error
+              # for arm64. Setting VSPATH to any non-empty value causes msvc.sh to skip
+              # its own discovery and print "Assuming env setup is already done", relying
+              # on the environment already configured by ilammy/msvc-dev-cmd (amd64_arm64).
+              # Use ${VSINSTALLDIR:-1} so the bypass is guaranteed even if VSINSTALLDIR
+              # is somehow not exported into this shell.
+              export VSPATH="${VSINSTALLDIR:-1}"
+              # Use --target (not -Dtarget_arch) so build.sh sets its own
+              # target_arch variable, which suppresses auto-detection at line
+              # 160. With -Dtarget_arch= the auto-detected value is appended
+              # after ours and overrides it (gyp uses the last -D value).
+              NSS_EXTRA="--target=arm64"
             fi
           fi
-          $NSS_DIR/build.sh -g -v -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static
+          # shellcheck disable=SC2086
+          $NSS_DIR/build.sh -g -v -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static $NSS_EXTRA
+          if [ "$RUNNER_OS" == "Windows" ] && [ "$RUNNER_ARCH" == "ARM64" ]; then
+            echo "::group::Verify NSS DLLs load on ARM64"
+            NSS_LIB="$GITHUB_WORKSPACE/dist/Release/lib"
+            python3 -c "
+        import ctypes, sys, os
+        lib = os.environ.get('NSS_LIB', r'$NSS_LIB')
+        for dll in ['freebl3.dll', 'softokn3.dll']:
+            path = os.path.join(lib, dll)
+            print(f'Loading {path}...', end=' ')
+            try:
+                ctypes.WinDLL(path)
+                print('OK')
+            except Exception as e:
+                print(f'FAILED: {e}')
+                sys.exit(1)
+        "
+            echo "::endgroup::"
+          fi
         fi
 
     - name: Save NSS cache
@@ -330,4 +606,4 @@ runs:
       uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
       with:
         path: dist
-        key: nss-${{ inputs.target || runner.os }}${{ steps.ubuntu_release.outputs.codename }}-${{ runner.arch }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
+        key: nss-${{ inputs.target || runner.os }}${{ steps.ubuntu_release.outputs.codename }}-${{ runner.arch }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}-1
