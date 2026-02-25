@@ -100,7 +100,6 @@ jobs:
         env:
           RUST_LOG: trace
           RUST_BACKTRACE: 1
-          NSPR_LOG_MODULES: ${{ startsWith(matrix.os, 'windows-11-arm') && 'nss_mod_db:5' || '' }}
           RUST_TEST_TIME_UNIT: 10,30
           RUST_TEST_TIME_INTEGRATION: 10,30
           RUST_TEST_TIME_DOCTEST: 10,30
