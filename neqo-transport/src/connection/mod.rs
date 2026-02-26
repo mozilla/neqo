@@ -4091,8 +4091,10 @@ impl Connection {
     }
 
     /// Returns the current max size of a datagram that can fit into a packet.
-    /// The value will change over time depending on the encoded size of the
-    /// packet number, ack frames, etc.
+    /// This conservatively assumes worst-case (4-byte) packet number encoding,
+    /// so the value doesn't fluctuate with the actual encoded packet number
+    /// size. It can still change over time as the path MTU, connection ID
+    /// length, or AEAD expansion change.
     ///
     /// # Errors
     /// The function returns `NotAvailable` if datagrams are not enabled.
@@ -4103,8 +4105,7 @@ impl Connection {
         if max_dgram_size == 0 {
             return Err(Error::NotAvailable);
         }
-        let version = self.version();
-        let Some((epoch, tx)) = self
+        let Some((_, tx)) = self
             .crypto
             .states()
             .select_tx(self.version, PacketNumberSpace::ApplicationData)
@@ -4112,25 +4113,14 @@ impl Connection {
             return Err(Error::NotAvailable);
         };
         let path = self.paths.primary().ok_or(Error::NotAvailable)?;
-        let mtu = path.borrow().plpmtu();
-        let mut buffer = Vec::new();
-        let encoder = Encoder::new_borrowed_vec(&mut buffer);
-
-        let (_, builder, _) = Self::build_packet_header(
-            &path.borrow(),
-            epoch,
-            encoder,
-            tx,
-            &self.address_validation,
-            version,
-            false,
-            usize::MAX,
-            self.loss_recovery
-                .largest_acknowledged_pn(PacketNumberSpace::ApplicationData),
-        );
+        let path = path.borrow();
+        let mtu = path.plpmtu();
+        let dcid_len = path.remote_cid().map_or(0, |cid| cid.as_ref().len());
+        // Short header: 1 byte flags + DCID + packet number (assume worst-case 4 bytes).
+        let header_len = 1 + dcid_len + 4;
 
         let data_len_possible = to_u64(
-            mtu.saturating_sub(tx.expansion() + builder.len() + DATAGRAM_FRAME_TYPE_VARINT_LEN),
+            mtu.saturating_sub(tx.expansion() + header_len + DATAGRAM_FRAME_TYPE_VARINT_LEN),
         );
         Ok(min(data_len_possible, max_dgram_size))
     }
@@ -4145,8 +4135,8 @@ impl Connection {
     /// creation of an actual packet and the datagram will be dropped if it does
     /// not fit into the packet. The app is encourage to use `max_datagram_size`
     /// to check the estimated max datagram size and to use smaller datagrams.
-    /// `max_datagram_size` is just a current estimate and will change over
-    /// time depending on the encoded size of the packet number, ack frames, etc.
+    /// `max_datagram_size` is just a current estimate and can change over
+    /// time as the path MTU, connection ID length, or AEAD expansion change.
     pub fn send_datagram<I: Into<DatagramTracking>>(&mut self, buf: Vec<u8>, id: I) -> Res<()> {
         self.quic_datagrams
             .add_datagram(buf, id.into(), &mut self.stats.borrow_mut())
