@@ -51,8 +51,9 @@ pub trait ClientSession {
     fn webtransport_session_protocol(&self, session_id: StreamId) -> Res<Option<String>>;
 
     /// Returns the current max size of a datagram that can fit into a packet.
-    /// The value will change over time depending on the encoded size of the
-    /// packet number, ack frames, etc.
+    /// This conservatively assumes worst-case packet number encoding, so it
+    /// can still change over time (e.g. as the path MTU changes) but not due
+    /// to the actual encoded packet number size.
     ///
     /// # Errors
     ///
@@ -921,8 +922,9 @@ impl ServerSession {
     }
 
     /// Returns the current max size of a datagram that can fit into a packet.
-    /// The value will change over time depending on the encoded size of the
-    /// packet number, ack frames, etc.
+    /// This conservatively assumes worst-case packet number encoding, so it
+    /// can still change over time (e.g. as the path MTU changes) but not due
+    /// to the actual encoded packet number size.
     ///
     /// # Errors
     ///
