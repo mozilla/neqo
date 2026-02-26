@@ -138,7 +138,7 @@ mod client_events;
 mod conn_params;
 pub mod connect_udp;
 mod connection;
-mod connection_client;
+pub(crate) mod connection_client;
 mod connection_server;
 mod control_stream_local;
 mod control_stream_remote;

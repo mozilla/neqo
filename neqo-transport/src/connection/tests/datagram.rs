@@ -24,13 +24,14 @@ use crate::{
     send_stream::{RetransmissionPriority, TransmissionPriority},
 };
 
-/// Minimum overhead for a short header packet carrying a DATAGRAM frame:
+/// Overhead for a short header packet carrying a DATAGRAM frame, assuming worst-case
+/// 4-byte packet number encoding (as used by `max_datagram_size`):
 /// - 8 bytes: minimum connection ID length (from `CountingConnectionIdGenerator`)
 /// - 1 byte: short header (header form, spin, reserved, key phase, PN length)
-/// - 1 byte: minimum packet number encoding
+/// - 4 bytes: maximum packet number encoding
 /// - 1 byte: DATAGRAM frame type
 /// - 16 bytes: AEAD authentication tag
-const MIN_DATAGRAM_PACKET_OVERHEAD: usize = 8 + 1 + 1 + 1 + 16;
+const MIN_DATAGRAM_PACKET_OVERHEAD: usize = 8 + 1 + 4 + 1 + 16;
 const DATAGRAM_LEN_MTU: usize =
     Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) - MIN_DATAGRAM_PACKET_OVERHEAD;
 const DATA_MTU: &[u8] = &[1; DATAGRAM_LEN_MTU];

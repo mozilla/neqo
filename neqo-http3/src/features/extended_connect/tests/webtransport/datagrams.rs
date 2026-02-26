@@ -58,11 +58,11 @@ fn no_datagrams() {
 fn do_datagram_test(wt: &mut WtTest, wt_session: &ServerSession) {
     assert_eq!(
         wt_session.max_datagram_size(),
-        Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
+        Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64() / 4)))
     );
     assert_eq!(
         wt.max_datagram_size(wt_session.stream_id()),
-        Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
+        Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64() / 4)))
     );
 
     assert_eq!(wt_session.send_datagram(DGRAM, None, now(), 0, 0), Ok(()));
@@ -97,7 +97,7 @@ fn datagrams_server_only() {
     );
     assert_eq!(
         wt.max_datagram_size(wt_session.stream_id()),
-        Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
+        Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64() / 4)))
     );
 
     assert_eq!(
@@ -124,7 +124,7 @@ fn datagrams_client_only() {
 
     assert_eq!(
         wt_session.max_datagram_size(),
-        Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
+        Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64() / 4)))
     );
     assert_eq!(
         wt.max_datagram_size(wt_session.stream_id()),
