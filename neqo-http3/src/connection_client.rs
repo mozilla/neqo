@@ -48,6 +48,15 @@ where
     move |(id, _)| (*id >= base && !(id.is_bidi() ^ base.is_bidi())).then_some(*id)
 }
 
+/// Reserve space for ACK frames and packet number growth beyond what is
+/// seen at session start (when max_datagram_size is sampled). An ACK frame
+/// with a single range is typically ~50 bytes (RecvdPackets::USEFUL_ACK_LEN),
+/// and packet number varints can grow by up to 3 bytes over the life of a
+/// connection, giving ~53 bytes of likely overhead in that simple case.
+/// ACK frames can be larger when carrying multiple ranges, so 64 bytes is
+/// a heuristic safety margin rather than a strict worst-case bound.
+pub(crate) const DATAGRAM_OVERHEAD: u64 = 64;
+
 const fn alpn_from_quic_version(version: Version) -> &'static str {
     match version {
         Version::Version2 | Version::Version1 => "h3",
@@ -894,9 +903,11 @@ impl Http3Client {
     ///
     /// This cannot panic. The max varint length is 8.
     pub fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
+        let session_id_len = u64::try_from(Encoder::varint_len(session_id.as_u64()))
+            .map_err(|_| Error::Internal)?;
         Ok(self.conn.max_datagram_size()?
-            - u64::try_from(Encoder::varint_len(session_id.as_u64()))
-                .map_err(|_| Error::Internal)?)
+            .saturating_sub(session_id_len)
+            .saturating_sub(DATAGRAM_OVERHEAD))
     }
 
     pub fn webtransport_set_datagram_high_water_mark(

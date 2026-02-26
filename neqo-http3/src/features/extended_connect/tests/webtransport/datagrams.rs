@@ -10,6 +10,7 @@ use test_fixture::now;
 
 use crate::{
     Error, Http3Parameters, WebTransportRequest,
+    connection_client::DATAGRAM_OVERHEAD,
     features::extended_connect::tests::webtransport::{
         DATAGRAM_SIZE, WtTest, wt_default_parameters,
     },
@@ -63,7 +64,8 @@ fn do_datagram_test(wt: &mut WtTest, wt_session: &WebTransportRequest) {
     assert_eq!(
         wt.max_datagram_size(wt_session.stream_id()),
         Ok(DATAGRAM_SIZE
-            - u64::try_from(Encoder::varint_len(wt_session.stream_id().as_u64())).unwrap())
+            - u64::try_from(Encoder::varint_len(wt_session.stream_id().as_u64())).unwrap()
+            - DATAGRAM_OVERHEAD)
     );
 
     assert_eq!(wt_session.send_datagram(DGRAM, None, now(), 0, 0), Ok(()));
@@ -99,7 +101,8 @@ fn datagrams_server_only() {
     assert_eq!(
         wt.max_datagram_size(wt_session.stream_id()),
         Ok(DATAGRAM_SIZE
-            - u64::try_from(Encoder::varint_len(wt_session.stream_id().as_u64())).unwrap())
+            - u64::try_from(Encoder::varint_len(wt_session.stream_id().as_u64())).unwrap()
+            - DATAGRAM_OVERHEAD)
     );
 
     assert_eq!(
