@@ -395,7 +395,7 @@ impl WebTransportRequest {
         let max_size = self.stream_handler.conn.borrow().max_datagram_size()?;
         Ok(max_size
             - u64::try_from(Encoder::varint_len(
-                self.stream_handler.stream_id().as_u64(),
+                self.stream_handler.stream_id().as_u64() / 4,
             ))
             .map_err(|_| Error::Internal)?)
     }
