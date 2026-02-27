@@ -860,6 +860,8 @@ impl Loss {
         let mut pto_space = None;
         // The spaces in which we will allow probing.
         let mut allow_probes = PacketNumberSpaceSet::default();
+        // The spaces for which packets should be marked for retransmission.
+        let mut retransmit = PacketNumberSpaceSet::default();
         for pn_space in PacketNumberSpace::iter() {
             let Some(t) = self.pto_time(primary_path.borrow().rtt(), pn_space) else {
                 continue;
@@ -869,27 +871,14 @@ impl Loss {
                 continue;
             }
             qdebug!("[{self}] PTO timer fired for {pn_space:?}");
-            let Some(space) = self.spaces.get_mut(pn_space) else {
-                continue;
-            };
-            let mut size = 0;
-            let mtu = primary_path.borrow().plpmtu();
-            lost.extend(
-                space
-                    .pto_packets()
-                    // Do not consider all packets for retransmission on PTO. On
-                    // a high bandwidth delay connection, that would be a lot of
-                    // `sent::Packet`s to clone.
-                    //
-                    // Given that we are sending at most `MAX_PTO_PACKET_COUNT`
-                    // packets on PTO, consider as many packets for
-                    // retransmission as would fit into those PTO packets.
-                    .take_while(move |p| {
-                        size += p.len();
-                        size <= MAX_PTO_PACKET_COUNT * mtu
-                    })
-                    .cloned(),
-            );
+            retransmit.insert(pn_space);
+            // When Handshake PTO fires, also retransmit Initial CRYPTO data.
+            // This handles lost Initial CRYPTO that hasn't triggered its own
+            // PTO because `last_ack_eliciting` keeps advancing with each new
+            // Initial send.
+            if pn_space == PacketNumberSpace::Handshake {
+                retransmit.insert(PacketNumberSpace::Initial);
+            }
             pto_space = pto_space.or(Some(pn_space));
         }
 
@@ -899,6 +888,23 @@ impl Loss {
             return;
         };
 
+        // Collect packets for retransmission.
+        let mtu = primary_path.borrow().plpmtu();
+        let mut size = 0;
+        for space in PacketNumberSpace::iter().filter(|s| retransmit.contains(*s)) {
+            let Some(s) = self.spaces.get_mut(space) else {
+                continue;
+            };
+            lost.extend(
+                s.pto_packets()
+                    .take_while(|p| {
+                        size += p.len();
+                        size <= MAX_PTO_PACKET_COUNT * mtu
+                    })
+                    .cloned(),
+            );
+        }
+
         qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
         self.fire_pto(pn_space, allow_probes, now);
 
@@ -906,31 +912,6 @@ impl Loss {
         if pn_space == PacketNumberSpace::Initial {
             self.maybe_prime_handshake_pto(now);
         }
-
-        // When Handshake PTO fires, also mark Initial packets for retransmission.
-        // This handles the case where Initial space has outstanding CRYPTO data
-        // but its PTO timer hasn't fired yet (because we keep sending Initial
-        // packets which push `last_ack_eliciting` forward). Without this, the
-        // client would send PING-only probes instead of retransmitting CRYPTO.
-        if pn_space != PacketNumberSpace::Handshake {
-            return;
-        }
-
-        let Some(initial_space) = self.spaces.get_mut(PacketNumberSpace::Initial) else {
-            return;
-        };
-
-        let mtu = primary_path.borrow().plpmtu();
-        let mut size = 0;
-        lost.extend(
-            initial_space
-                .pto_packets()
-                .take_while(|p| {
-                    size += p.len();
-                    size <= MAX_PTO_PACKET_COUNT * mtu
-                })
-                .cloned(),
-        );
     }
 
     pub fn timeout(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
