@@ -1,0 +1,67 @@
+name: Determine bench matrix
+description: Determine the list of benchmarks from cargo metadata
+
+outputs:
+  benches:
+    description: JSON array of benchmarks for CodSpeed (non-walltime, with runner)
+    value: ${{ steps.benches.outputs.benches }}
+  walltime-benches:
+    description: JSON array of walltime benchmarks only
+    value: ${{ steps.benches.outputs.walltime_benches }}
+  has-walltime:
+    description: Whether there are walltime benchmarks
+    value: ${{ steps.benches.outputs.has_walltime }}
+  all:
+    description: JSON array of all unique crate/bench pairs (for profiling)
+    value: ${{ steps.benches.outputs.all }}
+
+runs:
+  using: composite
+  steps:
+    - id: benches
+      shell: bash
+      run: |
+        ALL_BENCHES=$(cargo metadata --no-deps --format-version 1 | jq -c '
+          [.packages[] |
+            . as $pkg |
+            .targets[] |
+            select(.kind[] == "bench") |
+            select(has("required-features")) |
+            .name as $bench_name |
+            (($pkg.metadata.bench // []) | map(select(.name == $bench_name)) | .[0]) as $bench_meta |
+            (($bench_meta.codspeed.mode) // "simulation") as $cpu_mode |
+            (if $bench_meta.codspeed.memory == null then true else $bench_meta.codspeed.memory end) as $memory_enabled |
+            (
+              {
+                crate: $pkg.name,
+                bench: $bench_name,
+                mode: $cpu_mode
+              },
+              if $memory_enabled then
+                {
+                  crate: $pkg.name,
+                  bench: $bench_name,
+                  mode: "memory"
+                }
+              else
+                empty
+              end
+            )
+          ]')
+
+        # CodSpeed benchmarks (non-walltime, with runner)
+        NON_WALLTIME=$(echo "$ALL_BENCHES" | jq -c '[.[] | select(.mode != "walltime") | . + {runner: "ubuntu-24.04"}]')
+
+        # Walltime benchmarks
+        WALLTIME=$(echo "$ALL_BENCHES" | jq -c '[.[] | select(.mode == "walltime")]')
+        HAS_WALLTIME=$(echo "$WALLTIME" | jq 'length > 0')
+
+        # All unique crate/bench pairs (for profiling)
+        ALL_UNIQUE=$(echo "$ALL_BENCHES" | jq -c '[.[] | {crate, bench}] | unique')
+
+        {
+          echo "benches=$NON_WALLTIME"
+          echo "walltime_benches=$WALLTIME"
+          echo "has_walltime=$HAS_WALLTIME"
+          echo "all=$ALL_UNIQUE"
+        } >> "$GITHUB_OUTPUT"

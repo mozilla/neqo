@@ -140,7 +140,7 @@ runs:
       env:
         ARTIFACT_URL: ${{ steps.upload-logs.outputs.artifact-url }}
       run: |
-        jq ". + {log_url: \"$ARTIFACT_URL\"}" < result.json  > result.json.tmp
+        jq --arg url "$ARTIFACT_URL" '. + {log_url: $url}' < result.json > result.json.tmp
         mv result.json.tmp result.json
       shell: bash
 

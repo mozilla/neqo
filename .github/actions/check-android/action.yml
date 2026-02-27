@@ -63,7 +63,11 @@ runs:
         WD: ${{ inputs.working-directory }}
       run: cd "$WD" && cargo ndk --platform "$API_LEVEL" --target "$TARGET" test --no-run
 
+    # FIXME: Enable emulator testing for aarch64 once Google ships Android
+    # emulator binaries for ARM64 Linux hosts.
+    # See https://issuetracker.google.com/issues/242699119
     - shell: bash
+      if: ${{ !startsWith(inputs.target, 'aarch64') }}
       env:
         TARGET: ${{ inputs.target }}
         API_LEVEL: ${{ inputs.api-level }}
@@ -92,6 +96,7 @@ runs:
         chmod a+x /tmp/rust-android-run-tests-on-emulator.sh
 
     - uses: reactivecircus/android-emulator-runner@b530d96654c385303d652368551fb075bc2f0b6b # v2.35.0
+      if: ${{ !startsWith(inputs.target, 'aarch64') }}
       with:
         api-level: ${{ inputs.api-level }}
         arch: ${{ startsWith(inputs.target, 'x86_64') && 'x86_64' || (startsWith(inputs.target, 'i686') && 'x86' || (startsWith(inputs.target, 'aarch64') && 'arm64-v8a')) }}

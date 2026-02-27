@@ -7578,4 +7578,57 @@ mod tests {
             }
         );
     }
+
+    // Client needs to gracefully handle out-of-order STOP_SENDING and STREAM frame arrivals.
+    fn client_stop_sending_and_stream_test(separate_packets: bool, stop_sending_first: bool) {
+        let (mut client, mut server, stream_id) = connect_and_send_request(false);
+
+        let send_stop_sending = |s: &mut TestServer| {
+            s.conn
+                .stream_stop_sending(stream_id, Error::HttpRequestCancelled.code())
+                .unwrap();
+        };
+        let send_response = |s: &mut TestServer| {
+            _ = s.conn.stream_send(stream_id, HTTP_RESPONSE_2).unwrap();
+            s.conn.stream_close_send(stream_id).unwrap();
+        };
+
+        if stop_sending_first {
+            send_stop_sending(&mut server);
+        } else {
+            send_response(&mut server);
+        }
+        if separate_packets {
+            client.process(server.conn.process_output(now()).dgram(), now());
+        }
+        if stop_sending_first {
+            send_response(&mut server);
+        } else {
+            send_stop_sending(&mut server);
+        }
+        client.process(server.conn.process_output(now()).dgram(), now());
+
+        let events: Vec<_> = client.events().collect();
+        assert!(events.iter().any(|e| matches!(
+            e, Http3ClientEvent::StopSending { stream_id: id, .. } if *id == stream_id
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e, Http3ClientEvent::HeaderReady { stream_id: id, .. } if *id == stream_id
+        )));
+
+        // The stream is dead; any attempt to send on it should fail.
+        assert_eq!(
+            client.stream_close_send(stream_id, now()),
+            Err(Error::InvalidStreamId)
+        );
+    }
+
+    #[test]
+    fn client_stop_sending_and_stream_combinations() {
+        for separate_packets in [false, true] {
+            for stop_sending_first in [false, true] {
+                client_stop_sending_and_stream_test(separate_packets, stop_sending_first);
+            }
+        }
+    }
 }

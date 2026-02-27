@@ -1265,8 +1265,7 @@ impl CryptoStates {
     fn has_0rtt_read(&self) -> bool {
         self.zero_rtt
             .as_ref()
-            .filter(|z| z.direction == CryptoDxDirection::Read)
-            .is_some()
+            .is_some_and(|z| z.direction == CryptoDxDirection::Read)
     }
 
     /// Prepare to update read keys.  This doesn't happen immediately as
