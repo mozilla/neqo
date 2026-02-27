@@ -1165,8 +1165,8 @@ impl Connection {
         // drive it.
 
         let earliest = delays.into_iter().min().expect("at least one delay");
-        // Per RFC 9002 A.8, timers set in the past should fire immediately.
-        // `saturating_duration_since` clamps to zero in that case.
+        // TODO(agrover, mt) - need to analyze and fix #47
+        // rather than just clamping to zero here.
         debug_assert!(earliest > now);
         let delay = earliest.saturating_duration_since(now);
         qdebug!("[{self}] delay duration {delay:?}");
