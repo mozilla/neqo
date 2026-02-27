@@ -1265,7 +1265,6 @@ impl CryptoStates {
     fn has_0rtt_read(&self) -> bool {
         self.zero_rtt
             .as_ref()
-            .as_ref()
             .is_some_and(|z| z.direction == CryptoDxDirection::Read)
     }
 
