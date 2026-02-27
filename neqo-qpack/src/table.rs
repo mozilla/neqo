@@ -193,7 +193,7 @@ impl HeaderTable {
     /// The function returns `LookupResult`: `index`, `static_table` (if it is a static table entry)
     /// and `value_matches` (if the header value matches as well not only header name)
     pub fn lookup(&mut self, name: &[u8], value: &[u8], can_block: bool) -> Option<LookupResult> {
-        qtrace!("[{self}] lookup name:{name:?} value {value:?} can_block={can_block}",);
+        qtrace!("[{self}] lookup name:{name:?} value {value:?} can_block={can_block}");
         let mut name_match = None;
         for iter in HEADER_STATIC_TABLE {
             if iter.name() == name {

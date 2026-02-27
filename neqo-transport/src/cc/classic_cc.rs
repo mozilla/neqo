@@ -661,7 +661,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         if self.current.phase.in_slow_start() {
             cc_stats.slow_start_exit_cwnd = None;
         }
-        qinfo!("[{self}] Spurious cong event -> RESTORED;",);
+        qinfo!("[{self}] Spurious cong event -> RESTORED;");
         cc_stats.congestion_events[CongestionEvent::Spurious] += 1;
     }
 
