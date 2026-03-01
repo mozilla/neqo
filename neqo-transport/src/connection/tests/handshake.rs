@@ -1657,3 +1657,64 @@ fn certificate_compression() {
     assert!(!ORIGINAL.lock().unwrap().is_empty());
     assert_eq!(*ORIGINAL.lock().unwrap(), *DECODED.lock().unwrap());
 }
+
+/// Regression test for <https://bugzilla.mozilla.org/show_bug.cgi?id=2001901>.
+#[test]
+fn handshake_hs_pto_primed_then_timer_in_past() {
+    let mut now = now();
+    // Disable pacing so probes are sent immediately.
+    let mut client = new_client(ConnectionParameters::default().pacing(false));
+    let mut server = new_server(ConnectionParameters::default().pacing(false));
+
+    let c_init_1 = client.process_output(now).dgram().unwrap();
+    let c_init_2 = client.process_output(now).dgram().unwrap();
+    assert_initial(&c_init_1, false);
+    assert_initial(&c_init_2, false); // intentionally never delivered to server
+
+    // Deliver only c_init_1.  Server has an incomplete CH and sends a bare
+    // ACK (no ServerHello, so the client never gets Handshake TX keys).
+    now += DEFAULT_RTT / 2;
+    server.process_input(c_init_1, now);
+    let s_ack = server.process_output(now).dgram().unwrap();
+
+    // Client receives the bare ACK: initial_largest_acked is set,
+    // hs.last_ack_eliciting is still None.
+    now += DEFAULT_RTT / 2;
+    client.process_input(s_ack, now);
+    while client.process_output(now).dgram().is_some() {}
+
+    // Drive PTO iterations 1 and 2 to push initial.last_ack_eliciting ahead
+    // of hs.last_ack_eliciting (which is frozen after being primed in iter 1).
+    for _ in 0..2 {
+        now += client.process_output(now).callback();
+        while client.process_output(now).dgram().is_some() {}
+    }
+
+    // PTO iteration 3: only the Handshake timer fires (its threshold is now
+    // earlier than Initial's).  No Initial CRYPTO is newly pseudo-lost, so
+    // the probe is a PING rather than a CRYPTO retransmit.
+    now += client.process_output(now).callback();
+    let ping = client.process_output(now).dgram().unwrap();
+    while client.process_output(now).dgram().is_some() {}
+
+    // Pre-fire the server's own accumulated PTO probes so its response to the
+    // client PING is a bare ACK only.  Without this the server would bundle
+    // its own PING into the ACK, which causes the client to call
+    // `acks.immediate_ack`, producing non-empty output and masking the bug.
+    while server.process_output(now).dgram().is_some() {}
+
+    // Deliver the PING to the server.  Server still has an incomplete CH and
+    // responds with a bare ACK (no PING, server PTO just fired above).
+    server.process_input(ping, now);
+    let s_ack2 = server.process_output(now).dgram().unwrap();
+
+    // Receiving ACK2 acks the PING and clears pto_state.
+    // Now hs.last_ack_eliciting (T_hs) is far in the past relative to `now`,
+    // while initial.last_ack_eliciting equals `now`.
+    client.process_input(s_ack2, now);
+
+    // Initial space is set to ack_only, thus blocked.  Handshake space is
+    // missing keys, thus blocked, too. Still handshake PTO timer is firing in
+    // the past.
+    let _ = client.process_output(now);
+}
