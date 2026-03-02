@@ -129,7 +129,9 @@ impl ClientSession for Http3Client {
         send_group_id: u64,
         send_order: i64,
     ) -> Res<extended_connect::DatagramQueueOutcome> {
-        qtrace!("connect_udp_send_datagram session:{session_id:?}");
+        qtrace!(
+            "connect_udp_send_datagram session:{session_id:?}, sendGroup:{send_group_id}, sendOrder:{send_order}"
+        );
         let (conn, handler) = self.connection_and_handler();
         handler.connect_udp_send_datagram(conn, session_id, buf, id, now, send_group_id, send_order)
     }
