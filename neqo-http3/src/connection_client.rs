@@ -843,7 +843,7 @@ impl Http3Client {
         send_group_id: u64,
         send_order: i64,
     ) -> Res<bool> {
-        qtrace!("webtransport_send_datagram session:{session_id:?}");
+        qtrace!("webtransport_send_datagram session:{session_id:?}, sendGroup:{send_group_id}, sendOrder:{send_order}");
         let (below_watermark, dropped) = self
             .base_handler
             .webtransport_send_datagram(session_id, &mut self.conn, buf, id, now, send_group_id, send_order)?;
@@ -875,7 +875,7 @@ impl Http3Client {
         send_group_id: u64,
         send_order: i64,
     ) -> Res<bool> {
-        qtrace!("connect_udp_send_datagram session:{session_id:?}");
+        qtrace!("connect_udp_send_datagram session:{session_id:?}, sendGroup:{send_group_id}, sendOrder:{send_order}");
         let (below_watermark, _dropped) = self
             .base_handler
             .connect_udp_send_datagram(session_id, &mut self.conn, buf, id, now, send_group_id, send_order)?;
