@@ -399,7 +399,9 @@ impl ClientSession for Http3Client {
         send_group_id: u64,
         send_order: i64,
     ) -> Res<(bool, Option<extended_connect::DatagramOutcome>)> {
-        qtrace!("webtransport_send_datagram session:{session_id:?}");
+        qtrace!(
+            "webtransport_send_datagram session:{session_id:?}, sendGroup:{send_group_id}, sendOrder:{send_order}"
+        );
         let (conn, handler) = self.connection_and_handler();
         handler.webtransport_send_datagram(
             session_id,
