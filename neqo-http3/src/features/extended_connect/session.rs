@@ -468,7 +468,14 @@ impl Session {
         };
 
         let payload_len = buf.len();
-        let (below_watermark, dropped) = self.protocol.enqueue_datagram(Bytes::from(Vec::<u8>::from(dgram_data)), id_opt, payload_len, now, send_group_id, send_order);
+        let (below_watermark, dropped) = self.protocol.enqueue_datagram(
+            Bytes::from(Vec::<u8>::from(dgram_data)),
+            id_opt,
+            payload_len,
+            now,
+            send_group_id,
+            send_order,
+        );
 
         qtrace!("[{self}] enqueued datagram for sending via QUIC datagram");
         Ok((below_watermark, dropped))
