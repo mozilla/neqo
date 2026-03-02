@@ -856,7 +856,9 @@ impl Http3Client {
         bool,
         Option<crate::features::extended_connect::DatagramOutcome>,
     )> {
-        qtrace!("webtransport_send_datagram session:{session_id:?}");
+        qtrace!(
+            "webtransport_send_datagram session:{session_id:?}, sendGroup:{send_group_id}, sendOrder:{send_order}"
+        );
         self.base_handler.webtransport_send_datagram(
             session_id,
             &mut self.conn,
@@ -887,7 +889,9 @@ impl Http3Client {
         bool,
         Option<crate::features::extended_connect::DatagramOutcome>,
     )> {
-        qtrace!("connect_udp_send_datagram session:{session_id:?}");
+        qtrace!(
+            "connect_udp_send_datagram session:{session_id:?}, sendGroup:{send_group_id}, sendOrder:{send_order}"
+        );
         self.base_handler.connect_udp_send_datagram(
             session_id,
             &mut self.conn,
