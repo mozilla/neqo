@@ -193,6 +193,9 @@ jobs:
   check-vm:
     name: Run checks for VM-only platforms
     runs-on: ubuntu-24.04
+    # OpenBSD, NetBSD and Solaris often have NSS packages that are too old.
+    # Allow them to fail without aborting the merge queue.
+    continue-on-error: ${{ github.event_name == 'merge_group' && matrix.os != 'freebsd' }}
     strategy:
       fail-fast: false
       matrix:
