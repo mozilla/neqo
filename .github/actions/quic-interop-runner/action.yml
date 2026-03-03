@@ -88,7 +88,7 @@ runs:
       run: |
         cd quic-interop-runner
         if [ -n "$IMPLEMENTATIONS" ]; then
-          echo "$IMPLEMENTATIONS" > implementations.json
+          echo "$IMPLEMENTATIONS" > implementations_quic.json
         fi
         ARGS="--log-dir ../logs --json ../result.json"
         if [ -n "$CLIENT" ]; then
