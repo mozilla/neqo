@@ -44,7 +44,7 @@ jobs:
             exit 0
           fi
 
-          echo "$PENDING_ENV_IDS" | xargs -n1 -I{} gh api "repos/$REPO/actions/runs/$RUN_ID/pending_deployments" \
+          echo "$PENDING_ENV_IDS" | xargs -I{} gh api "repos/$REPO/actions/runs/$RUN_ID/pending_deployments" \
             --method POST \
             -F "environment_ids[]={}" \
             -F "state=approved" \
