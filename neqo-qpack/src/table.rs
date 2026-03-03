@@ -159,12 +159,17 @@ impl HeaderTable {
     /// `HeaderLookup` if entry does not exist.
     pub fn get_dynamic(&self, index: u64, base: u64, post: bool) -> Res<&DynamicTableEntry> {
         let inx = if post {
-            if self.base < (base + index + 1) {
+            if self.base
+                < base
+                    .checked_add(index)
+                    .and_then(|s| s.checked_add(1))
+                    .ok_or(Error::IntegerOverflow)?
+            {
                 return Err(Error::HeaderLookup);
             }
             self.base - (base + index + 1)
         } else {
-            if (self.base + index) < base {
+            if self.base.checked_add(index).ok_or(Error::IntegerOverflow)? < base {
                 return Err(Error::HeaderLookup);
             }
             (self.base + index) - base
@@ -422,6 +427,20 @@ mod tests {
 
             assert!(table.can_evict_to(first_entry_size));
             assert!(!table.can_evict_to(0));
+        }
+    }
+
+    #[test]
+    fn get_dynamic_max_index_returns_error_not_panic() {
+        let mut table = HeaderTable::new(false);
+        table.set_capacity(10_000).unwrap();
+        table.insert(b"name", b"value").unwrap();
+
+        for post in [true, false] {
+            assert_eq!(
+                table.get_dynamic(u64::MAX, u64::MAX, post).unwrap_err(),
+                Error::IntegerOverflow
+            );
         }
     }
 }
