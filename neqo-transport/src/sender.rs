@@ -13,8 +13,8 @@ use neqo_common::{qdebug, qlog::Qlog};
 use crate::{
     ConnectionParameters, SlowStart, Stats,
     cc::{
-        ClassicCongestionControl, ClassicSlowStart, CongestionControl, CongestionController, Cubic,
-        HyStart, NewReno,
+        ClassicCongestionController, ClassicSlowStart, CongestionControl, CongestionController,
+        Cubic, HyStart, NewReno,
     },
     pace::Pacer,
     pmtud::Pmtud,
@@ -39,24 +39,24 @@ impl PacketSender {
         Self {
             cc: match conn_params.get_congestion_control() {
                 CongestionControl::NewReno => match conn_params.get_slow_start() {
-                    SlowStart::Classic => Box::new(ClassicCongestionControl::new(
+                    SlowStart::Classic => Box::new(ClassicCongestionController::new(
                         ClassicSlowStart::default(),
                         NewReno::default(),
                         pmtud,
                     )),
-                    SlowStart::HyStart => Box::new(ClassicCongestionControl::new(
+                    SlowStart::HyStart => Box::new(ClassicCongestionController::new(
                         HyStart::new(conn_params.pacing_enabled()),
                         NewReno::default(),
                         pmtud,
                     )),
                 },
                 CongestionControl::Cubic => match conn_params.get_slow_start() {
-                    SlowStart::Classic => Box::new(ClassicCongestionControl::new(
+                    SlowStart::Classic => Box::new(ClassicCongestionController::new(
                         ClassicSlowStart::default(),
                         Cubic::default(),
                         pmtud,
                     )),
-                    SlowStart::HyStart => Box::new(ClassicCongestionControl::new(
+                    SlowStart::HyStart => Box::new(ClassicCongestionController::new(
                         HyStart::new(conn_params.pacing_enabled()),
                         Cubic::default(),
                         pmtud,

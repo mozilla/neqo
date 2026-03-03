@@ -21,7 +21,7 @@ use super::{RTT, make_cc_cubic};
 use crate::{
     cc::{
         ClassicSlowStart, CongestionController as _, CongestionEvent,
-        classic_cc::ClassicCongestionControl,
+        classic_cc::ClassicCongestionController,
         cubic::{Cubic, convert_to_f64},
     },
     recovery::sent,
@@ -44,7 +44,7 @@ const fn cwnd_after_loss_slow_start(cwnd: usize, mtu: usize) -> usize {
 fn setup_congestion_avoidance(
     fast_convergence: bool,
 ) -> (
-    ClassicCongestionControl<ClassicSlowStart, Cubic>,
+    ClassicCongestionController<ClassicSlowStart, Cubic>,
     CongestionControlStats,
 ) {
     let mut cc = make_cc_cubic();
@@ -66,7 +66,7 @@ fn setup_congestion_avoidance(
 }
 
 fn fill_cwnd(
-    cc: &mut ClassicCongestionControl<ClassicSlowStart, Cubic>,
+    cc: &mut ClassicCongestionController<ClassicSlowStart, Cubic>,
     mut next_pn: u64,
     now: Instant,
 ) -> u64 {
@@ -79,7 +79,7 @@ fn fill_cwnd(
 }
 
 fn ack_packet(
-    cc: &mut ClassicCongestionControl<ClassicSlowStart, Cubic>,
+    cc: &mut ClassicCongestionController<ClassicSlowStart, Cubic>,
     pn: u64,
     now: Instant,
     cc_stats: &mut CongestionControlStats,
@@ -89,7 +89,7 @@ fn ack_packet(
 }
 
 fn packet_lost(
-    cc: &mut ClassicCongestionControl<ClassicSlowStart, Cubic>,
+    cc: &mut ClassicCongestionController<ClassicSlowStart, Cubic>,
     pn: u64,
     cc_stats: &mut CongestionControlStats,
 ) {
@@ -100,7 +100,7 @@ fn packet_lost(
 }
 
 fn ecn_ce(
-    cc: &mut ClassicCongestionControl<ClassicSlowStart, Cubic>,
+    cc: &mut ClassicCongestionController<ClassicSlowStart, Cubic>,
     pn: u64,
     now: Instant,
     cc_stats: &mut CongestionControlStats,
@@ -337,7 +337,7 @@ fn congestion_event_congestion_avoidance() {
 /// Verify that `acked_bytes` is correctly reduced on a congestion event.
 fn acked_bytes_reduced_on_congestion_event(
     trigger: impl FnOnce(
-        &mut ClassicCongestionControl<ClassicSlowStart, Cubic>,
+        &mut ClassicCongestionController<ClassicSlowStart, Cubic>,
         Instant,
         &mut CongestionControlStats,
     ),

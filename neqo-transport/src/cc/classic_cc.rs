@@ -113,11 +113,11 @@ pub trait WindowAdjustment: Display + Debug {
 /// (`ssthresh`) is set on exit and they can influence how fast the exponential congestion window
 /// growth rate during slow start is.
 pub trait SlowStart: Display + Debug {
-    /// Handle tracking RTT rounds through having the next packet number that is to be sent out
-    /// passed in.
+    /// Enables a trait implementor to track RTT rounds via the next packet numer that is to be sent
+    /// out.
     fn on_packet_sent(&mut self, sent_pn: packet::Number);
-    /// Handle packets being acknowledged during initial slow start and do computations to decide if
-    /// initial slow start should be exited.
+    /// Handle packets being acknowledged during initial slow start. Returns whether initial slow
+    /// start should be exited.
     ///
     /// Returns `exit_slow_start`.
     fn on_packets_acked(&mut self, rtt_est: &RttEstimate, largest_acked: packet::Number) -> bool;
@@ -125,12 +125,15 @@ pub trait SlowStart: Display + Debug {
     /// Can apply changes to the exponential congestion window increase during initial slow start.
     /// One example is the reduced growth in Conservative Slow Start (CSS) from HyStart++.
     ///
-    /// Returns `cwnd_increase`.
+    /// The default implementation returns the unchanged `cwnd_increase` input parameter.
+    /// Implementors can specify how the increase is to be changed.
     fn maybe_change_cwnd_increase(
         &mut self,
         cwnd_increase: usize,
-        max_datagram_size: usize,
-    ) -> usize;
+        _max_datagram_size: usize,
+    ) -> usize {
+        cwnd_increase
+    }
 
     /// Handle exiting from initial slow start.
     ///
@@ -177,7 +180,7 @@ impl State {
 }
 
 #[derive(Debug)]
-pub struct ClassicCongestionControl<S, T> {
+pub struct ClassicCongestionController<S, T> {
     slow_start: S,
     congestion_control: T,
     bytes_in_flight: usize,
@@ -209,7 +212,7 @@ pub struct ClassicCongestionControl<S, T> {
     stored: Option<State>,
 }
 
-impl<S: Display, T: Display> Display for ClassicCongestionControl<S, T> {
+impl<S: Display, T: Display> Display for ClassicCongestionController<S, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -219,7 +222,7 @@ impl<S: Display, T: Display> Display for ClassicCongestionControl<S, T> {
     }
 }
 
-impl<S, T> ClassicCongestionControl<S, T> {
+impl<S, T> ClassicCongestionController<S, T> {
     pub const fn max_datagram_size(&self) -> usize {
         self.pmtud.plpmtu()
     }
@@ -230,7 +233,7 @@ impl<S, T> ClassicCongestionControl<S, T> {
     }
 }
 
-impl<S, T> CongestionController for ClassicCongestionControl<S, T>
+impl<S, T> CongestionController for ClassicCongestionController<S, T>
 where
     S: SlowStart,
     T: WindowAdjustment,
@@ -600,7 +603,7 @@ const fn cwnd_initial(mtu: usize) -> usize {
     const_min(CWND_INITIAL_PKTS * mtu, const_max(2 * mtu, 14_720))
 }
 
-impl<S, T> ClassicCongestionControl<S, T>
+impl<S, T> ClassicCongestionController<S, T>
 where
     S: SlowStart,
     T: WindowAdjustment,
@@ -933,7 +936,7 @@ mod tests {
     use neqo_common::qinfo;
     use test_fixture::now;
 
-    use super::{ClassicCongestionControl, PERSISTENT_CONG_THRESH, SlowStart, WindowAdjustment};
+    use super::{ClassicCongestionController, PERSISTENT_CONG_THRESH, SlowStart, WindowAdjustment};
     use crate::{
         cc::{
             CWND_INITIAL_PKTS, ClassicSlowStart, CongestionController, CongestionEvent,
@@ -958,12 +961,12 @@ mod tests {
     /// Uses an odd expression because `Duration` arithmetic isn't `const`.
     const PC: Duration = Duration::from_nanos(100_000_000 * (PERSISTENT_CONG_THRESH as u64) + 1);
 
-    fn cwnd_is_default(cc: &ClassicCongestionControl<ClassicSlowStart, NewReno>) {
+    fn cwnd_is_default(cc: &ClassicCongestionController<ClassicSlowStart, NewReno>) {
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
         assert_eq!(cc.ssthresh(), usize::MAX);
     }
 
-    fn cwnd_is_halved(cc: &ClassicCongestionControl<ClassicSlowStart, NewReno>) {
+    fn cwnd_is_halved(cc: &ClassicCongestionController<ClassicSlowStart, NewReno>) {
         assert_eq!(cc.cwnd(), cc.cwnd_initial() / 2);
         assert_eq!(cc.ssthresh(), cc.cwnd_initial() / 2);
     }
@@ -1188,7 +1191,7 @@ mod tests {
     /// `last_ack` and `rtt_time` are times in multiples of `PTO`, relative to `now()`,
     /// for the time of the largest acknowledged and the first RTT sample, respectively.
     fn persistent_congestion_by_pto<S: SlowStart, T: WindowAdjustment>(
-        mut cc: ClassicCongestionControl<S, T>,
+        mut cc: ClassicCongestionController<S, T>,
         last_ack: u32,
         rtt_time: u32,
         lost: &[sent::Packet],

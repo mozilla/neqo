@@ -12,7 +12,7 @@ use std::{
 use crate::{
     Pmtud,
     cc::{
-        ClassicSlowStart, classic_cc::ClassicCongestionControl, cubic::Cubic, hystart::HyStart,
+        ClassicSlowStart, classic_cc::ClassicCongestionController, cubic::Cubic, hystart::HyStart,
         new_reno::NewReno,
     },
 };
@@ -26,8 +26,8 @@ pub const MTU: Option<usize> = Some(1_500);
 pub const RTT: Duration = Duration::from_millis(100);
 
 /// Helper to create `ClassicCongestionControl` with New Reno for tests.
-pub fn make_cc_newreno() -> ClassicCongestionControl<ClassicSlowStart, NewReno> {
-    ClassicCongestionControl::new(
+pub fn make_cc_newreno() -> ClassicCongestionController<ClassicSlowStart, NewReno> {
+    ClassicCongestionController::new(
         ClassicSlowStart::default(),
         NewReno::default(),
         Pmtud::new(IP_ADDR, MTU),
@@ -35,8 +35,8 @@ pub fn make_cc_newreno() -> ClassicCongestionControl<ClassicSlowStart, NewReno> 
 }
 
 /// Helper to create `ClassicCongestionControl` with Cubic for tests.
-pub fn make_cc_cubic() -> ClassicCongestionControl<ClassicSlowStart, Cubic> {
-    ClassicCongestionControl::new(
+pub fn make_cc_cubic() -> ClassicCongestionController<ClassicSlowStart, Cubic> {
+    ClassicCongestionController::new(
         ClassicSlowStart::default(),
         Cubic::default(),
         Pmtud::new(IP_ADDR, MTU),
@@ -44,8 +44,8 @@ pub fn make_cc_cubic() -> ClassicCongestionControl<ClassicSlowStart, Cubic> {
 }
 
 /// Helper to create `ClassicCongestionControl` with HyStart++ for tests.
-pub fn make_cc_hystart(paced: bool) -> ClassicCongestionControl<HyStart, NewReno> {
-    ClassicCongestionControl::new(
+pub fn make_cc_hystart(paced: bool) -> ClassicCongestionController<HyStart, NewReno> {
+    ClassicCongestionController::new(
         HyStart::new(paced),
         NewReno::default(),
         Pmtud::new(IP_ADDR, MTU),

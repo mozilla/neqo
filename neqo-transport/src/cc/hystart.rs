@@ -10,52 +10,29 @@ use std::{
     time::Duration,
 };
 
-use neqo_common::{qdebug, qinfo, qtrace};
+use neqo_common::{qdebug, qtrace};
 
 use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate};
 
-#[derive(Debug, Clone)]
-pub struct State {
+#[derive(Debug)]
+pub struct HyStart {
+    /// > While an arriving ACK may newly acknowledge an arbitrary number of bytes, the HyStart++
+    /// > algorithm limits the number of those bytes applied to increase the cwnd to `L*SMSS`
+    /// > bytes.
+    ///
+    ///  <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-1>
+    ///
+    /// > A paced TCP implementation SHOULD use `L = infinity`. Burst concerns are mitigated by
+    /// > pacing, and this setting allows for optimal cwnd growth on modern networks.
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9406#section-4.3-9>
+    limit: usize,
     last_round_min_rtt: Duration,
     current_round_min_rtt: Duration,
     rtt_sample_count: usize,
     window_end: Option<packet::Number>,
     css_baseline_min_rtt: Duration,
     css_round_count: usize,
-}
-
-impl Display for State {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "State [last_min: {:?}, current_min: {:?}, samples: {}, window_end: {:?}, css_baseline: {:?}, css_rounds: {}]",
-            self.last_round_min_rtt,
-            self.current_round_min_rtt,
-            self.rtt_sample_count,
-            self.window_end,
-            self.css_baseline_min_rtt,
-            self.css_round_count
-        )
-    }
-}
-
-impl State {
-    pub const fn new() -> Self {
-        Self {
-            last_round_min_rtt: Duration::MAX,
-            current_round_min_rtt: Duration::MAX,
-            rtt_sample_count: 0,
-            window_end: None,
-            css_baseline_min_rtt: Duration::MAX,
-            css_round_count: 0,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct HyStart {
-    limit: usize,
-    current: State,
 }
 
 impl Display for HyStart {
@@ -87,7 +64,12 @@ impl HyStart {
         };
         Self {
             limit,
-            current: State::new(),
+            last_round_min_rtt: Duration::MAX,
+            current_round_min_rtt: Duration::MAX,
+            rtt_sample_count: 0,
+            window_end: None,
+            css_baseline_min_rtt: Duration::MAX,
+            css_round_count: 0,
         }
     }
 
@@ -100,8 +82,8 @@ impl HyStart {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-11>
     fn collect_rtt_sample(&mut self, rtt: Duration) {
-        self.current.current_round_min_rtt = min(self.current.current_round_min_rtt, rtt);
-        self.current.rtt_sample_count += 1;
+        self.current_round_min_rtt = min(self.current_round_min_rtt, rtt);
+        self.rtt_sample_count += 1;
     }
 
     /// > HyStart++ measures rounds using sequence numbers, as follows:
@@ -120,45 +102,45 @@ impl HyStart {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-4>
     ///
-    /// Neqo sets `window_end` to `None` when it is acked and calls this function when packets are
-    /// sent to conditionally start a new round.
+    /// [`HyStart::on_packets_acked`] sets `window_end` to `None` when it is acked
+    /// and calls this function when packets are sent to conditionally start a new round.
     fn maybe_start_new_round(&mut self, sent_pn: packet::Number) {
-        if self.current.window_end.is_some() {
+        if self.window_end.is_some() {
             return;
         }
-        self.current.window_end = Some(sent_pn);
-        self.current.last_round_min_rtt = self.current.current_round_min_rtt;
-        self.current.current_round_min_rtt = Duration::MAX;
-        self.current.rtt_sample_count = 0;
+        self.window_end = Some(sent_pn);
+        self.last_round_min_rtt = self.current_round_min_rtt;
+        self.current_round_min_rtt = Duration::MAX;
+        self.rtt_sample_count = 0;
         qdebug!("HyStart: maybe_start_new_round -> started new round");
     }
 
     pub fn in_css(&self) -> bool {
-        self.current.css_baseline_min_rtt != Duration::MAX
+        self.css_baseline_min_rtt != Duration::MAX
     }
 
     const fn enough_samples(&self) -> bool {
-        self.current.rtt_sample_count >= Self::N_RTT_SAMPLE
+        self.rtt_sample_count >= Self::N_RTT_SAMPLE
     }
 
     #[cfg(test)]
     pub const fn window_end(&self) -> Option<packet::Number> {
-        self.current.window_end
+        self.window_end
     }
 
     #[cfg(test)]
     pub const fn rtt_sample_count(&self) -> usize {
-        self.current.rtt_sample_count
+        self.rtt_sample_count
     }
 
     #[cfg(test)]
     pub const fn current_round_min_rtt(&self) -> Duration {
-        self.current.current_round_min_rtt
+        self.current_round_min_rtt
     }
 
     #[cfg(test)]
     pub const fn css_round_count(&self) -> usize {
-        self.current.css_round_count
+        self.css_round_count
     }
 }
 
@@ -173,12 +155,12 @@ impl SlowStart for HyStart {
         qtrace!(
             "HyStart: on_packets_acked -> pn={largest_acked}, rtt={:?}, cur_min={:?}, last_min={:?}, samples={}, in_css={}, css_rounds={}, window_end={:?}",
             rtt_est.latest_rtt(),
-            self.current.current_round_min_rtt,
-            self.current.last_round_min_rtt,
-            self.current.rtt_sample_count,
+            self.current_round_min_rtt,
+            self.last_round_min_rtt,
+            self.rtt_sample_count,
             self.in_css(),
-            self.current.css_round_count,
-            self.current.window_end
+            self.css_round_count,
+            self.window_end
         );
 
         // > For CSS rounds where at least N_RTT_SAMPLE RTT samples have been obtained, check to see
@@ -194,17 +176,17 @@ impl SlowStart for HyStart {
         // <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-20>
         if self.in_css()
             && self.enough_samples()
-            && self.current.current_round_min_rtt < self.current.css_baseline_min_rtt
+            && self.current_round_min_rtt < self.css_baseline_min_rtt
         {
             qdebug!(
                 "HyStart: on_packets_acked -> exiting CSS after {} rounds because cur_min={:?} < baseline_min={:?}",
-                self.current.css_round_count,
-                self.current.current_round_min_rtt,
-                self.current.css_baseline_min_rtt
+                self.css_round_count,
+                self.current_round_min_rtt,
+                self.css_baseline_min_rtt
             );
 
-            self.current.css_baseline_min_rtt = Duration::MAX;
-            self.current.css_round_count = 0;
+            self.css_baseline_min_rtt = Duration::MAX;
+            self.css_round_count = 0;
         }
 
         // > For rounds where at least N_RTT_SAMPLE RTT samples have been obtained and
@@ -214,22 +196,22 @@ impl SlowStart for HyStart {
         // <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-13>
         if !self.in_css()
             && self.enough_samples()
-            && self.current.current_round_min_rtt != Duration::MAX
-            && self.current.last_round_min_rtt != Duration::MAX
+            && self.current_round_min_rtt != Duration::MAX
+            && self.last_round_min_rtt != Duration::MAX
         {
             let rtt_thresh = max(
                 Self::MIN_RTT_THRESH,
                 min(
-                    self.current.last_round_min_rtt / Self::MIN_RTT_DIVISOR,
+                    self.last_round_min_rtt / Self::MIN_RTT_DIVISOR,
                     Self::MAX_RTT_THRESH,
                 ),
             );
-            if self.current.current_round_min_rtt >= self.current.last_round_min_rtt + rtt_thresh {
-                self.current.css_baseline_min_rtt = self.current.current_round_min_rtt;
+            if self.current_round_min_rtt >= self.last_round_min_rtt + rtt_thresh {
+                self.css_baseline_min_rtt = self.current_round_min_rtt;
                 qdebug!(
                     "HyStart: on_packets_acked -> entered CSS because cur_min={:?} >= last_min={:?} + thresh={rtt_thresh:?}",
-                    self.current.current_round_min_rtt,
-                    self.current.last_round_min_rtt
+                    self.current_round_min_rtt,
+                    self.last_round_min_rtt
                 );
             }
         }
@@ -237,22 +219,22 @@ impl SlowStart for HyStart {
         // Check for end of round. If `window_end` is acked it is set to `None` to indicate end of a
         // round. [`SlowStart::on_packet_sent`] will then set it to the next packet number we send
         // out to start a new round.
-        if let Some(window_end) = self.current.window_end
+        if let Some(window_end) = self.window_end
             && largest_acked >= window_end
         {
             qtrace!(
                 "HyStart: on_packets_acked -> round ended because largest_acked={largest_acked} >= window_end={window_end}"
             );
-            self.current.window_end = None;
+            self.window_end = None;
 
             // If a round ends while in CSS increase the counter and do a check if enough rounds
             // to exit to congestion avoidance have been completed.
             if self.in_css() {
-                self.current.css_round_count += 1;
-                let exit_slow_start = self.current.css_round_count >= Self::CSS_ROUNDS;
-                qinfo!(
+                self.css_round_count += 1;
+                let exit_slow_start = self.css_round_count >= Self::CSS_ROUNDS;
+                qdebug!(
                     "HyStart: on_packets_acked -> exit={exit_slow_start} because css_rounds={} >= {}",
-                    self.current.css_round_count,
+                    self.css_round_count,
                     Self::CSS_ROUNDS
                 );
                 return exit_slow_start;

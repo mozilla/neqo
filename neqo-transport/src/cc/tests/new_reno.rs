@@ -18,7 +18,7 @@ use test_fixture::now;
 use super::{RTT, make_cc_newreno};
 use crate::{
     cc::{
-        ClassicCongestionControl, ClassicSlowStart, CongestionController as _, new_reno::NewReno,
+        ClassicCongestionController, ClassicSlowStart, CongestionController as _, new_reno::NewReno,
     },
     packet,
     recovery::{self, sent},
@@ -28,12 +28,12 @@ use crate::{
 
 const PTO: Duration = RTT;
 
-fn cwnd_is_default(cc: &ClassicCongestionControl<ClassicSlowStart, NewReno>) {
+fn cwnd_is_default(cc: &ClassicCongestionController<ClassicSlowStart, NewReno>) {
     assert_eq!(cc.cwnd(), cc.cwnd_initial());
     assert_eq!(cc.ssthresh(), usize::MAX);
 }
 
-fn cwnd_is_halved(cc: &ClassicCongestionControl<ClassicSlowStart, NewReno>) {
+fn cwnd_is_halved(cc: &ClassicCongestionController<ClassicSlowStart, NewReno>) {
     assert_eq!(cc.cwnd(), cc.cwnd_initial() / 2);
     assert_eq!(cc.ssthresh(), cc.cwnd_initial() / 2);
 }
@@ -181,7 +181,7 @@ fn issue_1465() {
         pn += 1;
         p
     };
-    let mut send_next = |cc: &mut ClassicCongestionControl<ClassicSlowStart, NewReno>, now| {
+    let mut send_next = |cc: &mut ClassicCongestionController<ClassicSlowStart, NewReno>, now| {
         let p = next_packet(now);
         cc.on_packet_sent(&p, now);
         p
