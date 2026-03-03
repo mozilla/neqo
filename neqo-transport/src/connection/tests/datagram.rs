@@ -30,8 +30,7 @@ use crate::{
 /// - 1 byte: DATAGRAM frame type
 /// - 16 bytes: AEAD authentication tag
 const MIN_DATAGRAM_PACKET_OVERHEAD: usize = 8 + 1 + 1 + 1 + 16;
-const DATAGRAM_LEN_MTU: usize =
-    default_plpmtu(DEFAULT_ADDR.ip()) - MIN_DATAGRAM_PACKET_OVERHEAD;
+const DATAGRAM_LEN_MTU: usize = default_plpmtu(DEFAULT_ADDR.ip()) - MIN_DATAGRAM_PACKET_OVERHEAD;
 const DATA_MTU: &[u8] = &[1; DATAGRAM_LEN_MTU];
 const DATA_BIGGER_THAN_MTU: &[u8] = &[0; 2 * DATAGRAM_LEN_MTU];
 const_assert!(DATA_BIGGER_THAN_MTU.len() > DATAGRAM_LEN_MTU);
