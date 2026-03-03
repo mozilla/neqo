@@ -96,6 +96,9 @@ impl Paths {
                     Path::temporary(local, remote, conn_params, self.qlog.clone(), now, stats);
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
+                    if let Some(peer_max) = primary.borrow().pmtud().peer_max_udp_payload() {
+                        p.pmtud_mut().set_peer_max_udp_payload(peer_max);
+                    }
                 }
                 Rc::new(RefCell::new(p))
             })
