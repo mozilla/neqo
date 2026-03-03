@@ -572,7 +572,12 @@ impl Loss {
     }
 
     /// Prime the Handshake space PTO timer when stuck in Initial space.
-    fn maybe_prime_handshake_pto(&mut self, now: Instant) {
+    fn maybe_prime_handshake_pto(&mut self, now: Instant, has_handshake_keys: bool) {
+        // Only prime if we actually have Handshake TX keys to send probes.
+        if !has_handshake_keys {
+            return;
+        }
+
         // Only prime if we're in Initial space.
         let Some(pto) = self
             .pto_state
@@ -856,6 +861,7 @@ impl Loss {
         primary_path: &PathRef,
         now: Instant,
         lost: &mut Vec<sent::Packet>,
+        has_handshake_keys: bool,
     ) {
         let mut pto_space = None;
         // The spaces in which we will allow probing.
@@ -910,11 +916,16 @@ impl Loss {
 
         // Maybe prime the Handshake PTO when PTO fires in Initial space.
         if pn_space == PacketNumberSpace::Initial {
-            self.maybe_prime_handshake_pto(now);
+            self.maybe_prime_handshake_pto(now, has_handshake_keys);
         }
     }
 
-    pub fn timeout(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
+    pub fn timeout(
+        &mut self,
+        primary_path: &PathRef,
+        now: Instant,
+        has_handshake_keys: bool,
+    ) -> Vec<sent::Packet> {
         qtrace!("[{self}] timeout {now:?}");
 
         let loss_delay = primary_path.borrow().rtt().loss_delay();
@@ -941,7 +952,7 @@ impl Loss {
         }
         self.stats.borrow_mut().lost += lost_packets.len();
 
-        self.maybe_fire_pto(primary_path, now, &mut lost_packets);
+        self.maybe_fire_pto(primary_path, now, &mut lost_packets, has_handshake_keys);
         lost_packets
     }
 
@@ -1047,7 +1058,7 @@ mod tests {
         }
 
         pub fn timeout(&mut self, now: Instant) -> Vec<sent::Packet> {
-            self.lr.timeout(&self.path, now)
+            self.lr.timeout(&self.path, now, true)
         }
 
         pub fn next_timeout(&self) -> Option<Instant> {
@@ -1787,12 +1798,26 @@ mod tests {
     }
 
     #[test]
+    fn maybe_prime_handshake_pto_no_keys() {
+        let mut lr = Fixture::default();
+        let probe_set = PacketNumberSpaceSet::only(PacketNumberSpace::Initial);
+        lr.pto_state = Some(PtoState::new(PacketNumberSpace::Initial, probe_set));
+        lr.spaces
+            .get_mut(PacketNumberSpace::Initial)
+            .unwrap()
+            .largest_acked = Some(0);
+
+        lr.maybe_prime_handshake_pto(now(), false);
+        assert_no_handshake_last_ack_eliciting(&lr);
+    }
+
+    #[test]
     fn maybe_prime_handshake_pto_no_pto_state() {
         let mut lr = Fixture::default();
         assert!(lr.pto_state.is_none());
 
         // Verify nothing changes - the Handshake space should not be primed afterwards.
-        lr.maybe_prime_handshake_pto(now());
+        lr.maybe_prime_handshake_pto(now(), true);
         assert_no_handshake_last_ack_eliciting(&lr);
     }
 
@@ -1804,7 +1829,7 @@ mod tests {
         lr.pto_state = Some(PtoState::new(PacketNumberSpace::Handshake, probe_set));
 
         // Verify nothing changes - the Handshake space should not be primed afterwards.
-        lr.maybe_prime_handshake_pto(now());
+        lr.maybe_prime_handshake_pto(now(), true);
         assert_no_handshake_last_ack_eliciting(&lr);
     }
 
@@ -1823,7 +1848,7 @@ mod tests {
         lr.spaces.drop_space(PacketNumberSpace::Handshake);
 
         // Verify Handshake space still doesn't exist afterwards.
-        lr.maybe_prime_handshake_pto(now());
+        lr.maybe_prime_handshake_pto(now(), true);
         assert!(lr.spaces.get(PacketNumberSpace::Handshake).is_none());
     }
 
