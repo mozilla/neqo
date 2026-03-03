@@ -383,6 +383,31 @@ def main():
 
     updated, downgraded, failed = apply_version_updates(version_updates)
 
+    # Align any packages newly added by cargo during the above updates.
+    # cargo update --precise can introduce new transitive dependencies resolved
+    # to their latest crates.io version rather than Gecko's pinned version.
+    # These are not intentional choices, so the neqo_or_workspace downgrade
+    # skip does not apply. Loop until stable, since each alignment pass can
+    # itself introduce further new transitive dependencies.
+    seen_common = set(common)
+    while True:
+        updated_our_lock = load_lockfile("Cargo.lock")
+        updated_our_pkgs = parse_packages(updated_our_lock)
+        new_common = (set(gecko_pkgs) & set(updated_our_pkgs)) - seen_common
+        if not new_common:
+            break
+        seen_common |= new_common
+        new_updates: dict[tuple[str, str], str] = {}
+        for name in new_common:
+            if name in neqo_only:
+                continue
+            new_updates.update(
+                align_package_with_gecko(name, gecko_pkgs, updated_our_pkgs)
+            )
+        if not new_updates:
+            break
+        apply_version_updates(new_updates)
+
     print()
     if updated:
         print(f"Updated {len(updated)} package(s)")
