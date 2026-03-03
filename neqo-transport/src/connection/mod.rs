@@ -1056,7 +1056,9 @@ impl Connection {
         self.absorb_error(now, res);
 
         if let Some(path) = self.paths.primary() {
-            let lost = self.loss_recovery.timeout(&path, now);
+            let lost = self
+                .loss_recovery
+                .timeout(&path, now, self.crypto.has_handshake_keys());
             self.handle_lost_packets(&lost);
             qlog::packets_lost(&mut self.qlog, &lost, now);
         }
