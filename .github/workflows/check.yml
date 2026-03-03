@@ -193,10 +193,9 @@ jobs:
   check-vm:
     name: Run checks for VM-only platforms
     runs-on: ubuntu-24.04
-    # These platforms have recurring infrastructure issues. Allow them to fail without
-    # aborting the merge queue, which treats any failed workflow as a blocker regardless
-    # of branch protection settings.
-    continue-on-error: ${{ matrix.os != 'freebsd' }}
+    # OpenBSD, NetBSD and Solaris often have NSS packages that are too old.
+    # Allow them to fail without aborting the merge queue.
+    continue-on-error: ${{ github.event_name == 'merge_group' && matrix.os != 'freebsd' }}
     strategy:
       fail-fast: false
       matrix:
