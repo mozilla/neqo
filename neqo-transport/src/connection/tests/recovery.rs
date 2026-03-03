@@ -1045,12 +1045,12 @@ fn handshake_pto_not_primed_without_keys() {
 
     // Split ClientHello across two Initial packets (MLKEM).
     let c_init_1 = client.process_output(now).dgram().unwrap();
-    assert!(client.process_output(now).dgram().is_some()); // c_init_2, intentionally dropped
+    let c_init_2 = client.process_output(now).dgram().unwrap();
+    assert!(is_initial(&c_init_2, false)); // intentionally dropped
 
     // Deliver only c_init_1.  Incomplete CH → server sends bare ACK.
     now += DEFAULT_RTT / 2;
-    server.process_input(c_init_1, now);
-    let s_ack = server.process_output(now).dgram().unwrap();
+    let s_ack = server.process(Some(c_init_1), now).dgram().unwrap();
     now += DEFAULT_RTT / 2;
     client.process_input(s_ack, now);
     while client.process_output(now).dgram().is_some() {}
@@ -1059,12 +1059,16 @@ fn handshake_pto_not_primed_without_keys() {
     // Two PTO iterations (output dropped) push Initial baseline ahead of the
     // Handshake baseline that was primed during iteration 1.
     for _ in 0..2 {
-        now += client.process_output(now).callback();
+        let t = client.process_output(now).callback();
+        assert_ne!(t, Duration::ZERO);
+        now += t;
         while client.process_output(now).dgram().is_some() {}
     }
 
     // Third PTO: deliver the PING so the server ACKs it, clearing pto_state.
-    now += client.process_output(now).callback();
+    let t = client.process_output(now).callback();
+    assert_ne!(t, Duration::ZERO);
+    now += t;
     let ping = client.process_output(now).dgram().unwrap();
     while client.process_output(now).dgram().is_some() {}
     while server.process_output(now).dgram().is_some() {} // drain server PTO probes
