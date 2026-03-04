@@ -135,7 +135,7 @@ fn rtt_sample_collection_tracks_minimum() {
     assert_eq!(hystart.rtt_sample_count(), 1);
     assert_eq!(
         hystart.current_round_min_rtt(),
-        BASE_RTT,
+        Some(BASE_RTT),
         "First sample should set the minimum"
     );
 
@@ -144,7 +144,7 @@ fn rtt_sample_collection_tracks_minimum() {
     assert_eq!(hystart.rtt_sample_count(), 2);
     assert_eq!(
         hystart.current_round_min_rtt(),
-        LOW_RTT,
+        Some(LOW_RTT),
         "Lower RTT should update the minimum"
     );
 
@@ -153,7 +153,7 @@ fn rtt_sample_collection_tracks_minimum() {
     assert_eq!(hystart.rtt_sample_count(), 3);
     assert_eq!(
         hystart.current_round_min_rtt(),
-        LOW_RTT,
+        Some(LOW_RTT),
         "Higher RTT should not update the minimum"
     );
 }

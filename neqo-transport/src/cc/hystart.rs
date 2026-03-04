@@ -27,11 +27,11 @@ pub struct HyStart {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9406#section-4.3-9>
     limit: usize,
-    last_round_min_rtt: Duration,
-    current_round_min_rtt: Duration,
+    last_round_min_rtt: Option<Duration>,
+    current_round_min_rtt: Option<Duration>,
     rtt_sample_count: usize,
     window_end: Option<packet::Number>,
-    css_baseline_min_rtt: Duration,
+    css_baseline_min_rtt: Option<Duration>,
     css_round_count: usize,
 }
 
@@ -64,11 +64,11 @@ impl HyStart {
         };
         Self {
             limit,
-            last_round_min_rtt: Duration::MAX,
-            current_round_min_rtt: Duration::MAX,
+            last_round_min_rtt: None,
+            current_round_min_rtt: None,
             rtt_sample_count: 0,
             window_end: None,
-            css_baseline_min_rtt: Duration::MAX,
+            css_baseline_min_rtt: None,
             css_round_count: 0,
         }
     }
@@ -82,7 +82,10 @@ impl HyStart {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-11>
     fn collect_rtt_sample(&mut self, rtt: Duration) {
-        self.current_round_min_rtt = min(self.current_round_min_rtt, rtt);
+        self.current_round_min_rtt = Some(
+            self.current_round_min_rtt
+                .map_or(rtt, |current| min(current, rtt)),
+        );
         self.rtt_sample_count += 1;
     }
 
@@ -110,13 +113,14 @@ impl HyStart {
         }
         self.window_end = Some(sent_pn);
         self.last_round_min_rtt = self.current_round_min_rtt;
-        self.current_round_min_rtt = Duration::MAX;
+        self.current_round_min_rtt = None;
         self.rtt_sample_count = 0;
         qdebug!("HyStart: maybe_start_new_round -> started new round");
     }
 
-    pub fn in_css(&self) -> bool {
-        self.css_baseline_min_rtt != Duration::MAX
+    /// Checks if HyStart is in Conservative Slow Start. Is `pub` for use in tests.
+    pub const fn in_css(&self) -> bool {
+        self.css_baseline_min_rtt.is_some()
     }
 
     const fn enough_samples(&self) -> bool {
@@ -134,7 +138,7 @@ impl HyStart {
     }
 
     #[cfg(test)]
-    pub const fn current_round_min_rtt(&self) -> Duration {
+    pub const fn current_round_min_rtt(&self) -> Option<Duration> {
         self.current_round_min_rtt
     }
 
@@ -185,7 +189,7 @@ impl SlowStart for HyStart {
                 self.css_baseline_min_rtt
             );
 
-            self.css_baseline_min_rtt = Duration::MAX;
+            self.css_baseline_min_rtt = None;
             self.css_round_count = 0;
         }
 
@@ -196,22 +200,17 @@ impl SlowStart for HyStart {
         // <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-13>
         if !self.in_css()
             && self.enough_samples()
-            && self.current_round_min_rtt != Duration::MAX
-            && self.last_round_min_rtt != Duration::MAX
+            && let Some(current) = self.current_round_min_rtt
+            && let Some(last) = self.last_round_min_rtt
         {
             let rtt_thresh = max(
                 Self::MIN_RTT_THRESH,
-                min(
-                    self.last_round_min_rtt / Self::MIN_RTT_DIVISOR,
-                    Self::MAX_RTT_THRESH,
-                ),
+                min(last / Self::MIN_RTT_DIVISOR, Self::MAX_RTT_THRESH),
             );
-            if self.current_round_min_rtt >= self.last_round_min_rtt + rtt_thresh {
-                self.css_baseline_min_rtt = self.current_round_min_rtt;
+            if current >= last + rtt_thresh {
+                self.css_baseline_min_rtt = Some(current);
                 qdebug!(
-                    "HyStart: on_packets_acked -> entered CSS because cur_min={:?} >= last_min={:?} + thresh={rtt_thresh:?}",
-                    self.current_round_min_rtt,
-                    self.last_round_min_rtt
+                    "HyStart: on_packets_acked -> entered CSS because cur_min={current:?} >= last_min={last:?} + thresh={rtt_thresh:?}"
                 );
             }
         }
