@@ -218,29 +218,33 @@ impl SlowStart for HyStart {
         // Check for end of round. If `window_end` is acked it is set to `None` to indicate end of a
         // round. [`SlowStart::on_packet_sent`] will then set it to the next packet number we send
         // out to start a new round.
-        if let Some(window_end) = self.window_end
-            && largest_acked >= window_end
+        if self
+            .window_end
+            .is_none_or(|window_end| largest_acked < window_end)
         {
-            qtrace!(
-                "HyStart: on_packets_acked -> round ended because largest_acked={largest_acked} >= window_end={window_end}"
-            );
-            self.window_end = None;
-
-            // If a round ends while in CSS increase the counter and do a check if enough rounds
-            // to exit to congestion avoidance have been completed.
-            if self.in_css() {
-                self.css_round_count += 1;
-                let exit_slow_start = self.css_round_count >= Self::CSS_ROUNDS;
-                qdebug!(
-                    "HyStart: on_packets_acked -> exit={exit_slow_start} because css_rounds={} >= {}",
-                    self.css_round_count,
-                    Self::CSS_ROUNDS
-                );
-                return exit_slow_start;
-            }
+            return false;
         }
 
-        false
+        qtrace!(
+            "HyStart: on_packets_acked -> round ended because largest_acked={largest_acked} >= window_end={:?}",
+            self.window_end
+        );
+        self.window_end = None;
+
+        if !self.in_css() {
+            return false;
+        }
+
+        // If a round ends while in CSS increase the counter and do a check if enough rounds
+        // to exit to congestion avoidance have been completed.
+        self.css_round_count += 1;
+        let exit_slow_start = self.css_round_count >= Self::CSS_ROUNDS;
+        qdebug!(
+            "HyStart: on_packets_acked -> exit={exit_slow_start} because css_rounds={} >= {}",
+            self.css_round_count,
+            Self::CSS_ROUNDS
+        );
+        exit_slow_start
     }
 
     fn maybe_change_cwnd_increase(
