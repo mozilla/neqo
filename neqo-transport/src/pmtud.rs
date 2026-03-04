@@ -598,6 +598,15 @@ mod tests {
         assert_eq!(pmtud.mtu, 1500);
     }
 
+    #[test]
+    fn peer_max_udp_payload_accessor() {
+        let mut pmtud = Pmtud::new(V4, None);
+        assert_eq!(pmtud.peer_max_udp_payload(), None);
+
+        pmtud.set_peer_max_udp_payload(1452);
+        assert_eq!(pmtud.peer_max_udp_payload(), Some(1452));
+    }
+
     /// Tests that `ACK`ing non-probe packets does not affect PMTUD state.
     #[test]
     fn non_probe_ack_ignored() {
