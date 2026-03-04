@@ -8,7 +8,7 @@ use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
 use neqo_common::{Bytes, Header, event::Provider as EventProvider, qtrace};
 use neqo_crypto::ResumptionToken;
-use neqo_transport::{AppError, StreamId, StreamType};
+use neqo_transport::{AppError, OutgoingDatagramOutcome, StreamId, StreamType};
 
 use crate::{
     CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, PushId, RecvStreamEvents, Res,
@@ -130,6 +130,8 @@ pub enum Http3ClientEvent {
     WebTransport(WebTransportEvent),
     /// `ConnectUdp` events
     ConnectUdp(ConnectUdpEvent),
+    /// Outcome of an outgoing datagram.
+    OutgoingDatagramOutcome { outcome: OutgoingDatagramOutcome },
 }
 
 #[derive(Debug, Default, Clone)]
