@@ -92,7 +92,7 @@ jobs:
 
           cargo metadata --manifest-path ../neqo/Cargo.toml --format-version 1 --no-deps | jq '[.packages[] | {name, version}]' > ../neqo-versions.json
 
-          NEQO_CRATES="mtu neqo-common neqo-crypto neqo-http3 neqo-qpack neqo-transport neqo-udp"
+          NEQO_CRATES="mtu neqo-common neqo-http3 neqo-qpack neqo-transport neqo-udp"
           {
             echo '[patch."https://github.com/mozilla/neqo"]'
             for crate in $NEQO_CRATES; do

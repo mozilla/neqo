@@ -81,7 +81,7 @@ impl Random {
 impl Default for Random {
     #[cfg(not(feature = "disable-random"))]
     fn default() -> Self {
-        Self::new(&neqo_crypto::random::<32>())
+        Self::new(&nss_rs::random::<32>())
     }
 
     #[cfg(feature = "disable-random")]

@@ -11,10 +11,10 @@ mod streams;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
-use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{
     ConnectionParameters, StreamId, StreamType, default_plpmtu, recv_stream, send_stream,
 };
+use nss_rs::AuthenticationStatus;
 use test_fixture::{
     CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
     DEFAULT_SERVER_NAME, anti_replay, fixture_init, now,

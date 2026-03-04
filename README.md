@@ -63,8 +63,6 @@ To run test HTTP/3 programs (`neqo-client` and `neqo-server`):
 
 5. (optional) After having an NSS build you can set the `NSS_PREBUILT=1` environment variable to skip building NSS again on future `cargo build` invocations.
 
-To confirm the NSS setup works you can run `cargo test -p neqo-crypto --lib`.
-
 ## Debugging Neqo
 
 ### QUIC logging
@@ -132,7 +130,6 @@ was checked out to `/home/alice/git/neqo`, add the following lines to the root
 [patch."https://github.com/mozilla/neqo"]
 neqo-bin = { path = "/home/alice/git/neqo/neqo-bin" }
 neqo-common = { path = "/home/alice/git/neqo/neqo-common" }
-neqo-crypto = { path = "/home/alice/git/neqo/neqo-crypto" }
 neqo-http3 = { path = "/home/alice/git/neqo/neqo-http3" }
 neqo-qpack = { path = "/home/alice/git/neqo/neqo-qpack" }
 neqo-transport = { path = "/home/alice/git/neqo/neqo-transport" }

@@ -751,7 +751,7 @@ mod test {
     };
 
     use neqo_common::{Encoder, Role, qdebug};
-    use neqo_crypto::random;
+    use nss_rs::random;
 
     use super::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
     use crate::{

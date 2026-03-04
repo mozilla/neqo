@@ -656,7 +656,7 @@ fn client_initial_versions() {
 /// that contain CRYPTO frames to decide the version.  That was not wise.
 #[test]
 fn tls_hello_retry_request() {
-    use neqo_crypto::constants::{TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_X25519};
+    use nss_rs::constants::{TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_X25519};
 
     let mut client = default_client();
     let mut server = default_server();
