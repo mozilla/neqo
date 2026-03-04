@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-use neqo_common::{Bytes, Header, header::HeadersExt as _};
+use neqo_common::{Bytes, Header, header::HeadersExt as _, qwarn};
 use neqo_transport::{AppError, StreamId};
 
 use crate::{
@@ -48,6 +48,12 @@ pub enum Http3ServerConnEvent {
     StateChange(Http3State),
     WebTransport(WebTransportEvent),
     ConnectUdp(ConnectUdpEvent),
+    /// An extended CONNECT request with an unsupported protocol was received.
+    /// The server should respond with the given HTTP status code and close the stream.
+    RejectedConnect {
+        stream_id: StreamId,
+        status: u16,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -159,11 +165,20 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
                     headers,
                 }));
             }
-            Some(_) => {
-                unimplemented!("Extended connect other than webtransport or connect-udp")
+            Some(protocol) => {
+                // RFC 9220: Server SHOULD respond with 501 (Not Implemented)
+                qwarn!(
+                    "Unsupported extended CONNECT protocol: {:?}",
+                    String::from_utf8_lossy(protocol)
+                );
+                self.insert(Http3ServerConnEvent::RejectedConnect {
+                    stream_id,
+                    status: 501,
+                });
             }
             None => {
-                unimplemented!("connect without :protocol header");
+                // This is only called from `recv_message.rs` when `:protocol` is present.
+                unreachable!("extended_connect_new_session requires :protocol header");
             }
         }
     }
@@ -273,9 +288,13 @@ impl Http3ServerConnEvents {
     }
 
     fn remove_events_for_stream_id(&self, stream_info: &Http3StreamInfo) {
+        let id = stream_info.stream_id();
         self.remove(|evt| {
             matches!(evt,
-                Http3ServerConnEvent::Headers { stream_info: x, .. } | Http3ServerConnEvent::DataReadable { stream_info: x, .. } if x == stream_info)
+                Http3ServerConnEvent::Headers { stream_info: x, .. }
+                | Http3ServerConnEvent::DataReadable { stream_info: x, .. } if x == stream_info)
+                || matches!(evt,
+                Http3ServerConnEvent::RejectedConnect { stream_id, .. } if *stream_id == id)
         });
     }
 }
@@ -283,8 +302,14 @@ impl Http3ServerConnEvents {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::Http3ServerConnEvents;
-    use crate::connection::Http3State;
+    use neqo_common::Header;
+    use neqo_transport::StreamId;
+
+    use super::{
+        Http3ServerConnEvent, Http3ServerConnEvents, HttpRecvStreamEvents as _,
+        RecvStreamEvents as _,
+    };
+    use crate::{CloseType, Http3StreamType, connection::Http3State};
 
     #[test]
     fn has_events() {
@@ -292,5 +317,68 @@ mod tests {
         assert!(!events.has_events());
         events.connection_state_change(Http3State::Connected);
         assert!(events.has_events());
+    }
+
+    #[test]
+    fn extended_connect_unknown_protocol() {
+        let events = Http3ServerConnEvents::default();
+        let headers = vec![
+            Header::new(":method", "CONNECT"),
+            Header::new(":protocol", "unknown-protocol"),
+            Header::new(":authority", "example.com"),
+            Header::new(":path", "/"),
+        ];
+        events.extended_connect_new_session(StreamId::new(0), headers);
+
+        // RFC 9220: Server SHOULD respond with 501 (Not Implemented).
+        assert_eq!(
+            events.next_event(),
+            Some(Http3ServerConnEvent::RejectedConnect {
+                stream_id: StreamId::new(0),
+                status: 501,
+            })
+        );
+    }
+
+    #[test]
+    fn stream_reset_removes_rejected_connect() {
+        let events = Http3ServerConnEvents::default();
+        let headers = vec![
+            Header::new(":method", "CONNECT"),
+            Header::new(":protocol", "unknown-protocol"),
+            Header::new(":authority", "example.com"),
+            Header::new(":path", "/"),
+        ];
+        events.extended_connect_new_session(StreamId::new(0), headers);
+        assert!(events.has_events());
+
+        // A stream reset should remove the pending RejectedConnect event.
+        let stream_info = crate::Http3StreamInfo::new(StreamId::new(0), Http3StreamType::Http);
+        events.recv_closed(&stream_info, CloseType::ResetRemote(42));
+
+        // Only the StreamReset event should remain.
+        let evt = events.next_event();
+        assert!(
+            matches!(evt, Some(Http3ServerConnEvent::StreamReset { .. })),
+            "expected StreamReset, got {evt:?}"
+        );
+        assert!(!events.has_events());
+    }
+
+    #[test]
+    fn bare_connect_emits_headers_event() {
+        let events = Http3ServerConnEvents::default();
+        let stream_info = crate::Http3StreamInfo::new(StreamId::new(0), Http3StreamType::Http);
+        let headers = vec![
+            Header::new(":method", "CONNECT"),
+            Header::new(":authority", "example.com"),
+        ];
+        events.header_ready(&stream_info, headers, false, false);
+
+        // Bare CONNECT is passed through to the application as a Headers event.
+        assert!(matches!(
+            events.next_event(),
+            Some(Http3ServerConnEvent::Headers { .. })
+        ));
     }
 }
