@@ -11,8 +11,8 @@ use test_fixture::{
     boxed,
     sim::{
         Simulator,
-        connection::{Node, ReachState, ReceiveData, SendData},
-        network::{Drop, RandomDelay, TailDrop},
+        connection::{Node, ReachState, ReceiveData, SendData, SendDataCheckPmtud},
+        network::{Delay, Drop, DynamicMtu, RandomDelay, TailDrop},
     },
     simulate,
 };
@@ -208,5 +208,63 @@ fn transfer_fixed_seed() {
         ],
     );
     sim.seed_str("117f65d90ee5c1a7fb685f3af502c7730ba5d31866b758d98f5e3c2117cf9b86");
+    sim.run();
+}
+
+/// Tests PMTUD black hole detection when PMTU decreases mid-transfer.
+/// The `DynamicMtu` node reduces MTU after initial PMTUD completes, simulating
+/// a VPN coming up. PMTUD should detect the black hole and reduce MTU.
+#[test]
+fn pmtud_mtu_decrease() {
+    // Start at 1500 MTU, switch to 1300 after 100 packets.
+    // This simulates a VPN coming up and reducing PMTU.
+    let sim = Simulator::new(
+        "pmtud_mtu_decrease",
+        boxed![
+            Node::default_client(boxed![SendDataCheckPmtud::new(TRANSFER_AMOUNT, true)]), /* expect PMTU change */
+            DynamicMtu::new(1500, 1300, 100),
+            Delay::new(DELAY),
+            Node::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
+            Delay::new(DELAY),
+        ],
+    );
+    sim.run();
+}
+
+/// Tests that PMTUD black hole detection doesn't trigger under high packet loss.
+/// Random packet loss (independent of packet size) should not cause PMTUD to restart.
+#[test]
+fn pmtud_no_false_trigger_random_loss() {
+    let sim = Simulator::new(
+        "pmtud_no_false_trigger_random_loss",
+        boxed![
+            Node::default_client(boxed![SendDataCheckPmtud::new(TRANSFER_AMOUNT, false)]), /* expect no PMTU change */
+            RandomDelay::new(DELAY_RANGE),
+            Drop::percentage(10),
+            Node::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
+            RandomDelay::new(DELAY_RANGE),
+            Drop::percentage(10),
+        ],
+    );
+    sim.run();
+}
+
+/// Tests that PMTUD black hole detection doesn't trigger during burst losses
+/// caused by congestion (e.g., end of slow start, capacity reduction).
+/// Uses a small queue to force burst drops when cwnd exceeds queue capacity.
+/// This scenario is equivalent to sudden capacity reduction since both manifest
+/// as queue overflow causing correlated packet drops.
+#[test]
+fn pmtud_no_false_trigger_burst_loss() {
+    let sim = Simulator::new(
+        "pmtud_no_false_trigger_burst_loss",
+        boxed![
+            Node::default_client(boxed![SendDataCheckPmtud::new(TRANSFER_AMOUNT, false)]), /* expect no PMTU change */
+            // Small 8KB queue causes burst drops when cwnd grows past it.
+            TailDrop::new(1_000_000, 8_192, false, Duration::from_millis(50)),
+            Node::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
+            TailDrop::new(200_000, 4_096, false, Duration::from_millis(50)),
+        ],
+    );
     sim.run();
 }
