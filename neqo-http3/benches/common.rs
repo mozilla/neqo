@@ -6,8 +6,9 @@
 
 use std::time::Duration;
 
-use criterion::{BenchmarkGroup, Criterion};
+use criterion::{BenchmarkGroup, Criterion, measurement::WallTime};
 use test_fixture::{
+    bench::NOISE_THRESHOLD,
     boxed, fixture_init,
     sim::{
         ReadySimulator, Simulator,
@@ -40,11 +41,12 @@ pub fn setup(streams: usize, data_size: usize) -> ReadySimulator {
 /// benchmark to define its own measurement approach.
 pub fn benchmark<M>(c: &mut Criterion, mut measure: M)
 where
-    M: FnMut(&mut BenchmarkGroup<'_, criterion::measurement::WallTime>, usize, usize),
+    M: FnMut(&mut BenchmarkGroup<'_, WallTime>, usize, usize),
 {
     fixture_init();
 
     let mut group = c.benchmark_group("streams");
+    group.noise_threshold(NOISE_THRESHOLD);
     for (streams, data_size) in BENCHMARK_PARAMS {
         measure(&mut group, streams, data_size);
     }

@@ -36,6 +36,7 @@ use neqo_transport::{
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 
 pub mod assertions;
+pub mod bench;
 pub mod header_protection;
 pub mod sim;
 
