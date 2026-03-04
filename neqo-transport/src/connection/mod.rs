@@ -57,8 +57,9 @@ use crate::{
         self,
         TransportParameterId::{
             self, AckDelayExponent, ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit,
-            InitialSourceConnectionId, MaxAckDelay, MaxDatagramFrameSize, MinAckDelay,
-            OriginalDestinationConnectionId, RetrySourceConnectionId, StatelessResetToken,
+            InitialSourceConnectionId, MaxAckDelay, MaxDatagramFrameSize, MaxUdpPayloadSize,
+            MinAckDelay, OriginalDestinationConnectionId, RetrySourceConnectionId,
+            StatelessResetToken,
         },
         TransportParameters, TransportParametersHandler,
     },
@@ -2948,6 +2949,13 @@ impl Connection {
             )?;
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
+
+            if let Ok(max_udp_payload) = usize::try_from(remote.get_integer(MaxUdpPayloadSize)) {
+                path.borrow_mut()
+                    .pmtud_mut()
+                    .set_peer_max_udp_payload(max_udp_payload);
+                self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
+            }
 
             let max_ad = Duration::from_millis(remote.get_integer(MaxAckDelay));
             let min_ad = if remote.has_value(MinAckDelay) {
