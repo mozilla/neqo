@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used, reason = "This is example code.")]
-
 use std::{
     borrow::Cow,
     cell::RefCell,
@@ -26,7 +24,10 @@ use neqo_transport::{
 use rustc_hash::FxHashMap as HashMap;
 
 use super::{Args, qns_read_response};
-use crate::{STREAM_IO_BUFFER_SIZE, send_data::SendData};
+use crate::{
+    STREAM_IO_BUFFER_SIZE,
+    send_data::{SendData, SendResult},
+};
 
 #[derive(Default)]
 struct HttpStreamState {
@@ -94,7 +95,7 @@ impl HttpServer {
                 String::from_utf8(partial.clone())
                     .unwrap_or_else(|_| format!("<invalid UTF-8: {}>", hex(&partial)))
             );
-            conn.borrow_mut().stream_stop_sending(stream_id, 0).unwrap();
+            _ = conn.borrow_mut().stream_stop_sending(stream_id, 0); // Stream may be closed; ignore errors.
         }
     }
 
@@ -190,12 +191,18 @@ impl HttpServer {
 
         stream_state.writable = true;
         if let Some(resp) = &mut stream_state.data_to_send {
-            let done = resp.send(|chunk| conn.borrow_mut().stream_send(stream_id, chunk).unwrap());
-            if done {
-                conn.borrow_mut().stream_close_send(stream_id).unwrap();
-                self.write_state.remove(&stream_id);
-            } else {
-                stream_state.writable = false;
+            match resp.send(|chunk| conn.borrow_mut().stream_send(stream_id, chunk)) {
+                SendResult::StreamClosed => {
+                    qwarn!("Stream {stream_id} closed by peer, stopping send");
+                    self.write_state.remove(&stream_id);
+                }
+                SendResult::Done => {
+                    _ = conn.borrow_mut().stream_close_send(stream_id); // Stream may be closed; ignore errors.
+                    self.write_state.remove(&stream_id);
+                }
+                SendResult::MoreData => {
+                    stream_state.writable = false;
+                }
             }
         }
     }

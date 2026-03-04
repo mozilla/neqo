@@ -886,20 +886,18 @@ impl RecvStream {
             // Maybe send STOP_SENDING
             RecvStreamState::AbortReading {
                 frame_needed, err, ..
-            } => {
-                if *frame_needed
-                    && builder.write_varint_frame(&[
-                        FrameType::StopSending.into(),
-                        self.stream_id.as_u64(),
-                        *err,
-                    ])
-                {
-                    tokens.push(recovery::Token::Stream(StreamRecoveryToken::StopSending {
-                        stream_id: self.stream_id,
-                    }));
-                    stats.stop_sending += 1;
-                    *frame_needed = false;
-                }
+            } if *frame_needed
+                && builder.write_varint_frame(&[
+                    FrameType::StopSending.into(),
+                    self.stream_id.as_u64(),
+                    *err,
+                ]) =>
+            {
+                tokens.push(recovery::Token::Stream(StreamRecoveryToken::StopSending {
+                    stream_id: self.stream_id,
+                }));
+                stats.stop_sending += 1;
+                *frame_needed = false;
             }
             _ => {}
         }

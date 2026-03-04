@@ -83,12 +83,7 @@ jobs:
           tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful ' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: nss-version
-        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
-
       - uses: ./.github/actions/nss
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - name: Check
         run: |
@@ -182,7 +177,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        target: ['x86_64-linux-android', 'i686-linux-android'] # 'aarch64-linux-android' not currently working
+        target: ['x86_64-linux-android', 'aarch64-linux-android']
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -198,6 +193,9 @@ jobs:
   check-vm:
     name: Run checks for VM-only platforms
     runs-on: ubuntu-24.04
+    # OpenBSD, NetBSD and Solaris often have NSS packages that are too old.
+    # Allow them to fail without aborting the merge queue.
+    continue-on-error: ${{ github.event_name == 'merge_group' && matrix.os != 'freebsd' }}
     strategy:
       fail-fast: false
       matrix:

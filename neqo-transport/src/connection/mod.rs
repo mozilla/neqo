@@ -1020,13 +1020,13 @@ impl Connection {
             // Only the client runs timers while waiting for Initial packets.
             State::WaitInitial => debug_assert_eq!(self.role, Role::Client),
             // If Closing or Draining, check if it is time to move to Closed.
-            State::Closing { error, timeout } | State::Draining { error, timeout } => {
-                if *timeout <= now {
-                    let st = State::Closed(error.clone());
-                    self.set_state(st, now);
-                    qinfo!("Closing timer expired");
-                    return;
-                }
+            State::Closing { error, timeout } | State::Draining { error, timeout }
+                if *timeout <= now =>
+            {
+                let st = State::Closed(error.clone());
+                self.set_state(st, now);
+                qinfo!("Closing timer expired");
+                return;
             }
             State::Closed(_) => {
                 qdebug!("Timer fired while closed");
@@ -1056,7 +1056,9 @@ impl Connection {
         self.absorb_error(now, res);
 
         if let Some(path) = self.paths.primary() {
-            let lost = self.loss_recovery.timeout(&path, now);
+            let lost = self
+                .loss_recovery
+                .timeout(&path, now, self.crypto.has_handshake_keys());
             self.handle_lost_packets(&lost);
             qlog::packets_lost(&mut self.qlog, &lost, now);
         }
@@ -1550,7 +1552,7 @@ impl Connection {
                 self.handle_retry(packet, now)?;
                 return Ok(PreprocessResult::Next);
             }
-            (packet::Type::Handshake | packet::Type::Short, State::WaitInitial, Role::Client) => {
+            (packet::Type::Handshake | packet::Type::Short, State::WaitInitial, Role::Client)
                 // This packet can't be processed now, but it could be a sign
                 // that Initial packets were lost.
                 // Resend Initial CRYPTO frames immediately a few times just
@@ -1560,12 +1562,11 @@ impl Connection {
                 if dcid.is_none()
                     && self.cid_manager.is_valid(packet.dcid())
                     && !self.saved_datagrams.is_either_full()
-                {
+                => {
                     qtrace!("Resending Initial in response to an undecryptable packet");
                     self.crypto.resend_unacked(PacketNumberSpace::Initial);
                     self.resend_0rtt(now);
                 }
-            }
             (
                 packet::Type::VersionNegotiation | packet::Type::Retry | packet::Type::OtherVersion,
                 ..,
@@ -1862,10 +1863,7 @@ impl Connection {
         // OK, we have a valid packet.
 
         // Get the next packet number we'll send, for ACK verification.
-        // TODO: Once PR #2118 lands, this can move to `input_frame`. For now, it needs to be here,
-        // because we can drop packet number spaces as we parse through the packet, and if an ACK
-        // frame follows a CRYPTO frame that makes us drop a space, we need to know this
-        // packet number to verify the ACK against.
+        // This is used by `input_frame` to verify that ACKs don't acknowledge unsent packets.
         let next_pn = self
             .crypto
             .states()
@@ -2460,7 +2458,7 @@ impl Connection {
             }
         }
 
-        if profile.ack_only(space) {
+        if profile.ack_only() {
             // If we are CC limited we can only send ACKs!
             return (tokens, false, false);
         }
@@ -3617,10 +3615,10 @@ impl Connection {
             State::Closing { .. } | State::Draining { .. } | State::Closed { .. } => {
                 return Err(Error::ConnectionState);
             }
-            State::WaitInitial | State::Handshaking => {
-                if self.role == Role::Client && self.zero_rtt_state != ZeroRttState::Sending {
-                    return Err(Error::ConnectionState);
-                }
+            State::WaitInitial | State::Handshaking
+                if self.role == Role::Client && self.zero_rtt_state != ZeroRttState::Sending =>
+            {
+                return Err(Error::ConnectionState);
             }
             // In all other states, trust that the stream limits are correct.
             _ => (),

@@ -1226,6 +1226,7 @@ mod test {
     }
 
     #[expect(clippy::cast_precision_loss, reason = "This is test code.")]
+    #[expect(clippy::too_many_lines, reason = "This is test code.")]
     #[test]
     fn auto_tuning_approximates_bandwidth_delay_product() -> Res<()> {
         const DATA_FRAME_SIZE: u64 = 1_500;
@@ -1238,13 +1239,21 @@ mod test {
 
         // Run multiple iterations with randomized bandwidth and rtt.
         for _ in 0..100 {
-            // Random bandwidth between 1 Mbit/s and 1 Gbit/s.
+            // Random bandwidth between 12 Mbit/s and 1 Gbit/s. Minimum 12
+            // Mbit/s to ensure bdp stays above DATA_FRAME_SIZE, see `assert!`
+            // below.
             let bandwidth =
-                u64::from(u16::from_be_bytes(random::<2>()) % 1_000 + 1) * 1_000 * 1_000;
+                u64::from(u16::from_be_bytes(random::<2>()) % 1_000 + 12) * 1_000 * 1_000;
             // Random delay between 1 ms and 256 ms.
-            let rtt = Duration::from_millis(u64::from(random::<1>()[0]) + 1);
+            let rtt_int = u64::from(random::<1>()[0]) + 1;
+            let rtt = Duration::from_millis(rtt_int);
             let half_rtt = rtt / 2;
-            let bdp = bandwidth * u64::try_from(rtt.as_millis()).unwrap() / 1_000 / 8;
+            let bdp = bandwidth * rtt_int / 1_000 / 8;
+            assert!(
+                DATA_FRAME_SIZE <= bdp,
+                "BDP must be larger than DATA_FRAME_SIZE. Latency calculations
+                in test assume it can transfer DATA_FRAME_SIZE bytes in 1 RTT."
+            );
 
             let mut now = test_fixture::now();
 

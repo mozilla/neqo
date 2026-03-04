@@ -65,10 +65,12 @@ bench = false
 [[package.metadata.bench]]
 name = "streams_simulated"
 codspeed.mode = "simulation"
+codspeed.memory = false # Memory profiling is incompatible with iter_custom() because CodSpeed's instrumentation hooks are bypassed.
 
 [[package.metadata.bench]]
 name = "streams_walltime"
 codspeed.mode = "walltime"
+codspeed.memory = false # FIXME: Disabled due to high variance in results.
 
 [[bench]]
 name = "streams_walltime"

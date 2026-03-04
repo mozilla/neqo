@@ -6,6 +6,8 @@
 
 #![cfg(test)]
 
+mod common;
+
 use std::time::{Duration, Instant};
 
 use neqo_common::{Datagram, event::Provider as _, qtrace};
@@ -509,6 +511,56 @@ fn fetch_noresponse_will_idletimeout() {
 
         if let Output::Callback(t) = hconn_c.process_output(now) {
             now += t;
+        }
+    }
+}
+
+// Server needs to gracefully handle out-of-order STOP_SENDING and STREAM frame arrivals.
+fn server_stop_sending_and_stream_test(separate_packets: bool, stop_sending_first: bool) {
+    let (mut client, mut server, stream_id) = common::connect_and_send_request(false);
+
+    let send_stop_sending = |c: &mut Http3Client| c.stream_stop_sending(stream_id, 0).unwrap();
+    let send_fin = |c: &mut Http3Client| c.stream_close_send(stream_id, now()).unwrap();
+
+    if stop_sending_first {
+        send_stop_sending(&mut client);
+    } else {
+        send_fin(&mut client);
+    }
+    if separate_packets {
+        server.process(client.process_output(now()).dgram(), now());
+    }
+    if stop_sending_first {
+        send_fin(&mut client);
+    } else {
+        send_stop_sending(&mut client);
+    }
+    server.process(client.process_output(now()).dgram(), now());
+
+    let events: Vec<_> = server.events().collect();
+    assert!(events.iter().any(|e| matches!(
+        e, Http3ServerEvent::StreamStopSending { stream, .. } if stream.stream_id() == stream_id
+    )));
+    for event in events {
+        if let Http3ServerEvent::Headers { stream, .. } = event {
+            // The stream is dead; any attempt to send on it should fail.
+            assert_eq!(
+                stream.send_headers(&[Header::new(":status", "200")]),
+                Err(neqo_http3::Error::InvalidStreamId)
+            );
+            assert_eq!(
+                stream.stream_close_send(now()),
+                Err(neqo_http3::Error::InvalidStreamId)
+            );
+        }
+    }
+}
+
+#[test]
+fn server_stop_sending_and_stream_combinations() {
+    for separate_packets in [false, true] {
+        for stop_sending_first in [false, true] {
+            server_stop_sending_and_stream_test(separate_packets, stop_sending_first);
         }
     }
 }

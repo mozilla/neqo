@@ -46,7 +46,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}-qns-${{ matrix.name }}
           tags: type=ref,event=pr
 
-      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           push: false
           tags: ${{ steps.meta.outputs.tags }}
@@ -123,16 +123,16 @@ jobs:
             }
           }
           EOF
-          curl -o runner.json https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json
-          jq '. += input' runner.json additional.json > implementations.json
+          curl -o runner.json https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations_quic.json
+          jq '. += input' runner.json additional.json > implementations_quic.json
           {
             echo "implementations<<EOF"
-            cat implementations.json
+            cat implementations_quic.json
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           # Determine valid interop pairs: all combinations involving neqo-pr or neqo-main
           # shellcheck disable=SC2016
-          jq < implementations.json '[
+          jq < implementations_quic.json '[
             [to_entries[] | select(.value.role=="server" or .value.role=="both").key] as $servers |
             [to_entries[] | select(.value.role=="client" or .value.role=="both").key] as $clients |
             $clients[] as $client |

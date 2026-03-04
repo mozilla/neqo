@@ -95,7 +95,7 @@ impl Pacer {
 
         // If the increment is below the timer granularity, send immediately.
         if w < GRANULARITY {
-            qtrace!("[{self}] next {cwnd}/{rtt:?} below granularity ({w:?})",);
+            qtrace!("[{self}] next {cwnd}/{rtt:?} below granularity ({w:?})");
             return self.t;
         }
 
