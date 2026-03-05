@@ -116,11 +116,14 @@ pub trait SlowStart: Display + Debug {
     /// Enables a trait implementor to track RTT rounds via the next packet numer that is to be sent
     /// out.
     fn on_packet_sent(&mut self, sent_pn: packet::Number);
-    /// Handle packets being acknowledged during initial slow start. Returns whether initial slow
-    /// start should be exited.
-    ///
-    /// Returns `exit_slow_start`.
-    fn on_packets_acked(&mut self, rtt_est: &RttEstimate, largest_acked: packet::Number) -> bool;
+    /// Handle packets being acknowledged during slow start. Returns the congestion window in bytes
+    /// that slow start should be exited with. If slow start isn't exited returns `None`.
+    fn on_packets_acked(
+        &mut self,
+        rtt_est: &RttEstimate,
+        largest_acked: packet::Number,
+        curr_cwnd: usize,
+    ) -> Option<usize>;
 
     /// Can apply changes to the exponential congestion window increase during initial slow start.
     /// One example is the reduced growth in Conservative Slow Start (CSS) from HyStart++.
@@ -134,11 +137,6 @@ pub trait SlowStart: Display + Debug {
     ) -> usize {
         cwnd_increase
     }
-
-    /// Handle exiting from initial slow start.
-    ///
-    /// Returns the `ssthresh` value to exit with.
-    fn on_slow_start_exit(&mut self, curr_cwnd: usize) -> usize;
 }
 
 #[derive(Debug)]
@@ -343,24 +341,21 @@ where
         }
 
         // Initial slow start exit heuristics.
-        if self.in_initial_slow_start() {
-            let exit_slow_start = self
-                .slow_start
-                .on_packets_acked(rtt_est, largest_packet_acked.pn());
-
-            if exit_slow_start {
-                qdebug!("Exited slow start by algorithm");
-                let exit_cwnd = self
-                    .slow_start
-                    .on_slow_start_exit(self.current.congestion_window);
-                // By setting `congestion_window` and `ssthresh` here the slow start growth block
-                // below will be skipped on this ACK already, i.e. there won't be exponential growth
-                // when slow start is exiting.
-                self.current.congestion_window = exit_cwnd;
-                self.current.ssthresh = exit_cwnd;
-                cc_stats.slow_start_exit_cwnd = Some(exit_cwnd);
-                self.set_phase(Phase::CongestionAvoidance, now);
-            }
+        if self.in_initial_slow_start()
+            && let Some(exit_cwnd) = self.slow_start.on_packets_acked(
+                rtt_est,
+                largest_packet_acked.pn(),
+                self.current.congestion_window,
+            )
+        {
+            qdebug!("Exited slow start by algorithm");
+            // By setting `congestion_window` and `ssthresh` here the slow start growth block
+            // below will be skipped on this ACK already, i.e. there won't be exponential growth
+            // when slow start is exiting.
+            self.current.congestion_window = exit_cwnd;
+            self.current.ssthresh = exit_cwnd;
+            cc_stats.slow_start_exit_cwnd = Some(exit_cwnd);
+            self.set_phase(Phase::CongestionAvoidance, now);
         }
 
         // Slow start growth, up to the slow start threshold.

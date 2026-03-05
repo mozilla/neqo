@@ -153,7 +153,12 @@ impl SlowStart for HyStart {
         self.maybe_start_new_round(sent_pn);
     }
 
-    fn on_packets_acked(&mut self, rtt_est: &RttEstimate, largest_acked: packet::Number) -> bool {
+    fn on_packets_acked(
+        &mut self,
+        rtt_est: &RttEstimate,
+        largest_acked: packet::Number,
+        curr_cwnd: usize,
+    ) -> Option<usize> {
         self.collect_rtt_sample(rtt_est.latest_rtt());
 
         qtrace!(
@@ -222,7 +227,7 @@ impl SlowStart for HyStart {
             .window_end
             .is_none_or(|window_end| largest_acked < window_end)
         {
-            return false;
+            return None;
         }
 
         qtrace!(
@@ -232,7 +237,7 @@ impl SlowStart for HyStart {
         self.window_end = None;
 
         if !self.in_css() {
-            return false;
+            return None;
         }
 
         // If a round ends while in CSS increase the counter and do a check if enough rounds
@@ -244,7 +249,15 @@ impl SlowStart for HyStart {
             self.css_round_count,
             Self::CSS_ROUNDS
         );
-        exit_slow_start
+        if !exit_slow_start {
+            return None;
+        }
+        // > If CSS_ROUNDS rounds are complete, enter congestion avoidance by setting the ssthresh
+        // > to
+        // > the current cwnd.
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-23>
+        Some(curr_cwnd)
     }
 
     fn maybe_change_cwnd_increase(
@@ -274,13 +287,5 @@ impl SlowStart for HyStart {
             cwnd_increase /= Self::CSS_GROWTH_DIVISOR;
         }
         cwnd_increase
-    }
-
-    // > If CSS_ROUNDS rounds are complete, enter congestion avoidance by setting the ssthresh to
-    // > the current cwnd.
-    //
-    // <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-23>
-    fn on_slow_start_exit(&mut self, curr_cwnd: usize) -> usize {
-        curr_cwnd
     }
 }

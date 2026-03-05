@@ -27,15 +27,14 @@ impl Display for ClassicSlowStart {
 impl SlowStart for ClassicSlowStart {
     fn on_packet_sent(&mut self, _sent_pn: packet::Number) {}
 
-    fn on_packets_acked(&mut self, _rtt_est: &RttEstimate, _largest_acked: packet::Number) -> bool {
-        // Classic slow start does not have any heuristic for exiting initial slow start. Always
-        // returns `exit_slow_start = false`.
-        false
-    }
-
-    fn on_slow_start_exit(&mut self, _curr_cwnd: usize) -> usize {
-        unreachable!(
-            "Since classic slow start never exits initial slow start through a heuristic this function should never be called."
-        );
+    fn on_packets_acked(
+        &mut self,
+        _rtt_est: &RttEstimate,
+        _largest_acked: packet::Number,
+        _curr_cwnd: usize,
+    ) -> Option<usize> {
+        // Classic slow start does not have any heuristic for exiting slow start. Always
+        // returns `None`.
+        None
     }
 }
