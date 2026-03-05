@@ -602,15 +602,15 @@ where
         self.current.ssthresh = v;
     }
 
-    /// Accessor for [`ClassicCongestionControl::congestion_control`]. Is used to call Cubic getters
-    /// in tests.
+    /// Accessor for [`ClassicCongestionController::congestion_control`]. Is used to call Cubic
+    /// getters in tests.
     #[cfg(test)]
     pub const fn congestion_control(&self) -> &T {
         &self.congestion_control
     }
 
-    /// Mutable accessor for [`ClassicCongestionControl::congestion_control`]. Is used to call Cubic
-    /// setters in tests.
+    /// Mutable accessor for [`ClassicCongestionController::congestion_control`]. Is used to call
+    /// Cubic setters in tests.
     #[cfg(test)]
     pub const fn congestion_control_mut(&mut self) -> &mut T {
         &mut self.congestion_control

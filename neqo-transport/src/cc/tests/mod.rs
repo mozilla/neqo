@@ -25,7 +25,7 @@ pub const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 pub const MTU: Option<usize> = Some(1_500);
 pub const RTT: Duration = Duration::from_millis(100);
 
-/// Helper to create `ClassicCongestionControl` with New Reno for tests.
+/// Helper to create `ClassicCongestionController` with New Reno for tests.
 pub fn make_cc_newreno() -> ClassicCongestionController<ClassicSlowStart, NewReno> {
     ClassicCongestionController::new(
         ClassicSlowStart::default(),
@@ -34,7 +34,7 @@ pub fn make_cc_newreno() -> ClassicCongestionController<ClassicSlowStart, NewRen
     )
 }
 
-/// Helper to create `ClassicCongestionControl` with Cubic for tests.
+/// Helper to create `ClassicCongestionController` with Cubic for tests.
 pub fn make_cc_cubic() -> ClassicCongestionController<ClassicSlowStart, Cubic> {
     ClassicCongestionController::new(
         ClassicSlowStart::default(),
@@ -43,11 +43,11 @@ pub fn make_cc_cubic() -> ClassicCongestionController<ClassicSlowStart, Cubic> {
     )
 }
 
-/// Helper to create `ClassicCongestionControl` with HyStart++ for tests.
-pub fn make_cc_hystart(paced: bool) -> ClassicCongestionController<HyStart, NewReno> {
+/// Helper to create `ClassicCongestionController` with HyStart++ for tests.
+pub fn make_cc_hystart(paced: bool) -> ClassicCongestionController<HyStart, Cubic> {
     ClassicCongestionController::new(
         HyStart::new(paced),
-        NewReno::default(),
+        Cubic::default(),
         Pmtud::new(IP_ADDR, MTU),
     )
 }
