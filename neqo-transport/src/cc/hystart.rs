@@ -172,32 +172,6 @@ impl SlowStart for HyStart {
             self.window_end
         );
 
-        // > For CSS rounds where at least N_RTT_SAMPLE RTT samples have been obtained, check to see
-        // > if the current round's minRTT drops below baseline (cssBaselineMinRtt) indicating that
-        // > slow start exit was spurious:
-        // >
-        // > ```
-        // > if (currentRoundMinRTT < cssBaselineMinRtt)
-        // > cssBaselineMinRtt = infinity
-        // > resume slow start including HyStart++
-        // > ```
-        //
-        // <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-20>
-        if self.in_css()
-            && self.enough_samples()
-            && self.current_round_min_rtt < self.css_baseline_min_rtt
-        {
-            qdebug!(
-                "HyStart: on_packets_acked -> exiting CSS after {} rounds because cur_min={:?} < baseline_min={:?}",
-                self.css_round_count,
-                self.current_round_min_rtt,
-                self.css_baseline_min_rtt
-            );
-
-            self.css_baseline_min_rtt = None;
-            self.css_round_count = 0;
-        }
-
         // > For rounds where at least N_RTT_SAMPLE RTT samples have been obtained and
         // > currentRoundMinRTT and lastRoundMinRTT are valid, check to see if delay increase
         // > triggers slow start exit.
@@ -218,6 +192,31 @@ impl SlowStart for HyStart {
                     "HyStart: on_packets_acked -> entered CSS because cur_min={current:?} >= last_min={last:?} + thresh={rtt_thresh:?}"
                 );
             }
+        // > For CSS rounds where at least N_RTT_SAMPLE RTT samples have been obtained, check to see
+        // > if the current round's minRTT drops below baseline (cssBaselineMinRtt) indicating that
+        // > slow start exit was spurious:
+        // >
+        // > ```
+        // > if (currentRoundMinRTT < cssBaselineMinRtt)
+        // > cssBaselineMinRtt = infinity
+        // > resume slow start including HyStart++
+        // > ```
+        //
+        // <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-20>
+        } else if self.enough_samples()
+            && let Some(current) = self.current_round_min_rtt
+            && let Some(baseline) = self.css_baseline_min_rtt
+            && current < baseline
+        {
+            qdebug!(
+                "HyStart: on_packets_acked -> exiting CSS after {} rounds because cur_min={:?} < baseline_min={:?}",
+                self.css_round_count,
+                self.current_round_min_rtt,
+                self.css_baseline_min_rtt
+            );
+
+            self.css_baseline_min_rtt = None;
+            self.css_round_count = 0;
         }
 
         // Check for end of round. If `window_end` is acked it is set to `None` to indicate end of a
