@@ -125,17 +125,10 @@ pub trait SlowStart: Display + Debug {
         curr_cwnd: usize,
     ) -> Option<usize>;
 
-    /// Can apply changes to the exponential congestion window increase during initial slow start.
-    /// One example is the reduced growth in Conservative Slow Start (CSS) from HyStart++.
-    ///
-    /// The default implementation returns the unchanged `cwnd_increase` input parameter.
-    /// Implementors can specify how the increase is to be changed.
-    fn maybe_change_cwnd_increase(
-        &mut self,
-        cwnd_increase: usize,
-        _max_datagram_size: usize,
-    ) -> usize {
-        cwnd_increase
+    /// Calculates the congestion window increase in bytes during slow start. The default
+    /// implementation returns `new_acked`, i.e. classic exponential slow start growth.
+    fn calc_cwnd_increase(&mut self, new_acked: usize, _max_datagram_size: usize) -> usize {
+        new_acked
     }
 }
 
@@ -223,11 +216,6 @@ impl<S: Display, T: Display> Display for ClassicCongestionController<S, T> {
 impl<S, T> ClassicCongestionController<S, T> {
     pub const fn max_datagram_size(&self) -> usize {
         self.pmtud.plpmtu()
-    }
-
-    /// Return if the Congestion Controller currently is in initial slow start.
-    pub const fn in_initial_slow_start(&self) -> bool {
-        self.current.ssthresh == usize::MAX
     }
 }
 
@@ -340,53 +328,38 @@ where
             return;
         }
 
-        // Initial slow start exit heuristics.
-        if self.in_initial_slow_start()
-            && let Some(exit_cwnd) = self.slow_start.on_packets_acked(
+        // Slow start: grow up to ssthresh.
+        if self.current.congestion_window < self.current.ssthresh {
+            // Check if the slow start algorithm wants to exit.
+            if let Some(exit_cwnd) = self.slow_start.on_packets_acked(
                 rtt_est,
                 largest_packet_acked.pn(),
                 self.current.congestion_window,
-            )
-        {
-            qdebug!("Exited slow start by algorithm");
-            // By setting `congestion_window` and `ssthresh` here the slow start growth block
-            // below will be skipped on this ACK already, i.e. there won't be exponential growth
-            // when slow start is exiting.
-            self.current.congestion_window = exit_cwnd;
-            self.current.ssthresh = exit_cwnd;
-            cc_stats.slow_start_exit_cwnd = Some(exit_cwnd);
-            self.set_phase(Phase::CongestionAvoidance, now);
-        }
-
-        // Slow start growth, up to the slow start threshold.
-        if self.current.congestion_window < self.current.ssthresh {
-            let mut cwnd_increase = new_acked;
-
-            // If in initial slow start the slow start exit algorithm in use can apply changes to
-            // the congestion window increase. If not in initial slow start we cap growth at the
-            // previously established `ssthresh`.
-            if self.in_initial_slow_start() {
-                cwnd_increase = self
-                    .slow_start
-                    .maybe_change_cwnd_increase(cwnd_increase, self.max_datagram_size());
-            } else {
-                cwnd_increase = min(
-                    cwnd_increase,
-                    self.current.ssthresh - self.current.congestion_window,
-                );
-            }
-
-            self.current.congestion_window += cwnd_increase;
-            qtrace!("[{self}] slow start += {cwnd_increase}");
-
-            // This can only happen after persistent congestion when we re-enter slow start while
-            // having a previously established `ssthresh` which has now been reached.
-            if self.current.congestion_window == self.current.ssthresh {
-                qdebug!(
-                    "Exited slow start because the threshold was reached, ssthresh: {}",
-                    self.current.ssthresh
-                );
+            ) {
+                qdebug!("Exited slow start by algorithm");
+                self.current.congestion_window = exit_cwnd;
+                self.current.ssthresh = exit_cwnd;
+                cc_stats.slow_start_exit_cwnd = Some(exit_cwnd);
                 self.set_phase(Phase::CongestionAvoidance, now);
+            } else {
+                let cwnd_increase = self
+                    .slow_start
+                    .calc_cwnd_increase(new_acked, self.max_datagram_size());
+                self.current.congestion_window += cwnd_increase;
+                qtrace!("[{self}] slow start += {cwnd_increase}");
+
+                // This can only happen after persistent congestion when we re-enter slow start
+                // while having a previously established `ssthresh` which has now
+                // been reached.
+                if self.current.congestion_window >= self.current.ssthresh {
+                    qdebug!(
+                        "Exited slow start because the threshold was reached, ssthresh: {}",
+                        self.current.ssthresh
+                    );
+                    // Clamp congestion window to ssthresh.
+                    self.current.congestion_window = self.current.ssthresh;
+                    self.set_phase(Phase::CongestionAvoidance, now);
+                }
             }
         }
 
@@ -552,8 +525,8 @@ where
     }
 
     fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant) {
-        // Pass next packet number to send into slow start algorithm for initial slow start phase.
-        if self.in_initial_slow_start() {
+        // Pass next packet number to send into slow start algorithm during slow start.
+        if self.current.phase.in_slow_start() {
             self.slow_start.on_packet_sent(pkt.pn());
         }
 
@@ -641,13 +614,6 @@ where
     #[cfg(test)]
     pub const fn congestion_control_mut(&mut self) -> &mut T {
         &mut self.congestion_control
-    }
-
-    /// Accessor for [`ClassicCongestionControl::slow_start`]. Is used to call slow start
-    /// getters in tests.
-    #[cfg(test)]
-    pub const fn slow_start(&self) -> &S {
-        &self.slow_start
     }
 
     #[cfg(test)]

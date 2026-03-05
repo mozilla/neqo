@@ -260,11 +260,7 @@ impl SlowStart for HyStart {
         Some(curr_cwnd)
     }
 
-    fn maybe_change_cwnd_increase(
-        &mut self,
-        cwnd_increase: usize,
-        max_datagram_size: usize,
-    ) -> usize {
+    fn calc_cwnd_increase(&mut self, new_acked: usize, max_datagram_size: usize) -> usize {
         // > For each arriving ACK in slow start, where N is the number of previously unacknowledged
         // > bytes acknowledged in the arriving ACK:
         // >
@@ -273,7 +269,7 @@ impl SlowStart for HyStart {
         // > `cwnd = cwnd + min(N, L*SMSS)`
         //
         // <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-8>
-        let mut cwnd_increase = min(self.limit.saturating_mul(max_datagram_size), cwnd_increase);
+        let mut cwnd_increase = min(self.limit.saturating_mul(max_datagram_size), new_acked);
 
         // > For each arriving ACK in CSS, where N is the number of previously unacknowledged
         // > bytes acknowledged in the arriving ACK:

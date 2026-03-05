@@ -281,7 +281,7 @@ fn css_growth_rate_is_one_quarter() {
     maybe_enter_css(&mut hystart, BASE_RTT, HIGH_RTT);
     assert!(hystart.in_css(), "Should have entered CSS");
 
-    let cwnd_increase = hystart.maybe_change_cwnd_increase(NEW_ACKED, MIN_INITIAL_PACKET_SIZE);
+    let cwnd_increase = hystart.calc_cwnd_increase(NEW_ACKED, MIN_INITIAL_PACKET_SIZE);
 
     // In CSS, growth is divided by CSS_GROWTH_DIVISOR
     assert_eq!(
@@ -374,7 +374,7 @@ fn css_exit_to_slow_start_restores_normal_growth() {
     assert!(hystart.in_css(), "Should have entered CSS");
 
     // Test CSS growth (1/CSS_GROWTH_DIVISOR rate)
-    let cwnd_increase = hystart.maybe_change_cwnd_increase(NEW_ACKED, MIN_INITIAL_PACKET_SIZE);
+    let cwnd_increase = hystart.calc_cwnd_increase(NEW_ACKED, MIN_INITIAL_PACKET_SIZE);
     assert_eq!(
         cwnd_increase,
         NEW_ACKED / HyStart::CSS_GROWTH_DIVISOR,
@@ -396,7 +396,7 @@ fn css_exit_to_slow_start_restores_normal_growth() {
     assert!(!hystart.in_css(), "Should have exited CSS");
 
     // Test normal slow start growth (1:1 rate)
-    let cwnd_increase = hystart.maybe_change_cwnd_increase(NEW_ACKED, MIN_INITIAL_PACKET_SIZE);
+    let cwnd_increase = hystart.calc_cwnd_increase(NEW_ACKED, MIN_INITIAL_PACKET_SIZE);
     assert_eq!(cwnd_increase, NEW_ACKED, "Normal SS growth should be 1:1");
 }
 
@@ -407,7 +407,7 @@ fn l_limit_paced_no_cap() {
 
     // Try to increase by more than NON_PACED_L * SMSS
     let cwnd_increase =
-        hystart.maybe_change_cwnd_increase(100 * MIN_INITIAL_PACKET_SIZE, MIN_INITIAL_PACKET_SIZE);
+        hystart.calc_cwnd_increase(100 * MIN_INITIAL_PACKET_SIZE, MIN_INITIAL_PACKET_SIZE);
 
     assert_eq!(
         cwnd_increase,
@@ -424,77 +424,12 @@ fn l_limit_unpaced_is_capped() {
     // Try to increase by more than NON_PACED_L * SMSS
     // Try to increase by more than NON_PACED_L * SMSS
     let cwnd_increase =
-        hystart.maybe_change_cwnd_increase(100 * MIN_INITIAL_PACKET_SIZE, MIN_INITIAL_PACKET_SIZE);
+        hystart.calc_cwnd_increase(100 * MIN_INITIAL_PACKET_SIZE, MIN_INITIAL_PACKET_SIZE);
 
     assert_eq!(
         cwnd_increase,
         HyStart::NON_PACED_L * MIN_INITIAL_PACKET_SIZE,
         "Unpaced should cap at L * SMSS"
-    );
-}
-
-#[test]
-fn hystart_only_used_in_initial_slow_start() {
-    let mut cc = make_cc_hystart(true);
-    let mut cc_stats = CongestionControlStats::default();
-    let mut now = now();
-
-    let cwnd_initial = cc.cwnd();
-
-    // send a full congestion window worth of SMSS sized packets
-    let initial_cwnd_packets = cwnd_initial / MIN_INITIAL_PACKET_SIZE;
-    let mut sent_packets = Vec::new();
-    for i in 0..initial_cwnd_packets {
-        let pkt = sent::make_packet(i as u64, now, MIN_INITIAL_PACKET_SIZE);
-        cc.on_packet_sent(&pkt, now);
-        sent_packets.push(pkt);
-    }
-    now += Duration::from_millis(10);
-    // ack them in one ack frame
-    cc.on_packets_acked(
-        &sent_packets,
-        &RttEstimate::new(Duration::from_millis(10)),
-        now,
-        &mut cc_stats,
-    );
-
-    assert_eq!(
-        cc.slow_start().rtt_sample_count(),
-        1,
-        "should take samples in initial slow start"
-    );
-    assert_eq!(
-        cc.cwnd(),
-        cwnd_initial + initial_cwnd_packets * MIN_INITIAL_PACKET_SIZE
-    );
-
-    cc.set_ssthresh(cc.cwnd() + MIN_INITIAL_PACKET_SIZE);
-    assert!(
-        !cc.in_initial_slow_start(),
-        "`ssthresh` is set so shouldn't be in initial slow start anymore"
-    );
-
-    // send and ack one packet that is bigger than the distance to slow start threshold to test that
-    // we stop growth at `ssthresh`.
-    let bigger_pkt = sent::make_packet(1, now, 2 * MIN_INITIAL_PACKET_SIZE);
-    cc.on_packet_sent(&bigger_pkt, now);
-    now += Duration::from_millis(10);
-    cc.on_packets_acked(
-        &[bigger_pkt],
-        &RttEstimate::new(Duration::from_millis(10)),
-        now,
-        &mut cc_stats,
-    );
-
-    assert_eq!(
-        cc.slow_start().rtt_sample_count(),
-        1,
-        "should not take new samples when we're not in initial slow start"
-    );
-    assert_eq!(
-        cc.cwnd(),
-        cc.ssthresh(),
-        "should only grow up to already established `ssthresh`"
     );
 }
 
