@@ -357,9 +357,9 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.21.3"
+version = "0.20.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cdf337090841a411e2a7f3deb9187445851f91b309c0c0a29e05f74a00a48c0"
+checksum = "6f63b86c8a8826a49b8c21f08a2d07338eec8d900540f8630dc76284be802989"
 dependencies = [
  "darling_core",
  "darling_macro",
@@ -367,9 +367,9 @@ dependencies = [
 
 [[package]]
 name = "darling_core"
-version = "0.21.3"
+version = "0.20.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1247195ecd7e3c85f83c8d2a366e4210d588e802133e1e355180a9870b517ea4"
+checksum = "95133861a8032aaea082871032f5815eb9e98cef03fa916ab4500513994df9e5"
 dependencies = [
  "fnv",
  "ident_case",
@@ -381,9 +381,9 @@ dependencies = [
 
 [[package]]
 name = "darling_macro"
-version = "0.21.3"
+version = "0.20.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d38308df82d1080de0afee5d069fa14b0326a88c14f15c5ccda35b4a6c414c81"
+checksum = "d336a2a514f6ccccaa3e09b02d41d35330c07ddf03a62165fcec10bb561c7806"
 dependencies = [
  "darling_core",
  "quote",
@@ -428,18 +428,18 @@ dependencies = [
 
 [[package]]
 name = "enumset"
-version = "1.1.10"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25b07a8dfbbbfc0064c0a6bdf9edcf966de6b1c33ce344bdeca3b41615452634"
+checksum = "e875f1719c16de097dee81ed675e2d9bb63096823ed3f0ca827b7dea3028bbbb"
 dependencies = [
  "enumset_derive",
 ]
 
 [[package]]
 name = "enumset_derive"
-version = "0.14.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f43e744e4ea338060faee68ed933e46e722fb7f3617e722a5772d7e856d8b3ce"
+checksum = "e08b6c6ab82d70f08844964ba10c7babb716de2ecaeab9be5717918a5177d3af"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -781,7 +781,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "clap",
  "clap-verbosity-flag",
@@ -807,7 +807,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-common"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -824,7 +824,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-crypto"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "bindgen",
  "enum-map",
@@ -843,7 +843,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-http3"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enumset",
@@ -864,7 +864,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-qpack"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "log",
  "neqo-common",
@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-transport"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-udp"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -1161,19 +1161,20 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.16.1"
+version = "3.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fa237f2807440d238e0364a218270b98f767a00d3dada77b1c53ae88940e2e7"
+checksum = "d6b6f7f2fcb69f747921f79f3926bd1e203fce4fef62c268dd3abfb6d86029aa"
 dependencies = [
- "serde_core",
+ "serde",
+ "serde_derive",
  "serde_with_macros",
 ]
 
 [[package]]
 name = "serde_with_macros"
-version = "3.16.1"
+version = "3.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52a8e3ca0ca629121f70ab50f95249e5a6f925cc0f6ffe8256c45b728875706c"
+checksum = "8d00caa5193a3c8362ac2b73be6b9e768aa5a4b2f721d8f4b339600c3cb51f8e"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -1285,7 +1286,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "log",
  "neqo-common",
