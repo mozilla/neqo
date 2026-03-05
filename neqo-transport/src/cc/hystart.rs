@@ -37,7 +37,7 @@ pub struct HyStart {
 
 impl Display for HyStart {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "HyStart++",)
+        write!(f, "HyStart++")
     }
 }
 
