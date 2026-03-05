@@ -14,8 +14,6 @@ use std::{
 
 use neqo_common::qtrace;
 
-use crate::rtt::GRANULARITY;
-
 /// A pacer that uses a leaky bucket.
 pub struct Pacer {
     /// Whether pacing is enabled.
@@ -25,51 +23,59 @@ pub struct Pacer {
     /// The maximum capacity, or burst size, in bytes.
     m: usize,
     /// The current capacity, in bytes. When negative, represents accumulated debt
-    /// from sub-granularity sends that will be paid off in future pacing calculations.
+    /// that will be paid off in future pacing calculations.
     c: isize,
     /// The packet size or minimum capacity for sending, in bytes.
     p: usize,
+    /// The single-packet MTU, before GSO scaling.
+    mtu: usize,
+    /// Number of GSO segments per batch. The pacer uses this to scale `p` and
+    /// `m` so it paces between GSO batches rather than individual packets.
+    gso: usize,
+    /// The burst allowance in number of GSO batches.
+    burst: usize,
 }
 
 impl Pacer {
     /// This value determines how much faster the pacer operates than the
-    /// congestion window.
-    ///
-    /// A value of 1 would cause all packets to be spaced over the entire RTT,
-    /// which is a little slow and might act as an additional restriction in
-    /// the case the congestion controller increases the congestion window.
-    /// This value spaces packets over half the congestion window, which matches
-    /// our current congestion controller, which double the window every RTT.
-    const SPEEDUP: usize = 2;
+    /// congestion window. A value of 1 spaces packets over the entire RTT,
+    /// avoiding bursty traffic that causes tail losses at bottleneck queues.
+    const SPEEDUP: usize = 1;
 
-    /// Create a new `Pacer`.  This takes the current time, the maximum burst size,
-    /// and the packet size.
-    ///
-    /// The value of `m` is the maximum capacity in bytes.  `m` primes the pacer
-    /// with credit and determines the burst size.  `m` must not exceed
-    /// the initial congestion window, but it should probably be lower.
-    ///
-    /// The value of `p` is the packet size in bytes, which determines the minimum
-    /// credit needed before a packet is sent.  This should be a substantial
-    /// fraction of the maximum packet size, if not the packet size.
-    pub fn new(enabled: bool, now: Instant, m: usize, p: usize) -> Self {
-        assert!(m >= p, "maximum capacity has to be at least one packet");
+    /// Create a new `Pacer`.  This takes the current time, the burst allowance
+    /// in number of GSO batches, and the packet size.
+    pub fn new(enabled: bool, now: Instant, burst: usize, p: usize) -> Self {
+        assert!(burst >= 1, "burst must be at least 1");
         assert!(isize::try_from(p).is_ok(), "p ({p}) exceeds isize::MAX");
         Self {
             enabled,
             t: now,
-            m,
-            c: isize::try_from(m).expect("maximum capacity fits into isize"),
+            m: p * burst,
+            c: isize::try_from(p * burst).expect("capacity fits into isize"),
             p,
+            mtu: p,
+            gso: 1,
+            burst,
         }
     }
 
     pub const fn mtu(&self) -> usize {
-        self.p
+        self.mtu
     }
 
     pub const fn set_mtu(&mut self, mtu: usize) {
-        self.p = mtu;
+        self.mtu = mtu;
+        self.update_p_m();
+    }
+
+    pub const fn set_gso_segments(&mut self, gso: usize) {
+        self.gso = gso;
+        self.update_p_m();
+    }
+
+    const fn update_p_m(&mut self) {
+        self.p = self.mtu * self.gso;
+        self.m = self.p * self.burst;
     }
 
     /// Determine when the next packet will be available based on the provided
@@ -92,12 +98,6 @@ impl Pacer {
         let d = r.saturating_mul(deficit);
         let add = d / u128::try_from(cwnd * Self::SPEEDUP).expect("usize fits into u128");
         let w = u64::try_from(add).map_or(rtt, Duration::from_nanos);
-
-        // If the increment is below the timer granularity, send immediately.
-        if w < GRANULARITY {
-            qtrace!("[{self}] next {cwnd}/{rtt:?} below granularity ({w:?})");
-            return self.t;
-        }
 
         let nxt = self.t + w;
         qtrace!("[{self}] next {cwnd}/{rtt:?} wait {w:?} = {nxt:?}");
@@ -168,47 +168,73 @@ mod tests {
     #[test]
     fn even() {
         let n = now();
-        let mut p = Pacer::new(true, n, PACKET, PACKET);
+        let mut p = Pacer::new(true, n, 1, PACKET);
         assert_eq!(p.next(RTT, CWND), n);
         p.spend(n, RTT, CWND, PACKET);
-        assert_eq!(p.next(RTT, CWND), n + (RTT / 20));
+        assert_eq!(
+            p.next(RTT, CWND),
+            n + (RTT / u32::try_from(Pacer::SPEEDUP * CWND / PACKET).unwrap())
+        );
     }
 
     #[test]
     fn backwards_in_time() {
         let n = now();
-        let mut p = Pacer::new(true, n + RTT, PACKET, PACKET);
+        let mut p = Pacer::new(true, n + RTT, 1, PACKET);
         assert_eq!(p.next(RTT, CWND), n + RTT);
         // Now spend some credit in the past using a time machine.
         p.spend(n, RTT, CWND, PACKET);
-        assert_eq!(p.next(RTT, CWND), n + (RTT / 20));
+        assert_eq!(
+            p.next(RTT, CWND),
+            n + (RTT / u32::try_from(Pacer::SPEEDUP * CWND / PACKET).unwrap())
+        );
     }
 
     #[test]
     fn pacing_disabled() {
         let n = now();
-        let mut p = Pacer::new(false, n, PACKET, PACKET);
+        let mut p = Pacer::new(false, n, 1, PACKET);
         assert_eq!(p.next(RTT, CWND), n);
         p.spend(n, RTT, CWND, PACKET);
         assert_eq!(p.next(RTT, CWND), n);
     }
 
     #[test]
-    fn send_immediately_below_granularity() {
-        const SHORT_RTT: Duration = Duration::from_millis(10);
+    fn gso_batch_pacing() {
+        const GSO: usize = 10;
         let n = now();
-        let mut p = Pacer::new(true, n, PACKET, PACKET);
-        assert_eq!(p.next(SHORT_RTT, CWND), n);
-        p.spend(n, SHORT_RTT, CWND, PACKET);
-        assert_eq!(
-            p.next(SHORT_RTT, CWND),
-            n,
-            "Expect packet to be sent immediately, instead of being paced below timer granularity"
-        );
+        let mut p = Pacer::new(true, n, 2, PACKET);
+        p.set_gso_segments(GSO);
+        // p is now PACKET * GSO = 10000, m = 20000 (2 batches)
+        assert_eq!(p.next(RTT, CWND), n);
+        // Spend one full GSO batch
+        for _ in 0..GSO {
+            p.spend(n, RTT, CWND, PACKET);
+        }
+        // Still have credit for one more batch
+        assert_eq!(p.next(RTT, CWND), n);
+        // Spend second batch
+        for _ in 0..GSO {
+            p.spend(n, RTT, CWND, PACKET);
+        }
+        // Now should need to wait
+        let next = p.next(RTT, CWND);
+        assert!(next > n, "Should pace after two GSO batches");
     }
 
     #[test]
-    fn sends_below_granularity_accumulate_eventually() {
+    fn sub_ms_pacing_accumulates_debt() {
+        const SHORT_RTT: Duration = Duration::from_millis(10);
+        let n = now();
+        let mut p = Pacer::new(true, n, 1, PACKET);
+        assert_eq!(p.next(SHORT_RTT, CWND), n);
+        p.spend(n, SHORT_RTT, CWND, PACKET);
+        let next = p.next(SHORT_RTT, CWND);
+        assert!(next > n, "Pacer should return a future time after spending");
+    }
+
+    #[test]
+    fn sends_accumulate_debt() {
         const RTT: Duration = Duration::from_millis(100);
         const BW: usize = 50 * 1_000_000;
         let bdp = usize::try_from(
@@ -217,20 +243,19 @@ mod tests {
         )
         .expect("cwnd fits in usize");
         let mut n = now();
-        let mut p = Pacer::new(true, n, 2 * PACKET, PACKET);
+        let mut p = Pacer::new(true, n, 2, PACKET);
         let start = n;
         let packet_count = 10_000;
         for _ in 0..packet_count {
             n = p.next(RTT, bdp);
             p.spend(n, RTT, bdp, PACKET);
         }
-        // We expect _some_ time to have progressed after sending all the packets.
         assert!(n - start > Duration::ZERO);
     }
 
     #[test]
     fn pacer_display_and_debug() {
-        let mut p = Pacer::new(true, now(), PACKET, PACKET);
+        let mut p = Pacer::new(true, now(), 1, PACKET);
         assert_eq!(p.mtu(), PACKET);
         p.set_mtu(500);
         assert_eq!(p.mtu(), 500);

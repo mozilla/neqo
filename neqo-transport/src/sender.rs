@@ -20,7 +20,7 @@ use crate::{
     stats::CongestionControlStats,
 };
 
-/// The number of packets we allow to burst from the pacer.
+/// The number of GSO batches we allow to burst from the pacer.
 pub const PACING_BURST_SIZE: usize = 2;
 
 #[derive(Debug)]
@@ -42,12 +42,16 @@ impl PacketSender {
                     Box::new(ClassicCongestionControl::new(Cubic::default(), pmtud))
                 }
             },
-            pacer: Pacer::new(
-                conn_params.pacing_enabled(),
-                now,
-                mtu * PACING_BURST_SIZE,
-                mtu,
-            ),
+            pacer: {
+                let mut p = Pacer::new(
+                    conn_params.pacing_enabled(),
+                    now,
+                    PACING_BURST_SIZE,
+                    mtu,
+                );
+                p.set_gso_segments(conn_params.get_max_gso_segments());
+                p
+            },
         }
     }
 
@@ -88,6 +92,12 @@ impl PacketSender {
             );
             self.pacer.set_mtu(current_mtu);
         }
+    }
+
+    /// Update the GSO segment count used for pacing. Call this when the
+    /// socket's GSO capability is known or changes.
+    pub const fn set_gso_segments(&mut self, segments: usize) {
+        self.pacer.set_gso_segments(segments);
     }
 
     pub fn on_packets_acked(

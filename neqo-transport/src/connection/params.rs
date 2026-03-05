@@ -140,6 +140,10 @@ pub struct ConnectionParameters {
     grease: bool,
     disable_migration: bool,
     pacing: bool,
+    /// The maximum number of GSO segments per sendmsg call. The pacer uses
+    /// this to compute intervals between GSO batches rather than individual
+    /// packets, enabling effective pacing even with coarse (1ms) timers.
+    max_gso_segments: usize,
     /// Whether the connection performs PLPMTUD.
     pmtud: bool,
     /// Whether PMTUD should take the local interface MTU into account.
@@ -177,6 +181,7 @@ impl Default for ConnectionParameters {
             grease: true,
             disable_migration: false,
             pacing: true,
+            max_gso_segments: 1,
             pmtud: false,
             pmtud_iface_mtu: true,
             sni_slicing: true,
@@ -430,6 +435,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn pacing(mut self, pacing: bool) -> Self {
         self.pacing = pacing;
+        self
+    }
+
+    #[must_use]
+    pub const fn get_max_gso_segments(&self) -> usize {
+        self.max_gso_segments
+    }
+
+    #[must_use]
+    pub const fn max_gso_segments(mut self, segments: usize) -> Self {
+        self.max_gso_segments = segments;
         self
     }
 
