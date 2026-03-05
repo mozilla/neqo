@@ -71,7 +71,7 @@ impl SendProfile {
     }
 
     #[must_use]
-    pub const fn new_paced() -> Self {
+    pub fn new_paced() -> Self {
         // When pacing, we still allow ACK frames to be sent.
         Self {
             limit: ACK_ONLY_SIZE_LIMIT - 1,
