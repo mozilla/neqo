@@ -422,7 +422,6 @@ fn l_limit_unpaced_is_capped() {
     hystart.on_packet_sent(0);
 
     // Try to increase by more than NON_PACED_L * SMSS
-    // Try to increase by more than NON_PACED_L * SMSS
     let cwnd_increase =
         hystart.calc_cwnd_increase(100 * MIN_INITIAL_PACKET_SIZE, MIN_INITIAL_PACKET_SIZE);
 

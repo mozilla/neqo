@@ -37,31 +37,38 @@ impl PacketSender {
     pub fn new(conn_params: &ConnectionParameters, pmtud: Pmtud, now: Instant) -> Self {
         let mtu = pmtud.plpmtu();
         Self {
-            cc: match conn_params.get_congestion_control() {
-                CongestionControl::NewReno => match conn_params.get_slow_start() {
-                    SlowStart::Classic => Box::new(ClassicCongestionController::new(
+            cc: match (
+                conn_params.get_congestion_control(),
+                conn_params.get_slow_start(),
+            ) {
+                (CongestionControl::NewReno, SlowStart::Classic) => {
+                    Box::new(ClassicCongestionController::new(
                         ClassicSlowStart::default(),
                         NewReno::default(),
                         pmtud,
-                    )),
-                    SlowStart::HyStart => Box::new(ClassicCongestionController::new(
+                    ))
+                }
+                (CongestionControl::NewReno, SlowStart::HyStart) => {
+                    Box::new(ClassicCongestionController::new(
                         HyStart::new(conn_params.pacing_enabled()),
                         NewReno::default(),
                         pmtud,
-                    )),
-                },
-                CongestionControl::Cubic => match conn_params.get_slow_start() {
-                    SlowStart::Classic => Box::new(ClassicCongestionController::new(
+                    ))
+                }
+                (CongestionControl::Cubic, SlowStart::Classic) => {
+                    Box::new(ClassicCongestionController::new(
                         ClassicSlowStart::default(),
                         Cubic::default(),
                         pmtud,
-                    )),
-                    SlowStart::HyStart => Box::new(ClassicCongestionController::new(
+                    ))
+                }
+                (CongestionControl::Cubic, SlowStart::HyStart) => {
+                    Box::new(ClassicCongestionController::new(
                         HyStart::new(conn_params.pacing_enabled()),
                         Cubic::default(),
                         pmtud,
-                    )),
-                },
+                    ))
+                }
             },
             pacer: Pacer::new(
                 conn_params.pacing_enabled(),

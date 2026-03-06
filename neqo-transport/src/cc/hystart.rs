@@ -153,6 +153,37 @@ impl SlowStart for HyStart {
         self.maybe_start_new_round(sent_pn);
     }
 
+    fn reset(&mut self) {
+        self.last_round_min_rtt = None;
+        self.current_round_min_rtt = None;
+        self.rtt_sample_count = 0;
+        self.window_end = None;
+        self.css_baseline_min_rtt = None;
+        self.css_round_count = 0;
+    }
+
+    // The HyStart++ RFC recommends only running HyStart++ in initial slow start.
+    //
+    // > An implementation SHOULD use HyStart++ only for the initial slow start (when the ssthresh
+    // > is at its initial value of arbitrarily high per [RFC5681]) and fall back to using standard
+    // > slow start for the remainder of the connection lifetime. This is acceptable because
+    // > subsequent slow starts will use the discovered ssthresh value to exit slow start and avoid
+    // > the overshoot problem.
+    //
+    // <https://datatracker.ietf.org/doc/html/rfc9406#section-4.3-11>
+    //
+    // We ignore this SHOULD and run HyStart++ every slow start if it is enabled. That is for the
+    // following reasons:
+    // - reduces code complexity in [`ClassicCongestionController::on_packets_acked`] because there
+    //   is one less state to distinguish
+    // - the RFC is only stating this as a SHOULD, so we are not in direct conflict with it
+    // - in QUIC we only have non-initial slow start after persistent congestion, so it is quite
+    //   rare, as opposed to TCP where it also happens after an RTO timeout (see RFC 5681 3.1)
+    // - after persistent congestion the established `ssthresh` might be still too high, so we could
+    //   still overshoot and induce loss before reaching it, thus no harm in still using HyStart++
+    //   to exit based on RTT if necessary
+    // - if we do reach the previously established `ssthresh` we still exit slow start and continue
+    //   with congestion avoidance
     fn on_packets_acked(
         &mut self,
         rtt_est: &RttEstimate,

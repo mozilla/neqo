@@ -130,6 +130,10 @@ pub trait SlowStart: Display + Debug {
     fn calc_cwnd_increase(&mut self, new_acked: usize, _max_datagram_size: usize) -> usize {
         new_acked
     }
+
+    /// Resets slow start state. Is used after persistent congestion so slow start algorithms
+    /// perform cleanly in non-initial slow starts.
+    fn reset(&mut self) {}
 }
 
 #[derive(Debug)]
@@ -777,6 +781,9 @@ where
                     self.current.congestion_window = self.cwnd_min();
                     self.current.acked_bytes = 0;
                     self.set_phase(Phase::PersistentCongestion, now);
+                    // We re-enter slow start after persistent congestion, so we need to reset any
+                    // state leftover from initial slow start to have it perform correctly.
+                    self.slow_start.reset();
 
                     cc_stats.cwnd = self.current.congestion_window;
                     qlog::metrics_updated(
@@ -904,7 +911,7 @@ mod tests {
             classic_cc::Phase,
             cubic::Cubic,
             new_reno::NewReno,
-            tests::{RTT, make_cc_cubic, make_cc_newreno},
+            tests::{RTT, make_cc_cubic, make_cc_hystart, make_cc_newreno},
         },
         packet,
         recovery::{self, sent},
@@ -1968,5 +1975,30 @@ mod tests {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         cc.detect_persistent_congestion(Some(now), None, PTO, lost.iter(), now, &mut cc_stats);
         assert_eq!(cc_stats.cwnd, cc.cwnd_min());
+    }
+
+    #[test]
+    fn slow_start_state_reset_after_persistent_congestion() {
+        let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
+        let mut cc = make_cc_hystart(true);
+        let mut cc_stats = CongestionControlStats::default();
+
+        // Dirty HyStart state so current_round_min_rtt is non-None.
+        cc.slow_start
+            .on_packets_acked(&RttEstimate::new(RTT), 0, cc.cwnd());
+        assert!(cc.slow_start.current_round_min_rtt().is_some());
+
+        cc.detect_persistent_congestion(
+            Some(by_pto(0)),
+            None,
+            PTO,
+            lost.iter(),
+            now(),
+            &mut cc_stats,
+        );
+        assert_eq!(cc.cwnd(), cc.cwnd_min());
+
+        // HyStart state should be reset, so current_round_min_rtt is None again.
+        assert!(cc.slow_start.current_round_min_rtt().is_none());
     }
 }
