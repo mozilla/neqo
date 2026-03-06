@@ -1128,12 +1128,12 @@ mod tests {
         let rtt = p.rtt();
         println!(
             "rtts: {:?} {:?} {:?} {:?}",
-            rtt.latest(),
+            rtt.latest_rtt(),
             rtt.estimate(),
             rtt.rttvar(),
             rtt.minimum(),
         );
-        assert_eq!(rtt.latest(), latest_rtt, "latest RTT");
+        assert_eq!(rtt.latest_rtt(), latest_rtt, "latest RTT");
         assert_eq!(rtt.estimate(), smoothed_rtt, "smoothed RTT");
         assert_eq!(rtt.rttvar(), rttvar, "RTT variance");
         assert_eq!(rtt.minimum(), min_rtt, "min RTT");

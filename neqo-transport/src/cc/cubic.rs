@@ -290,9 +290,9 @@ impl WindowAdjustment for Cubic {
         } else {
             // If we get here with `self.t_epoch == None` this is a new congestion
             // avoidance stage. It's been set to `None` by
-            // [`super::ClassicCongestionControl::reduce_cwnd`] or needs to be
+            // [`super::ClassicCongestionController::reduce_cwnd`] or needs to be
             // initialized after slow start. It could also have been reset by
-            // [`super::ClassicCongestionControl::on_app_limited`] in which case we also start a
+            // [`super::ClassicCongestionController::on_app_limited`] in which case we also start a
             // new congestion avoidance stage for the purpose of resetting
             // timing as per RFC 9438 section 5.8.
             //
@@ -406,7 +406,7 @@ impl WindowAdjustment for Cubic {
     //
     // This function only returns the value for `cwnd * CUBIC_BETA` and sets some variables for the
     // start of a new congestion avoidance phase. Actually setting the congestion window happens in
-    // [`super::ClassicCongestionControl::on_congestion_event`] where this function is called.
+    // [`super::ClassicCongestionController::on_congestion_event`] where this function is called.
     fn reduce_cwnd(
         &mut self,
         curr_cwnd: usize,
