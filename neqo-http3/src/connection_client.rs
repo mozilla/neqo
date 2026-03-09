@@ -913,6 +913,11 @@ impl Http3Client {
             .map_err(|_| Error::InvalidStreamId)
     }
 
+    /// Clears the `SendGroup` for a given WebTransport stream
+    ///
+    /// # Errors
+    ///
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn webtransport_clear_sendgroup(&mut self, stream_id: StreamId) -> Res<()> {
         // Update the HTTP3-layer stream record.
         self.base_handler.stream_clear_sendgroup(stream_id)?;
