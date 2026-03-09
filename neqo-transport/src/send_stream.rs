@@ -1497,15 +1497,26 @@ impl PerGroupQueues {
         }
     }
 
-    /// Return the highest-priority stream in this group (highest sendOrder first, then
-    /// regular round-robin), advancing the round-robin pointer for the chosen bucket.
-    fn next_stream_id(&mut self) -> Option<StreamId> {
+    /// Return all streams in this group in priority order (highest sendOrder first, then
+    /// regular round-robin), one per priority bucket.  The round-robin pointer for each
+    /// bucket is advanced as its representative is collected.
+    ///
+    /// Callers iterate the returned list and stop as soon as one stream writes data or
+    /// fills the packet, so lower-priority streams are only tried when higher-priority
+    /// ones have no pending data — matching the spec "MUST starve until all bytes queued
+    /// for sending… have been sent" requirement while avoiding permanent starvation once
+    /// higher-priority data is exhausted.
+    fn streams_in_priority_order(&mut self) -> Vec<StreamId> {
+        let mut ids = Vec::new();
         for grp in self.sendordered.values_mut().rev() {
             if let Some(id) = grp.iter().next() {
-                return Some(id);
+                ids.push(id);
             }
         }
-        self.regular.iter().next()
+        if let Some(id) = self.regular.iter().next() {
+            ids.push(id);
+        }
+        ids
     }
 
     fn remove_stream(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) {
@@ -1923,22 +1934,33 @@ impl SendStreams {
             let start = self.per_group_next;
             for i in 0..num_groups {
                 let idx = (start + i) % num_groups;
-                // Borrow per_group, get the stream_id, then release before accessing map.
-                let stream_id_opt = {
-                    if let Some((_, grp_queues)) = self.per_group.get_index_mut(idx) {
-                        grp_queues.next_stream_id()
-                    } else {
-                        None
-                    }
-                };
-                if let Some(stream_id) = stream_id_opt {
+                // Collect stream IDs in priority order for this group (releases per_group
+                // borrow before we touch map).  We iterate lower-priority streams only
+                // when a higher-priority stream has no pending data (returns true with
+                // nothing written), satisfying the spec's starvation requirement while
+                // avoiding permanent starvation once higher-priority data is exhausted.
+                let group_streams: Vec<StreamId> = self
+                    .per_group
+                    .get_index_mut(idx)
+                    .map(|(_, grp)| grp.streams_in_priority_order())
+                    .unwrap_or_default();
+                for stream_id in group_streams {
                     qtrace!("send group {idx}: stream {stream_id}");
                     if let Some(stream) = self.map.get_mut(&stream_id) {
+                        let before = builder.len();
                         if !stream.write_frames(priority, builder, tokens, stats) {
                             // Packet full; advance so the next group gets priority next time.
                             self.per_group_next = (idx + 1) % num_groups;
                             return;
                         }
+                        if builder.len() > before {
+                            // Wrote something but packet not full: this group had its
+                            // turn; stop the inner loop and let the outer loop continue
+                            // to the next group.
+                            break;
+                        }
+                        // Nothing written (stream has no pending data): fall through to
+                        // the next priority bucket within this group.
                     }
                 }
             }

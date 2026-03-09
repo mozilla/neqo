@@ -772,23 +772,33 @@ fn wt_send_group_with_sendorder() {
 
 #[test]
 fn wt_send_groups_fair_bandwidth_allocation() {
-    // Test that send groups get fair bandwidth allocation even when streams
-    // in different groups have different sendOrder values.
-    // This validates the spec requirement: "The user agent considers WebTransportSendGroups
-    // as equals when allocating bandwidth for sending WebTransportSendStreams."
-
-    const DATA_SIZE: usize = 10_000; // Large enough to fill multiple packets
+    // Test that two send groups receive interleaved bandwidth, even when streams in
+    // different groups have very different sendOrder values.
+    //
+    // Spec: "The user agent considers WebTransportSendGroups as equals when allocating
+    // bandwidth for sending WebTransportSendStreams."
+    //
+    // group_high has sendOrder 1000/900; group_low has sendOrder 100/50.
+    // Without group-level fairness the scheduler would prefer group_high streams
+    // globally and completely starve group_low.  With per-group round-robin, the
+    // server receives Data events from both groups interleaved throughout the transfer.
+    //
+    // We verify fairness by checking that the FIRST group_low Data event arrives
+    // before the LAST group_high Data event — proving they overlap in delivery
+    // (group_low is not held back until after group_high finishes).
+    //
+    // DATA_SIZE must produce multiple packets per stream so the interleaving is visible:
+    // 10 KB / ~1440 B MTU ≈ 7 packets per stream → 14+ Data events per group.
+    const DATA_SIZE: usize = 10_000;
     const BUF: &[u8] = &[0x42; DATA_SIZE];
 
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
     let session_id = wt_session.stream_id();
 
-    // Create two send groups
     let group_high = wt.client.webtransport_create_send_group(session_id).unwrap();
     let group_low = wt.client.webtransport_create_send_group(session_id).unwrap();
 
-    // Create streams in group_high with HIGH sendOrder (should be prioritized WITHIN the group)
     let stream_high1 = wt
         .client
         .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group_high))
@@ -797,8 +807,6 @@ fn wt_send_groups_fair_bandwidth_allocation() {
         .client
         .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group_high))
         .unwrap();
-
-    // Create streams in group_low with LOW sendOrder (should be deprioritized WITHIN the group)
     let stream_low1 = wt
         .client
         .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group_low))
@@ -808,63 +816,86 @@ fn wt_send_groups_fair_bandwidth_allocation() {
         .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group_low))
         .unwrap();
 
-    // Set HIGH sendOrder for group_high streams
     wt.client.webtransport_set_sendorder(stream_high1, Some(1000)).unwrap();
     wt.client.webtransport_set_sendorder(stream_high2, Some(900)).unwrap();
-
-    // Set LOW sendOrder for group_low streams
     wt.client.webtransport_set_sendorder(stream_low1, Some(100)).unwrap();
     wt.client.webtransport_set_sendorder(stream_low2, Some(50)).unwrap();
 
-    // Fill all streams with data
     for stream in [stream_high1, stream_high2, stream_low1, stream_low2] {
-        assert_eq!(
-            wt.client.send_data(stream, BUF, now()).unwrap(),
-            DATA_SIZE
-        );
+        assert_eq!(wt.client.send_data(stream, BUF, now()).unwrap(), DATA_SIZE);
     }
 
     wt.exchange_packets();
 
-    // Both groups should have received data, despite group_high having much higher sendOrder.
-    // This tests that send groups are treated fairly at the group level.
-    // We check that streams from both groups became readable on the server.
-    let mut group_high_readable = false;
-    let mut group_low_readable = false;
-
+    // Collect Data events in arrival order.  With fair round-robin scheduling the
+    // server sees data from both groups interleaved (not group_high completely first).
+    let mut events_in_order: Vec<StreamId> = Vec::new();
     while let Some(event) = wt.server.next_event() {
         if let Http3ServerEvent::Data { stream, .. } = event {
-            let stream_id = stream.stream_id();
-            if stream_id == stream_high1 || stream_id == stream_high2 {
-                group_high_readable = true;
-            }
-            if stream_id == stream_low1 || stream_id == stream_low2 {
-                group_low_readable = true;
+            let id = stream.stream_id();
+            if id == stream_high1 || id == stream_high2 || id == stream_low1 || id == stream_low2
+            {
+                events_in_order.push(id);
             }
         }
     }
 
-    // Both send groups should have gotten bandwidth allocation
-    assert!(group_high_readable, "group_high streams should have received data");
-    assert!(group_low_readable, "group_low streams should have received data despite lower sendOrder");
+    // Both groups must have received data.
+    let first_group_low = events_in_order
+        .iter()
+        .position(|&id| id == stream_low1 || id == stream_low2);
+    let last_group_high = events_in_order
+        .iter()
+        .rposition(|&id| id == stream_high1 || id == stream_high2);
+
+    assert!(
+        first_group_low.is_some(),
+        "group_low received no data; it was starved by group_high \
+         (total events: {}, all for group_high)",
+        events_in_order.len()
+    );
+    assert!(
+        last_group_high.is_some(),
+        "group_high received no data (total events: {})",
+        events_in_order.len()
+    );
+
+    // The key fairness invariant: group_low's first delivery overlaps with group_high's
+    // ongoing delivery.  If group_low was starved, its first event would come *after*
+    // group_high's last event.
+    assert!(
+        first_group_low.unwrap() < last_group_high.unwrap(),
+        "group_low was starved: first group_low event at position {} comes after \
+         last group_high event at position {} (total {} events)",
+        first_group_low.unwrap(),
+        last_group_high.unwrap(),
+        events_in_order.len()
+    );
 }
 
 #[test]
 fn wt_sendorder_within_send_group() {
-    // Test that sendOrder still prioritizes streams WITHIN a send group.
-    // This validates that sendOrder numbers are evaluated within each group's namespace.
+    // Test that sendOrder prioritizes streams WITHIN a send group, and that lower-
+    // priority streams are not permanently starved once higher-priority data is sent.
+    //
+    // Spec: "sendOrder values are evaluated within the context of the send group."
+    // Spec: "this sending MUST starve until all bytes queued for sending on
+    //        WebTransportSendStreams with a non-null and higher [[SendOrder]]… have
+    //        been sent."  After those bytes are sent, the lower stream must proceed.
+    //
+    // DATA_SIZE is large enough that stream_high's data spans many packets, making
+    // the ordering deterministic: server Data events for stream_high will precede
+    // those for stream_low regardless of congestion-window size.
 
-    const DATA_SIZE: usize = 5_000;
+    const DATA_SIZE: usize = 50_000;
     const BUF: &[u8] = &[0x42; DATA_SIZE];
 
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
     let session_id = wt_session.stream_id();
 
-    // Create one send group
     let group = wt.client.webtransport_create_send_group(session_id).unwrap();
 
-    // Create two streams in the same group with different sendOrders
     let stream_high = wt
         .client
         .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group))
@@ -874,33 +905,47 @@ fn wt_sendorder_within_send_group() {
         .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, Some(group))
         .unwrap();
 
-    // Set sendOrder: stream_high should be prioritized over stream_low WITHIN the group
     wt.client.webtransport_set_sendorder(stream_high, Some(1000)).unwrap();
     wt.client.webtransport_set_sendorder(stream_low, Some(10)).unwrap();
 
-    // Fill both streams with data
     assert_eq!(wt.client.send_data(stream_low, BUF, now()).unwrap(), DATA_SIZE);
     assert_eq!(wt.client.send_data(stream_high, BUF, now()).unwrap(), DATA_SIZE);
 
     wt.exchange_packets();
 
-    // Within the same group, sendOrder should determine priority.
-    // The high sendOrder stream should get data sent first.
-    let mut first_readable = None;
+    // Collect all Data events in arrival order.
+    let mut first_readable: Option<StreamId> = None;
+    let mut stream_high_delivered = false;
+    let mut stream_low_delivered = false;
 
     while let Some(event) = wt.server.next_event() {
         if let Http3ServerEvent::Data { stream, .. } = event {
+            let id = stream.stream_id();
             if first_readable.is_none() {
-                first_readable = Some(stream.stream_id());
+                first_readable = Some(id);
+            }
+            if id == stream_high {
+                stream_high_delivered = true;
+            } else if id == stream_low {
+                stream_low_delivered = true;
             }
         }
     }
 
-    // The stream with higher sendOrder should become readable first
+    // stream_high (sendOrder=1000) must be served before stream_low (sendOrder=10).
     assert_eq!(
         first_readable,
         Some(stream_high),
-        "stream with higher sendOrder should be prioritized within the group"
+        "stream with higher sendOrder should be served first within the group"
+    );
+
+    // Both streams must eventually deliver all their data: stream_high because it has
+    // highest priority, stream_low because it must not be permanently starved once
+    // stream_high's queued bytes have been sent.
+    assert!(stream_high_delivered, "stream_high data was not delivered");
+    assert!(
+        stream_low_delivered,
+        "stream_low was permanently starved even after stream_high exhausted its data"
     );
 }
 
