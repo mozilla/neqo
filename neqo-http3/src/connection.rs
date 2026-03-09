@@ -1592,6 +1592,11 @@ impl Http3Connection {
             .map_err(|e| Error::map_stream_create_errors(&e))?;
         // Set outgoing WebTransport streams to be fair (share bandwidth)
         conn.stream_fairness(stream_id, true)?;
+        // Register the stream with its send group in the transport scheduler so that
+        // sendOrder is evaluated per-group and groups get fair bandwidth allocation.
+        if let Some(group_id) = send_group {
+            conn.stream_sendgroup(stream_id, Some(group_id.as_u64()))?;
+        }
 
         self.webtransport_create_stream_internal(
             wt,
