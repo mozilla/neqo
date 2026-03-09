@@ -34,7 +34,7 @@ use crate::{
         ConnectType,
         extended_connect::{
             self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
-            send_group::SendGroupId,
+            send_group::Id as SendGroupId,
             webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         },
     },
@@ -1086,6 +1086,12 @@ impl Http3Connection {
         send_stream.set_send_group(sendgroup)
     }
 
+    /// Clear the stream [`SendGroupId`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidStreamId`] if the stream id doesn't exist, or
+    /// [`Error::Unavailable`] if the stream doesn't support send groups.
     pub fn stream_clear_sendgroup(&mut self, stream_id: StreamId) -> Res<()> {
         let send_stream = self
             .send_streams
@@ -1468,7 +1474,6 @@ impl Http3Connection {
 
         let wt = self.validate_extended_connect_session(session_id)?;
 
-        // Validate send group if provided
         if let Some(group_id) = send_group
             && !self.webtransport_validate_send_group(session_id, group_id)?
         {
