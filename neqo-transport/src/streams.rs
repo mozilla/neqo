@@ -428,6 +428,12 @@ impl Streams {
     }
 
     /// # Errors
+    /// When the stream does not exist.
+    pub fn set_sendgroup(&mut self, stream_id: StreamId, group_id: Option<SendGroupId>) -> Res<()> {
+        self.send.set_sendgroup(stream_id, group_id)
+    }
+
+    /// # Errors
     /// When a stream cannot be created, which might be temporary.
     pub fn stream_create(&mut self, st: StreamType) -> Res<StreamId> {
         match self.local_stream_limits.take_stream_id(st) {
