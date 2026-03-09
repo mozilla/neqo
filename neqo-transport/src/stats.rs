@@ -590,6 +590,9 @@ fn debug() {
     rx:
     path validation outcomes: ValidationCount({Capable: 0, NotCapable(BlackHole): 0, NotCapable(Bleaching): 0, NotCapable(ReceivedUnsentECT1): 0})
     mark transitions:
-  dscp: \n"
+  dscp: 
+  bytes: rx 0 lost 0 acked 0
+  min_rtt: 0ns
+  cwnd: 0 bytes_in_flight: 0\n"
     );
 }
