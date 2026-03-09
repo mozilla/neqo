@@ -16,7 +16,16 @@ pub struct SendGroupId(u64);
 /// `SendGroupId(0)` is never valid; 0 is reserved as a sentinel.
 impl SendGroupId {
     pub fn new() -> Self {
-        Self(NEXT_SEND_GROUP_ID.fetch_add(1, Ordering::Relaxed))
+        let id = NEXT_SEND_GROUP_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                if current == u64::MAX {
+                    None
+                } else {
+                    Some(current + 1)
+                }
+            })
+            .expect("SendGroupId counter overflow");
+        Self(id)
     }
 
     pub const fn as_u64(self) -> u64 {
