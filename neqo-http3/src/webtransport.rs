@@ -218,8 +218,12 @@ impl ClientSession for Http3Client {
         stream_id: StreamId,
         sendgroup: SendGroupId,
     ) -> Res<()> {
-        let (_conn, handler) = self.connection_and_handler();
-        handler.stream_set_sendgroup(stream_id, sendgroup)
+        let (conn, handler) = self.connection_and_handler();
+        // Update the HTTP3-layer stream record (validates ownership against the session).
+        handler.stream_set_sendgroup(stream_id, sendgroup)?;
+        // Update the transport-layer scheduler so sendOrder is namespaced per group.
+        conn.stream_sendgroup(stream_id, Some(sendgroup.as_u64()))
+            .map_err(|_| Error::InvalidStreamId)
     }
 
     fn webtransport_set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
