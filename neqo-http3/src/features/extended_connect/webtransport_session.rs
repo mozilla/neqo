@@ -153,15 +153,7 @@ impl Session {
         stats
     }
 
-    pub(crate) fn process_datagram_queue(&mut self, send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> Vec<(u64, DatagramOutcome)> {
-        let outcomes = self.datagram_queue.process_queue(send_fn);
-        for (_, outcome) in &outcomes {
-            if matches!(outcome, DatagramOutcome::DroppedTooOld) {
-                self.record_datagram_expired_outgoing();
-            }
-        }
-        outcomes
-    }
+
 }
 
 impl Protocol for Session {
