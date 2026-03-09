@@ -19,7 +19,7 @@ use crate::{
     Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
     features::extended_connect::{
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
-        send_group::{SendGroup, SendGroupId},
+        send_group::{Id as SendGroupId, SendGroup},
         session::{DgramContextIdError, Protocol, State},
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},

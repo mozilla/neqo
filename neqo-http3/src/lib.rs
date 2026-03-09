@@ -169,7 +169,7 @@ pub use client_events::{ConnectUdpEvent, Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::{Http3State, SessionAcceptAction};
 pub use connection_client::Http3Client;
-pub use features::extended_connect::send_group::SendGroupId;
+pub use features::extended_connect::send_group::Id as SendGroupId;
 use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;

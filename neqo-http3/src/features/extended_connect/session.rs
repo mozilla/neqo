@@ -21,7 +21,7 @@ use crate::{
     SendStream, Stream,
     features::extended_connect::{
         ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
-        send_group::SendGroupId,
+        send_group::Id as SendGroupId,
     },
     frames::HFrame,
     priority::PriorityHandler,
@@ -449,7 +449,6 @@ impl Session {
         }
     }
 
-    #[expect(dead_code, reason = "used by later patches in the stack")]
     pub(crate) fn validate_send_group(&self, group_id: SendGroupId) -> bool {
         self.protocol.validate_send_group(group_id)
     }
