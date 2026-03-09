@@ -904,7 +904,13 @@ impl Http3Client {
         stream_id: StreamId,
         sendgroup: SendGroupId,
     ) -> Res<()> {
-        self.base_handler.stream_set_sendgroup(stream_id, sendgroup)
+        // Update the HTTP3-layer stream record (validates ownership against the session).
+        self.base_handler
+            .stream_set_sendgroup(stream_id, sendgroup)?;
+        // Update the transport-layer scheduler so sendOrder is namespaced per group.
+        self.conn
+            .stream_sendgroup(stream_id, Some(sendgroup.as_u64()))
+            .map_err(|_| Error::InvalidStreamId)
     }
 
     /// Sets the `Fairness` for a given stream
