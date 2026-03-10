@@ -159,6 +159,10 @@ pub struct CongestionControlStats {
     /// The reason slow start was exited. None if we haven't exited slow start or if we re-entered
     /// after spurious congestion.
     pub slow_start_exit_reason: Option<SlowStartExitReason>,
+    /// Number of times HyStart++ entered CSS (Conservative Slow Start). Only meaningful when
+    /// HyStart++ is enabled. Higher values indicate that we HyStart had a lot of spurious CSS
+    /// entries, spending more time throttling slow start growth.
+    pub css_entries: usize,
     /// Number of CSS (Conservative Slow Start) rounds completed. Only meaningful when HyStart++ is
     /// enabled. Higher values indicate the heuristic spent more time throttling slow start growth.
     pub css_rounds_finished: usize,

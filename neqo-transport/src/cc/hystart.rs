@@ -220,6 +220,7 @@ impl SlowStart for HyStart {
             );
             if current >= last + rtt_thresh {
                 self.css_baseline_min_rtt = Some(current);
+                cc_stats.css_entries += 1;
                 qdebug!(
                     "HyStart: on_packets_acked -> entered CSS because cur_min={current:?} >= last_min={last:?} + thresh={rtt_thresh:?}"
                 );

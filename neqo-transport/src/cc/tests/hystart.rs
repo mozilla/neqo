@@ -247,18 +247,15 @@ fn css_entry_not_triggered_with_insufficient_samples() {
 #[test]
 fn css_entry_triggered_on_rtt_increase() {
     let mut hystart = make_hystart_paced();
+    let mut cc_stats = CongestionControlStats::default();
 
     // Use helper to set up two rounds with RTT increase
     // rtt_thresh = max(4ms, min(100ms / 8, 16ms)) = max(4ms, min(12.5ms, 16ms)) = 12.5ms
     // Since 120ms >= 100ms + 12.5ms, CSS should be entered
-    maybe_enter_css(
-        &mut hystart,
-        BASE_RTT,
-        HIGH_RTT,
-        &mut CongestionControlStats::default(),
-    );
+    maybe_enter_css(&mut hystart, BASE_RTT, HIGH_RTT, &mut cc_stats);
 
     assert!(hystart.in_css(), "CSS should be entered on RTT increase");
+    assert_eq!(cc_stats.css_entries, 1);
 }
 
 #[test]
@@ -283,6 +280,7 @@ fn css_entry_not_triggered_on_small_rtt_increase() {
 #[test]
 fn css_entry_triggered_on_min_rtt_thresh() {
     let mut hystart = make_hystart_paced();
+    let mut cc_stats = CongestionControlStats::default();
 
     // Test MIN_RTT_THRESH bound: very small base RTT
     // rtt_thresh = max(MIN_RTT_THRESH, min(10ms / 8, MAX_RTT_THRESH))
@@ -292,18 +290,20 @@ fn css_entry_triggered_on_min_rtt_thresh() {
         &mut hystart,
         Duration::from_millis(10),
         Duration::from_millis(15),
-        &mut CongestionControlStats::default(),
+        &mut cc_stats,
     );
 
     assert!(
         hystart.in_css(),
         "CSS should be entered with MIN_RTT_THRESH"
     );
+    assert_eq!(cc_stats.css_entries, 1);
 }
 
 #[test]
 fn css_entry_triggered_on_max_rtt_thresh() {
     let mut hystart = make_hystart_paced();
+    let mut cc_stats = CongestionControlStats::default();
 
     // Test MAX_RTT_THRESH bound: large base RTT
     // rtt_thresh = max(MIN_RTT_THRESH, min(200ms / 8, MAX_RTT_THRESH))
@@ -313,13 +313,14 @@ fn css_entry_triggered_on_max_rtt_thresh() {
         &mut hystart,
         Duration::from_millis(200),
         Duration::from_millis(218),
-        &mut CongestionControlStats::default(),
+        &mut cc_stats,
     );
 
     assert!(
         hystart.in_css(),
         "CSS should be entered with MAX_RTT_THRESH"
     );
+    assert_eq!(cc_stats.css_entries, 1);
 }
 
 #[test]
@@ -403,13 +404,10 @@ fn css_back_to_slow_start_on_rtt_decrease() {
     const CSS_BASELINE_RTT: Duration = HIGH_RTT;
     const LOWER_RTT: Duration = Duration::from_millis(110);
     let mut hystart = make_hystart_paced();
-    maybe_enter_css(
-        &mut hystart,
-        BASE_RTT,
-        CSS_BASELINE_RTT,
-        &mut CongestionControlStats::default(),
-    );
+    let mut cc_stats = CongestionControlStats::default();
+    maybe_enter_css(&mut hystart, BASE_RTT, CSS_BASELINE_RTT, &mut cc_stats);
     assert!(hystart.in_css(), "Should have entered CSS");
+    assert_eq!(cc_stats.css_entries, 1);
 
     // Start a new round in CSS
     let new_window_end = 300;
@@ -421,7 +419,7 @@ fn css_back_to_slow_start_on_rtt_decrease() {
             &RttEstimate::new(LOWER_RTT),
             i as u64, // Less than window_end
             INITIAL_CWND,
-            &mut CongestionControlStats::default(),
+            &mut cc_stats,
         );
     }
 
