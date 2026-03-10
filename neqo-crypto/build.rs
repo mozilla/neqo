@@ -335,6 +335,7 @@ fn setup_standalone(nss: &str) -> Vec<String> {
     setup_clang();
 
     println!("cargo:rerun-if-env-changed=NSS_DIR");
+    println!("cargo:rerun-if-env-changed=NSS_PREBUILT");
     let nss = PathBuf::from(nss);
     assert!(
         !nss.is_relative(),
