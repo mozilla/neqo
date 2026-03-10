@@ -13,7 +13,10 @@ use std::{
 
 use neqo_common::{qdebug, qtrace};
 
-use crate::cc::{CongestionEvent, classic_cc::WindowAdjustment};
+use crate::{
+    cc::{CongestionEvent, classic_cc::WindowAdjustment},
+    stats::CongestionControlStats,
+};
 
 /// Convert an integer congestion window value into a floating point value.
 /// This has the effect of reducing larger values to `1<<53`.
@@ -266,12 +269,12 @@ impl Cubic {
     }
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Cast from f64 to usize."
+)]
 impl WindowAdjustment for Cubic {
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "Cast from f64 to usize."
-    )]
     fn bytes_for_cwnd_increase(
         &mut self,
         curr_cwnd: usize,
@@ -413,6 +416,7 @@ impl WindowAdjustment for Cubic {
         acked_bytes: usize,
         max_datagram_size: usize,
         congestion_event: CongestionEvent,
+        cc_stats: &mut CongestionControlStats,
     ) -> (usize, usize) {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
         // Fast Convergence
@@ -437,6 +441,7 @@ impl WindowAdjustment for Cubic {
             } else {
                 curr_cwnd_f64
             };
+        cc_stats.w_max = self.current.w_max as usize;
 
         // Reducing the congestion window and resetting time
         self.current.t_epoch = None;
@@ -461,7 +466,7 @@ impl WindowAdjustment for Cubic {
         self.stored = Some(self.current.clone());
     }
 
-    fn restore_undo_state(&mut self) {
+    fn restore_undo_state(&mut self, cc_stats: &mut CongestionControlStats) {
         let Some(stored) = self.stored.take() else {
             debug_assert!(false, "couldn't restore {self} specific undo state");
             return;
@@ -472,5 +477,6 @@ impl WindowAdjustment for Cubic {
             self.current
         );
         self.current = stored;
+        cc_stats.w_max = self.current.w_max as usize;
     }
 }

@@ -148,6 +148,11 @@ pub struct CongestionControlStats {
     /// None if we haven't exited slow start or if we re-entered after spurious congestion.
     /// When exiting via congestion event, this is the cwnd AFTER the reduction.
     pub slow_start_exit_cwnd: Option<usize>,
+    /// Cubic's `w_max`: the congestion window (in bytes) just before the most recent
+    /// congestion reduction (with fast convergence applied). Reports 0 (the initial value) if no
+    /// congestion event has occurred or Cubic is not in use. Recorded as a stat to approximate a
+    /// connection's ideal congestion window in metrics.
+    pub w_max: usize,
     /// The current congestion window size (in bytes). Updated throughout the connection
     /// lifetime.
     pub cwnd: usize,
