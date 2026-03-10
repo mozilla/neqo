@@ -487,7 +487,7 @@ impl Session {
         conn: &mut Connection,
         now: Instant,
     ) -> Vec<(Option<u64>, super::datagram_queue::DatagramOutcome)> {
-        let (outcomes, payload_bytes, _overhead_bytes) = self.protocol.process_datagram_queue(now, &mut |data, id| {
+        let (outcomes, payload_bytes, overhead_bytes) = self.protocol.process_datagram_queue(now, &mut |data, id| {
             let tracking = match id {
                 Some(id_val) => DatagramTracking::Id(id_val),
                 None => DatagramTracking::None,
@@ -507,6 +507,9 @@ impl Session {
         }
         if payload_bytes > 0 {
             self.protocol.record_bytes_sent(payload_bytes);
+        }
+        if overhead_bytes > 0 {
+            self.protocol.record_bytes_sent_overhead(overhead_bytes);
         }
 
         outcomes

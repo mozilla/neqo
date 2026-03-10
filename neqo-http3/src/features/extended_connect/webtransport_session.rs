@@ -114,6 +114,10 @@ impl Session {
         self.stats.bytes_sent += bytes;
     }
 
+    pub(crate) fn record_bytes_sent_overhead(&mut self, bytes: u64) {
+        self.stats.bytes_sent_overhead += bytes;
+    }
+
     pub(crate) fn record_bytes_received(&mut self, bytes: u64) {
         self.stats.bytes_received += bytes;
     }
@@ -349,6 +353,10 @@ impl Protocol for Session {
 
     fn record_bytes_sent(&mut self, bytes: u64) {
         self.record_bytes_sent(bytes);
+    }
+
+    fn record_bytes_sent_overhead(&mut self, bytes: u64) {
+        self.record_bytes_sent_overhead(bytes);
     }
 
     fn record_bytes_received(&mut self, bytes: u64) {
