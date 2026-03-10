@@ -19,7 +19,7 @@ use crate::{
     packet::MIN_INITIAL_PACKET_SIZE,
     recovery::sent,
     rtt::RttEstimate,
-    stats::CongestionControlStats,
+    stats::{CongestionControlStats, SlowStartExitReason},
 };
 
 const BASE_RTT: Duration = Duration::from_millis(100);
@@ -515,6 +515,10 @@ fn integration_full_slow_start_to_css_to_ca() {
             assert!(
                 growth < MIN_INITIAL_PACKET_SIZE / HyStart::CSS_GROWTH_DIVISOR,
                 "We should be using CA growth once we detected exit to CA."
+            );
+            assert_eq!(
+                stats.slow_start_exit_reason,
+                Some(SlowStartExitReason::Heuristic)
             );
             break;
         }
