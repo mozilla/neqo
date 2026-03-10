@@ -6,9 +6,7 @@
 
 use std::fmt::{self, Display};
 
-use crate::{
-    cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::CongestionControlStats,
-};
+use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::CongestionControlStats};
 
 /// Classic slow start as described in RFC 9002.
 ///
