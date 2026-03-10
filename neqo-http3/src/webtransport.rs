@@ -224,6 +224,8 @@ pub trait ClientSession {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(bool, Option<extended_connect::DatagramOutcome>)>;
 }
 
@@ -397,10 +399,20 @@ impl ClientSession for Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(bool, Option<extended_connect::DatagramOutcome>)> {
         qtrace!("webtransport_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
-        handler.webtransport_send_datagram(session_id, conn, buf, id, now)
+        handler.webtransport_send_datagram(
+            session_id,
+            conn,
+            buf,
+            id,
+            now,
+            send_group_id,
+            send_order,
+        )
     }
 }
 
@@ -474,6 +486,10 @@ trait Handler {
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats>;
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "send_group_id and send_order are required for WebTransport datagram scheduling"
+    )]
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &self,
         session_id: StreamId,
@@ -481,6 +497,8 @@ trait Handler {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(bool, Option<extended_connect::DatagramOutcome>)>;
 }
 
@@ -557,8 +575,18 @@ impl Handler for Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(bool, Option<extended_connect::DatagramOutcome>)> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
+        self.extended_connect_send_datagram(
+            session_id,
+            conn,
+            buf,
+            id,
+            now,
+            send_group_id,
+            send_order,
+        )
     }
 }
 
@@ -588,6 +616,10 @@ pub(crate) trait ServerHandler {
         stream_type: StreamType,
     ) -> Res<StreamId>;
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "send_group_id and send_order are required for WebTransport datagram scheduling"
+    )]
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         conn: &mut Connection,
@@ -595,6 +627,8 @@ pub(crate) trait ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<()>;
 }
 
@@ -650,10 +684,12 @@ impl ServerHandler for Http3ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<()> {
         self.mark_needs_processing();
         self.base_handler_mut()
-            .webtransport_send_datagram(session_id, conn, buf, id, now)
+            .webtransport_send_datagram(session_id, conn, buf, id, now, send_group_id, send_order)
             .map(|_| ())
     }
 }
@@ -773,6 +809,8 @@ impl ServerSession {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<()> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
@@ -784,6 +822,8 @@ impl ServerSession {
                 buf,
                 id,
                 now,
+                send_group_id,
+                send_order,
             )
     }
 
