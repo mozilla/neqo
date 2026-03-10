@@ -437,6 +437,8 @@ impl Session {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(bool, Option<DatagramOutcome>)> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state != State::Active {
@@ -475,6 +477,8 @@ impl Session {
             id_opt,
             payload_len,
             now,
+            send_group_id,
+            send_order,
         );
 
         qtrace!("[{self}] enqueued datagram for sending via QUIC datagram");

@@ -46,7 +46,7 @@ fn no_datagrams() {
     );
 
     assert_eq!(
-        wt_session.send_datagram(DGRAM, None, now()),
+        wt_session.send_datagram(DGRAM, None, now(), 0, 0),
         Err(Error::Transport(TransportError::NotAvailable))
     );
     assert_eq!(
@@ -69,7 +69,7 @@ fn do_datagram_test(wt: &mut WtTest, wt_session: &ServerSession) {
         Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
     );
 
-    assert_eq!(wt_session.send_datagram(DGRAM, None, now()), Ok(()));
+    assert_eq!(wt_session.send_datagram(DGRAM, None, now(), 0, 0), Ok(()));
     assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(()));
 
     wt.exchange_packets();
@@ -105,7 +105,7 @@ fn datagrams_server_only() {
     );
 
     assert_eq!(
-        wt_session.send_datagram(DGRAM, None, now()),
+        wt_session.send_datagram(DGRAM, None, now(), 0, 0),
         Err(Error::Transport(TransportError::NotAvailable))
     );
     assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(()));
@@ -135,7 +135,7 @@ fn datagrams_client_only() {
         Err(Error::Transport(TransportError::NotAvailable))
     );
 
-    assert_eq!(wt_session.send_datagram(DGRAM, None, now()), Ok(()));
+    assert_eq!(wt_session.send_datagram(DGRAM, None, now(), 0, 0), Ok(()));
     assert_eq!(
         wt.send_datagram(wt_session.stream_id(), DGRAM),
         Err(Error::Transport(TransportError::NotAvailable))
@@ -192,15 +192,15 @@ fn datagram_high_water_mark_reported_via_send_datagram() {
 
     let (below1, dropped1) = wt
         .client
-        .webtransport_send_datagram(session_id, DGRAM, None, now())
+        .webtransport_send_datagram(session_id, DGRAM, None, now(), 0, 0)
         .unwrap();
     let (below2, dropped2) = wt
         .client
-        .webtransport_send_datagram(session_id, DGRAM, None, now())
+        .webtransport_send_datagram(session_id, DGRAM, None, now(), 0, 0)
         .unwrap();
     let (below3, dropped3) = wt
         .client
-        .webtransport_send_datagram(session_id, DGRAM, None, now())
+        .webtransport_send_datagram(session_id, DGRAM, None, now(), 0, 0)
         .unwrap();
 
     assert!(below1);
@@ -219,14 +219,14 @@ fn datagram_hard_limit_overflow_reports_outcome() {
     for id in 0..limit {
         let (_, dropped) = wt
             .client
-            .webtransport_send_datagram(session_id, DGRAM, Some(id), now())
+            .webtransport_send_datagram(session_id, DGRAM, Some(id), now(), 0, 0)
             .unwrap();
         assert_eq!(dropped, None);
     }
 
     let (_, dropped) = wt
         .client
-        .webtransport_send_datagram(session_id, DGRAM, Some(limit), now())
+        .webtransport_send_datagram(session_id, DGRAM, Some(limit), now(), 0, 0)
         .unwrap();
     assert_eq!(dropped, Some(DatagramOutcome::Overflowed(0)));
 }
@@ -241,7 +241,7 @@ fn datagram_sent_reports_client_event() {
     let session_id = wt_session.stream_id();
 
     wt.client
-        .webtransport_send_datagram(session_id, DGRAM, Some(9u64), now())
+        .webtransport_send_datagram(session_id, DGRAM, Some(9u64), now(), 0, 0)
         .unwrap();
     wt.exchange_packets();
 
@@ -265,7 +265,7 @@ fn datagram_max_age_expiry_reports_client_event() {
 
     let t0 = now();
     wt.client
-        .webtransport_send_datagram(session_id, DGRAM, Some(7u64), t0)
+        .webtransport_send_datagram(session_id, DGRAM, Some(7u64), t0, 0, 0)
         .unwrap();
 
     let t1 = t0 + Duration::from_millis(200);
