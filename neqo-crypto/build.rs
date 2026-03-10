@@ -335,6 +335,7 @@ fn setup_standalone(nss: &str) -> Vec<String> {
     setup_clang();
 
     println!("cargo:rerun-if-env-changed=NSS_DIR");
+    println!("cargo:rerun-if-env-changed=NSS_PREBUILT");
     let nss = PathBuf::from(nss);
     assert!(
         !nss.is_relative(),
@@ -346,8 +347,9 @@ fn setup_standalone(nss: &str) -> Vec<String> {
     println!("cargo:rerun-if-env-changed=NSS_TARGET");
     let nsstarget = "Release";
 
-    // If NSS_PREBUILT is set, we assume that the NSS libraries are already built.
-    if env::var("NSS_PREBUILT").is_err() {
+    // If NSS_PREBUILT is set to a non-zero value, we assume that the NSS libraries are already
+    // built.
+    if !env::var("NSS_PREBUILT").is_ok_and(|v| v != "0") {
         build_nss(nss);
     }
 
