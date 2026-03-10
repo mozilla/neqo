@@ -1692,8 +1692,10 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(bool, Option<(Option<u64>, extended_connect::datagram_queue::DatagramOutcome)>)> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
+        self.extended_connect_send_datagram(session_id, conn, buf, id, now, send_group_id, send_order)
     }
 
     pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
@@ -1703,8 +1705,10 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(bool, Option<(Option<u64>, extended_connect::datagram_queue::DatagramOutcome)>)> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
+        self.extended_connect_send_datagram(session_id, conn, buf, id, now, send_group_id, send_order)
     }
 
     fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
@@ -1714,6 +1718,8 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(bool, Option<(Option<u64>, extended_connect::datagram_queue::DatagramOutcome)>)> {
         self.recv_streams
             .get_mut(&session_id)
@@ -1721,7 +1727,7 @@ impl Http3Connection {
             .extended_connect_session()
             .ok_or(Error::InvalidStreamId)?
             .borrow_mut()
-            .send_datagram(conn, buf, id, now)
+            .send_datagram(conn, buf, id, now, send_group_id, send_order)
     }
 
     fn extended_connect_set_datagram_high_water_mark(

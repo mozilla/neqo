@@ -430,6 +430,8 @@ impl Session {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(bool, Option<(Option<u64>, super::datagram_queue::DatagramOutcome)>)> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state != State::Active {
@@ -466,7 +468,7 @@ impl Session {
         };
 
         let payload_len = buf.len();
-        let (below_watermark, dropped) = self.protocol.enqueue_datagram(Bytes::from(Vec::<u8>::from(dgram_data)), id_opt, payload_len, now);
+        let (below_watermark, dropped) = self.protocol.enqueue_datagram(Bytes::from(Vec::<u8>::from(dgram_data)), id_opt, payload_len, now, send_group_id, send_order);
 
         qtrace!("[{self}] enqueued datagram for sending via QUIC datagram");
         Ok((below_watermark, dropped))
@@ -774,6 +776,8 @@ pub(crate) trait Protocol: Debug + Display {
         _id: Option<u64>,
         _payload_len: usize,
         _now: Instant,
+        _send_group_id: u64,
+        _send_order: i64
     ) -> (bool, Option<(Option<u64>, super::datagram_queue::DatagramOutcome)>) {
         (true, None)
     }
