@@ -127,6 +127,7 @@ pub trait SlowStart: Display + Debug {
         rtt_est: &RttEstimate,
         largest_acked: packet::Number,
         curr_cwnd: usize,
+        cc_stats: &mut CongestionControlStats,
     ) -> Option<usize>;
 
     /// Calculates the congestion window increase in bytes during slow start. The default
@@ -343,6 +344,7 @@ where
                 rtt_est,
                 largest_packet_acked.pn(),
                 self.current.congestion_window,
+                cc_stats,
             ) {
                 qdebug!("Exited slow start by algorithm");
                 self.current.congestion_window = exit_cwnd;
@@ -1992,7 +1994,7 @@ mod tests {
 
         // Dirty HyStart state so current_round_min_rtt is non-None.
         cc.slow_start
-            .on_packets_acked(&RttEstimate::new(RTT), 0, cc.cwnd());
+            .on_packets_acked(&RttEstimate::new(RTT), 0, cc.cwnd(), &mut cc_stats);
         assert!(cc.slow_start.current_round_min_rtt().is_some());
 
         cc.detect_persistent_congestion(
