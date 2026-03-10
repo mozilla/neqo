@@ -330,26 +330,28 @@ impl LossRecoverySpace {
             .take_while(|p| largest_acked.is_some_and(|largest_ack| p.pn() < largest_ack))
         {
             // Packets sent before now - loss_delay are deemed lost.
-            if packet.time_sent() + loss_delay <= now {
+            let trigger = if packet.time_sent() + loss_delay <= now {
                 qtrace!(
                     "lost={}, time sent {:?} is before lost_delay {loss_delay:?}",
                     packet.pn(),
                     packet.time_sent()
                 );
+                sent::LossTrigger::TimeThreshold
             } else if largest_acked >= Some(packet.pn() + PACKET_THRESHOLD) {
                 qtrace!(
                     "lost={}, is >= {PACKET_THRESHOLD} from largest acked {largest_acked:?}",
                     packet.pn()
                 );
+                sent::LossTrigger::ReorderingThreshold
             } else {
                 if largest_acked.is_some() {
                     self.first_ooo_time = Some(packet.time_sent());
                 }
                 // No more packets can be declared lost after this one.
                 break;
-            }
+            };
 
-            if packet.declare_lost(now) {
+            if packet.declare_lost(now, trigger) {
                 lost_packets.push(packet.clone());
             }
         }

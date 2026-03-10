@@ -21,9 +21,9 @@ use qlog::events::{
     quic::{
         AckedRanges, CongestionStateUpdated, CongestionStateUpdatedTrigger, ErrorSpace,
         LossTimerEventType, LossTimerUpdated, MetricsUpdated, PacketDropped, PacketDroppedTrigger,
-        PacketHeader, PacketLost, PacketNumberSpace as QlogPacketNumberSpace, PacketReceived,
-        PacketSent, PacketsAcked, QuicFrame, RecoveryParametersSet, StreamType, TimerType,
-        VersionInformation,
+        PacketHeader, PacketLost, PacketLostTrigger, PacketNumberSpace as QlogPacketNumberSpace,
+        PacketReceived, PacketSent, PacketsAcked, QuicFrame, RecoveryParametersSet, StreamType,
+        TimerType, VersionInformation,
     },
 };
 use smallvec::SmallVec;
@@ -288,8 +288,14 @@ pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
             let header =
                 PacketHeader::with_type(pkt.packet_type().into(), Some(pkt.pn()), None, None, None);
 
+            let trigger = pkt
+                .loss_info()
+                .map(|info| PacketLostTrigger::from(info.trigger))
+                .or_else(|| pkt.pto_fired().then_some(PacketLostTrigger::PtoExpired));
+
             let ev_data = EventData::PacketLost(PacketLost {
                 header: Some(header),
+                trigger,
                 ..Default::default()
             });
 
@@ -813,6 +819,15 @@ impl From<LossTimerType> for TimerType {
         match value {
             LossTimerType::Ack => Self::Ack,
             LossTimerType::Pto => Self::Pto,
+        }
+    }
+}
+
+impl From<sent::LossTrigger> for PacketLostTrigger {
+    fn from(value: sent::LossTrigger) -> Self {
+        match value {
+            sent::LossTrigger::TimeThreshold => Self::TimeThreshold,
+            sent::LossTrigger::ReorderingThreshold => Self::ReorderingThreshold,
         }
     }
 }
