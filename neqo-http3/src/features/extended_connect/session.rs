@@ -505,11 +505,14 @@ impl Session {
         let (mut outcomes, to_send) = self.protocol.drain_datagram_queue(now);
 
         let mut payload_bytes = 0u64;
+        let mut overhead_bytes = 0u64;
         for dgram in to_send {
+            let total_len = dgram.data.len();
             match conn.send_datagram(dgram.data.into_vec(), DatagramTracking::Id(dgram.id)) {
                 Ok(()) => {
                     self.protocol.record_datagram_sent();
                     payload_bytes += dgram.payload_len as u64;
+                    overhead_bytes += (total_len - dgram.payload_len) as u64;
                     outcomes.push((dgram.id, super::datagram_queue::DatagramOutcome::Sent));
                 }
                 Err(_) => break,
@@ -517,6 +520,9 @@ impl Session {
         }
         if payload_bytes > 0 {
             self.protocol.record_bytes_sent(payload_bytes);
+        }
+        if overhead_bytes > 0 {
+            self.protocol.record_bytes_sent_overhead(overhead_bytes);
         }
 
         outcomes
