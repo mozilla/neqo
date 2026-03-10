@@ -20,6 +20,8 @@
 pub struct SessionStats {
     /// Payload bytes sent in WebTransport datagrams (excludes stream data).
     pub datagram_bytes_sent: u64,
+    /// Framing overhead bytes for sent datagrams (excludes retransmissions).
+    pub bytes_sent_overhead: u64,
     /// Payload bytes received in WebTransport datagrams (excludes stream data).
     pub datagram_bytes_received: u64,
     /// Number of WebTransport datagrams sent.

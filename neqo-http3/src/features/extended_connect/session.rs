@@ -440,10 +440,12 @@ impl Session {
         self.protocol.write_datagram_prefix(&mut dgram_data);
         dgram_data.encode(buf);
 
+        let overhead = dgram_data.len() - buf.len();
         conn.send_datagram(dgram_data.into(), id)?;
         if let Some(stats) = self.protocol.stats_mut() {
             stats.datagrams_sent += 1;
             stats.datagram_bytes_sent += buf.len() as u64;
+            stats.bytes_sent_overhead += overhead as u64;
         }
         qtrace!("[{self}] sent datagram via QUIC datagram");
         Ok(())
