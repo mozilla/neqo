@@ -813,6 +813,7 @@ dependencies = [
  "codspeed-criterion-compat",
  "enumset",
  "http",
+ "indexmap",
  "log",
  "neqo-common",
  "neqo-http3",

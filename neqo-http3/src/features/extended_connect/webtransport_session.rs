@@ -156,8 +156,11 @@ impl Session {
         id: u64,
         payload_len: usize,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> (bool, Option<(u64, DatagramOutcome)>) {
-        self.datagram_queue.enqueue(data, id, payload_len, now)
+        self.datagram_queue
+            .enqueue(data, id, payload_len, now, send_group_id, send_order)
     }
 
     pub(crate) fn drain_datagram_queue(
@@ -406,8 +409,10 @@ impl Protocol for Session {
         id: u64,
         payload_len: usize,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> (bool, Option<(u64, DatagramOutcome)>) {
-        self.enqueue_datagram(data, id, payload_len, now)
+        self.enqueue_datagram(data, id, payload_len, now, send_group_id, send_order)
     }
 
     fn drain_datagram_queue(

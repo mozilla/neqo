@@ -848,13 +848,23 @@ impl Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(
         bool,
         Option<(u64, crate::features::extended_connect::DatagramOutcome)>,
     )> {
         qtrace!("webtransport_send_datagram session:{session_id:?}");
         self.base_handler
-            .webtransport_send_datagram(session_id, &mut self.conn, buf, id, now)
+            .webtransport_send_datagram(
+                session_id,
+                &mut self.conn,
+                buf,
+                id,
+                now,
+                send_group_id,
+                send_order,
+            )
     }
 
     /// Send `ConnectUdp` datagram.
@@ -870,13 +880,23 @@ impl Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(
         bool,
         Option<(u64, crate::features::extended_connect::DatagramOutcome)>,
     )> {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
         self.base_handler
-            .connect_udp_send_datagram(session_id, &mut self.conn, buf, id, now)
+            .connect_udp_send_datagram(
+                session_id,
+                &mut self.conn,
+                buf,
+                id,
+                now,
+                send_group_id,
+                send_order,
+            )
     }
 
     /// Returns the current max size of a datagram that can fit into a packet.

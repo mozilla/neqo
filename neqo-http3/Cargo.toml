@@ -21,6 +21,7 @@ workspace = true
 [dependencies]
 enumset = { workspace = true }
 http = { workspace = true }
+indexmap = { version = "2", default-features = false }
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 neqo-qpack = { path = "./../neqo-qpack" }
