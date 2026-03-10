@@ -33,7 +33,7 @@ fn do_datagram_test(wt: &mut WtTest, wt_session: &ServerSession) {
     );
 
     assert_eq!(
-        wt_session.send_datagram(DGRAM, None, now()),
+        wt_session.send_datagram(DGRAM, None, now(), 0, 0),
         Ok(DatagramQueueOutcome::Ok)
     );
     assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(()));
@@ -96,7 +96,7 @@ fn datagram_high_water_mark_reported_via_send_datagram() {
 
     let mut send = || {
         wt.client
-            .webtransport_send_datagram(session_id, DGRAM, None, now())
+            .webtransport_send_datagram(session_id, DGRAM, None, now(), 0, 0)
             .unwrap()
     };
 
@@ -115,14 +115,14 @@ fn datagram_hard_limit_overflow_reports_outcome() {
     for id in 0..limit {
         let outcome = wt
             .client
-            .webtransport_send_datagram(session_id, DGRAM, Some(id), now())
+            .webtransport_send_datagram(session_id, DGRAM, Some(id), now(), 0, 0)
             .unwrap();
         assert_eq!(outcome, DatagramQueueOutcome::Ok);
     }
 
     let outcome = wt
         .client
-        .webtransport_send_datagram(session_id, DGRAM, Some(limit), now())
+        .webtransport_send_datagram(session_id, DGRAM, Some(limit), now(), 0, 0)
         .unwrap();
     assert_eq!(outcome, DatagramQueueOutcome::Overflowed);
 
@@ -160,11 +160,11 @@ fn datagram_hard_limit_overflow_counts_untracked_drops() {
     let limit = u64::try_from(DEFAULT_HARD_LIMIT).unwrap();
     for _ in 0..limit {
         wt.client
-            .webtransport_send_datagram(session_id, DGRAM, None, now())
+            .webtransport_send_datagram(session_id, DGRAM, None, now(), 0, 0)
             .unwrap();
     }
     wt.client
-        .webtransport_send_datagram(session_id, DGRAM, None, now())
+        .webtransport_send_datagram(session_id, DGRAM, None, now(), 0, 0)
         .unwrap();
 
     assert_eq!(
@@ -186,7 +186,7 @@ fn datagram_sent_reports_client_event() {
     let session_id = wt_session.stream_id();
 
     wt.client
-        .webtransport_send_datagram(session_id, DGRAM, Some(9u64), now())
+        .webtransport_send_datagram(session_id, DGRAM, Some(9u64), now(), 0, 0)
         .unwrap();
     wt.exchange_packets();
 
@@ -210,7 +210,7 @@ fn datagram_max_age_expiry_reports_client_event() {
 
     let t0 = now();
     wt.client
-        .webtransport_send_datagram(session_id, DGRAM, Some(7u64), t0)
+        .webtransport_send_datagram(session_id, DGRAM, Some(7u64), t0, 0, 0)
         .unwrap();
 
     let t1 = t0 + Duration::from_millis(200);
@@ -243,7 +243,7 @@ fn datagram_dropped_on_session_close_reports_outcome() {
     // Enqueued but not yet drained: no `process_output`/`exchange_packets`
     // call happens between this and the cancellation below.
     wt.client
-        .webtransport_send_datagram(session_id, DGRAM, Some(42u64), now())
+        .webtransport_send_datagram(session_id, DGRAM, Some(42u64), now(), 0, 0)
         .unwrap();
 
     wt.cancel_session_client(session_id);
@@ -286,7 +286,7 @@ fn datagram_dropped_on_peer_initiated_session_close_reports_outcome() {
     };
 
     wt.client
-        .webtransport_send_datagram(session_id, DGRAM, Some(42u64), now())
+        .webtransport_send_datagram(session_id, DGRAM, Some(42u64), now(), 0, 0)
         .unwrap();
 
     // A single `process` call both reads the close capsule (driving the
@@ -318,7 +318,7 @@ fn server_datagram_high_water_mark_reported_via_send_datagram() {
 
     wt_session.set_datagram_high_water_mark(Some(2)).unwrap();
 
-    let send = || wt_session.send_datagram(DGRAM, None, now()).unwrap();
+    let send = || wt_session.send_datagram(DGRAM, None, now(), 0, 0).unwrap();
     assert_eq!(send(), DatagramQueueOutcome::Ok);
     assert_eq!(send(), DatagramQueueOutcome::AboveWatermark);
     assert_eq!(send(), DatagramQueueOutcome::AboveWatermark);
@@ -333,7 +333,7 @@ fn server_datagram_sent_and_max_age_expiry_report_server_event() {
     let wt_session = wt.create_wt_session();
     let session_id = wt_session.stream_id();
 
-    wt_session.send_datagram(DGRAM, Some(1u64), now()).unwrap();
+    wt_session.send_datagram(DGRAM, Some(1u64), now(), 0, 0).unwrap();
     wt.exchange_packets();
 
     let sent_event = |e| {
@@ -348,7 +348,7 @@ fn server_datagram_sent_and_max_age_expiry_report_server_event() {
     assert!(wt.server.events().any(sent_event));
 
     let t0 = now();
-    wt_session.send_datagram(DGRAM, Some(2u64), t0).unwrap();
+    wt_session.send_datagram(DGRAM, Some(2u64), t0, 0, 0).unwrap();
     let t1 = t0 + Duration::from_millis(200);
     wt_session
         .set_datagram_max_age(Duration::from_millis(100), t1)
@@ -391,9 +391,9 @@ fn server_datagram_expires_on_an_otherwise_idle_connection() {
     // datagram is left stuck in the http3-level queue rather than sent
     // immediately.
     for _ in 0..15 {
-        wt_session.send_datagram(DGRAM, None, now()).unwrap();
+        wt_session.send_datagram(DGRAM, None, now(), 0, 0).unwrap();
     }
-    wt_session.send_datagram(DGRAM, Some(77u64), now()).unwrap();
+    wt_session.send_datagram(DGRAM, Some(77u64), now(), 0, 0).unwrap();
 
     let t0 = now();
     wt.server.process_output(t0);
@@ -436,9 +436,9 @@ fn server_shortening_max_age_on_idle_connection_still_expires_on_new_deadline() 
     // datagram is left stuck in the http3-level queue - and so still
     // subject to max-age - rather than handed to the QUIC layer immediately.
     for _ in 0..15 {
-        wt_session.send_datagram(DGRAM, None, now()).unwrap();
+        wt_session.send_datagram(DGRAM, None, now(), 0, 0).unwrap();
     }
-    wt_session.send_datagram(DGRAM, Some(77u64), now()).unwrap();
+    wt_session.send_datagram(DGRAM, Some(77u64), now(), 0, 0).unwrap();
 
     let t0 = now();
     wt.server.process_output(t0);
