@@ -840,11 +840,13 @@ impl Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<bool> {
         qtrace!("webtransport_send_datagram session:{session_id:?}");
         let (below_watermark, dropped) = self
             .base_handler
-            .webtransport_send_datagram(session_id, &mut self.conn, buf, id, now)?;
+            .webtransport_send_datagram(session_id, &mut self.conn, buf, id, now, send_group_id, send_order)?;
         if let Some((Some(tracking_id), outcome)) = dropped {
             self.events.insert(Http3ClientEvent::WebTransport(
                 WebTransportEvent::DatagramOutcome {
@@ -870,11 +872,13 @@ impl Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<bool> {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
         let (below_watermark, _dropped) = self
             .base_handler
-            .connect_udp_send_datagram(session_id, &mut self.conn, buf, id, now)?;
+            .connect_udp_send_datagram(session_id, &mut self.conn, buf, id, now, send_group_id, send_order)?;
         Ok(below_watermark)
     }
 
