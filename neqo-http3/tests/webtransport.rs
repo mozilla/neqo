@@ -463,7 +463,9 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
     wt_server_session
         .response(&SessionAcceptAction::Accept, now)
         .unwrap();
-    wt_server_session.send_datagram(b"PING", None, now).unwrap();
+    wt_server_session
+        .send_datagram(b"PING", None, now, 0, 0)
+        .unwrap();
     let accept_and_wt_datagram = server
         .process_output(now)
         .dgram()
@@ -707,6 +709,61 @@ fn wt_export_keying_material_transport_error() {
 }
 
 #[test]
+fn wt_session_stats_basic() {
+    let (mut client, mut server) = connect();
+    let wt_session = create_wt_session(&mut client, &mut server);
+
+    // Get initial stats
+    let stats = client.webtransport_session_stats(wt_session.stream_id());
+    assert!(stats.is_ok(), "Should have stats for active session");
+    let stats = stats.unwrap();
+
+    // Session stats track datagrams, not streams, so initially should be 0
+    assert_eq!(stats.datagram_bytes_sent, 0, "No datagrams sent yet");
+    assert_eq!(
+        stats.datagram_bytes_received, 0,
+        "No datagrams received yet"
+    );
+    assert_eq!(stats.datagrams_sent, 0);
+    assert_eq!(stats.datagrams_received, 0);
+}
+
+#[test]
+fn wt_session_stats_after_datagram_transfer() {
+    const DATAGRAM_DATA: &[u8] = &[1, 2, 3, 4, 5];
+
+    let (mut client, mut server) = connect();
+    let wt_session = create_wt_session(&mut client, &mut server);
+    let session_id = wt_session.stream_id();
+
+    // Get initial stats
+    let initial_stats = client.webtransport_session_stats(session_id).unwrap();
+    assert_eq!(initial_stats.datagram_bytes_sent, 0);
+    assert_eq!(initial_stats.datagrams_sent, 0);
+
+    // Send a datagram
+    client
+        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now(), 0, 0)
+        .unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+
+    // Get stats after transfer
+    let final_stats = client.webtransport_session_stats(session_id).unwrap();
+
+    // Verify datagram stats increased
+    assert_eq!(
+        final_stats.datagrams_sent, 1,
+        "Should have sent one datagram"
+    );
+    assert!(
+        final_stats.datagram_bytes_sent >= DATAGRAM_DATA.len() as u64,
+        "datagram_bytes_sent should be at least datagram size: {} >= {}",
+        final_stats.datagram_bytes_sent,
+        DATAGRAM_DATA.len()
+    );
+}
+
+#[test]
 fn wt_transport_stats_populated() {
     let (mut client, mut server) = connect();
     let _wt_session = create_wt_session(&mut client, &mut server);
@@ -780,7 +837,7 @@ fn wt_stats_at_session_close() {
 
     // Send a datagram to have some stats
     client
-        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now())
+        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now(), 0, 0)
         .unwrap();
     exchange_packets(&mut client, &mut server, false, None);
 

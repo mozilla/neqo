@@ -1631,6 +1631,10 @@ impl Http3Connection {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "send_group_id and send_order are required for WebTransport datagram scheduling"
+    )]
     pub(crate) fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
         &self,
         session_id: StreamId,
@@ -1638,25 +1642,23 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(
         bool,
         Option<extended_connect::datagram_queue::DatagramOutcome>,
     )> {
         self.validate_extended_connect_session(session_id)?
             .borrow_mut()
-            .send_datagram(conn, buf, id, now)
+            .send_datagram(conn, buf, id, now, send_group_id, send_order)
     }
 
     pub fn webtransport_set_datagram_high_water_mark(
-        &mut self,
+        &self,
         session_id: StreamId,
         mark: f64,
     ) -> Res<()> {
-        self.recv_streams
-            .get_mut(&session_id)
-            .ok_or(Error::InvalidStreamId)?
-            .extended_connect_session()
-            .ok_or(Error::InvalidStreamId)?
+        self.validate_extended_connect_session(session_id)?
             .borrow_mut()
             .set_datagram_high_water_mark(mark);
         Ok(())
