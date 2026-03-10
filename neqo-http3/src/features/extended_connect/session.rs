@@ -509,7 +509,9 @@ impl Session {
         let mut outcomes = self.record_expired(expired);
 
         let mut payload_bytes = 0;
+        let mut overhead_bytes = 0;
         for dgram in to_send {
+            let total_len = dgram.data.len();
             let tracking = dgram
                 .id
                 .map_or(DatagramTracking::None, DatagramTracking::Id);
@@ -520,6 +522,7 @@ impl Session {
                 Ok(()) => {
                     self.stats.datagrams_sent += 1;
                     payload_bytes += to_u64(dgram.payload_len);
+                    overhead_bytes += to_u64(total_len - dgram.payload_len);
                     DatagramOutcome::Sent
                 }
                 Err(e) => {
@@ -532,6 +535,7 @@ impl Session {
             }
         }
         self.stats.datagram_bytes_sent += payload_bytes;
+        self.stats.bytes_sent_overhead += overhead_bytes;
 
         outcomes
     }
