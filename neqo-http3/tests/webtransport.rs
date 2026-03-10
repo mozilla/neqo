@@ -466,7 +466,7 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
     wt_server_session
         .response(&SessionAcceptAction::Accept, now)
         .unwrap();
-    wt_server_session.send_datagram(b"PING", None, now).unwrap();
+    wt_server_session.send_datagram(b"PING", None, now, 0, 0).unwrap();
     let accept_and_wt_datagram = server
         .process_output(now)
         .dgram()
@@ -590,7 +590,7 @@ fn wt_session_stats_after_datagram_transfer() {
 
     // Send a datagram
     client
-        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now())
+        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now(), 0, 0)
         .unwrap();
     exchange_packets(&mut client, &mut server, false, None);
 
@@ -680,7 +680,7 @@ fn wt_stats_at_session_close() {
 
     // Send a datagram to have some stats
     client
-        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now())
+        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now(), 0, 0)
         .unwrap();
     exchange_packets(&mut client, &mut server, false, None);
 

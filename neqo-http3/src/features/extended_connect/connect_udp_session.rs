@@ -122,8 +122,11 @@ impl Protocol for Session {
         id: Option<u64>,
         payload_len: usize,
         now: Instant,
+        _send_group_id: u64,
+        _send_order: i64,
     ) -> (bool, Option<(Option<u64>, DatagramOutcome)>) {
-        self.datagram_queue.enqueue(data, id, payload_len, now)
+        // ConnectUdp sessions don't use send groups or send order.
+        self.datagram_queue.enqueue(data, id, payload_len, now, 0, 0)
     }
 
     fn process_datagram_queue(
