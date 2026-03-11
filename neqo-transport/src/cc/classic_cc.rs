@@ -273,7 +273,6 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
             if self.current.phase.in_recovery() {
                 self.set_phase(Phase::CongestionAvoidance, None, now);
-                qlog::metrics_updated(&mut self.qlog, &[qlog::Metric::InRecovery(false)], now);
             }
 
             new_acked += pkt.len();
@@ -803,7 +802,6 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             &[
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::SsThresh(self.current.ssthresh),
-                qlog::Metric::InRecovery(true),
             ],
             now,
         );

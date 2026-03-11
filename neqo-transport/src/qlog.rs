@@ -298,13 +298,11 @@ pub enum Metric {
     SmoothedRtt(Duration),
     LatestRtt(Duration),
     RttVariance(Duration),
-    MaxAckDelay(u64),
     PtoCount(usize),
     CongestionWindow(usize),
     BytesInFlight(usize),
     SsThresh(usize),
     PacketsInFlight(u64),
-    InRecovery(bool),
     PacingRate(u64),
 }
 
@@ -344,7 +342,6 @@ pub fn metrics_updated(qlog: &mut Qlog, updated_metrics: &[Metric], now: Instant
                     }
                     Metric::PacketsInFlight(v) => packets_in_flight = Some(*v),
                     Metric::PacingRate(v) => pacing_rate = Some(*v),
-                    _ => (),
                 }
             }
 
@@ -359,6 +356,7 @@ pub fn metrics_updated(qlog: &mut Qlog, updated_metrics: &[Metric], now: Instant
                 ssthresh,
                 packets_in_flight,
                 pacing_rate,
+                ..Default::default()
             });
 
             Some(ev_data)
