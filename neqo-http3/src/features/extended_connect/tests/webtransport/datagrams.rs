@@ -42,11 +42,11 @@ fn no_datagrams() {
 
     assert_eq!(
         wt_session.send_datagram(DGRAM, None, now()),
-        Err(Error::Transport(TransportError::TooMuchData))
+        Err(Error::Transport(TransportError::NotAvailable))
     );
     assert_eq!(
         wt.send_datagram(wt_session.stream_id(), DGRAM),
-        Err(Error::Transport(TransportError::TooMuchData))
+        Err(Error::Transport(TransportError::NotAvailable))
     );
 
     wt.exchange_packets();
@@ -104,7 +104,7 @@ fn datagrams_server_only() {
 
     assert_eq!(
         wt_session.send_datagram(DGRAM, None, now()),
-        Err(Error::Transport(TransportError::TooMuchData))
+        Err(Error::Transport(TransportError::NotAvailable))
     );
     assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(()));
 
@@ -137,7 +137,7 @@ fn datagrams_client_only() {
     assert_eq!(wt_session.send_datagram(DGRAM, None, now()), Ok(()));
     assert_eq!(
         wt.send_datagram(wt_session.stream_id(), DGRAM),
-        Err(Error::Transport(TransportError::TooMuchData))
+        Err(Error::Transport(TransportError::NotAvailable))
     );
 
     wt.exchange_packets();
