@@ -55,7 +55,7 @@ impl QueuedDatagram {
     }
 
     pub fn age(&self, now: Instant) -> Duration {
-        now.duration_since(self.timestamp)
+        now.saturating_duration_since(self.timestamp)
     }
 }
 
@@ -272,7 +272,9 @@ mod tests {
 
         queue.enqueue(Bytes::from(vec![1]), Some(1), 1, t0);
 
+        // Advance time by 150 ms without sleeping.
         let t1 = t0 + Duration::from_millis(150);
+
         let expired = queue.expire_old_datagrams(t1);
         assert_eq!(expired.len(), 1);
         assert_eq!(expired[0], Some(1));
