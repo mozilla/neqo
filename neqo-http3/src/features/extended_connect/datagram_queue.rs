@@ -41,7 +41,7 @@ impl QueuedDatagram {
     }
 
     pub fn age(&self, now: Instant) -> Duration {
-        now.duration_since(self.timestamp)
+        now.saturating_duration_since(self.timestamp)
     }
 }
 
@@ -199,6 +199,10 @@ impl Default for WebTransportDatagramQueue {
 mod tests {
     use super::*;
 
+    fn now() -> Instant {
+        Instant::now()
+    }
+
     #[test]
     fn test_queue_basic() {
         let mut queue = WebTransportDatagramQueue::new();
@@ -243,8 +247,9 @@ mod tests {
         queue.set_max_age(100.0, t0);
 
         queue.enqueue(Bytes::from(vec![1]), 1, 1, t0);
-
+        // Advance time by 150 ms without sleeping.
         let t1 = t0 + Duration::from_millis(150);
+
         let expired = queue.expire_old_datagrams(t1);
         assert_eq!(expired.len(), 1);
         assert_eq!(expired[0], 1);
