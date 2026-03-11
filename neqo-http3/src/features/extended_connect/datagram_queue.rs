@@ -113,16 +113,16 @@ impl WebTransportDatagramQueue {
 
     pub fn enqueue(&mut self, data: Bytes, id: Option<u64>, payload_len: usize, now: Instant) -> (bool, Option<(Option<u64>, DatagramOutcome)>) {
         let dropped = if self.queue.len() >= self.hard_limit {
-            if let Some(oldest) = self.queue.pop_front() {
-                qdebug!(
-                    "Queue at hard limit ({}), dropping oldest datagram {:?}",
-                    self.hard_limit,
-                    oldest.id
-                );
-                Some((oldest.id, DatagramOutcome::DroppedQueueFull))
-            } else {
-                None
-            }
+            let oldest = self
+                .queue
+                .pop_front()
+                .expect("queue is non-empty when at hard limit");
+            qdebug!(
+                "Queue at hard limit ({}), dropping oldest datagram {:?}",
+                self.hard_limit,
+                oldest.id
+            );
+            Some((oldest.id, DatagramOutcome::DroppedQueueFull))
         } else {
             None
         };
