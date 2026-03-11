@@ -130,20 +130,21 @@ impl WebTransportDatagramQueue {
         payload_len: usize,
         now: Instant,
     ) -> (bool, Option<DatagramOutcome>) {
-        let dropped = if self.queue.len() >= self.hard_limit {
-            let oldest = self
-                .queue
-                .pop_front()
-                .expect("len() >= hard_limit > 0 implies non-empty");
-            qdebug!(
-                "Queue at hard limit ({}), dropping oldest datagram {:?}",
-                self.hard_limit,
+        let dropped = (self.queue.len() >= self.hard_limit)
+            .then(|| {
+                let oldest = self
+                    .queue
+                    .pop_front()
+                    .expect("queue is non-empty when at hard limit");
+                qdebug!(
+                    "Queue at hard limit ({}), dropping oldest datagram {:?}",
+                    self.hard_limit,
+                    oldest.id
+                );
                 oldest.id
-            );
-            oldest.id.map(DatagramOutcome::Overflowed)
-        } else {
-            None
-        };
+            })
+            .flatten()
+            .map(DatagramOutcome::Overflowed);
 
         let datagram = QueuedDatagram::new(data, id, payload_len, now);
         self.queue.push_back(datagram);
