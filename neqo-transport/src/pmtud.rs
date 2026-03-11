@@ -9,13 +9,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, qdebug, qinfo};
+use neqo_common::{Buffer, qdebug, qinfo, qlog::Qlog};
 use static_assertions::const_assert;
 
 use crate::{
     Stats,
     frame::{FrameEncoder as _, FrameType},
-    packet,
+    packet, qlog,
     recovery::{self, sent},
 };
 
@@ -59,6 +59,7 @@ pub struct Pmtud {
     probe_count: usize,
     probe_state: Probe,
     raise_timer: Option<Instant>,
+    qlog: Qlog,
 }
 
 impl Pmtud {
@@ -93,6 +94,19 @@ impl Pmtud {
             probe_count: 0,
             probe_state: Probe::NotNeeded,
             raise_timer: None,
+            qlog: Qlog::disabled(),
+        }
+    }
+
+    pub fn set_qlog(&mut self, qlog: Qlog) {
+        self.qlog = qlog;
+    }
+
+    fn maybe_mtu_updated(&mut self, old: usize, now: Instant) {
+        let new = self.plpmtu();
+        if old != new {
+            let done = !self.needs_probe();
+            qlog::mtu_updated(&mut self.qlog, old, new, done, now);
         }
     }
 
@@ -185,14 +199,17 @@ impl Pmtud {
 
         // A probe was ACKed, confirm the new MTU and try to probe upwards further.
         stats.pmtud_ack += acked;
+        let old_mtu = self.plpmtu();
         self.mtu = self.search_table[self.probe_index];
         stats.pmtud_pmtu = self.mtu;
         qdebug!("PMTUD probe of size {} succeeded", self.mtu);
         self.next(now, stats);
+        self.maybe_mtu_updated(old_mtu, now);
     }
 
     /// Stops the PMTUD process, setting the MTU to the largest successful probe size.
     fn stop(&mut self, idx: usize, now: Instant, stats: &mut Stats) {
+        let old_mtu = self.plpmtu();
         self.probe_state = Probe::NotNeeded; // We don't need to send any more probes
         self.probe_index = idx; // Index of the last successful probe
         self.mtu = self.search_table[idx]; // Leading to this MTU
@@ -204,6 +221,7 @@ impl Pmtud {
             self.mtu,
             self.raise_timer
         );
+        self.maybe_mtu_updated(old_mtu, now);
     }
 
     /// Checks whether a PMTUD probe has been lost. If it has been lost more than `MAX_PROBES`
@@ -237,12 +255,14 @@ impl Pmtud {
 
     /// Starts PMTUD from the minimum MTU, probing upward.
     pub fn start(&mut self, now: Instant, stats: &mut Stats) {
+        let old_mtu = self.plpmtu();
         self.probe_index = 0;
         self.mtu = self.search_table[self.probe_index];
         stats.pmtud_pmtu = self.mtu;
         self.raise_timer = None;
         qdebug!("PMTUD started, PLPMTU is now {}", self.mtu);
         self.next(now, stats);
+        self.maybe_mtu_updated(old_mtu, now);
     }
 
     /// Starts the next upward PMTUD probe.

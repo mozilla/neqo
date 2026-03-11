@@ -13,22 +13,29 @@ use std::{
 
 use neqo_common::{Decoder, Ecn, hex, qinfo, qlog::Qlog};
 use qlog::events::{
-    EventData, RawInfo,
-    connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated},
+    ApplicationErrorCode, ConnectionErrorCode, EventData, RawInfo,
+    connectivity::{
+        ConnectionClosed, ConnectionClosedTrigger, ConnectionStarted, ConnectionState,
+        ConnectionStateUpdated, MtuUpdated, TransportOwner,
+    },
     quic::{
         AckedRanges, CongestionStateUpdated, CongestionStateUpdatedTrigger, ErrorSpace,
-        MetricsUpdated, PacketDropped, PacketHeader, PacketLost, PacketReceived, PacketSent,
-        QuicFrame, StreamType, VersionInformation,
+        MetricsUpdated, PacketDropped, PacketDroppedTrigger, PacketHeader, PacketLost,
+        PacketNumberSpace as QlogPacketNumberSpace, PacketReceived, PacketSent, PacketsAcked,
+        QuicFrame, RecoveryParametersSet, StreamType, VersionInformation,
     },
 };
 use smallvec::SmallVec;
 
 use crate::{
+    CloseReason,
+    cc::{CWND_INITIAL_PKTS, CongestionControlAlgorithm, Cubic, PERSISTENT_CONG_THRESH},
     connection::State,
     frame::{CloseError, Frame},
     packet::{self, metadata::Direction},
     path::PathRef,
     recovery::sent,
+    rtt::{DEFAULT_INITIAL_RTT, GRANULARITY},
     stream_id::StreamType as NeqoStreamType,
     tparams::{
         TransportParameterId::{
@@ -39,6 +46,7 @@ use crate::{
         },
         TransportParametersHandler,
     },
+    tracking::PacketNumberSpace,
     version::{self, Version},
 };
 
@@ -49,6 +57,7 @@ pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler,
             #[expect(clippy::cast_possible_truncation, reason = "These are OK.")]
             let ev_data =
                 EventData::TransportParametersSet(qlog::events::quic::TransportParametersSet {
+                    owner: Some(TransportOwner::Remote),
                     original_destination_connection_id: remote
                         .get_bytes(OriginalDestinationConnectionId)
                         .map(hex),
@@ -123,23 +132,18 @@ fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     );
 }
 
-pub fn connection_state_updated(qlog: &mut Qlog, new_state: &State, now: Instant) {
+pub fn connection_state_updated(
+    qlog: &mut Qlog,
+    old_state: &State,
+    new_state: &State,
+    now: Instant,
+) {
     qlog.add_event_at(
         || {
-            let ev_data = EventData::ConnectionStateUpdated(ConnectionStateUpdated {
-                old: None,
-                new: match new_state {
-                    State::Init | State::WaitInitial => ConnectionState::Attempted,
-                    State::WaitVersion | State::Handshaking => ConnectionState::HandshakeStarted,
-                    State::Connected => ConnectionState::HandshakeCompleted,
-                    State::Confirmed => ConnectionState::HandshakeConfirmed,
-                    State::Closing { .. } => ConnectionState::Closing,
-                    State::Draining { .. } => ConnectionState::Draining,
-                    State::Closed { .. } => ConnectionState::Closed,
-                },
-            });
-
-            Some(ev_data)
+            Some(EventData::ConnectionStateUpdated(ConnectionStateUpdated {
+                old: Some(old_state.into()),
+                new: new_state.into(),
+            }))
         },
         now,
     );
@@ -266,6 +270,8 @@ pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, no
             let ev_data = EventData::PacketDropped(PacketDropped {
                 header: Some(header),
                 raw: Some(raw),
+                details: Some(decrypt_err.error.to_string()),
+                trigger: Some(PacketDroppedTrigger::DecryptionFailure),
                 ..Default::default()
             });
 
@@ -290,6 +296,87 @@ pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
         }
         Ok(())
     });
+}
+
+pub fn recovery_parameters_set(
+    qlog: &mut Qlog,
+    plpmtu: usize,
+    cc: CongestionControlAlgorithm,
+    now: Instant,
+) {
+    qlog.add_event_at(
+        || {
+            let loss_reduction_factor = match cc {
+                CongestionControlAlgorithm::NewReno => 0.5,
+                CongestionControlAlgorithm::Cubic => {
+                    f32::from(u8::try_from(Cubic::BETA_USIZE_DIVIDEND).expect("fits"))
+                        / f32::from(u8::try_from(Cubic::BETA_USIZE_DIVISOR).expect("fits"))
+                }
+            };
+            Some(EventData::RecoveryParametersSet(RecoveryParametersSet {
+                reordering_threshold: Some(
+                    u16::try_from(crate::recovery::PACKET_THRESHOLD).expect("fits"),
+                ),
+                time_threshold: Some(9.0 / 8.0),
+                timer_granularity: Some(u16::try_from(GRANULARITY.as_millis()).expect("fits")),
+                initial_rtt: Some(DEFAULT_INITIAL_RTT.as_secs_f32() * 1000.0),
+                max_datagram_size: Some(u32::try_from(plpmtu).expect("MTU fits in u32")),
+                initial_congestion_window: Some(
+                    u64::try_from(CWND_INITIAL_PKTS * plpmtu).expect("fits"),
+                ),
+                minimum_congestion_window: Some(
+                    u32::try_from(2 * plpmtu).expect("MTU fits in u32"),
+                ),
+                loss_reduction_factor: Some(loss_reduction_factor),
+                persistent_congestion_threshold: Some(
+                    u16::try_from(PERSISTENT_CONG_THRESH).expect("fits"),
+                ),
+            }))
+        },
+        now,
+    );
+}
+
+pub fn connection_closed(qlog: &mut Qlog, close_reason: &CloseReason, now: Instant) {
+    qlog.add_event_at(
+        || Some(EventData::ConnectionClosed(close_reason.into())),
+        now,
+    );
+}
+
+pub fn packets_acked(
+    qlog: &mut Qlog,
+    space: PacketNumberSpace,
+    acked_pkts: &[sent::Packet],
+    now: Instant,
+) {
+    if acked_pkts.is_empty() {
+        return;
+    }
+    qlog.add_event_at(
+        || {
+            let packet_number_space = Some(QlogPacketNumberSpace::from(space));
+            let packet_numbers = Some(acked_pkts.iter().map(sent::Packet::pn).collect::<Vec<_>>());
+            Some(EventData::PacketsAcked(PacketsAcked {
+                packet_number_space,
+                packet_numbers,
+            }))
+        },
+        now,
+    );
+}
+
+pub fn mtu_updated(qlog: &mut Qlog, old: usize, new: usize, done: bool, now: Instant) {
+    qlog.add_event_at(
+        || {
+            Some(EventData::MtuUpdated(MtuUpdated {
+                old: Some(u16::try_from(old).expect("MTU fits in u16")),
+                new: u16::try_from(new).expect("MTU fits in u16"),
+                done: Some(done),
+            }))
+        },
+        now,
+    );
 }
 
 #[expect(dead_code, reason = "TODO: Construct all variants.")]
@@ -514,10 +601,7 @@ impl From<Frame<'_>> for QuicFrame {
                 stream_type,
                 maximum_streams,
             } => Self::MaxStreams {
-                stream_type: match stream_type {
-                    NeqoStreamType::BiDi => StreamType::Bidirectional,
-                    NeqoStreamType::UniDi => StreamType::Unidirectional,
-                },
+                stream_type: stream_type.into(),
                 maximum: maximum_streams,
             },
             Frame::DataBlocked { data_limit } => Self::DataBlocked { limit: data_limit },
@@ -532,10 +616,7 @@ impl From<Frame<'_>> for QuicFrame {
                 stream_type,
                 stream_limit,
             } => Self::StreamsBlocked {
-                stream_type: match stream_type {
-                    NeqoStreamType::BiDi => StreamType::Bidirectional,
-                    NeqoStreamType::UniDi => StreamType::Unidirectional,
-                },
+                stream_type: stream_type.into(),
                 limit: stream_limit,
             },
             Frame::NewConnectionId {
@@ -564,10 +645,7 @@ impl From<Frame<'_>> for QuicFrame {
                 frame_type,
                 reason_phrase,
             } => Self::ConnectionClose {
-                error_space: match error_code {
-                    CloseError::Transport(_) => Some(ErrorSpace::TransportError),
-                    CloseError::Application(_) => Some(ErrorSpace::ApplicationError),
-                },
+                error_space: Some((&error_code).into()),
                 error_code: Some(error_code.code()),
                 error_code_value: Some(0),
                 reason: Some(reason_phrase),
@@ -583,6 +661,91 @@ impl From<Frame<'_>> for QuicFrame {
                 length: data.len() as u64,
                 raw: None,
             },
+        }
+    }
+}
+
+impl From<&State> for ConnectionState {
+    fn from(state: &State) -> Self {
+        match state {
+            State::Init | State::WaitInitial => Self::Attempted,
+            State::WaitVersion | State::Handshaking => Self::HandshakeStarted,
+            State::Connected => Self::HandshakeCompleted,
+            State::Confirmed => Self::HandshakeConfirmed,
+            State::Closing { .. } => Self::Closing,
+            State::Draining { .. } => Self::Draining,
+            State::Closed { .. } => Self::Closed,
+        }
+    }
+}
+
+impl From<PacketNumberSpace> for QlogPacketNumberSpace {
+    fn from(space: PacketNumberSpace) -> Self {
+        match space {
+            PacketNumberSpace::Initial => Self::Initial,
+            PacketNumberSpace::Handshake => Self::Handshake,
+            PacketNumberSpace::ApplicationData => Self::ApplicationData,
+        }
+    }
+}
+
+impl From<NeqoStreamType> for StreamType {
+    fn from(stream_type: NeqoStreamType) -> Self {
+        match stream_type {
+            NeqoStreamType::BiDi => Self::Bidirectional,
+            NeqoStreamType::UniDi => Self::Unidirectional,
+        }
+    }
+}
+
+impl From<&CloseError> for ErrorSpace {
+    fn from(error: &CloseError) -> Self {
+        match error {
+            CloseError::Transport(_) => Self::TransportError,
+            CloseError::Application(_) => Self::ApplicationError,
+        }
+    }
+}
+
+impl From<&CloseReason> for ConnectionClosed {
+    fn from(close_reason: &CloseReason) -> Self {
+        let (connection_code, application_code, trigger) = match close_reason {
+            CloseReason::Transport(e) if *e == crate::Error::IdleTimeout => {
+                (None, None, Some(ConnectionClosedTrigger::IdleTimeout))
+            }
+            CloseReason::Transport(e) if *e == crate::Error::StatelessReset => {
+                (None, None, Some(ConnectionClosedTrigger::StatelessReset))
+            }
+            CloseReason::Transport(e) if *e == crate::Error::VersionNegotiation => {
+                (None, None, Some(ConnectionClosedTrigger::VersionMismatch))
+            }
+            CloseReason::Transport(e) if *e == crate::Error::None => {
+                (None, None, Some(ConnectionClosedTrigger::Clean))
+            }
+            CloseReason::Transport(crate::Error::Peer(code)) => (
+                Some(ConnectionErrorCode::Value(*code)),
+                None,
+                Some(ConnectionClosedTrigger::Error),
+            ),
+            CloseReason::Application(code)
+            | CloseReason::Transport(crate::Error::PeerApplication(code)) => (
+                None,
+                Some(ApplicationErrorCode::Value(*code)),
+                Some(ConnectionClosedTrigger::Application),
+            ),
+            CloseReason::Transport(e) => (
+                Some(ConnectionErrorCode::Value(e.code())),
+                None,
+                Some(ConnectionClosedTrigger::Error),
+            ),
+        };
+        Self {
+            owner: None,
+            connection_code,
+            application_code,
+            internal_code: None,
+            reason: None,
+            trigger,
         }
     }
 }
