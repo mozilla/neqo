@@ -295,7 +295,7 @@ impl Http3ServerHandler {
             self.check_result(conn, now, &res);
 
             // Process datagram queues to send any queued datagrams
-            let _outcomes = self.base_handler.process_all_datagram_queues(conn);
+            let _outcomes = self.base_handler.process_all_datagram_queues(conn, now);
         }
     }
 

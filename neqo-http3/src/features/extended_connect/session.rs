@@ -466,7 +466,7 @@ impl Session {
         };
 
         let payload_len = buf.len();
-        let (below_watermark, dropped) = self.protocol.enqueue_datagram(Bytes::from(Vec::<u8>::from(dgram_data)), id_u64, payload_len);
+        let (below_watermark, dropped) = self.protocol.enqueue_datagram(Bytes::from(Vec::<u8>::from(dgram_data)), id_u64, payload_len, now);
 
         qtrace!("[{self}] enqueued datagram for sending via QUIC datagram");
         Ok((below_watermark, dropped))
@@ -475,8 +475,9 @@ impl Session {
     pub(crate) fn process_datagram_queue(
         &mut self,
         conn: &mut Connection,
+        now: Instant,
     ) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
-        let (outcomes, payload_bytes, _overhead_bytes) = self.protocol.process_datagram_queue(&mut |data, id| {
+        let (outcomes, payload_bytes, _overhead_bytes) = self.protocol.process_datagram_queue(now, &mut |data, id| {
             match conn.send_datagram(data.to_vec(), DatagramTracking::Id(id)) {
                 Ok(()) => Ok(()),
                 Err(_) => Err(()),
@@ -501,8 +502,8 @@ impl Session {
         self.protocol.set_datagram_high_water_mark(mark);
     }
 
-    pub(crate) fn set_datagram_max_age(&mut self, age_ms: f64) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
-        self.protocol.set_datagram_max_age(age_ms)
+    pub(crate) fn set_datagram_max_age(&mut self, age_ms: f64, now: Instant) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
+        self.protocol.set_datagram_max_age(age_ms, now)
     }
 
     pub(crate) fn datagram(&mut self, datagram: Bytes) {
@@ -750,15 +751,15 @@ pub(crate) trait Protocol: Debug + Display {
     fn set_datagram_high_water_mark(&mut self, _mark: f64) {
     }
 
-    fn set_datagram_max_age(&mut self, _age_ms: f64) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
+    fn set_datagram_max_age(&mut self, _age_ms: f64, _now: Instant) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
         Vec::new()
     }
 
-    fn enqueue_datagram(&mut self, _data: Bytes, _id: u64, _payload_len: usize) -> (bool, Option<(u64, super::datagram_queue::DatagramOutcome)>) {
+    fn enqueue_datagram(&mut self, _data: Bytes, _id: u64, _payload_len: usize, _now: Instant) -> (bool, Option<(u64, super::datagram_queue::DatagramOutcome)>) {
         (true, None)
     }
 
-    fn process_datagram_queue(&mut self, _send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> (Vec<(u64, super::datagram_queue::DatagramOutcome)>, u64, u64) {
+    fn process_datagram_queue(&mut self, _now: Instant, _send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> (Vec<(u64, super::datagram_queue::DatagramOutcome)>, u64, u64) {
         (Vec::new(), 0, 0)
     }
 }
