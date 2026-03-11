@@ -305,6 +305,7 @@ pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
     });
 }
 
+<<<<<<< HEAD
 pub fn recovery_parameters_set(
     qlog: &mut Qlog,
     plpmtu: usize,
@@ -386,6 +387,7 @@ pub fn mtu_updated(qlog: &mut Qlog, old_mtu: usize, new_mtu: usize, done: bool, 
     );
 }
 
+#[derive(Clone, Copy)]
 #[expect(dead_code, reason = "TODO: Construct all variants.")]
 pub enum Metric {
     MinRtt(Duration),

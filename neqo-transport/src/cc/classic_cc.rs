@@ -17,7 +17,7 @@ use rustc_hash::FxHashMap as HashMap;
 
 use super::CongestionControl;
 use crate::{
-    Pmtud, cc::CongestionEvent, packet, qlog, recovery::sent, rtt::RttEstimate,
+    Pmtud, cc::CongestionEvent, pace::Pacer, packet, qlog, recovery::sent, rtt::RttEstimate,
     sender::PACING_BURST_SIZE, stats::CongestionControlStats,
 };
 
@@ -174,6 +174,8 @@ pub struct ClassicCongestionControl<T> {
     /// - [`Self::bytes_in_flight`] is not stored because if it was to be restored it might get
     ///   out-of-sync with the actual number of bytes-in-flight on the path.
     stored: Option<State>,
+    /// The most recently observed smoothed RTT, used to compute the pacing rate.
+    last_rtt: Option<Duration>,
 }
 
 impl<T: Display> Display for ClassicCongestionControl<T> {
@@ -279,6 +281,8 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             new_acked += pkt.len();
         }
 
+        self.last_rtt = Some(rtt_est.estimate());
+
         if is_app_limited {
             self.cc_algorithm.on_app_limited();
             qdebug!(
@@ -341,6 +345,10 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             &[
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::BytesInFlight(self.bytes_in_flight),
+                qlog::Metric::PacingRate(Pacer::rate(
+                    self.current.congestion_window,
+                    rtt_est.estimate(),
+                )),
             ],
             now,
         );
@@ -460,6 +468,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
     fn discard_in_flight(&mut self, now: Instant) {
         self.bytes_in_flight = 0;
+        self.last_rtt = None;
         qlog::metrics_updated(
             &mut self.qlog,
             &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
@@ -521,6 +530,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             pmtud,
             current: State::new(mtu),
             stored: None,
+            last_rtt: None,
         }
     }
 
@@ -718,13 +728,24 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                     );
 
                     cc_stats.cwnd = self.current.congestion_window;
-                    qlog::metrics_updated(
-                        &mut self.qlog,
-                        &[qlog::Metric::CongestionWindow(
-                            self.current.congestion_window,
-                        )],
-                        now,
-                    );
+                    let cwnd = qlog::Metric::CongestionWindow(self.current.congestion_window);
+                    let ssthresh = qlog::Metric::SsThresh(self.current.ssthresh);
+                    if let Some(rtt) = self.last_rtt {
+                        qlog::metrics_updated(
+                            &mut self.qlog,
+                            &[
+                                cwnd,
+                                ssthresh,
+                                qlog::Metric::PacingRate(Pacer::rate(
+                                    self.current.congestion_window,
+                                    rtt,
+                                )),
+                            ],
+                            now,
+                        );
+                    } else {
+                        qlog::metrics_updated(&mut self.qlog, &[cwnd, ssthresh], now);
+                    }
 
                     return true;
                 }
@@ -798,14 +819,21 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             cc_stats.slow_start_exit_cwnd = Some(self.current.congestion_window);
         }
 
-        qlog::metrics_updated(
-            &mut self.qlog,
-            &[
-                qlog::Metric::CongestionWindow(self.current.congestion_window),
-                qlog::Metric::SsThresh(self.current.ssthresh),
-            ],
-            now,
-        );
+        let cwnd = qlog::Metric::CongestionWindow(self.current.congestion_window);
+        let ssthresh = qlog::Metric::SsThresh(self.current.ssthresh);
+        if let Some(rtt) = self.last_rtt {
+            qlog::metrics_updated(
+                &mut self.qlog,
+                &[
+                    cwnd,
+                    ssthresh,
+                    qlog::Metric::PacingRate(Pacer::rate(self.current.congestion_window, rtt)),
+                ],
+                now,
+            );
+        } else {
+            qlog::metrics_updated(&mut self.qlog, &[cwnd, ssthresh], now);
+        }
         let trigger =
             (congestion_event == CongestionEvent::Ecn).then_some(qlog::CongestionStateTrigger::Ecn);
         self.set_phase(Phase::RecoveryStart, trigger, now);
