@@ -19,6 +19,7 @@ use super::CongestionController;
 use crate::{
     Pmtud,
     cc::CongestionEvent,
+    pace::Pacer,
     packet, qlog,
     recovery::sent,
     rtt::RttEstimate,
@@ -210,6 +211,8 @@ pub struct ClassicCongestionController<S, T> {
     /// - [`Self::bytes_in_flight`] is not stored because if it was to be restored it might get
     ///   out-of-sync with the actual number of bytes-in-flight on the path.
     stored: Option<State>,
+    /// The most recently observed smoothed RTT, used to compute the pacing rate.
+    last_rtt: Option<Duration>,
 }
 
 impl<S: Display, T: Display> Display for ClassicCongestionController<S, T> {
@@ -330,6 +333,8 @@ where
             new_acked += pkt.len();
         }
 
+        self.last_rtt = Some(rtt_est.estimate());
+
         if is_app_limited {
             self.congestion_control.on_app_limited();
             qdebug!(
@@ -413,6 +418,10 @@ where
             &[
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::BytesInFlight(self.bytes_in_flight),
+                qlog::Metric::PacingRate(Pacer::rate(
+                    self.current.congestion_window,
+                    rtt_est.estimate(),
+                )),
             ],
             now,
         );
@@ -532,6 +541,7 @@ where
 
     fn discard_in_flight(&mut self, now: Instant) {
         self.bytes_in_flight = 0;
+        self.last_rtt = None;
         qlog::metrics_updated(
             &mut self.qlog,
             &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
@@ -603,6 +613,7 @@ where
             pmtud,
             current: State::new(mtu),
             stored: None,
+            last_rtt: None,
         }
     }
 
@@ -804,13 +815,24 @@ where
                     self.slow_start.reset();
 
                     cc_stats.cwnd = Some(self.current.congestion_window);
-                    qlog::metrics_updated(
-                        &mut self.qlog,
-                        &[qlog::Metric::CongestionWindow(
-                            self.current.congestion_window,
-                        )],
-                        now,
-                    );
+                    let cwnd = qlog::Metric::CongestionWindow(self.current.congestion_window);
+                    let ssthresh = qlog::Metric::SsThresh(self.current.ssthresh);
+                    if let Some(rtt) = self.last_rtt {
+                        qlog::metrics_updated(
+                            &mut self.qlog,
+                            &[
+                                cwnd,
+                                ssthresh,
+                                qlog::Metric::PacingRate(Pacer::rate(
+                                    self.current.congestion_window,
+                                    rtt,
+                                )),
+                            ],
+                            now,
+                        );
+                    } else {
+                        qlog::metrics_updated(&mut self.qlog, &[cwnd, ssthresh], now);
+                    }
 
                     return true;
                 }
@@ -885,14 +907,21 @@ where
             cc_stats.slow_start_exit_reason = Some(SlowStartExitReason::CongestionEvent);
         }
 
-        qlog::metrics_updated(
-            &mut self.qlog,
-            &[
-                qlog::Metric::CongestionWindow(self.current.congestion_window),
-                qlog::Metric::SsThresh(self.current.ssthresh),
-            ],
-            now,
-        );
+        let cwnd = qlog::Metric::CongestionWindow(self.current.congestion_window);
+        let ssthresh = qlog::Metric::SsThresh(self.current.ssthresh);
+        if let Some(rtt) = self.last_rtt {
+            qlog::metrics_updated(
+                &mut self.qlog,
+                &[
+                    cwnd,
+                    ssthresh,
+                    qlog::Metric::PacingRate(Pacer::rate(self.current.congestion_window, rtt)),
+                ],
+                now,
+            );
+        } else {
+            qlog::metrics_updated(&mut self.qlog, &[cwnd, ssthresh], now);
+        }
         let trigger =
             (congestion_event == CongestionEvent::Ecn).then_some(qlog::CongestionStateTrigger::Ecn);
         self.set_phase(Phase::RecoveryStart, trigger, now);
