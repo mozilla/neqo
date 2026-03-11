@@ -128,14 +128,17 @@ impl Qlog {
             return;
         };
 
-        if let Err(e) = f(&mut shared_streamer.streamer) {
-            log::error!("Qlog event generation failed with error {e}; closing qlog.");
-            // Set the inner Option to None to disable future logging for other references.
-            *borrow = None;
-            // Explicitly drop the RefCell borrow to release the mutable borrow.
-            drop(borrow);
-            // Set the outer Option to None to prevent future dereferences.
-            self.inner = None;
+        match f(&mut shared_streamer.streamer) {
+            Ok(()) | Err(qlog::Error::Done) => (),
+            Err(e) => {
+                log::error!("Qlog event generation failed with error {e}; closing qlog.");
+                // Set the inner Option to None to disable future logging for other references.
+                *borrow = None;
+                // Explicitly drop the RefCell borrow to release the mutable borrow.
+                drop(borrow);
+                // Set the outer Option to None to prevent future dereferences.
+                self.inner = None;
+            }
         }
     }
 }
