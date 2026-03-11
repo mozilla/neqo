@@ -1692,7 +1692,7 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<(bool, Option<(u64, extended_connect::datagram_queue::DatagramOutcome)>)> {
+    ) -> Res<(bool, Option<(Option<u64>, extended_connect::datagram_queue::DatagramOutcome)>)> {
         self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 
@@ -1703,7 +1703,7 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<(bool, Option<(u64, extended_connect::datagram_queue::DatagramOutcome)>)> {
+    ) -> Res<(bool, Option<(Option<u64>, extended_connect::datagram_queue::DatagramOutcome)>)> {
         self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 
@@ -1714,7 +1714,7 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<(bool, Option<(u64, extended_connect::datagram_queue::DatagramOutcome)>)> {
+    ) -> Res<(bool, Option<(Option<u64>, extended_connect::datagram_queue::DatagramOutcome)>)> {
         self.recv_streams
             .get_mut(&session_id)
             .ok_or(Error::InvalidStreamId)?
@@ -1744,7 +1744,7 @@ impl Http3Connection {
         session_id: StreamId,
         age_ms: f64,
         now: Instant,
-    ) -> Res<Vec<(u64, extended_connect::datagram_queue::DatagramOutcome)>> {
+    ) -> Res<Vec<(Option<u64>, extended_connect::datagram_queue::DatagramOutcome)>> {
         Ok(self
             .recv_streams
             .get_mut(&session_id)
@@ -1768,7 +1768,7 @@ impl Http3Connection {
         session_id: StreamId,
         age_ms: f64,
         now: Instant,
-    ) -> Res<Vec<(u64, extended_connect::datagram_queue::DatagramOutcome)>> {
+    ) -> Res<Vec<(Option<u64>, extended_connect::datagram_queue::DatagramOutcome)>> {
         self.extended_connect_set_datagram_max_age(session_id, age_ms, now)
     }
 
@@ -1785,7 +1785,7 @@ impl Http3Connection {
         session_id: StreamId,
         age_ms: f64,
         now: Instant,
-    ) -> Res<Vec<(u64, extended_connect::datagram_queue::DatagramOutcome)>> {
+    ) -> Res<Vec<(Option<u64>, extended_connect::datagram_queue::DatagramOutcome)>> {
         self.extended_connect_set_datagram_max_age(session_id, age_ms, now)
     }
 
@@ -1794,7 +1794,7 @@ impl Http3Connection {
         session_id: StreamId,
         conn: &mut Connection,
         now: Instant,
-    ) -> Res<Vec<(u64, extended_connect::datagram_queue::DatagramOutcome)>> {
+    ) -> Res<Vec<(Option<u64>, extended_connect::datagram_queue::DatagramOutcome)>> {
         Ok(self
             .recv_streams
             .get_mut(&session_id)
@@ -1809,7 +1809,7 @@ impl Http3Connection {
         &mut self,
         conn: &mut Connection,
         now: Instant,
-    ) -> Vec<(StreamId, u64, extended_connect::datagram_queue::DatagramOutcome)> {
+    ) -> Vec<(StreamId, Option<u64>, extended_connect::datagram_queue::DatagramOutcome)> {
         let session_ids: Vec<StreamId> = self
             .recv_streams
             .iter()
