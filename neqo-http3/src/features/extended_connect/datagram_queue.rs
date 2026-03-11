@@ -32,17 +32,17 @@ pub struct QueuedDatagram {
 }
 
 impl QueuedDatagram {
-    pub fn new(data: Bytes, id: u64, payload_len: usize) -> Self {
+    pub fn new(data: Bytes, id: u64, payload_len: usize, now: Instant) -> Self {
         Self {
             data,
             id,
             payload_len,
-            timestamp: Instant::now(),
+            timestamp: now,
         }
     }
 
-    pub fn age(&self) -> Duration {
-        self.timestamp.elapsed()
+    pub fn age(&self, now: Instant) -> Duration {
+        now.saturating_duration_since(self.timestamp)
     }
 }
 
@@ -82,26 +82,26 @@ impl WebTransportDatagramQueue {
         };
     }
 
-    pub fn set_max_age(&mut self, age_ms: f64) -> Vec<(u64, DatagramOutcome)> {
+    pub fn set_max_age(&mut self, age_ms: f64, now: Instant) -> Vec<(u64, DatagramOutcome)> {
         qtrace!("Setting max age to {} ms", age_ms);
         self.max_age = if age_ms.is_infinite() {
             DEFAULT_MAX_AGE
         } else {
             Duration::from_millis(age_ms.max(0.0) as u64)
         };
-        self.expire_old_datagrams()
+        self.expire_old_datagrams(now)
             .into_iter()
             .map(|id| (id, DatagramOutcome::DroppedTooOld))
             .collect()
     }
 
-    fn expire_old_datagrams(&mut self) -> Vec<u64> {
+    fn expire_old_datagrams(&mut self, now: Instant) -> Vec<u64> {
         let mut expired = Vec::new();
 
         while let Some(dgram) = self.queue.front() {
-            if dgram.age() > self.max_age {
+            if dgram.age(now) > self.max_age {
                 let dgram = self.queue.pop_front().unwrap();
-                qdebug!("Datagram {} expired (age: {:?})", dgram.id, dgram.age());
+                qdebug!("Datagram {} expired (age: {:?})", dgram.id, dgram.age(now));
                 expired.push(dgram.id);
             } else {
                 break;
@@ -111,7 +111,7 @@ impl WebTransportDatagramQueue {
         expired
     }
 
-    pub fn enqueue(&mut self, data: Bytes, id: u64, payload_len: usize) -> (bool, Option<(u64, DatagramOutcome)>) {
+    pub fn enqueue(&mut self, data: Bytes, id: u64, payload_len: usize, now: Instant) -> (bool, Option<(u64, DatagramOutcome)>) {
         let dropped = if self.queue.len() >= self.hard_limit {
             if let Some(oldest) = self.queue.pop_front() {
                 qdebug!(
@@ -127,7 +127,7 @@ impl WebTransportDatagramQueue {
             None
         };
 
-        let datagram = QueuedDatagram::new(data, id, payload_len);
+        let datagram = QueuedDatagram::new(data, id, payload_len, now);
         self.queue.push_back(datagram);
 
         let below_watermark = (self.queue.len() as f64) < self.high_water_mark;
@@ -147,18 +147,18 @@ impl WebTransportDatagramQueue {
     /// that were successfully handed to the QUIC layer (excludes framing overhead).
     /// `overhead_bytes_sent` is the framing overhead (varint session ID + protocol
     /// prefix) for those same datagrams.
-    pub fn process_queue(&mut self, send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> (Vec<(u64, DatagramOutcome)>, u64, u64) {
+    pub fn process_queue(&mut self, now: Instant, send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> (Vec<(u64, DatagramOutcome)>, u64, u64) {
         let mut outcomes = Vec::new();
         let mut payload_bytes_sent: u64 = 0;
         let mut overhead_bytes_sent: u64 = 0;
 
-        let expired = self.expire_old_datagrams();
+        let expired = self.expire_old_datagrams(now);
         for id in expired {
             outcomes.push((id, DatagramOutcome::DroppedTooOld));
         }
 
         while let Some(dgram) = self.queue.front() {
-            if dgram.age() > self.max_age {
+            if dgram.age(now) > self.max_age {
                 let dgram = self.queue.pop_front().unwrap();
                 qdebug!("Datagram {} expired during processing", dgram.id);
                 outcomes.push((dgram.id, DatagramOutcome::DroppedTooOld));
@@ -203,11 +203,15 @@ impl Default for WebTransportDatagramQueue {
 mod tests {
     use super::*;
 
+    fn now() -> Instant {
+        Instant::now()
+    }
+
     #[test]
     fn test_queue_basic() {
         let mut queue = WebTransportDatagramQueue::new();
 
-        let (below_watermark, _) = queue.enqueue(Bytes::from(vec![1, 2, 3]), 1, 3);
+        let (below_watermark, _) = queue.enqueue(Bytes::from(vec![1, 2, 3]), 1, 3, now());
         assert!(below_watermark);
         assert_eq!(queue.len(), 1);
     }
@@ -216,10 +220,11 @@ mod tests {
     fn test_high_water_mark() {
         let mut queue = WebTransportDatagramQueue::new();
         queue.set_high_water_mark(2.0);
+        let t = now();
 
-        assert!(queue.enqueue(Bytes::from(vec![1]), 1, 1).0);
-        assert!(!queue.enqueue(Bytes::from(vec![2]), 2, 1).0);
-        assert!(!queue.enqueue(Bytes::from(vec![3]), 3, 1).0);
+        assert!(queue.enqueue(Bytes::from(vec![1]), 1, 1, t).0);
+        assert!(!queue.enqueue(Bytes::from(vec![2]), 2, 1, t).0);
+        assert!(!queue.enqueue(Bytes::from(vec![3]), 3, 1, t).0);
 
         assert_eq!(queue.len(), 3);
     }
@@ -228,11 +233,12 @@ mod tests {
     fn test_hard_limit() {
         let mut queue = WebTransportDatagramQueue::new();
         queue.hard_limit = 3;
+        let t = now();
 
-        queue.enqueue(Bytes::from(vec![1]), 1, 1);
-        queue.enqueue(Bytes::from(vec![2]), 2, 1);
-        queue.enqueue(Bytes::from(vec![3]), 3, 1);
-        queue.enqueue(Bytes::from(vec![4]), 4, 1);
+        queue.enqueue(Bytes::from(vec![1]), 1, 1, t);
+        queue.enqueue(Bytes::from(vec![2]), 2, 1, t);
+        queue.enqueue(Bytes::from(vec![3]), 3, 1, t);
+        queue.enqueue(Bytes::from(vec![4]), 4, 1, t);
 
         assert_eq!(queue.len(), 3);
     }
@@ -240,13 +246,15 @@ mod tests {
     #[test]
     fn test_max_age_expiration() {
         let mut queue = WebTransportDatagramQueue::new();
-        queue.set_max_age(100.0);
+        let t0 = now();
+        queue.set_max_age(100.0, t0);
 
-        queue.enqueue(Bytes::from(vec![1]), 1, 1);
+        queue.enqueue(Bytes::from(vec![1]), 1, 1, t0);
 
-        std::thread::sleep(Duration::from_millis(150));
+        // Advance time by 150 ms without sleeping.
+        let t1 = t0 + Duration::from_millis(150);
 
-        let expired = queue.expire_old_datagrams();
+        let expired = queue.expire_old_datagrams(t1);
         assert_eq!(expired.len(), 1);
         assert_eq!(expired[0], 1);
         assert!(queue.is_empty());
@@ -255,12 +263,13 @@ mod tests {
     #[test]
     fn test_process_queue() {
         let mut queue = WebTransportDatagramQueue::new();
+        let t = now();
 
         // data = [prefix_byte, payload_byte], payload_len = 1
-        queue.enqueue(Bytes::from(vec![0, 1]), 1, 1);
-        queue.enqueue(Bytes::from(vec![0, 2]), 2, 1);
+        queue.enqueue(Bytes::from(vec![0, 1]), 1, 1, t);
+        queue.enqueue(Bytes::from(vec![0, 2]), 2, 1, t);
 
-        let (outcomes, payload_bytes, overhead_bytes) = queue.process_queue(&mut |_data, _id| Ok(()));
+        let (outcomes, payload_bytes, overhead_bytes) = queue.process_queue(t, &mut |_data, _id| Ok(()));
 
         assert_eq!(outcomes.len(), 2);
         assert_eq!(outcomes[0], (1, DatagramOutcome::Sent));

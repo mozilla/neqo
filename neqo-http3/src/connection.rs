@@ -1743,6 +1743,7 @@ impl Http3Connection {
         &mut self,
         session_id: StreamId,
         age_ms: f64,
+        now: Instant,
     ) -> Res<Vec<(u64, extended_connect::datagram_queue::DatagramOutcome)>> {
         Ok(self
             .recv_streams
@@ -1751,7 +1752,7 @@ impl Http3Connection {
             .extended_connect_session()
             .ok_or(Error::InvalidStreamId)?
             .borrow_mut()
-            .set_datagram_max_age(age_ms))
+            .set_datagram_max_age(age_ms, now))
     }
 
     pub fn webtransport_set_datagram_high_water_mark(
@@ -1766,8 +1767,9 @@ impl Http3Connection {
         &mut self,
         session_id: StreamId,
         age_ms: f64,
+        now: Instant,
     ) -> Res<Vec<(u64, extended_connect::datagram_queue::DatagramOutcome)>> {
-        self.extended_connect_set_datagram_max_age(session_id, age_ms)
+        self.extended_connect_set_datagram_max_age(session_id, age_ms, now)
     }
 
     pub fn connect_udp_set_datagram_high_water_mark(
@@ -1782,14 +1784,16 @@ impl Http3Connection {
         &mut self,
         session_id: StreamId,
         age_ms: f64,
+        now: Instant,
     ) -> Res<Vec<(u64, extended_connect::datagram_queue::DatagramOutcome)>> {
-        self.extended_connect_set_datagram_max_age(session_id, age_ms)
+        self.extended_connect_set_datagram_max_age(session_id, age_ms, now)
     }
 
     pub fn webtransport_process_datagram_queue(
         &mut self,
         session_id: StreamId,
         conn: &mut Connection,
+        now: Instant,
     ) -> Res<Vec<(u64, extended_connect::datagram_queue::DatagramOutcome)>> {
         Ok(self
             .recv_streams
@@ -1798,13 +1802,14 @@ impl Http3Connection {
             .extended_connect_session()
             .ok_or(Error::InvalidStreamId)?
             .borrow_mut()
-            .process_datagram_queue(conn))
+            .process_datagram_queue(conn, now))
     }
 
     pub(crate) fn process_all_datagram_queues(
         &mut self,
         conn: &mut Connection,
-    ) -> Vec<(StreamId, u64, crate::features::extended_connect::datagram_queue::DatagramOutcome)> {
+        now: Instant,
+    ) -> Vec<(StreamId, u64, extended_connect::datagram_queue::DatagramOutcome)> {
         let session_ids: Vec<StreamId> = self
             .recv_streams
             .iter()
@@ -1819,7 +1824,7 @@ impl Http3Connection {
 
         let mut all_outcomes = Vec::new();
         for session_id in session_ids {
-            if let Ok(outcomes) = self.webtransport_process_datagram_queue(session_id, conn) {
+            if let Ok(outcomes) = self.webtransport_process_datagram_queue(session_id, conn, now) {
                 // Collect all outcomes with session_id
                 for (tracking_id, outcome) in outcomes {
                     all_outcomes.push((session_id, tracking_id, outcome));
