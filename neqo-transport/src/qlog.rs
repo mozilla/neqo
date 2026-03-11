@@ -478,7 +478,7 @@ impl From<Frame<'_>> for QuicFrame {
             },
             Frame::NewToken { token } => Self::NewToken {
                 token: qlog::Token {
-                    ty: Some(qlog::TokenType::Retry),
+                    ty: None,
                     details: None,
                     raw: Some(RawInfo {
                         data: Some(hex(token)),
@@ -569,7 +569,7 @@ impl From<Frame<'_>> for QuicFrame {
                     CloseError::Application(_) => Some(ErrorSpace::ApplicationError),
                 },
                 error_code: Some(error_code.code()),
-                error_code_value: Some(0),
+                error_code_value: Some(error_code.code()),
                 reason: Some(reason_phrase),
                 trigger_frame_type: Some(frame_type),
             },
