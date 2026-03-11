@@ -908,10 +908,11 @@ impl Http3Client {
         &mut self,
         session_id: StreamId,
         max_age: f64,
+        now: Instant,
     ) -> Res<()> {
         let expired = self
             .base_handler
-            .webtransport_set_datagram_max_age(session_id, max_age)?;
+            .webtransport_set_datagram_max_age(session_id, max_age, now)?;
         for (tracking_id, outcome) in expired {
             self.events.insert(Http3ClientEvent::WebTransport(
                 WebTransportEvent::DatagramOutcome {
@@ -937,10 +938,11 @@ impl Http3Client {
         &mut self,
         session_id: StreamId,
         max_age: f64,
+        now: Instant,
     ) -> Res<()> {
         // Expired outcomes are discarded; ConnectUdpEvent has no DatagramOutcome variant.
         self.base_handler
-            .connect_udp_set_datagram_max_age(session_id, max_age)
+            .connect_udp_set_datagram_max_age(session_id, max_age, now)
             .map(|_| ())
     }
 
@@ -1123,7 +1125,7 @@ impl Http3Client {
                 // moved to the QUIC send queue here, during process_http3(). This
                 // is called from process_output()/process(), so datagrams are sent
                 // on the next outgoing packet after the caller triggers processing.
-                let outcomes = self.base_handler.process_all_datagram_queues(&mut self.conn);
+                let outcomes = self.base_handler.process_all_datagram_queues(&mut self.conn, now);
                 for (session_id, tracking_id, outcome) in outcomes {
                     self.events.insert(Http3ClientEvent::WebTransport(
                         WebTransportEvent::DatagramOutcome {
