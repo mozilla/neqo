@@ -161,15 +161,15 @@ impl Session {
          self.datagram_queue.set_high_water_mark(mark);
      }
  
-     pub(crate) fn set_datagram_max_age(&mut self, age_ms: f64, now: Instant) -> Vec<(u64, DatagramOutcome)> {
+     pub(crate) fn set_datagram_max_age(&mut self, age_ms: f64, now: Instant) -> Vec<(Option<u64>, DatagramOutcome)> {
          self.datagram_queue.set_max_age(age_ms, now)
      }
 
-     pub(crate) fn enqueue_datagram(&mut self, data: Bytes, id: u64, payload_len: usize, now: Instant) -> (bool, Option<(u64, DatagramOutcome)>) {
+     pub(crate) fn enqueue_datagram(&mut self, data: Bytes, id: Option<u64>, payload_len: usize, now: Instant) -> (bool, Option<(Option<u64>, DatagramOutcome)>) {
          self.datagram_queue.enqueue(data, id, payload_len, now)
      }
 
-     pub(crate) fn process_datagram_queue(&mut self, now: Instant, send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> (Vec<(u64, DatagramOutcome)>, u64, u64) {
+     pub(crate) fn process_datagram_queue(&mut self, now: Instant, send_fn: &mut dyn FnMut(&[u8], Option<u64>) -> Result<(), ()>) -> (Vec<(Option<u64>, DatagramOutcome)>, u64, u64) {
          self.datagram_queue.process_queue(now, send_fn)
      }
 }
@@ -399,15 +399,29 @@ impl Protocol for Session {
         self.set_datagram_high_water_mark(mark);
     }
 
-    fn set_datagram_max_age(&mut self, age_ms: f64, now: Instant) -> Vec<(u64, super::datagram_queue::DatagramOutcome)> {
+    fn set_datagram_max_age(
+        &mut self,
+        age_ms: f64,
+        now: Instant,
+    ) -> Vec<(Option<u64>, DatagramOutcome)> {
         self.set_datagram_max_age(age_ms, now)
     }
 
-    fn enqueue_datagram(&mut self, data: Bytes, id: u64, payload_len: usize, now: Instant) -> (bool, Option<(u64, DatagramOutcome)>) {
+    fn enqueue_datagram(
+        &mut self,
+        data: Bytes,
+        id: Option<u64>,
+        payload_len: usize,
+        now: Instant,
+    ) -> (bool, Option<(Option<u64>, DatagramOutcome)>) {
         self.enqueue_datagram(data, id, payload_len, now)
     }
 
-    fn process_datagram_queue(&mut self, now: Instant, send_fn: &mut dyn FnMut(&[u8], u64) -> Result<(), ()>) -> (Vec<(u64, DatagramOutcome)>, u64, u64) {
+    fn process_datagram_queue(
+        &mut self,
+        now: Instant,
+        send_fn: &mut dyn FnMut(&[u8], Option<u64>) -> Result<(), ()>,
+    ) -> (Vec<(Option<u64>, DatagramOutcome)>, u64, u64) {
         self.process_datagram_queue(now, send_fn)
     }
 }

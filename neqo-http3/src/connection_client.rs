@@ -845,7 +845,7 @@ impl Http3Client {
         let (below_watermark, dropped) = self
             .base_handler
             .webtransport_send_datagram(session_id, &mut self.conn, buf, id, now)?;
-        if let Some((tracking_id, outcome)) = dropped {
+        if let Some((Some(tracking_id), outcome)) = dropped {
             self.events.insert(Http3ClientEvent::WebTransport(
                 WebTransportEvent::DatagramOutcome {
                     session_id,
@@ -914,13 +914,15 @@ impl Http3Client {
             .base_handler
             .webtransport_set_datagram_max_age(session_id, max_age, now)?;
         for (tracking_id, outcome) in expired {
-            self.events.insert(Http3ClientEvent::WebTransport(
-                WebTransportEvent::DatagramOutcome {
-                    session_id,
-                    tracking_id,
-                    outcome,
-                },
-            ));
+            if let Some(tracking_id) = tracking_id {
+                self.events.insert(Http3ClientEvent::WebTransport(
+                    WebTransportEvent::DatagramOutcome {
+                        session_id,
+                        tracking_id,
+                        outcome,
+                    },
+                ));
+            }
         }
         Ok(())
     }
@@ -1127,13 +1129,15 @@ impl Http3Client {
                 // on the next outgoing packet after the caller triggers processing.
                 let outcomes = self.base_handler.process_all_datagram_queues(&mut self.conn, now);
                 for (session_id, tracking_id, outcome) in outcomes {
-                    self.events.insert(Http3ClientEvent::WebTransport(
-                        WebTransportEvent::DatagramOutcome {
-                            session_id,
-                            tracking_id,
-                            outcome,
-                        },
-                    ));
+                    if let Some(tracking_id) = tracking_id {
+                        self.events.insert(Http3ClientEvent::WebTransport(
+                            WebTransportEvent::DatagramOutcome {
+                                session_id,
+                                tracking_id,
+                                outcome,
+                            },
+                        ));
+                    }
                 }
             }
             Http3State::Closed { .. } => {}
