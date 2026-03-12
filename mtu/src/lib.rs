@@ -133,8 +133,6 @@ pub fn interface_and_mtu(remote: IpAddr) -> Result<(String, usize)> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
-    #![expect(clippy::unwrap_used, reason = "OK in tests.")]
-
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     use crate::interface_and_mtu;
