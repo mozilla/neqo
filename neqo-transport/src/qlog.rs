@@ -366,12 +366,12 @@ pub fn packets_acked(
     );
 }
 
-pub fn mtu_updated(qlog: &mut Qlog, old: usize, new: usize, done: bool, now: Instant) {
+pub fn mtu_updated(qlog: &mut Qlog, old_mtu: usize, new_mtu: usize, done: bool, now: Instant) {
     qlog.add_event_at(
         || {
             Some(EventData::MtuUpdated(MtuUpdated {
-                old: Some(u16::try_from(old).expect("MTU fits in u16")),
-                new: u16::try_from(new).expect("MTU fits in u16"),
+                old: Some(u16::try_from(old_mtu).expect("MTU fits in u16")),
+                new: u16::try_from(new_mtu).expect("MTU fits in u16"),
                 done: Some(done),
             }))
         },

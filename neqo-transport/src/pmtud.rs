@@ -103,13 +103,13 @@ impl Pmtud {
     }
 
     fn set_mtu(&mut self, idx: usize, stats: &mut Stats, now: Instant) {
-        let old = self.plpmtu();
+        let old_mtu = self.plpmtu();
         self.mtu = self.search_table[idx];
         stats.pmtud_pmtu = self.mtu;
-        let new = self.plpmtu();
-        if old != new {
+        let new_mtu = self.plpmtu();
+        if old_mtu != new_mtu {
             let done = !self.needs_probe();
-            qlog::mtu_updated(&mut self.qlog, old, new, done, now);
+            qlog::mtu_updated(&mut self.qlog, old_mtu, new_mtu, done, now);
         }
     }
 
