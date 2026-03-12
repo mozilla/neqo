@@ -4,7 +4,6 @@ members = [
   "mtu",
   "neqo-bin",
   "neqo-common",
-  "neqo-crypto",
   "neqo-http3",
   "neqo-qpack",
   "neqo-transport",
@@ -36,6 +35,7 @@ hex = { version = "0.4", default-features = false }
 http = { version = "0.2.9", default-features = false }
 libc = { version = "0.2", default-features = false }
 log = { version = "0.4", default-features = false }
+nss-rs = { git = "https://github.com/mozilla/nss-rs", rev = "1412f3a848130a43accf169fb216ff4b833c7c83" }
 qlog = { version = "0.15.1", default-features = false }
 quinn-udp = { version = "0.6", default-features = false, features = ["log"] }
 rustc-hash = { version = "2.1", default-features = false, features = [ "std" ]}

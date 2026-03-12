@@ -88,9 +88,9 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bindgen"
-version = "0.72.0"
+version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f72209734318d0b619a5e0f5129918b848c416e122a3c4ce054e03cb87b726f"
+checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
 dependencies = [
  "bitflags",
  "cexpr",
@@ -535,10 +535,10 @@ version = "0.23.1"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
- "neqo-crypto",
  "neqo-http3",
  "neqo-qpack",
  "neqo-transport",
+ "nss-rs",
  "test-fixture",
 ]
 
@@ -793,10 +793,10 @@ dependencies = [
  "log",
  "neqo-bin",
  "neqo-common",
- "neqo-crypto",
  "neqo-http3",
  "neqo-transport",
  "neqo-udp",
+ "nss-rs",
  "qlog",
  "quinn-udp",
  "rustc-hash",
@@ -823,25 +823,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "neqo-crypto"
-version = "0.23.1"
-dependencies = [
- "bindgen",
- "enum-map",
- "log",
- "mozbuild",
- "neqo-common",
- "semver",
- "serde",
- "serde_derive",
- "strum",
- "test-fixture",
- "thiserror",
- "toml",
- "windows",
-]
-
-[[package]]
 name = "neqo-http3"
 version = "0.23.1"
 dependencies = [
@@ -850,10 +831,10 @@ dependencies = [
  "http",
  "log",
  "neqo-common",
- "neqo-crypto",
  "neqo-http3",
  "neqo-qpack",
  "neqo-transport",
+ "nss-rs",
  "qlog",
  "rustc-hash",
  "sfv",
@@ -887,8 +868,8 @@ dependencies = [
  "log",
  "mtu",
  "neqo-common",
- "neqo-crypto",
  "neqo-transport",
+ "nss-rs",
  "qlog",
  "rustc-hash",
  "smallvec",
@@ -933,6 +914,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "nss-rs"
+version = "0.3.0"
+source = "git+https://github.com/mozilla/nss-rs?rev=1412f3a848130a43accf169fb216ff4b833c7c83#1412f3a848130a43accf169fb216ff4b833c7c83"
+dependencies = [
+ "bindgen",
+ "enum-map",
+ "log",
+ "once_cell",
+ "pkcs11-bindings",
+ "semver",
+ "serde",
+ "serde_derive",
+ "strum",
+ "thiserror",
+ "toml",
+ "windows",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -973,6 +973,15 @@ name = "pin-utils"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
+
+[[package]]
+name = "pkcs11-bindings"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77f2b11de4fec7f1e085891d4a4bf16a8b1beb49978837a80d4e9e705b99295c"
+dependencies = [
+ "bindgen",
+]
 
 [[package]]
 name = "proc-macro2"
@@ -1289,9 +1298,9 @@ version = "0.23.1"
 dependencies = [
  "log",
  "neqo-common",
- "neqo-crypto",
  "neqo-http3",
  "neqo-transport",
+ "nss-rs",
  "qlog",
 ]
 
