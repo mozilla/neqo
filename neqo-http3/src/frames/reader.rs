@@ -7,8 +7,8 @@
 use std::{cmp::min, fmt::Debug, time::Instant};
 
 use neqo_common::{
-    hex_snip_middle, hex_with_len, qtrace, Decoder, IncrementalDecoderBuffer,
-    IncrementalDecoderIgnore, IncrementalDecoderUint,
+    Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
+    hex_snip_middle, hex_with_len, qtrace,
 };
 use neqo_transport::{Connection, StreamId};
 
@@ -18,6 +18,11 @@ use crate::{Error, RecvStream, Res};
 const MAX_READ_SIZE: usize = 2048; // Given a practical MTU of 1500 bytes, this seems reasonable.
 
 pub trait FrameDecoder<T> {
+    /// Fuzzing corpus name for this frame type. If `Some`, decoded frames will be
+    /// written to the fuzzing corpus with this name.
+    #[cfg(feature = "build-fuzzing-corpus")]
+    const FUZZING_CORPUS: Option<&'static str> = None;
+
     fn is_known_type(frame_type: HFrameType) -> bool;
 
     /// # Errors
@@ -49,7 +54,7 @@ pub struct StreamReaderConnectionWrapper<'a> {
 }
 
 impl<'a> StreamReaderConnectionWrapper<'a> {
-    pub fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
+    pub const fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
         Self { conn, stream_id }
     }
 }
@@ -70,6 +75,7 @@ pub struct StreamReaderRecvStreamWrapper<'a> {
 }
 
 impl<'a> StreamReaderRecvStreamWrapper<'a> {
+    #[cfg_attr(fuzzing, expect(private_interfaces, reason = "OK for fuzzing."))]
     pub fn new(conn: &'a mut Connection, recv_stream: &'a mut Box<dyn RecvStream>) -> Self {
         Self { recv_stream, conn }
     }
@@ -256,34 +262,67 @@ impl FrameReader {
 
     fn frame_length_decoded<T: FrameDecoder<T>>(&mut self, len: u64) -> Res<Option<T>> {
         self.frame_len = len;
-        if let Some(f) = T::decode(
+        match T::decode(
             self.frame_type,
             self.frame_len,
             if len > 0 { None } else { Some(&[]) },
         )? {
-            self.reset();
-            return Ok(Some(f));
-        } else if T::is_known_type(self.frame_type) {
-            self.state = FrameReaderState::GetData {
-                decoder: IncrementalDecoderBuffer::new(
-                    usize::try_from(len).or(Err(Error::HttpFrame))?,
-                ),
-            };
-        } else if self.frame_len == 0 {
-            self.reset();
-        } else {
-            self.state = FrameReaderState::UnknownFrameDischargeData {
-                decoder: IncrementalDecoderIgnore::new(
-                    usize::try_from(len).or(Err(Error::HttpFrame))?,
-                ),
-            };
+            Some(f) => {
+                #[cfg(feature = "build-fuzzing-corpus")]
+                if let Some(corpus) = T::FUZZING_CORPUS {
+                    // Write zero-length frames to the fuzzing corpus to test parsing of frames with
+                    // only type and length fields.
+                    self.write_item_to_fuzzing_corpus(corpus, None);
+                }
+                self.reset();
+                return Ok(Some(f));
+            }
+            None => {
+                if T::is_known_type(self.frame_type) {
+                    self.state = FrameReaderState::GetData {
+                        decoder: IncrementalDecoderBuffer::new(
+                            usize::try_from(len).or(Err(Error::HttpFrame))?,
+                        ),
+                    };
+                } else if self.frame_len == 0 {
+                    self.reset();
+                } else {
+                    self.state = FrameReaderState::UnknownFrameDischargeData {
+                        decoder: IncrementalDecoderIgnore::new(
+                            usize::try_from(len).or(Err(Error::HttpFrame))?,
+                        ),
+                    };
+                }
+            }
         }
         Ok(None)
     }
 
     fn frame_data_decoded<T: FrameDecoder<T>>(&mut self, data: &[u8]) -> Res<Option<T>> {
+        #[cfg(feature = "build-fuzzing-corpus")]
+        if let Some(corpus) = T::FUZZING_CORPUS {
+            self.write_item_to_fuzzing_corpus(corpus, Some(data));
+        }
+
         let res = T::decode(self.frame_type, self.frame_len, Some(data))?;
         self.reset();
         Ok(res)
+    }
+
+    #[cfg(feature = "build-fuzzing-corpus")]
+    /// Write `HFrame` data to indicated fuzzing corpus.
+    ///
+    /// The output consists of the varint-encoded frame type and length, followed by the optional
+    /// payload data.
+    fn write_item_to_fuzzing_corpus(&self, corpus: &str, data: Option<&[u8]>) {
+        // We need to include the frame type and length varints before the data
+        // to create a complete frame that the fuzzer can process.
+        let mut encoder = neqo_common::Encoder::default();
+        encoder.encode_varint(self.frame_type.0);
+        encoder.encode_varint(self.frame_len);
+        if let Some(d) = data {
+            encoder.encode(d);
+        }
+        neqo_common::write_item_to_fuzzing_corpus(corpus, encoder.as_ref());
     }
 }

@@ -168,7 +168,7 @@ mod tests {
     use test_fixture::fixture_init;
 
     use crate::{
-        err::{self, is_blocked, secstatus_to_res, Error, PRErrorCode, PR_SetError},
+        err::{self, Error, PR_SetError, PRErrorCode, is_blocked, secstatus_to_res},
         ssl::{SECFailure, SECSuccess},
     };
 
@@ -241,5 +241,19 @@ mod tests {
             }
             _ => panic!("bad error type"),
         }
+    }
+
+    #[test]
+    #[expect(invalid_from_utf8, reason = "Testing error conversion.")]
+    fn error_from_std_errors() {
+        use std::ffi::CString;
+        assert_eq!(
+            Error::from(CString::new("a\0b").unwrap_err()),
+            Error::Internal
+        );
+        assert_eq!(
+            Error::from(std::str::from_utf8(&[0xff]).unwrap_err()),
+            Error::String
+        );
     }
 }

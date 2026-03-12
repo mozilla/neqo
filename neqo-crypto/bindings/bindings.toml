@@ -14,6 +14,7 @@ types = [
     "SSLExtensionHandler",
     "SSLExtensionType",
     "SSLExtensionWriter",
+    "SSLExtraServerCertData",
     "SSLHelloRetryRequestAction",
     "SSLHelloRetryRequestCallback",
     "SSLNamedGroup",
@@ -80,12 +81,12 @@ variables = [
 ]
 opaque = [
     "CERTCertificate",
+    "CERTCertificateList",
     "PK11SymKey",
     "PLArenaPool",
     "PRFileDesc",
     "SECKEYPrivateKey",
     "SECKEYPublicKey",
-    "SSLExtraServerCertData",
 ]
 
 [nss_sslopt]

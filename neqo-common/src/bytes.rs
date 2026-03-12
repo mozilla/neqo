@@ -30,12 +30,12 @@ impl Bytes {
     }
 
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.data.len() - self.offset
     }
 
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
@@ -113,8 +113,8 @@ mod tests {
 
     #[test]
     fn is_empty() {
-        let b = Bytes::new(vec![1, 2, 3, 4], 4);
-        assert!(b.is_empty());
+        assert!(Bytes::new(vec![1, 2, 3, 4], 4).is_empty());
+        assert!(!Bytes::new(vec![1, 2, 3, 4], 3).is_empty());
     }
 
     #[test]
@@ -134,5 +134,22 @@ mod tests {
         let a = Bytes::new(vec![1, 2, 3, 4], 1);
         let b = Bytes::from(vec![2, 3, 4]);
         assert_eq!(a, b);
+        assert_ne!(a, Bytes::from(vec![9, 9, 9]));
+    }
+
+    #[test]
+    fn as_mut() {
+        let mut b = Bytes::new(vec![1, 2, 3], 1);
+        b.as_mut()[0] = 9;
+        assert_eq!(b.as_ref(), &[9, 3]);
+    }
+
+    #[test]
+    fn partial_eq_array_and_slice() {
+        let b = Bytes::from(vec![1, 2, 3]);
+        assert_eq!(b, [1, 2, 3]);
+        assert_ne!(b, [9, 9, 9]);
+        assert_eq!(b, [1, 2, 3][..]);
+        assert_ne!(b, [9, 9, 9][..]);
     }
 }

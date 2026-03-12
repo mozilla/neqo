@@ -8,23 +8,30 @@
 
 use std::{
     fmt::{Debug, Display},
-    str::FromStr,
     time::{Duration, Instant},
 };
 
+use enum_map::Enum;
 use neqo_common::qlog::Qlog;
 
-use crate::{recovery::sent, rtt::RttEstimate, Error, Pmtud};
+use crate::{Pmtud, recovery::sent, rtt::RttEstimate, stats::CongestionControlStats};
 
 mod classic_cc;
 mod cubic;
 mod new_reno;
 
-pub use classic_cc::ClassicCongestionControl;
 #[cfg(test)]
 pub use classic_cc::CWND_INITIAL_PKTS;
+pub use classic_cc::ClassicCongestionControl;
 pub use cubic::Cubic;
 pub use new_reno::NewReno;
+
+#[derive(Clone, Copy, PartialEq, Eq, Enum, Debug)]
+pub enum CongestionEvent {
+    Loss,
+    Ecn,
+    Spurious,
+}
 
 pub trait CongestionControl: Display + Debug {
     fn set_qlog(&mut self, qlog: Qlog);
@@ -56,6 +63,7 @@ pub trait CongestionControl: Display + Debug {
         acked_pkts: &[sent::Packet],
         rtt_est: &RttEstimate,
         now: Instant,
+        cc_stats: &mut CongestionControlStats,
     );
 
     /// Returns true if the congestion window was reduced.
@@ -66,10 +74,16 @@ pub trait CongestionControl: Display + Debug {
         pto: Duration,
         lost_packets: &[sent::Packet],
         now: Instant,
+        cc_stats: &mut CongestionControlStats,
     ) -> bool;
 
     /// Returns true if the congestion window was reduced.
-    fn on_ecn_ce_received(&mut self, largest_acked_pkt: &sent::Packet, now: Instant) -> bool;
+    fn on_ecn_ce_received(
+        &mut self,
+        largest_acked_pkt: &sent::Packet,
+        now: Instant,
+        cc_stats: &mut CongestionControlStats,
+    ) -> bool;
 
     #[must_use]
     fn recovery_packet(&self) -> bool;
@@ -81,24 +95,14 @@ pub trait CongestionControl: Display + Debug {
     fn discard_in_flight(&mut self, now: Instant);
 }
 
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
+#[strum(ascii_case_insensitive)]
 pub enum CongestionControlAlgorithm {
+    #[strum(serialize = "newreno", serialize = "reno")]
     NewReno,
+    #[strum(serialize = "cubic")]
     #[default]
     Cubic,
-}
-
-// A `FromStr` implementation so that this can be used in command-line interfaces.
-impl FromStr for CongestionControlAlgorithm {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "newreno" | "reno" => Ok(Self::NewReno),
-            "cubic" => Ok(Self::Cubic),
-            _ => Err(Error::InvalidInput),
-        }
-    }
 }
 
 #[cfg(test)]

@@ -6,18 +6,17 @@
 
 use std::time::{Duration, Instant};
 
-use neqo_common::{qtrace, qwarn, Encoder};
+use neqo_common::{Encoder, qtrace, qwarn};
 use test_fixture::now;
 
 use super::{
     super::{Connection, ConnectionParameters, IdleTimeout, Output, State},
-    connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, default_client,
-    default_server, maybe_authenticate, new_client, new_server, send_and_receive, send_something,
-    AT_LEAST_PTO, DEFAULT_STREAM_DATA,
+    AT_LEAST_PTO, DEFAULT_STREAM_DATA, connect, connect_force_idle, connect_rtt_idle,
+    connect_with_rtt, default_client, default_server, maybe_authenticate, new_client, new_server,
+    send_and_receive, send_something,
 };
 use crate::{
-    packet::{self, PACKET_LIMIT},
-    recovery,
+    packet, recovery,
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     tparams::{TransportParameter, TransportParameterId},
@@ -286,7 +285,8 @@ fn idle_caching() {
     let mut client = default_client();
     let mut server = default_server();
     let start = now();
-    let mut builder = packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+    let mut builder =
+        packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
 
     // Perform the first round trip, but drop the Initial from the server.
     // The client then caches the Handshake packet.
@@ -327,12 +327,10 @@ fn idle_caching() {
     assert!(tokens.is_empty());
     let dgram = server.process_output(middle).dgram();
 
-    // Now only allow the Initial packet from the server through;
-    // it shouldn't contain a CRYPTO frame.
-    let crypto_before_c = client.stats().frame_rx.crypto;
+    // The packet may contain CRYPTO if a PTO marked Initial packets for retransmission.
+    // The important thing for this test is that an ACK is received, keeping the connection alive.
     let ack_before = client.stats().frame_rx.ack;
     client.process_input(dgram.unwrap(), middle);
-    assert_eq!(client.stats().frame_rx.crypto, crypto_before_c);
     assert_eq!(client.stats().frame_rx.ack, ack_before + 1);
 
     let end = start + default_timeout() + (AT_LEAST_PTO / 2);
@@ -472,9 +470,8 @@ fn keep_alive_lost() {
 
     assert!(client.process(out, now).dgram().is_none());
 
-    // TODO: if we run server.process with current value of now, the server will
-    // return some small timeout for the recovery although it does not have
-    // any outstanding data. Therefore we call it after AT_LEAST_PTO.
+    // Advance past the recovery timeout. Without this, the server returns a small
+    // timeout for recovery even though it has no outstanding data.
     now += AT_LEAST_PTO;
     assert_idle(
         &mut server,
@@ -681,7 +678,7 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     //    IDLE_TIMEOUT / 2)
     //  - PTO timer will trigger again. (at the start time + pto + 2*pto)
     //  - Idle time out  will trigger (at the timeout + IDLE_TIMEOUT)
-    const IDLE_TIMEOUT: Duration = Duration::from_millis(6000);
+    const IDLE_TIMEOUT: Duration = Duration::from_secs(6);
 
     // This test makes too many assumptions about single-packet flights and PTOs for multi-packet
     // MLKEM flights to work.

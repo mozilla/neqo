@@ -1,9 +1,12 @@
 name: Claude Code Review
 
 on:
-  pull_request:
+  # Use pull_request_target to allow secrets access for fork PRs.
+  # CI only runs after manual approval for neqo, for non-members of the repo.
+  pull_request_target: # zizmor: ignore[dangerous-triggers] See rationale above.
     branches: ["main"]
     types: [opened, synchronize, ready_for_review, reopened]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -15,6 +18,8 @@ permissions:
 jobs:
   claude-review:
     name: Claude Code Review
+    # Require approval before running on fork PRs to prevent secret exfiltration.
+    environment: claude-review
 
     runs-on: ubuntu-24.04
     permissions:
@@ -23,25 +28,39 @@ jobs:
       id-token: write # Required for OIDC authentication.
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      # With pull_request_target, checkout defaults to the base branch.
+      # Check out from the PR's head repository to handle fork PRs correctly.
+      - name: Checkout PR head
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 1
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+
+      - name: Restore trusted instruction files from base branch
+        env:
+          BASE_REPO: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --depth=1 "https://github.com/$BASE_REPO" "$BASE_SHA"
+          # Overwrite instruction files with the trusted base-branch versions.
+          git checkout FETCH_HEAD -- .github/copilot-instructions.md 2>/dev/null || true
 
       - name: Run Claude Code Review
         id: claude
         # TODO: Would like to pin this, but the Mozilla org allowlist requires "anthropics/claude-code-action@v1"
         uses: anthropics/claude-code-action@v1 # zizmor: ignore[unpinned-uses]
         with:
-          track_progress: true
+          track_progress: ${{ github.event_name != 'workflow_dispatch' }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Use a PAT to allow the action to work on fork PRs.
+          github_token: ${{ secrets.NEQO_CI }}
           use_sticky_comment: true
           use_commit_signing: true
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://docs.anthropic.com/en/docs/claude-code/sdk#command-line for available options
           claude_args: |
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --allowedTools "mcp__github_inline_comment__create_inline_comment"
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
@@ -75,8 +94,6 @@ jobs:
 
             Follow the detailed instructions in `.github/copilot-instructions.md`
             as you prepare your review for the different focus areas listed above.
-            If that file is changed as part of a PR, use the changed version instead
-            of the file in the main branch.
 
             Provide detailed feedback using inline comments for specific issues,
             including GitHub suggestions in the comments whenever possible.

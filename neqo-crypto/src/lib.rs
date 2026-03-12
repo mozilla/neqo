@@ -48,12 +48,12 @@ pub use self::{
     auth::AuthenticationStatus,
     constants::*,
     ech::{
-        encode_config as encode_ech_config, generate_keys as generate_ech_keys, AeadId, KdfId,
-        KemId, SymmetricSuite,
+        AeadId, KdfId, KemId, SymmetricSuite, encode_config as encode_ech_config,
+        generate_keys as generate_ech_keys,
     },
     err::{Error, PRErrorCode, Res},
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
-    p11::{random, randomize, PrivateKey, PublicKey, SymKey},
+    p11::{PrivateKey, PublicKey, SymKey, random, randomize},
     replay::AntiReplay,
     secrets::SecretDirection,
     ssl::Opt,
@@ -108,7 +108,7 @@ fn version_check() -> Res<()> {
 fn enable_ssl_trace() -> Res<()> {
     let opt = Opt::Locking.as_int();
     let mut v: ::std::os::raw::c_int = 0;
-    secstatus_to_res(unsafe { ssl::SSL_OptionGetDefault(opt, &mut v) })
+    secstatus_to_res(unsafe { ssl::SSL_OptionGetDefault(opt, &raw mut v) })
 }
 
 fn init_once(db: Option<PathBuf>) -> Res<NssLoaded> {
@@ -204,7 +204,9 @@ where
     if data.is_null() || len == 0 {
         &[]
     } else {
-        #[expect(clippy::disallowed_methods, reason = "This is non-null.")]
-        std::slice::from_raw_parts(data, len)
+        unsafe {
+            #[expect(clippy::disallowed_methods, reason = "This is non-null.")]
+            std::slice::from_raw_parts(data, len)
+        }
     }
 }

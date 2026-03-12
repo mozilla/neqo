@@ -32,6 +32,11 @@ ignored = ["log"]
 
 [features]
 bench = ["neqo-common/bench", "neqo-transport/bench", "log/release_max_level_info"]
+build-fuzzing-corpus = [
+        "neqo-common/build-fuzzing-corpus",
+        "neqo-transport/build-fuzzing-corpus",
+        "test-fixture/disable-random",
+]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

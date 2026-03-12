@@ -79,14 +79,9 @@ Run these commands in order before submitting a PR. All must pass:
 
 ### Known Issues and Workarounds
 
-1. **One mtu package test fails without IPv6**: The `inet_v6` test in the `mtu` crate tests fails if there is no IPv6 connectivity to the Internet. In such cases, set the `GITHUB_ACTIONS` environment variable to skip that test:
-   ```bash
-   GITHUB_ACTIONS=1 cargo test --locked --workspace
-   ```
+1. **Format checking requires nightly**: The `.rustfmt.toml` uses features only available in nightly Rust. Always use `cargo +nightly fmt`.
 
-2. **Format checking requires nightly**: The `.rustfmt.toml` uses features only available in nightly Rust. Always use `cargo +nightly fmt`.
-
-3. **clippy requires cargo-hack**: Install with `cargo install cargo-hack`. The CI runs clippy per-crate with feature powerset to catch warnings hidden by workspace feature unification.
+2. **clippy requires cargo-hack**: Install with `cargo install cargo-hack`. The CI runs clippy per-crate with feature powerset to catch warnings hidden by workspace feature unification.
 
 ## Repository Layout
 

@@ -8,8 +8,9 @@
 #![cfg(not(feature = "disable-encryption"))]
 
 use neqo_crypto::{
+    Aead, AeadTrait as _,
     constants::{Cipher, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-    hkdf, Aead, AeadTrait as _,
+    hkdf,
 };
 use test_fixture::fixture_init;
 
@@ -130,4 +131,21 @@ fn aead_encrypt_in_place_too_small_buffer() {
 
     let result = aead.encrypt_in_place(1, AAD, &mut small_buffer);
     assert!(result.is_err());
+}
+
+#[test]
+fn encrypt_decrypt_in_place() {
+    let aead = make_aead(TLS_AES_128_GCM_SHA256);
+
+    let plaintext = b"hello world";
+    let mut buffer = Vec::from(plaintext);
+    buffer.resize(plaintext.len() + aead.expansion(), 0);
+
+    let encrypted_len = aead.encrypt_in_place(0, b"aad", &mut buffer).unwrap();
+    assert_eq!(encrypted_len, plaintext.len() + aead.expansion());
+    assert_eq!(encrypted_len, buffer.len());
+
+    let decrypted_len = aead.decrypt_in_place(0, b"aad", &mut buffer).unwrap();
+    assert_eq!(decrypted_len, plaintext.len());
+    assert_eq!(&buffer[..decrypted_len], plaintext);
 }

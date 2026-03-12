@@ -30,7 +30,7 @@ runs:
             freebsd)    pkg install -y curl llvm nss pkgconf
                         ;;
             openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
-                        pkg_add rust rust-clippy rust-rustfmt llvm-19.1.7p3 nss pkgconf # rustup does not support OpenBSD at all
+                        pkg_add rust rust-clippy rust-rustfmt llvm-21.1.2p0 nss # rustup does not support OpenBSD at all
                         ;;
             netbsd)     /usr/sbin/pkg_add pkgin && pkgin -y install curl clang nss pkgconf
                         ;;
@@ -56,9 +56,9 @@ runs:
             freebsd)    sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
                         . "\$HOME/.cargo/env"
                         ;;
-            openbsd)    export LIBCLANG_PATH=/usr/local/llvm19/lib
-                        export LLVM_COV=/usr/local/llvm19/bin/llvm-cov
-                        export LLVM_PROFDATA=/usr/local/llvm19/bin/llvm-profdata
+            openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
+                        export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
+                        export LLVM_PROFDATA=/usr/local/llvm21/bin/llvm-profdata
                         [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on OpenBSD
                         ;;
             netbsd)     sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
@@ -76,7 +76,7 @@ runs:
                         ;;
           esac
           cargo version
-          cargo check --locked --all-targets $WORKSPACE \$EXCLUDE
+          cargo check --locked --all-targets $WORKSPACE \${EXCLUDE:-}
           case "$PLATFORM" in
             openbsd)    # clippy fails on OpenBSD, because libfuzzer-sys is not supported.
                         ;;
@@ -102,45 +102,57 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
         curl -o "$WD/rustup.sh" --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
-        echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG GITHUB_ACTIONS RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
+        echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
-      uses: vmactions/freebsd-vm@966989c456d41351f095a421f60e71342d3bce41 # v1.2.1
+      uses: vmactions/freebsd-vm@c9f815bc7aa0d34c9fdd0619b034a32d6ca7b57e # v1.4.2
       with:
         usesh: true
+        disable-cache: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'openbsd' }}
-      uses: vmactions/openbsd-vm@0d65352eee1508bab7cb12d130536d3a556be487 # v1.1.8
+      uses: vmactions/openbsd-vm@9a8e4351a4a0dc6238e7c69276dcbf6c03bea576 # v1.3.6
       with:
         usesh: true
+        disable-cache: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'netbsd' }}
-      uses: vmactions/netbsd-vm@d0228be27fbaba19418cc1b332609a895cf16561 # v1.1.9
+      uses: vmactions/netbsd-vm@e04aec09540429f9cebb0e7941f7cd0c0fc3b44f # v1.3.6
       with:
         usesh: true
+        disable-cache: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'solaris' }}
-      uses: vmactions/solaris-vm@58cbd70c6e051860f9b8f65908cc582938fbbdba # v1.1.5
+      uses: vmactions/solaris-vm@69d382b4a775b25ea5955e6c1730e9d05047ca0d # v1.3.1
       with:
         release: "11.4-gcc"
         usesh: true
+        disable-cache: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
-    - if: ${{ inputs.codecov-token != '' }}
-      uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0
+    - id: check-coverage
+      shell: bash
+      env:
+        WORKING_DIR: ${{ inputs.working-directory }}
+      run: test -f "$WORKING_DIR/codecov.json" && echo "exists=true" >> "$GITHUB_OUTPUT" || true
+
+    - if: ${{ steps.check-coverage.outputs.exists == 'true' }}
+      uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
       with:
         files: codecov.json
+        working-directory: ${{ inputs.working-directory }}
         fail_ci_if_error: false
         token: ${{ inputs.codecov-token }}
         verbose: true
+        flags: ${{ inputs.platform }}

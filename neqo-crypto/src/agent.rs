@@ -17,7 +17,7 @@ use std::{
     ops::{Deref, DerefMut},
     os::raw::{c_uint, c_void},
     pin::Pin,
-    ptr::{null, null_mut, NonNull},
+    ptr::{NonNull, null, null_mut},
     rc::Rc,
     slice,
     time::Instant,
@@ -25,19 +25,15 @@ use std::{
 
 use neqo_common::{hex_snip_middle, hex_with_len, qdebug, qtrace, qwarn};
 
-pub use crate::{
-    agentio::{as_c_void, Record, RecordList},
-    cert::CertificateInfo,
-};
 use crate::{
     agentio::{AgentIo, METHODS},
     assert_initialized,
     auth::AuthenticationStatus,
     constants::{
-        Alert, Cipher, Epoch, Extension, Group, SignatureScheme, Version, TLS_VERSION_1_3,
+        Alert, Cipher, Epoch, Extension, Group, SignatureScheme, TLS_VERSION_1_3, Version,
     },
     ech,
-    err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res},
+    err::{Error, PRErrorCode, Res, is_blocked, secstatus_to_res},
     ext::{ExtensionHandler, ExtensionTracker, SSL_CallExtensionWriterOnEchInner},
     null_safe_slice,
     p11::{self, PrivateKey, PublicKey},
@@ -46,6 +42,10 @@ use crate::{
     secrets::SecretHolder,
     ssl::{self, PRBool},
     time::{Time, TimeHolder},
+};
+pub use crate::{
+    agentio::{Record, RecordList, as_c_void},
+    cert::CertificateInfo,
 };
 
 /// Private trait for Certificate Compression implementation
@@ -231,9 +231,9 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
     secstatus_to_res(unsafe {
         ssl::SSL_GetNextProto(
             fd,
-            &mut alpn_state,
+            &raw mut alpn_state,
             chosen.as_mut_ptr(),
-            &mut chosen_len,
+            &raw mut chosen_len,
             c_uint::try_from(chosen.len())?,
         )
     })?;
@@ -414,7 +414,6 @@ impl SecretAgentInfo {
     pub const fn alpn(&self) -> Option<&String> {
         self.alpn.as_ref()
     }
-    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn signature_scheme(&self) -> SignatureScheme {
         self.signature_scheme
@@ -447,7 +446,7 @@ pub struct SecretAgent {
 
 impl SecretAgent {
     fn new() -> Res<Self> {
-        let mut io = Box::pin(AgentIo::new());
+        let mut io = Box::pin(AgentIo::default());
         let fd = Self::create_fd(&mut io)?;
         Ok(Self {
             fd,
@@ -502,7 +501,9 @@ impl SecretAgent {
         _is_server: PRBool,
     ) -> ssl::SECStatus {
         let auth_required_ptr = arg.cast::<bool>();
-        *auth_required_ptr = true;
+        unsafe {
+            *auth_required_ptr = true;
+        }
         // NSS insists on getting SECWouldBlock here rather than accepting
         // the usual combination of PR_WOULD_BLOCK_ERROR and SECFailure.
         ssl::_SECStatus_SECWouldBlock
@@ -513,10 +514,10 @@ impl SecretAgent {
         arg: *mut c_void,
         alert: *const ssl::SSLAlert,
     ) {
-        let alert = alert.as_ref().unwrap();
+        let alert = unsafe { alert.as_ref().unwrap() };
         if alert.level == 2 {
             // Fatal alerts demand attention.
-            let st = arg.cast::<Option<Alert>>().as_mut().unwrap();
+            let st = unsafe { arg.cast::<Option<Alert>>().as_mut().unwrap() };
             if st.is_none() {
                 *st = Some(alert.description);
             } else {
@@ -576,7 +577,7 @@ impl SecretAgent {
     /// If the range of versions isn't supported.
     pub fn set_version_range(&mut self, min: Version, max: Version) -> Res<()> {
         let range = ssl::SSLVersionRange { min, max };
-        secstatus_to_res(unsafe { ssl::SSL_VersionRangeSet(self.fd, &range) })
+        secstatus_to_res(unsafe { ssl::SSL_VersionRangeSet(self.fd, &raw const range) })
     }
 
     /// Enable a set of ciphers.  Note that the order of these is not respected.
@@ -1074,24 +1075,25 @@ impl Client {
         let Ok(info_len) = c_uint::try_from(size_of::<ssl::SSLResumptionTokenInfo>()) else {
             return ssl::SECFailure;
         };
-        let info_res = &ssl::SSL_GetResumptionTokenInfo(token, len, info.as_mut_ptr(), info_len);
+        let info_res =
+            unsafe { ssl::SSL_GetResumptionTokenInfo(token, len, info.as_mut_ptr(), info_len) };
         if info_res.is_err() {
             // Ignore the token.
             return ssl::SECSuccess;
         }
-        let expiration_time = info.assume_init().expirationTime;
-        if ssl::SSL_DestroyResumptionTokenInfo(info.as_mut_ptr()).is_err() {
+        let expiration_time = unsafe { info.assume_init() }.expirationTime;
+        if unsafe { ssl::SSL_DestroyResumptionTokenInfo(info.as_mut_ptr()) }.is_err() {
             // Ignore the token.
             return ssl::SECSuccess;
         }
-        let Some(resumption) = arg.cast::<Vec<ResumptionToken>>().as_mut() else {
+        let Some(resumption) = (unsafe { arg.cast::<Vec<ResumptionToken>>().as_mut() }) else {
             return ssl::SECFailure;
         };
         let Ok(len) = usize::try_from(len) else {
             return ssl::SECFailure;
         };
         let mut v = Vec::with_capacity(len);
-        v.extend_from_slice(null_safe_slice(token, len));
+        v.extend_from_slice(unsafe { null_safe_slice(token, len) });
         qdebug!("[{fd:p}] Got resumption token {}", hex_snip_middle(&v));
 
         if resumption.len() >= MAX_TICKETS {
@@ -1256,6 +1258,17 @@ pub struct Server {
     zero_rtt_check: Option<Pin<Box<ZeroRttCheckState>>>,
 }
 
+fn load_cert_and_key(name: &str) -> Res<(p11::Certificate, PrivateKey)> {
+    let c = CString::new(name)?;
+    let cert = p11::Certificate::from_ptr(unsafe {
+        p11::PK11_FindCertFromNickname(c.as_ptr(), null_mut())
+    })
+    .map_err(|_| Error::CertificateLoading)?;
+    let key = PrivateKey::from_ptr(unsafe { p11::PK11_FindKeyByAnyCert(*cert, null_mut()) })
+        .map_err(|_| Error::CertificateLoading)?;
+    Ok((cert, key))
+}
+
 impl Server {
     /// Create a new server agent.
     ///
@@ -1264,22 +1277,63 @@ impl Server {
     /// Errors returned when NSS fails.
     pub fn new<A: AsRef<str>>(certificates: &[A]) -> Res<Self> {
         let mut agent = SecretAgent::new()?;
-
         for n in certificates {
-            let c = CString::new(n.as_ref())?;
-            let cert_ptr = unsafe { p11::PK11_FindCertFromNickname(c.as_ptr(), null_mut()) };
-            let Ok(cert) = p11::Certificate::from_ptr(cert_ptr) else {
-                return Err(Error::CertificateLoading);
-            };
-            let key_ptr = unsafe { p11::PK11_FindKeyByAnyCert(*cert, null_mut()) };
-            let Ok(key) = PrivateKey::from_ptr(key_ptr) else {
-                return Err(Error::CertificateLoading);
-            };
+            let (cert, key) = load_cert_and_key(n.as_ref())?;
             secstatus_to_res(unsafe {
                 ssl::SSL_ConfigServerCert(agent.fd, (*cert).cast(), (*key).cast(), null(), 0)
             })?;
         }
+        agent.ready(true, true)?;
+        Ok(Self {
+            agent,
+            zero_rtt_check: None,
+        })
+    }
 
+    /// Create a server with OCSP responses and SCTs configured.
+    /// Not suitable for multiple certificates, because it configures the same OCSP/SCT for all
+    /// certificates. In other words, this is good for testing that the plumbing works, not for
+    /// a real server.
+    ///
+    /// # Errors
+    ///
+    /// Errors returned when NSS fails.
+    pub fn new_with_ocsp_and_scts<A: AsRef<str>>(
+        certificates: &[A],
+        ocsp_responses: &[&[u8]],
+        scts: &[u8],
+    ) -> Res<Self> {
+        let mut agent = SecretAgent::new()?;
+        for n in certificates {
+            let (cert, key) = load_cert_and_key(n.as_ref())?;
+            let ocsp_items: Vec<p11::SECItem> = ocsp_responses
+                .iter()
+                .map(|b| p11::Item::wrap(b))
+                .collect::<Res<_>>()?;
+            let ocsp_array = ssl::SECItemArrayStr {
+                items: ocsp_items.as_ptr().cast::<ssl::SECItem>().cast_mut(),
+                len: c_uint::try_from(ocsp_items.len())?,
+            };
+            let sct_item = p11::Item::wrap(scts)?;
+            let extra = ssl::SSLExtraServerCertDataStr {
+                // ssl_auth_null means "I don't care what sort of certificate this is".
+                authType: ssl::SSLAuthType::ssl_auth_null,
+                certChain: null(),
+                stapledOCSPResponses: &raw const ocsp_array,
+                signedCertTimestamps: std::ptr::from_ref(&sct_item).cast(),
+                delegCred: null(),
+                delegCredPrivKey: null(),
+            };
+            secstatus_to_res(unsafe {
+                ssl::SSL_ConfigServerCert(
+                    agent.fd,
+                    (*cert).cast(),
+                    (*key).cast(),
+                    &raw const extra,
+                    c_uint::try_from(size_of::<ssl::SSLExtraServerCertDataStr>())?,
+                )
+            })?;
+        }
         agent.ready(true, true)?;
         Ok(Self {
             agent,
@@ -1301,8 +1355,9 @@ impl Server {
             return ssl::SSLHelloRetryRequestAction::ssl_hello_retry_accept;
         }
 
-        let check_state = arg.cast::<ZeroRttCheckState>().as_mut().unwrap();
-        let token = null_safe_slice(client_token, usize::try_from(client_token_len).unwrap());
+        let check_state = unsafe { arg.cast::<ZeroRttCheckState>().as_mut().unwrap() };
+        let token =
+            unsafe { null_safe_slice(client_token, usize::try_from(client_token_len).unwrap()) };
         match check_state.checker.check(token) {
             ZeroRttCheckResult::Accept => ssl::SSLHelloRetryRequestAction::ssl_hello_retry_accept,
             ZeroRttCheckResult::Fail => ssl::SSLHelloRetryRequestAction::ssl_hello_retry_fail,
@@ -1313,9 +1368,12 @@ impl Server {
                 // Don't bother propagating errors from this, because it should be caught in
                 // testing.
                 assert!(tok.len() <= usize::try_from(retry_token_max).unwrap());
-                let slc = slice::from_raw_parts_mut(retry_token, tok.len());
-                slc.copy_from_slice(&tok);
-                *retry_token_len = c_uint::try_from(tok.len()).unwrap();
+                // and `retry_token_len` is a valid pointer provided by NSS.
+                unsafe {
+                    let slc = slice::from_raw_parts_mut(retry_token, tok.len());
+                    slc.copy_from_slice(&tok);
+                    *retry_token_len = c_uint::try_from(tok.len()).unwrap();
+                }
                 ssl::SSLHelloRetryRequestAction::ssl_hello_retry_request
             }
         }
@@ -1503,7 +1561,9 @@ mod tests {
             74, 184, 51, 9, 38, 114, 144, 66, 153,
         ];
         let resumption_token = ResumptionToken::new(token.to_vec(), now);
-        let expected = format!("ResumptionToken {{ token: \"[848]: 0200063c2515eea5..b833092672904299\", expiration_time: {now:?} }}");
+        let expected = format!(
+            "ResumptionToken {{ token: \"[848]: 0200063c2515eea5..b833092672904299\", expiration_time: {now:?} }}"
+        );
         assert_eq!(format!("{resumption_token:?}"), expected);
     }
 }

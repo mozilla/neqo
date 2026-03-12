@@ -64,7 +64,7 @@ impl AntiReplay {
                 Interval::from(window).try_into()?,
                 c_uint::try_from(k)?,
                 c_uint::try_from(bits)?,
-                &mut ctx,
+                &raw mut ctx,
             )
         }?;
 
@@ -76,5 +76,20 @@ impl AntiReplay {
     /// Configure the provided socket with this anti-replay context.
     pub(crate) fn config_socket(&self, fd: *mut PRFileDesc) -> Res<()> {
         unsafe { SSL_SetAntiReplayContext(fd, *self.ctx) }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::time::Duration;
+
+    #[test]
+    fn creation() {
+        test_fixture::fixture_init();
+        for (k, bits, expected) in [(7, 8, true), (usize::MAX, 3, false), (1, usize::MAX, false)] {
+            let res = crate::AntiReplay::new(test_fixture::now(), Duration::from_secs(10), k, bits);
+            assert_eq!(res.is_ok(), expected);
+        }
     }
 }

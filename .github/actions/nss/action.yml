@@ -2,12 +2,14 @@ name: Install NSS
 description: Install NSS
 
 inputs:
-  type:
-    description: "When building, whether to do a debug or release build of NSS"
-    default: "Release"
   minimum-version:
-    description: "Minimum required version of NSS"
-    required: true
+    description: "Minimum required version of NSS. If not provided, reads from version-file."
+    required: false
+    default: ""
+  version-file:
+    description: "Path to file containing the minimum NSS version (relative to workspace root)"
+    required: false
+    default: "neqo-crypto/min_version.txt"
   target:
     description: "Target for cross-compilation"
     default: ""
@@ -15,18 +17,34 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Determine minimum NSS version
+      id: min-version
+      shell: bash
+      env:
+        MIN_VERSION_INPUT: ${{ inputs.minimum-version }}
+        VERSION_FILE: ${{ inputs.version-file }}
+      run: |
+        if [ -n "$MIN_VERSION_INPUT" ]; then
+          echo "minimum=$MIN_VERSION_INPUT" >> "$GITHUB_OUTPUT"
+        elif [ -f "$VERSION_FILE" ]; then
+          echo "minimum=$(cat "$VERSION_FILE")" >> "$GITHUB_OUTPUT"
+        else
+          echo "::error::No minimum-version provided and version file '$VERSION_FILE' not found"
+          exit 1
+        fi
+
     - name: Install system NSS (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && inputs.target == '' }}
+      if: ${{ runner.os == 'Linux' && inputs.target == '' && (runner.environment != 'self-hosted' || contains(runner.name, 'CodSpeed')) }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
         [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
-        sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config
+        sudo apt-get install -y --no-install-recommends libnss3-dev
 
     - name: Install system NSS (MacOS)
       shell: bash
-      if: ${{ runner.os == 'MacOS' && runner.environment == 'github-hosted' && inputs.target == '' }}
+      if: ${{ runner.os == 'MacOS' && inputs.target == '' }}
       run: |
         [ "$BREW_UPDATED" ] || brew update && echo "BREW_UPDATED=1" >> "$GITHUB_ENV"
         brew install nss
@@ -34,29 +52,13 @@ runs:
     - name: Check system NSS version
       id: system_nss
       env:
-        MIN_VERSION: ${{ inputs.minimum-version }}
+        MIN_VERSION: ${{ steps.min-version.outputs.minimum }}
       shell: bash
       if: inputs.target == ''
       run: |
-        if ! command -v pkg-config &> /dev/null; then
-          echo "pkg-config: not found"
-          exit 0
-        fi
-        if ! pkg-config --exists nss; then
-          echo "pkg-config: NSS not found"
-          exit 0
-        fi
-        NSS_VERSION="$(pkg-config --modversion nss)"
-        if [ "$?" -ne 0 ]; then
-          echo "pkg-config: failed to determine NSS version"
-          exit 0
-        fi
-        NSS_MAJOR=$(echo "$NSS_VERSION" | cut -d. -f1)
-        NSS_MINOR=$(echo "$NSS_VERSION" | cut -d. -f2)
-        REQ_NSS_MAJOR=$(echo "$MIN_VERSION" | cut -d. -f1)
-        REQ_NSS_MINOR=$(echo "$MIN_VERSION" | cut -d. -f2)
-        if [[ "$NSS_MAJOR" -lt "$REQ_NSS_MAJOR" || "$NSS_MAJOR" -eq "$REQ_NSS_MAJOR" && "$NSS_MINOR" -lt "$REQ_NSS_MINOR" ]]; then
-          echo "System NSS is too old: $NSS_VERSION"
+        if ! pkg-config --atleast-version "$MIN_VERSION" nss; then
+          echo -n "System NSS needs ${MIN_VERSION}, got "
+          pkg-config --modversion nss 2>/dev/null || echo "pkg-config error"
           exit 0
         fi
         echo "System NSS is suitable: $NSS_VERSION"
@@ -69,11 +71,11 @@ runs:
       #
       # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
       # is too small for this to be effective there.
-      if: ${{ env.SCCACHE_ENABLED != '1' && !steps.system_nss.outputs.suitable && runner.environment != 'github-hosted' }}
-      uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
+      if: ${{ env.SCCACHE_ENABLED != '1' && !steps.system_nss.outputs.suitable && runner.environment == 'self-hosted' && !contains(runner.name, 'CodSpeed') }}
+      uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
     - name: Enable sscache
-      if: ${{ !steps.system_nss.outputs.suitable && runner.environment != 'github-hosted' }}
+      if: ${{ !steps.system_nss.outputs.suitable && runner.environment == 'self-hosted' && !contains(runner.name, 'CodSpeed') }}
       env:
         RUNNER_ENVIRONMENT: ${{ runner.environment }}
         RUNNER_OS: ${{ runner.os }}
@@ -87,54 +89,75 @@ runs:
         fi
         echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
         echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
-        if [ "$RUNNER_ENVIRONMENT" == "github-hosted" ]; then
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-        fi
+        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
-    - name: Checkout NSS
+    - name: Retrieve NSS
+      id: nss
       if: ${{ !steps.system_nss.outputs.suitable }}
-      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-      with:
-        repository: nss-dev/nss
-        path: nss
-        persist-credentials: false
+      shell: bash
+      run: |
+        # Versions and checksums are defined in nss-versions.env next to this action.
+        source "$GITHUB_ACTION_PATH/nss-versions.env"
+        NSS_TAG="${NSS_VERSION//./_}"
+        NSS_URL="https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_VERSION}.tar.gz"
+        echo "Retrieving NSS $NSS_VERSION from $NSS_URL"
+        curl -L -o nss.tar.gz "$NSS_URL"
+        if command -v sha256sum &>/dev/null; then
+          echo "$NSS_SHA256  nss.tar.gz" | sha256sum -c
+        else
+          echo "$NSS_SHA256  nss.tar.gz" | shasum -a 256 -c
+        fi
+        tar xzf nss.tar.gz --strip-components=1
+        rm nss.tar.gz
+        echo "version=$NSS_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Retrieve NSPR
       id: nspr
       if: ${{ !steps.system_nss.outputs.suitable }}
       shell: bash
-      env:
-        NSPR_VERSION: 4.37 # This changes so rarely that we can hardcode it.
       run: |
-        curl -L https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz |
-          tar xz --strip-components=1
+        # Versions and checksums are defined in nss-versions.env next to this action.
+        source "$GITHUB_ACTION_PATH/nss-versions.env"
+        NSPR_URL="https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz"
+        echo "Retrieving NSPR $NSPR_VERSION from $NSPR_URL"
+        curl -L -o nspr.tar.gz "$NSPR_URL"
+        if command -v sha256sum &>/dev/null; then
+          echo "$NSPR_SHA256  nspr.tar.gz" | sha256sum -c
+        else
+          echo "$NSPR_SHA256  nspr.tar.gz" | shasum -a 256 -c
+        fi
+        tar xzf nspr.tar.gz --strip-components=1
+        rm nspr.tar.gz
         echo "version=$NSPR_VERSION" >> "$GITHUB_OUTPUT"
 
-    - name: Store NSS version
-      id: nss
-      if: ${{ !steps.system_nss.outputs.suitable }}
+    - name: Store Ubuntu release code name (Linux)
+      id: ubuntu_release
       shell: bash
+      if: ${{ runner.os == 'Linux' && !steps.system_nss.outputs.suitable }}
       run: |
-        NSS_HEAD=$(git -C nss rev-parse HEAD)
-        echo "version=$NSS_HEAD" >> "$GITHUB_OUTPUT"
+        # Store Ubuntu release codename for use in cache key.
+        . /etc/os-release
+        echo "codename=-$UBUNTU_CODENAME" >> "$GITHUB_OUTPUT"
 
-    - name: Cache NSS
+    # Use restore-only here so PRs don't create redundant caches. PRs restore
+    # from main; only main saves new caches. This reduces churn and evictions.
+    # Downside: PRs that change NSS version/build will rebuild on every CI run.
+    - name: Restore NSS cache
       id: cache
-      if: ${{ !steps.system_nss.outputs.suitable && runner.environment == 'github-hosted' }}
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      if: ${{ !steps.system_nss.outputs.suitable }}
+      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
       with:
         path: dist
-        key: nss-${{ inputs.target && inputs.target || runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
+        key: nss-${{ inputs.target || runner.os }}${{ steps.ubuntu_release.outputs.codename }}-${{ runner.arch }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
 
     - name: Check if build is needed
       id: check_build
       if: ${{ !steps.system_nss.outputs.suitable }}
       env:
         CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
-        RUNNER_ENVIRONMENT: ${{ runner.environment }}
       shell: bash
       run: |
-        if [ "$RUNNER_ENVIRONMENT" != "github-hosted" ] || [ ! "$CACHE_HIT" ]; then
+        if [ "$CACHE_HIT" != "true" ]; then
           echo "Building NSS from source"
           echo "build_nss=1" >> "$GITHUB_OUTPUT"
         else
@@ -143,7 +166,7 @@ runs:
 
     - name: Install build dependencies (Linux)
       shell: bash
-      if: ${{ runner.os == 'Linux' && steps.check_build.outputs.build_nss && runner.environment == 'github-hosted' }}
+      if: ${{ runner.os == 'Linux' && steps.check_build.outputs.build_nss && (runner.environment != 'self-hosted' || contains(runner.name, 'CodSpeed')) }}
       env:
         DEBIAN_FRONTEND: noninteractive
       run: sudo apt-get install -y --no-install-recommends gyp ninja-build
@@ -191,17 +214,14 @@ runs:
       shell: bash
       if: ${{ !steps.system_nss.outputs.suitable }}
       env:
-        NSS_TARGET: ${{ inputs.type }}
-        NSS_TYPE: ${{ inputs.type }}
         NSS_DIR: ${{ github.workspace }}/nss
         RUNNER_OS: ${{ runner.os }}
         WORKSPACE: ${{ github.workspace }}
       run: | # zizmor: ignore[github-env] We need to write to GITHUB_PATH on Windows.
-        NSS_OUT="$WORKSPACE/dist/$NSS_TARGET"
+        NSS_OUT="$WORKSPACE/dist/Release"
         {
           echo "LD_LIBRARY_PATH=$NSS_OUT/lib"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib"
-          echo "NSS_TARGET=$NSS_TARGET"
           echo "NSS_DIR=$NSS_DIR"
           echo "NSS_PREBUILT=1"
         } >> "$GITHUB_ENV"
@@ -216,16 +236,17 @@ runs:
         TARGET_PLATFORM: ${{ inputs.target }}
         RUNNER_OS: ${{ runner.os }}
       run: |
-        if [ "$NSS_TARGET" != "Debug" ]; then
-          # We want to do an optimized build for accurate CPU profiling, but
-          # we also want debug symbols and frame pointers for that, which the normal optimized NSS
-          # build process doesn't provide.
-          OPT="-o"
-          [ "$RUNNER_OS" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
-        fi
+        # We want to do an optimized build for accurate CPU profiling, but
+        # we also want debug symbols and frame pointers for that, which the normal optimized NSS
+        # build process doesn't provide.
+        [ "$RUNNER_OS" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         if [[ $TARGET_PLATFORM == *-android* ]]; then
+          # TODO: The application-services version below must be updated when
+          # NSS versions change, as the build script references library names
+          # that may change across NSS releases.
+          VERSION="v149.0"
           for file in build-nss-android.sh build-android-common.sh; do
-            curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/tags/v137.0/libs/$file"
+            curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/tags/$VERSION/libs/$file"
             chmod +x "$file"
           done
           # See https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md#android
@@ -238,12 +259,12 @@ runs:
           find /tmp/tmp.* > tmp
           CERTUTIL="$(grep certutil tmp)"
           TARGET_DIR="$(dirname $(dirname $CERTUTIL))"
-          mkdir -p "dist/$NSS_TARGET"
-          cp -vaL "$TARGET_DIR"/* "dist/$NSS_TARGET/"
+          mkdir -p "dist/Release"
+          cp -vaL "$TARGET_DIR"/* "dist/Release/"
           NSPR_H="$(grep nspr.h tmp)"
           INCLUDE_DIR="$(dirname $NSPR_H)"
-          mkdir -p "dist/$NSS_TARGET/include/nspr"
-          cp -vaL "$INCLUDE_DIR"/* "dist/$NSS_TARGET/include/nspr"
+          mkdir -p "dist/Release/include/nspr"
+          cp -vaL "$INCLUDE_DIR"/* "dist/Release/include/nspr"
           CHACHA="$(grep chacha20poly1305.h tmp)"
           PRIVATE_DIR="$(dirname $(dirname $CHACHA))"
           mkdir -p "dist/private"
@@ -254,9 +275,16 @@ runs:
           cp -vaL "$PUBLIC_DIR"/* "dist/"
           LIBNSPR4="$(grep lib/libnspr4.a tmp)"
           LIB_DIR="$(dirname $LIBNSPR4)"
-          mkdir -p "dist/$NSS_TARGET/lib"
-          cp -vaL "$LIB_DIR"/* "dist/$NSS_TARGET/lib"
+          mkdir -p "dist/Release/lib"
+          cp -vaL "$LIB_DIR"/* "dist/Release/lib"
         else
           [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-          $NSS_DIR/build.sh -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 $OPT --static
+          $NSS_DIR/build.sh -g -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static
         fi
+
+    - name: Save NSS cache
+      if: ${{ steps.check_build.outputs.build_nss && github.event_name != 'pull_request' }}
+      uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      with:
+        path: dist
+        key: nss-${{ inputs.target || runner.os }}${{ steps.ubuntu_release.outputs.codename }}-${{ runner.arch }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}

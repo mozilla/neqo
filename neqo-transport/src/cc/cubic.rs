@@ -11,72 +11,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::qtrace;
+use neqo_common::{qdebug, qtrace};
 
-use crate::cc::classic_cc::WindowAdjustment;
-
-/// > Constant that determines the aggressiveness of CUBIC in competing with other congestion
-/// > control algorithms in high-BDP networks.
-///
-/// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
-///
-/// See section 5.1 of RFC9438 for discussion on how to set the concrete value:
-///
-/// <https://datatracker.ietf.org/doc/html/rfc9438#name-fairness-to-reno>
-pub const CUBIC_C: f64 = 0.4;
-/// > CUBIC additive increase factor used in the Reno-friendly region \[to achieve approximately the
-/// > same average congestion window size as Reno\].
-///
-/// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
-///
-/// > The model used to calculate CUBIC_ALPHA is not absolutely precise,
-/// > but analysis and simulation \[...\], as well as over a decade of experience with
-/// > CUBIC in the public Internet, show that this approach produces acceptable
-/// > levels of rate fairness between CUBIC and Reno flows.
-///
-/// Formula:
-///
-/// `CUBIC_ALPHA = 3.0 * (1.0 - CUBIC_BETA) / (1.0 + CUBIC_BETA)`
-///
-/// <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
-pub const CUBIC_ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7); // with CUBIC_BETA = 0.7
-/// `CUBIC_BETA` = 0.7;
-///
-/// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
-///
-/// > To balance between the scalability and convergence speed, CUBIC sets the multiplicative window
-/// > decrease factor to 0.7 while Standard TCP uses 0.5. While this improves the scalability of
-/// > CUBIC, a side effect of this decision is slower convergence, especially under low statistical
-/// > multiplexing environments.
-///
-/// <https://datatracker.ietf.org/doc/html/rfc9438#name-principle-4-for-the-cubic-d>
-///
-/// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing to
-/// construct `CUBIC_BETA = 0.7`.
-pub const CUBIC_BETA_USIZE_DIVIDEND: usize = 7;
-/// > CUBIC multiplicative decrease factor
-///
-/// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
-///
-/// > To balance between the scalability and convergence speed, CUBIC sets the multiplicative window
-/// > decrease factor to 0.7 while Standard TCP uses 0.5. While this improves the scalability of
-/// > CUBIC, a side effect of this decision is slower convergence, especially under low statistical
-/// > multiplexing environments.
-///
-/// <https://datatracker.ietf.org/doc/html/rfc9438#name-principle-4-for-the-cubic-d>
-///
-/// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing to
-/// construct `CUBIC_BETA = 0.7`
-pub const CUBIC_BETA_USIZE_DIVISOR: usize = 10;
-
-/// This is the factor that is used by fast convergence to further reduce the next `W_max` when a
-/// congestion event occurs while `cwnd < W_max`. This speeds up the bandwidth release for when a
-/// new flow joins the network.
-///
-/// The calculation assumes `CUBIC_BETA = 0.7`.
-///
-/// <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
-pub const CUBIC_FAST_CONVERGENCE_FACTOR: f64 = (1.0 + 0.7) / 2.0;
+use crate::cc::{CongestionEvent, classic_cc::WindowAdjustment};
 
 /// Convert an integer congestion window value into a floating point value.
 /// This has the effect of reducing larger values to `1<<53`.
@@ -90,8 +27,8 @@ pub fn convert_to_f64(v: usize) -> f64 {
     f_64
 }
 
-#[derive(Debug, Default)]
-pub struct Cubic {
+#[derive(Debug, Default, Clone)]
+pub struct State {
     /// > An estimate for the congestion window \[...\] in the Reno-friendly region -- that
     /// > is, an estimate for the congestion window of Reno.
     ///
@@ -139,24 +76,119 @@ pub struct Cubic {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-variables-of-interest>
     ///
-    /// This also is reset on being application limited.
+    /// This is also reset on being application limited.
     t_epoch: Option<Instant>,
     /// New and unused leftover acked bytes for calculating the reno region increases to `w_est`.
     reno_acked_bytes: f64,
 }
 
-impl Display for Cubic {
+impl Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "Cubic [w_max: {}, k: {}, t_epoch: {:?}]",
+            "state [w_max: {}, k: {}, t_epoch: {:?}]",
             self.w_max, self.k, self.t_epoch
         )?;
         Ok(())
     }
 }
 
+#[derive(Debug, Default)]
+pub struct Cubic {
+    /// Current CUBIC parameters.
+    current: State,
+    /// CUBIC parameters that have been stored on a congestion event to restore later in case it
+    /// turns out to have been spurious.
+    stored: Option<State>,
+}
+
+impl Display for Cubic {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Cubic {}", self.current)
+    }
+}
+
 impl Cubic {
+    /// > Constant that determines the aggressiveness of CUBIC in competing with other congestion
+    /// > control algorithms in high-BDP networks.
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
+    ///
+    /// See section 5.1 of RFC9438 for discussion on how to set the concrete value:
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fairness-to-reno>
+    pub const C: f64 = 0.4;
+
+    /// > CUBIC additive increase factor used in the Reno-friendly region \[to achieve approximately
+    /// > the same average congestion window size as Reno\].
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
+    ///
+    /// > The model used to calculate CUBIC_ALPHA is not absolutely precise,
+    /// > but analysis and simulation \[...\], as well as over a decade of experience with
+    /// > CUBIC in the public Internet, show that this approach produces acceptable
+    /// > levels of rate fairness between CUBIC and Reno flows.
+    ///
+    /// Formula:
+    ///
+    /// `ALPHA = 3.0 * (1.0 - CUBIC_BETA) / (1.0 + CUBIC_BETA)`
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
+    pub const ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7); // with CUBIC_BETA = 0.7
+
+    /// > CUBIC multiplicative decrease factor
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
+    ///
+    /// > To balance between the scalability and convergence speed, CUBIC sets the multiplicative
+    /// > window
+    /// > decrease factor to 0.7 while Standard TCP uses 0.5. While this improves the scalability of
+    /// > CUBIC, a side effect of this decision is slower convergence, especially under low
+    /// > statistical multiplexing environments.
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-principle-4-for-the-cubic-d>
+    ///
+    /// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing.
+    /// The divisor is set to `100` to also accommodate the `0.85` beta value for ECN induced
+    /// congestion events.
+    pub const BETA_USIZE_DIVISOR: usize = 100;
+
+    /// > CUBIC multiplicative decrease factor
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-constants-of-interest>
+    ///
+    /// > To balance between the scalability and convergence speed, CUBIC sets the multiplicative
+    /// > window
+    /// > decrease factor to 0.7 while Standard TCP uses 0.5. While this improves the scalability of
+    /// > CUBIC, a side effect of this decision is slower convergence, especially under low
+    /// > statistical multiplexing environments.
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-principle-4-for-the-cubic-d>
+    ///
+    /// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing to
+    /// construct `CUBIC_BETA = 0.7` from `70/100`.
+    pub const BETA_USIZE_DIVIDEND: usize = 70;
+
+    /// As per RFC 8511 it makes sense to have a different decrease factor for ECN-CE congestion
+    /// events than for loss induced congestion events.
+    ///
+    /// > CUBIC connections benefit from beta_{ecn} of 0.85.
+    ///
+    /// <https://www.rfc-editor.org/rfc/rfc8511.html#section-3.1>
+    ///
+    /// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing to
+    /// construct the beta value from `85/100`.
+    pub const BETA_USIZE_DIVIDEND_ECN: usize = 85;
+
+    /// This is the factor that is used by fast convergence to further reduce the next `W_max` when
+    /// a congestion event occurs while `cwnd < W_max`. This speeds up the bandwidth release for
+    /// when a new flow joins the network.
+    ///
+    /// The calculation assumes `CUBIC_BETA = 0.7`.
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
+    pub const FAST_CONVERGENCE_FACTOR: f64 = f64::midpoint(1.0, 0.7);
+
     /// Original equation is:
     ///
     /// `k = cubic_root((w_max - cwnd_epoch)/C)`
@@ -171,7 +203,7 @@ impl Cubic {
     ///
     /// `k = cubic_root((w_max - cwnd_epoch)/SMSS/C)`
     fn calc_k(&self, cwnd_epoch: f64, max_datagram_size: f64) -> f64 {
-        ((self.w_max - cwnd_epoch) / max_datagram_size / CUBIC_C).cbrt()
+        ((self.current.w_max - cwnd_epoch) / max_datagram_size / Self::C).cbrt()
     }
 
     /// `w_cubic(t) = C*(t-K)^3 + w_max`
@@ -185,7 +217,7 @@ impl Cubic {
     ///
     /// `w_cubic(t) = (C*(t-K)^3) * SMSS + w_max`
     fn w_cubic(&self, t: f64, max_datagram_size: f64) -> f64 {
-        (CUBIC_C * (t - self.k).powi(3)).mul_add(max_datagram_size, self.w_max)
+        (Self::C * (t - self.current.k).powi(3)).mul_add(max_datagram_size, self.current.w_max)
     }
 
     /// Sets `w_est`, `k`, `t_epoch` and `reno_acked_bytes` at the start of a new epoch
@@ -205,17 +237,17 @@ impl Cubic {
         max_datagram_size: f64,
         now: Instant,
     ) {
-        self.t_epoch = Some(now);
-        self.reno_acked_bytes = new_acked_bytes;
-        self.w_est = curr_cwnd;
+        self.current.t_epoch = Some(now);
+        self.current.reno_acked_bytes = new_acked_bytes;
+        self.current.w_est = curr_cwnd;
         // If `w_max < cwnd_epoch` we take the cubic root from a negative value in `calc_k()`. That
         // could only happen if somehow `cwnd` get's increased between calling `reduce_cwnd()` and
         // `start_epoch()`. This could happen if we exit slow start without packet loss, thus never
         // had a congestion event and called `reduce_cwnd()` which means `w_max` was never set and
         // is still it's default `0.0` value. For those cases we reset/initialize `w_max` here and
         // appropiately set `k` to `0.0` (`k` is the time for `cwnd` to reach `w_max`).
-        self.k = if self.w_max <= curr_cwnd {
-            self.w_max = curr_cwnd;
+        self.current.k = if self.current.w_max <= curr_cwnd {
+            self.current.w_max = curr_cwnd;
             0.0
         } else {
             self.calc_k(curr_cwnd, max_datagram_size)
@@ -225,12 +257,12 @@ impl Cubic {
 
     #[cfg(test)]
     pub const fn w_max(&self) -> f64 {
-        self.w_max
+        self.current.w_max
     }
 
     #[cfg(test)]
-    pub fn set_w_max(&mut self, w_max: f64) {
-        self.w_max = w_max;
+    pub const fn set_w_max(&mut self, w_max: f64) {
+        self.current.w_max = w_max;
     }
 }
 
@@ -252,8 +284,8 @@ impl WindowAdjustment for Cubic {
         let new_acked_bytes = convert_to_f64(new_acked_bytes);
         let max_datagram_size = convert_to_f64(max_datagram_size);
 
-        let t_epoch = if let Some(t) = self.t_epoch {
-            self.reno_acked_bytes += new_acked_bytes;
+        let t_epoch = if let Some(t) = self.current.t_epoch {
+            self.current.reno_acked_bytes += new_acked_bytes;
             t
         } else {
             // If we get here with `self.t_epoch == None` this is a new congestion
@@ -266,7 +298,8 @@ impl WindowAdjustment for Cubic {
             //
             // <https://datatracker.ietf.org/doc/html/rfc9438#app-limited>
             self.start_epoch(curr_cwnd, new_acked_bytes, max_datagram_size, now);
-            self.t_epoch
+            self.current
+                .t_epoch
                 .expect("unwrapping `None` value -- it should've been set by `start_epoch`")
         };
 
@@ -301,15 +334,15 @@ impl WindowAdjustment for Cubic {
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-9>
 
         // We first calculate the increase in segments and floor it to only include whole segments.
-        let increase = (CUBIC_ALPHA * self.reno_acked_bytes / curr_cwnd).floor();
+        let increase = (Self::ALPHA * self.current.reno_acked_bytes / curr_cwnd).floor();
 
         // Only apply the increase if it is at least by one segment.
         if increase > 0.0 {
-            self.w_est += increase * max_datagram_size;
+            self.current.w_est = increase.mul_add(max_datagram_size, self.current.w_est);
             // Because we floored the increase to whole segments we cannot just zero
             // `reno_acked_bytes` but have to calculate the actual bytes used.
-            let acked_bytes_used = increase * curr_cwnd / CUBIC_ALPHA;
-            self.reno_acked_bytes -= acked_bytes_used;
+            let acked_bytes_used = increase * curr_cwnd / Self::ALPHA;
+            self.current.reno_acked_bytes -= acked_bytes_used;
         }
 
         // > When receiving a new ACK in congestion avoidance (where cwnd could be greater than
@@ -327,7 +360,7 @@ impl WindowAdjustment for Cubic {
         // That is in line with what e.g. the Linux Kernel CUBIC implementation is doing.
         //
         // <https://github.com/torvalds/linux/blob/d7ee5bdce7892643409dea7266c34977e651b479/net/ipv4/tcp_cubic.c#L313>
-        let target = target_cubic.max(self.w_est);
+        let target = target_cubic.max(self.current.w_est);
 
         let cwnd_increase = target - curr_cwnd;
 
@@ -379,6 +412,7 @@ impl WindowAdjustment for Cubic {
         curr_cwnd: usize,
         acked_bytes: usize,
         max_datagram_size: usize,
+        congestion_event: CongestionEvent,
     ) -> (usize, usize) {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
         // Fast Convergence
@@ -397,23 +431,46 @@ impl WindowAdjustment for Cubic {
         //
         // "Check cwnd + MAX_DATAGRAM_SIZE instead of cwnd because with cwnd in bytes, cwnd may be
         // slightly off."
-        self.w_max = if curr_cwnd_f64 + convert_to_f64(max_datagram_size) < self.w_max {
-            curr_cwnd_f64 * CUBIC_FAST_CONVERGENCE_FACTOR
-        } else {
-            curr_cwnd_f64
-        };
+        self.current.w_max =
+            if curr_cwnd_f64 + convert_to_f64(max_datagram_size) < self.current.w_max {
+                curr_cwnd_f64 * Self::FAST_CONVERGENCE_FACTOR
+            } else {
+                curr_cwnd_f64
+            };
 
         // Reducing the congestion window and resetting time
-        self.t_epoch = None;
+        self.current.t_epoch = None;
+        let beta_dividend = if congestion_event == CongestionEvent::Ecn {
+            Self::BETA_USIZE_DIVIDEND_ECN
+        } else {
+            Self::BETA_USIZE_DIVIDEND
+        };
         (
-            curr_cwnd * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
-            acked_bytes * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
+            curr_cwnd * beta_dividend / Self::BETA_USIZE_DIVISOR,
+            acked_bytes * beta_dividend / Self::BETA_USIZE_DIVISOR,
         )
     }
 
     fn on_app_limited(&mut self) {
         // Reset t_epoch. Let it start again when the congestion controller
         // exits the app-limited period.
-        self.t_epoch = None;
+        self.current.t_epoch = None;
+    }
+
+    fn save_undo_state(&mut self) {
+        self.stored = Some(self.current.clone());
+    }
+
+    fn restore_undo_state(&mut self) {
+        let Some(stored) = self.stored.take() else {
+            debug_assert!(false, "couldn't restore {self} specific undo state");
+            return;
+        };
+
+        qdebug!(
+            "Spurious cong event: recovering cubic state from {} to {stored}",
+            self.current
+        );
+        self.current = stored;
     }
 }

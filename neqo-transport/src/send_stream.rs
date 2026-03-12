@@ -8,8 +8,8 @@
 
 use std::{
     cell::RefCell,
-    cmp::{max, min, Ordering},
-    collections::{btree_map::Entry, BTreeMap, VecDeque},
+    cmp::{Ordering, max, min},
+    collections::{BTreeMap, VecDeque, btree_map::Entry},
     fmt::{self, Display, Formatter},
     mem,
     num::NonZeroUsize,
@@ -18,13 +18,15 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use neqo_common::{qdebug, qerror, qtrace, Buffer, Encoder, Role};
+use neqo_common::{Buffer, Encoder, Role, qdebug, qerror, qtrace};
 use smallvec::SmallVec;
+use static_assertions::const_assert;
 
 use crate::{
+    AppError, Error, MAX_LOCAL_MAX_STREAM_DATA, Res,
     events::ConnectionEvents,
     fc::SenderFlowControl,
-    frame::{Frame, FrameType},
+    frame::{Frame, FrameEncoder as _, FrameType},
     packet,
     recovery::{self, StreamRecoveryToken},
     stats::FrameStats,
@@ -34,16 +36,7 @@ use crate::{
         TransportParameterId::{InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni},
         TransportParameters,
     },
-    AppError, Error, Res,
 };
-
-/// The maximum stream send buffer size.
-///
-/// See [`crate::recv_stream::MAX_RECV_WINDOW_SIZE`] for an explanation of this
-/// concrete value.
-///
-/// Keep in sync with [`crate::recv_stream::MAX_RECV_WINDOW_SIZE`].
-pub const MAX_SEND_BUFFER_SIZE: usize = 10 * 1024 * 1024;
 
 /// The priority that is assigned to sending data for the stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord)]
@@ -323,36 +316,36 @@ impl RangeTracker {
             .map(|(&k, _)| k)
             .collect::<SmallVec<[u64; 8]>>();
 
-        if let Entry::Occupied(next_entry) = self.used.entry(new_end) {
-            if next_entry.get().1 == RangeState::Sent {
-                // Check if the very next entry is the same type as this, so it can be merged.
-                let (extra_len, _) = next_entry.remove();
-                new_len += extra_len;
-            }
+        if let Entry::Occupied(next_entry) = self.used.entry(new_end)
+            && next_entry.get().1 == RangeState::Sent
+        {
+            // Check if the very next entry is the same type as this, so it can be merged.
+            let (extra_len, _) = next_entry.remove();
+            new_len += extra_len;
         }
 
         // Merge with any preceding sent range that might overlap,
         // or cut the head of this if the preceding range is acked.
         let prev = self.used.range(..new_off).next_back();
-        if let Some((&prev_off, &(prev_len, prev_state))) = prev {
-            if prev_off + prev_len >= new_off {
-                let overlap = prev_off + prev_len - new_off;
-                new_len = new_len.saturating_sub(overlap);
-                if new_len == 0 {
-                    // The previous range completely covers this one (no more to do).
-                    return;
-                }
+        if let Some((&prev_off, &(prev_len, prev_state))) = prev
+            && prev_off + prev_len >= new_off
+        {
+            let overlap = prev_off + prev_len - new_off;
+            new_len = new_len.saturating_sub(overlap);
+            if new_len == 0 {
+                // The previous range completely covers this one (no more to do).
+                return;
+            }
 
-                if prev_state == RangeState::Acked {
-                    // The previous range is acked, so it cuts this one.
-                    new_off += overlap;
-                } else {
-                    // Extend the current range backwards.
-                    new_off = prev_off;
-                    new_len += prev_len;
-                    // The previous range will be updated below.
-                    // It might need to be cut because of a covered acked range.
-                }
+            if prev_state == RangeState::Acked {
+                // The previous range is acked, so it cuts this one.
+                new_off += overlap;
+            } else {
+                // Extend the current range backwards.
+                new_off = prev_off;
+                new_len += prev_len;
+                // The previous range will be updated below.
+                // It might need to be cut because of a covered acked range.
             }
         }
 
@@ -471,7 +464,16 @@ pub struct TxBuffer {
     ranges: RangeTracker,   // ranges in buffer that have been sent or acked
 }
 
+const_assert!(MAX_LOCAL_MAX_STREAM_DATA <= usize::MAX as u64);
+
 impl TxBuffer {
+    /// The maximum stream send buffer size.
+    ///
+    /// See [`MAX_LOCAL_MAX_STREAM_DATA`] for an explanation of this
+    /// concrete value.
+    #[expect(clippy::cast_possible_truncation, reason = "Checked by const_assert!")]
+    pub const MAX_SIZE: usize = MAX_LOCAL_MAX_STREAM_DATA as usize;
+
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -479,10 +481,10 @@ impl TxBuffer {
 
     /// Attempt to add some or all of the passed-in buffer to the `TxBuffer`.
     pub fn send(&mut self, buf: &[u8]) -> usize {
-        let can_buffer = min(MAX_SEND_BUFFER_SIZE - self.buffered(), buf.len());
+        let can_buffer = min(Self::MAX_SIZE - self.buffered(), buf.len());
         if can_buffer > 0 {
             self.send_buf.extend(&buf[..can_buffer]);
-            debug_assert!(self.send_buf.len() <= MAX_SEND_BUFFER_SIZE);
+            debug_assert!(self.send_buf.len() <= Self::MAX_SIZE);
         }
         can_buffer
     }
@@ -564,7 +566,7 @@ impl TxBuffer {
     }
 
     fn avail(&self) -> usize {
-        MAX_SEND_BUFFER_SIZE - self.buffered()
+        Self::MAX_SIZE - self.buffered()
     }
 
     fn used(&self) -> u64 {
@@ -609,7 +611,7 @@ pub enum State {
 }
 
 impl State {
-    fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
+    const fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
         match self {
             Self::Send { send_buf, .. } | Self::DataSent { send_buf, .. } => Some(send_buf),
             Self::Ready { .. }
@@ -622,14 +624,14 @@ impl State {
     fn tx_avail(&self) -> usize {
         match self {
             // In Ready, TxBuffer not yet allocated but size is known
-            Self::Ready { .. } => MAX_SEND_BUFFER_SIZE,
+            Self::Ready { .. } => TxBuffer::MAX_SIZE,
             Self::Send { send_buf, .. } | Self::DataSent { send_buf, .. } => send_buf.avail(),
             Self::DataRecvd { .. } | Self::ResetSent { .. } | Self::ResetRecvd { .. } => 0,
         }
     }
 
     fn transition(&mut self, new_state: Self) {
-        qtrace!("SendStream state {:?} -> {:?}", self, new_state);
+        qtrace!("SendStream state {self:?} -> {new_state:?}");
         *self = new_state;
     }
 }
@@ -743,7 +745,7 @@ impl SendStream {
         true
     }
 
-    pub fn set_fairness(&mut self, make_fair: bool) {
+    pub const fn set_fairness(&mut self, make_fair: bool) {
         self.fair = make_fair;
     }
 
@@ -752,7 +754,7 @@ impl SendStream {
         self.fair
     }
 
-    pub fn set_priority(
+    pub const fn set_priority(
         &mut self,
         transmission: TransmissionPriority,
         retransmission: RetransmissionPriority,
@@ -766,7 +768,7 @@ impl SendStream {
         self.sendorder
     }
 
-    pub fn set_sendorder(&mut self, sendorder: Option<SendOrder>) {
+    pub const fn set_sendorder(&mut self, sendorder: Option<SendOrder>) {
         self.sendorder = sendorder;
     }
 
@@ -940,16 +942,20 @@ impl SendStream {
             }
 
             // Write the stream out.
-            builder.encode_varint(Frame::stream_type(fin, offset > 0, fill));
-            builder.encode_varint(id.as_u64());
-            if offset > 0 {
-                builder.encode_varint(offset);
-            }
+            let frame_type = Frame::stream_type(fin, offset > 0, fill);
+            builder.encode_frame(frame_type, |b| {
+                b.encode_varint(id.as_u64());
+                if offset > 0 {
+                    b.encode_varint(offset);
+                }
+                if fill {
+                    b.encode(&data[..length]);
+                } else {
+                    b.encode_vvec(&data[..length]);
+                }
+            });
             if fill {
-                builder.encode(&data[..length]);
                 builder.mark_full();
-            } else {
-                builder.encode_vvec(&data[..length]);
             }
             debug_assert!(builder.len() <= builder.limit());
 
@@ -1053,10 +1059,10 @@ impl SendStream {
         stats: &mut FrameStats,
     ) {
         // Send STREAM_DATA_BLOCKED at normal priority always.
-        if priority == self.priority {
-            if let State::Ready { fc, .. } | State::Send { fc, .. } = &mut self.state {
-                fc.write_frames(builder, tokens, stats);
-            }
+        if priority == self.priority
+            && let State::Ready { fc, .. } | State::Send { fc, .. } = &mut self.state
+        {
+            fc.write_frames(builder, tokens, stats);
         }
     }
 
@@ -1076,10 +1082,8 @@ impl SendStream {
             self.send_blocked_if_space_needed(0);
         }
 
-        if fin {
-            if let State::DataSent { fin_sent, .. } = &mut self.state {
-                *fin_sent = true;
-            }
+        if fin && let State::DataSent { fin_sent, .. } = &mut self.state {
+            *fin_sent = true;
         }
     }
 
@@ -1139,15 +1143,14 @@ impl SendStream {
             buf.mark_as_lost(offset, len);
         }
 
-        if fin {
-            if let State::DataSent {
+        if fin
+            && let State::DataSent {
                 fin_sent,
                 fin_acked,
                 ..
             } = &mut self.state
-            {
-                *fin_sent = *fin_acked;
-            }
+        {
+            *fin_sent = *fin_acked;
         }
     }
 
@@ -1169,7 +1172,7 @@ impl SendStream {
     /// event.
     ///
     /// See [`crate::Connection::stream_set_writable_event_low_watermark`].
-    pub fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
+    pub const fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
         self.writable_event_low_watermark = watermark;
     }
 
@@ -1336,7 +1339,7 @@ impl SendStream {
     }
 
     #[cfg(test)]
-    pub(crate) fn state(&mut self) -> &mut State {
+    pub(crate) const fn state(&mut self) -> &mut State {
         &mut self.state
     }
 
@@ -1393,7 +1396,7 @@ pub struct OrderGroupIter<'a> {
 }
 
 impl OrderGroup {
-    pub fn iter(&mut self) -> OrderGroupIter<'_> {
+    pub const fn iter(&mut self) -> OrderGroupIter<'_> {
         // Ids may have been deleted since we last iterated
         if self.next >= self.vec.len() {
             self.next = 0;
@@ -1422,7 +1425,7 @@ impl OrderGroup {
         self.vec.truncate(position);
     }
 
-    fn update_next(&mut self) -> usize {
+    const fn update_next(&mut self) -> usize {
         let next = self.next;
         self.next = (self.next + 1) % self.vec.len();
         next
@@ -1778,21 +1781,18 @@ pub struct RecoveryToken {
 mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
-    use neqo_common::{event::Provider as _, hex_with_len, qtrace, Encoder, MAX_VARINT};
+    use neqo_common::{Encoder, MAX_VARINT, event::Provider as _, hex_with_len, qtrace};
 
     use super::RecoveryToken;
     use crate::{
+        ConnectionEvents, INITIAL_LOCAL_MAX_STREAM_DATA, StreamId,
         connection::{RetransmissionPriority, TransmissionPriority},
         events::ConnectionEvent,
         fc::SenderFlowControl,
-        packet::{self, PACKET_LIMIT},
+        packet,
         recovery::{self, StreamRecoveryToken},
-        send_stream::{
-            RangeState, RangeTracker, SendStream, SendStreams, State, TxBuffer,
-            MAX_SEND_BUFFER_SIZE,
-        },
+        send_stream::{RangeState, RangeTracker, SendStream, SendStreams, State, TxBuffer},
         stats::FrameStats,
-        ConnectionEvents, StreamId, INITIAL_STREAM_RECV_WINDOW_SIZE,
     };
 
     fn connection_fc(limit: u64) -> Rc<RefCell<SenderFlowControl<()>>> {
@@ -2260,14 +2260,14 @@ mod tests {
         let mut txb = TxBuffer::new();
 
         // Fill the buffer
-        let big_buf = vec![1; INITIAL_STREAM_RECV_WINDOW_SIZE];
-        assert_eq!(txb.send(&big_buf), INITIAL_STREAM_RECV_WINDOW_SIZE);
+        let big_buf = vec![1; INITIAL_LOCAL_MAX_STREAM_DATA];
+        assert_eq!(txb.send(&big_buf), INITIAL_LOCAL_MAX_STREAM_DATA);
         assert!(matches!(txb.next_bytes(),
-                         Some((0, x)) if x.len() == INITIAL_STREAM_RECV_WINDOW_SIZE
+                         Some((0, x)) if x.len() == INITIAL_LOCAL_MAX_STREAM_DATA
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark almost all as sent. Get what's left
-        let one_byte_from_end = INITIAL_STREAM_RECV_WINDOW_SIZE as u64 - 1;
+        let one_byte_from_end = INITIAL_LOCAL_MAX_STREAM_DATA as u64 - 1;
         txb.mark_as_sent(0, usize::try_from(one_byte_from_end).unwrap());
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 1
@@ -2275,7 +2275,7 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark all as sent. Get nothing
-        txb.mark_as_sent(0, INITIAL_STREAM_RECV_WINDOW_SIZE);
+        txb.mark_as_sent(0, INITIAL_LOCAL_MAX_STREAM_DATA);
         assert!(txb.next_bytes().is_none());
 
         // Mark as lost. Get it again
@@ -2287,7 +2287,7 @@ mod tests {
 
         // Mark a larger range lost, including beyond what's in the buffer even.
         // Get a little more
-        let five_bytes_from_end = INITIAL_STREAM_RECV_WINDOW_SIZE as u64 - 5;
+        let five_bytes_from_end = INITIAL_LOCAL_MAX_STREAM_DATA as u64 - 5;
         txb.mark_as_lost(five_bytes_from_end, 100);
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 5
@@ -2312,7 +2312,7 @@ mod tests {
         txb.mark_as_sent(five_bytes_from_end, 5);
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 30
-                         && start == INITIAL_STREAM_RECV_WINDOW_SIZE as u64
+                         && start == INITIAL_LOCAL_MAX_STREAM_DATA as u64
                          && x.iter().all(|ch| *ch == 2)));
     }
 
@@ -2321,14 +2321,14 @@ mod tests {
         let mut txb = TxBuffer::new();
 
         // Fill the buffer
-        let big_buf = vec![1; INITIAL_STREAM_RECV_WINDOW_SIZE];
-        assert_eq!(txb.send(&big_buf), INITIAL_STREAM_RECV_WINDOW_SIZE);
+        let big_buf = vec![1; INITIAL_LOCAL_MAX_STREAM_DATA];
+        assert_eq!(txb.send(&big_buf), INITIAL_LOCAL_MAX_STREAM_DATA);
         assert!(matches!(txb.next_bytes(),
-                         Some((0, x)) if x.len()==INITIAL_STREAM_RECV_WINDOW_SIZE
+                         Some((0, x)) if x.len()==INITIAL_LOCAL_MAX_STREAM_DATA
                          && x.iter().all(|ch| *ch == 1)));
 
         // As above
-        let forty_bytes_from_end = INITIAL_STREAM_RECV_WINDOW_SIZE as u64 - 40;
+        let forty_bytes_from_end = INITIAL_LOCAL_MAX_STREAM_DATA as u64 - 40;
 
         txb.mark_as_acked(0, usize::try_from(forty_bytes_from_end).unwrap());
         assert!(matches!(txb.next_bytes(),
@@ -2348,7 +2348,7 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark a range 'A' in second slice as sent. Should still return the same
-        let range_a_start = INITIAL_STREAM_RECV_WINDOW_SIZE as u64 + 30;
+        let range_a_start = INITIAL_LOCAL_MAX_STREAM_DATA as u64 + 30;
         let range_a_end = range_a_start + 10;
         txb.mark_as_sent(range_a_start, 10);
         assert!(matches!(txb.next_bytes(),
@@ -2357,7 +2357,7 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Ack entire first slice and into second slice
-        let ten_bytes_past_end = INITIAL_STREAM_RECV_WINDOW_SIZE as u64 + 10;
+        let ten_bytes_past_end = INITIAL_LOCAL_MAX_STREAM_DATA as u64 + 10;
         txb.mark_as_acked(0, usize::try_from(ten_bytes_past_end).unwrap());
 
         // Get up to marked range A
@@ -2385,6 +2385,7 @@ mod tests {
         let conn_events = ConnectionEvents::default();
 
         let mut s = SendStream::new(4.into(), 1024, Rc::clone(&conn_fc), conn_events);
+        assert_eq!(s.to_string(), "SendStream 4");
 
         let res = s.send(&[4; 100]).unwrap();
         assert_eq!(res, 100);
@@ -2396,26 +2397,26 @@ mod tests {
         }
 
         // Should hit stream flow control limit before filling up send buffer
-        let big_buf = vec![4; INITIAL_STREAM_RECV_WINDOW_SIZE + 100];
-        let res = s.send(&big_buf[..INITIAL_STREAM_RECV_WINDOW_SIZE]).unwrap();
+        let big_buf = vec![4; INITIAL_LOCAL_MAX_STREAM_DATA + 100];
+        let res = s.send(&big_buf[..INITIAL_LOCAL_MAX_STREAM_DATA]).unwrap();
         assert_eq!(res, 1024 - 100);
 
         // should do nothing, max stream data already 1024
         s.set_max_stream_data(1024);
-        let res = s.send(&big_buf[..INITIAL_STREAM_RECV_WINDOW_SIZE]).unwrap();
+        let res = s.send(&big_buf[..INITIAL_LOCAL_MAX_STREAM_DATA]).unwrap();
         assert_eq!(res, 0);
 
         // should now hit the conn flow control (4096)
         s.set_max_stream_data(1_048_576);
-        let res = s.send(&big_buf[..INITIAL_STREAM_RECV_WINDOW_SIZE]).unwrap();
+        let res = s.send(&big_buf[..INITIAL_LOCAL_MAX_STREAM_DATA]).unwrap();
         assert_eq!(res, 3072);
 
         // should now hit the tx buffer size
         conn_fc
             .borrow_mut()
-            .update(INITIAL_STREAM_RECV_WINDOW_SIZE as u64);
+            .update(INITIAL_LOCAL_MAX_STREAM_DATA as u64);
         let res = s.send(&big_buf).unwrap();
-        assert_eq!(res, INITIAL_STREAM_RECV_WINDOW_SIZE - 4096);
+        assert_eq!(res, INITIAL_LOCAL_MAX_STREAM_DATA - 4096);
 
         // TODO(agrover@mozilla.com): test ooo acks somehow
         s.mark_as_acked(0, 40, false);
@@ -2481,8 +2482,8 @@ mod tests {
         conn_fc.borrow_mut().update(1_000_000_000);
         assert_eq!(conn_events.events().count(), 0);
 
-        let big_buf = vec![b'a'; INITIAL_STREAM_RECV_WINDOW_SIZE];
-        assert_eq!(s.send(&big_buf).unwrap(), INITIAL_STREAM_RECV_WINDOW_SIZE);
+        let big_buf = vec![b'a'; INITIAL_LOCAL_MAX_STREAM_DATA];
+        assert_eq!(s.send(&big_buf).unwrap(), INITIAL_LOCAL_MAX_STREAM_DATA);
     }
 
     #[test]
@@ -2568,11 +2569,13 @@ mod tests {
         s.close();
 
         let mut ss = SendStreams::default();
+        assert!(!ss.exists(StreamId::from(0)));
         ss.insert(StreamId::from(0), s);
+        assert!(ss.exists(StreamId::from(0)));
 
         let mut tokens = recovery::Tokens::new();
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
 
         // Write a small frame: no fin.
         let written = builder.len();
@@ -2661,7 +2664,7 @@ mod tests {
 
         let mut tokens = recovery::Tokens::new();
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         ss.write_frames(
             TransmissionPriority::default(),
             &mut builder,
@@ -2740,7 +2743,7 @@ mod tests {
 
         // This doesn't report blocking yet.
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
@@ -2790,7 +2793,7 @@ mod tests {
             connection_fc(FC_LIMIT),
             ConnectionEvents::default(),
         );
-        assert_eq!(s.avail(), MAX_SEND_BUFFER_SIZE);
+        assert_eq!(s.avail(), TxBuffer::MAX_SIZE);
     }
 
     #[test]
@@ -2807,7 +2810,7 @@ mod tests {
 
         // Assert that STREAM_DATA_BLOCKED is sent.
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
@@ -2895,7 +2898,7 @@ mod tests {
 
         // No frame should be sent here.
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         s.write_stream_frame(
@@ -2947,7 +2950,7 @@ mod tests {
         }
 
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let header_len = builder.len();
         builder.set_limit(header_len + space);
 
@@ -3049,7 +3052,7 @@ mod tests {
             s.close();
 
             let mut builder =
-                packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+                packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
             let header_len = builder.len();
             // Add 2 for the frame type and stream ID, then add the extra.
             builder.set_limit(header_len + data.len() + 2 + extra);
@@ -3067,7 +3070,7 @@ mod tests {
         }
 
         // The minimum amount of extra space for getting another frame in.
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         enc.encode_varint(u64::try_from(data.len()).unwrap());
         let len_buf = Vec::from(enc);
         let minimum_extra = len_buf.len() + packet::Builder::MINIMUM_FRAME_SIZE;

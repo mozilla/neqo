@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qinfo, qtrace, Datagram, Dscp, Ecn, Tos};
+use neqo_common::{Datagram, Dscp, Ecn, Tos, qinfo, qtrace};
 use neqo_transport::Output;
 
 use super::Node;
@@ -51,6 +51,8 @@ struct Stats {
 }
 
 impl Stats {
+    // Const constructor for compile-time initialization in TailDrop::new().
+    // Could derive Default if const was not required.
     const fn new() -> Self {
         Self {
             received: 0,
@@ -353,12 +355,12 @@ mod test {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{qinfo, Encoder};
+    use neqo_common::{Encoder, qinfo};
 
-    use crate::sim::{network::TailDrop, rng::Random, Node as _};
+    use crate::sim::{Node as _, network::TailDrop, rng::Random};
 
     fn mark_rate(used: usize, capacity: usize, trials: usize, salt: u64) -> usize {
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         enc.encode_uint(8, u64::try_from(used).unwrap());
         enc.encode_uint(8, u64::try_from(capacity).unwrap());
         enc.encode_uint(8, u64::try_from(trials).unwrap());

@@ -87,7 +87,9 @@ fn setup_clang() {
     };
     let libclang_dir = mozbuild_root.join("clang").join("lib");
     if libclang_dir.is_dir() {
-        env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
+        unsafe {
+            env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
+        }
         println!("rustc-env:LIBCLANG_PATH={}", libclang_dir.to_str().unwrap());
     } else {
         println!("warning: LIBCLANG_PATH isn't set; maybe run ./mach bootstrap with gecko");
@@ -108,7 +110,7 @@ fn get_bash() -> PathBuf {
     )
 }
 
-fn build_nss(dir: PathBuf, nsstarget: &str) {
+fn build_nss(dir: PathBuf) {
     let mut build_nss = vec![
         String::from("./build.sh"),
         String::from("-Ddisable_tests=1"),
@@ -116,16 +118,10 @@ fn build_nss(dir: PathBuf, nsstarget: &str) {
         String::from("-Ddisable_libpkix=1"),
         String::from("-Ddisable_ckbi=1"),
         String::from("-Ddisable_fips=1"),
+        String::from("--opt"),
         // Generate static libraries in addition to shared libraries.
         String::from("--static"),
     ];
-    if nsstarget == "Release" {
-        build_nss.push(String::from("-o"));
-    }
-    if let Ok(d) = env::var("NSS_JOBS") {
-        build_nss.push(String::from("-j"));
-        build_nss.push(d);
-    }
     let target = env::var("TARGET").unwrap();
     if target.strip_prefix("aarch64-").is_some() {
         build_nss.push(String::from("--target=arm64"));
@@ -167,6 +163,7 @@ fn static_link() {
         } else {
             "nspr4"
         },
+        "gcm",
         "nss_static",
         "nssb",
         "nssdev",
@@ -194,34 +191,24 @@ fn static_link() {
         static_libs.push("sqlite");
     }
     // Hardware specific libs.
-    // See https://github.com/mozilla/application-services/blob/0a2dac76f979b8bcfb6bacb5424b50f58520b8fe/components/support/rc_crypto/nss/nss_build_common/src/lib.rs#L127-L157
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-    // https://searchfox.org/nss/rev/0d5696b3edce5124353f03159d2aa15549db8306/lib/freebl/freebl.gyp#508-542
     if target_arch == "arm" || target_arch == "aarch64" {
         static_libs.push("armv8_c_lib");
     }
-    if target_arch == "x86_64" || target_arch == "x86" {
-        static_libs.push("gcm-aes-x86_c_lib");
-        static_libs.push("sha-x86_c_lib");
-    }
     if target_arch == "arm" {
-        static_libs.push("gcm-aes-arm32-neon_c_lib");
+        static_libs.push("ghash-aes-arm32-neon_c_lib");
     }
     if target_arch == "aarch64" {
-        static_libs.push("gcm-aes-aarch64_c_lib");
+        static_libs.push("ghash-aes-aarch64_c_lib");
+    }
+    if target_arch == "x86_64" || target_arch == "x86" {
+        static_libs.push("ghash-aes-x86_c_lib");
+        static_libs.push("sha-x86_c_lib");
     }
     if target_arch == "x86_64" {
         static_libs.push("hw-acc-crypto-avx");
         static_libs.push("hw-acc-crypto-avx2");
-    }
-    // https://searchfox.org/nss/rev/08c4d05078d00089f8d7540651b0717a9d66f87e/lib/freebl/freebl.gyp#315-324
-    if (target_os == "android" || target_os == "linux") && target_arch == "x86_64" {
         static_libs.push("intel-gcm-wrap_c_lib");
-        // https://searchfox.org/nss/rev/08c4d05078d00089f8d7540651b0717a9d66f87e/lib/freebl/freebl.gyp#43-47
-        if (target_os == "android" || target_os == "linux") && target_arch == "x86_64" {
-            static_libs.push("intel-gcm-s_lib");
-        }
     }
     for lib in static_libs {
         println!("cargo:rustc-link-lib=static={lib}");
@@ -348,6 +335,7 @@ fn setup_standalone(nss: &str) -> Vec<String> {
     setup_clang();
 
     println!("cargo:rerun-if-env-changed=NSS_DIR");
+    println!("cargo:rerun-if-env-changed=NSS_PREBUILT");
     let nss = PathBuf::from(nss);
     assert!(
         !nss.is_relative(),
@@ -357,15 +345,15 @@ fn setup_standalone(nss: &str) -> Vec<String> {
     // $NSS_DIR/../dist/
     let nssdist = nss.parent().unwrap().join("dist");
     println!("cargo:rerun-if-env-changed=NSS_TARGET");
-    let nsstarget = env::var("NSS_TARGET")
-        .unwrap_or_else(|_| fs::read_to_string(nssdist.join("latest")).unwrap());
+    let nsstarget = "Release";
 
-    // If NSS_PREBUILT is set, we assume that the NSS libraries are already built.
-    if env::var("NSS_PREBUILT").is_err() {
-        build_nss(nss, &nsstarget);
+    // If NSS_PREBUILT is set to a non-zero value, we assume that the NSS libraries are already
+    // built.
+    if !env::var("NSS_PREBUILT").is_ok_and(|v| v != "0") {
+        build_nss(nss);
     }
 
-    let nsstarget = nssdist.join(nsstarget.trim());
+    let nsstarget = nssdist.join(nsstarget);
     let includes = get_includes(&nsstarget, &nssdist);
 
     let nsslibdir = nsstarget.join("lib");
@@ -394,8 +382,8 @@ fn setup_standalone(nss: &str) -> Vec<String> {
 #[cfg(feature = "gecko")]
 fn setup_for_gecko() -> Vec<String> {
     use mozbuild::{
-        config::{BINDGEN_SYSTEM_FLAGS, NSPR_CFLAGS, NSS_CFLAGS},
         TOPOBJDIR,
+        config::{BINDGEN_SYSTEM_FLAGS, NSPR_CFLAGS, NSS_CFLAGS},
     };
 
     let fold_libs = mozbuild::config::MOZ_FOLD_LIBS;

@@ -11,7 +11,7 @@ use std::{
     sync::atomic::Ordering,
 };
 
-use libc::{fsync, read, socket, write, SOCK_RAW};
+use libc::{SOCK_RAW, fsync, read, socket, write};
 
 use crate::unlikely_err;
 
@@ -77,5 +77,18 @@ impl Read for RouteSocket {
         // read a well-formed message back out, and not block.
         let res = unsafe { read(self.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len()) };
         check_result(res)
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod test {
+    use super::*;
+
+    #[test]
+    fn check_result_error_and_success() {
+        assert!(check_result(-1).is_err());
+        assert_eq!(check_result(0).unwrap(), 0);
+        assert_eq!(check_result(42).unwrap(), 42);
     }
 }

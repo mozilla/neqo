@@ -13,27 +13,29 @@ use std::{
 };
 
 use neqo_common::{
-    qdebug, qerror, qinfo, qtrace, qwarn, Bytes, Decoder, Header, MessageType, Role,
+    Bytes, Decoder, Header, MessageType, Role, qdebug, qerror, qinfo, qtrace, qwarn,
 };
 use neqo_qpack as qpack;
 use neqo_transport::{
-    streams::SendOrder, AppError, CloseReason, Connection, DatagramTracking, State, StreamId,
-    StreamType, ZeroRttState,
+    AppError, CloseReason, Connection, DatagramTracking, State, StreamId, StreamType, ZeroRttState,
+    streams::SendOrder,
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use strum::Display;
 
 use crate::{
+    CloseType, Error, Http3Parameters, Http3StreamType, HttpRecvStreamEvents, NewStreamType,
+    Priority, PriorityHandler, ReceiveOutput, RecvStream, RecvStreamEvents, Res, SendStream,
+    SendStreamEvents,
     client_events::Http3ClientEvents,
     control_stream_local::ControlStreamLocal,
     control_stream_remote::ControlStreamRemote,
     features::{
-        extended_connect::{
-            self,
-            webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
-            ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
-        },
         ConnectType,
+        extended_connect::{
+            self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
+            webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
+        },
     },
     frames::HFrame,
     push_controller::PushController,
@@ -44,9 +46,6 @@ use crate::{
     send_message::SendMessage,
     settings::{HSettingType, HSettings, HttpZeroRttChecker},
     stream_type_reader::NewStreamHeadReader,
-    CloseType, Error, Http3Parameters, Http3StreamType, HttpRecvStreamEvents, NewStreamType,
-    Priority, PriorityHandler, ReceiveOutput, RecvStream, RecvStreamEvents, Res, SendStream,
-    SendStreamEvents,
 };
 
 pub struct RequestDescription<'b, T: RequestTarget> {
@@ -311,7 +310,7 @@ impl Http3Connection {
     pub fn new(conn_params: Http3Parameters, role: Role) -> Self {
         Self {
             state: Http3State::Initializing,
-            control_stream_local: ControlStreamLocal::new(),
+            control_stream_local: ControlStreamLocal::default(),
             qpack_encoder: Rc::new(RefCell::new(qpack::Encoder::new(
                 conn_params.get_qpack_settings(),
                 true,
@@ -642,7 +641,7 @@ impl Http3Connection {
     pub(crate) fn handle_zero_rtt_rejected(&mut self) -> Res<()> {
         if self.state == Http3State::ZeroRtt {
             self.state = Http3State::Initializing;
-            self.control_stream_local = ControlStreamLocal::new();
+            self.control_stream_local = ControlStreamLocal::default();
             self.qpack_encoder = Rc::new(RefCell::new(qpack::Encoder::new(
                 self.local_params.get_qpack_settings(),
                 true,
@@ -867,13 +866,17 @@ impl Http3Connection {
                 ]
             }
             Some(ConnectType::Extended(protocol)) => {
-                vec![
+                let mut h = vec![
                     Header::new(":method", request.method),
                     Header::new(":scheme", request.target.scheme()),
                     Header::new(":authority", request.target.authority()),
                     Header::new(":path", request.target.path()),
                     Header::new(":protocol", protocol.to_string()),
-                ]
+                ];
+                if protocol == ExtendedConnectType::ConnectUdp {
+                    h.push(Header::new("capsule-protocol", "?1"));
+                }
+                h
             }
         };
 
@@ -916,7 +919,7 @@ impl Http3Connection {
         // Closing and Closed.
         match self.state() {
             Http3State::GoingAway(..) | Http3State::Closing(..) | Http3State::Closed(..) => {
-                return Err(Error::AlreadyClosed)
+                return Err(Error::AlreadyClosed);
             }
             Http3State::Initializing => return Err(Error::Unavailable),
             _ => {}
@@ -1297,14 +1300,13 @@ impl Http3Connection {
         now: Instant,
     ) -> Res<()> {
         let mut recv_stream = self.recv_streams.get_mut(&stream_id);
-        if let Some(r) = &mut recv_stream {
-            if !r
+        if let Some(r) = &mut recv_stream
+            && !r
                 .http_stream()
                 .ok_or(Error::InvalidStreamId)?
                 .extended_connect_wait_for_response()
-            {
-                return Err(Error::InvalidStreamId);
-            }
+        {
+            return Err(Error::InvalidStreamId);
         }
 
         let send_stream = self.send_streams.get_mut(&stream_id);
@@ -1313,9 +1315,9 @@ impl Http3Connection {
         match (send_stream, recv_stream, accept_res) {
             (None, None, _) => Err(Error::InvalidStreamId),
             (None, Some(_), _) | (Some(_), None, _) => {
-                // TODO this needs a better error
+                // Stream is in an inconsistent state (one direction exists, the other doesn't).
                 self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
-                Err(Error::InvalidStreamId)
+                Err(Error::InvalidState)
             }
             (Some(s), Some(_r), SessionAcceptAction::Reject(headers)) => {
                 if s.http_stream()
@@ -1333,9 +1335,14 @@ impl Http3Connection {
                 Ok(())
             }
             (Some(s), Some(_r), SessionAcceptAction::Accept) => {
+                let mut response_headers = vec![Header::new(":status", "200")];
+                if connect_type == ExtendedConnectType::ConnectUdp {
+                    response_headers.push(Header::new("capsule-protocol", "?1"));
+                }
+
                 if s.http_stream()
                     .ok_or(Error::InvalidStreamId)?
-                    .send_headers(&[Header::new(":status", "200")], conn)
+                    .send_headers(&response_headers, conn)
                     .is_ok()
                 {
                     let extended_conn = Rc::new(RefCell::new(
@@ -1538,8 +1545,9 @@ impl Http3Connection {
         conn: &mut Connection,
         buf: &[u8],
         id: I,
+        now: Instant,
     ) -> Res<()> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id)
+        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 
     pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
@@ -1548,8 +1556,9 @@ impl Http3Connection {
         conn: &mut Connection,
         buf: &[u8],
         id: I,
+        now: Instant,
     ) -> Res<()> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id)
+        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 
     fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
@@ -1558,6 +1567,7 @@ impl Http3Connection {
         conn: &mut Connection,
         buf: &[u8],
         id: I,
+        now: Instant,
     ) -> Res<()> {
         self.recv_streams
             .get_mut(&session_id)
@@ -1565,7 +1575,7 @@ impl Http3Connection {
             .extended_connect_session()
             .ok_or(Error::InvalidStreamId)?
             .borrow_mut()
-            .send_datagram(conn, buf, id)
+            .send_datagram(conn, buf, id, now)
     }
 
     /// If the control stream has received frames `MaxPushId`, `Goaway`, `PriorityUpdateRequest` or
@@ -1781,12 +1791,12 @@ impl Http3Connection {
         conn: &mut Connection,
     ) -> Option<Box<dyn RecvStream>> {
         let stream = self.recv_streams.remove(&stream_id);
-        if let Some(s) = &stream {
-            if s.stream_type() == Http3StreamType::ExtendedConnect {
-                self.send_streams.remove(&stream_id)?;
-                if let Some(wt) = s.extended_connect_session() {
-                    self.remove_extended_connect(&wt, conn);
-                }
+        if let Some(s) = &stream
+            && s.stream_type() == Http3StreamType::ExtendedConnect
+        {
+            self.send_streams.remove(&stream_id)?;
+            if let Some(wt) = s.extended_connect_session() {
+                self.remove_extended_connect(&wt, conn);
             }
         }
         stream
@@ -1798,16 +1808,14 @@ impl Http3Connection {
         conn: &mut Connection,
     ) -> Option<Box<dyn SendStream>> {
         let stream = self.send_streams.remove(&stream_id);
-        if let Some(s) = &stream {
-            if s.stream_type() == Http3StreamType::ExtendedConnect {
-                if let Some(wt) = self
-                    .recv_streams
-                    .remove(&stream_id)?
-                    .extended_connect_session()
-                {
-                    self.remove_extended_connect(&wt, conn);
-                }
-            }
+        if let Some(s) = &stream
+            && s.stream_type() == Http3StreamType::ExtendedConnect
+            && let Some(wt) = self
+                .recv_streams
+                .remove(&stream_id)?
+                .extended_connect_session()
+        {
+            self.remove_extended_connect(&wt, conn);
         }
         stream
     }
@@ -1830,7 +1838,7 @@ impl Http3Connection {
     }
 
     #[must_use]
-    pub fn state_mut(&mut self) -> &mut Http3State {
+    pub const fn state_mut(&mut self) -> &mut Http3State {
         &mut self.state
     }
 
@@ -1868,19 +1876,19 @@ impl Http3Connection {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use url::Url;
+    use http::Uri;
 
     use crate::{
+        Error, Priority,
         connection::{Http3Connection, RequestDescription},
         features::ConnectType,
-        Error, Priority,
     };
 
     #[test]
     fn create_request_headers_connect_without_connect_type() {
         let request = RequestDescription {
             method: "CONNECT",
-            target: &Url::parse("https://example.com").unwrap(),
+            target: &Uri::from_static("https://example.com"),
             headers: &[],
             connect_type: None,
             priority: Priority::default(),
@@ -1895,7 +1903,7 @@ mod tests {
     fn create_request_headers_connect_type_without_connect() {
         let request = RequestDescription {
             method: "GET",
-            target: &Url::parse("https://example.com").unwrap(),
+            target: &Uri::from_static("https://example.com"),
             headers: &[],
             connect_type: Some(ConnectType::Classic),
             priority: Priority::default(),

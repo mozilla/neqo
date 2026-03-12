@@ -8,10 +8,10 @@
 #![cfg(test)]
 
 use neqo_crypto::{
+    Error,
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     init,
     selfencrypt::SelfEncrypt,
-    Error,
 };
 
 #[test]
@@ -98,4 +98,12 @@ fn truncate() {
     let (se, sealed) = sealed();
     let res = se.open(AAD, &sealed[0..(sealed.len() - 1)]);
     assert_bad_data(res);
+}
+
+#[test]
+fn truncate_header() {
+    let (se, _) = sealed();
+    // Ciphertext too short to contain the salt (needs 2 byte header + 16 byte salt).
+    let res = se.open(AAD, &[1, 0, 0, 0, 0]);
+    assert_eq!(res.unwrap_err(), Error::SelfEncrypt);
 }

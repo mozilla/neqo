@@ -11,14 +11,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{hex, qinfo, qlog::Qlog, Decoder, Ecn};
+use neqo_common::{Decoder, Ecn, hex, qinfo, qlog::Qlog};
 use qlog::events::{
+    EventData, RawInfo,
     connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated},
     quic::{
         AckedRanges, ErrorSpace, MetricsUpdated, PacketDropped, PacketHeader, PacketLost,
         PacketReceived, PacketSent, QuicFrame, StreamType, VersionInformation,
     },
-    EventData, RawInfo,
 };
 use smallvec::SmallVec;
 
@@ -41,8 +41,8 @@ use crate::{
     version::{self, Version},
 };
 
-pub fn connection_tparams_set(qlog: &Qlog, tph: &TransportParametersHandler, now: Instant) {
-    qlog.add_event_data_with_instant(
+pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler, now: Instant) {
+    qlog.add_event_at(
         || {
             let remote = tph.remote();
             #[expect(clippy::cast_possible_truncation, reason = "These are OK.")]
@@ -89,16 +89,16 @@ pub fn connection_tparams_set(qlog: &Qlog, tph: &TransportParametersHandler, now
     );
 }
 
-pub fn server_connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
+pub fn server_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     connection_started(qlog, path, now);
 }
 
-pub fn client_connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
+pub fn client_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     connection_started(qlog, path, now);
 }
 
-fn connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
-    qlog.add_event_data_with_instant(
+fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
+    qlog.add_event_at(
         || {
             let p = path.deref().borrow();
             let ev_data = EventData::ConnectionStarted(ConnectionStarted {
@@ -122,17 +122,12 @@ fn connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
     );
 }
 
-#[allow(
-    clippy::allow_attributes,
-    clippy::similar_names,
-    reason = "FIXME: 'new and now are similar' hits on MSRV <1.91."
-)]
-pub fn connection_state_updated(qlog: &Qlog, new: &State, now: Instant) {
-    qlog.add_event_data_with_instant(
+pub fn connection_state_updated(qlog: &mut Qlog, new_state: &State, now: Instant) {
+    qlog.add_event_at(
         || {
             let ev_data = EventData::ConnectionStateUpdated(ConnectionStateUpdated {
                 old: None,
-                new: match new {
+                new: match new_state {
                     State::Init | State::WaitInitial => ConnectionState::Attempted,
                     State::WaitVersion | State::Handshaking => ConnectionState::HandshakeStarted,
                     State::Connected => ConnectionState::HandshakeCompleted,
@@ -150,11 +145,11 @@ pub fn connection_state_updated(qlog: &Qlog, new: &State, now: Instant) {
 }
 
 pub fn client_version_information_initiated(
-    qlog: &Qlog,
+    qlog: &mut Qlog,
     version_config: &version::Config,
     now: Instant,
 ) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             Some(EventData::VersionInformation(VersionInformation {
                 client_versions: Some(
@@ -173,13 +168,13 @@ pub fn client_version_information_initiated(
 }
 
 pub fn client_version_information_negotiated(
-    qlog: &Qlog,
+    qlog: &mut Qlog,
     client: &[Version],
     server: &[version::Wire],
     chosen: Version,
     now: Instant,
 ) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             Some(EventData::VersionInformation(VersionInformation {
                 client_versions: Some(
@@ -197,12 +192,12 @@ pub fn client_version_information_negotiated(
 }
 
 pub fn server_version_information_failed(
-    qlog: &Qlog,
+    qlog: &mut Qlog,
     server: &[Version],
     client: version::Wire,
     now: Instant,
 ) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             Some(EventData::VersionInformation(VersionInformation {
                 client_versions: Some(vec![format!("{client:02x}")]),
@@ -219,8 +214,8 @@ pub fn server_version_information_failed(
     );
 }
 
-pub fn packet_io(qlog: &Qlog, meta: packet::MetaData, now: Instant) {
-    qlog.add_event_data_with_instant(
+pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
+    qlog.add_event_at(
         || {
             let mut d = Decoder::from(meta.payload());
             let raw = RawInfo {
@@ -257,14 +252,13 @@ pub fn packet_io(qlog: &Qlog, meta: packet::MetaData, now: Instant) {
         now,
     );
 }
-
-pub fn packet_dropped(qlog: &Qlog, public_packet: &packet::Public, now: Instant) {
-    qlog.add_event_data_with_instant(
+pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, now: Instant) {
+    qlog.add_event_at(
         || {
             let header =
-                PacketHeader::with_type(public_packet.packet_type().into(), None, None, None, None);
+                PacketHeader::with_type(decrypt_err.packet_type().into(), None, None, None, None);
             let raw = RawInfo {
-                length: Some(public_packet.len() as u64),
+                length: Some(decrypt_err.len() as u64),
                 ..Default::default()
             };
 
@@ -280,7 +274,7 @@ pub fn packet_dropped(qlog: &Qlog, public_packet: &packet::Public, now: Instant)
     );
 }
 
-pub fn packets_lost(qlog: &Qlog, pkts: &[sent::Packet], now: Instant) {
+pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
     qlog.add_event_with_stream(|stream| {
         for pkt in pkts {
             let header =
@@ -313,10 +307,10 @@ pub enum Metric {
     PacingRate(u64),
 }
 
-pub fn metrics_updated(qlog: &Qlog, updated_metrics: &[Metric], now: Instant) {
+pub fn metrics_updated(qlog: &mut Qlog, updated_metrics: &[Metric], now: Instant) {
     debug_assert!(!updated_metrics.is_empty());
 
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             let mut min_rtt: Option<f32> = None;
             let mut smoothed_rtt: Option<f32> = None;

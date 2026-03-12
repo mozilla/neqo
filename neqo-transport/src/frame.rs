@@ -8,14 +8,13 @@
 
 use std::ops::RangeInclusive;
 
-use neqo_common::{qtrace, Decoder, Encoder, MAX_VARINT};
+use neqo_common::{Buffer, Decoder, Encoder, MAX_VARINT, qtrace};
 use strum::FromRepr;
 
 use crate::{
-    cid::MAX_CONNECTION_ID_LEN,
-    ecn, packet,
+    AppError, ConnectionId, Error, Res, TransportError, ecn, packet,
+    stateless_reset::Token as Srt,
     stream_id::{StreamId, StreamType},
-    AppError, Error, Res, TransportError,
 };
 
 #[repr(u64)]
@@ -209,7 +208,7 @@ pub enum Frame<'a> {
         sequence_number: u64,
         retire_prior: u64,
         connection_id: &'a [u8],
-        stateless_reset_token: &'a [u8; 16],
+        stateless_reset_token: Srt,
     },
     RetireConnectionId {
         sequence_number: u64,
@@ -517,7 +516,7 @@ impl<'a> Frame<'a> {
                 application_error_code: dv(dec)?,
                 final_size: match dec.decode_varint() {
                     Some(v) => v,
-                    _ => return Err(Error::NoMoreData),
+                    None => return Err(Error::NoMoreData),
                 },
             }),
             FrameType::Ack => decode_ack(dec, false),
@@ -608,11 +607,10 @@ impl<'a> Frame<'a> {
                 let sequence_number = dv(dec)?;
                 let retire_prior = dv(dec)?;
                 let connection_id = d(dec.decode_vec(1))?;
-                if connection_id.len() > MAX_CONNECTION_ID_LEN {
+                if connection_id.len() > ConnectionId::MAX_LEN {
                     return Err(Error::FrameEncoding);
                 }
-                let srt = d(dec.decode(16))?;
-                let stateless_reset_token = <&[_; 16]>::try_from(srt)?;
+                let stateless_reset_token = Srt::try_from(dec)?;
 
                 Ok(Self::NewConnectionId {
                     sequence_number,
@@ -685,16 +683,52 @@ impl<'a> Frame<'a> {
     }
 }
 
+/// Extension trait for [`Encoder`] that automates writing to fuzzing corpus.
+pub trait FrameEncoder {
+    /// Encode a frame with the given type and encoding closure.
+    ///
+    /// This method:
+    /// 1. Encodes the frame type as a varint
+    /// 2. Calls the provided closure to encode the frame-specific data
+    /// 3. When fuzzing corpus collection is enabled, saves the frame to the corpus
+    ///
+    /// # Example
+    /// ```ignore
+    /// builder.encode_frame(FrameType::NewToken, |b| {
+    ///     b.encode_vvec(&token);
+    /// });
+    /// ```
+    fn encode_frame<T, F>(&mut self, frame_type: T, encode_fn: F) -> &mut Self
+    where
+        T: Into<u64>,
+        F: FnOnce(&mut Self);
+}
+
+impl<B: Buffer> FrameEncoder for Encoder<B> {
+    fn encode_frame<T, F>(&mut self, frame_type: T, encode_fn: F) -> &mut Self
+    where
+        T: Into<u64>,
+        F: FnOnce(&mut Self),
+    {
+        #[cfg(feature = "build-fuzzing-corpus")]
+        let frame_start = self.len();
+        self.encode_varint(frame_type.into());
+        encode_fn(self);
+        #[cfg(feature = "build-fuzzing-corpus")]
+        neqo_common::write_item_to_fuzzing_corpus("frame", &self.as_ref()[frame_start..]);
+        self
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::{Decoder, Encoder};
 
     use crate::{
-        cid::MAX_CONNECTION_ID_LEN,
+        CloseError, ConnectionId, Error, StreamId, StreamType, Token as Srt,
         ecn::Count,
         frame::{AckRange, Frame, FrameType},
-        CloseError, Error, StreamId, StreamType,
     };
 
     fn just_dec(f: &Frame, s: &str) {
@@ -906,7 +940,7 @@ mod tests {
             sequence_number: 0x1234,
             retire_prior: 0,
             connection_id: &[0x01, 0x02],
-            stateless_reset_token: &[9; 16],
+            stateless_reset_token: Srt::new([9; Srt::LEN]),
         };
 
         just_dec(&f, "1852340002010209090909090909090909090909090909");
@@ -915,7 +949,7 @@ mod tests {
     #[test]
     fn too_large_new_connection_id() {
         let mut enc = Encoder::from_hex("18523400"); // up to the CID
-        enc.encode_vvec(&[0x0c; MAX_CONNECTION_ID_LEN + 10]);
+        enc.encode_vvec(&[0x0c; ConnectionId::MAX_LEN + 10]);
         enc.encode(&[0x11; 16][..]);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
@@ -1053,7 +1087,7 @@ mod tests {
 
     #[test]
     fn frame_decode_enforces_bound_on_ack_range() {
-        let mut e = Encoder::new();
+        let mut e = Encoder::default();
 
         e.encode_varint(FrameType::Ack);
         e.encode_varint(0u64); // largest acknowledged
@@ -1077,10 +1111,177 @@ mod tests {
     /// See bug in <https://github.com/mozilla/neqo/issues/2838>.
     #[test]
     fn padding_frame_u16_overflow() {
-        let mut e = Encoder::new();
+        let mut e = Encoder::default();
         e.encode_varint(FrameType::Padding);
         // `Frame::Padding` uses u16 to store length. Try to overflow length.
         e.pad_to(u16::MAX as usize + 1, 0);
         assert_eq!(Frame::decode(&mut e.as_decoder()), Err(Error::TooMuchData));
+    }
+
+    #[test]
+    fn frame_type_to_u8() {
+        assert_eq!(u8::from(FrameType::Padding), 0);
+        assert_eq!(u8::from(FrameType::Ping), 1);
+    }
+
+    #[test]
+    #[expect(clippy::too_many_lines, reason = "OK in tests.")]
+    fn dump() {
+        let s = |id| StreamId::from(id);
+        assert_eq!(Frame::Padding(5).dump(), "Padding { len: 5 }");
+        assert_eq!(
+            Frame::Crypto {
+                offset: 1,
+                data: &[2, 3]
+            }
+            .dump(),
+            "Crypto { offset: 1, len: 2 }"
+        );
+        assert_eq!(
+            Frame::Stream {
+                stream_id: s(4),
+                offset: 10,
+                data: &[1],
+                fin: true,
+                fill: false
+            }
+            .dump(),
+            "Stream { stream_id: 4, offset: 10, len: 1, fin: true }"
+        );
+        assert_eq!(
+            Frame::Stream {
+                stream_id: s(4),
+                offset: 0,
+                data: &[1, 2],
+                fin: false,
+                fill: true
+            }
+            .dump(),
+            "Stream { stream_id: 4, offset: 0, len: >>2, fin: false }"
+        );
+        assert_eq!(
+            Frame::Datagram {
+                data: &[1, 2, 3],
+                fill: false
+            }
+            .dump(),
+            "Datagram { len: 3 }"
+        );
+        // Remaining frames use Debug format
+        assert_eq!(Frame::Ping.dump(), "Ping");
+        assert_eq!(
+            Frame::Ack {
+                largest_acknowledged: 1,
+                ack_delay: 2,
+                first_ack_range: 0,
+                ack_ranges: vec![],
+                ecn_count: None
+            }
+            .dump(),
+            "Ack { largest_acknowledged: 1, ack_delay: 2, first_ack_range: 0, ack_ranges: [], ecn_count: None }"
+        );
+        assert_eq!(
+            Frame::ResetStream {
+                stream_id: s(1),
+                application_error_code: 2,
+                final_size: 3
+            }
+            .dump(),
+            "ResetStream { stream_id: StreamId(1), application_error_code: 2, final_size: 3 }"
+        );
+        assert_eq!(
+            Frame::StopSending {
+                stream_id: s(1),
+                application_error_code: 2
+            }
+            .dump(),
+            "StopSending { stream_id: StreamId(1), application_error_code: 2 }"
+        );
+        assert_eq!(
+            Frame::NewToken { token: &[1] }.dump(),
+            "NewToken { token: [1] }"
+        );
+        assert_eq!(
+            Frame::MaxData { maximum_data: 100 }.dump(),
+            "MaxData { maximum_data: 100 }"
+        );
+        assert_eq!(
+            Frame::MaxStreamData {
+                stream_id: s(1),
+                maximum_stream_data: 100
+            }
+            .dump(),
+            "MaxStreamData { stream_id: StreamId(1), maximum_stream_data: 100 }"
+        );
+        assert_eq!(
+            Frame::MaxStreams {
+                stream_type: StreamType::BiDi,
+                maximum_streams: 10
+            }
+            .dump(),
+            "MaxStreams { stream_type: BiDi, maximum_streams: 10 }"
+        );
+        assert_eq!(
+            Frame::DataBlocked { data_limit: 50 }.dump(),
+            "DataBlocked { data_limit: 50 }"
+        );
+        assert_eq!(
+            Frame::StreamDataBlocked {
+                stream_id: s(1),
+                stream_data_limit: 50
+            }
+            .dump(),
+            "StreamDataBlocked { stream_id: StreamId(1), stream_data_limit: 50 }"
+        );
+        assert_eq!(
+            Frame::StreamsBlocked {
+                stream_type: StreamType::UniDi,
+                stream_limit: 5
+            }
+            .dump(),
+            "StreamsBlocked { stream_type: UniDi, stream_limit: 5 }"
+        );
+        assert_eq!(
+            Frame::NewConnectionId {
+                sequence_number: 1,
+                retire_prior: 0,
+                connection_id: &[1, 2],
+                stateless_reset_token: Srt::new([0; 16])
+            }
+            .dump(),
+            "NewConnectionId { sequence_number: 1, retire_prior: 0, connection_id: [1, 2], stateless_reset_token: Token([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) }"
+        );
+        assert_eq!(
+            Frame::RetireConnectionId { sequence_number: 1 }.dump(),
+            "RetireConnectionId { sequence_number: 1 }"
+        );
+        assert_eq!(
+            Frame::PathChallenge { data: [1; 8] }.dump(),
+            "PathChallenge { data: [1, 1, 1, 1, 1, 1, 1, 1] }"
+        );
+        assert_eq!(
+            Frame::PathResponse { data: [2; 8] }.dump(),
+            "PathResponse { data: [2, 2, 2, 2, 2, 2, 2, 2] }"
+        );
+        assert_eq!(
+            Frame::ConnectionClose {
+                error_code: CloseError::Transport(0),
+                frame_type: 0,
+                reason_phrase: String::new()
+            }
+            .dump(),
+            "ConnectionClose { error_code: Transport(0), frame_type: 0, reason_phrase: \"\" }"
+        );
+        assert_eq!(Frame::HandshakeDone.dump(), "HandshakeDone");
+        assert_eq!(
+            Frame::AckFrequency {
+                seqno: 1,
+                tolerance: 2,
+                delay: 3,
+                ignore_order: false
+            }
+            .dump(),
+            "AckFrequency { seqno: 1, tolerance: 2, delay: 3, ignore_order: false }"
+        );
     }
 }

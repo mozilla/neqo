@@ -8,7 +8,13 @@ use std::{cmp::min, rc::Rc, time::Instant};
 
 use neqo_common::{Buffer, Encoder};
 
-use crate::{frame::FrameType, packet, path::PathRef, recovery, CloseReason, Error};
+use crate::{
+    CloseReason, Error,
+    frame::{FrameEncoder as _, FrameType},
+    packet,
+    path::PathRef,
+    recovery,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// The state of the Connection.
@@ -121,17 +127,6 @@ impl ClosingFrame {
         if builder.remaining() < Self::MIN_LENGTH {
             return;
         }
-        match &self.error {
-            CloseReason::Transport(e) => {
-                builder.encode_varint(FrameType::ConnectionCloseTransport);
-                builder.encode_varint(e.code());
-                builder.encode_varint(self.frame_type);
-            }
-            CloseReason::Application(code) => {
-                builder.encode_varint(FrameType::ConnectionCloseApplication);
-                builder.encode_varint(*code);
-            }
-        }
         // Truncate the reason phrase if it doesn't fit.  As we send this frame in
         // multiple packet number spaces, limit the overall size to 256.
         let available = min(256, builder.remaining());
@@ -140,7 +135,21 @@ impl ClosingFrame {
         } else {
             &self.reason_phrase
         };
-        builder.encode_vvec(reason);
+        match &self.error {
+            CloseReason::Transport(e) => {
+                builder.encode_frame(FrameType::ConnectionCloseTransport, |b| {
+                    b.encode_varint(e.code());
+                    b.encode_varint(self.frame_type);
+                    b.encode_vvec(reason);
+                });
+            }
+            CloseReason::Application(code) => {
+                builder.encode_frame(FrameType::ConnectionCloseApplication, |b| {
+                    b.encode_varint(*code);
+                    b.encode_vvec(reason);
+                });
+            }
+        }
     }
 }
 
@@ -179,7 +188,7 @@ impl StateSignaling {
     ) -> Option<recovery::Token> {
         (matches!(self, Self::HandshakeDone) && builder.remaining() >= 1).then(|| {
             *self = Self::Idle;
-            builder.encode_varint(FrameType::HandshakeDone);
+            builder.encode_frame(FrameType::HandshakeDone, |_| {});
             recovery::Token::HandshakeDone
         })
     }
@@ -237,5 +246,36 @@ impl StateSignaling {
     /// We just got a stateless reset.  Terminate.
     pub fn reset(&mut self) {
         *self = Self::Reset;
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::time::Instant;
+
+    use super::State;
+    use crate::{CloseReason, Error};
+
+    #[test]
+    fn state_predicates() {
+        let now = Instant::now();
+        let err = CloseReason::Transport(Error::None);
+        let closing = State::Closing {
+            error: err.clone(),
+            timeout: now,
+        };
+        let draining = State::Draining {
+            error: err.clone(),
+            timeout: now,
+        };
+        let closed = State::Closed(err);
+
+        assert!(!State::Init.connected() && !State::Init.closed() && !State::Init.closing());
+        assert!(!State::WaitInitial.connected() && !State::Handshaking.connected());
+        assert!(State::Connected.connected() && State::Confirmed.connected());
+        assert!(closing.closing() && closing.closed() && closing.error().is_some());
+        assert!(draining.closing() && draining.closed());
+        assert!(!closed.closing() && closed.closed() && closed.error().is_some());
     }
 }

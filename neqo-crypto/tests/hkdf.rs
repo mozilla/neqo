@@ -5,11 +5,12 @@
 // except according to those terms.
 
 use neqo_crypto::{
+    SymKey,
     constants::{
         Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
         TLS_VERSION_1_3,
     },
-    hkdf, SymKey,
+    hkdf,
 };
 use test_fixture::fixture_init;
 
@@ -155,4 +156,17 @@ fn expand_label_sha384() {
             0x5a, 0x31, 0xf5, 0x53, 0xab, 0x99,
         ],
     );
+}
+
+#[test]
+fn unsupported_version() {
+    fixture_init();
+    assert!(hkdf::generate_key(0x0303, TLS_AES_128_GCM_SHA256).is_err());
+    assert!(hkdf::import_key(0x0302, &[0; 32]).is_err());
+}
+
+#[test]
+fn unsupported_cipher() {
+    fixture_init();
+    assert!(hkdf::generate_key(TLS_VERSION_1_3, 0xFFFF).is_err());
 }

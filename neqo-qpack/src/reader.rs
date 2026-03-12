@@ -9,7 +9,7 @@ use std::{mem, str};
 use neqo_common::{qdebug, qerror};
 use neqo_transport::{Connection, StreamId};
 
-use crate::{huffman, prefix::Prefix, Error, Res};
+use crate::{Error, Res, huffman, prefix::Prefix};
 
 pub trait ReadByte {
     /// # Errors
@@ -53,7 +53,7 @@ impl Reader for ReceiverConnWrapper<'_> {
 }
 
 impl<'a> ReceiverConnWrapper<'a> {
-    pub fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
+    pub const fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
         Self { conn, stream_id }
     }
 }
@@ -119,7 +119,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
     /// `ReceiverBufferWrapper` is only used for decoding header blocks. The header blocks are read
     /// entirely before a decoding starts, therefore any incomplete varint or literal because of
     /// reaching the end of a buffer will be treated as the `Error::Decompression` error.
-    pub fn read_literal_from_buffer(&mut self, prefix_len: u8) -> Res<String> {
+    pub fn read_literal_from_buffer(&mut self, prefix_len: u8) -> Res<Vec<u8>> {
         debug_assert!(prefix_len < 7);
 
         let first_byte = self.read_byte()?;
@@ -128,20 +128,23 @@ impl<'a> ReceiverBufferWrapper<'a> {
         let length: usize = int_reader
             .read(self)?
             .try_into()
-            .or(Err(Error::Decompression))?;
+            .ok()
+            .filter(|&l| l <= LiteralReader::MAX_LEN)
+            .ok_or(Error::Decompression)?;
         if use_huffman {
-            Ok(parse_utf8(&huffman::decode(self.slice(length)?)?)?.to_string())
+            huffman::decode(self.slice(length)?)
         } else {
-            Ok(parse_utf8(self.slice(length)?)?.to_string())
+            Ok(self.slice(length)?.to_vec())
         }
     }
 
     fn slice(&mut self, len: usize) -> Res<&[u8]> {
-        if self.offset + len > self.buf.len() {
+        let end = self.offset.checked_add(len).ok_or(Error::Decompression)?;
+        if end > self.buf.len() {
             Err(Error::Decompression)
         } else {
             let start = self.offset;
-            self.offset += len;
+            self.offset = end;
             Ok(&self.buf[start..self.offset])
         }
     }
@@ -252,6 +255,19 @@ pub struct LiteralReader {
 }
 
 impl LiteralReader {
+    /// Maximum length for a literal string in QPACK encoding.
+    ///
+    /// RFC 9204 requires implementations to set their own limits for string literal
+    /// lengths to prevent denial-of-service attacks. The RFC does not mandate a
+    /// specific value, stating only that limits "SHOULD be large enough to process
+    /// the largest individual field the HTTP implementation can be configured to
+    /// accept."
+    ///
+    /// The Gecko limit is in `network.http.max_response_header_size` and defaults to
+    /// 393216 bytes (384 KB), see `modules/libpref/init/StaticPrefList.yaml`. We use
+    /// the same limit.
+    const MAX_LEN: usize = 384 * 1024;
+
     /// Creates `LiteralReader` with the first byte. This constructor is always used
     /// when a literal has a prefix.
     /// For literals without a prefix please use the default constructor.
@@ -299,9 +315,11 @@ impl LiteralReader {
                     };
                 }
                 LiteralReaderState::ReadLength { reader } => {
-                    let v = reader.read(s)?;
-                    self.literal
-                        .resize(v.try_into().or(Err(Error::Decoding))?, 0x0);
+                    let v = usize::try_from(reader.read(s)?)
+                        .ok()
+                        .filter(|&l| l <= Self::MAX_LEN)
+                        .ok_or(Error::Decoding)?;
+                    self.literal.resize(v, 0x0);
                     self.state = LiteralReaderState::ReadLiteral { offset: 0 };
                 }
                 LiteralReaderState::ReadLiteral { offset } => {
@@ -380,12 +398,14 @@ pub(crate) mod test_receiver {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
+    use neqo_common::Encoder;
     use test_receiver::TestReceiver;
 
     use super::{
-        parse_utf8, str, test_receiver, Error, IntReader, LiteralReader, ReadByte as _,
-        ReceiverBufferWrapper, Res,
+        Error, IntReader, LiteralReader, ReadByte as _, ReceiverBufferWrapper, Res, huffman,
+        test_receiver,
     };
+    use crate::{prefix::Prefix, qpack_send_buf::Encoder as _};
 
     const TEST_CASES_NUMBERS: [(&[u8], u8, u64); 7] = [
         (&[0xEA], 3, 10),
@@ -475,45 +495,45 @@ mod tests {
         }
     }
 
-    const TEST_CASES_LITERAL: [(&[u8], u8, &str); 9] = [
+    const TEST_CASES_LITERAL: [(&[u8], u8, &[u8]); 9] = [
         // No Huffman
         (
             &[
                 0x0a, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x6b, 0x65, 0x79,
             ],
             1,
-            "custom-key",
+            b"custom-key",
         ),
         (
             &[
                 0x0a, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x6b, 0x65, 0x79,
             ],
             3,
-            "custom-key",
+            b"custom-key",
         ),
         (
             &[
                 0xea, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x6b, 0x65, 0x79,
             ],
             3,
-            "custom-key",
+            b"custom-key",
         ),
         (
             &[
                 0x0d, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x68, 0x65, 0x61, 0x64, 0x65, 0x72,
             ],
             1,
-            "custom-header",
+            b"custom-header",
         ),
         // With Huffman
-        (&[0x15, 0xae, 0xc3, 0x77, 0x1a, 0x4b], 3, "private"),
+        (&[0x15, 0xae, 0xc3, 0x77, 0x1a, 0x4b], 3, b"private"),
         (
             &[
                 0x56, 0xd0, 0x7a, 0xbe, 0x94, 0x10, 0x54, 0xd4, 0x44, 0xa8, 0x20, 0x05, 0x95, 0x04,
                 0x0b, 0x81, 0x66, 0xe0, 0x82, 0xa6, 0x2d, 0x1b, 0xff,
             ],
             1,
-            "Mon, 21 Oct 2013 20:13:21 GMT",
+            b"Mon, 21 Oct 2013 20:13:21 GMT",
         ),
         (
             &[
@@ -521,7 +541,7 @@ mod tests {
                 0x04, 0x0b, 0x81, 0x66, 0xe0, 0x82, 0xa6, 0x2d, 0x1b, 0xff,
             ],
             4,
-            "Mon, 21 Oct 2013 20:13:21 GMT",
+            b"Mon, 21 Oct 2013 20:13:21 GMT",
         ),
         (
             &[
@@ -529,7 +549,7 @@ mod tests {
                 0x82, 0xae, 0x43, 0xd3,
             ],
             1,
-            "https://www.example.com",
+            b"https://www.example.com",
         ),
         (
             &[
@@ -537,7 +557,7 @@ mod tests {
                 0x82, 0xae, 0x43, 0xd3,
             ],
             0,
-            "https://www.example.com",
+            b"https://www.example.com",
         ),
     ];
 
@@ -547,10 +567,7 @@ mod tests {
             let mut reader = LiteralReader::new_with_first_byte(buf[0], *prefix_len);
             let mut test_receiver: TestReceiver = TestReceiver::default();
             test_receiver.write(&buf[1..]);
-            assert_eq!(
-                parse_utf8(&reader.read(&mut test_receiver).unwrap()).unwrap(),
-                *value
-            );
+            assert_eq!(reader.read(&mut test_receiver).unwrap().as_slice(), *value);
         }
     }
 
@@ -599,5 +616,105 @@ mod tests {
             buffer.read_literal_from_buffer(*prefix_len),
             Err(Error::Decompression)
         );
+    }
+
+    #[test]
+    fn read_non_utf8_huffman_literal() {
+        // Test non-UTF8 data with Huffman encoding
+        // 0xE4 is 'ä' in ISO-8859-1 (extended ASCII), which is invalid UTF-8
+        let non_utf8_data = &[0xE4u8];
+        let encoded = huffman::encode(non_utf8_data);
+
+        // Build a QPACK literal: [huffman_bit | length][data]
+        // For prefix_len=3, the huffman bit is at position (0x80 >> 3) = 0x10
+        let mut buf = Vec::new();
+        #[expect(clippy::cast_possible_truncation, reason = "Test data is small")]
+        let len = encoded.len() as u8;
+        buf.push(0x10 | len); // Huffman bit set + length
+        buf.extend_from_slice(&encoded);
+
+        let mut buffer = ReceiverBufferWrapper::new(&buf);
+        let result = buffer.read_literal_from_buffer(3).unwrap();
+        assert_eq!(result, non_utf8_data);
+    }
+
+    #[test]
+    fn read_non_utf8_plain_literal() {
+        // Test non-UTF8 data without Huffman encoding
+        // 0xFF, 0xFE are invalid UTF-8 sequences
+        let non_utf8_data = &[0xFFu8, 0xFEu8];
+
+        // Build a QPACK literal without Huffman: [length][data]
+        // For prefix_len=3, no huffman bit
+        let mut buf = Vec::new();
+        #[expect(clippy::cast_possible_truncation, reason = "Test data is small")]
+        let len = non_utf8_data.len() as u8;
+        buf.push(len); // No Huffman bit, just length
+        buf.extend_from_slice(non_utf8_data);
+
+        let mut buffer = ReceiverBufferWrapper::new(&buf);
+        let result = buffer.read_literal_from_buffer(3).unwrap();
+        assert_eq!(result, non_utf8_data);
+    }
+
+    /// Create a [`LiteralReader`] and [`TestReceiver`] for a literal with the given length.
+    fn literal_reader_for_test(literal_len: usize) -> (LiteralReader, TestReceiver) {
+        const PREFIX_LEN: u8 = 3;
+        let mut data = Encoder::default();
+        data.encode_literal(
+            false,
+            Prefix::new(0x00, PREFIX_LEN),
+            &vec![b'a'; literal_len],
+        );
+        let reader = LiteralReader::new_with_first_byte(data.as_ref()[0], PREFIX_LEN);
+        let mut test_receiver = TestReceiver::default();
+        test_receiver.write(&data.as_ref()[1..]);
+        (reader, test_receiver)
+    }
+
+    /// Test that [`LiteralReader`] rejects literals exceeding [`MAX_LEN`].
+    ///
+    /// This prevents denial-of-service attacks where a malicious QPACK encoder
+    /// sends an extremely large length value to trigger excessive memory allocation.
+    /// RFC 9204 requires implementations to set their own limits for string literal
+    /// lengths.
+    #[test]
+    fn literal_exceeding_max_len_rejected() {
+        let (mut reader, mut test_receiver) = literal_reader_for_test(LiteralReader::MAX_LEN + 1);
+        assert_eq!(reader.read(&mut test_receiver), Err(Error::Decoding));
+    }
+
+    /// Test that [`LiteralReader`] accepts literals at exactly [`MAX_LEN`].
+    #[test]
+    fn literal_at_max_len_accepted() {
+        let (mut reader, mut test_receiver) = literal_reader_for_test(LiteralReader::MAX_LEN);
+        let result = reader.read(&mut test_receiver).unwrap();
+        assert_eq!(result.len(), LiteralReader::MAX_LEN);
+    }
+
+    #[test]
+    fn buffer_wrapper_rejects_oversized_literal() {
+        const PREFIX_LEN: u8 = 3;
+        // Encode only the length field (MAX_LEN + 1) without allocating the actual data.
+        // The validation should fail before attempting to read the literal content.
+        let mut data = Encoder::default();
+        data.encode_prefixed_encoded_int(
+            Prefix::new(0x00, PREFIX_LEN + 1),
+            (LiteralReader::MAX_LEN + 1) as u64,
+        );
+        let mut buffer = ReceiverBufferWrapper::new(data.as_ref());
+        assert_eq!(
+            buffer.read_literal_from_buffer(PREFIX_LEN),
+            Err(Error::Decompression)
+        );
+    }
+
+    #[test]
+    fn buffer_wrapper_slice_detects_overflow() {
+        let buf = [0u8; 10];
+        let mut wrapper = ReceiverBufferWrapper::new(&buf);
+        wrapper.offset = 5;
+        assert_eq!(wrapper.slice(7), Err(Error::Decompression));
+        assert_eq!(wrapper.slice(usize::MAX), Err(Error::Decompression));
     }
 }

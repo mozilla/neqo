@@ -11,6 +11,7 @@ description.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme.workspace = true
+autobenches = false
 
 [lints]
 workspace = true
@@ -21,6 +22,7 @@ env_logger = { version = "0.10", default-features = false }
 hex = { workspace = true, optional = true }
 log = { workspace = true }
 qlog = { workspace = true }
+sha1 = { version = "0.10", default-features = false, optional = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
 
@@ -28,16 +30,17 @@ thiserror = { workspace = true }
 windows = { workspace = true, features = ["Win32_Media"] }
 
 [dev-dependencies]
-criterion = { version = "0.6", default-features = false, features = ["cargo_bench_support"] }
-neqo-crypto = { path = "../neqo-crypto" }
+criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false }
 test-fixture = { path = "../test-fixture" }
-regex = { workspace = true }
 
 [features]
-bench = ["neqo-crypto/bench", "test-fixture/bench", "log/release_max_level_info"]
-build-fuzzing-corpus = ["hex/alloc"]
+bench = ["test-fixture/bench", "log/release_max_level_info"]
+build-fuzzing-corpus = ["hex/alloc", "sha1"]
 ci = []
 test-fixture = []
+
+[package.metadata.cargo-machete]
+ignored = ["criterion"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

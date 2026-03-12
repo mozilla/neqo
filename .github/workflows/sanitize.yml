@@ -1,7 +1,5 @@
 name: Sanitize
 on:
-  push:
-    branches: ["main"]
   pull_request:
     branches: ["main"]
   merge_group:
@@ -23,7 +21,6 @@ defaults:
 jobs:
   sanitize:
     name: Sanitize
-    if: github.actor != 'dependabot[bot]'
     strategy:
       fail-fast: false
       matrix:
@@ -38,7 +35,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
@@ -49,12 +46,7 @@ jobs:
           tools: cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: nss-version
-        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
-
       - uses: ./.github/actions/nss
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - name: Run tests with sanitizers
         env:
@@ -77,7 +69,7 @@ jobs:
             {
               echo "leak:dyld4::RuntimeState"
               echo "leak:fetchInitializingClassList"
-              echo "leak:std::rt::lang_start_internal"
+              echo "leak:lang_start_internal"
             } > suppressions.txt
             PWD=$(pwd)
             export LSAN_OPTIONS="suppressions=$PWD/suppressions.txt"
@@ -87,7 +79,7 @@ jobs:
 
       - name: Save simulation seeds artifact
         if: ${{ env.DUMP_SIMULATION_SEEDS }}
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: simulation-seeds-${{ matrix.os }}-sanitizer-${{ matrix.sanitizer }}
           path: ${{ env.DUMP_SIMULATION_SEEDS }}

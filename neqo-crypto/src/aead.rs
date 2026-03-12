@@ -13,11 +13,11 @@ use std::{
 
 use crate::{
     constants::{Cipher, Version},
-    err::{sec::SEC_ERROR_BAD_DATA, Error, Res},
+    err::{Error, Res, sec::SEC_ERROR_BAD_DATA},
     experimental_api,
     p11::{PK11SymKey, SymKey},
     scoped_ptr,
-    ssl::{PRUint16, PRUint64, PRUint8, SSLAeadContext},
+    ssl::{PRUint8, PRUint16, PRUint64, SSLAeadContext},
 };
 
 /// Trait for AEAD (Authenticated Encryption with Associated Data) operations.
@@ -55,8 +55,7 @@ pub trait Aead {
     /// # Errors
     ///
     /// Returns `Error` when encryption fails.
-    fn encrypt_in_place<'a>(&self, count: u64, aad: &[u8], data: &'a mut [u8])
-        -> Res<&'a mut [u8]>;
+    fn encrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize>;
 
     /// Decrypt ciphertext with associated data.
     ///
@@ -76,8 +75,7 @@ pub trait Aead {
     /// # Errors
     ///
     /// Returns `Error` when decryption or authentication fails.
-    fn decrypt_in_place<'a>(&self, count: u64, aad: &[u8], data: &'a mut [u8])
-        -> Res<&'a mut [u8]>;
+    fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize>;
 }
 
 experimental_api!(SSL_MakeAead(
@@ -126,14 +124,16 @@ impl RealAead {
     ) -> Res<Self> {
         let p = prefix.as_bytes();
         let mut ctx: *mut SSLAeadContext = null_mut();
-        SSL_MakeAead(
-            version,
-            cipher,
-            secret,
-            p.as_ptr().cast(),
-            c_uint::try_from(p.len())?,
-            &mut ctx,
-        )?;
+        unsafe {
+            SSL_MakeAead(
+                version,
+                cipher,
+                secret,
+                p.as_ptr().cast(),
+                c_uint::try_from(p.len())?,
+                &raw mut ctx,
+            )?;
+        }
         Ok(Self {
             ctx: AeadContext::from_ptr(ctx)?,
         })
@@ -167,19 +167,14 @@ impl Aead for RealAead {
                 input.as_ptr(),
                 c_uint::try_from(input.len())?,
                 output.as_mut_ptr(),
-                &mut l,
+                &raw mut l,
                 c_uint::try_from(output.len())?,
             )
         }?;
         Ok(&output[..l.try_into()?])
     }
 
-    fn encrypt_in_place<'a>(
-        &self,
-        count: u64,
-        aad: &[u8],
-        data: &'a mut [u8],
-    ) -> Res<&'a mut [u8]> {
+    fn encrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
         if data.len() < self.expansion() {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
@@ -194,12 +189,12 @@ impl Aead for RealAead {
                 data.as_ptr(),
                 c_uint::try_from(data.len() - self.expansion())?,
                 data.as_mut_ptr(),
-                &mut l,
+                &raw mut l,
                 c_uint::try_from(data.len())?,
             )
         }?;
         debug_assert_eq!(usize::try_from(l)?, data.len());
-        Ok(data)
+        Ok(data.len())
     }
 
     fn decrypt<'a>(
@@ -222,19 +217,14 @@ impl Aead for RealAead {
                 input.as_ptr(),
                 c_uint::try_from(input.len())?,
                 output.as_mut_ptr(),
-                &mut l,
+                &raw mut l,
                 c_uint::try_from(output.len())?,
             )
         }?;
         Ok(&output[..l.try_into()?])
     }
 
-    fn decrypt_in_place<'a>(
-        &self,
-        count: u64,
-        aad: &[u8],
-        data: &'a mut [u8],
-    ) -> Res<&'a mut [u8]> {
+    fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
         let mut l: c_uint = 0;
         unsafe {
             // Note that NSS insists upon having extra space available for decryption, so
@@ -248,12 +238,12 @@ impl Aead for RealAead {
                 data.as_ptr(),
                 c_uint::try_from(data.len())?,
                 data.as_mut_ptr(),
-                &mut l,
+                &raw mut l,
                 c_uint::try_from(data.len())?,
             )
         }?;
         debug_assert_eq!(usize::try_from(l)?, data.len() - self.expansion());
-        Ok(&mut data[..l.try_into()?])
+        Ok(l.try_into()?)
     }
 }
 

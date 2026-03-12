@@ -12,8 +12,8 @@ use std::{
 use neqo_common::qtrace;
 
 use crate::{
-    static_table::{StaticTableEntry, HEADER_STATIC_TABLE},
     Error, Res,
+    static_table::{HEADER_STATIC_TABLE, StaticTableEntry},
 };
 
 pub const ADDITIONAL_TABLE_ENTRY_SIZE: usize = 32;
@@ -39,11 +39,11 @@ impl DynamicTableEntry {
         self.refs == 0 && self.base < first_not_acked
     }
 
-    pub fn size(&self) -> usize {
+    pub const fn size(&self) -> usize {
         self.name.len() + self.value.len() + ADDITIONAL_TABLE_ENTRY_SIZE
     }
 
-    pub fn add_ref(&mut self) {
+    pub const fn add_ref(&mut self) {
         self.refs += 1;
     }
 
@@ -134,10 +134,7 @@ impl HeaderTable {
     /// `HeaderLookup` if the index does not exist in the static table.
     pub fn get_static(index: u64) -> Res<&'static StaticTableEntry> {
         let inx = usize::try_from(index).or(Err(Error::HeaderLookup))?;
-        if inx > HEADER_STATIC_TABLE.len() {
-            return Err(Error::HeaderLookup);
-        }
-        Ok(&HEADER_STATIC_TABLE[inx])
+        HEADER_STATIC_TABLE.get(inx).ok_or(Error::HeaderLookup)
     }
 
     fn get_dynamic_with_abs_index(&mut self, index: u64) -> Res<&mut DynamicTableEntry> {
@@ -147,18 +144,12 @@ impl HeaderTable {
         }
         let inx = self.base - index - 1;
         let inx = usize::try_from(inx).or(Err(Error::HeaderLookup))?;
-        if inx >= self.dynamic.len() {
-            return Err(Error::HeaderLookup);
-        }
-        Ok(&mut self.dynamic[inx])
+        self.dynamic.get_mut(inx).ok_or(Error::HeaderLookup)
     }
 
     fn get_dynamic_with_relative_index(&self, index: u64) -> Res<&DynamicTableEntry> {
         let inx = usize::try_from(index).or(Err(Error::HeaderLookup))?;
-        if inx >= self.dynamic.len() {
-            return Err(Error::HeaderLookup);
-        }
-        Ok(&self.dynamic[inx])
+        self.dynamic.get(inx).ok_or(Error::HeaderLookup)
     }
 
     /// Get a entry in the  dynamic table.
@@ -168,12 +159,17 @@ impl HeaderTable {
     /// `HeaderLookup` if entry does not exist.
     pub fn get_dynamic(&self, index: u64, base: u64, post: bool) -> Res<&DynamicTableEntry> {
         let inx = if post {
-            if self.base < (base + index + 1) {
+            if self.base
+                < base
+                    .checked_add(index)
+                    .and_then(|s| s.checked_add(1))
+                    .ok_or(Error::IntegerOverflow)?
+            {
                 return Err(Error::HeaderLookup);
             }
             self.base - (base + index + 1)
         } else {
-            if (self.base + index) < base {
+            if self.base.checked_add(index).ok_or(Error::IntegerOverflow)? < base {
                 return Err(Error::HeaderLookup);
             }
             (self.base + index) - base
@@ -202,7 +198,7 @@ impl HeaderTable {
     /// The function returns `LookupResult`: `index`, `static_table` (if it is a static table entry)
     /// and `value_matches` (if the header value matches as well not only header name)
     pub fn lookup(&mut self, name: &[u8], value: &[u8], can_block: bool) -> Option<LookupResult> {
-        qtrace!("[{self}] lookup name:{name:?} value {value:?} can_block={can_block}",);
+        qtrace!("[{self}] lookup name:{name:?} value {value:?} can_block={can_block}");
         let mut name_match = None;
         for iter in HEADER_STATIC_TABLE {
             if iter.name() == name {
@@ -254,14 +250,15 @@ impl HeaderTable {
             "[{self}] reduce table to {reduce}, currently used:{}",
             self.used,
         );
-        while (!self.dynamic.is_empty()) && self.used > reduce {
-            if let Some(e) = self.dynamic.back() {
-                if !e.can_reduce(self.acked_inserts_cnt) {
-                    return false;
-                }
-                self.used -= u64::try_from(e.size()).expect("usize fits in u64");
-                self.dynamic.pop_back();
+        while let Some(e) = self.dynamic.back() {
+            if self.used <= reduce {
+                break;
             }
+            if !e.can_reduce(self.acked_inserts_cnt) {
+                return false;
+            }
+            self.used -= u64::try_from(e.size()).expect("usize fits in u64");
+            self.dynamic.pop_back();
         }
         true
     }
@@ -430,6 +427,20 @@ mod tests {
 
             assert!(table.can_evict_to(first_entry_size));
             assert!(!table.can_evict_to(0));
+        }
+    }
+
+    #[test]
+    fn get_dynamic_max_index_returns_error_not_panic() {
+        let mut table = HeaderTable::new(false);
+        table.set_capacity(10_000).unwrap();
+        table.insert(b"name", b"value").unwrap();
+
+        for post in [true, false] {
+            assert_eq!(
+                table.get_dynamic(u64::MAX, u64::MAX, post).unwrap_err(),
+                Error::IntegerOverflow
+            );
         }
     }
 }

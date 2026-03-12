@@ -6,7 +6,7 @@
 
 use neqo_transport::ConnectionParameters;
 use test_fixture::{
-    default_client, default_server, new_client, now, CountingConnectionIdGenerator,
+    CountingConnectionIdGenerator, default_client, default_server, new_client, now,
 };
 
 #[test]

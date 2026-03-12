@@ -8,13 +8,13 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use neqo_common::{event::Provider as _, Dscp};
+use neqo_common::{Dscp, event::Provider as _};
 use neqo_crypto::{AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
-    server::{ConnectionRef, Server, ValidateAddress},
     Connection, ConnectionEvent, ConnectionParameters, State, Stats,
+    server::{ConnectionRef, Server, ValidateAddress},
 };
-use test_fixture::{default_client, now, CountingConnectionIdGenerator};
+use test_fixture::{CountingConnectionIdGenerator, default_client, now};
 
 /// # Panics
 ///

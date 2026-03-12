@@ -3,8 +3,8 @@ name = "mtu"
 authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
-version = "0.2.9"
-edition = "2021"
+version = "0.3.0"
+edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "Obtain the local network interface MTU towards a given IP address."
@@ -23,7 +23,7 @@ libc = { workspace = true }
 static_assertions = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = ">=0.58,<0.60", features = [
+windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_NetworkManagement_IpHelper",
   "Win32_NetworkManagement_Ndis",
@@ -33,7 +33,7 @@ windows = { version = ">=0.58,<0.60", features = [
 [build-dependencies]
 cfg_aliases = { version = "0.2", default-features = false }
 mozbuild = { version = "0.1", default-features = false, optional = true }
-bindgen = { version = "0.69", default-features = false, features = ["runtime"] }
+bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
 
 [package.metadata.cargo-machete]
 ignored = ["bindgen", "cfg_aliases"]
@@ -43,5 +43,10 @@ gecko = ["dep:mozbuild"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
+bench = false
+
+[[bin]]
+name = "mtu-lookup"
+path = "src/bin/mtu-lookup.rs"
 bench = false
 

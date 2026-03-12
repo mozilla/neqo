@@ -7,7 +7,7 @@
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
 use neqo_common::Encoder;
-use neqo_transport::{recv_stream, send_stream, Connection, StreamId};
+use neqo_transport::{Connection, StreamId, recv_stream, send_stream};
 
 use super::session::Session;
 use crate::{

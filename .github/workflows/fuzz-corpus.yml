@@ -1,0 +1,91 @@
+name: Check for new fuzzing samples
+on:
+  workflow_dispatch:
+    inputs:
+      fuzzers:
+        description: 'Which fuzzers to process'
+        type: choice
+        options:
+          - all
+          - weekly
+          - monthly
+        default: all
+  schedule:
+    # Weekly: Run at 12:00 AM on Sunday.
+    - cron: '0 0 * * 0'
+    # Monthly: Run at 12:00 AM on the 1st of each month.
+    - cron: '0 0 1 * *'
+
+concurrency:
+  # If "pull_request" is added to triggers above, adjust "group" accordingly.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz-corpus:
+    name: Check for new fuzzing samples
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: write # Needed to create PRs.
+      contents: write # Needed to push branches.
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: true # zizmor: ignore[artipacked] We need to push branches.
+
+      - uses: ./.github/actions/rust
+        with:
+          version: nightly
+          tools: cargo-fuzz
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/nss
+
+      - id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FUZZERS_INPUT: ${{ inputs.fuzzers }}
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          # Determine which fuzzers to run based on trigger type
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # Manual trigger: use input directly
+            echo "fuzzers=$FUZZERS_INPUT" >> "$GITHUB_OUTPUT"
+          elif [ "$SCHEDULE" = "0 0 * * 0" ]; then
+            # Weekly schedule (Sunday)
+            echo "fuzzers=weekly" >> "$GITHUB_OUTPUT"
+          else
+            # Monthly schedule (1st of month)
+            echo "fuzzers=all" >> "$GITHUB_OUTPUT"
+          fi
+
+      - env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+          FUZZER_FILTER: ${{ steps.filter.outputs.fuzzers }}
+        run: |
+          ./test/make-fuzz-corpus.sh
+          # If there are no new corpus samples, exit.
+          if [ -z "$(git status --porcelain fuzz/corpus)" ]; then
+            echo "No new fuzzing corpus samples generated."
+            exit 0
+          fi
+
+          # Otherwise, create a PR to add them.
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          echo "$TOKEN" | gh auth login --with-token
+          SHA_SHORT=$(echo "$SHA" | cut -c1-7)
+          BRANCH="chore-corpus-samples-$SHA_SHORT"
+          MESSAGE="chore: Add new fuzzing corpus samples
+
+          A periodic run of the test suite generated new fuzzing samples. This PR adds them to the fuzzing corpus."
+          git checkout -b "$BRANCH"
+          git add fuzz/corpus
+          git commit -m "$MESSAGE"
+          git push --set-upstream origin "$BRANCH"
+          gh pr create --fill-verbose

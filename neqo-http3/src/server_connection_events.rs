@@ -6,14 +6,14 @@
 
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-use neqo_common::{header::HeadersExt as _, Bytes, Header};
+use neqo_common::{Bytes, Header, header::HeadersExt as _};
 use neqo_transport::{AppError, StreamId};
 
 use crate::{
-    connection::Http3State,
-    features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
     CloseType, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents, Res,
     SendStreamEvents,
+    connection::Http3State,
+    features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
 };
 
 /// Server events for a single connection.
@@ -92,13 +92,13 @@ pub struct Http3ServerConnEvents {
 
 impl SendStreamEvents for Http3ServerConnEvents {
     fn send_closed(&self, stream_info: &Http3StreamInfo, close_type: CloseType) {
-        if close_type != CloseType::Done {
-            if let Some(error) = close_type.error() {
-                self.insert(Http3ServerConnEvent::StreamStopSending {
-                    stream_info: *stream_info,
-                    error,
-                });
-            }
+        if close_type != CloseType::Done
+            && let Some(error) = close_type.error()
+        {
+            self.insert(Http3ServerConnEvent::StreamStopSending {
+                stream_info: *stream_info,
+                error,
+            });
         }
     }
 
@@ -148,12 +148,12 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
 
     fn extended_connect_new_session(&self, stream_id: StreamId, headers: Vec<Header>) {
         match headers.find_header(":protocol").map(Header::value) {
-            Some("webtransport") => {
+            Some(b"webtransport") => {
                 self.insert(Http3ServerConnEvent::WebTransport(
                     WebTransportEvent::Session { stream_id, headers },
                 ));
             }
-            Some("connect-udp") => {
+            Some(b"connect-udp") => {
                 self.insert(Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::Session {
                     stream_id,
                     headers,
@@ -277,5 +277,20 @@ impl Http3ServerConnEvents {
             matches!(evt,
                 Http3ServerConnEvent::Headers { stream_info: x, .. } | Http3ServerConnEvent::DataReadable { stream_info: x, .. } if x == stream_info)
         });
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::Http3ServerConnEvents;
+    use crate::connection::Http3State;
+
+    #[test]
+    fn has_events() {
+        let events = Http3ServerConnEvents::default();
+        assert!(!events.has_events());
+        events.connection_state_change(Http3State::Connected);
+        assert!(events.has_events());
     }
 }

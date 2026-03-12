@@ -6,7 +6,7 @@
 
 use std::cmp::min;
 
-use neqo_common::qwarn;
+use neqo_common::qdebug;
 use neqo_qpack as qpack;
 use neqo_transport::ConnectionParameters;
 
@@ -137,7 +137,6 @@ impl Http3Parameters {
         self.connect
     }
 
-    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn http3_datagram(mut self, http3_datagram: bool) -> Self {
         self.http3_datagram = http3_datagram;
@@ -147,8 +146,9 @@ impl Http3Parameters {
     #[must_use]
     pub fn get_http3_datagram(&self) -> bool {
         if self.http3_datagram && self.conn_params.get_datagram_size() == 0 {
-            qwarn!("HTTP/3 setting SETTINGS_HTTP3_DATAGRAM is enabled but QUIC transport parameter max_datagram_frame_size is 0.");
-            debug_assert!(false);
+            qdebug!(
+                "HTTP/3 setting SETTINGS_H3_DATAGRAM is enabled but QUIC transport parameter max_datagram_frame_size is 0. Datagrams will be sent via HTTP DATAGRAM Capsules."
+            );
         }
         self.http3_datagram
     }
@@ -162,11 +162,40 @@ mod tests {
     use crate::Http3Parameters;
 
     #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "assertion failed: false")]
-    fn get_http3_datagram_debug_panic_on_mismatch() {
+    fn http3_datagram_with_capsules_only() {
         let params = Http3Parameters::default()
             .connection_parameters(ConnectionParameters::default().datagram_size(0))
+            .http3_datagram(true);
+        assert!(params.get_http3_datagram());
+    }
+
+    #[test]
+    fn max_table_size_accepts_limit() {
+        // QPACK spec limits table size to (1 << 30) - 1.
+        let limit = (1 << 30) - 1;
+        let params = Http3Parameters::default()
+            .max_table_size_encoder(limit)
+            .max_table_size_decoder(limit);
+        assert_eq!(params.get_qpack_settings().max_table_size_encoder, limit);
+        assert_eq!(params.get_qpack_settings().max_table_size_decoder, limit);
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn max_table_size_encoder_rejects_above_limit() {
+        _ = Http3Parameters::default().max_table_size_encoder(1 << 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn max_table_size_decoder_rejects_above_limit() {
+        _ = Http3Parameters::default().max_table_size_decoder(1 << 30);
+    }
+
+    #[test]
+    fn http3_datagram_setting() {
+        let params = Http3Parameters::default()
+            .connection_parameters(ConnectionParameters::default().datagram_size(1200))
             .http3_datagram(true);
         assert!(params.get_http3_datagram());
     }

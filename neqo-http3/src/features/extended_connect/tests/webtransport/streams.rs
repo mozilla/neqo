@@ -7,8 +7,8 @@
 use neqo_transport::StreamType;
 
 use crate::{
-    features::extended_connect::{tests::webtransport::WtTest, CloseReason},
     Error,
+    features::extended_connect::{CloseReason, tests::webtransport::WtTest},
 };
 
 #[test]
@@ -1126,4 +1126,17 @@ fn wt_session_close_frame_and_streams_client() {
             },
         )),
     );
+}
+
+#[test]
+fn wt_set_sendorder() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    wt.client
+        .webtransport_set_sendorder(wt_stream, Some(42))
+        .unwrap();
+    wt.client
+        .webtransport_set_sendorder(wt_stream, None)
+        .unwrap();
 }

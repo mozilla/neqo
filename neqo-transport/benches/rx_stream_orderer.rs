@@ -4,9 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(
+    clippy::significant_drop_tightening,
+    reason = "Inherent in codspeed criterion_group! macro."
+)]
+
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use neqo_transport::recv_stream::RxStreamOrderer;
 
 fn rx_stream_orderer() {

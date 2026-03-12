@@ -9,12 +9,12 @@ use common::assert_dscp;
 use neqo_common::{Datagram, Decoder, Encoder, Role};
 use neqo_crypto::AeadTrait as _;
 use neqo_transport::{
-    CloseReason, ConnectionParameters, Error, State, StreamType, Version, MIN_INITIAL_PACKET_SIZE,
+    CloseReason, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, State, StreamType, Version,
 };
 use test_fixture::{
-    default_client, default_server,
+    CountingConnectionIdGenerator, DEFAULT_ALPN, default_client, default_server,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
-    new_client, new_server, now, split_datagram, CountingConnectionIdGenerator, DEFAULT_ALPN,
+    new_client, new_server, now, split_datagram,
 };
 
 #[test]
@@ -49,7 +49,7 @@ fn truncate_long_packet() {
     // This test needs to alter the server handshake, so turn off MLKEM.
     let mut client =
         new_client::<CountingConnectionIdGenerator>(ConnectionParameters::default().mlkem(false));
-    let mut server = new_server::<CountingConnectionIdGenerator>(
+    let mut server = new_server::<CountingConnectionIdGenerator, &str>(
         DEFAULT_ALPN,
         ConnectionParameters::default().mlkem(false),
     );
@@ -367,7 +367,7 @@ fn server_initial_packet_number() {
                 .versions(Version::Version1, vec![Version::Version1])
                 .mlkem(false),
         );
-        let mut server = new_server::<CountingConnectionIdGenerator>(
+        let mut server = new_server::<CountingConnectionIdGenerator, &str>(
             DEFAULT_ALPN,
             ConnectionParameters::default()
                 .versions(Version::Version1, vec![Version::Version1])

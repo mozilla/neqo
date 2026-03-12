@@ -6,6 +6,9 @@
 
 #![allow(
     clippy::allow_attributes,
+    clippy::allow_attributes_without_reason,
+    clippy::needless_raw_strings,
+    clippy::derive_partial_eq_without_eq,
     dead_code,
     non_upper_case_globals,
     non_snake_case,
@@ -19,7 +22,7 @@ use std::os::raw::{c_uint, c_void};
 
 use crate::{
     constants::Epoch,
-    err::{secstatus_to_res, Res},
+    err::{Res, secstatus_to_res},
 };
 
 include!(concat!(env!("OUT_DIR"), "/nss_ssl.rs"));

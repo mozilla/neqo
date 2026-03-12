@@ -31,7 +31,7 @@ impl Random {
         }
     }
 
-    pub fn random(&mut self) -> u64 {
+    pub const fn random(&mut self) -> u64 {
         let result = (self.state[1].overflowing_mul(5).0)
             .rotate_right(7)
             .overflowing_mul(9)
@@ -53,7 +53,7 @@ impl Random {
     /// If the range is empty or inverted (`range.start > range.end`), then
     /// this returns the value of `range.start` without generating any random values.
     #[must_use]
-    pub fn random_from(&mut self, range: Range<u64>) -> u64 {
+    pub const fn random_from(&mut self, range: Range<u64>) -> u64 {
         let max = range.end.saturating_sub(range.start);
         if max == 0 {
             return range.start;

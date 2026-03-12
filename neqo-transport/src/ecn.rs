@@ -7,9 +7,9 @@
 use std::ops::{AddAssign, Deref, DerefMut, Sub};
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{qdebug, qinfo, Ecn};
+use neqo_common::{Ecn, qdebug, qinfo};
 
-use crate::{packet, recovery::sent, Stats};
+use crate::{Stats, packet, recovery::sent};
 
 /// The number of packets to use for testing a path for ECN capability.
 pub(crate) const TEST_COUNT: usize = 10;
@@ -186,7 +186,7 @@ impl Info {
     }
 
     /// Set the baseline (= the ECN counts from the last ACK Frame).
-    pub(crate) fn set_baseline(&mut self, baseline: Count) {
+    pub(crate) const fn set_baseline(&mut self, baseline: Count) {
         self.baseline = baseline;
     }
 
@@ -233,7 +233,7 @@ impl Info {
     }
 
     /// An [`Ecn::Ect0`] marked packet has been acked.
-    pub(crate) fn acked_ecn(&mut self) {
+    pub(crate) const fn acked_ecn(&mut self) {
         if let ValidationState::Testing {
             initial_probes_acked: probes_acked,
             ..
@@ -352,5 +352,23 @@ impl Info {
         } else {
             Ecn::NotEct
         }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::Count;
+
+    #[test]
+    fn count_predicates() {
+        assert!(Count::default().is_empty());
+        assert!(!Count::default().is_some());
+        assert!(!Count::new(0, 1, 0, 0).is_empty());
+        assert!(Count::new(0, 1, 0, 0).is_some()); // ect1 > 0
+        assert!(Count::new(0, 0, 1, 0).is_some()); // ect0 > 0
+        assert!(Count::new(0, 0, 0, 1).is_some()); // ce > 0
+        assert!(!Count::new(1, 0, 0, 0).is_empty());
+        assert!(!Count::new(1, 0, 0, 0).is_some()); // not_ect alone
     }
 }

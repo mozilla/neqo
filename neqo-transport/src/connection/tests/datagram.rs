@@ -10,21 +10,28 @@ use neqo_common::event::Provider as _;
 use static_assertions::const_assert;
 
 use super::{
-    assert_error, connect_force_idle, default_server, new_client, new_server, now, AT_LEAST_PTO,
+    AT_LEAST_PTO, assert_error, connect_force_idle, default_server, new_client, new_server, now,
 };
 use crate::{
+    CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Pmtud,
+    StreamType,
     connection::tests::DEFAULT_ADDR,
     events::{ConnectionEvent, OutgoingDatagramOutcome},
     frame::FrameType,
     packet,
-    quic_datagrams::MAX_QUIC_DATAGRAM,
+    quic_datagrams::QuicDatagram,
     send_stream::{RetransmissionPriority, TransmissionPriority},
-    CloseReason, Connection, ConnectionParameters, Error, Pmtud, StreamType,
-    MIN_INITIAL_PACKET_SIZE,
 };
 
-// FIXME: The 27 here is a magic constant that the original code also (implicitly) had.
-const DATAGRAM_LEN_MTU: usize = Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) - 27;
+/// Minimum overhead for a short header packet carrying a DATAGRAM frame:
+/// - 8 bytes: minimum connection ID length (from `CountingConnectionIdGenerator`)
+/// - 1 byte: short header (header form, spin, reserved, key phase, PN length)
+/// - 1 byte: minimum packet number encoding
+/// - 1 byte: DATAGRAM frame type
+/// - 16 bytes: AEAD authentication tag
+const MIN_DATAGRAM_PACKET_OVERHEAD: usize = 8 + 1 + 1 + 1 + 16;
+const DATAGRAM_LEN_MTU: usize =
+    Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) - MIN_DATAGRAM_PACKET_OVERHEAD;
 const DATA_MTU: &[u8] = &[1; DATAGRAM_LEN_MTU];
 const DATA_BIGGER_THAN_MTU: &[u8] = &[0; 2 * DATAGRAM_LEN_MTU];
 const_assert!(DATA_BIGGER_THAN_MTU.len() > DATAGRAM_LEN_MTU);
@@ -132,10 +139,11 @@ fn datagram_enabled_on_server() {
 fn connect_datagram() -> (Connection, Connection) {
     let mut client = new_client(
         ConnectionParameters::default()
-            .datagram_size(MAX_QUIC_DATAGRAM)
+            .datagram_size(QuicDatagram::MAX_SIZE)
             .outgoing_datagram_queue(OUTGOING_QUEUE),
     );
-    let mut server = new_server(ConnectionParameters::default().datagram_size(MAX_QUIC_DATAGRAM));
+    let mut server =
+        new_server(ConnectionParameters::default().datagram_size(QuicDatagram::MAX_SIZE));
     connect_force_idle(&mut client, &mut server);
     (client, server)
 }
@@ -364,7 +372,7 @@ fn datagram_lost() {
     let dgram_lost = client.stats().datagram_tx.lost;
     let out = client.process_output(now).dgram();
     assert!(out.is_some()); // PING probing
-                            // Datagram is not sent again.
+    // Datagram is not sent again.
     assert_eq!(client.stats().frame_tx.ping, pings_sent + 1);
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent2);
     assert_eq!(client.stats().datagram_tx.lost, dgram_lost + 1);
@@ -536,11 +544,11 @@ fn too_many_datagram_events() {
     // Datagram with FIRST_DATAGRAM data will be dropped.
     assert!(matches!(
         client.next_event().unwrap(),
-        ConnectionEvent::Datagram(data) if data == SECOND_DATAGRAM
+        ConnectionEvent::IncomingDatagramDropped
     ));
     assert!(matches!(
         client.next_event().unwrap(),
-        ConnectionEvent::IncomingDatagramDropped
+        ConnectionEvent::Datagram(data) if data == SECOND_DATAGRAM
     ));
     assert!(matches!(
         client.next_event().unwrap(),

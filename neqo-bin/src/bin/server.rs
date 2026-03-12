@@ -11,7 +11,7 @@ use neqo_bin::server::Res;
 #[allow(
     clippy::allow_attributes,
     clippy::unwrap_in_result,
-    reason = "FIXME: False positive?"
+    reason = "FIXME: Fixed in newer tokio versions."
 )]
 async fn main() -> Res<()> {
     let args = neqo_bin::server::Args::parse();

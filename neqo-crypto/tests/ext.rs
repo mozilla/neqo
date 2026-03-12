@@ -8,9 +8,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use handshake::forward_records;
 use neqo_crypto::{
+    AuthenticationStatus, Client, Error, HandshakeState, Server,
     constants::{HandshakeMessage, TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
-    generate_ech_keys, AuthenticationStatus, Client, Error, HandshakeState, Server,
+    generate_ech_keys,
 };
 use test_fixture::{damage_ech_config, fixture_init, now};
 

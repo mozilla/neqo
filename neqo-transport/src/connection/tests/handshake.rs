@@ -4,6 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(
+    clippy::missing_asserts_for_indexing,
+    clippy::unwrap_in_result,
+    reason = "OK in tests"
+)]
+
 use std::{
     cell::RefCell,
     net::{IpAddr, Ipv6Addr, SocketAddr},
@@ -11,34 +17,36 @@ use std::{
     time::Duration,
 };
 
-use neqo_common::{event::Provider as _, qdebug, Datagram};
+use neqo_common::{Datagram, event::Provider as _, qdebug};
 use neqo_crypto::{
-    constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus,
+    AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys,
 };
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
 use test_fixture::{
+    DEFAULT_ADDR,
     assertions::{assert_coalesced_0rtt, assert_handshake, assert_initial, assert_version},
-    damage_ech_config, fixture_init, now, split_datagram, strip_padding, DEFAULT_ADDR,
+    damage_ech_config, fixture_init, now, split_datagram, strip_padding,
 };
 
 use super::{
     super::{Connection, Output, State},
-    assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
-    get_tokens, handshake, maybe_authenticate, resumed_server, send_something, zero_len_cid_client,
-    CountingConnectionIdGenerator, AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
+    AT_LEAST_PTO, CountingConnectionIdGenerator, DEFAULT_RTT, DEFAULT_STREAM_DATA, assert_error,
+    connect, connect_force_idle, connect_with_rtt, default_client, default_server, get_tokens,
+    handshake, maybe_authenticate, resumed_server, send_something, zero_len_cid_client,
 };
 use crate::{
+    CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
+    Version,
     connection::{
-        tests::{exchange_ticket, new_client, new_server},
         AddressValidation,
+        tests::{exchange_ticket, new_client, new_server},
     },
     events::ConnectionEvent,
     server::ValidateAddress,
     stats::FrameStats,
     tparams::{TransportParameter, TransportParameterId::*},
     tracking::DEFAULT_LOCAL_ACK_DELAY,
-    CloseReason, ConnectionParameters, Error, Pmtud, StreamType, Version,
 };
 
 const ECH_CONFIG_ID: u8 = 7;
@@ -500,9 +508,11 @@ fn coalesce_05rtt() {
 
 #[test]
 fn reorder_handshake() {
+    const V2_INITIAL: u8 = 0b1001_0000;
     const RTT: Duration = Duration::from_millis(100);
-    let mut client = default_client();
-    let mut server = default_server();
+    // Disable packet number randomization for deterministic packet counts.
+    let mut client = new_client(ConnectionParameters::default().randomize_first_pn(false));
+    let mut server = new_server(ConnectionParameters::default().randomize_first_pn(false));
     let mut now = now();
 
     let c1 = client.process_output(now).dgram();
@@ -512,16 +522,16 @@ fn reorder_handshake() {
     now += RTT / 2;
     server.process_input(c1.unwrap(), now);
     let _s_initial = server.process(c2, now).dgram().unwrap();
-    let s_handshake = server.process_output(now).dgram().unwrap();
-    let s_hs_has_initial = s_handshake[0] & 0b1011_0000 == 0b1001_0000; // v2 Initial
+    let s_handshake_1 = server.process_output(now).dgram().unwrap();
+    let s_hs1_has_initial = s_handshake_1[0] & 0b1011_0000 == V2_INITIAL;
 
     // Pass just the handshake packet in and the client can't handle it yet.
     // It can only send another Initial packet.
     now += RTT + RTT / 2; // With multi-packet MLKEM flights, client needs more time here.
-    let dgram = client.process(Some(s_handshake), now).dgram();
+    let dgram = client.process(Some(s_handshake_1), now).dgram();
     assert_initial(dgram.as_ref().unwrap(), false);
     assert_eq!(client.stats().saved_datagrams, 1);
-    assert_eq!(client.stats().packets_rx, usize::from(s_hs_has_initial));
+    assert_eq!(client.stats().packets_rx, usize::from(s_hs1_has_initial));
 
     // Get the server to try again.
     // Though we currently allow the server to arm its PTO timer, use
@@ -529,31 +539,46 @@ fn reorder_handshake() {
     now += AT_LEAST_PTO;
     let c2 = client.process_output(now).dgram();
     now += RTT / 2;
+    // When Handshake PTO fires, Initial packets are also marked for retransmission.
+    // The server sends three Initial datagrams, then a Handshake datagram.
+    let s_pkt_tx_before = server.stats().packets_tx;
     let s_initial_2 = server.process(c2, now).dgram().unwrap();
+    assert_initial(&s_initial_2, false);
+    let s_initial_3 = server.process_output(now).dgram().unwrap();
+    assert_initial(&s_initial_3, false);
+    let s_initial_4 = server.process_output(now).dgram().unwrap();
+    assert_initial(&s_initial_4, false);
+    // Count the number of packets sent, so we can account for any Handshake packets.
+    let s_pkt_tx = server.stats().packets_tx - s_pkt_tx_before;
     let s_handshake_2 = server.process_output(now).dgram().unwrap();
+    let s_hs2_has_initial = s_handshake_2[0] & 0b1011_0000 == V2_INITIAL;
 
     // Processing the Handshake packet first should save it.
     now += RTT / 2;
     client.process_input(s_handshake_2, now);
-    assert_eq!(client.stats().saved_datagrams, 2);
+
+    let c_stats_before = client.stats();
+    assert_eq!(c_stats_before.saved_datagrams, 2);
     // There's a chance that each "handshake" datagram contained a little bit of an Initial packet.
     // That will have been processed by the client.
-    assert!((0..=2).contains(&client.stats().packets_rx));
+    assert_eq!(
+        c_stats_before.packets_rx,
+        usize::from(s_hs1_has_initial) + usize::from(s_hs2_has_initial)
+    );
+    assert!(c_stats_before.dropped_rx == 0);
 
+    // Deliver all Initial packets.
     client.process_input(s_initial_2, now);
-    // Each saved packet should now be "received" again.
-    // That means:
-    // s_handshake - initial?, handshake, padding?
-    // s_handshake_2 - initial?, handshake, padding?
-    // s_initial_2 - initial, handshake? (but not if the others have initial), padding
-    //
-    // As of writing, there are 6 packets, two of which are padding (dropped):
-    // s_handshake - handshake
-    // s_handshake_2 - initial, handshake, padding
-    // s_initial_2 - initial, padding
-    // This can only happen when Initial packets are in a very small range of sizes.
-    assert!((4..=8).contains(&client.stats().packets_rx));
-    assert!((1..=3).contains(&client.stats().dropped_rx));
+    client.process_input(s_initial_3, now);
+    client.process_input(s_initial_4, now);
+    // The client should have received and processed `s_pkt_tx`,
+    // plus the two saved datagrams that were saved
+    // and any garbage that was dropped.
+    let c_stats_after = client.stats();
+    assert_eq!(
+        c_stats_after.packets_rx - c_stats_before.packets_rx,
+        s_pkt_tx + 2 + c_stats_after.dropped_rx
+    );
     maybe_authenticate(&mut client);
     let c3 = client.process_output(now).dgram();
     assert!(c3.is_some());
@@ -782,7 +807,7 @@ fn corrupted_initial() {
         .enumerate()
         .rev()
         .skip(1) // Skip the last byte, which might be a SCONE indicator.
-        .find(|(_, &v)| v != Connection::SCONE_INDICATION[0]) // The SCONE padding value.
+        .find(|&(_, &v)| v != Connection::SCONE_INDICATION[0]) // The SCONE padding value.
         .unwrap();
     corrupted[idx] ^= 0x76;
 
@@ -835,7 +860,7 @@ fn extra_initial_hs() {
     // Feed that undecryptable packet into the client a few times.
     // Do that MAX_SAVED_DATAGRAMS times and each time the client will emit
     // another Initial packet.
-    for _ in 0..crate::saved::MAX_SAVED_DATAGRAMS {
+    for _ in 0..crate::saved::SavedDatagrams::CAPACITY {
         let c_init = match client.process(Some(undecryptable.clone()), now) {
             Output::None => unreachable!(),
             Output::Datagram(c_init) => Some(c_init),
@@ -965,9 +990,11 @@ fn anti_amplification() {
     assert!(!maybe_authenticate(&mut client)); // No need yet.
 
     // The client sends a padded datagram, with just ACKs for Initial and Handshake.
+    // Per RFC 9000 Section 14.1, datagrams containing Initial packets must be
+    // at least 1200 bytes, even when coalesced with Handshake packets.
     assert_eq!(client.stats().frame_tx.ack, ack_count + 2);
     assert_eq!(client.stats().frame_tx.all(), frame_count + 2);
-    assert_ne!(ack.len(), client.plpmtu()); // Not padded (it includes Handshake).
+    assert_eq!(ack.len(), client.plpmtu()); // Must be padded (contains Initial).
 
     now += DEFAULT_RTT / 2;
     let remainder = server.process(Some(ack), now).dgram();
@@ -1373,7 +1400,7 @@ fn emit_authentication_needed_once() {
         test_fixture::LONG_CERT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        // TODO: Why is this needed to avoind the 5ms pacing delay?
+        // Disable pacing to allow sending multiple packets without inter-packet delays.
         ConnectionParameters::default().pacing(false),
     )
     .expect("create a server");
@@ -1425,7 +1452,7 @@ fn emit_authentication_needed_once() {
 #[test]
 fn client_initial_retransmits_identical() {
     let mut now = now();
-    // TODO: With pacing on, why does the delay callback return by 5ms and then PTO after 295ms?
+    // Disable pacing so the PTO timer is the only callback, simplifying assertions.
     let mut client = new_client(ConnectionParameters::default().pacing(false));
 
     // Force the client to retransmit its Initial flight a number of times and make sure the
@@ -1620,4 +1647,180 @@ fn scone() {
     // The SCONE packets are effectively invisible.
     assert_eq!(server.stats().packets_rx, server_stats.packets_rx + 1);
     assert_eq!(client.stats().packets_rx, client_stats.packets_rx + 1);
+}
+
+/// RFC 9287 Section 3.1 states: "A server MUST NOT remember that a client negotiated
+/// the extension in a previous connection and set the QUIC Bit to 0 based on that information."
+///
+/// This test verifies that the client complies with RFC 9287 Section 3.1 by ensuring
+/// it does not grease the QUIC Bit based on cached (0-RTT) transport parameters.
+/// Regression test for the `handshakeloss` interop test failure, where client Initial
+/// packets with the fixed bit cleared (due to cached parameters) were discarded by the server.
+#[test]
+fn grease_quic_bit_respects_current_handshake() {
+    fixture_init();
+
+    // Create a client connection.
+    let client = Connection::new_client(
+        test_fixture::DEFAULT_SERVER_NAME,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
+        ConnectionParameters::default(),
+        now(),
+    )
+    .unwrap();
+
+    // Simulate having cached 0-RTT transport parameters that include grease_quic_bit.
+    // In reality, this would come from a previous connection's session ticket.
+    let mut tp = crate::tparams::TransportParameters::default();
+    tp.set_empty(GreaseQuicBit);
+    client.tps.borrow_mut().set_remote_0rtt(Some(tp));
+
+    // At this point:
+    // - We have remote_0rtt params with GreaseQuicBit
+    // - We do NOT have remote_handshake params (no current handshake confirmation)
+
+    // With only cached 0-RTT params, no greasing is allowed.
+    assert!(
+        !client.can_grease_quic_bit(),
+        "Must not grease with only cached 0-RTT params (RFC 9287 Section 3.1)"
+    );
+}
+
+#[test]
+fn certificate_compression() {
+    use std::sync::Mutex;
+
+    use neqo_crypto::agent::CertificateCompressor;
+
+    // These statics work for concurrent test execution because the certificate is
+    // effectively a fixed value. A more robust approach would use a hash-based lookup,
+    // but that's unnecessary given the current test setup.
+    static ORIGINAL: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+    static DECODED: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+
+    struct Xor;
+    impl CertificateCompressor for Xor {
+        const ID: u16 = 0x1234;
+        const NAME: &std::ffi::CStr = c"xor";
+        const ENABLE_ENCODING: bool = true;
+        fn decode(input: &[u8], output: &mut [u8]) -> neqo_crypto::Res<()> {
+            output
+                .iter_mut()
+                .zip(input)
+                .for_each(|(o, &i)| *o = i ^ 0xAA);
+            *DECODED.lock().unwrap() = output[..input.len()].to_vec();
+            Ok(())
+        }
+        fn encode(input: &[u8], output: &mut [u8]) -> neqo_crypto::Res<usize> {
+            *ORIGINAL.lock().unwrap() = input.to_vec();
+            output
+                .iter_mut()
+                .zip(input)
+                .for_each(|(o, &i)| *o = i ^ 0xAA);
+            Ok(input.len())
+        }
+    }
+
+    let mut client = default_client();
+    client.set_certificate_compression::<Xor>().unwrap();
+    let mut server = default_server();
+    server.set_certificate_compression::<Xor>().unwrap();
+    connect(&mut client, &mut server);
+
+    assert!(!ORIGINAL.lock().unwrap().is_empty());
+    assert_eq!(*ORIGINAL.lock().unwrap(), *DECODED.lock().unwrap());
+}
+
+/// Test that Initial CRYPTO can be retransmitted even when PTO fires for Handshake space.
+///
+/// This reproduces the bug from QNS L1/C1 test failures where:
+/// 1. Client sends `ClientHello` split across multiple Initial packets
+/// 2. Server receives first packet but second is lost
+/// 3. Server ACKs what it received
+/// 4. Client detects loss and retransmits, but packets keep getting lost
+/// 5. Initial PTO fires, which primes the Handshake PTO timer
+/// 6. Handshake PTO fires
+/// 7. BUG: `ack_only(Initial)` returns true, blocking CRYPTO retransmission
+/// 8. Client cannot complete handshake, times out
+///
+/// RFC 9002 Section 6.2.4 requires sending probes in packet number spaces
+/// with in-flight data. The client must be able to retransmit lost Initial
+/// CRYPTO frames even when PTO fires for Handshake space.
+#[test]
+fn initial_crypto_retransmit_during_handshake_pto() {
+    let mut now = now();
+
+    // Use default client which has MLKEM enabled, causing CRYPTO to be split
+    // across multiple Initial packets.
+    let mut client = new_client(ConnectionParameters::default().pacing(false));
+    let mut server = new_server(ConnectionParameters::default().pacing(false));
+
+    // Client sends Initial packets. With MLKEM, this will be 2 packets.
+    let c_init_1 = client.process_output(now).dgram().unwrap();
+    let c_init_2 = client.process_output(now).dgram().unwrap();
+    assert_initial(&c_init_1, false);
+    assert_initial(&c_init_2, false);
+
+    // Record the initial CRYPTO frame count. With default settings (MLKEM + SNI slicing),
+    // the ClientHello is split: 2 CRYPTO frames in the first packet, 1 in the second.
+    let crypto_before = client.stats().frame_tx.crypto;
+    assert_eq!(crypto_before, 3);
+
+    // Deliver only the FIRST Initial packet to server. The second is "lost".
+    now += DEFAULT_RTT / 2;
+    server.process_input(c_init_1, now);
+
+    // Server sends ACK for what it received (incomplete ClientHello).
+    // Server is waiting for more CRYPTO data to complete the ClientHello.
+    let s_ack = server.process_output(now).dgram();
+    assert!(s_ack.is_some(), "Server should ACK the partial Initial");
+
+    // Deliver server's ACK to client.
+    now += DEFAULT_RTT / 2;
+    client.process_input(s_ack.unwrap(), now);
+
+    // Client should detect that c_init_2 was lost (server ACKed c_init_1 but not c_init_2).
+    // The client is now in a state where:
+    // - It has received an Initial ACK (knows peer is alive)
+    // - It still has lost Initial CRYPTO data to retransmit
+    // - Handshake space may get primed for PTO
+
+    // Fire PTOs multiple times. Without further ACKs, the PTO mechanism must
+    // continue to allow CRYPTO retransmission even when Handshake PTO fires.
+    //
+    // The bug manifests when:
+    // 1. Initial PTO fires, priming Handshake PTO
+    // 2. Handshake PTO fires (before Initial PTO, since Initial keeps sending)
+    // 3. Without the fix: Initial packets aren't marked for retransmission, and ack_only(Initial)
+    //    blocks CRYPTO frames
+    for pto_count in 1..=5 {
+        now += client.process_output(now).callback();
+
+        let crypto_before_pto = client.stats().frame_tx.crypto;
+
+        // Collect all packets sent on this PTO.
+        let mut packets_sent = 0;
+        while client.process_output(now).dgram().is_some() {
+            packets_sent += 1;
+        }
+
+        let crypto_after_pto = client.stats().frame_tx.crypto;
+
+        // The client MUST send packets on PTO.
+        assert!(
+            packets_sent > 0,
+            "PTO {pto_count}: Client should send packets on PTO"
+        );
+
+        // The client MUST include CRYPTO frames, not just PINGs/ACKs.
+        assert!(
+            crypto_after_pto > crypto_before_pto,
+            "PTO {pto_count}: Client must retransmit CRYPTO frames, not just ACKs/PINGs. \
+             CRYPTO frames before: {crypto_before_pto}, after: {crypto_after_pto}, \
+             packets sent: {packets_sent}"
+        );
+    }
 }

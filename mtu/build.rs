@@ -12,7 +12,7 @@ const BINDINGS: &str = "bindings.rs";
 
 #[cfg(feature = "gecko")]
 fn clang_args() -> Vec<String> {
-    use mozbuild::{config::BINDGEN_SYSTEM_FLAGS, TOPOBJDIR};
+    use mozbuild::{TOPOBJDIR, config::BINDGEN_SYSTEM_FLAGS};
 
     let mut flags: Vec<String> = BINDGEN_SYSTEM_FLAGS.iter().map(|s| s.to_string()).collect();
 
