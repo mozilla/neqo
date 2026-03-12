@@ -16,8 +16,9 @@ use qlog::events::{
     EventData, RawInfo,
     connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated},
     quic::{
-        AckedRanges, ErrorSpace, MetricsUpdated, PacketDropped, PacketHeader, PacketLost,
-        PacketReceived, PacketSent, QuicFrame, StreamType, VersionInformation,
+        AckedRanges, CongestionStateUpdated, CongestionStateUpdatedTrigger, ErrorSpace,
+        MetricsUpdated, PacketDropped, PacketHeader, PacketLost, PacketReceived, PacketSent,
+        QuicFrame, StreamType, VersionInformation,
     },
 };
 use smallvec::SmallVec;
@@ -361,6 +362,43 @@ pub fn metrics_updated(qlog: &mut Qlog, updated_metrics: &[Metric], now: Instant
             });
 
             Some(ev_data)
+        },
+        now,
+    );
+}
+
+/// Trigger for a `recovery:congestion_state_updated` qlog event.
+#[derive(Clone, Copy)]
+pub enum CongestionStateTrigger {
+    /// The congestion state change was triggered by an ECN mark.
+    Ecn,
+    /// The congestion state change was triggered by persistent congestion.
+    PersistentCongestion,
+}
+
+impl From<CongestionStateTrigger> for CongestionStateUpdatedTrigger {
+    fn from(value: CongestionStateTrigger) -> Self {
+        match value {
+            CongestionStateTrigger::Ecn => Self::Ecn,
+            CongestionStateTrigger::PersistentCongestion => Self::PersistentCongestion,
+        }
+    }
+}
+
+pub fn congestion_state_updated(
+    qlog: &mut Qlog,
+    old_state: &'static str,
+    new_state: &'static str,
+    trigger: Option<CongestionStateTrigger>,
+    now: Instant,
+) {
+    qlog.add_event_at(
+        || {
+            Some(EventData::CongestionStateUpdated(CongestionStateUpdated {
+                old: Some(old_state.to_owned()),
+                new: new_state.to_owned(),
+                trigger: trigger.map(Into::into),
+            }))
         },
         now,
     );
