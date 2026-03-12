@@ -24,6 +24,7 @@ use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef},
     crypto::{CryptoDxState, CryptoStates, Epoch},
     frame::{FrameEncoder as _, FrameType},
+    scone::Bitrate,
     version::{self, Version},
 };
 
@@ -578,6 +579,8 @@ pub struct Public<'a> {
     version: Option<version::Wire>,
     /// A reference to the entire packet, including the header.
     data: &'a mut [u8],
+    /// SCONE information, if present.
+    scone: Option<Bitrate>,
 }
 
 impl<'a> Public<'a> {
@@ -587,7 +590,7 @@ impl<'a> Public<'a> {
 
     /// Decode the type-specific portions of a long header.
     /// This includes reading the length and the remainder of the packet.
-    /// Returns a tuple of any token and the length of the header.
+    /// Returns a tuple of: any token, the length of the header, and SCONE bitrate.
     fn decode_long(
         decoder: &mut Decoder<'a>,
         packet_type: Type,
@@ -677,6 +680,7 @@ impl<'a> Public<'a> {
                     header_len,
                     version: None,
                     data,
+                    scone: None,
                 },
                 &mut [],
             ));
@@ -699,19 +703,22 @@ impl<'a> Public<'a> {
                         header_len: decoder.offset(),
                         version: None,
                         data,
+                        scone: None,
                     },
                     &mut [],
                 ));
             }
             Version::SCONE1 | Version::SCONE2 => {
-                // Note: this outright ignores SCONE packets.
-                // It does not even validate that the connection ID is correct.
-                debug!(
-                    "Received SCONE indication {i}",
-                    i = u8::try_from((version >> 25) & 0x40)? | (first & 0x3f)
-                );
                 let (_scone, remainder) = data.split_at_mut(decoder.offset());
-                return Self::decode(remainder, dcid_decoder);
+                // This isn't perfect: if there are multiple packets in the datagram
+                // and the first one after the SCONE packet is discarded, we'll lose
+                // the indication.  That's OK, because we shouldn't be getting SCONE during handshakes.
+                let (mut pkt, remainder) =
+                    Self::decode_inner(remainder, dcid_decoder, accept_other_version)?;
+                let indication = Bitrate::from((first, version));
+                pkt.scone = Some(indication);
+                debug!("Received SCONE indication {indication:x?}");
+                return Ok((pkt, remainder));
             }
             _ => {}
         }
@@ -728,6 +735,7 @@ impl<'a> Public<'a> {
                         header_len: decoder.offset(),
                         version: Some(version),
                         data,
+                        scone: None,
                     },
                     &mut [],
                 ))
@@ -756,6 +764,7 @@ impl<'a> Public<'a> {
                 header_len,
                 version: Some(version.wire_version()),
                 data,
+                scone: None,
             },
             remainder,
         ))
@@ -975,6 +984,7 @@ impl<'a> Public<'a> {
             dcid: self.dcid,
             scid: self.scid,
             data,
+            scone: self.scone,
         })
     }
 
@@ -1060,6 +1070,7 @@ pub struct Decrypted<'a> {
     data: &'a [u8],
     dcid: ConnectionId,
     scid: Option<ConnectionId>,
+    scone: Option<Bitrate>,
 }
 
 impl Decrypted<'_> {
@@ -1092,6 +1103,11 @@ impl Decrypted<'_> {
             .as_ref()
             .expect("should only be called for long header packets")
             .as_cid_ref()
+    }
+
+    #[must_use]
+    pub const fn scone(&self) -> Option<Bitrate> {
+        self.scone
     }
 }
 
