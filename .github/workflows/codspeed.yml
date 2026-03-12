@@ -92,7 +92,7 @@ jobs:
             done
           fi
 
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: build-neqo
           path: dist
@@ -216,7 +216,7 @@ jobs:
           tools: cargo-codspeed
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
         with:
           name: build-neqo
           path: dist
@@ -281,17 +281,17 @@ jobs:
           version: stable
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
         if: matrix.client == 'neqo' || matrix.server == 'neqo'
         with:
           name: build-neqo
           path: build-neqo
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
         if: matrix.client != 'neqo'
         with:
           name: build-${{ matrix.client }}
           path: build-${{ matrix.client }}
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
         if: matrix.server != 'neqo' && matrix.server != matrix.client
         with:
           name: build-${{ matrix.server }}

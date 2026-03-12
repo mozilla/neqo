@@ -150,7 +150,7 @@ jobs:
 
       - name: Save simulation seeds artifact
         if: ${{ always() }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
           path: simulation-seeds
@@ -199,7 +199,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ freebsd, openbsd, netbsd ] # NSS package on 'solaris' is too old.
+        # TODO: Re-enable openbsd once OpenBSD > 7.8 ships; nss-3.101 (the version in 7.8) is too old.
+        # TODO: Re-enable NetBSD once NetBSD > 10.1 ships with NSS >= 3.121.
+        os: [ freebsd ] # NSS package on 'solaris' is too old.
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

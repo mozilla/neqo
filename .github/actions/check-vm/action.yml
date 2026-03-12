@@ -27,14 +27,14 @@ runs:
           set -ex
           pwd
           case "$PLATFORM" in
-            freebsd)    pkg install -y curl llvm nss pkgconf
+            freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf
                         ;;
             openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
                         pkg_add rust rust-clippy rust-rustfmt llvm-21.1.2p0 nss # rustup does not support OpenBSD at all
                         ;;
-            netbsd)     /usr/sbin/pkg_add pkgin && pkgin -y install curl clang nss pkgconf
+            netbsd)     /usr/sbin/pkg_add pkgin && pkgin -y update && pkgin -y install curl clang nss pkgconf
                         ;;
-            solaris)    pkg install clang-libs nss pkg-config
+            solaris)    pkg refresh && pkg install clang-libs nss pkg-config
                         ;;
             *)          echo "Unsupported OS: $PLATFORM"
                         exit 1

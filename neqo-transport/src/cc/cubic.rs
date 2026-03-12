@@ -338,7 +338,7 @@ impl WindowAdjustment for Cubic {
 
         // Only apply the increase if it is at least by one segment.
         if increase > 0.0 {
-            self.current.w_est += increase * max_datagram_size;
+            self.current.w_est = increase.mul_add(max_datagram_size, self.current.w_est);
             // Because we floored the increase to whole segments we cannot just zero
             // `reno_acked_bytes` but have to calculate the actual bytes used.
             let acked_bytes_used = increase * curr_cwnd / Self::ALPHA;

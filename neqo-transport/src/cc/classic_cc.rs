@@ -12,7 +12,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use ::qlog::events::{EventData, quic::CongestionStateUpdated};
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::Qlog, qtrace};
 use rustc_hash::FxHashMap as HashMap;
 
@@ -314,7 +313,7 @@ where
             }
 
             if self.current.phase.in_recovery() {
-                self.set_phase(Phase::CongestionAvoidance, now);
+                self.set_phase(Phase::CongestionAvoidance, None, now);
                 qlog::metrics_updated(&mut self.qlog, &[qlog::Metric::InRecovery(false)], now);
             }
 
@@ -344,7 +343,7 @@ where
                 self.current.congestion_window = exit_cwnd;
                 self.current.ssthresh = exit_cwnd;
                 cc_stats.slow_start_exit_cwnd = Some(exit_cwnd);
-                self.set_phase(Phase::CongestionAvoidance, now);
+                self.set_phase(Phase::CongestionAvoidance, None, now);
             } else {
                 let cwnd_increase = self
                     .slow_start
@@ -362,7 +361,7 @@ where
                     );
                     // Clamp congestion window to ssthresh.
                     self.current.congestion_window = self.current.ssthresh;
-                    self.set_phase(Phase::CongestionAvoidance, now);
+                    self.set_phase(Phase::CongestionAvoidance, None, now);
                 }
             }
         }
@@ -625,22 +624,24 @@ where
         self.current.acked_bytes
     }
 
-    fn set_phase(&mut self, phase: Phase, now: Instant) {
+    fn set_phase(
+        &mut self,
+        phase: Phase,
+        trigger: Option<qlog::CongestionStateTrigger>,
+        now: Instant,
+    ) {
         if self.current.phase == phase {
             return;
         }
         qdebug!("[{self}] phase -> {phase:?}");
         let old_state = self.current.phase;
-        // No need to tell qlog about exit from transient states.
-        if !old_state.transient() {
-            self.qlog.add_event_at(
-                || {
-                    Some(EventData::CongestionStateUpdated(CongestionStateUpdated {
-                        old: Some(old_state.to_qlog().to_owned()),
-                        new: phase.to_qlog().to_owned(),
-                        trigger: None,
-                    }))
-                },
+        // Only emit a qlog event when a transition changes the qlog state.
+        if old_state.to_qlog() != phase.to_qlog() {
+            qlog::congestion_state_updated(
+                &mut self.qlog,
+                old_state.to_qlog(),
+                phase.to_qlog(),
+                trigger,
                 now,
             );
         }
@@ -780,7 +781,11 @@ where
                     qinfo!("[{self}] persistent congestion");
                     self.current.congestion_window = self.cwnd_min();
                     self.current.acked_bytes = 0;
-                    self.set_phase(Phase::PersistentCongestion, now);
+                    self.set_phase(
+                        Phase::PersistentCongestion,
+                        Some(qlog::CongestionStateTrigger::PersistentCongestion),
+                        now,
+                    );
                     // We re-enter slow start after persistent congestion, so we need to reset any
                     // state leftover from initial slow start to have it perform correctly.
                     self.slow_start.reset();
@@ -875,7 +880,9 @@ where
             ],
             now,
         );
-        self.set_phase(Phase::RecoveryStart, now);
+        let trigger =
+            (congestion_event == CongestionEvent::Ecn).then_some(qlog::CongestionStateTrigger::Ecn);
+        self.set_phase(Phase::RecoveryStart, trigger, now);
         true
     }
 
@@ -902,7 +909,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use neqo_common::qinfo;
-    use test_fixture::now;
+    use test_fixture::{new_neqo_qlog, now};
 
     use super::{ClassicCongestionController, PERSISTENT_CONG_THRESH, SlowStart, WindowAdjustment};
     use crate::{
@@ -2000,5 +2007,67 @@ mod tests {
 
         // HyStart state should be reset, so current_round_min_rtt is None again.
         assert!(cc.slow_start.current_round_min_rtt().is_none());
+    }
+
+    /// Set up a `ClassicCongestionController` with qlog enabled, run `f`, then assert
+    /// that the qlog output contains the given `trigger` string in a
+    /// `CongestionStateUpdated` event.
+    fn assert_congestion_state_trigger(
+        trigger: &str,
+        f: impl FnOnce(
+            &mut ClassicCongestionController<ClassicSlowStart, NewReno>,
+            &mut CongestionControlStats,
+        ),
+    ) {
+        let (log, contents) = new_neqo_qlog();
+        let mut cc = make_cc_newreno();
+        cc.set_qlog(log);
+        let mut cc_stats = CongestionControlStats::default();
+        f(&mut cc, &mut cc_stats);
+        drop(cc);
+        assert!(
+            contents
+                .to_string()
+                .contains(&format!(r#""trigger":"{trigger}""#)),
+            "Expected {trigger} trigger in qlog"
+        );
+    }
+
+    /// An ECN congestion event should log `CongestionStateUpdated` with `trigger = "ecn"`.
+    #[test]
+    fn congestion_state_updated_ecn_trigger() {
+        assert_congestion_state_trigger("ecn", |cc, stats| {
+            let now = now();
+            let p_ce = sent::Packet::new(
+                packet::Type::Short,
+                1,
+                now,
+                true,
+                recovery::Tokens::new(),
+                cc.max_datagram_size(),
+            );
+            cc.on_packet_sent(&p_ce, now);
+            cc.on_ecn_ce_received(&p_ce, now, stats);
+        });
+    }
+
+    /// Persistent congestion should log `CongestionStateUpdated` with
+    /// `trigger = "persistent_congestion"`, even though a preceding
+    /// `on_congestion_event` left the phase in the transient `RecoveryStart`.
+    #[test]
+    fn congestion_state_updated_persistent_congestion_trigger() {
+        assert_congestion_state_trigger("persistent_congestion", |cc, stats| {
+            let lost_pkts = [lost(1, true, ZERO), lost(2, true, PC)];
+            for p in &lost_pkts {
+                cc.on_packet_sent(p, now());
+            }
+            assert_ne!(cc.cwnd(), cc.cwnd_min());
+            cc.on_packets_lost(Some(now()), None, PTO, &lost_pkts, now(), stats);
+            assert_eq!(
+                cc.cwnd(),
+                cc.cwnd_min(),
+                "persistent congestion should have been detected"
+            );
+        });
     }
 }
