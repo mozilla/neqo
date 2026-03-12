@@ -126,7 +126,7 @@ pub trait SlowStart: Display + Debug {
 
     /// Calculates the congestion window increase in bytes during slow start. The default
     /// implementation returns `new_acked`, i.e. classic exponential slow start growth.
-    fn calc_cwnd_increase(&mut self, new_acked: usize, _max_datagram_size: usize) -> usize {
+    fn calc_cwnd_increase(&self, new_acked: usize, _max_datagram_size: usize) -> usize {
         new_acked
     }
 

@@ -290,7 +290,7 @@ impl SlowStart for HyStart {
         Some(curr_cwnd)
     }
 
-    fn calc_cwnd_increase(&mut self, new_acked: usize, max_datagram_size: usize) -> usize {
+    fn calc_cwnd_increase(&self, new_acked: usize, max_datagram_size: usize) -> usize {
         // > For each arriving ACK in slow start, where N is the number of previously unacknowledged
         // > bytes acknowledged in the arriving ACK:
         // >
