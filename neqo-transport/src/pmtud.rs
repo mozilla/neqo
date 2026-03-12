@@ -102,7 +102,10 @@ impl Pmtud {
         self.qlog = qlog;
     }
 
-    fn maybe_mtu_updated(&mut self, old: usize, now: Instant) {
+    fn set_mtu(&mut self, idx: usize, stats: &mut Stats, now: Instant) {
+        let old = self.plpmtu();
+        self.mtu = self.search_table[idx];
+        stats.pmtud_pmtu = self.mtu;
         let new = self.plpmtu();
         if old != new {
             let done = !self.needs_probe();
@@ -199,21 +202,20 @@ impl Pmtud {
 
         // A probe was ACKed, confirm the new MTU and try to probe upwards further.
         stats.pmtud_ack += acked;
-        let old_mtu = self.plpmtu();
-        self.mtu = self.search_table[self.probe_index];
-        stats.pmtud_pmtu = self.mtu;
-        qdebug!("PMTUD probe of size {} succeeded", self.mtu);
+        let confirmed_idx = self.probe_index;
+        qdebug!(
+            "PMTUD probe of size {} succeeded",
+            self.search_table[confirmed_idx]
+        );
         self.next(now, stats);
-        self.maybe_mtu_updated(old_mtu, now);
+        self.set_mtu(confirmed_idx, stats, now);
     }
 
     /// Stops the PMTUD process, setting the MTU to the largest successful probe size.
     fn stop(&mut self, idx: usize, now: Instant, stats: &mut Stats) {
-        let old_mtu = self.plpmtu();
         self.probe_state = Probe::NotNeeded; // We don't need to send any more probes
         self.probe_index = idx; // Index of the last successful probe
-        self.mtu = self.search_table[idx]; // Leading to this MTU
-        stats.pmtud_pmtu = self.mtu;
+        self.set_mtu(idx, stats, now); // Leading to this MTU
         self.probe_count = 0; // Reset the count
         self.raise_timer = Some(now + PMTU_RAISE_TIMER);
         qinfo!(
@@ -221,7 +223,6 @@ impl Pmtud {
             self.mtu,
             self.raise_timer
         );
-        self.maybe_mtu_updated(old_mtu, now);
     }
 
     /// Checks whether a PMTUD probe has been lost. If it has been lost more than `MAX_PROBES`
@@ -255,14 +256,11 @@ impl Pmtud {
 
     /// Starts PMTUD from the minimum MTU, probing upward.
     pub fn start(&mut self, now: Instant, stats: &mut Stats) {
-        let old_mtu = self.plpmtu();
         self.probe_index = 0;
-        self.mtu = self.search_table[self.probe_index];
-        stats.pmtud_pmtu = self.mtu;
         self.raise_timer = None;
-        qdebug!("PMTUD started, PLPMTU is now {}", self.mtu);
         self.next(now, stats);
-        self.maybe_mtu_updated(old_mtu, now);
+        self.set_mtu(0, stats, now);
+        qdebug!("PMTUD started, PLPMTU is now {}", self.mtu);
     }
 
     /// Starts the next upward PMTUD probe.
