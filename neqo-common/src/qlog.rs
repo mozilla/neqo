@@ -65,7 +65,7 @@ impl Qlog {
             None,
             now,
             new_trace(role),
-            qlog::events::EventImportance::Base,
+            qlog::events::EventImportance::Extra,
             Box::new(BufWriter::new(file)),
         );
         Self::enabled(streamer, qlog_path)

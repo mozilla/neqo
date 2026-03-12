@@ -3,20 +3,15 @@
 
 version: 2
 updates:
+  # We don't really use Dependabot for Rust dependencies, since we are tracking Gecko,
+  # but we do want to be notified of security vulnerabilities.
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
-    # Most Cargo dependencies are shared with other Gecko components and their
-    # versions must match mozilla-central. Only allow version updates for crates
-    # that are exclusively used by neqo within Gecko. Security updates are
-    # unaffected by this setting.
-    # Verify against https://searchfox.org/mozilla-central/source/Cargo.lock
-    allow:
-      - dependency-name: "qlog"
-      - dependency-name: "quinn-udp"
-      - dependency-name: "enum-map"
-      - dependency-name: "enumset"
+    # Disable all non-security updates.
+    # <https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#open-pull-requests-limit>
+    open-pull-requests-limit: 0
     cooldown:
       default-days: 10
       semver-major-days: 20

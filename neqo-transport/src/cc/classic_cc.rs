@@ -22,7 +22,7 @@ use crate::{
 };
 
 pub const CWND_INITIAL_PKTS: usize = 10;
-const PERSISTENT_CONG_THRESH: u32 = 3;
+pub const PERSISTENT_CONG_THRESH: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
@@ -228,6 +228,7 @@ where
     T: WindowAdjustment,
 {
     fn set_qlog(&mut self, qlog: Qlog) {
+        self.pmtud.set_qlog(qlog.clone());
         self.qlog = qlog;
     }
 
@@ -314,7 +315,6 @@ where
 
             if self.current.phase.in_recovery() {
                 self.set_phase(Phase::CongestionAvoidance, None, now);
-                qlog::metrics_updated(&mut self.qlog, &[qlog::Metric::InRecovery(false)], now);
             }
 
             new_acked += pkt.len();
@@ -876,7 +876,6 @@ where
             &[
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::SsThresh(self.current.ssthresh),
-                qlog::Metric::InRecovery(true),
             ],
             now,
         );

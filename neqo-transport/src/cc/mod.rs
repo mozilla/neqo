@@ -22,9 +22,7 @@ mod cubic;
 mod hystart;
 mod new_reno;
 
-#[cfg(test)]
-pub use classic_cc::CWND_INITIAL_PKTS;
-pub use classic_cc::ClassicCongestionController;
+pub use classic_cc::{CWND_INITIAL_PKTS, ClassicCongestionController, PERSISTENT_CONG_THRESH};
 pub use classic_slow_start::ClassicSlowStart;
 pub use cubic::Cubic;
 pub use hystart::HyStart;
