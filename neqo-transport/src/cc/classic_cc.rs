@@ -282,6 +282,12 @@ where
             .first()
             .expect("`acked_pkts.first().is_some()` is checked in `Loss::on_ack_received`");
 
+        // Initialize the stat to the initial congestion window value. If we early return on
+        // `is_app_limited` the stat is never set on very short connections otherwise.
+        if cc_stats.cwnd == 0 {
+            cc_stats.cwnd = self.current.congestion_window;
+        }
+
         // Supplying `true` for `rtt_est.pto(true)` here is best effort not to have to track
         // `recovery::Loss::confirmed()` all the way down to the congestion controller. Having too
         // big a PTO does no harm here.
