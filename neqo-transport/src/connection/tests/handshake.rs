@@ -467,9 +467,9 @@ fn coalesce_05rtt() {
     server.process_input(c2_2.unwrap(), now);
     let s2 = server.process(c2_1, now).dgram();
 
-    // s2 is just an Initial, which might be padded.  Strip that off.
+    // s2 is just an Initial, which might be padded.
     let dgram = client.process(s2.map(strip_padding), now).dgram();
-    // `s2` is padded to PMTU. Padding is dropped at the client as garbage packet.
+    // Padding was stripped, so a dropped packet would indicate a problem.
     assert_eq!(client.stats().dropped_rx, 0);
     let s2 = server.process(dgram, now).dgram();
 
