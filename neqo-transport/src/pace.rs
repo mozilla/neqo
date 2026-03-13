@@ -119,10 +119,9 @@ impl Pacer {
 
     /// Compute the effective pacing rate in bytes per second.
     ///
-    /// Returns `u64::MAX` if `rtt` is zero.
-    pub fn rate(cwnd: usize, rtt: Duration) -> u64 {
-        Self::bytes_for(cwnd, rtt, Duration::from_secs(1))
-            .map_or(u64::MAX, |b| u64::try_from(b).unwrap_or(u64::MAX))
+    /// Returns `None` if `rtt` is zero or the rate exceeds `u64::MAX`.
+    pub fn rate(cwnd: usize, rtt: Duration) -> Option<u64> {
+        u64::try_from(Self::bytes_for(cwnd, rtt, Duration::from_secs(1))?).ok()
     }
 
     /// Spend credit. This cannot fail, but instead may carry debt into the
@@ -247,13 +246,15 @@ mod tests {
     #[test]
     fn rate_basic() {
         // 10 KB cwnd, 100 ms RTT → 2 * 10_000 * 1e9 / 100_000_000 = 200_000 B/s
-        let rate = Pacer::rate(10_000, Duration::from_millis(100));
-        assert_eq!(rate, 200_000);
+        assert_eq!(
+            Pacer::rate(10_000, Duration::from_millis(100)),
+            Some(200_000)
+        );
     }
 
     #[test]
     fn rate_zero_rtt() {
-        assert_eq!(Pacer::rate(10_000, Duration::ZERO), u64::MAX);
+        assert_eq!(Pacer::rate(10_000, Duration::ZERO), None);
     }
 
     #[test]
