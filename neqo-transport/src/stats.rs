@@ -135,7 +135,7 @@ pub struct DatagramStats {
 }
 
 /// Congestion Control stats
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Default, Clone, PartialEq)]
 pub struct CongestionControlStats {
     /// Total number of congestion events caused by packet loss, total number of
     /// congestion events caused by ECN-CE marked packets, and number of
@@ -152,7 +152,7 @@ pub struct CongestionControlStats {
     /// congestion reduction (with fast convergence applied). Reports 0 (the initial value) if no
     /// congestion event has occurred or Cubic is not in use. Recorded as a stat to approximate a
     /// connection's ideal congestion window in metrics.
-    pub w_max: usize,
+    pub w_max: f64,
     /// The current congestion window size (in bytes). Updated throughout the connection
     /// lifetime.
     pub cwnd: usize,
@@ -255,7 +255,7 @@ impl DerefMut for DscpCount {
 }
 
 /// Connection statistics
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Default, Clone, PartialEq)]
 pub struct Stats {
     pub info: String,
 
