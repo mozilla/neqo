@@ -1597,8 +1597,8 @@ mod tests {
         // 2. Lose packets (1, 2) --> `RecoveryStart`, 1 event, reduced cwnd
         let mut lost_pkt1 = pkt1.clone();
         let mut lost_pkt2 = pkt2.clone();
-        lost_pkt1.declare_lost(now);
-        lost_pkt2.declare_lost(now);
+        lost_pkt1.declare_lost(now, sent::LossTrigger::TimeThreshold);
+        lost_pkt2.declare_lost(now, sent::LossTrigger::TimeThreshold);
         cc.on_packets_lost(
             Some(now),
             None,
@@ -1747,7 +1747,7 @@ mod tests {
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 0);
 
         let mut lost_pkt1 = pkt1.clone();
-        lost_pkt1.declare_lost(now);
+        lost_pkt1.declare_lost(now, sent::LossTrigger::TimeThreshold);
 
         // Step 2: Lose packet 1 → congestion event #1
         cc.on_packets_lost(
@@ -1775,7 +1775,7 @@ mod tests {
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 1);
 
         let mut lost_pkt2 = pkt2.clone();
-        lost_pkt2.declare_lost(now);
+        lost_pkt2.declare_lost(now, sent::LossTrigger::TimeThreshold);
 
         // Step 5. Lose packet 2 → New congestion event as we left recovery when restoring the
         // previous params.
