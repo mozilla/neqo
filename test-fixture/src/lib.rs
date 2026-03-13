@@ -553,7 +553,7 @@ pub fn new_neqo_qlog() -> (Qlog, SharedVec) {
         None,
         Instant::now(),
         trace,
-        EventImportance::Base,
+        EventImportance::Extra,
         Box::new(buf),
     );
     let log = Qlog::enabled(streamer, PathBuf::from(""));
