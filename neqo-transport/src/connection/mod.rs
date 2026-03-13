@@ -2897,7 +2897,7 @@ impl Connection {
             qlog::recovery_parameters_set(
                 &mut self.qlog,
                 path.borrow().plpmtu(),
-                self.conn_params.get_cc_algorithm(),
+                self.conn_params.get_congestion_control(),
                 now,
             );
         }
@@ -3599,7 +3599,7 @@ impl Connection {
             qlog::recovery_parameters_set(
                 &mut self.qlog,
                 path.borrow().plpmtu(),
-                self.conn_params.get_cc_algorithm(),
+                self.conn_params.get_congestion_control(),
                 now,
             );
         } else {

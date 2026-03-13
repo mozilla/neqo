@@ -30,7 +30,7 @@ use smallvec::SmallVec;
 
 use crate::{
     CloseReason,
-    cc::{CWND_INITIAL_PKTS, CongestionControlAlgorithm, Cubic, PERSISTENT_CONG_THRESH},
+    cc::{CWND_INITIAL_PKTS, CongestionControl, Cubic, PERSISTENT_CONG_THRESH},
     connection::State,
     frame::{CloseError, Frame},
     packet::{self, metadata::Direction},
@@ -308,14 +308,14 @@ pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
 pub fn recovery_parameters_set(
     qlog: &mut Qlog,
     plpmtu: usize,
-    cc: CongestionControlAlgorithm,
+    cc: CongestionControl,
     now: Instant,
 ) {
     qlog.add_event_at(
         || {
             let loss_reduction_factor = match cc {
-                CongestionControlAlgorithm::NewReno => 0.5,
-                CongestionControlAlgorithm::Cubic => {
+                CongestionControl::NewReno => 0.5,
+                CongestionControl::Cubic => {
                     f32::from(u8::try_from(Cubic::BETA_USIZE_DIVIDEND).expect("fits"))
                         / f32::from(u8::try_from(Cubic::BETA_USIZE_DIVISOR).expect("fits"))
                 }
