@@ -1612,7 +1612,7 @@ mod tests {
 
         // 2. Lose packets (1, 2) --> `RecoveryStart`, 1 event, reduced cwnd
         let cwnd_before_loss = cc.cwnd();
-        assert_eq!(cc_stats.w_max, 0.0);
+        assert!(cc_stats.w_max.is_none());
         let mut lost_pkt1 = pkt1.clone();
         let mut lost_pkt2 = pkt2.clone();
         lost_pkt1.declare_lost(now, sent::LossTrigger::TimeThreshold);
@@ -1628,7 +1628,7 @@ mod tests {
         assert_eq!(cc.current.phase, Phase::RecoveryStart);
         assert!(cc_stats.slow_start_exit_cwnd.is_some());
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
-        assert_eq!(cc_stats.w_max, cwnd_before_loss as f64);
+        assert_eq!(cc_stats.w_max, Some(cwnd_before_loss as f64));
         assert_eq!(
             cc.cwnd(),
             cc.cwnd_initial() * Cubic::BETA_USIZE_DIVIDEND / Cubic::BETA_USIZE_DIVISOR
@@ -1675,7 +1675,7 @@ mod tests {
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 1);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
-        assert_eq!(cc_stats.w_max, 0.0);
+        assert!(cc_stats.w_max.is_none());
     }
 
     /// This tests a scenario where spurious detection happens late, after cwnd has recovered and

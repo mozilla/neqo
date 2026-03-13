@@ -441,7 +441,7 @@ impl WindowAdjustment for Cubic {
             } else {
                 curr_cwnd_f64
             };
-        cc_stats.w_max = self.current.w_max;
+        cc_stats.w_max = Some(self.current.w_max);
 
         // Reducing the congestion window and resetting time
         self.current.t_epoch = None;
@@ -477,6 +477,7 @@ impl WindowAdjustment for Cubic {
             self.current
         );
         self.current = stored;
-        cc_stats.w_max = self.current.w_max;
+        // The stat is `None` if it is unset, so set it to that instead of `Some(0.0)`.
+        cc_stats.w_max = (self.current.w_max != 0.0).then_some(self.current.w_max);
     }
 }
