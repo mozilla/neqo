@@ -150,6 +150,8 @@ pub struct ConnectionParameters {
     mlkem: bool,
     /// Whether to randomize the packet number of the first Initial packet.
     randomize_first_pn: bool,
+    /// Whether to send the SCONE transport parameter.
+    scone: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -182,6 +184,7 @@ impl Default for ConnectionParameters {
             sni_slicing: true,
             mlkem: true,
             randomize_first_pn: true,
+            scone: true,
         }
     }
 }
@@ -488,6 +491,17 @@ impl ConnectionParameters {
         self
     }
 
+    #[must_use]
+    pub const fn scone_enabled(&self) -> bool {
+        self.scone
+    }
+
+    #[must_use]
+    pub const fn scone(mut self, scone: bool) -> Self {
+        self.scone = scone;
+        self
+    }
+
     /// # Errors
     /// When a connection ID cannot be obtained.
     /// # Panics
@@ -509,7 +523,9 @@ impl ConnectionParameters {
         if self.grease {
             tps.local_mut().set_empty(GreaseQuicBit);
         }
-        tps.local_mut().set_empty(Scone);
+        if self.scone {
+            tps.local_mut().set_empty(Scone);
+        }
         tps.local_mut().set_integer(
             MaxAckDelay,
             u64::try_from(DEFAULT_LOCAL_ACK_DELAY.as_millis())?,
