@@ -305,7 +305,6 @@ pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
     });
 }
 
-<<<<<<< HEAD
 pub fn recovery_parameters_set(
     qlog: &mut Qlog,
     plpmtu: usize,
@@ -402,9 +401,11 @@ pub enum Metric {
     PacingRate(u64),
 }
 
-pub fn metrics_updated(qlog: &mut Qlog, updated_metrics: &[Metric], now: Instant) {
-    debug_assert!(!updated_metrics.is_empty());
-
+pub fn metrics_updated<M: IntoIterator<Item = Metric>>(
+    qlog: &mut Qlog,
+    updated_metrics: M,
+    now: Instant,
+) {
     qlog.add_event_at(
         || {
             let mut min_rtt: Option<f32> = None;
@@ -425,19 +426,19 @@ pub fn metrics_updated(qlog: &mut Qlog, updated_metrics: &[Metric], now: Instant
                     Metric::LatestRtt(v) => latest_rtt = Some(v.as_secs_f32() * 1000.0),
                     Metric::RttVariance(v) => rtt_variance = Some(v.as_secs_f32() * 1000.0),
                     Metric::PtoCount(v) => {
-                        pto_count = Some(u16::try_from(*v).expect("fits in u16"));
+                        pto_count = Some(u16::try_from(v).expect("fits in u16"));
                     }
                     Metric::CongestionWindow(v) => {
-                        congestion_window = Some(u64::try_from(*v).expect("fits in u64"));
+                        congestion_window = Some(u64::try_from(v).expect("fits in u64"));
                     }
                     Metric::BytesInFlight(v) => {
-                        bytes_in_flight = Some(u64::try_from(*v).expect("fits in u64"));
+                        bytes_in_flight = Some(u64::try_from(v).expect("fits in u64"));
                     }
                     Metric::SsThresh(v) => {
-                        ssthresh = Some(u64::try_from(*v).expect("fits in u64"));
+                        ssthresh = Some(u64::try_from(v).expect("fits in u64"));
                     }
-                    Metric::PacketsInFlight(v) => packets_in_flight = Some(*v),
-                    Metric::PacingRate(v) => pacing_rate = Some(*v),
+                    Metric::PacketsInFlight(v) => packets_in_flight = Some(v),
+                    Metric::PacingRate(v) => pacing_rate = Some(v),
                 }
             }
 
