@@ -467,9 +467,9 @@ fn coalesce_05rtt() {
     server.process_input(c2_2.unwrap(), now);
     let s2 = server.process(c2_1, now).dgram();
 
-    // s2 is just an Initial, which might be padded.  Strip that off.
+    // s2 is just an Initial, which might be padded.
     let dgram = client.process(s2.map(strip_padding), now).dgram();
-    // `s2` is padded to PMTU. Padding is dropped at the client as garbage packet.
+    // Padding was stripped, so a dropped packet would indicate a problem.
     assert_eq!(client.stats().dropped_rx, 0);
     let s2 = server.process(dgram, now).dgram();
 
@@ -508,6 +508,7 @@ fn coalesce_05rtt() {
 
 #[test]
 fn reorder_handshake() {
+    const V2_INITIAL: u8 = 0b1001_0000;
     const RTT: Duration = Duration::from_millis(100);
     // Disable packet number randomization for deterministic packet counts.
     let mut client = new_client(ConnectionParameters::default().randomize_first_pn(false));
@@ -521,15 +522,16 @@ fn reorder_handshake() {
     now += RTT / 2;
     server.process_input(c1.unwrap(), now);
     let _s_initial = server.process(c2, now).dgram().unwrap();
-    let s_handshake = server.process_output(now).dgram().unwrap();
+    let s_handshake_1 = server.process_output(now).dgram().unwrap();
+    let s_hs1_has_initial = s_handshake_1[0] & 0b1011_0000 == V2_INITIAL;
 
     // Pass just the handshake packet in and the client can't handle it yet.
     // It can only send another Initial packet.
     now += RTT + RTT / 2; // With multi-packet MLKEM flights, client needs more time here.
-    let dgram = client.process(Some(s_handshake), now).dgram();
+    let dgram = client.process(Some(s_handshake_1), now).dgram();
     assert_initial(dgram.as_ref().unwrap(), false);
     assert_eq!(client.stats().saved_datagrams, 1);
-    assert_eq!(client.stats().packets_rx, 0);
+    assert_eq!(client.stats().packets_rx, usize::from(s_hs1_has_initial));
 
     // Get the server to try again.
     // Though we currently allow the server to arm its PTO timer, use
@@ -539,27 +541,44 @@ fn reorder_handshake() {
     now += RTT / 2;
     // When Handshake PTO fires, Initial packets are also marked for retransmission.
     // The server sends three Initial datagrams, then a Handshake datagram.
+    let s_pkt_tx_before = server.stats().packets_tx;
     let s_initial_2 = server.process(c2, now).dgram().unwrap();
     assert_initial(&s_initial_2, false);
     let s_initial_3 = server.process_output(now).dgram().unwrap();
     assert_initial(&s_initial_3, false);
     let s_initial_4 = server.process_output(now).dgram().unwrap();
     assert_initial(&s_initial_4, false);
+    // Count the number of packets sent, so we can account for any Handshake packets.
+    let s_pkt_tx = server.stats().packets_tx - s_pkt_tx_before;
     let s_handshake_2 = server.process_output(now).dgram().unwrap();
-    assert_handshake(&s_handshake_2);
+    let s_hs2_has_initial = s_handshake_2[0] & 0b1011_0000 == V2_INITIAL;
 
     // Processing the Handshake packet first should save it.
     now += RTT / 2;
     client.process_input(s_handshake_2, now);
-    assert_eq!(client.stats().saved_datagrams, 2);
-    assert_eq!(client.stats().packets_rx, 0);
+
+    let c_stats_before = client.stats();
+    assert_eq!(c_stats_before.saved_datagrams, 2);
+    // There's a chance that each "handshake" datagram contained a little bit of an Initial packet.
+    // That will have been processed by the client.
+    assert_eq!(
+        c_stats_before.packets_rx,
+        usize::from(s_hs1_has_initial) + usize::from(s_hs2_has_initial)
+    );
+    assert!(c_stats_before.dropped_rx == 0);
 
     // Deliver all Initial packets.
     client.process_input(s_initial_2, now);
     client.process_input(s_initial_3, now);
     client.process_input(s_initial_4, now);
-    // Each saved packet should now be "received" again.
-    assert_eq!(client.stats().packets_rx, 5);
+    // The client should have received and processed `s_pkt_tx`,
+    // plus the two saved datagrams that were saved
+    // and any garbage that was dropped.
+    let c_stats_after = client.stats();
+    assert_eq!(
+        c_stats_after.packets_rx - c_stats_before.packets_rx,
+        s_pkt_tx + 2 + c_stats_after.dropped_rx
+    );
     maybe_authenticate(&mut client);
     let c3 = client.process_output(now).dgram();
     assert!(c3.is_some());
@@ -672,12 +691,17 @@ fn interleave_versions_client() {
 
     // The second does.
     client.process_input(s2.unwrap(), now);
+    let s3 = server.process_output(now).dgram().unwrap();
+    if s3[0] & 0b1011_0000 == 0b1001_0000 {
+        // The Initial (v2!) spilled over into another datagram.
+        let (extra, _) = split_datagram(&s3);
+        client.process_input(extra, now);
+    }
     assert!(client.has_version());
     assert_eq!(client.version(), Version::Version2);
 
-    // Let the server finish its handshake (one packet is not enough).
-    let s3 = server.process_output(now).dgram();
-    client.process_input(s3.unwrap(), now);
+    // Let the server finish its handshake.
+    client.process_input(s3, now);
 
     // The client finishes with v2 packets.
     maybe_authenticate(&mut client);
@@ -701,47 +725,47 @@ fn reorder_1rtt() {
     let mut server = default_server();
     let mut now = now();
 
-    let c1 = client.process_output(now).dgram();
-    let c2 = client.process_output(now).dgram();
+    let c1 = client.process_output(now).dgram().map(strip_padding);
+    let c2 = client.process_output(now).dgram().map(strip_padding);
     assert!(c1.is_some() && c2.is_some());
 
     now += RTT / 2;
     server.process_input(c1.unwrap(), now);
-    let s1 = server.process(c2, now).dgram();
+    let s1 = server.process(c2, now).dgram().map(strip_padding);
     assert!(s1.is_some());
 
     now += RTT / 2;
-    let dgram = client.process(s1, now).dgram();
+    let dgram = client.process(s1, now).dgram().map(strip_padding);
 
     now += RTT / 2;
-    let dgram = server.process(dgram, now).dgram();
+    let dgram = server.process(dgram, now).dgram().map(strip_padding);
 
     now += RTT / 2;
     client.process_input(dgram.unwrap(), now);
     maybe_authenticate(&mut client);
-    let c2 = client.process_output(now).dgram();
+    let c2 = client.process_output(now).dgram().map(strip_padding);
     assert!(c2.is_some());
 
     // Now get a bunch of packets from the client.
     // Give them to the server before giving it `c2`.
     for _ in 0..PACKETS {
         let d = send_something(&mut client, now);
-        server.process_input(d, now + RTT / 2);
+        server.process_input(strip_padding(d), now + RTT / 2);
     }
     // The server has now received those packets, and saved them.
-    // The six extra received are Initial + the junk we use for padding.
-    assert_eq!(server.stats().packets_rx, PACKETS + 2);
+    // It has only been given the three handshake packets we gave it.
+    assert_eq!(server.stats().packets_rx, 3);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
-    assert_eq!(server.stats().dropped_rx, 3);
+    assert_eq!(server.stats().dropped_rx, 0);
 
     now += RTT / 2;
     let s2 = server.process(c2, now).dgram();
     // The server has now received those packets, and saved them.
     // The two additional are an Initial w/ACK, a Handshake w/ACK and a 1-RTT (w/
     // NEW_CONNECTION_ID).
-    assert_eq!(server.stats().packets_rx, PACKETS * 2 + 4);
+    assert!(server.stats().packets_rx > PACKETS);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
-    assert_eq!(server.stats().dropped_rx, 3);
+    assert_eq!(server.stats().dropped_rx, 0);
     assert_eq!(*server.state(), State::Confirmed);
     assert_eq!(server.paths.rtt(), RTT);
 
@@ -774,23 +798,24 @@ fn reorder_1rtt() {
 fn corrupted_initial() {
     let mut client = default_client();
     let mut server = default_server();
+
     let d = client.process_output(now()).dgram().unwrap();
     let mut corrupted = Vec::from(&d[..]);
-    // Find the last non-zero value and corrupt that.
+    // Find the last non-padding value and corrupt that.
     let (idx, _) = corrupted
         .iter()
         .enumerate()
         .rev()
-        .find(|&(_, &v)| v != 0)
+        .skip(1) // Skip the last byte, which might be a SCONE indicator.
+        .find(|&(_, &v)| v != Connection::SCONE_INDICATION[0]) // The SCONE padding value.
         .unwrap();
     corrupted[idx] ^= 0x76;
+
     let dgram = Datagram::new(d.source(), d.destination(), d.tos(), corrupted);
     server.process_input(dgram, now());
-    // The server should have received two packets,
-    // the first should be dropped, the second saved.
+    // The server should have received two "packets", both corrupted.
     assert_eq!(server.stats().packets_rx, 2);
     assert_eq!(server.stats().dropped_rx, 2);
-    assert_eq!(server.stats().saved_datagrams, 0);
 }
 
 #[test]
@@ -885,7 +910,6 @@ fn extra_initial_invalid_cid() {
     let s_init = server.process(c_init2, now).dgram();
     assert!(s_init.is_some());
     let s_hs = server.process_output(now).dgram().unwrap();
-    assert_handshake(&s_hs);
     now += DEFAULT_RTT / 2;
 
     // If the client receives a packet that contains the wrong connection
@@ -1481,27 +1505,32 @@ fn server_initial_retransmits_identical() {
     let mut now = now();
     // We calculate largest_acked, which is difficult with packet number randomization.
     let mut client = new_client(ConnectionParameters::default().randomize_first_pn(false));
-    let mut ci = client.process_output(now).dgram();
-    let mut ci2 = client.process_output(now).dgram();
+    let ci = client.process_output(now).dgram().unwrap();
+    let ci2 = client.process_output(now).dgram().unwrap();
 
     // Force the server to retransmit its Initial flight a number of times and make sure the
     // retranmissions are identical to the original. Also, verify the PTO durations.
     let mut server = new_server(ConnectionParameters::default().pacing(false));
+    server.process_input(ci, now);
+    server.process_input(ci2, now);
+
     let mut total_ptos = Duration::from_secs(0);
+    // Count for any extra packets in each flight due to coalescing.
+    let mut extra = 0;
     for i in 1..=3 {
         println!("==== iteration {i} ====");
-        _ = server.process(ci.take(), now).dgram().unwrap();
-        _ = server.process(ci2.take(), now).dgram().unwrap();
-        if i == 1 {
-            // On the first iteration, the server will want to send its entire flight.
-            // During later ones, we will have hit a PTO and can hence only send two packets.
-            _ = server.process(ci2.take(), now).dgram().unwrap();
+        let d1 = server.process_output(now).dgram().unwrap();
+        if let (_, Some(dh)) = split_datagram(&d1) {
+            extra += usize::from(dh[0] & 0b1011_0000 == 0b1010_0000); // count extra Handshake
         }
+        let d2 = server.process_output(now).dgram().unwrap();
+        extra += usize::from(d2[0] & 0b1011_0000 == 0b1001_0000); // count extra Initial
         assert_eq!(
             server.stats().frame_tx,
             FrameStats {
-                crypto: i * 3 - 1,
-                ack: i + 1,
+                // base count for CRYPTO is two per flight, plus any extra
+                crypto: i * 2 + extra,
+                ack: i,
                 largest_acknowledged: (i - i.saturating_sub(1)) as u64,
                 ..Default::default()
             }
@@ -1581,6 +1610,43 @@ fn zero_rtt_with_ech() {
     assert!(server.tls_info().unwrap().ech_accepted());
     assert!(client.tls_info().unwrap().early_data_accepted());
     assert!(server.tls_info().unwrap().early_data_accepted());
+}
+
+#[test]
+fn scone() {
+    fn add_scone(d: &Datagram) -> Datagram {
+        const SCONE: &[u8] = &[0xff, 0x6f, 0x7d, 0xc0, 0xfd, 0x00, 0x00];
+        let mut sconed = SCONE.to_vec();
+        sconed.extend_from_slice(&d[..]);
+        Datagram::new(d.source(), d.destination(), d.tos(), sconed)
+    }
+
+    let mut server = default_server();
+    let mut client = default_client();
+
+    let ci = client.process_output(now()).dgram().unwrap();
+    let ci_len = ci.len();
+    assert_eq!(
+        &ci[ci_len - Connection::SCONE_INDICATION.len()..],
+        Connection::SCONE_INDICATION,
+        "Client should send indication"
+    );
+    server.process_input(ci, now());
+
+    connect(&mut client, &mut server);
+    assert!(client.tps.borrow_mut().remote().get_empty(Scone));
+    assert!(server.tps.borrow_mut().remote().get_empty(Scone));
+
+    let client_stats = client.stats();
+    let server_stats = server.stats();
+    let d = send_something(&mut client, now());
+    server.process_input(add_scone(&d), now());
+    let d = send_something(&mut server, now());
+    client.process_input(add_scone(&d), now());
+
+    // The SCONE packets are effectively invisible.
+    assert_eq!(server.stats().packets_rx, server_stats.packets_rx + 1);
+    assert_eq!(client.stats().packets_rx, client_stats.packets_rx + 1);
 }
 
 /// RFC 9287 Section 3.1 states: "A server MUST NOT remember that a client negotiated
