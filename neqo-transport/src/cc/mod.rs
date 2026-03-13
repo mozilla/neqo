@@ -11,6 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use enum_dispatch::enum_dispatch;
 use enum_map::Enum;
 use neqo_common::qlog::Qlog;
 
@@ -35,6 +36,7 @@ pub enum CongestionEvent {
     Spurious,
 }
 
+#[enum_dispatch]
 pub trait CongestionController: Display + Debug {
     fn set_qlog(&mut self, qlog: Qlog);
 
@@ -49,10 +51,6 @@ pub trait CongestionController: Display + Debug {
 
     #[must_use]
     fn cwnd_min(&self) -> usize;
-
-    #[cfg(test)]
-    #[must_use]
-    fn cwnd_initial(&self) -> usize;
 
     #[must_use]
     fn pmtud(&self) -> &Pmtud;
@@ -115,6 +113,24 @@ pub enum SlowStart {
     Classic,
     #[strum(serialize = "hystart")]
     HyStart,
+}
+
+/// A concrete congestion controller, dispatching across all combinations of
+/// algorithm and slow-start strategy.
+///
+/// This enum avoids the heap allocation and vtable indirection of `Box<dyn CongestionController>`
+/// on the per-packet hot path.
+#[enum_dispatch(CongestionController)]
+#[derive(Debug, strum::Display)]
+pub enum CongestionControlImplementation {
+    #[strum(to_string = "{0}")]
+    ClassicNewReno(ClassicCongestionController<ClassicSlowStart, NewReno>),
+    #[strum(to_string = "{0}")]
+    HyStartNewReno(ClassicCongestionController<HyStart, NewReno>),
+    #[strum(to_string = "{0}")]
+    ClassicCubic(ClassicCongestionController<ClassicSlowStart, Cubic>),
+    #[strum(to_string = "{0}")]
+    HyStartCubic(ClassicCongestionController<HyStart, Cubic>),
 }
 
 #[cfg(test)]
