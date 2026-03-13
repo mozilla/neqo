@@ -712,7 +712,8 @@ impl<'a> Public<'a> {
                 let (_scone, remainder) = data.split_at_mut(decoder.offset());
                 // This isn't perfect: if there are multiple packets in the datagram
                 // and the first one after the SCONE packet is discarded, we'll lose
-                // the indication.  That's OK, because we shouldn't be getting SCONE during handshakes.
+                // the indication.  That's OK, because we shouldn't be getting SCONE during
+                // handshakes.
                 let (mut pkt, remainder) =
                     Self::decode_inner(remainder, dcid_decoder, accept_other_version)?;
                 let indication = Bitrate::from((first, version));
