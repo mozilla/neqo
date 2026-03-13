@@ -22,7 +22,7 @@ use crate::{
 };
 
 pub const CWND_INITIAL_PKTS: usize = 10;
-const PERSISTENT_CONG_THRESH: u32 = 3;
+pub const PERSISTENT_CONG_THRESH: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
@@ -194,6 +194,7 @@ impl<T> ClassicCongestionControl<T> {
 
 impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     fn set_qlog(&mut self, qlog: Qlog) {
+        self.pmtud.set_qlog(qlog.clone());
         self.qlog = qlog;
     }
 
@@ -273,7 +274,6 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
             if self.current.phase.in_recovery() {
                 self.set_phase(Phase::CongestionAvoidance, None, now);
-                qlog::metrics_updated(&mut self.qlog, &[qlog::Metric::InRecovery(false)], now);
             }
 
             new_acked += pkt.len();
@@ -803,7 +803,6 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             &[
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::SsThresh(self.current.ssthresh),
-                qlog::Metric::InRecovery(true),
             ],
             now,
         );
