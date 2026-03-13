@@ -129,6 +129,7 @@ impl Qlog {
         };
 
         match f(&mut shared_streamer.streamer) {
+            // `Error::Done` means "event was below the importance threshold" - not an actual error.
             Ok(()) | Err(qlog::Error::Done) => (),
             Err(e) => {
                 log::error!("Qlog event generation failed with error {e}; closing qlog.");
