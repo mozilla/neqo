@@ -2913,6 +2913,12 @@ impl Connection {
         debug_assert_eq!(self.role, Role::Client);
         if let Some(path) = self.paths.primary() {
             qlog::client_connection_started(&mut self.qlog, &path, now);
+            qlog::recovery_parameters_set(
+                &mut self.qlog,
+                path.borrow().plpmtu(),
+                self.conn_params.get_cc_algorithm(),
+                now,
+            );
         }
         qlog::client_version_information_initiated(
             &mut self.qlog,
@@ -3535,6 +3541,7 @@ impl Connection {
             now,
         );
         let largest_acknowledged = acked_packets.first().map(sent::Packet::pn);
+        qlog::packets_acked(&mut self.qlog, space, &acked_packets, now);
         for acked in acked_packets {
             for token in acked.tokens() {
                 match token {
@@ -3608,6 +3615,12 @@ impl Connection {
             path.borrow_mut().set_valid(now);
             // Generate a qlog event that the server connection started.
             qlog::server_connection_started(&mut self.qlog, &path, now);
+            qlog::recovery_parameters_set(
+                &mut self.qlog,
+                path.borrow().plpmtu(),
+                self.conn_params.get_cc_algorithm(),
+                now,
+            );
         } else {
             self.zero_rtt_state = if self
                 .crypto
@@ -3644,12 +3657,16 @@ impl Connection {
     fn set_state(&mut self, state: State, now: Instant) {
         if state > self.state {
             qdebug!("[{self}] State change from {:?} -> {state:?}", self.state);
+            let old_state = self.state.clone();
             self.state = state.clone();
             if self.state.closed() {
                 self.streams.clear_streams();
             }
             self.events.connection_state_change(state);
-            qlog::connection_state_updated(&mut self.qlog, &self.state, now);
+            qlog::connection_state_updated(&mut self.qlog, &old_state, &self.state, now);
+            if let State::Closed(reason) = &self.state {
+                qlog::connection_closed(&mut self.qlog, reason, now);
+            }
         } else if mem::discriminant(&state) != mem::discriminant(&self.state) {
             // Only tolerate a regression in state if the new state is closing
             // and the connection is already closed.

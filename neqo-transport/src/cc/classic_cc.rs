@@ -12,7 +12,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use ::qlog::events::{EventData, quic::CongestionStateUpdated};
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::Qlog, qtrace};
 use rustc_hash::FxHashMap as HashMap;
 
@@ -23,7 +22,7 @@ use crate::{
 };
 
 pub const CWND_INITIAL_PKTS: usize = 10;
-const PERSISTENT_CONG_THRESH: u32 = 3;
+pub const PERSISTENT_CONG_THRESH: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
@@ -195,6 +194,7 @@ impl<T> ClassicCongestionControl<T> {
 
 impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     fn set_qlog(&mut self, qlog: Qlog) {
+        self.pmtud.set_qlog(qlog.clone());
         self.qlog = qlog;
     }
 
@@ -273,8 +273,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             }
 
             if self.current.phase.in_recovery() {
-                self.set_phase(Phase::CongestionAvoidance, now);
-                qlog::metrics_updated(&mut self.qlog, &[qlog::Metric::InRecovery(false)], now);
+                self.set_phase(Phase::CongestionAvoidance, None, now);
             }
 
             new_acked += pkt.len();
@@ -304,7 +303,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             if self.current.congestion_window == self.current.ssthresh {
                 // This doesn't look like it is necessary, but it can happen
                 // after persistent congestion.
-                self.set_phase(Phase::CongestionAvoidance, now);
+                self.set_phase(Phase::CongestionAvoidance, None, now);
             }
         }
         // Congestion avoidance, above the slow start threshold.
@@ -555,22 +554,24 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         self.current.acked_bytes
     }
 
-    fn set_phase(&mut self, phase: Phase, now: Instant) {
+    fn set_phase(
+        &mut self,
+        phase: Phase,
+        trigger: Option<qlog::CongestionStateTrigger>,
+        now: Instant,
+    ) {
         if self.current.phase == phase {
             return;
         }
         qdebug!("[{self}] phase -> {phase:?}");
         let old_state = self.current.phase;
-        // No need to tell qlog about exit from transient states.
-        if !old_state.transient() {
-            self.qlog.add_event_at(
-                || {
-                    Some(EventData::CongestionStateUpdated(CongestionStateUpdated {
-                        old: Some(old_state.to_qlog().to_owned()),
-                        new: phase.to_qlog().to_owned(),
-                        trigger: None,
-                    }))
-                },
+        // Only emit a qlog event when a transition changes the qlog state.
+        if old_state.to_qlog() != phase.to_qlog() {
+            qlog::congestion_state_updated(
+                &mut self.qlog,
+                old_state.to_qlog(),
+                phase.to_qlog(),
+                trigger,
                 now,
             );
         }
@@ -710,7 +711,11 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                     qinfo!("[{self}] persistent congestion");
                     self.current.congestion_window = self.cwnd_min();
                     self.current.acked_bytes = 0;
-                    self.set_phase(Phase::PersistentCongestion, now);
+                    self.set_phase(
+                        Phase::PersistentCongestion,
+                        Some(qlog::CongestionStateTrigger::PersistentCongestion),
+                        now,
+                    );
 
                     cc_stats.cwnd = self.current.congestion_window;
                     qlog::metrics_updated(
@@ -798,11 +803,12 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             &[
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::SsThresh(self.current.ssthresh),
-                qlog::Metric::InRecovery(true),
             ],
             now,
         );
-        self.set_phase(Phase::RecoveryStart, now);
+        let trigger =
+            (congestion_event == CongestionEvent::Ecn).then_some(qlog::CongestionStateTrigger::Ecn);
+        self.set_phase(Phase::RecoveryStart, trigger, now);
         true
     }
 
@@ -829,7 +835,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use neqo_common::qinfo;
-    use test_fixture::now;
+    use test_fixture::{new_neqo_qlog, now};
 
     use super::{ClassicCongestionControl, PERSISTENT_CONG_THRESH, WindowAdjustment};
     use crate::{
@@ -1961,5 +1967,64 @@ mod tests {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         cc.detect_persistent_congestion(Some(now), None, PTO, lost.iter(), now, &mut cc_stats);
         assert_eq!(cc_stats.cwnd, cc.cwnd_min());
+    }
+
+    /// Set up a `ClassicCongestionControl` with qlog enabled, run `f`, then assert
+    /// that the qlog output contains the given `trigger` string in a
+    /// `CongestionStateUpdated` event.
+    fn assert_congestion_state_trigger(
+        trigger: &str,
+        f: impl FnOnce(&mut ClassicCongestionControl<NewReno>, &mut CongestionControlStats),
+    ) {
+        let (log, contents) = new_neqo_qlog();
+        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
+        cc.set_qlog(log);
+        let mut cc_stats = CongestionControlStats::default();
+        f(&mut cc, &mut cc_stats);
+        drop(cc);
+        assert!(
+            contents
+                .to_string()
+                .contains(&format!(r#""trigger":"{trigger}""#)),
+            "Expected {trigger} trigger in qlog"
+        );
+    }
+
+    /// An ECN congestion event should log `CongestionStateUpdated` with `trigger = "ecn"`.
+    #[test]
+    fn congestion_state_updated_ecn_trigger() {
+        assert_congestion_state_trigger("ecn", |cc, stats| {
+            let now = now();
+            let p_ce = sent::Packet::new(
+                packet::Type::Short,
+                1,
+                now,
+                true,
+                recovery::Tokens::new(),
+                cc.max_datagram_size(),
+            );
+            cc.on_packet_sent(&p_ce, now);
+            cc.on_ecn_ce_received(&p_ce, now, stats);
+        });
+    }
+
+    /// Persistent congestion should log `CongestionStateUpdated` with
+    /// `trigger = "persistent_congestion"`, even though a preceding
+    /// `on_congestion_event` left the phase in the transient `RecoveryStart`.
+    #[test]
+    fn congestion_state_updated_persistent_congestion_trigger() {
+        assert_congestion_state_trigger("persistent_congestion", |cc, stats| {
+            let lost_pkts = [lost(1, true, ZERO), lost(2, true, PC)];
+            for p in &lost_pkts {
+                cc.on_packet_sent(p, now());
+            }
+            assert_ne!(cc.cwnd(), cc.cwnd_min());
+            cc.on_packets_lost(Some(now()), None, PTO, &lost_pkts, now(), stats);
+            assert_eq!(
+                cc.cwnd(),
+                cc.cwnd_min(),
+                "persistent congestion should have been detected"
+            );
+        });
     }
 }
