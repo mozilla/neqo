@@ -43,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025, windows-11-arm]
         rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
         type: [debug]
         # Include some dynamically-linked release builds, to check that that works on all platforms.
@@ -51,10 +51,16 @@ jobs:
           - os: ubuntu-24.04
             rust-toolchain: stable
             type: release
+          - os: ubuntu-24.04-arm
+            rust-toolchain: stable
+            type: release
           - os: macos-15
             rust-toolchain: stable
             type: release
           - os: windows-2025
+            rust-toolchain: stable
+            type: release
+          - os: windows-11-arm
             rust-toolchain: stable
             type: release
           # Also do some debug builds on the oldest OS versions.
@@ -104,7 +110,8 @@ jobs:
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
-          if [ "$TOOLCHAIN" == "stable" ]; then
+          # cargo-llvm-cov produces "malformed instrumentation profile data" on Windows ARM64.
+          if [ "$TOOLCHAIN" == "stable" ] && ! { [ "$RUNNER_OS" = "Windows" ] && [ "$RUNNER_ARCH" = "ARM64" ]; }; then
             cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
             if [ -n "$CAREFUL" ]; then
@@ -146,7 +153,7 @@ jobs:
           flags: ${{ startsWith(matrix.os, 'ubuntu') && 'linux' || startsWith(matrix.os, 'macos') && 'macos' || 'windows' }}
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
+        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable' && !startsWith(matrix.os, 'windows-11-arm')
 
       - name: Save simulation seeds artifact
         if: ${{ always() }}

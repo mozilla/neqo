@@ -29,7 +29,6 @@ runs:
       run: echo "RUST_BACKTRACE=full" >> "$GITHUB_ENV"
 
     - name: Install Rust
-      # TODO: Manually upate this, Dependabot will skip it because no tags associated with SHA:
       uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # zizmor: ignore[stale-action-refs]
       with:
         toolchain: ${{ inputs.version  }}
@@ -86,6 +85,8 @@ runs:
       uses: ilammy/msvc-dev-cmd@v1 # zizmor: ignore[unpinned-uses]
       # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
       # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+      with:
+        arch: ${{ runner.arch == 'ARM64' && 'amd64_arm64' || 'amd64' }}
 
     # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
     - name: Set up build environment (Windows)
