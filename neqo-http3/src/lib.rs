@@ -623,6 +623,10 @@ trait SendStream: Stream {
     fn set_send_group(&mut self, _send_group: SendGroupId) -> Res<()> {
         Err(Error::Unavailable)
     }
+    /// This function is only implemented by `WebTransportSendStream`.
+    fn clear_send_group(&mut self) -> Res<()> {
+        Err(Error::Unavailable)
+    }
 }
 
 trait HttpSendStream: SendStream {
