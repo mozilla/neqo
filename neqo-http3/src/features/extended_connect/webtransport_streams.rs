@@ -169,7 +169,7 @@ impl WebTransportSendStream {
         self.send_group
     }
 
-    pub(crate) fn set_send_group(&mut self, send_group: Option<SendGroupId>) -> Res<()> {
+    pub(crate) fn update_send_group(&mut self, send_group: Option<SendGroupId>) -> Res<()> {
         if let Some(group_id) = send_group
             && !self.session.validate_send_group(group_id)
         {
@@ -285,6 +285,9 @@ impl SendStream for WebTransportSendStream {
     }
 
     fn set_send_group(&mut self, send_group: SendGroupId) -> Res<()> {
-        self.set_send_group(Some(send_group))
+        self.update_send_group(Some(send_group))
+    }
+    fn clear_send_group(&mut self) -> Res<()> {
+        self.update_send_group(None)
     }
 }

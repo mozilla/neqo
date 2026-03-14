@@ -636,6 +636,12 @@ trait SendStream: Stream {
     fn set_send_group(&mut self, _send_group: SendGroupId) -> Res<()> {
         Err(Error::Unavailable)
     }
+    /// This function is only implemented by
+    /// [`WebTransportSendStream`](crate::features::extended_connect::webtransport_streams::WebTransportSendStream).
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn clear_send_group(&mut self) -> Res<()> {
+        Err(Error::Unavailable)
+    }
 }
 
 trait HttpSendStream: SendStream {

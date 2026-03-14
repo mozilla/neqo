@@ -85,6 +85,11 @@ pub trait ClientSession {
         sendgroup: SendGroupId,
     ) -> Res<()>;
 
+    /// # Errors
+    ///
+    /// Returns `InvalidStreamId` if the stream does not exist.
+    fn webtransport_clear_sendgroup(&mut self, stream_id: StreamId) -> Res<()>;
+
     /// Sets the `Fairness` for a given stream
     ///
     /// # Errors
@@ -223,6 +228,15 @@ impl ClientSession for Http3Client {
         handler.stream_set_sendgroup(stream_id, sendgroup)?;
         // Update the transport-layer scheduler so sendOrder is namespaced per group.
         conn.stream_sendgroup(stream_id, Some(sendgroup.as_u64()))
+            .map_err(|_| Error::InvalidStreamId)
+    }
+
+    fn webtransport_clear_sendgroup(&mut self, stream_id: StreamId) -> Res<()> {
+        let (conn, handler) = self.connection_and_handler();
+        // Update the HTTP3-layer stream record.
+        handler.stream_clear_sendgroup(stream_id)?;
+        // Remove the group assignment in the transport-layer scheduler.
+        conn.stream_sendgroup(stream_id, None)
             .map_err(|_| Error::InvalidStreamId)
     }
 
