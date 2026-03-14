@@ -288,4 +288,7 @@ impl SendStream for WebTransportSendStream {
     fn set_send_group(&mut self, send_group: SendGroupId) -> Res<()> {
         self.set_send_group(Some(send_group))
     }
+    fn clear_send_group(&mut self) -> Res<()> {
+        self.set_send_group(None)
+    }
 }
