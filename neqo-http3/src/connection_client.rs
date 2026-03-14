@@ -904,6 +904,15 @@ impl Http3Client {
             .map_err(|_| Error::InvalidStreamId)
     }
 
+    pub fn webtransport_clear_sendgroup(&mut self, stream_id: StreamId) -> Res<()> {
+        // Update the HTTP3-layer stream record.
+        self.base_handler.stream_clear_sendgroup(stream_id)?;
+        // Remove the group assignment in the transport-layer scheduler.
+        self.conn
+            .stream_sendgroup(stream_id, None)
+            .map_err(|_| Error::InvalidStreamId)
+    }
+
     /// Sets the `Fairness` for a given stream
     ///
     /// # Errors
