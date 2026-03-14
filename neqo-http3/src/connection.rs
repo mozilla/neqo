@@ -1084,6 +1084,14 @@ impl Http3Connection {
         send_stream.set_send_group(sendgroup)
     }
 
+    pub fn stream_clear_sendgroup(&mut self, stream_id: StreamId) -> Res<()> {
+        let send_stream = self
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?;
+        send_stream.clear_send_group()
+    }
+
     /// Set the stream Fairness.   Fair streams will share bandwidth with other
     /// streams of the same sendOrder group (or the unordered group).  Unfair streams
     /// will give bandwidth preferentially to the lowest streamId with data to send.
