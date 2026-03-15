@@ -12,6 +12,21 @@ permissions:
   contents: read
 
 jobs:
+  check-netns:
+    name: Network namespace tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/rust
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run network namespace tests
+        run: sudo -E env "PATH=$PATH" cargo test --package mtu --test netns -- --nocapture
+
   check-android:
     name: Check Android
     runs-on: ubuntu-24.04
