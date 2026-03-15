@@ -220,6 +220,11 @@ impl<S, T> ClassicCongestionController<S, T> {
     pub const fn max_datagram_size(&self) -> usize {
         self.pmtud.plpmtu()
     }
+
+    #[cfg(test)]
+    pub const fn cwnd_initial(&self) -> usize {
+        cwnd_initial(self.pmtud.plpmtu())
+    }
 }
 
 impl<S, T> CongestionController for ClassicCongestionController<S, T>
@@ -250,11 +255,6 @@ where
 
     fn cwnd_min(&self) -> usize {
         self.max_datagram_size() * 2
-    }
-
-    #[cfg(test)]
-    fn cwnd_initial(&self) -> usize {
-        cwnd_initial(self.pmtud.plpmtu())
     }
 
     fn pmtud(&self) -> &Pmtud {

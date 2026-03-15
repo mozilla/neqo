@@ -13,8 +13,8 @@ use neqo_common::{qdebug, qlog::Qlog};
 use crate::{
     ConnectionParameters, SlowStart, Stats,
     cc::{
-        ClassicCongestionController, ClassicSlowStart, CongestionControl, CongestionController,
-        Cubic, HyStart, NewReno,
+        ClassicCongestionController, ClassicSlowStart, CongestionControl,
+        CongestionControlImplementation, CongestionController as _, Cubic, HyStart, NewReno,
     },
     pace::Pacer,
     pmtud::Pmtud,
@@ -28,7 +28,7 @@ pub const PACING_BURST_SIZE: usize = 2;
 
 #[derive(Debug)]
 pub struct PacketSender {
-    cc: Box<dyn CongestionController>,
+    cc: CongestionControlImplementation,
     pacer: Pacer,
 }
 
@@ -42,28 +42,32 @@ impl PacketSender {
                 conn_params.get_slow_start(),
             ) {
                 (CongestionControl::NewReno, SlowStart::Classic) => {
-                    Box::new(ClassicCongestionController::new(
-                        ClassicSlowStart::default(),
-                        NewReno::default(),
-                        pmtud,
-                    ))
+                    CongestionControlImplementation::ClassicNewReno(
+                        ClassicCongestionController::new(
+                            ClassicSlowStart::default(),
+                            NewReno::default(),
+                            pmtud,
+                        ),
+                    )
                 }
                 (CongestionControl::NewReno, SlowStart::HyStart) => {
-                    Box::new(ClassicCongestionController::new(
-                        HyStart::new(conn_params.pacing_enabled()),
-                        NewReno::default(),
-                        pmtud,
-                    ))
+                    CongestionControlImplementation::HyStartNewReno(
+                        ClassicCongestionController::new(
+                            HyStart::new(conn_params.pacing_enabled()),
+                            NewReno::default(),
+                            pmtud,
+                        ),
+                    )
                 }
                 (CongestionControl::Cubic, SlowStart::Classic) => {
-                    Box::new(ClassicCongestionController::new(
+                    CongestionControlImplementation::ClassicCubic(ClassicCongestionController::new(
                         ClassicSlowStart::default(),
                         Cubic::default(),
                         pmtud,
                     ))
                 }
                 (CongestionControl::Cubic, SlowStart::HyStart) => {
-                    Box::new(ClassicCongestionController::new(
+                    CongestionControlImplementation::HyStartCubic(ClassicCongestionController::new(
                         HyStart::new(conn_params.pacing_enabled()),
                         Cubic::default(),
                         pmtud,
