@@ -6,7 +6,7 @@
 
 use std::fmt::{self, Display};
 
-use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate};
+use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::CongestionControlStats};
 
 /// Classic slow start as described in RFC 9002.
 ///
@@ -32,6 +32,7 @@ impl SlowStart for ClassicSlowStart {
         _rtt_est: &RttEstimate,
         _largest_acked: packet::Number,
         _curr_cwnd: usize,
+        _cc_stats: &mut CongestionControlStats,
     ) -> Option<usize> {
         // Classic slow start does not have any heuristic for exiting slow start. Always
         // returns `None`.

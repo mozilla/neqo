@@ -134,6 +134,14 @@ pub struct DatagramStats {
     pub dropped_queue_full: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlowStartExitReason {
+    /// Exited due to a congestion event (loss or ECN).
+    CongestionEvent,
+    /// Exited due to a heuristic algorithm (e.g., HyStart++).
+    Heuristic,
+}
+
 /// Congestion Control stats
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct CongestionControlStats {
@@ -148,6 +156,16 @@ pub struct CongestionControlStats {
     /// None if we haven't exited slow start or if we re-entered after spurious congestion.
     /// When exiting via congestion event, this is the cwnd AFTER the reduction.
     pub slow_start_exit_cwnd: Option<usize>,
+    /// The reason slow start was exited. None if we haven't exited slow start or if we re-entered
+    /// after spurious congestion.
+    pub slow_start_exit_reason: Option<SlowStartExitReason>,
+    /// Number of times HyStart++ entered CSS (Conservative Slow Start). Only meaningful when
+    /// HyStart++ is enabled. Higher values indicate that HyStart++ had many spurious CSS
+    /// entries, spending more time throttling slow start growth.
+    pub css_entries: usize,
+    /// Number of CSS (Conservative Slow Start) rounds completed. Only meaningful when HyStart++ is
+    /// enabled. Higher values indicate the heuristic spent more time throttling slow start growth.
+    pub css_rounds_finished: usize,
     /// The current congestion window size (in bytes). Updated throughout the connection
     /// lifetime.
     pub cwnd: usize,
@@ -399,8 +417,8 @@ impl Debug for Stats {
         )?;
         writeln!(
             f,
-            "    final_cwnd {} ss_exit_cwnd {:?}",
-            self.cc.cwnd, self.cc.slow_start_exit_cwnd
+            "    final_cwnd {} ss_exit_cwnd {:?} ss_exit_reason {:?}",
+            self.cc.cwnd, self.cc.slow_start_exit_cwnd, self.cc.slow_start_exit_reason
         )?;
         writeln!(
             f,
@@ -462,7 +480,7 @@ fn debug() {
   tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
   cc:
     ce_loss 0 ce_ecn 0 ce_spurious 0
-    final_cwnd 0 ss_exit_cwnd None
+    final_cwnd 0 ss_exit_cwnd None ss_exit_reason None
   pmtud: 0 sent 0 acked 0 lost 0 iface_mtu None peer_max_udp_payload 0 pmtu
   resumed: false
   frames rx:

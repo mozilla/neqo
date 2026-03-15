@@ -17,8 +17,13 @@ use rustc_hash::FxHashMap as HashMap;
 
 use super::CongestionController;
 use crate::{
-    Pmtud, cc::CongestionEvent, packet, qlog, recovery::sent, rtt::RttEstimate,
-    sender::PACING_BURST_SIZE, stats::CongestionControlStats,
+    Pmtud,
+    cc::CongestionEvent,
+    packet, qlog,
+    recovery::sent,
+    rtt::RttEstimate,
+    sender::PACING_BURST_SIZE,
+    stats::{CongestionControlStats, SlowStartExitReason},
 };
 
 pub const CWND_INITIAL_PKTS: usize = 10;
@@ -122,6 +127,7 @@ pub trait SlowStart: Display + Debug {
         rtt_est: &RttEstimate,
         largest_acked: packet::Number,
         curr_cwnd: usize,
+        cc_stats: &mut CongestionControlStats,
     ) -> Option<usize>;
 
     /// Calculates the congestion window increase in bytes during slow start. The default
@@ -338,11 +344,13 @@ where
                 rtt_est,
                 largest_packet_acked.pn(),
                 self.current.congestion_window,
+                cc_stats,
             ) {
                 qdebug!("Exited slow start by algorithm");
                 self.current.congestion_window = exit_cwnd;
                 self.current.ssthresh = exit_cwnd;
                 cc_stats.slow_start_exit_cwnd = Some(exit_cwnd);
+                cc_stats.slow_start_exit_reason = Some(SlowStartExitReason::Heuristic);
                 self.set_phase(Phase::CongestionAvoidance, None, now);
             } else {
                 let cwnd_increase = self
@@ -731,6 +739,7 @@ where
         // If we are restoring back to slow start then we should undo the stat recording.
         if self.current.phase.in_slow_start() {
             cc_stats.slow_start_exit_cwnd = None;
+            cc_stats.slow_start_exit_reason = None;
         }
         qinfo!("[{self}] Spurious cong event -> RESTORED;");
         cc_stats.congestion_events[CongestionEvent::Spurious] += 1;
@@ -869,6 +878,7 @@ where
         // and should record the exit congestion window.
         if self.current.phase.in_slow_start() {
             cc_stats.slow_start_exit_cwnd = Some(self.current.congestion_window);
+            cc_stats.slow_start_exit_reason = Some(SlowStartExitReason::CongestionEvent);
         }
 
         qlog::metrics_updated(
@@ -922,7 +932,7 @@ mod tests {
         packet,
         recovery::{self, sent},
         rtt::RttEstimate,
-        stats::CongestionControlStats,
+        stats::{CongestionControlStats, SlowStartExitReason},
     };
 
     const PTO: Duration = RTT;
@@ -1623,6 +1633,10 @@ mod tests {
         );
         assert_eq!(cc.current.phase, Phase::RecoveryStart);
         assert!(cc_stats.slow_start_exit_cwnd.is_some());
+        assert_eq!(
+            cc_stats.slow_start_exit_reason,
+            Some(SlowStartExitReason::CongestionEvent)
+        );
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
         assert_eq!(
             cc.cwnd(),
@@ -1667,6 +1681,7 @@ mod tests {
         );
         assert_eq!(cc.current.phase, Phase::SlowStart);
         assert!(cc_stats.slow_start_exit_cwnd.is_none());
+        assert!(cc_stats.slow_start_exit_reason.is_none());
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 1);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
@@ -1865,9 +1880,11 @@ mod tests {
         let mut cc = make_cc_newreno();
         let now = now();
         let mut cc_stats = CongestionControlStats::default();
+        let rtt_estimate = RttEstimate::new(RTT);
 
         assert!(cc.current.phase.in_slow_start());
-        assert!(cc_stats.slow_start_exit_cwnd.is_none());
+        assert_eq!(cc_stats.slow_start_exit_cwnd, None);
+        assert!(cc_stats.slow_start_exit_reason.is_none());
 
         let pkt1 = sent::make_packet(1, now, 1000);
         cc.on_packet_sent(&pkt1, now);
@@ -1877,13 +1894,40 @@ mod tests {
                 cc.on_ecn_ce_received(&pkt1, now, &mut cc_stats);
             }
             CongestionEvent::Loss => {
-                cc.on_packets_lost(Some(now), None, PTO, &[pkt1], now, &mut cc_stats);
+                cc.on_packets_lost(
+                    Some(now),
+                    None,
+                    PTO,
+                    std::slice::from_ref(&pkt1),
+                    now,
+                    &mut cc_stats,
+                );
             }
             CongestionEvent::Spurious => panic!("unsupported congestion event"),
         }
 
+        // Should have exited slow start with cwnd captured AFTER reduction.
         assert!(!cc.current.phase.in_slow_start());
-        assert!(cc_stats.slow_start_exit_cwnd.is_some());
+        assert_eq!(cc_stats.slow_start_exit_cwnd, Some(cc.cwnd()));
+        assert_eq!(
+            cc_stats.slow_start_exit_reason,
+            Some(SlowStartExitReason::CongestionEvent)
+        );
+
+        // For loss, test that a spurious congestion event resets the stats.
+        if congestion_event == CongestionEvent::Loss {
+            // Send recovery packet and ack it to exit recovery.
+            let pkt2 = sent::make_packet(2, now, 1000);
+            cc.on_packet_sent(&pkt2, now);
+            cc.on_packets_acked(&[pkt2], &rtt_estimate, now, &mut cc_stats);
+
+            // Late ack of pkt1 triggers spurious congestion detection - should reset to None.
+            cc.on_packets_acked(&[pkt1], &rtt_estimate, now, &mut cc_stats);
+
+            assert!(cc.current.phase.in_slow_start());
+            assert_eq!(cc_stats.slow_start_exit_cwnd, None);
+            assert!(cc_stats.slow_start_exit_reason.is_none());
+        }
     }
 
     #[test]
@@ -1904,47 +1948,6 @@ mod tests {
         assert_eq!(Phase::CongestionAvoidance.to_qlog(), "congestion_avoidance");
         assert_eq!(Phase::Recovery.to_qlog(), "recovery");
         assert_eq!(Phase::RecoveryStart.to_qlog(), "recovery");
-    }
-
-    #[test]
-    fn slow_start_exit_cwnd_stat() {
-        let mut cc = make_cc_newreno();
-        let now = now();
-        let mut cc_stats = CongestionControlStats::default();
-        let rtt_estimate = RttEstimate::new(RTT);
-
-        // Initially None when in slow start
-        assert!(cc.current.phase.in_slow_start());
-        assert_eq!(cc_stats.slow_start_exit_cwnd, None);
-
-        // Cause congestion event to exit slow start
-        let pkt1 = sent::make_packet(1, now, 1000);
-        cc.on_packet_sent(&pkt1, now);
-        cc.on_packets_lost(
-            Some(now),
-            None,
-            PTO,
-            std::slice::from_ref(&pkt1),
-            now,
-            &mut cc_stats,
-        );
-
-        // Should have exited slow start with cwnd captured AFTER reduction
-        assert!(!cc.current.phase.in_slow_start());
-        assert!(cc_stats.slow_start_exit_cwnd.is_some());
-        assert_eq!(cc_stats.slow_start_exit_cwnd, Some(cc.cwnd()));
-
-        // Send recovery packet
-        let pkt2 = sent::make_packet(2, now, 1000);
-        cc.on_packet_sent(&pkt2, now);
-        cc.on_packets_acked(&[pkt2], &rtt_estimate, now, &mut cc_stats);
-
-        // Late ack of pkt1 triggers spurious congestion event - should reset to None
-        cc.on_packets_acked(&[pkt1], &rtt_estimate, now, &mut cc_stats);
-
-        assert!(cc.current.phase.in_slow_start());
-        assert!(cc_stats.slow_start_exit_cwnd.is_none());
-        assert_eq!(cc_stats.slow_start_exit_cwnd, None);
     }
 
     #[test]
@@ -1991,7 +1994,7 @@ mod tests {
 
         // Dirty HyStart state so current_round_min_rtt is non-None.
         cc.slow_start
-            .on_packets_acked(&RttEstimate::new(RTT), 0, cc.cwnd());
+            .on_packets_acked(&RttEstimate::new(RTT), 0, cc.cwnd(), &mut cc_stats);
         assert!(cc.slow_start.current_round_min_rtt().is_some());
 
         cc.detect_persistent_congestion(
