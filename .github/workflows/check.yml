@@ -40,6 +40,8 @@ jobs:
   check:
     name: Run checks
     needs: toolchains
+    # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
+    # environment: codecov
     strategy:
       fail-fast: false
       matrix:
@@ -141,11 +143,11 @@ jobs:
         with:
           files: codecov.json
           fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
           verbose: true
           flags: ${{ startsWith(matrix.os, 'ubuntu') && 'linux' || startsWith(matrix.os, 'macos') && 'macos' || 'windows' }}
         env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
 
       - name: Save simulation seeds artifact
@@ -193,6 +195,8 @@ jobs:
   check-vm:
     name: Run checks for VM-only platforms
     runs-on: ubuntu-24.04
+    # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
+    # environment: codecov
     # OpenBSD, NetBSD and Solaris often have NSS packages that are too old.
     # Allow them to fail without aborting the merge queue.
     continue-on-error: ${{ github.event_name == 'merge_group' && matrix.os != 'freebsd' }}
@@ -209,5 +213,5 @@ jobs:
       - uses: ./.github/actions/check-vm
         with:
           platform: ${{ matrix.os }}
-          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
 
