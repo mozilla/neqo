@@ -34,6 +34,7 @@ functions = [
     "SSL_ConfigServerCert",
     "SSL_ConfigServerSessionIDCache",
     "SSL_DestroyResumptionTokenInfo",
+    "SSL_ExportKeyingMaterial",
     "SSL_GetChannelInfo",
     "SSL_GetExperimentalAPI",
     "SSL_GetImplementedCiphers",
