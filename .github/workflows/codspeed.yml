@@ -10,8 +10,6 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   RUSTUP_TOOLCHAIN: stable
-  # Performance comparison settings
-  TRANSFER_SIZE: 33554432  # 32 MiB
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -30,133 +28,12 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       benches: ${{ steps.matrix.outputs.benches }}
-      walltime-benches: ${{ steps.matrix.outputs.walltime-benches }}
-      has-walltime: ${{ steps.matrix.outputs.has-walltime }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
       - id: matrix
         uses: ./.github/actions/bench-matrix
-
-  # Build neqo for walltime benchmarks and perfcompare on ARM64.
-  # CodSpeed's macro runners are aarch64, so we build on ARM for compatibility.
-  # Using ubuntu-22.04 for glibc compatibility with CodSpeed runners.
-  build-neqo:
-    name: Build neqo
-    runs-on: ubuntu-22.04-arm
-    needs: bench-matrix
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/rust
-        with:
-          version: stable
-          tools: cargo-codspeed
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: ./.github/actions/nss
-
-      - name: Build neqo binaries
-        run: |
-          export RUSTFLAGS="-C force-frame-pointers=yes"
-          cargo build --locked --profile bench --features bench --bin neqo-client --bin neqo-server
-
-      - name: Build walltime benchmarks
-        if: needs.bench-matrix.outputs.has-walltime == 'true'
-        env:
-          WALLTIME_BENCHES: ${{ needs.bench-matrix.outputs.walltime-benches }}
-        run: |
-          echo "$WALLTIME_BENCHES" | jq -r '.[] | "\(.crate) \(.bench)"' | while read -r crate bench; do
-            cargo codspeed build --package "$crate" --locked --features bench --bench "$bench" --measurement-mode walltime
-          done
-
-      - name: Bundle artifacts
-        run: |
-          mkdir -p dist/lib
-          # Neqo binaries
-          cp target/release/neqo-client target/release/neqo-server dist/
-          # Codspeed benchmarks
-          cp -r target/codspeed dist/
-          # Test fixture for certificate database
-          cp -r test-fixture dist/
-          # NSS/NSPR libraries
-          if [ -d "$NSS_DIR/../dist/Release/lib" ]; then
-            cp -L "$NSS_DIR"/../dist/Release/lib/*.so dist/lib/ 2>/dev/null || true
-            cp -L "$NSS_DIR"/../dist/Release/lib/*.so.* dist/lib/ 2>/dev/null || true
-          else
-            for lib in nss3 nssutil3 smime3 ssl3 nspr4 plc4 plds4; do
-              cp -L /usr/lib/*/lib${lib}.so* dist/lib/ 2>/dev/null || true
-            done
-          fi
-
-      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: build-neqo
-          path: dist
-          retention-days: 1
-
-  build-msquic:
-    name: Build msquic
-    runs-on: ubuntu-22.04-arm
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/actions
-          persist-credentials: false
-
-      - uses: ./.github/actions/quic-build
-        with:
-          impl: msquic
-          token: ${{ secrets.GITHUB_TOKEN }}
-          artifact-name: build-msquic
-
-  build-google:
-    name: Build google/quiche
-    runs-on: ubuntu-22.04-arm
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/actions
-          persist-credentials: false
-
-      - uses: ./.github/actions/quic-build
-        with:
-          impl: google
-          token: ${{ secrets.GITHUB_TOKEN }}
-          artifact-name: build-google
-
-  build-quiche:
-    name: Build cloudflare/quiche
-    runs-on: ubuntu-22.04-arm
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/actions
-          persist-credentials: false
-
-      - uses: ./.github/actions/quic-build
-        with:
-          impl: quiche
-          token: ${{ secrets.GITHUB_TOKEN }}
-          artifact-name: build-quiche
-
-  build-s2n:
-    name: Build s2n-quic
-    runs-on: ubuntu-22.04-arm
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/actions
-          persist-credentials: false
-
-      - uses: ./.github/actions/quic-build
-        with:
-          impl: s2n
-          token: ${{ secrets.GITHUB_TOKEN }}
-          artifact-name: build-s2n
 
   benchmarks:
     name: Run ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
