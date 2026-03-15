@@ -30,7 +30,7 @@ thiserror = { workspace = true }
 windows = { workspace = true, features = ["Win32_Media"] }
 
 [dev-dependencies]
-criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false }
+criterion = { workspace = true }
 test-fixture = { path = "../test-fixture" }
 
 [features]

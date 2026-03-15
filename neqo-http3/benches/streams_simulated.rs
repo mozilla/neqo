@@ -16,6 +16,7 @@
 use std::time::Duration;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use test_fixture::bench;
 
 #[path = "common.rs"]
 mod common;
@@ -36,5 +37,9 @@ fn benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, benchmark);
+criterion_group! {
+    name = benches;
+    config = bench::config_simulation();
+    targets = benchmark
+}
 criterion_main!(benches);

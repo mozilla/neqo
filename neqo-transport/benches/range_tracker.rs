@@ -13,6 +13,7 @@ use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use neqo_transport::send_stream::RangeTracker;
+use test_fixture::bench;
 
 const CHUNK: u64 = 1000;
 const END: u64 = 100_000;
@@ -55,5 +56,9 @@ fn benchmark_coalesce(c: &mut Criterion) {
     coalesce(c, 1000);
 }
 
-criterion_group!(benches, benchmark_coalesce);
+criterion_group! {
+    name = benches;
+    config = bench::config_fast();
+    targets = benchmark_coalesce
+}
 criterion_main!(benches);

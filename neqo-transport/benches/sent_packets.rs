@@ -16,6 +16,7 @@ use neqo_transport::{
     packet,
     recovery::{self, sent},
 };
+use test_fixture::bench;
 
 fn sent_packets() -> sent::Packets {
     let mut pkts = sent::Packets::default();
@@ -51,5 +52,9 @@ fn take_ranges(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, take_ranges);
+criterion_group! {
+    name = benches;
+    config = bench::config_fast();
+    targets = take_ranges
+}
 criterion_main!(benches);
