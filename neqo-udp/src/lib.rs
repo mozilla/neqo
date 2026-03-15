@@ -10,6 +10,8 @@
     reason = "Functions simply delegate to tokio and quinn-udp."
 )]
 
+#[cfg(apple)]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     array,
     io::{self, IoSliceMut},
@@ -40,11 +42,36 @@ const RECV_BUF_SIZE: usize = u16::MAX as usize;
 /// - Linux/Android: use segmentation offloading via GRO
 /// - Windows: use segmentation offloading via URO (caveat see <https://github.com/quinn-rs/quinn/issues/2041>)
 /// - Apple: no segmentation offloading available, use multiple buffers
-#[cfg(not(all(apple, feature = "fast-apple-datapath")))]
+#[cfg(not(apple))]
 const NUM_BUFS: usize = 1;
-#[cfg(all(apple, feature = "fast-apple-datapath"))]
+#[cfg(apple)]
 // Value approximated based on neqo-bin "Download" benchmark only.
 const NUM_BUFS: usize = 16;
+
+/// Whether the Apple fast UDP datapath has been enabled for this process.
+///
+/// Defaults to `false`. Call [`enable_apple_fast_path`] to opt in.
+#[cfg(apple)]
+static APPLE_FAST_PATH: AtomicBool = AtomicBool::new(false);
+
+/// Enable the Apple fast UDP datapath (`sendmsg_x`/`recvmsg_x`) for all
+/// subsequently created sockets.
+///
+/// The caller is responsible for verifying that these private APIs are
+/// available and functional before calling this. On unsupported OS versions,
+/// calling these APIs may crash.
+#[cfg(apple)]
+pub fn enable_apple_fast_path() {
+    APPLE_FAST_PATH.store(true, Ordering::Relaxed);
+}
+
+/// Returns whether the Apple fast UDP datapath has been enabled for this
+/// process via [`enable_apple_fast_path`].
+#[cfg(apple)]
+#[must_use]
+pub fn is_apple_fast_path_enabled() -> bool {
+    APPLE_FAST_PATH.load(Ordering::Relaxed)
+}
 
 /// A UDP receive buffer.
 pub struct RecvBuf(Vec<Vec<u8>>);
@@ -229,8 +256,17 @@ pub struct Socket<S> {
 impl<S: SocketRef> Socket<S> {
     /// Create a new [`Socket`] given a raw file descriptor managed externally.
     pub fn new(socket: S) -> Result<Self, io::Error> {
+        let state = UdpSocketState::new((&socket).into())?;
+        // The caller of [`enable_apple_fast_path`] is responsible for
+        // verifying that `sendmsg_x` and `recvmsg_x` are available.
+        #[cfg(apple)]
+        if APPLE_FAST_PATH.load(Ordering::Relaxed) {
+            unsafe {
+                state.set_apple_fast_path();
+            }
+        }
         Ok(Self {
-            state: UdpSocketState::new((&socket).into())?,
+            state,
             inner: socket,
         })
     }
@@ -490,6 +526,15 @@ mod tests {
             normal_datagram.data()
         );
 
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(apple)]
+    fn apple_fast_path() -> Result<(), io::Error> {
+        enable_apple_fast_path();
+        assert!(is_apple_fast_path_enabled());
+        assert!(socket()?.max_gso_segments() > 1);
         Ok(())
     }
 }

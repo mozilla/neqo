@@ -27,8 +27,14 @@ impl Socket {
     /// Create a new [`Socket`] bound to the provided address, not managed externally.
     pub fn bind<A: std::net::ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
         const ONE_MB: usize = 1 << 20;
+
         let socket = std::net::UdpSocket::bind(addr)?;
         let state = quinn_udp::UdpSocketState::new((&socket).into())?;
+        #[cfg(apple)]
+        unsafe {
+            // neqo-bin always enables the Apple fast datapath as a canary.
+            state.set_apple_fast_path();
+        }
 
         // FIXME: We need to experiment if increasing this actually improves performance.
         // Also, on BSD and Apple targets, this seems to increase the `net.inet.udp.maxdgram`

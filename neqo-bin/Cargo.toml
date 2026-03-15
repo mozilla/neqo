@@ -62,11 +62,13 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [features]
 bench = ["neqo-bin/bench", "neqo-http3/bench", "neqo-transport/bench", "log/release_max_level_info"]
-fast-apple-datapath = ["quinn-udp/fast-apple-datapath"]
 draft-29 = ["neqo-http3/draft-29", "neqo-transport/draft-29"]
 
+[build-dependencies]
+cfg_aliases = { workspace = true }
+
 [package.metadata.cargo-machete]
-ignored = ["criterion"]
+ignored = ["cfg_aliases", "criterion"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

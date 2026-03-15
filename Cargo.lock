@@ -783,6 +783,7 @@ dependencies = [
 name = "neqo-bin"
 version = "0.23.1"
 dependencies = [
+ "cfg_aliases",
  "clap",
  "clap-verbosity-flag",
  "codspeed-criterion-compat",
