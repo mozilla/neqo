@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 
 //! A crate to return the name and maximum transmission unit (MTU) of the local network interface
 //! towards a given destination `SocketAddr`, optionally from a given local `SocketAddr`.
