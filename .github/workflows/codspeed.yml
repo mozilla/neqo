@@ -161,6 +161,8 @@ jobs:
   benchmarks:
     name: Run ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
     runs-on: ${{ matrix.bench.runner }}
+    # TODO: Restore `environment: codspeed` once GitHub supports filtering deployment messages.
+    # environment: codspeed
     needs: bench-matrix
     if: ${{ needs.bench-matrix.outputs.benches != '[]' }}
     strategy:
@@ -192,10 +194,12 @@ jobs:
         with:
           mode: ${{ matrix.bench.mode }}
           run: cargo codspeed run
-          token: ${{ secrets.CODSPEED_TOKEN }}
+          token: ${{ secrets.CODSPEED_TOKEN }} # zizmor: ignore[secrets-outside-env]
 
   benchmarks-walltime:
     name: Run ${{ matrix.bench.bench }} (walltime)
+    # TODO: Restore `environment: codspeed` once GitHub supports filtering deployment messages.
+    # environment: codspeed
     runs-on: # zizmor: ignore[self-hosted-runner]
       group: codspeed
       labels: codspeed-macro
@@ -239,11 +243,13 @@ jobs:
         with:
           mode: walltime
           run: cargo codspeed run --package ${{ matrix.bench.crate }} --bench ${{ matrix.bench.bench }}
-          token: ${{ secrets.CODSPEED_TOKEN }}
+          token: ${{ secrets.CODSPEED_TOKEN }} # zizmor: ignore[secrets-outside-env]
 
   perfcompare:
     name: ${{ matrix.client }}-${{ matrix.server }}${{ matrix.cubic && '-cubic' || '' }}${{ matrix.pacing == false && '-nopacing' || '' }}
     needs: [build-neqo, build-msquic, build-google, build-quiche, build-s2n]
+    # TODO: Restore `environment: codspeed` once GitHub supports filtering deployment messages.
+    # environment: codspeed
     runs-on: # zizmor: ignore[self-hosted-runner]
       group: codspeed
       labels: codspeed-macro
@@ -393,7 +399,7 @@ jobs:
           mode: walltime
           working-directory: /tmp
           config: ${{ github.workspace }}/codspeed.yml
-          token: ${{ secrets.CODSPEED_TOKEN }}
+          token: ${{ secrets.CODSPEED_TOKEN }} # zizmor: ignore[secrets-outside-env]
 
       - name: Stop server
         if: always()
