@@ -894,9 +894,17 @@ impl Http3Client {
     ///
     /// This cannot panic. The max varint length is 8.
     pub fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
+        let session_id_len = u64::try_from(Encoder::varint_len(session_id.as_u64()))
+            .map_err(|_| Error::Internal)?;
+        // Reserve space for ACK frames and packet number growth beyond what is
+        // seen at session start (when max_datagram_size is sampled). A worst-case
+        // ACK frame is ~50 bytes (RecvdPackets::USEFUL_ACK_LEN) and packet number
+        // varints can grow by up to 3 bytes over the life of a connection, giving
+        // ~53 bytes of realistic overhead; 64 provides a small margin.
+        const DATAGRAM_OVERHEAD: u64 = 64;
         Ok(self.conn.max_datagram_size()?
-            - u64::try_from(Encoder::varint_len(session_id.as_u64()))
-                .map_err(|_| Error::Internal)?)
+            .saturating_sub(session_id_len)
+            .saturating_sub(DATAGRAM_OVERHEAD))
     }
 
     pub fn webtransport_set_datagram_high_water_mark(
