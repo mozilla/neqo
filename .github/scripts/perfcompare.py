@@ -27,28 +27,28 @@ class ImplConfig(NamedTuple):
 # fmt: off
 IMPLS = {
     "neqo": ImplConfig(
-        "binaries/neqo/neqo-client _cc _pacing _disk _flags -Q 1 https://{host}:{port}/{size}",
-        "binaries/neqo/neqo-server _cc _pacing _flags -Q 1 {host}:{port}",
+        "build-neqo/neqo/neqo-client _cc _pacing _disk _flags -Q 1 https://{host}:{port}/{size}",
+        "build-neqo/neqo/neqo-server _cc _pacing _flags -Q 1 {host}:{port}",
         "--output-dir .", "",
     ),
     "msquic": ImplConfig(
-        "msquic/build/bin/Release/quicinterop -test:D -custom:{host} -port:{port} -urls:https://{host}:{port}/{size}",
-        "msquic/build/bin/Release/quicinteropserver -root:{tmp} -listen:{host} -port:{port} -file:{tmp}/cert -key:{tmp}/key -noexit",
+        "build-msquic/quicinterop -test:D -custom:{host} -port:{port} -urls:https://{host}:{port}/{size}",
+        "build-msquic/quicinteropserver -root:{tmp} -listen:{host} -port:{port} -file:{tmp}/cert -key:{tmp}/key -noexit",
         "", "-a hq-interop",
     ),
     "google": ImplConfig(
-        "google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://{host}:{port}/{size}",
-        "google-quiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port {port} --certificate_file {tmp}/cert --key_file {tmp}/key",
+        "build-google/quic_client --disable_certificate_verification https://{host}:{port}/{size}",
+        "build-google/quic_server --generate_dynamic_responses --port {port} --certificate_file {tmp}/cert --key_file {tmp}/key",
         "", "",
     ),
     "quiche": ImplConfig(
-        "quiche/target/release/quiche-client _disk --no-verify https://{host}:{port}/{size}",
-        "quiche/target/release/quiche-server --root {tmp} --listen {host}:{port} --cert {tmp}/cert --key {tmp}/key",
+        "build-quiche/quiche-client _disk --no-verify https://{host}:{port}/{size}",
+        "build-quiche/quiche-server --root {tmp} --listen {host}:{port} --cert {tmp}/cert --key {tmp}/key",
         "--dump-responses .", "",
     ),
     "s2n": ImplConfig(
-        "s2n-quic/target/release/s2n-quic-qns interop client --tls rustls --disable-cert-verification _disk --local-ip {host} https://{host}:{port}/{size}",
-        "s2n-quic/target/release/s2n-quic-qns interop server --www-dir {tmp} --certificate {tmp}/cert --private-key {tmp}/key --ip {host} --port {port}",
+        "build-s2n/s2n-quic-qns interop client --tls rustls --disable-cert-verification _disk --local-ip {host} https://{host}:{port}/{size}",
+        "build-s2n/s2n-quic-qns interop server --www-dir {tmp} --certificate {tmp}/cert --private-key {tmp}/key --ip {host} --port {port}",
         "--download-dir .", "-a hq-interop",
     ),
 }
@@ -253,7 +253,7 @@ def process(cfg, name, bold):
     if not m:
         raise ValueError(f"Could not parse standard deviation from {rm}")
     rng = float(m.group(1))
-    row += f" {(cfg.size/1048576)/mean:.1f} ± {(cfg.size/1048576)/rng:.1f} "
+    row += f" {(cfg.size / 1048576) / mean:.1f} ± {(cfg.size / 1048576) / rng:.1f} "
 
     if bj.exists():
         base = json.loads(bj.read_text(encoding="utf-8"))["results"][0]
@@ -331,8 +331,8 @@ def run(cfg, tmp):
                 if client == "neqo" or server == "neqo":
                     hyperfine(
                         cfg,
-                        scmd.replace("neqo/", "neqo-main/"),
-                        ccmd.replace("neqo/", "neqo-main/"),
+                        scmd.replace("/neqo/", "/neqo-main/"),
+                        ccmd.replace("/neqo/", "/neqo-main/"),
                         name,
                         cfg.workspace / "hyperfine-main",
                     )
