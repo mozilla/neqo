@@ -1763,7 +1763,7 @@ impl Connection {
                     let pn = payload.pn();
                     self.idle_timeout.on_packet_received(now);
                     self.log_packet(
-                        packet::MetaData::new_in(path, tos, packet_len, &payload),
+                        packet::MetaData::new_in(path, tos, packet_len, &payload, self.version),
                         now,
                     );
 
@@ -2753,6 +2753,7 @@ impl Connection {
                     builder.len() + aead_expansion,
                     &builder.as_ref()[payload_start..],
                     packet_tos,
+                    self.version,
                 ),
                 now,
             );
