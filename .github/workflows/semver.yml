@@ -18,11 +18,13 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-          fetch-depth: 0 # We need the full history to compare against `main` for semver changes.
+          fetch-depth: 0 # We need the full history to compare against the PR base branch for semver changes.
       - uses: ./.github/actions/rust
         with:
           tools: cargo-semver-checks
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: ./.github/actions/nss
 
-      - run: cargo semver-checks --default-features --baseline-rev origin/main -p mtu
+      - env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+        run: cargo semver-checks --default-features --baseline-rev "origin/$BASE_REF" -p mtu

@@ -13,7 +13,8 @@ env:
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
-  WORKSPACE: ${{ github.workspace}}
+  WORKSPACE: ${{ github.workspace }}
+  BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -23,9 +24,9 @@ permissions:
   contents: read
 
 jobs:
-  bench:
-    name: cargo bench
-    runs-on: 'self-hosted' # zizmor: ignore[self-hosted-runner]
+  build:
+    name: Build bench binaries
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: bash
@@ -38,10 +39,33 @@ jobs:
           path: neqo
           submodules: 'recursive'
           persist-credentials: false
+
+      - uses: ./neqo/.github/actions/build-neqo
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-name: bench-build
+          benches: 'true'
+          baseline-ref: origin/${{ env.BASE_REF }}
+
+  bench:
+    name: cargo bench
+    runs-on: 'self-hosted' # zizmor: ignore[self-hosted-runner]
+    needs: [build]
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout mozilla/neqo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: mozilla/neqo
+          path: neqo
+          persist-credentials: false
           clean: false
       - run: |
           cd neqo
-          git fetch --no-tags --depth=1 origin main
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
 
       - name: Set PATH and environment
         run: |
@@ -53,40 +77,22 @@ jobs:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: flamegraph, samply
           token: ${{ secrets.GITHUB_TOKEN }}
-          workspaces: |
-            neqo
 
-      - name: Get minimum NSS version
-        id: nss-version
-        run: |
-          cd neqo
-          cat neqo-crypto/min_version.txt > versions.txt
-          git show origin/main:neqo-crypto/min_version.txt >> versions.txt
-          # Use the maximum version from both branches.
-          echo "minimum=$(sort -u versions.txt | tail -n1)" >> "$GITHUB_OUTPUT"
-
-      - name: Install NSS
-        id: nss
-        uses: ./neqo/.github/actions/nss
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
         with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+          name: bench-build
+          path: dist
 
-      - name: Build neqo
+      - name: Set up build artifacts
         run: |
-          # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
-          export RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment -C force-frame-pointers=yes $RUSTFLAGS"
-          echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
-          mkdir -p binaries/neqo-main
-          mkdir -p binaries/neqo
-          cd neqo
-          git checkout origin/main
-          cargo build --locked --release --bin neqo-client --bin neqo-server
-          cp target/release/neqo-client ../binaries/neqo-main/
-          cp target/release/neqo-server ../binaries/neqo-main/
-          git checkout -
-          cargo build --locked --release --bin neqo-client --bin neqo-server
-          cp target/release/neqo-client ../binaries/neqo/
-          cp target/release/neqo-server ../binaries/neqo/
+          chmod +x dist/neqo/* dist/neqo-baseline/*
+          mkdir -p binaries/neqo binaries/neqo-baseline
+          cp dist/neqo/* binaries/neqo/
+          cp dist/neqo-baseline/* binaries/neqo-baseline/
+          {
+            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/dist/lib:$LD_LIBRARY_PATH"
+            echo "NSS_DB_PATH=$GITHUB_WORKSPACE/dist/test-fixture/db"
+          } >> "$GITHUB_ENV"
 
       # Disable turboboost, hyperthreading and use performance governor.
       # Also creates "cpu23", "cpu2" and "cpu3" CPU sets for use with cset.
@@ -95,39 +101,34 @@ jobs:
         run: sudo /root/bin/prep.sh
 
       - name: Run cargo bench
-        env:
-          NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
         run: |
           sudo ip link set dev lo mtu "$MTU"
           cd neqo
           rm -rf target/criterion
-          git checkout origin/main
-          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches-main.txt
-          BENCHES_MAIN=$(grep Executable benches-main.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
-          # Run the builds from the main branch first, to establish a baseline.
-          for BENCH in $BENCHES_MAIN; do
-            cp "$BENCH" ../binaries/neqo-main/
+          # Run the baseline builds first, to establish a baseline.
+          for BENCH in ../dist/neqo-baseline/*; do
+            NAME=$(basename "$BENCH")
+            [[ "$NAME" == "neqo-client" || "$NAME" == "neqo-server" ]] && continue
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --save-baseline main --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results-main.txt
+              "$BENCH" -- --bench --save-baseline baseline --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results-baseline.txt
           done
-          git checkout -
-          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
-          BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
           # Run pull request builds twice, once without perf for baseline comparison, and once with perf for profiling.
           # (Perf seems to introduce some variability in the results.)
-          for BENCH in $BENCHES; do
-            cp "$BENCH" ../binaries/neqo/
+          for BENCH in ../dist/neqo/*; do
+            NAME=$(basename "$BENCH")
+            [[ "$NAME" == "neqo-client" || "$NAME" == "neqo-server" ]] && continue
             # shellcheck disable=SC2086
             # --baseline-lenient allows us to add new benchmarks in pull requests.
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --baseline-lenient main --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
+              "$BENCH" -- --bench --baseline-lenient baseline --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
           done
-          for BENCH in $BENCHES; do
+          for BENCH in ../dist/neqo/*; do
             NAME=$(basename "$BENCH" | cut -d- -f1)
+            [[ "$(basename "$BENCH")" == "neqo-client" || "$(basename "$BENCH")" == "neqo-server" ]] && continue
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "../$NAME.perf" $BENCH --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
+              perf -- $PERF_OPT -o "../$NAME.perf" "$BENCH" --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
           done
 
       # Re-enable turboboost, hyperthreading and use powersave governor. Remove all CPU sets.
@@ -153,8 +154,8 @@ jobs:
           EVENT_PATH: ${{ github.event_path }}
           TESTBED: 'On-prem'
         run: |
-          SHA=$(cd neqo && git log origin/main -1 --format=%H)
-          echo "$SHA" > main-sha.txt
+          SHA=$(cd neqo && git log origin/"$BASE_REF" -1 --format=%H)
+          echo "$SHA" > baseline-sha.txt
           python3 neqo/.github/scripts/format-bench-results.py results.txt
           # Build final markdown output
           {
@@ -200,7 +201,7 @@ jobs:
             *.md
             event.json
             results.*
-            results-main.*
+            results-baseline.*
           compression-level: 9
 
       - name: Export PR comment data
@@ -225,4 +226,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- binaries comment-data "$COMPARE_TMP" || true
+          rm -r -- binaries dist comment-data || true

@@ -4,6 +4,7 @@ on:
   # Use pull_request_target to allow secrets access for fork PRs.
   # CI only runs after manual approval for neqo, for non-members of the repo.
   pull_request_target: # zizmor: ignore[dangerous-triggers] See rationale above.
+    branches: ["main"]
     types: [opened, synchronize, ready_for_review, reopened]
   workflow_dispatch:
 
