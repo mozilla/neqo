@@ -965,6 +965,9 @@ impl Connection {
             let p = p.borrow();
             v.rtt = p.rtt().estimate();
             v.rttvar = p.rtt().rttvar();
+            v.min_rtt = p.rtt().minimum();
+            v.cwnd = p.sender().cwnd();
+            v.bytes_in_flight = p.sender().bytes_in_flight();
         }
         v
     }
@@ -1765,6 +1768,8 @@ impl Connection {
                         break;
                     }
                 };
+            let packet_len = slc_len - remainder.len();
+            self.stats.borrow_mut().bytes_rx += packet_len;
             match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
                 PreprocessResult::Continue => (),
                 PreprocessResult::Next => break,
@@ -2791,6 +2796,7 @@ impl Connection {
                 tokens,
                 encoder.len() - header_start,
             );
+            self.stats.borrow_mut().bytes_tx += sent.len();
             if padded {
                 needs_padding = false;
                 self.loss_recovery.on_packet_sent(path, sent, now);
@@ -3503,6 +3509,7 @@ impl Connection {
             now,
         );
         let largest_acknowledged = acked_packets.first().map(sent::Packet::pn);
+        self.stats.borrow_mut().bytes_acked += acked_packets.iter().map(|p| p.len()).sum::<usize>();
         for acked in acked_packets {
             for token in acked.tokens() {
                 match token {

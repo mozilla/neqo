@@ -314,6 +314,21 @@ pub struct Stats {
 
     pub cc: CongestionControlStats,
 
+    /// Total bytes sent on wire.
+    pub bytes_tx: usize,
+    /// Total bytes received on wire.
+    pub bytes_rx: usize,
+    /// Total bytes in packets declared lost.
+    pub bytes_lost: usize,
+    /// Total bytes in acknowledged packets.
+    pub bytes_acked: usize,
+    /// Minimum RTT observed.
+    pub min_rtt: Duration,
+    /// Congestion window size.
+    pub cwnd: usize,
+    /// Bytes in flight (sent but not yet acked or declared lost).
+    pub bytes_in_flight: usize,
+
     /// ECN path validation count, indexed by validation outcome.
     pub ecn_path_validation: ecn::ValidationCount,
     /// ECN counts for outgoing UDP datagrams, recorded locally. For coalesced packets,
@@ -430,7 +445,18 @@ impl Debug for Stats {
         )?;
         writeln!(f, "    mark transitions:")?;
         self.ecn_rx_transition.fmt(f)?;
-        writeln!(f, "  dscp: {:?}", self.dscp_rx)
+        writeln!(f, "  dscp: {:?}", self.dscp_rx)?;
+        writeln!(
+            f,
+            "  bytes: tx {} rx {} lost {} acked {}",
+            self.bytes_tx, self.bytes_rx, self.bytes_lost, self.bytes_acked
+        )?;
+        writeln!(f, "  min_rtt: {:?}", self.min_rtt)?;
+        writeln!(
+            f,
+            "  cwnd: {} bytes_in_flight: {}",
+            self.cwnd, self.bytes_in_flight
+        )
     }
 }
 
@@ -489,6 +515,9 @@ fn debug() {
     rx:
     path validation outcomes: ValidationCount({Capable: 0, NotCapable(BlackHole): 0, NotCapable(Bleaching): 0, NotCapable(ReceivedUnsentECT1): 0})
     mark transitions:
-  dscp: \n"
+  dscp: 
+  bytes: tx 0 rx 0 lost 0 acked 0
+  min_rtt: 0ns
+  cwnd: 0 bytes_in_flight: 0\n"
     );
 }

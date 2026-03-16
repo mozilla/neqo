@@ -1406,9 +1406,13 @@ impl Http3Connection {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::stats::WebTransportSessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
-        self.extended_connect_close_session(conn, session_id, error, message, now)
+        // Capture stats BEFORE closing the session
+        let stats = self.webtransport_session_stats(session_id)?;
+        // Now close the session
+        self.extended_connect_close_session(conn, session_id, error, message, now)?;
+        Ok(stats)
     }
 
     /// Get all WebTransport (not CONNECT-UDP) session stream IDs.
@@ -1464,6 +1468,21 @@ impl Http3Connection {
             .get(&session_id)
             .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
             .map(|s| s.validate_send_group(group_id))
+            .ok_or(Error::InvalidStreamId)
+    }
+
+    /// Get statistics for a WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_session_stats(
+        &self,
+        session_id: StreamId,
+    ) -> Res<extended_connect::stats::WebTransportSessionStats> {
+        self.recv_streams
+            .get(&session_id)
+            .and_then(|s| s.extended_connect_session())
+            .and_then(|s| s.borrow().stats())
             .ok_or(Error::InvalidStreamId)
     }
 
@@ -1630,6 +1649,9 @@ impl Http3Connection {
         send_group: Option<SendGroupId>,
     ) -> Res<()> {
         webtransport_session.borrow_mut().add_stream(stream_id)?;
+        webtransport_session
+            .borrow_mut()
+            .record_stream_opened(local);
         if stream_id.stream_type() == StreamType::UniDi {
             if local {
                 self.send_streams.insert(

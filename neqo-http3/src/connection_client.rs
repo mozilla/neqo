@@ -770,7 +770,7 @@ impl Http3Client {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<crate::features::extended_connect::stats::WebTransportSessionStats> {
         self.base_handler.webtransport_close_session(
             &mut self.conn,
             session_id,
@@ -1467,6 +1467,21 @@ impl Http3Client {
     /// Returns error if the session ID is invalid or is not a WebTransport session.
     pub fn webtransport_validate_send_group(&self, session_id: StreamId, group_id: SendGroupId) -> Res<bool> {
         self.base_handler.webtransport_validate_send_group(session_id, group_id)
+    }
+
+    /// Get statistics for a WebTransport session.
+    ///
+    /// Returns session-level statistics including bytes sent/received,
+    /// datagrams sent/received, and streams opened.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_session_stats(
+        &self,
+        session_id: StreamId,
+    ) -> Res<crate::features::extended_connect::stats::WebTransportSessionStats> {
+        self.base_handler.webtransport_session_stats(session_id)
     }
 
     /// Create a WebTransport stream with a send group.
