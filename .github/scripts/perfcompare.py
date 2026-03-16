@@ -228,7 +228,7 @@ def process(cfg, name, bold):
     """Process benchmark results into a table row."""
     rj = cfg.workspace / "hyperfine" / f"{name}.json"
     rm = cfg.workspace / "hyperfine" / f"{name}.md"
-    bj = cfg.workspace / "hyperfine-main" / f"{name}.json"
+    bj = cfg.workspace / "hyperfine-baseline" / f"{name}.json"
     if not rj.exists() or not rm.exists():
         return None
 
@@ -269,7 +269,7 @@ def process(cfg, name, bold):
             print(f"No significant change: {base['mean']} -> {mean}")
             row += f"|  {delta:.1f} | {pct:.1f}% |\n"
     elif "neqo" in name:
-        print("No cached baseline from main found.")
+        print("No cached baseline found.")
         row += "| :question: | :question: |\n"
     else:
         row += "| | |\n"
@@ -331,10 +331,10 @@ def run(cfg, tmp):
                 if client == "neqo" or server == "neqo":
                     hyperfine(
                         cfg,
-                        scmd.replace("/neqo/", "/neqo-main/"),
-                        ccmd.replace("/neqo/", "/neqo-main/"),
+                        scmd.replace("/neqo/", "/neqo-baseline/"),
+                        ccmd.replace("/neqo/", "/neqo-baseline/"),
                         name,
-                        cfg.workspace / "hyperfine-main",
+                        cfg.workspace / "hyperfine-baseline",
                     )
 
                 hyperfine(cfg, scmd, ccmd, name, cfg.workspace / "hyperfine", md=True)
@@ -359,7 +359,7 @@ def main():
     a = p.parse_args()
     cfg = Cfg(a.host, a.port, a.size, a.runs, a.workspace, a.perf_opt)
 
-    for d in ("binaries", "hyperfine", "hyperfine-main"):
+    for d in ("binaries", "hyperfine", "hyperfine-baseline"):
         (cfg.workspace / d).mkdir(exist_ok=True)
     (cfg.workspace / "results.txt").touch()
 
@@ -373,7 +373,7 @@ def main():
     header = (
         f"Transfer of {cfg.size} bytes over loopback, min. {cfg.runs} runs. "
         "All unit-less numbers are in milliseconds.\n\n"
-        "| Client vs. server (params) | Mean ± σ | Min | Max | MiB/s ± σ | Δ `main` | Δ `main` |\n"
+        "| Client vs. server (params) | Mean ± σ | Min | Max | MiB/s ± σ | Δ `baseline` | Δ `baseline` |\n"
         "|:---|---:|---:|---:|---:|---:|---:|\n"
     )
     sorted_steps = sorted(steps, key=lambda r: re.sub(r"^\| \*\*", "| ", r))
