@@ -444,7 +444,6 @@ impl Session {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state != State::Active {
             qdebug!("[{self}]: cannot send datagram in {:?} state.", self.state);
-            debug_assert!(false);
             return Err(Error::Unavailable);
         }
         if conn.remote_datagram_size() == 0 && self.protocol.datagram_capsule_support() {
