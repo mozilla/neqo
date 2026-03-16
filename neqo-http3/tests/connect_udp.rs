@@ -357,7 +357,6 @@ fn connect_via_proxy() {
 }
 
 #[test]
-#[cfg_attr(debug_assertions, should_panic(expected = "assertion failed: false"))]
 fn send_dgram_on_non_active_session() {
     let (mut client, _proxy, connect_udp_session_id) = initiate_new_session();
 
