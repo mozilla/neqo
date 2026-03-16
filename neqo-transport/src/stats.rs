@@ -168,7 +168,7 @@ pub struct CongestionControlStats {
     pub css_rounds_finished: usize,
     /// The current congestion window size (in bytes). Updated throughout the connection
     /// lifetime.
-    pub cwnd: usize,
+    pub cwnd: Option<usize>,
 }
 /// ECN counts by QUIC [`packet::Type`].
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -417,7 +417,7 @@ impl Debug for Stats {
         )?;
         writeln!(
             f,
-            "    final_cwnd {} ss_exit_cwnd {:?} ss_exit_reason {:?}",
+            "    final_cwnd {:?} ss_exit_cwnd {:?} ss_exit_reason {:?}",
             self.cc.cwnd, self.cc.slow_start_exit_cwnd, self.cc.slow_start_exit_reason
         )?;
         writeln!(
@@ -480,7 +480,7 @@ fn debug() {
   tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
   cc:
     ce_loss 0 ce_ecn 0 ce_spurious 0
-    final_cwnd 0 ss_exit_cwnd None ss_exit_reason None
+    final_cwnd None ss_exit_cwnd None ss_exit_reason None
   pmtud: 0 sent 0 acked 0 lost 0 iface_mtu None peer_max_udp_payload 0 pmtu
   resumed: false
   frames rx:
