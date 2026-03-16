@@ -1,10 +1,9 @@
 # Run QNS (QUIC Network Simulator) on PRs to test interop between the
-# changes in the PR and the main branch.
+# changes in the PR and its base branch.
 
 name: QNS PR
 on:
   pull_request:
-    branches: ["main"]
     types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
@@ -28,7 +27,7 @@ jobs:
         include:
           - name: pr
             ref: ${{ github.event.pull_request.head.sha }}
-          - name: main
+          - name: baseline
             ref: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
@@ -83,14 +82,14 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          for IMAGE in pr main; do
+          for IMAGE in pr baseline; do
             docker load --input "/tmp/$IMAGE.tar"
             echo "${IMAGE^^}_IMAGE=ghcr.io/$REPO-qns-$IMAGE:pr-$PR_NUMBER" >> "$GITHUB_ENV"
           done
 
       - id: config
         run: |
-          # Add neqo-pr, neqo-main, and some non-default implementations
+          # Add neqo-pr, neqo-baseline, and some non-default implementations
           # tquic: https://github.com/quic-interop/quic-interop-runner/pull/385/files
           # openssl: https://github.com/quic-interop/quic-interop-runner/pull/402/files
           # linuxquic: https://github.com/quic-interop/quic-interop-runner/pull/428
@@ -101,8 +100,8 @@ jobs:
               "url": "$URL",
               "role": "$ROLE"
             },
-            "neqo-main": {
-              "image": "$MAIN_IMAGE",
+            "neqo-baseline": {
+              "image": "$BASELINE_IMAGE",
               "url": "$URL",
               "role": "$ROLE"
             },
@@ -130,7 +129,7 @@ jobs:
             cat implementations_quic.json
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          # Determine valid interop pairs: all combinations involving neqo-pr or neqo-main
+          # Determine valid interop pairs: all combinations involving neqo-pr or neqo-baseline
           # shellcheck disable=SC2016
           jq < implementations_quic.json '[
             [to_entries[] | select(.value.role=="server" or .value.role=="both").key] as $servers |
@@ -138,7 +137,7 @@ jobs:
             $clients[] as $client |
             $servers[] as $server |
             $client + " '"$DELIM"' " + $server |
-            select((contains("neqo-pr") or contains("neqo-main")) and ($client != $server))
+            select((contains("neqo-pr") or contains("neqo-baseline")) and ($client != $server))
           ]' > pairs.json
           {
             echo "pairs<<EOF"
@@ -170,13 +169,13 @@ jobs:
       - run: docker load --input "/tmp/pr.tar"
 
       - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
-        if: contains(matrix.pair, 'neqo-main')
+        if: contains(matrix.pair, 'neqo-baseline')
         with:
-          name: 'main Docker image'
+          name: 'baseline Docker image'
           path: /tmp
 
-      - if: contains(matrix.pair, 'neqo-main')
-        run: docker load --input /tmp/main.tar
+      - if: contains(matrix.pair, 'neqo-baseline')
+        run: docker load --input /tmp/baseline.tar
 
       - id: depair
         env:
@@ -223,14 +222,15 @@ jobs:
       - env:
           PAIRS: ${{ needs.implementations.outputs.pairs }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
           PR: 'neqo-pr'
         run: |
           # shellcheck disable=SC2153
           mapfile -t LIST < <(echo "$PAIRS" | jq '.[]' | sort)
           for PREFIX in "${LIST[@]}"; do
             PREFIX=$(echo "$PREFIX" | tr -d '"')
-            # Skip neqo-main results as they're only used as baseline
-            [[ "$PREFIX" == *"neqo-main"* ]] && continue
+            # Skip neqo-baseline results as they're only used as baseline
+            [[ "$PREFIX" == *"neqo-baseline"* ]] && continue
             CLIENT=$(echo "$PREFIX" | cut -f1 -d " ")
             SERVER=$(echo "$PREFIX" | cut -f3 -d " ")
             if [ "$CLIENT" == "$PR" ]; then
@@ -244,12 +244,12 @@ jobs:
               echo "* $PAIR: run cancelled after $TIMEOUT min" >> "$ROLE.failed.md"
               continue
             fi
-            MAIN_RUN="${RUN/$PR/neqo-main}"
-            if [ ! -s "$MAIN_RUN/result.json" ]; then
+            BASELINE_RUN="${RUN/$PR/neqo-baseline}"
+            if [ ! -s "$BASELINE_RUN/result.json" ]; then
               echo "* $PAIR: baseline result missing" >> "$ROLE.failed.md"
               continue
             fi
-            for BRANCH in "$RUN" "$MAIN_RUN"; do
+            for BRANCH in "$RUN" "$BASELINE_RUN"; do
               if [ ! -s "$BRANCH/result.json" ]; then
                 echo "* $PAIR: $BRANCH result missing" >> "$ROLE.failed.md"
                 continue 2
@@ -274,11 +274,11 @@ jobs:
               for GROUP in $(jq -r < "$RUN/$ROLE.grouped.json" '.results | keys[]'); do
                 PR_RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
                 LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
-                # Get baseline from neqo-main if available
+                # Get baseline from neqo-baseline if available
                 BASELINE=$(mktemp)
-                MAIN_GROUPED="$MAIN_RUN/$ROLE.grouped.json"
-                if [ -s "$MAIN_GROUPED" ]; then
-                  jq < "$MAIN_GROUPED" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE"
+                BASELINE_GROUPED="$BASELINE_RUN/$ROLE.grouped.json"
+                if [ -s "$BASELINE_GROUPED" ]; then
+                  jq < "$BASELINE_GROUPED" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE"
                 fi
                 [ -n "$PR_RESULT" ] || continue
                 DIFF=$(wdiff -n "$BASELINE" - <<< "$PR_RESULT" || true)
@@ -307,7 +307,7 @@ jobs:
             if [ -e client.failed.md ] || [ -e server.failed.md ]; then
               echo -n "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
               if [ "$BASE_SHA" ]; then
-                echo -n ", differences relative to \`main\` at ${BASE_SHA}"
+                echo -n ", differences relative to \`$BASE_REF\` at ${BASE_SHA}"
               fi
               echo "."
               echo

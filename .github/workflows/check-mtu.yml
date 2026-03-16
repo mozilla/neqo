@@ -2,7 +2,6 @@ name: CI MTU
 on:
   workflow_dispatch:
   pull_request:
-    branches: ["main"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -31,6 +30,8 @@ jobs:
   check-vm:
     name: Run checks for VM-only platforms
     runs-on: ubuntu-24.04
+    # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
+    # environment: codecov
     strategy:
       fail-fast: false
       matrix:
@@ -43,5 +44,5 @@ jobs:
         with:
           working-directory: mtu
           platform: ${{ matrix.os }}
-          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
 

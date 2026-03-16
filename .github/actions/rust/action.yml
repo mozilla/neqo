@@ -29,12 +29,26 @@ runs:
       run: echo "RUST_BACKTRACE=full" >> "$GITHUB_ENV"
 
     - name: Install Rust
-      # TODO: Manually upate this, Dependabot will skip it because no tags associated with SHA:
-      uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # zizmor: ignore[stale-action-refs]
-      with:
-        toolchain: ${{ inputs.version  }}
-        components: ${{ inputs.components }}
-        targets: ${{ inputs.targets }}
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        COMPONENTS: ${{ inputs.components }}
+        TARGETS: ${{ inputs.targets }}
+      run: |
+        rustup toolchain install "$VERSION" --profile minimal
+        # Trim whitespace, since composite expressions may yield spaces.
+        COMPONENTS="$(echo "$COMPONENTS" | xargs)"
+        TARGETS="$(echo "$TARGETS" | tr ',' ' ' | xargs)"
+        if [ -n "$COMPONENTS" ]; then
+          # shellcheck disable=SC2086
+          rustup component add --toolchain "$VERSION" $COMPONENTS
+        fi
+        if [ -n "$TARGETS" ]; then
+          for target in $TARGETS; do
+            rustup target add --toolchain "$VERSION" "$target"
+          done
+        fi
+        rustup default "$VERSION"
 
     - name: Use sccache
       # Apparently the action can't be installed twice in the same workflow, so check if

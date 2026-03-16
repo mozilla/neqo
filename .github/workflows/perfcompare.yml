@@ -2,7 +2,6 @@ name: Performance comparison
 on:
   workflow_call:
   pull_request:
-    branches: ["main"]
   workflow_dispatch:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
@@ -13,6 +12,7 @@ env:
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
+  BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -22,9 +22,9 @@ permissions:
   contents: read
 
 jobs:
-  perfcompare:
-    name: Performance comparison
-    runs-on: 'self-hosted' # zizmor: ignore[self-hosted-runner]
+  build-neqo:
+    name: Build neqo
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: bash
@@ -38,49 +38,92 @@ jobs:
           submodules: 'recursive'
           persist-credentials: false
           clean: false
+
+      - uses: ./neqo/.github/actions/build-neqo
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-name: build-neqo
+          baseline-ref: origin/${{ env.BASE_REF }}
+
+  build-msquic:
+    name: Build msquic
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - uses: ./.github/actions/quic-build
+        with:
+          impl: msquic
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-name: build-msquic
+
+  build-google:
+    name: Build google/quiche
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - uses: ./.github/actions/quic-build
+        with:
+          impl: google
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-name: build-google
+
+  build-quiche:
+    name: Build cloudflare/quiche
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - uses: ./.github/actions/quic-build
+        with:
+          impl: quiche
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-name: build-quiche
+
+  build-s2n:
+    name: Build s2n-quic
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - uses: ./.github/actions/quic-build
+        with:
+          impl: s2n
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-name: build-s2n
+
+  perfcompare:
+    name: Performance comparison
+    runs-on: 'self-hosted' # zizmor: ignore[self-hosted-runner]
+    needs: [build-neqo, build-msquic, build-google, build-quiche, build-s2n]
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout mozilla/neqo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: mozilla/neqo
+          path: neqo
+          persist-credentials: false
+          clean: false
       - run: |
           cd neqo
-          git fetch --no-tags --depth=1 origin main
-
-      - name: Checkout microsoft/msquic
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: microsoft/msquic
-          ref: v2.5.6
-          path: msquic
-          submodules: 'recursive'
-          persist-credentials: false
-          clean: false
-
-      - name: Checkout google/quiche
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: google/quiche
-          ref: c52d86fe10442363e4e8c5a66e639187c419d7c0 # Google doesn't tag release, just update the hash occasionally
-          path: google-quiche
-          submodules: 'recursive'
-          persist-credentials: false
-          clean: false
-
-      - name: Checkout cloudflare/quiche
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: cloudflare/quiche
-          ref: 0.24.5
-          path: quiche
-          submodules: 'recursive'
-          persist-credentials: false
-          clean: false
-
-      - name: Checkout aws/s2n-quic
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: aws/s2n-quic
-          ref: v1.72.0
-          path: s2n-quic
-          submodules: 'recursive'
-          persist-credentials: false
-          clean: false
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
 
       - name: Set PATH and environment
         run: |
@@ -92,68 +135,39 @@ jobs:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: hyperfine, flamegraph, samply
           token: ${{ secrets.GITHUB_TOKEN }}
-          workspaces: |
-            neqo
-            quiche
-            s2n-quic
 
-      - name: Get minimum NSS version
-        id: nss-version
-        run: |
-          cd neqo
-          cat neqo-crypto/min_version.txt > versions.txt
-          git show origin/main:neqo-crypto/min_version.txt >> versions.txt
-          # Use the maximum version from both branches.
-          echo "minimum=$(sort -u versions.txt | tail -n1)" >> "$GITHUB_OUTPUT"
-
-      - name: Install NSS
-        id: nss
-        uses: ./neqo/.github/actions/nss
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
         with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+          name: build-neqo
+          path: build-neqo
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: build-msquic
+          path: build-msquic
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: build-google
+          path: build-google
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: build-quiche
+          path: build-quiche
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: build-s2n
+          path: build-s2n
 
-      - name: Build neqo
+      - name: Set up build artifacts
         run: |
-          # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
-          export RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment -C force-frame-pointers=yes $RUSTFLAGS"
-          echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
-          mkdir -p binaries/neqo-main
-          mkdir -p binaries/neqo
-          cd neqo
-          git checkout origin/main
-          cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
-          cp target/release/neqo-client ../binaries/neqo-main/
-          cp target/release/neqo-server ../binaries/neqo-main/
-          git checkout -
-          cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
-          cp target/release/neqo-client ../binaries/neqo/
-          cp target/release/neqo-server ../binaries/neqo/
-
-      - name: Build msquic
-        run: |
-          mkdir -p msquic/build
-          cd msquic/build
-          rm -f CMakeCache.txt # This seems to be needed now to avoid a spurious warning about "QUIC_TLS"...
-          cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 -DQUIC_OPTIMIZE_LOCAL=1 -DQUIC_HIGH_RES_TIMERS=1 ..
-          cmake --build .
-
-      - name: Build google/quiche
-        run: |
-          cd google-quiche
-          bazel-7.0.0 build -c opt --copt=-fno-omit-frame-pointer --copt=-g --strip=never --sandbox_writable_path="$HOME/.cache/sccache" quiche:quic_server quiche:quic_client
-          bazel-7.0.0 shutdown
-
-      - name: Build cloudflare/quiche
-        run: |
-          # We already changed RUSTFLAGS above; this depends on that having happened.
-          cd quiche
-          cargo build --release --bin quiche-client --bin quiche-server # --locked not working
-
-      - name: Build aws/s2n-quic
-        run: |
-          # We already changed RUSTFLAGS above; this depends on that having happened.
-          cd s2n-quic
-          cargo build --release --bin s2n-quic-qns # --locked not working
+          # Clean stale binaries dir from previous workflow runs.
+          # perfcompare.py recreates and populates binaries/ during the run.
+          rm -rf binaries
+          chmod +x build-neqo/neqo/* build-neqo/neqo-baseline/* \
+            build-msquic/* build-google/* build-quiche/* build-s2n/*
+          {
+            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/build-neqo/lib:$LD_LIBRARY_PATH"
+            echo "NSS_DB_PATH=$GITHUB_WORKSPACE/build-neqo/test-fixture/db"
+          } >> "$GITHUB_ENV"
 
       # Disable turboboost, hyperthreading and use performance governor.
       # Also creates "cpu23", "cpu2" and "cpu3" CPU sets for use with cset.
@@ -169,7 +183,7 @@ jobs:
       - name: Compare QUIC implementations
         env:
           WORKSPACE: ${{ github.workspace }}
-          NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
+          NSS_DB_PATH: ${{ github.workspace }}/build-neqo/test-fixture/db
         run: |
           python3 neqo/.github/scripts/perfcompare.py \
             --host 127.0.0.1 \
@@ -202,8 +216,8 @@ jobs:
           EVENT_PATH: ${{ github.event_path }}
           TESTBED: 'On-prem'
         run: |
-          SHA=$(cd neqo && git log origin/main -1 --format=%H)
-          echo "$SHA" > main-sha.txt
+          SHA=$(cd neqo && git log origin/"$BASE_REF" -1 --format=%H)
+          echo "$SHA" > baseline-sha.txt
           {
             echo "### Client/server transfer results"
             echo
@@ -251,9 +265,9 @@ jobs:
             *.md
             event.json
             results.*
-            results-main.*
+            results-baseline.*
             hyperfine
-            hyperfine-main
+            hyperfine-baseline
           compression-level: 9
 
       - name: Export PR comment data
@@ -278,4 +292,5 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- binaries comment-data hyperfine hyperfine-main || true
+          rm -r -- binaries build-neqo build-msquic build-google build-quiche build-s2n \
+            comment-data hyperfine hyperfine-baseline || true
