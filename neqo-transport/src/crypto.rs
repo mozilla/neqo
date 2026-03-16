@@ -222,10 +222,9 @@ impl Crypto {
         let info = self.tls.preinfo()?;
         // `info.early_data()` returns false for a server,
         // so use `early_data_cipher()` to tell if 0-RTT is enabled.
-        let cipher = info.early_data_cipher();
-        if cipher.is_none() {
+        let Some(cipher) = info.early_data_cipher() else {
             return Ok(false);
-        }
+        };
         let (dir, secret) = match role {
             Role::Client => (
                 CryptoDxDirection::Write,
@@ -237,8 +236,7 @@ impl Crypto {
             ),
         };
         let secret = secret.ok_or(Error::Internal)?;
-        self.states
-            .set_0rtt_keys(version, dir, &secret, cipher.ok_or(Error::Internal)?)?;
+        self.states.set_0rtt_keys(version, dir, &secret, cipher)?;
         Ok(true)
     }
 

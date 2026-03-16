@@ -1408,7 +1408,7 @@ impl OrderGroup {
     }
 
     #[must_use]
-    pub const fn stream_ids(&self) -> &Vec<StreamId> {
+    pub fn stream_ids(&self) -> &[StreamId] {
         &self.vec
     }
 
@@ -2237,7 +2237,7 @@ mod tests {
         let res = rt.first_unmarked_range();
         assert_eq!(res, (0, Some(5)));
         assert_eq!(
-            rt.used.iter().next().unwrap(),
+            rt.used.first_key_value().unwrap(),
             (&5, &(5, RangeState::Acked))
         );
         assert_eq!(

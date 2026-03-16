@@ -165,7 +165,7 @@ impl Session {
     fn receive(&mut self, conn: &mut Connection, now: Instant) -> Res<(ReceiveOutput, bool)> {
         qtrace!("[{self}] receive control data");
         let (out, _) = self.control_stream_recv.receive(conn, now)?;
-        debug_assert!(out == ReceiveOutput::NoOutput);
+        debug_assert_eq!(out, ReceiveOutput::NoOutput);
         self.maybe_check_headers()?;
         self.read_control_stream(conn, now)?;
         Ok((ReceiveOutput::NoOutput, self.state == State::Done))
@@ -181,7 +181,7 @@ impl Session {
             .http_stream()
             .ok_or(Error::Internal)?
             .header_unblocked(conn, now)?;
-        debug_assert!(out == ReceiveOutput::NoOutput);
+        debug_assert_eq!(out, ReceiveOutput::NoOutput);
         self.maybe_check_headers()?;
         self.read_control_stream(conn, now)?;
         Ok((ReceiveOutput::NoOutput, self.state == State::Done))
