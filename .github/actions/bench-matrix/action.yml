@@ -5,12 +5,6 @@ outputs:
   benches:
     description: JSON array of benchmarks for CodSpeed (non-walltime, with runner)
     value: ${{ steps.benches.outputs.benches }}
-  walltime-benches:
-    description: JSON array of walltime benchmarks only
-    value: ${{ steps.benches.outputs.walltime_benches }}
-  has-walltime:
-    description: Whether there are walltime benchmarks
-    value: ${{ steps.benches.outputs.has_walltime }}
   all:
     description: JSON array of all unique crate/bench pairs (for profiling)
     value: ${{ steps.benches.outputs.all }}
@@ -52,16 +46,10 @@ runs:
         # CodSpeed benchmarks (non-walltime, with runner)
         NON_WALLTIME=$(echo "$ALL_BENCHES" | jq -c '[.[] | select(.mode != "walltime") | . + {runner: "ubuntu-24.04"}]')
 
-        # Walltime benchmarks
-        WALLTIME=$(echo "$ALL_BENCHES" | jq -c '[.[] | select(.mode == "walltime")]')
-        HAS_WALLTIME=$(echo "$WALLTIME" | jq 'length > 0')
-
         # All unique crate/bench pairs (for profiling)
         ALL_UNIQUE=$(echo "$ALL_BENCHES" | jq -c '[.[] | {crate, bench}] | unique')
 
         {
           echo "benches=$NON_WALLTIME"
-          echo "walltime_benches=$WALLTIME"
-          echo "has_walltime=$HAS_WALLTIME"
           echo "all=$ALL_UNIQUE"
         } >> "$GITHUB_OUTPUT"

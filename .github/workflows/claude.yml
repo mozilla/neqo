@@ -51,6 +51,7 @@ jobs:
         # TODO: Would like to pin this, but the Mozilla org allowlist requires "anthropics/claude-code-action@v1"
         uses: anthropics/claude-code-action@v1 # zizmor: ignore[unpinned-uses]
         with:
+          show_full_output: 'true'
           track_progress: ${{ github.event_name != 'workflow_dispatch' }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # Use a PAT to allow the action to work on fork PRs.
