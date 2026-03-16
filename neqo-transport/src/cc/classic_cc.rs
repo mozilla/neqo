@@ -282,6 +282,10 @@ where
             .first()
             .expect("`acked_pkts.first().is_some()` is checked in `Loss::on_ack_received`");
 
+        // Initialize the stat to the initial congestion window value. If we early return on
+        // `is_app_limited` the stat is never set on very short connections otherwise.
+        cc_stats.cwnd.get_or_insert(self.current.congestion_window);
+
         // Supplying `true` for `rtt_est.pto(true)` here is best effort not to have to track
         // `recovery::Loss::confirmed()` all the way down to the congestion controller. Having too
         // big a PTO does no harm here.
@@ -395,7 +399,7 @@ where
             self.current.acked_bytes = min(bytes_for_increase, self.current.acked_bytes);
         }
 
-        cc_stats.cwnd = self.current.congestion_window;
+        cc_stats.cwnd = Some(self.current.congestion_window);
         qlog::metrics_updated(
             &mut self.qlog,
             &[
@@ -790,7 +794,7 @@ where
                     // state leftover from initial slow start to have it perform correctly.
                     self.slow_start.reset();
 
-                    cc_stats.cwnd = self.current.congestion_window;
+                    cc_stats.cwnd = Some(self.current.congestion_window);
                     qlog::metrics_updated(
                         &mut self.qlog,
                         &[qlog::Metric::CongestionWindow(
@@ -864,7 +868,7 @@ where
         );
 
         cc_stats.congestion_events[congestion_event] += 1;
-        cc_stats.cwnd = self.current.congestion_window;
+        cc_stats.cwnd = Some(self.current.congestion_window);
         // If we were in slow start when `on_congestion_event` was called we will exit slow start
         // and should record the exit congestion window.
         if self.current.phase.in_slow_start() {
@@ -1968,19 +1972,41 @@ mod tests {
         cc.on_packets_acked(&sent_packets, &rtt_estimate, now, &mut cc_stats);
         let cwnd_after_growth = cc.cwnd();
         assert!(cwnd_after_growth > cwnd_initial);
-        assert_eq!(cc_stats.cwnd, cwnd_after_growth);
+        assert_eq!(cc_stats.cwnd, Some(cwnd_after_growth));
 
         // Tracks cwnd after congestion event reduction
         let pkt_lost = sent::make_packet(next_pn, now, 1000);
         cc.on_packet_sent(&pkt_lost, now);
         cc.on_packets_lost(Some(now), None, PTO, &[pkt_lost], now, &mut cc_stats);
-        assert_eq!(cc_stats.cwnd, cc.cwnd());
-        assert!(cc_stats.cwnd < cwnd_after_growth);
+        assert_eq!(cc_stats.cwnd, Some(cc.cwnd()));
+        assert!(cc_stats.cwnd.is_some_and(|cwnd| cwnd < cwnd_after_growth));
 
         // Tracks cwnd after persistent congestion
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         cc.detect_persistent_congestion(Some(now), None, PTO, lost.iter(), now, &mut cc_stats);
-        assert_eq!(cc_stats.cwnd, cc.cwnd_min());
+        assert_eq!(cc_stats.cwnd, Some(cc.cwnd_min()));
+    }
+
+    #[test]
+    // There was a bug in the stat logic that it never got initialized if a connection never made it
+    // past the point of being app-limited, i.e. it returned `0` if a connection never grew the
+    // congestion window. This test asserts that it is getting initialized to the initial window
+    // size on the first ack, even if the congestion window doesn't grow.
+    fn cwnd_stat_app_limited() {
+        let mut cc = make_cc_cubic();
+        let now = now();
+        let mut cc_stats = CongestionControlStats::default();
+        let rtt_estimate = RttEstimate::new(crate::DEFAULT_INITIAL_RTT);
+
+        let cwnd_initial = cc.cwnd();
+
+        // Send and ack a single packet — not enough to fill cwnd, so app-limited.
+        let pkt = sent::make_packet(0, now, cc.max_datagram_size());
+        cc.on_packet_sent(&pkt, now);
+        cc.on_packets_acked(&[pkt], &rtt_estimate, now, &mut cc_stats);
+
+        assert_eq!(cc.cwnd(), cwnd_initial);
+        assert_eq!(cc_stats.cwnd, Some(cwnd_initial));
     }
 
     #[test]
