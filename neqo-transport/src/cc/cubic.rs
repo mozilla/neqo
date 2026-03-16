@@ -74,7 +74,7 @@ pub struct State {
     /// ```
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
-    w_max: f64,
+    w_max: Option<f64>,
     /// > The time in seconds at which the current congestion avoidance stage started.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-variables-of-interest>
@@ -89,7 +89,7 @@ impl Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "state [w_max: {}, k: {}, t_epoch: {:?}]",
+            "state [w_max: {:?}, k: {}, t_epoch: {:?}]",
             self.w_max, self.k, self.t_epoch
         )?;
         Ok(())
@@ -205,8 +205,8 @@ impl Cubic {
     /// `w_max` and `cwnd_epoch` it becomes:
     ///
     /// `k = cubic_root((w_max - cwnd_epoch)/SMSS/C)`
-    fn calc_k(&self, cwnd_epoch: f64, max_datagram_size: f64) -> f64 {
-        ((self.current.w_max - cwnd_epoch) / max_datagram_size / Self::C).cbrt()
+    fn calc_k(w_max: f64, cwnd_epoch: f64, max_datagram_size: f64) -> f64 {
+        ((w_max - cwnd_epoch) / max_datagram_size / Self::C).cbrt()
     }
 
     /// `w_cubic(t) = C*(t-K)^3 + w_max`
@@ -219,8 +219,8 @@ impl Cubic {
     /// `w_max` already is in bytes the formula becomes:
     ///
     /// `w_cubic(t) = (C*(t-K)^3) * SMSS + w_max`
-    fn w_cubic(&self, t: f64, max_datagram_size: f64) -> f64 {
-        (Self::C * (t - self.current.k).powi(3)).mul_add(max_datagram_size, self.current.w_max)
+    fn w_cubic(&self, t: f64, w_max: f64, max_datagram_size: f64) -> f64 {
+        (Self::C * (t - self.current.k).powi(3)).mul_add(max_datagram_size, w_max)
     }
 
     /// Sets `w_est`, `k`, `t_epoch` and `reno_acked_bytes` at the start of a new epoch
@@ -246,26 +246,27 @@ impl Cubic {
         // If `w_max < cwnd_epoch` we take the cubic root from a negative value in `calc_k()`. That
         // could only happen if somehow `cwnd` get's increased between calling `reduce_cwnd()` and
         // `start_epoch()`. This could happen if we exit slow start without packet loss, thus never
-        // had a congestion event and called `reduce_cwnd()` which means `w_max` was never set and
-        // is still it's default `0.0` value. For those cases we reset/initialize `w_max` here and
-        // appropiately set `k` to `0.0` (`k` is the time for `cwnd` to reach `w_max`).
-        self.current.k = if self.current.w_max <= curr_cwnd {
-            self.current.w_max = curr_cwnd;
-            0.0
-        } else {
-            self.calc_k(curr_cwnd, max_datagram_size)
+        // had a congestion event and called `reduce_cwnd()` which means `w_max` was never set
+        // (`None`). For those cases we reset/initialize `w_max` here and appropriately set `k` to
+        // `0.0` (`k` is the time for `cwnd` to reach `w_max`).
+        self.current.k = match self.current.w_max {
+            Some(w_max) if w_max > curr_cwnd => Self::calc_k(w_max, curr_cwnd, max_datagram_size),
+            _ => {
+                self.current.w_max = Some(curr_cwnd);
+                0.0
+            }
         };
         qtrace!("[{self}] New epoch");
     }
 
     #[cfg(test)]
-    pub const fn w_max(&self) -> f64 {
+    pub const fn w_max(&self) -> Option<f64> {
         self.current.w_max
     }
 
     #[cfg(test)]
     pub const fn set_w_max(&mut self, w_max: f64) {
-        self.current.w_max = w_max;
+        self.current.w_max = Some(w_max);
     }
 }
 
@@ -318,9 +319,13 @@ impl WindowAdjustment for Cubic {
         //
         // In neqo the target congestion window is in bytes.
         let t = now.saturating_duration_since(t_epoch);
+        let w_max = self
+            .current
+            .w_max
+            .expect("w_max must be set in self.start_epoch");
         // cwnd <= target_cubic <= cwnd * 1.5
         let target_cubic = f64::clamp(
-            self.w_cubic((t + min_rtt).as_secs_f64(), max_datagram_size),
+            self.w_cubic((t + min_rtt).as_secs_f64(), w_max, max_datagram_size),
             curr_cwnd,
             curr_cwnd * 1.5,
         );
@@ -435,13 +440,18 @@ impl WindowAdjustment for Cubic {
         //
         // "Check cwnd + MAX_DATAGRAM_SIZE instead of cwnd because with cwnd in bytes, cwnd may be
         // slightly off."
-        self.current.w_max =
-            if curr_cwnd_f64 + convert_to_f64(max_datagram_size) < self.current.w_max {
+        self.current.w_max = Some(
+            if self
+                .current
+                .w_max
+                .is_some_and(|w| curr_cwnd_f64 + convert_to_f64(max_datagram_size) < w)
+            {
                 curr_cwnd_f64 * Self::FAST_CONVERGENCE_FACTOR
             } else {
                 curr_cwnd_f64
-            };
-        cc_stats.w_max = Some(self.current.w_max);
+            },
+        );
+        cc_stats.w_max = self.current.w_max;
 
         // Reducing the congestion window and resetting time
         self.current.t_epoch = None;
@@ -477,7 +487,6 @@ impl WindowAdjustment for Cubic {
             self.current
         );
         self.current = stored;
-        // The stat is `None` if it is unset, so set it to that instead of `Some(0.0)`.
-        cc_stats.w_max = (self.current.w_max != 0.0).then_some(self.current.w_max);
+        cc_stats.w_max = self.current.w_max;
     }
 }

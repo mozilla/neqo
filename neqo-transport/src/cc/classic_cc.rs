@@ -1628,7 +1628,9 @@ mod tests {
         assert_eq!(cc.current.phase, Phase::RecoveryStart);
         assert!(cc_stats.slow_start_exit_cwnd.is_some());
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
-        assert_eq!(cc_stats.w_max, Some(cwnd_before_loss as f64));
+        #[expect(clippy::cast_precision_loss, reason = "cwnd_before_loss is small")]
+        let expected_w_max = cwnd_before_loss as f64;
+        assert_eq!(cc_stats.w_max, Some(expected_w_max));
         assert_eq!(
             cc.cwnd(),
             cc.cwnd_initial() * Cubic::BETA_USIZE_DIVIDEND / Cubic::BETA_USIZE_DIVISOR
