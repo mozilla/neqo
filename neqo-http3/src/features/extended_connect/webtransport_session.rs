@@ -419,11 +419,9 @@ impl Protocol for Session {
         _buf: &[u8],
         _now: Instant,
     ) -> Res<()> {
-        debug_assert!(
-            false,
-            "[{self}] WebTransport does not support datagram capsules."
-        );
-        Ok(())
+        // WebTransport uses QUIC datagrams, not HTTP DATAGRAM Capsules.
+        // datagram_capsule_support() returns false so this should never be called.
+        Err(Error::Unavailable)
     }
 
     fn set_datagram_high_water_mark(&mut self, mark: f64) {
