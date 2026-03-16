@@ -528,6 +528,16 @@ pub enum WebTransportServerEvent {
         reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     },
+    /// The remote endpoint sent a `WT_DRAIN_SESSION` capsule, signalling that
+    /// it wishes to gracefully close this session.
+    ///
+    /// The server application should stop creating new streams on the session
+    /// and close it once existing activity is complete.
+    ///
+    /// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.7>
+    Draining {
+        session: WebTransportRequest,
+    },
     NewStream(Http3OrWebTransportStream),
     Datagram {
         session: WebTransportRequest,
@@ -738,6 +748,12 @@ impl Http3ServerEvents {
                 reason,
                 headers,
             },
+        ));
+    }
+
+    pub(crate) fn webtransport_session_draining(&self, session: WebTransportRequest) {
+        self.insert(Http3ServerEvent::WebTransport(
+            WebTransportServerEvent::Draining { session },
         ));
     }
 

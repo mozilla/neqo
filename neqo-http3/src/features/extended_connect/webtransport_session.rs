@@ -80,14 +80,14 @@ impl Session {
     }
 
     /// Mark session as draining (called when a `WT_DRAIN_SESSION` capsule is received).
-    // TODO: call from WT_DRAIN_SESSION capsule handler and from GOAWAY path.
-    #[expect(dead_code, reason = "pending WT_DRAIN_SESSION capsule implementation")]
+    // TODO: also wire into GOAWAY path.
     pub(crate) fn set_draining(&mut self) {
         self.draining = true;
     }
 
     /// Returns `true` if the session has been marked as draining.
-    #[expect(dead_code, reason = "pending WT_DRAIN_SESSION capsule implementation")]
+    // TODO: use once GOAWAY drain path is wired in.
+    #[expect(dead_code, reason = "pending GOAWAY drain integration")]
     pub(crate) fn is_draining(&self) -> bool {
         self.draining
     }
@@ -204,7 +204,7 @@ impl Protocol for Session {
         // > datagrams until they can be associated with an
         // > established session.
         //
-        // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#section-4.5>
+        // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.5>
         #[expect(clippy::iter_over_hash_type, reason = "no defined order necessary")]
         for stream_id in self.pending_streams.drain() {
             events.extended_connect_new_stream(
@@ -244,31 +244,38 @@ impl Protocol for Session {
             )
             .map_err(|_| Error::HttpGeneralProtocolStream)?;
         qtrace!("[{self}] Received frame: {f:?} fin={fin}");
-        if let Some(WebTransportFrame::CloseSession { error, message }) = f {
-            events.session_end(
-                ExtendedConnectType::WebTransport,
-                self.id,
-                CloseReason::Clean { error, message },
-                None,
-            );
-            if fin {
-                Ok(Some(State::Done))
-            } else {
-                Ok(Some(State::FinPending))
+        match f {
+            Some(WebTransportFrame::CloseSession { error, message }) => {
+                events.session_end(
+                    ExtendedConnectType::WebTransport,
+                    self.id,
+                    CloseReason::Clean { error, message },
+                    None,
+                );
+                if fin {
+                    Ok(Some(State::Done))
+                } else {
+                    Ok(Some(State::FinPending))
+                }
             }
-        } else if fin {
-            events.session_end(
-                ExtendedConnectType::WebTransport,
-                self.id,
-                CloseReason::Clean {
-                    error: 0,
-                    message: String::new(),
-                },
-                None,
-            );
-            Ok(Some(State::Done))
-        } else {
-            Ok(None)
+            Some(WebTransportFrame::DrainSession) => {
+                self.set_draining();
+                events.session_draining(ExtendedConnectType::WebTransport, self.id);
+                Ok(None)
+            }
+            None if fin => {
+                events.session_end(
+                    ExtendedConnectType::WebTransport,
+                    self.id,
+                    CloseReason::Clean {
+                        error: 0,
+                        message: String::new(),
+                    },
+                    None,
+                );
+                Ok(Some(State::Done))
+            }
+            None => Ok(None),
         }
     }
 
@@ -305,7 +312,7 @@ impl Protocol for Session {
                 // > streams and datagrams until they can be associated with an
                 // > established session.
                 //
-                // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#section-4.5>
+                // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.5>
                 self.pending_streams.insert(stream_id);
             }
             State::Active => {
