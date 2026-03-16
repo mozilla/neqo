@@ -220,7 +220,7 @@ impl SlowStart for HyStart {
             );
             if current >= last + rtt_thresh {
                 self.css_baseline_min_rtt = Some(current);
-                cc_stats.css_entries += 1;
+                cc_stats.hystart_css_entries += 1;
                 qdebug!(
                     "HyStart: on_packets_acked -> entered CSS because cur_min={current:?} >= last_min={last:?} + thresh={rtt_thresh:?}"
                 );
@@ -275,7 +275,7 @@ impl SlowStart for HyStart {
         // If a round ends while in CSS increase the counter and do a check if enough rounds
         // to exit to congestion avoidance have been completed.
         self.css_round_count += 1;
-        cc_stats.css_rounds_finished += 1;
+        cc_stats.hystart_css_rounds_finished += 1;
         let exit_slow_start = self.css_round_count >= Self::CSS_ROUNDS;
         qdebug!(
             "HyStart: on_packets_acked -> exit={exit_slow_start} because css_rounds={} >= {}",

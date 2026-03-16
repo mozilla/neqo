@@ -162,10 +162,10 @@ pub struct CongestionControlStats {
     /// Number of times HyStart++ entered CSS (Conservative Slow Start). Only meaningful when
     /// HyStart++ is enabled. Higher values indicate that HyStart++ had many spurious CSS
     /// entries, spending more time throttling slow start growth.
-    pub css_entries: usize,
+    pub hystart_css_entries: usize,
     /// Number of CSS (Conservative Slow Start) rounds completed. Only meaningful when HyStart++ is
     /// enabled. Higher values indicate the heuristic spent more time throttling slow start growth.
-    pub css_rounds_finished: usize,
+    pub hystart_css_rounds_finished: usize,
     /// The current congestion window size (in bytes). Updated throughout the connection
     /// lifetime.
     pub cwnd: Option<usize>,

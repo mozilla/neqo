@@ -255,7 +255,7 @@ fn css_entry_triggered_on_rtt_increase() {
     maybe_enter_css(&mut hystart, BASE_RTT, HIGH_RTT, &mut cc_stats);
 
     assert!(hystart.in_css(), "CSS should be entered on RTT increase");
-    assert_eq!(cc_stats.css_entries, 1);
+    assert_eq!(cc_stats.hystart_css_entries, 1);
 }
 
 #[test]
@@ -297,7 +297,7 @@ fn css_entry_triggered_on_min_rtt_thresh() {
         hystart.in_css(),
         "CSS should be entered with MIN_RTT_THRESH"
     );
-    assert_eq!(cc_stats.css_entries, 1);
+    assert_eq!(cc_stats.hystart_css_entries, 1);
 }
 
 #[test]
@@ -320,7 +320,7 @@ fn css_entry_triggered_on_max_rtt_thresh() {
         hystart.in_css(),
         "CSS should be entered with MAX_RTT_THRESH"
     );
-    assert_eq!(cc_stats.css_entries, 1);
+    assert_eq!(cc_stats.hystart_css_entries, 1);
 }
 
 #[test]
@@ -387,14 +387,14 @@ fn css_exit_after_n_rounds() {
                 HyStart::CSS_ROUNDS,
             );
             assert!(hystart.in_css(), "Should still be in CSS");
-            assert_eq!(cc_stats.css_rounds_finished, round);
+            assert_eq!(cc_stats.hystart_css_rounds_finished, round);
         } else {
             assert!(
                 exit_slow_start.is_some(),
                 "Should exit after {} rounds have completed",
                 HyStart::CSS_ROUNDS
             );
-            assert_eq!(cc_stats.css_rounds_finished, HyStart::CSS_ROUNDS);
+            assert_eq!(cc_stats.hystart_css_rounds_finished, HyStart::CSS_ROUNDS);
         }
     }
 }
@@ -407,7 +407,7 @@ fn css_back_to_slow_start_on_rtt_decrease() {
     let mut cc_stats = CongestionControlStats::default();
     maybe_enter_css(&mut hystart, BASE_RTT, CSS_BASELINE_RTT, &mut cc_stats);
     assert!(hystart.in_css(), "Should have entered CSS");
-    assert_eq!(cc_stats.css_entries, 1);
+    assert_eq!(cc_stats.hystart_css_entries, 1);
 
     // Start a new round in CSS
     let new_window_end = 300;
@@ -596,7 +596,7 @@ fn integration_full_slow_start_to_css_to_ca() {
                 stats.slow_start_exit_reason,
                 Some(SlowStartExitReason::Heuristic)
             );
-            assert_eq!(stats.css_rounds_finished, HyStart::CSS_ROUNDS);
+            assert_eq!(stats.hystart_css_rounds_finished, HyStart::CSS_ROUNDS);
             break;
         }
 
