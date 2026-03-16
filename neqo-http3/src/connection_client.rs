@@ -840,12 +840,14 @@ impl Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<bool> {
-        qtrace!("webtransport_send_datagram session:{session_id:?}");
+        qtrace!("webtransport_send_datagram session:{session_id:?}, sendGroup:{send_group_id}, sendOrder:{send_order}");
         let (below_watermark, dropped) = self
             .base_handler
-            .webtransport_send_datagram(session_id, &mut self.conn, buf, id, now)?;
-        if let Some((tracking_id, outcome)) = dropped {
+            .webtransport_send_datagram(session_id, &mut self.conn, buf, id, now, send_group_id, send_order)?;
+        if let Some((Some(tracking_id), outcome)) = dropped {
             self.events.insert(Http3ClientEvent::WebTransport(
                 WebTransportEvent::DatagramOutcome {
                     session_id,
@@ -870,11 +872,13 @@ impl Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<bool> {
-        qtrace!("connect_udp_send_datagram session:{session_id:?}");
+        qtrace!("connect_udp_send_datagram session:{session_id:?}, sendGroup:{send_group_id}, sendOrder:{send_order}");
         let (below_watermark, _dropped) = self
             .base_handler
-            .connect_udp_send_datagram(session_id, &mut self.conn, buf, id, now)?;
+            .connect_udp_send_datagram(session_id, &mut self.conn, buf, id, now, send_group_id, send_order)?;
         Ok(below_watermark)
     }
 
@@ -908,18 +912,21 @@ impl Http3Client {
         &mut self,
         session_id: StreamId,
         max_age: f64,
+        now: Instant,
     ) -> Res<()> {
         let expired = self
             .base_handler
-            .webtransport_set_datagram_max_age(session_id, max_age)?;
+            .webtransport_set_datagram_max_age(session_id, max_age, now)?;
         for (tracking_id, outcome) in expired {
-            self.events.insert(Http3ClientEvent::WebTransport(
-                WebTransportEvent::DatagramOutcome {
-                    session_id,
-                    tracking_id,
-                    outcome,
-                },
-            ));
+            if let Some(tracking_id) = tracking_id {
+                self.events.insert(Http3ClientEvent::WebTransport(
+                    WebTransportEvent::DatagramOutcome {
+                        session_id,
+                        tracking_id,
+                        outcome,
+                    },
+                ));
+            }
         }
         Ok(())
     }
@@ -937,10 +944,11 @@ impl Http3Client {
         &mut self,
         session_id: StreamId,
         max_age: f64,
+        now: Instant,
     ) -> Res<()> {
         // Expired outcomes are discarded; ConnectUdpEvent has no DatagramOutcome variant.
         self.base_handler
-            .connect_udp_set_datagram_max_age(session_id, max_age)
+            .connect_udp_set_datagram_max_age(session_id, max_age, now)
             .map(|_| ())
     }
 
@@ -1123,15 +1131,17 @@ impl Http3Client {
                 // moved to the QUIC send queue here, during process_http3(). This
                 // is called from process_output()/process(), so datagrams are sent
                 // on the next outgoing packet after the caller triggers processing.
-                let outcomes = self.base_handler.process_all_datagram_queues(&mut self.conn);
+                let outcomes = self.base_handler.process_all_datagram_queues(&mut self.conn, now);
                 for (session_id, tracking_id, outcome) in outcomes {
-                    self.events.insert(Http3ClientEvent::WebTransport(
-                        WebTransportEvent::DatagramOutcome {
-                            session_id,
-                            tracking_id,
-                            outcome,
-                        },
-                    ));
+                    if let Some(tracking_id) = tracking_id {
+                        self.events.insert(Http3ClientEvent::WebTransport(
+                            WebTransportEvent::DatagramOutcome {
+                                session_id,
+                                tracking_id,
+                                outcome,
+                            },
+                        ));
+                    }
                 }
             }
             Http3State::Closed { .. } => {}

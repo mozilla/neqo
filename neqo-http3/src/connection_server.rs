@@ -261,10 +261,12 @@ impl Http3ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler
-            .webtransport_send_datagram(session_id, conn, buf, id, now)
+            .webtransport_send_datagram(session_id, conn, buf, id, now, send_group_id, send_order)
             .map(|_| ())
     }
 
@@ -275,10 +277,12 @@ impl Http3ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler
-            .connect_udp_send_datagram(session_id, conn, buf, id, now)
+            .connect_udp_send_datagram(session_id, conn, buf, id, now, send_group_id, send_order)
             .map(|_| ())
     }
 
@@ -295,7 +299,7 @@ impl Http3ServerHandler {
             self.check_result(conn, now, &res);
 
             // Process datagram queues to send any queued datagrams
-            let _outcomes = self.base_handler.process_all_datagram_queues(conn);
+            let _outcomes = self.base_handler.process_all_datagram_queues(conn, now);
         }
     }
 
