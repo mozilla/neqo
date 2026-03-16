@@ -1680,8 +1680,8 @@ mod tests {
             &mut cc_stats,
         );
         assert_eq!(cc.current.phase, Phase::SlowStart);
-        assert!(cc_stats.slow_start_exit_cwnd.is_none());
-        assert!(cc_stats.slow_start_exit_reason.is_none());
+        assert_eq!(cc_stats.slow_start_exit_cwnd, None);
+        assert_eq!(cc_stats.slow_start_exit_reason, None);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 1);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
@@ -1884,7 +1884,7 @@ mod tests {
 
         assert!(cc.current.phase.in_slow_start());
         assert_eq!(cc_stats.slow_start_exit_cwnd, None);
-        assert!(cc_stats.slow_start_exit_reason.is_none());
+        assert_eq!(cc_stats.slow_start_exit_reason, None);
 
         let pkt1 = sent::make_packet(1, now, 1000);
         cc.on_packet_sent(&pkt1, now);
@@ -1926,7 +1926,7 @@ mod tests {
 
             assert!(cc.current.phase.in_slow_start());
             assert_eq!(cc_stats.slow_start_exit_cwnd, None);
-            assert!(cc_stats.slow_start_exit_reason.is_none());
+            assert_eq!(cc_stats.slow_start_exit_reason, None);
         }
     }
 
