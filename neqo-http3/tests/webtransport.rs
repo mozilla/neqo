@@ -18,7 +18,8 @@ use neqo_http3::{
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use test_fixture::{
     CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
-    DEFAULT_SERVER_NAME, anti_replay, exchange_packets, fixture_init, now,
+    DEFAULT_SERVER_NAME, anti_replay, exchange_packets, fixture_init,
+    http3_client_with_params, http3_server_with_params, now,
 };
 
 fn connect() -> (Http3Client, Http3Server) {
@@ -693,5 +694,104 @@ fn wt_stats_bytes_acknowledged() {
         "bytes_acked should increase after ACK: {} -> {}",
         initial_acked,
         final_stats.bytes_acked
+    );
+}
+
+/// Verify that `Http3ClientEvent::StreamCreatable` fires for both bidi and unidi
+/// stream types during connection establishment.  This event is the neqo-http3
+/// signal used by the `waitUntilAvailable` WebTransport feature: when the DOM
+/// side is waiting for stream quota to become available, it listens for this
+/// event to retry queued stream-creation requests.
+#[test]
+fn stream_creatable_event_on_connect() {
+    // Use exchange_packets (is_handshake=true) which handles authentication via
+    // peer_certificate() without draining the Http3Client event queue, so all
+    // events generated during the handshake remain available for inspection.
+    let mut client = http3_client_with_params(Http3Parameters::default().webtransport(true));
+    let mut server = http3_server_with_params(Http3Parameters::default().webtransport(true));
+    exchange_packets(&mut client, &mut server, true, None);
+
+    let events: Vec<Http3ClientEvent> = client.events().collect();
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Http3ClientEvent::StreamCreatable { stream_type }
+                if *stream_type == StreamType::BiDi)),
+        "Expected StreamCreatable(BiDi) event during connection"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Http3ClientEvent::StreamCreatable { stream_type }
+                if *stream_type == StreamType::UniDi)),
+        "Expected StreamCreatable(UniDi) event during connection"
+    );
+}
+
+/// Verify that `Http3ClientEvent::StreamCreatable` fires with the correct
+/// `stream_type` when stream quota is replenished via a `MAX_STREAMS` frame.
+/// This is the core mechanism behind `waitUntilAvailable`: the client waits for
+/// quota, the server eventually grants more, and neqo-http3 signals readiness.
+#[test]
+fn stream_creatable_event_on_max_streams() {
+    // HTTP/3 always creates 3 client-initiated unidi streams (control + QPACK
+    // encoder + decoder).  Allow exactly one more for a WebTransport unidi
+    // stream so quota is exhausted after the first WT stream is opened.
+    // Unidi streams (server-recv only) are retired as soon as the client sends
+    // FIN — no server-side send close required — making the MAX_STREAMS path
+    // deterministic without needing to coordinate both ends.
+    let conn_params = ConnectionParameters::default().max_streams(StreamType::UniDi, 4);
+    let mut client = http3_client_with_params(
+        Http3Parameters::default()
+            .webtransport(true)
+            .connection_parameters(conn_params.clone()),
+    );
+    let mut server = http3_server_with_params(
+        Http3Parameters::default()
+            .webtransport(true)
+            .connection_parameters(conn_params),
+    );
+    exchange_packets(&mut client, &mut server, true, None);
+    let _ = client.events().count(); // drain setup events
+
+    let wt_session = create_wt_session(&mut client, &mut server);
+    let _ = client.events().count(); // drain session events
+
+    // Use the single remaining unidi quota slot.
+    let wt_stream = client
+        .webtransport_create_stream(wt_session.stream_id(), StreamType::UniDi)
+        .unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+    let _ = client.events().count(); // drain
+
+    // Quota is exhausted — another unidi WT stream creation must fail.
+    assert!(
+        client
+            .webtransport_create_stream(wt_session.stream_id(), StreamType::UniDi)
+            .is_err(),
+        "Expected stream creation to fail when unidi quota is exhausted"
+    );
+
+    // Send data then FIN on the client-side unidi stream.  A WT unidi stream
+    // whose transport-level FIN arrives together with the stream-type header
+    // (i.e. no application bytes follow) is treated as H3_GENERAL_PROTOCOL_ERROR
+    // by the stream-type reader (see `NewStreamHeadReader::get_type`).  Sending
+    // at least one byte ensures the server reads the session-ID varint without
+    // seeing FIN, so the stream is accepted.  After the server reads the data
+    // and FIN it retires the recv slot, which triggers MAX_STREAMS(uni) to the
+    // client.
+    client.send_data(wt_stream, b"x", now()).unwrap();
+    client.stream_close_send(wt_stream, now()).unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+
+    // The server sent MAX_STREAMS(uni); verify neqo-http3 surfaces the event.
+    assert!(
+        client.events().any(|e| matches!(
+            e,
+            Http3ClientEvent::StreamCreatable { stream_type }
+                if stream_type == StreamType::UniDi
+        )),
+        "Expected StreamCreatable(UniDi) after MAX_STREAMS replenishment"
     );
 }
