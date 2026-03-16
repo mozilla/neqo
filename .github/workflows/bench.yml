@@ -2,7 +2,6 @@ name: cargo bench
 on:
   workflow_call:
   pull_request:
-    branches: ["main"]
   workflow_dispatch:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true

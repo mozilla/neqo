@@ -1,7 +1,6 @@
 name: Find PR mutants
 on:
   pull_request:
-    branches: ["main"]
   merge_group:
 
 concurrency:
