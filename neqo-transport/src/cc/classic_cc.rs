@@ -1626,7 +1626,7 @@ mod tests {
 
         // 2. Lose packets (1, 2) --> `RecoveryStart`, 1 event, reduced cwnd
         let cwnd_before_loss = cc.cwnd();
-        assert!(cc_stats.w_max.is_none());
+        assert_eq!(cc_stats.w_max, None);
         let mut lost_pkt1 = pkt1.clone();
         let mut lost_pkt2 = pkt2.clone();
         lost_pkt1.declare_lost(now, sent::LossTrigger::TimeThreshold);
@@ -1646,9 +1646,13 @@ mod tests {
             Some(SlowStartExitReason::CongestionEvent)
         );
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
-        #[expect(clippy::cast_precision_loss, reason = "cwnd_before_loss is small")]
-        let expected_w_max = cwnd_before_loss as f64;
-        assert_eq!(cc_stats.w_max, Some(expected_w_max));
+        #[expect(
+            clippy::cast_sign_loss,
+            clippy::cast_possible_truncation,
+            reason = "w_max is non-negative and represents whole bytes"
+        )]
+        let w_max_stat = cc_stats.w_max.unwrap() as usize;
+        assert_eq!(w_max_stat, cwnd_before_loss);
         assert_eq!(
             cc.cwnd(),
             cc.cwnd_initial() * Cubic::BETA_USIZE_DIVIDEND / Cubic::BETA_USIZE_DIVISOR
@@ -1696,7 +1700,7 @@ mod tests {
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 1);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
-        assert!(cc_stats.w_max.is_none());
+        assert_eq!(cc_stats.w_max, None);
     }
 
     /// This tests a scenario where spurious detection happens late, after cwnd has recovered and
