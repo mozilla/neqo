@@ -338,6 +338,11 @@ impl<S: HttpServer + Unpin> Runner<S> {
                                 // Drop the packets and let QUIC handle retransmission.
                                 break;
                             }
+                            Err(e) if neqo_udp::is_network_error(&e) => {
+                                qdebug!("Send failed with network error {e}, dropping datagram");
+                                // Server cannot initiate migration, so nothing else to do here.
+                                break;
+                            }
                             e @ Err(_) => return e,
                         }
                     }

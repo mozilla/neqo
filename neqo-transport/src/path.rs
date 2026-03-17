@@ -270,6 +270,55 @@ impl Paths {
         }
     }
 
+    /// Called when a UDP send for a datagram on this connection fails with a network error that
+    /// indicates that the path may have become unavailable.
+    ///
+    /// Schedules a `PATH_CHALLENGE` liveness re-probe for the path. If the path is
+    /// primary and another valid path exists, immediately falls back to it.
+    /// Returns `true` if fallback to another path occurred (so the caller can reset
+    /// loss recovery state).
+    pub fn on_path_unavailable(
+        &mut self,
+        local: SocketAddr,
+        remote: SocketAddr,
+        now: Instant,
+    ) -> bool {
+        let Some(path) = self
+            .paths
+            .iter()
+            .find(|p| p.borrow().received_on(local, remote))
+            .cloned()
+        else {
+            return false;
+        };
+
+        let is_primary = path.borrow().is_primary();
+        path.borrow_mut().mark_failed_send();
+
+        if !is_primary {
+            return false;
+        }
+
+        // Primary path failed — try to fall back to another valid path.
+        if let Some(fallback) = self
+            .paths
+            .iter()
+            .rev() // More recent paths are toward the end.
+            .find(|p| p.borrow().is_valid() && !Rc::ptr_eq(p, &path))
+            .cloned()
+        {
+            qinfo!(
+                "[{}] Falling back to {} after send error",
+                path.borrow(),
+                fallback.borrow()
+            );
+            drop(self.select_primary(&fallback, now));
+            return true;
+        }
+
+        false
+    }
+
     /// Get when the next call to `process_timeout()` should be scheduled.
     pub fn next_timeout(&self, pto: Duration) -> Option<Instant> {
         self.paths
@@ -642,7 +691,7 @@ impl Path {
     }
 
     /// Determine if this path was the one that the provided datagram was received on.
-    fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
+    pub(crate) fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
         self.local == local && self.remote == remote
     }
 
@@ -758,6 +807,19 @@ impl Path {
     /// Whether the path has been validated.
     pub const fn is_valid(&self) -> bool {
         self.validated.is_some()
+    }
+
+    /// A send on this path failed with a network error. Schedules a `PATH_CHALLENGE`.
+    pub(crate) fn mark_failed_send(&mut self) {
+        let probe_count = match self.state {
+            ProbeState::Valid => Some(0),
+            ProbeState::Probing { probe_count, .. } => Some(probe_count),
+            ProbeState::ProbeNeeded { .. } | ProbeState::Failed => None,
+        };
+        if let Some(probe_count) = probe_count {
+            qdebug!("[{self}] Send error, scheduling path liveness probe");
+            self.state = ProbeState::ProbeNeeded { probe_count };
+        }
     }
 
     /// Handle a `PATH_RESPONSE` frame. Returns true if the response was accepted.

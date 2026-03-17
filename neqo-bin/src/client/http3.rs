@@ -165,6 +165,10 @@ impl super::Client for Http3Client {
     fn has_events(&self) -> bool {
         Provider::has_events(self)
     }
+
+    fn on_path_unavailable(&mut self, local: SocketAddr, remote: SocketAddr, now: Instant) {
+        self.on_path_unavailable(local, remote, now);
+    }
 }
 
 impl super::Handler for Handler {
