@@ -21,6 +21,8 @@ use std::{
 use log::{Level, log_enabled};
 use neqo_common::{Datagram, Tos, datagram, qdebug, qtrace};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
+#[cfg(windows)]
+use windows::Win32::Networking::WinSock;
 
 /// Receive buffer size
 ///
@@ -81,6 +83,12 @@ pub fn send_inner(
             );
             return Ok(());
         }
+        Err(e) if is_enobufs(&e) => {
+            // On macOS/BSD, ENOBUFS means the NIC transmit queue is momentarily
+            // full. The packet is already dropped by the kernel. Signal WouldBlock.
+            qdebug!("Interface send queue full (ENOBUFS), signaling WouldBlock: {e}");
+            return Err(io::Error::from(io::ErrorKind::WouldBlock));
+        }
         e @ Err(_) => return e,
     }
 
@@ -96,27 +104,27 @@ pub fn send_inner(
     Ok(())
 }
 
-#[expect(
-    clippy::unnecessary_map_or,
-    reason = "Clippy ignores the #[cfg] attribute."
-)]
 fn is_emsgsize(e: &io::Error) -> bool {
-    e.raw_os_error().map_or(false, |e| {
+    e.raw_os_error().is_some_and(|e| {
         #[cfg(unix)]
-        {
-            e == libc::EMSGSIZE
-        }
+        return e == libc::EMSGSIZE;
         #[cfg(windows)]
-        {
-            e == windows::Win32::Networking::WinSock::WSAEMSGSIZE.0
-                // WSAEINVAL is returned when the Windows USO (UDP Segmentation Offload)
-                // segment size exceeds the supported limit.
-                || e == windows::Win32::Networking::WinSock::WSAEINVAL.0
-        }
+        // WSAEINVAL is returned when the Windows USO (UDP Segmentation Offload)
+        // segment size exceeds the supported limit.
+        return e == WinSock::WSAEMSGSIZE.0 || e == WinSock::WSAEINVAL.0;
         #[cfg(not(any(unix, windows)))]
-        {
-            false
-        }
+        return false;
+    })
+}
+
+fn is_enobufs(e: &io::Error) -> bool {
+    e.raw_os_error().is_some_and(|e| {
+        #[cfg(unix)]
+        return e == libc::ENOBUFS;
+        #[cfg(windows)]
+        return e == WinSock::WSAENOBUFS.0;
+        #[cfg(not(any(unix, windows)))]
+        return false;
     })
 }
 
@@ -350,16 +358,18 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn is_emsgsize_true_for_emsgsize() {
-        let err = io::Error::from_raw_os_error(libc::EMSGSIZE);
-        assert!(is_emsgsize(&err));
-    }
+    fn is_emsgsize_and_is_enobufs_are_disjoint() {
+        let emsgsize = io::Error::from_raw_os_error(libc::EMSGSIZE);
+        assert!(is_emsgsize(&emsgsize));
+        assert!(!is_enobufs(&emsgsize));
 
-    #[test]
-    #[cfg(unix)]
-    fn is_emsgsize_false_for_other_errors() {
-        let err = io::Error::from_raw_os_error(libc::EAGAIN);
-        assert!(!is_emsgsize(&err));
+        let enobufs = io::Error::from_raw_os_error(libc::ENOBUFS);
+        assert!(!is_emsgsize(&enobufs));
+        assert!(is_enobufs(&enobufs));
+
+        let eagain = io::Error::from_raw_os_error(libc::EAGAIN);
+        assert!(!is_emsgsize(&eagain));
+        assert!(!is_enobufs(&eagain));
     }
 
     #[test]
@@ -385,9 +395,10 @@ mod tests {
     }
 
     #[test]
-    fn is_emsgsize_false_for_non_os_error() {
+    fn is_emsgsize_and_is_enobufs_false_for_non_os_error() {
         let err = io::Error::other("test error");
         assert!(!is_emsgsize(&err));
+        assert!(!is_enobufs(&err));
     }
 
     #[test]
