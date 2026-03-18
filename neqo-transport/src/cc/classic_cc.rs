@@ -19,7 +19,6 @@ use super::CongestionController;
 use crate::{
     Pmtud,
     cc::CongestionEvent,
-    pace::Pacer,
     packet, qlog,
     recovery::sent,
     rtt::RttEstimate,
@@ -211,8 +210,6 @@ pub struct ClassicCongestionController<S, T> {
     /// - [`Self::bytes_in_flight`] is not stored because if it was to be restored it might get
     ///   out-of-sync with the actual number of bytes-in-flight on the path.
     stored: Option<State>,
-    /// The most recently observed smoothed RTT, used to compute the pacing rate.
-    last_rtt: Option<Duration>,
 }
 
 impl<S: Display, T: Display> Display for ClassicCongestionController<S, T> {
@@ -333,8 +330,6 @@ where
             new_acked += pkt.len();
         }
 
-        self.last_rtt = Some(rtt_est.estimate());
-
         if is_app_limited {
             self.congestion_control.on_app_limited();
             qdebug!(
@@ -418,12 +413,7 @@ where
             [
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::BytesInFlight(self.bytes_in_flight),
-            ]
-            .into_iter()
-            .chain(
-                Pacer::rate(self.current.congestion_window, rtt_est.estimate())
-                    .map(qlog::Metric::PacingRate),
-            ),
+            ],
             now,
         );
 
@@ -542,7 +532,6 @@ where
 
     fn discard_in_flight(&mut self, now: Instant) {
         self.bytes_in_flight = 0;
-        self.last_rtt = None;
         qlog::metrics_updated(
             &mut self.qlog,
             [qlog::Metric::BytesInFlight(self.bytes_in_flight)],
@@ -614,7 +603,6 @@ where
             pmtud,
             current: State::new(mtu),
             stored: None,
-            last_rtt: None,
         }
     }
 
@@ -821,13 +809,7 @@ where
                         [
                             qlog::Metric::CongestionWindow(self.current.congestion_window),
                             qlog::Metric::SsThresh(self.current.ssthresh),
-                        ]
-                        .into_iter()
-                        .chain(
-                            self.last_rtt
-                                .and_then(|r| Pacer::rate(self.current.congestion_window, r))
-                                .map(qlog::Metric::PacingRate),
-                        ),
+                        ],
                         now,
                     );
 
@@ -909,13 +891,7 @@ where
             [
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::SsThresh(self.current.ssthresh),
-            ]
-            .into_iter()
-            .chain(
-                self.last_rtt
-                    .and_then(|r| Pacer::rate(self.current.congestion_window, r))
-                    .map(qlog::Metric::PacingRate),
-            ),
+            ],
             now,
         );
         let trigger =

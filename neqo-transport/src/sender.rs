@@ -18,6 +18,7 @@ use crate::{
     },
     pace::Pacer,
     pmtud::Pmtud,
+    qlog,
     recovery::sent,
     rtt::RttEstimate,
     stats::CongestionControlStats,
@@ -30,6 +31,8 @@ pub const PACING_BURST_SIZE: usize = 2;
 pub struct PacketSender {
     cc: Box<dyn CongestionController>,
     pacer: Pacer,
+    qlog: Qlog,
+    last_rtt: Option<Duration>,
 }
 
 impl PacketSender {
@@ -76,10 +79,13 @@ impl PacketSender {
                 mtu * PACING_BURST_SIZE,
                 mtu,
             ),
+            qlog: Qlog::default(),
+            last_rtt: None,
         }
     }
 
     pub fn set_qlog(&mut self, qlog: Qlog) {
+        self.qlog = qlog.clone();
         self.cc.set_qlog(qlog);
     }
 
@@ -127,6 +133,13 @@ impl PacketSender {
     ) {
         self.cc
             .on_packets_acked(acked_pkts, rtt_est, now, &mut stats.cc);
+        let rtt = rtt_est.estimate();
+        self.last_rtt = Some(rtt);
+        if self.qlog.is_enabled() {
+            if let Some(rate) = Pacer::rate(self.cc.cwnd(), rtt) {
+                qlog::metrics_updated(&mut self.qlog, [qlog::Metric::PacingRate(rate)], now);
+            }
+        }
         self.pmtud_mut().on_packets_acked(acked_pkts, now, stats);
         self.maybe_update_pacer_mtu();
     }
@@ -149,6 +162,14 @@ impl PacketSender {
             now,
             &mut stats.cc,
         );
+        if ret && self.qlog.is_enabled() {
+            if let Some(rate) = self
+                .last_rtt
+                .and_then(|rtt| Pacer::rate(self.cc.cwnd(), rtt))
+            {
+                qlog::metrics_updated(&mut self.qlog, [qlog::Metric::PacingRate(rate)], now);
+            }
+        }
         // Call below may change the size of MTU probes, so it needs to happen after the CC
         // reaction above, which needs to ignore probes based on their size.
         self.pmtud_mut().on_packets_lost(lost_packets, stats, now);
@@ -163,7 +184,16 @@ impl PacketSender {
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) -> bool {
-        self.cc.on_ecn_ce_received(largest_acked_pkt, now, cc_stats)
+        let ret = self.cc.on_ecn_ce_received(largest_acked_pkt, now, cc_stats);
+        if ret && self.qlog.is_enabled() {
+            if let Some(rate) = self
+                .last_rtt
+                .and_then(|rtt| Pacer::rate(self.cc.cwnd(), rtt))
+            {
+                qlog::metrics_updated(&mut self.qlog, [qlog::Metric::PacingRate(rate)], now);
+            }
+        }
+        ret
     }
 
     pub fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
@@ -174,6 +204,7 @@ impl PacketSender {
     /// all bytes in flight.
     pub fn discard_in_flight(&mut self, now: Instant) {
         self.cc.discard_in_flight(now);
+        self.last_rtt = None;
     }
 
     pub fn on_packet_sent(&mut self, pkt: &sent::Packet, rtt: Duration, now: Instant) {

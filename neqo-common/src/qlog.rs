@@ -96,6 +96,12 @@ impl Qlog {
         Self::default()
     }
 
+    /// Returns true if qlog is enabled.
+    #[must_use]
+    pub fn is_enabled(&self) -> bool {
+        self.inner.is_some()
+    }
+
     /// If logging enabled, closure may generate an event to be logged.
     pub fn add_event_at<F>(&mut self, f: F, now: Instant)
     where
