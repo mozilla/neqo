@@ -566,8 +566,6 @@ pub async fn client(mut args: Args) -> Res<()> {
             .as_ref()
             .map(clap_verbosity_flag::Verbosity::log_level_filter),
     );
-    #[cfg(apple)]
-    neqo_udp::enable_apple_fast_path();
     init()?;
 
     args.update_for_tests();
