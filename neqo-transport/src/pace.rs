@@ -109,8 +109,10 @@ impl Pacer {
 
     /// Bytes sendable at `SPEEDUP * cwnd / rtt` pace over `elapsed`.
     /// Returns `None` if `rtt` is zero.
-    const fn bytes_for(cwnd: usize, rtt: Duration, elapsed: Duration) -> Option<u128> {
-        let factor = (cwnd as u128).saturating_mul(Self::SPEEDUP as u128);
+    fn bytes_for(cwnd: usize, rtt: Duration, elapsed: Duration) -> Option<u128> {
+        let factor = u128::try_from(cwnd)
+            .expect("usize fits into u128")
+            .saturating_mul(u128::try_from(Self::SPEEDUP).expect("usize fits into u128"));
         elapsed
             .as_nanos()
             .saturating_mul(factor)
@@ -120,7 +122,7 @@ impl Pacer {
     /// Compute the effective pacing rate in bytes per second.
     ///
     /// Returns `None` if `rtt` is zero or the rate exceeds `u64::MAX`.
-    pub fn rate(cwnd: usize, rtt: Duration) -> Option<u64> {
+    pub(crate) fn rate(cwnd: usize, rtt: Duration) -> Option<u64> {
         u64::try_from(Self::bytes_for(cwnd, rtt, Duration::from_secs(1))?).ok()
     }
 

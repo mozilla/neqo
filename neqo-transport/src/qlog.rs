@@ -442,6 +442,20 @@ pub fn metrics_updated<M: IntoIterator<Item = Metric>>(
                 }
             }
 
+            debug_assert!(
+                min_rtt.is_some()
+                    || smoothed_rtt.is_some()
+                    || latest_rtt.is_some()
+                    || rtt_variance.is_some()
+                    || pto_count.is_some()
+                    || congestion_window.is_some()
+                    || bytes_in_flight.is_some()
+                    || ssthresh.is_some()
+                    || packets_in_flight.is_some()
+                    || pacing_rate.is_some(),
+                "metrics_updated called with no metrics"
+            );
+
             let ev_data = EventData::MetricsUpdated(MetricsUpdated {
                 min_rtt,
                 smoothed_rtt,
@@ -846,5 +860,32 @@ impl From<packet::Type> for qlog::events::quic::PacketType {
             packet::Type::VersionNegotiation => Self::VersionNegotiation,
             packet::Type::OtherVersion => Self::Unknown,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use test_fixture::new_neqo_qlog;
+
+    use super::{Metric, metrics_updated};
+
+    /// Verify that `metrics_updated` records all metric variants, including
+    /// `SsThresh`, when qlog is enabled.
+    #[test]
+    fn metrics_updated_all_variants() {
+        let (mut qlog, contents) = new_neqo_qlog();
+        let now = test_fixture::now();
+        metrics_updated(
+            &mut qlog,
+            [Metric::CongestionWindow(10_000), Metric::SsThresh(5_000)],
+            now,
+        );
+        drop(qlog);
+        let output = contents.to_string();
+        assert!(
+            output.contains("congestion_window"),
+            "missing congestion_window"
+        );
+        assert!(output.contains("ssthresh"), "missing ssthresh");
     }
 }
