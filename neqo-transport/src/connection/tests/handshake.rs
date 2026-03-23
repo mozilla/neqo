@@ -1648,10 +1648,8 @@ fn scone(enable: bool) {
     server.process_input(ci, now);
 
     connect(&mut client, &mut server);
-    if enable {
-        assert!(client.tps.borrow_mut().remote().get_empty(Scone));
-        assert!(server.tps.borrow_mut().remote().get_empty(Scone));
-    }
+    assert_eq!(client.tps.borrow_mut().remote().get_empty(Scone), enable);
+    assert_eq!(server.tps.borrow_mut().remote().get_empty(Scone), enable);
 
     let client_stats = client.stats();
     let server_stats = server.stats();
