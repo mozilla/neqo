@@ -53,14 +53,12 @@ impl From<(u8, u32)> for Bitrate {
 impl From<Bitrate> for Option<NonZeroU64> {
     #[expect(clippy::cast_possible_truncation, reason = "We want truncation here")]
     #[expect(clippy::cast_sign_loss, reason = "negative values are impossible")]
-    #[expect(clippy::unwrap_in_result, reason = "zero is literally impossible")]
     fn from(value: Bitrate) -> Self {
         value.is_set().then(|| {
             // Bitrate formula is 100_000 * 10^(n/20),
             // log10(100_000) is 5, and 10^(1/20) is 1.122...
             NonZeroU64::new(1.122_018_454_301_963_3_f64.powi(100 + i32::from(value.0)) as u64)
-                .unwrap()
-        })
+        }).flatten()
     }
 }
 
