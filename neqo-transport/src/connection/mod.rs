@@ -1782,7 +1782,7 @@ impl Connection {
                     let pn = payload.pn();
                     self.idle_timeout.on_packet_received(now);
                     self.log_packet(
-                        packet::MetaData::new_in(path, tos, packet_len, &payload),
+                        packet::MetaData::new_in(path, tos, packet_len, &payload, self.version),
                         now,
                     );
 
@@ -2772,6 +2772,7 @@ impl Connection {
                     builder.len() + aead_expansion,
                     &builder.as_ref()[payload_start..],
                     packet_tos,
+                    self.version,
                 ),
                 now,
             );
@@ -2916,7 +2917,7 @@ impl Connection {
             qlog::recovery_parameters_set(
                 &mut self.qlog,
                 path.borrow().plpmtu(),
-                self.conn_params.get_cc_algorithm(),
+                self.conn_params.get_congestion_control(),
                 now,
             );
         }
@@ -3618,7 +3619,7 @@ impl Connection {
             qlog::recovery_parameters_set(
                 &mut self.qlog,
                 path.borrow().plpmtu(),
-                self.conn_params.get_cc_algorithm(),
+                self.conn_params.get_congestion_control(),
                 now,
             );
         } else {

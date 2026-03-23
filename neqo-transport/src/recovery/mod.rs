@@ -330,26 +330,28 @@ impl LossRecoverySpace {
             .take_while(|p| largest_acked.is_some_and(|largest_ack| p.pn() < largest_ack))
         {
             // Packets sent before now - loss_delay are deemed lost.
-            if packet.time_sent() + loss_delay <= now {
+            let trigger = if packet.time_sent() + loss_delay <= now {
                 qtrace!(
                     "lost={}, time sent {:?} is before lost_delay {loss_delay:?}",
                     packet.pn(),
                     packet.time_sent()
                 );
+                sent::LossTrigger::TimeThreshold
             } else if largest_acked >= Some(packet.pn() + PACKET_THRESHOLD) {
                 qtrace!(
                     "lost={}, is >= {PACKET_THRESHOLD} from largest acked {largest_acked:?}",
                     packet.pn()
                 );
+                sent::LossTrigger::ReorderingThreshold
             } else {
                 if largest_acked.is_some() {
                     self.first_ooo_time = Some(packet.time_sent());
                 }
                 // No more packets can be declared lost after this one.
                 break;
-            }
+            };
 
-            if packet.declare_lost(now) {
+            if packet.declare_lost(now, trigger) {
                 lost_packets.push(packet.clone());
             }
         }
@@ -694,6 +696,9 @@ impl Loss {
             &mut self.stats.borrow_mut(),
         );
 
+        if self.pto_state.is_some() {
+            qlog::loss_timer_cancelled(&mut self.qlog, now);
+        }
         self.pto_state = None;
 
         (acked_packets, lost)
@@ -702,6 +707,9 @@ impl Loss {
     /// When receiving a retry, get all the sent packets so that they can be flushed.
     /// We also need to pretend that they never happened for the purposes of congestion control.
     pub fn retry(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
+        if self.pto_state.is_some() {
+            qlog::loss_timer_cancelled(&mut self.qlog, now);
+        }
         self.pto_state = None;
         let mut dropped = self
             .spaces
@@ -749,6 +757,9 @@ impl Loss {
         // We just made progress, so discard PTO count.
         // The spec says that clients should not do this until confirming that
         // the server has completed address validation, but ignore that.
+        if self.pto_state.is_some() {
+            qlog::loss_timer_cancelled(&mut self.qlog, now);
+        }
         self.pto_state = None;
 
         if space == PacketNumberSpace::Handshake {
@@ -850,6 +861,7 @@ impl Loss {
             st.count_pto(&mut self.stats.borrow_mut());
             qlog::metrics_updated(&mut self.qlog, &[qlog::Metric::PtoCount(st.count())], now);
         }
+        qlog::loss_timer_set(&mut self.qlog, now);
     }
 
     /// This checks whether the PTO timer has fired and fires it if needed.
@@ -927,6 +939,18 @@ impl Loss {
         has_handshake_keys: bool,
     ) -> Vec<sent::Packet> {
         qtrace!("[{self}] timeout {now:?}");
+        let timer_type = {
+            let path = primary_path.borrow();
+            if self
+                .earliest_loss_time(path.rtt())
+                .is_some_and(|t| t <= now)
+            {
+                qlog::LossTimerType::Ack
+            } else {
+                qlog::LossTimerType::Pto
+            }
+        };
+        qlog::loss_timer_expired(&mut self.qlog, timer_type, now);
 
         let loss_delay = primary_path.borrow().rtt().loss_delay();
         let confirmed = self.confirmed();
@@ -1128,12 +1152,12 @@ mod tests {
         let rtt = p.rtt();
         println!(
             "rtts: {:?} {:?} {:?} {:?}",
-            rtt.latest(),
+            rtt.latest_rtt(),
             rtt.estimate(),
             rtt.rttvar(),
             rtt.minimum(),
         );
-        assert_eq!(rtt.latest(), latest_rtt, "latest RTT");
+        assert_eq!(rtt.latest_rtt(), latest_rtt, "latest RTT");
         assert_eq!(rtt.estimate(), smoothed_rtt, "smoothed RTT");
         assert_eq!(rtt.rttvar(), rttvar, "RTT variance");
         assert_eq!(rtt.minimum(), min_rtt, "min RTT");
@@ -1914,6 +1938,70 @@ mod tests {
         assert!(
             !pto.ack_only(),
             "Initial space must be able to send CRYPTO frames even when PTO is for Handshake"
+        );
+    }
+
+    /// Set up a qlog-instrumented fixture with a PTO already fired.
+    /// Returns the log contents and the PTO expiry time for use in follow-on
+    /// operations (e.g., acknowledging packets to trigger Cancelled).
+    fn fire_pto_log() -> (Fixture, test_fixture::SharedVec, Instant) {
+        let (log, contents) = test_fixture::new_neqo_qlog();
+        let mut lr = Fixture::default();
+        lr.lr.set_qlog(log);
+        lr.on_packet_sent(
+            sent::Packet::new(
+                packet::Type::Initial,
+                0,
+                now(),
+                true,
+                recovery::Tokens::new(),
+                ON_SENT_SIZE,
+            ),
+            now(),
+        );
+        let pto = lr.next_timeout().expect("PTO timer armed");
+        lr.timeout(pto);
+        (lr, contents, pto)
+    }
+
+    #[test]
+    fn loss_timer_set_on_pto() {
+        let (_, contents, _) = fire_pto_log();
+        let log = contents.to_string();
+        assert!(
+            log.contains(r#""event_type":"set""#),
+            "Expected loss_timer_updated Set event in qlog: {log}"
+        );
+        assert!(
+            log.contains(r#""timer_type":"pto""#),
+            "Expected timer_type pto in qlog: {log}"
+        );
+    }
+
+    #[test]
+    fn loss_timer_expired_on_timeout() {
+        let (_, contents, _) = fire_pto_log();
+        let log = contents.to_string();
+        assert!(
+            log.contains(r#""event_type":"expired""#),
+            "Expected loss_timer_updated Expired event in qlog: {log}"
+        );
+    }
+
+    #[test]
+    fn loss_timer_cancelled_on_ack() {
+        let (mut lr, contents, pto) = fire_pto_log();
+        lr.on_ack_received(
+            PacketNumberSpace::Initial,
+            vec![0..=0],
+            None,
+            Duration::ZERO,
+            pto + TEST_RTT,
+        );
+        let log = contents.to_string();
+        assert!(
+            log.contains(r#""event_type":"cancelled""#),
+            "Expected loss_timer_updated Cancelled event in qlog: {log}"
         );
     }
 }

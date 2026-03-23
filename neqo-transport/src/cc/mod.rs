@@ -17,11 +17,15 @@ use neqo_common::qlog::Qlog;
 use crate::{Pmtud, recovery::sent, rtt::RttEstimate, stats::CongestionControlStats};
 
 mod classic_cc;
+mod classic_slow_start;
 mod cubic;
+mod hystart;
 mod new_reno;
 
-pub use classic_cc::{CWND_INITIAL_PKTS, ClassicCongestionControl, PERSISTENT_CONG_THRESH};
+pub use classic_cc::{CWND_INITIAL_PKTS, ClassicCongestionController, PERSISTENT_CONG_THRESH};
+pub use classic_slow_start::ClassicSlowStart;
 pub use cubic::Cubic;
+pub use hystart::HyStart;
 pub use new_reno::NewReno;
 
 #[derive(Clone, Copy, PartialEq, Eq, Enum, Debug)]
@@ -31,7 +35,7 @@ pub enum CongestionEvent {
     Spurious,
 }
 
-pub trait CongestionControl: Display + Debug {
+pub trait CongestionController: Display + Debug {
     fn set_qlog(&mut self, qlog: Qlog);
 
     #[must_use]
@@ -95,12 +99,22 @@ pub trait CongestionControl: Display + Debug {
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
 #[strum(ascii_case_insensitive)]
-pub enum CongestionControlAlgorithm {
+pub enum CongestionControl {
     #[strum(serialize = "newreno", serialize = "reno")]
     NewReno,
     #[strum(serialize = "cubic")]
     #[default]
     Cubic,
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
+#[strum(ascii_case_insensitive)]
+pub enum SlowStart {
+    #[strum(serialize = "classic")]
+    #[default]
+    Classic,
+    #[strum(serialize = "hystart")]
+    HyStart,
 }
 
 #[cfg(test)]

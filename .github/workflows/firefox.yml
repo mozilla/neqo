@@ -1,7 +1,6 @@
 name: Vendor
 on:
   pull_request:
-    branches: ["main"]
     types: [opened, synchronize, reopened]
   merge_group:
   workflow_dispatch:

@@ -20,16 +20,17 @@ use qlog::events::{
     },
     quic::{
         AckedRanges, CongestionStateUpdated, CongestionStateUpdatedTrigger, ErrorSpace,
-        MetricsUpdated, PacketDropped, PacketDroppedTrigger, PacketHeader, PacketLost,
-        PacketNumberSpace as QlogPacketNumberSpace, PacketReceived, PacketSent, PacketsAcked,
-        QuicFrame, RecoveryParametersSet, StreamType, VersionInformation,
+        LossTimerEventType, LossTimerUpdated, MetricsUpdated, PacketDropped, PacketDroppedTrigger,
+        PacketHeader, PacketLost, PacketLostTrigger, PacketNumberSpace as QlogPacketNumberSpace,
+        PacketReceived, PacketSent, PacketsAcked, QuicFrame, RecoveryParametersSet, StreamType,
+        TimerType, VersionInformation,
     },
 };
 use smallvec::SmallVec;
 
 use crate::{
     CloseReason,
-    cc::{CWND_INITIAL_PKTS, CongestionControlAlgorithm, Cubic, PERSISTENT_CONG_THRESH},
+    cc::{CWND_INITIAL_PKTS, CongestionControl, Cubic, PERSISTENT_CONG_THRESH},
     connection::State,
     frame::{CloseError, Frame},
     packet::{self, metadata::Direction},
@@ -287,8 +288,14 @@ pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
             let header =
                 PacketHeader::with_type(pkt.packet_type().into(), Some(pkt.pn()), None, None, None);
 
+            let trigger = pkt
+                .loss_info()
+                .map(|info| PacketLostTrigger::from(info.trigger))
+                .or_else(|| pkt.pto_fired().then_some(PacketLostTrigger::PtoExpired));
+
             let ev_data = EventData::PacketLost(PacketLost {
                 header: Some(header),
+                trigger,
                 ..Default::default()
             });
 
@@ -301,14 +308,14 @@ pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
 pub fn recovery_parameters_set(
     qlog: &mut Qlog,
     plpmtu: usize,
-    cc: CongestionControlAlgorithm,
+    cc: CongestionControl,
     now: Instant,
 ) {
     qlog.add_event_at(
         || {
             let loss_reduction_factor = match cc {
-                CongestionControlAlgorithm::NewReno => 0.5,
-                CongestionControlAlgorithm::Cubic => {
+                CongestionControl::NewReno => 0.5,
+                CongestionControl::Cubic => {
                     f32::from(u8::try_from(Cubic::BETA_USIZE_DIVIDEND).expect("fits"))
                         / f32::from(u8::try_from(Cubic::BETA_USIZE_DIVISOR).expect("fits"))
                 }
@@ -489,6 +496,65 @@ pub fn congestion_state_updated(
     );
 }
 
+/// The type of loss recovery timer that fired or was updated.
+#[derive(Clone, Copy)]
+pub enum LossTimerType {
+    /// The reordering/loss-detection timer (ACK-based).
+    Ack,
+    /// The Probe Timeout timer.
+    Pto,
+}
+
+/// Emit a `loss_timer_updated` Set event.
+///
+/// Only the PTO timer has explicit set/cancel lifecycle in neqo. The
+/// loss-detection (Ack) timer is derived lazily from packet state on every
+/// call to [`crate::recovery::Loss::next_timeout`] and has no single arm or
+/// cancel point to instrument.
+pub fn loss_timer_set(qlog: &mut Qlog, now: Instant) {
+    loss_timer_updated(qlog, LossTimerEventType::Set, Some(TimerType::Pto), now);
+}
+
+pub fn loss_timer_expired(qlog: &mut Qlog, timer_type: LossTimerType, now: Instant) {
+    loss_timer_updated(
+        qlog,
+        LossTimerEventType::Expired,
+        Some(timer_type.into()),
+        now,
+    );
+}
+
+/// Emit a `loss_timer_updated` Cancelled event.
+///
+/// See [`loss_timer_set`] for why only `TimerType::Pto` is used here.
+pub fn loss_timer_cancelled(qlog: &mut Qlog, now: Instant) {
+    loss_timer_updated(
+        qlog,
+        LossTimerEventType::Cancelled,
+        Some(TimerType::Pto),
+        now,
+    );
+}
+
+fn loss_timer_updated(
+    qlog: &mut Qlog,
+    event_type: LossTimerEventType,
+    timer_type: Option<TimerType>,
+    now: Instant,
+) {
+    qlog.add_event_at(
+        || {
+            Some(EventData::LossTimerUpdated(LossTimerUpdated {
+                timer_type,
+                packet_number_space: None,
+                event_type,
+                delta: None,
+            }))
+        },
+        now,
+    );
+}
+
 // Helper functions
 
 #[expect(clippy::too_many_lines, reason = "Yeah, but it's a nice match.")]
@@ -563,7 +629,7 @@ impl From<Frame<'_>> for QuicFrame {
             },
             Frame::NewToken { token } => Self::NewToken {
                 token: qlog::Token {
-                    ty: Some(qlog::TokenType::Retry),
+                    ty: None,
                     details: None,
                     raw: Some(RawInfo {
                         data: Some(hex(token)),
@@ -645,7 +711,7 @@ impl From<Frame<'_>> for QuicFrame {
             } => Self::ConnectionClose {
                 error_space: Some((&error_code).into()),
                 error_code: Some(error_code.code()),
-                error_code_value: Some(0),
+                error_code_value: Some(error_code.code()),
                 reason: Some(reason_phrase),
                 trigger_frame_type: Some(frame_type),
             },
@@ -744,6 +810,24 @@ impl From<&CloseReason> for ConnectionClosed {
             internal_code: None,
             reason: None,
             trigger,
+        }
+    }
+}
+
+impl From<LossTimerType> for TimerType {
+    fn from(value: LossTimerType) -> Self {
+        match value {
+            LossTimerType::Ack => Self::Ack,
+            LossTimerType::Pto => Self::Pto,
+        }
+    }
+}
+
+impl From<sent::LossTrigger> for PacketLostTrigger {
+    fn from(value: sent::LossTrigger) -> Self {
+        match value {
+            sent::LossTrigger::TimeThreshold => Self::TimeThreshold,
+            sent::LossTrigger::ReorderingThreshold => Self::ReorderingThreshold,
         }
     }
 }

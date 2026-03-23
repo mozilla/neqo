@@ -1612,8 +1612,7 @@ fn zero_rtt_with_ech() {
     assert!(server.tls_info().unwrap().early_data_accepted());
 }
 
-#[test]
-fn scone() {
+fn scone(enable: bool) {
     const PERIOD: Duration = Duration::from_secs(67);
 
     fn add_scone(d: &Datagram, signal: u8) -> Datagram {
@@ -1627,8 +1626,16 @@ fn scone() {
     let got_scone = |e| matches!(e, ConnectionEvent::SconeUpdated(_));
 
     // This test needs to keep connections alive long past the default idle timeout.
-    let mut client = new_client(ConnectionParameters::default().idle_timeout(PERIOD * 7));
-    let mut server = new_server(ConnectionParameters::default().idle_timeout(PERIOD * 7));
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .idle_timeout(PERIOD * 7)
+            .scone(enable),
+    );
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .idle_timeout(PERIOD * 7)
+            .scone(enable),
+    );
     let mut now = now();
 
     let ci = client.process_output(now).dgram().unwrap();
@@ -1641,8 +1648,10 @@ fn scone() {
     server.process_input(ci, now);
 
     connect(&mut client, &mut server);
-    assert!(client.tps.borrow_mut().remote().get_empty(Scone));
-    assert!(server.tps.borrow_mut().remote().get_empty(Scone));
+    if enable {
+        assert!(client.tps.borrow_mut().remote().get_empty(Scone));
+        assert!(server.tps.borrow_mut().remote().get_empty(Scone));
+    }
 
     let client_stats = client.stats();
     let server_stats = server.stats();
@@ -1657,7 +1666,7 @@ fn scone() {
     assert_eq!(server.stats().packets_rx, server_stats.packets_rx + 1);
     assert_eq!(client.stats().packets_rx, client_stats.packets_rx + 1);
 
-    // Now check for duplicates.
+    // Now check that events are correctly generated (or not).
 
     // A duplicate packet means no event, even with a rate decrease.
     client.process_input(add_scone(&d, 0x2), now);
@@ -1694,6 +1703,18 @@ fn scone() {
     let d = send_something(&mut server, now);
     client.process_input(add_scone(&d, 0x7f), now);
     assert!(client.events().any(got_scone));
+}
+
+#[test]
+fn scone_enabled() {
+    scone(true);
+}
+
+/// The scone test passes, even when the config item isn't set.
+/// This is because the transport parameter is the only thing it affects.
+#[test]
+fn scone_disabled() {
+    scone(false);
 }
 
 /// RFC 9287 Section 3.1 states: "A server MUST NOT remember that a client negotiated

@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Auto-approve if actor has write access
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.NEQO_CI }} # zizmor: ignore[secrets-outside-env] Can't be in an env with run restrictions.
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           ACTOR: ${{ github.event.workflow_run.actor.login }}

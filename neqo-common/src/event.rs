@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::marker::PhantomData;
-
 /// An event provider is able to generate a stream of events.
 pub trait Provider {
     type Event;
@@ -19,33 +17,17 @@ pub trait Provider {
     fn has_events(&self) -> bool;
 
     /// Construct an iterator that produces all events.
-    fn events(&'_ mut self) -> Iter<'_, Self, Self::Event> {
-        Iter::new(self)
+    fn events(&'_ mut self) -> Iter<'_, Self> {
+        Iter { p: self }
     }
 }
 
-pub struct Iter<'a, P, E>
-where
-    P: ?Sized,
-{
+pub struct Iter<'a, P: ?Sized> {
     p: &'a mut P,
-    _e: PhantomData<E>,
 }
 
-impl<'a, P, E> Iter<'a, P, E>
-where
-    P: Provider<Event = E> + ?Sized,
-{
-    const fn new(p: &'a mut P) -> Self {
-        Self { p, _e: PhantomData }
-    }
-}
-
-impl<P, E> Iterator for Iter<'_, P, E>
-where
-    P: Provider<Event = E>,
-{
-    type Item = E;
+impl<P: Provider + ?Sized> Iterator for Iter<'_, P> {
+    type Item = P::Event;
     fn next(&mut self) -> Option<Self::Item> {
         self.p.next_event()
     }
