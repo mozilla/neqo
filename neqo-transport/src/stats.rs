@@ -134,8 +134,16 @@ pub struct DatagramStats {
     pub dropped_queue_full: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlowStartExitReason {
+    /// Exited due to a congestion event (loss or ECN).
+    CongestionEvent,
+    /// Exited due to a heuristic algorithm (e.g., HyStart++).
+    Heuristic,
+}
+
 /// Congestion Control stats
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Default, Clone, PartialEq)]
 pub struct CongestionControlStats {
     /// Total number of congestion events caused by packet loss, total number of
     /// congestion events caused by ECN-CE marked packets, and number of
@@ -148,9 +156,24 @@ pub struct CongestionControlStats {
     /// None if we haven't exited slow start or if we re-entered after spurious congestion.
     /// When exiting via congestion event, this is the cwnd AFTER the reduction.
     pub slow_start_exit_cwnd: Option<usize>,
+    /// The reason slow start was exited. None if we haven't exited slow start or if we re-entered
+    /// after spurious congestion.
+    pub slow_start_exit_reason: Option<SlowStartExitReason>,
+    /// Number of times HyStart++ entered CSS (Conservative Slow Start). Only meaningful when
+    /// HyStart++ is enabled. Higher values indicate that HyStart++ had many spurious CSS
+    /// entries, spending more time throttling slow start growth.
+    pub hystart_css_entries: usize,
+    /// Number of CSS (Conservative Slow Start) rounds completed. Only meaningful when HyStart++ is
+    /// enabled. Higher values indicate the heuristic spent more time throttling slow start growth.
+    pub hystart_css_rounds_finished: usize,
+    /// Cubic's `w_max`: the congestion window (in bytes) just before the most recent
+    /// congestion reduction (with fast convergence applied). `None` if no congestion event has
+    /// occurred or Cubic is not in use. Recorded as a stat to approximate a connection's ideal
+    /// congestion window in metrics.
+    pub w_max: Option<f64>,
     /// The current congestion window size (in bytes). Updated throughout the connection
     /// lifetime.
-    pub cwnd: usize,
+    pub cwnd: Option<usize>,
 }
 /// ECN counts by QUIC [`packet::Type`].
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -250,7 +273,7 @@ impl DerefMut for DscpCount {
 }
 
 /// Connection statistics
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Default, Clone, PartialEq)]
 pub struct Stats {
     pub info: String,
 
@@ -282,6 +305,8 @@ pub struct Stats {
     pub pmtud_lost: usize,
     /// MTU of the local interface used for the most recent path.
     pub pmtud_iface_mtu: usize,
+    /// The peer's `max_udp_payload_size` transport parameter.
+    pub pmtud_peer_max_udp_payload: Option<usize>,
     /// Probed PMTU of the current path.
     pub pmtud_pmtu: usize,
 
@@ -397,13 +422,18 @@ impl Debug for Stats {
         )?;
         writeln!(
             f,
-            "    final_cwnd {} ss_exit_cwnd {:?}",
-            self.cc.cwnd, self.cc.slow_start_exit_cwnd
+            "    final_cwnd {:?} ss_exit_cwnd {:?} ss_exit_reason {:?}",
+            self.cc.cwnd, self.cc.slow_start_exit_cwnd, self.cc.slow_start_exit_reason
         )?;
         writeln!(
             f,
-            "  pmtud: {} sent {} acked {} lost {} iface_mtu {} pmtu",
-            self.pmtud_tx, self.pmtud_ack, self.pmtud_lost, self.pmtud_iface_mtu, self.pmtud_pmtu
+            "  pmtud: {} sent {} acked {} lost {} iface_mtu {:?} peer_max_udp_payload {} pmtu",
+            self.pmtud_tx,
+            self.pmtud_ack,
+            self.pmtud_lost,
+            self.pmtud_iface_mtu,
+            self.pmtud_peer_max_udp_payload,
+            self.pmtud_pmtu
         )?;
         writeln!(f, "  resumed: {}", self.resumed)?;
         writeln!(f, "  frames rx:")?;
@@ -455,8 +485,8 @@ fn debug() {
   tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
   cc:
     ce_loss 0 ce_ecn 0 ce_spurious 0
-    final_cwnd 0 ss_exit_cwnd None
-  pmtud: 0 sent 0 acked 0 lost 0 iface_mtu 0 pmtu
+    final_cwnd None ss_exit_cwnd None ss_exit_reason None
+  pmtud: 0 sent 0 acked 0 lost 0 iface_mtu None peer_max_udp_payload 0 pmtu
   resumed: false
   frames rx:
     crypto 0 done 0 token 0 close 0

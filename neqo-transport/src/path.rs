@@ -96,6 +96,9 @@ impl Paths {
                     Path::temporary(local, remote, conn_params, self.qlog.clone(), now, stats);
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
+                    if let Some(peer_max) = primary.borrow().pmtud().peer_max_udp_payload() {
+                        p.pmtud_mut().set_peer_max_udp_payload(peer_max);
+                    }
                 }
                 Rc::new(RefCell::new(p))
             })
@@ -1106,7 +1109,8 @@ impl Path {
 
     /// Update the `QLog` instance.
     pub fn set_qlog(&mut self, qlog: Qlog) {
-        self.sender.set_qlog(qlog);
+        self.sender.set_qlog(qlog.clone());
+        self.qlog = qlog;
     }
 }
 

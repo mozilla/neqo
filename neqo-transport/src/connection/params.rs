@@ -8,17 +8,17 @@ use std::{cmp::max, time::Duration};
 
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
-    CongestionControlAlgorithm, DEFAULT_INITIAL_RTT, Res,
+    CongestionControl, DEFAULT_INITIAL_RTT, Res, SlowStart,
     connection::{ConnectionIdManager, Role},
     rtt::GRANULARITY,
     stream_id::StreamType,
     tparams::{
         PreferredAddress, TransportParameter,
         TransportParameterId::{
-            self, ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit, InitialMaxData,
+            ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit, IdleTimeout, InitialMaxData,
             InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni,
             InitialMaxStreamsBidi, InitialMaxStreamsUni, MaxAckDelay, MaxDatagramFrameSize,
-            MinAckDelay,
+            MinAckDelay, PreferredAddress as PreferredAddressTp, Scone,
         },
         TransportParametersHandler,
     },
@@ -106,7 +106,8 @@ pub enum PreferredAddressConfig {
 #[derive(Debug, Clone)]
 pub struct ConnectionParameters {
     versions: version::Config,
-    cc_algorithm: CongestionControlAlgorithm,
+    congestion_control: CongestionControl,
+    slow_start: SlowStart,
     /// Initial connection-level flow control limit.
     max_data: u64,
     /// Initial flow control limit for receiving data on bidirectional streams that the peer
@@ -150,13 +151,16 @@ pub struct ConnectionParameters {
     mlkem: bool,
     /// Whether to randomize the packet number of the first Initial packet.
     randomize_first_pn: bool,
+    /// Whether to send the SCONE transport parameter.
+    scone: bool,
 }
 
 impl Default for ConnectionParameters {
     fn default() -> Self {
         Self {
             versions: version::Config::default(),
-            cc_algorithm: CongestionControlAlgorithm::Cubic,
+            congestion_control: CongestionControl::Cubic,
+            slow_start: SlowStart::Classic,
             max_data: INITIAL_LOCAL_MAX_DATA,
             max_stream_data_bidi_remote: u64::try_from(INITIAL_LOCAL_MAX_STREAM_DATA)
                 .expect("usize fits in u64"),
@@ -182,6 +186,7 @@ impl Default for ConnectionParameters {
             sni_slicing: true,
             mlkem: true,
             randomize_first_pn: true,
+            scone: false,
         }
     }
 }
@@ -215,13 +220,24 @@ impl ConnectionParameters {
     }
 
     #[must_use]
-    pub const fn get_cc_algorithm(&self) -> CongestionControlAlgorithm {
-        self.cc_algorithm
+    pub const fn get_congestion_control(&self) -> CongestionControl {
+        self.congestion_control
     }
 
     #[must_use]
-    pub const fn cc_algorithm(mut self, v: CongestionControlAlgorithm) -> Self {
-        self.cc_algorithm = v;
+    pub const fn congestion_control(mut self, v: CongestionControl) -> Self {
+        self.congestion_control = v;
+        self
+    }
+
+    #[must_use]
+    pub const fn get_slow_start(&self) -> SlowStart {
+        self.slow_start
+    }
+
+    #[must_use]
+    pub const fn slow_start(mut self, v: SlowStart) -> Self {
+        self.slow_start = v;
         self
     }
 
@@ -488,6 +504,17 @@ impl ConnectionParameters {
         self
     }
 
+    #[must_use]
+    pub const fn scone_enabled(&self) -> bool {
+        self.scone
+    }
+
+    #[must_use]
+    pub const fn scone(mut self, scone: bool) -> Self {
+        self.scone = scone;
+        self
+    }
+
     /// # Errors
     /// When a connection ID cannot be obtained.
     /// # Panics
@@ -508,6 +535,9 @@ impl ConnectionParameters {
         }
         if self.grease {
             tps.local_mut().set_empty(GreaseQuicBit);
+        }
+        if self.scone {
+            tps.local_mut().set_empty(Scone);
         }
         tps.local_mut().set_integer(
             MaxAckDelay,
@@ -533,7 +563,7 @@ impl ConnectionParameters {
         tps.local_mut()
             .set_integer(InitialMaxStreamsUni, self.max_streams_uni);
         tps.local_mut().set_integer(
-            TransportParameterId::IdleTimeout,
+            IdleTimeout,
             u64::try_from(self.idle_timeout.as_millis()).unwrap_or(0),
         );
         if let PreferredAddressConfig::Address(preferred) = &self.preferred_address
@@ -541,7 +571,7 @@ impl ConnectionParameters {
         {
             let (cid, srt) = cid_manager.preferred_address_cid()?;
             tps.local_mut().set(
-                TransportParameterId::PreferredAddress,
+                PreferredAddressTp,
                 TransportParameter::PreferredAddress {
                     v4: preferred.ipv4(),
                     v6: preferred.ipv6(),

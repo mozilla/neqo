@@ -1,0 +1,51 @@
+name: Auto-approve Claude Code Review
+
+on:
+  workflow_run: # zizmor: ignore[dangerous-triggers] Workflow makes no checkout and only uses metadata to call the deployments API. The actor login cannot inject code.
+    workflows: ["Claude Code Review"]
+    types: [requested]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false # An in-progress approval must not be cancelled.
+
+permissions: {}
+
+jobs:
+  auto-approve:
+    name: Auto-approve for write-access contributors
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write # Required to approve pending deployments.
+
+    steps:
+      - name: Auto-approve if actor has write access
+        env:
+          GH_TOKEN: ${{ secrets.NEQO_CI }} # zizmor: ignore[secrets-outside-env] Can't be in an env with run restrictions.
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ACTOR: ${{ github.event.workflow_run.actor.login }}
+        run: |
+          # Check if the workflow run actor has write (or admin) access to the repo.
+          PERMISSION=$(gh api "repos/$REPO/collaborators/$ACTOR/permission" \
+            --jq '.permission' 2>/dev/null || echo "none")
+
+          if [[ "$PERMISSION" != "admin" && "$PERMISSION" != "write" && "$PERMISSION" != "maintain" ]]; then
+            echo "Actor $ACTOR has $PERMISSION access — requires manual approval."
+            exit 0
+          fi
+
+          echo "Actor $ACTOR has $PERMISSION access — auto-approving."
+          PENDING_ENV_IDS=$(gh api "repos/$REPO/actions/runs/$RUN_ID/pending_deployments" \
+            --jq '.[].environment.id')
+
+          if [[ -z "$PENDING_ENV_IDS" ]]; then
+            echo "No pending deployments to approve."
+            exit 0
+          fi
+
+          echo "$PENDING_ENV_IDS" | xargs -I{} gh api "repos/$REPO/actions/runs/$RUN_ID/pending_deployments" \
+            --method POST \
+            -F "environment_ids[]={}" \
+            -F "state=approved" \
+            -F "comment=Auto-approved: $ACTOR has $PERMISSION access."

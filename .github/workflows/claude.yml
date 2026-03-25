@@ -51,6 +51,7 @@ jobs:
         # TODO: Would like to pin this, but the Mozilla org allowlist requires "anthropics/claude-code-action@v1"
         uses: anthropics/claude-code-action@v1 # zizmor: ignore[unpinned-uses]
         with:
+          show_full_output: 'true'
           track_progress: ${{ github.event_name != 'workflow_dispatch' }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # Use a PAT to allow the action to work on fork PRs.
@@ -60,7 +61,7 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://docs.anthropic.com/en/docs/claude-code/sdk#command-line for available options
           claude_args: |
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --allowedTools "mcp__github_inline_comment__create_inline_comment"
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}

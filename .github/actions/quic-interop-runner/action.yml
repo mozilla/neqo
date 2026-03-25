@@ -88,7 +88,7 @@ runs:
       run: |
         cd quic-interop-runner
         if [ -n "$IMPLEMENTATIONS" ]; then
-          echo "$IMPLEMENTATIONS" > implementations.json
+          echo "$IMPLEMENTATIONS" > implementations_quic.json
         fi
         ARGS="--log-dir ../logs --json ../result.json"
         if [ -n "$CLIENT" ]; then
@@ -127,7 +127,7 @@ runs:
         exit $FAILED
       shell: bash
 
-    - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+    - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
       if: ${{ always() }}
       id: upload-logs
       with:
@@ -144,7 +144,7 @@ runs:
         mv result.json.tmp result.json
       shell: bash
 
-    - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+    - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
       if: ${{ always() }}
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} results'

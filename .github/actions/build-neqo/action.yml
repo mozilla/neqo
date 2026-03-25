@@ -1,0 +1,102 @@
+name: Build neqo
+description: >
+  Build neqo client/server for both main and PR branches, optionally including
+  walltime benchmark binaries, bundle NSS shared libraries and test fixtures,
+  and upload everything as a single artifact.
+
+inputs:
+  token:
+    description: GitHub token
+    required: true
+  artifact-name:
+    description: Name for the uploaded artifact
+    required: true
+  benches:
+    description: Also build walltime benchmark binaries
+    default: 'false'
+  baseline-ref:
+    description: Git ref to build baseline binaries from
+    default: 'origin/main'
+
+runs:
+  using: composite
+  steps:
+    - name: Install clang and lld
+      shell: bash
+      run: |
+        [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+        sudo apt-get install -y --no-install-recommends clang lld
+
+    - name: Install Rust
+      uses: ./neqo/.github/actions/rust
+      with:
+        version: stable
+        token: ${{ inputs.token }}
+
+    - name: Install NSS
+      uses: ./neqo/.github/actions/nss
+      with:
+        version-file: neqo/neqo-crypto/min_version.txt
+
+    - name: Build neqo
+      shell: bash
+      env:
+        BENCHES: ${{ inputs.benches }}
+        BASELINE_REF: ${{ inputs.baseline-ref }}
+      run: |
+        # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
+        export RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment -C force-frame-pointers=yes $RUSTFLAGS"
+        mkdir -p dist/neqo-baseline dist/neqo
+        cd neqo
+        if [[ "$BENCHES" == "true" ]]; then
+          WALLTIME_BENCHES=$(cargo metadata --no-deps --format-version 1 | jq -r '
+            [.packages[] |
+              . as $pkg |
+              .targets[] |
+              select(.kind[] == "bench") |
+              select(has("required-features")) |
+              .name as $bench_name |
+              (($pkg.metadata.bench // []) | map(select(.name == $bench_name)) | .[0]) as $bench_meta |
+              select(($bench_meta.codspeed.mode) == "walltime") |
+              "\($pkg.name) \($bench_name)"
+            ] | .[]')
+          build_walltime_benches() {
+            local dest="$1"
+            [[ -z "$WALLTIME_BENCHES" ]] && return
+            echo "$WALLTIME_BENCHES" | while read -r crate bench; do
+              cargo bench --package "$crate" --bench "$bench" --locked --features bench --no-run 2>&1 | tee -a benches.txt
+              BIN=$(grep Executable benches.txt | tail -n1 | cut -d\( -f2 | cut -d\) -f1)
+              cp "$BIN" "$dest/"
+              : > benches.txt
+            done
+          }
+        fi
+        git fetch --no-tags --depth=1 origin "${BASELINE_REF#origin/}"
+        git checkout "$BASELINE_REF"
+        cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
+        if [[ "$BENCHES" == "true" ]]; then build_walltime_benches ../dist/neqo-baseline; fi
+        cp target/release/neqo-client target/release/neqo-server ../dist/neqo-baseline/
+        git checkout -
+        cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
+        if [[ "$BENCHES" == "true" ]]; then build_walltime_benches ../dist/neqo; fi
+        cp target/release/neqo-client target/release/neqo-server ../dist/neqo/
+
+    - name: Bundle NSS libraries and test fixture
+      shell: bash
+      run: |
+        mkdir -p dist/lib
+        if [ -d "$NSS_DIR/../dist/Release/lib" ]; then
+          cp -L "$NSS_DIR"/../dist/Release/lib/*.so dist/lib/ 2>/dev/null || true
+          cp -L "$NSS_DIR"/../dist/Release/lib/*.so.* dist/lib/ 2>/dev/null || true
+        else
+          for lib in nss3 nssutil3 smime3 ssl3 nspr4 plc4 plds4; do
+            cp -L /usr/lib/*/lib${lib}.so* dist/lib/ 2>/dev/null || true
+          done
+        fi
+        cp -r neqo/test-fixture dist/
+
+    - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: dist
+        retention-days: 1
