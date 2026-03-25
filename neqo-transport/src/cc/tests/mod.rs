@@ -12,8 +12,8 @@ use std::{
 use crate::{
     Pmtud,
     cc::{
-        ClassicSlowStart, classic_cc::ClassicCongestionController, cubic::Cubic, hystart::HyStart,
-        new_reno::NewReno,
+        ClassicSlowStart, Search, classic_cc::ClassicCongestionController, cubic::Cubic,
+        hystart::HyStart, new_reno::NewReno,
     },
 };
 
@@ -53,4 +53,9 @@ pub fn make_cc_hystart(paced: bool) -> ClassicCongestionController<HyStart, Cubi
         Pmtud::new(IP_ADDR, MTU),
         true,
     )
+}
+
+/// Helper to create `ClassicCongestionController` with SEARCH + Cubic for tests.
+pub fn make_cc_search() -> ClassicCongestionController<Search, Cubic> {
+    ClassicCongestionController::new(Search::new(), Cubic::default(), Pmtud::new(IP_ADDR, MTU))
 }

@@ -20,12 +20,14 @@ mod classic_slow_start;
 mod cubic;
 mod hystart;
 mod new_reno;
+mod search;
 
 pub use classic_cc::{CWND_INITIAL_PKTS, ClassicCongestionController, PERSISTENT_CONG_THRESH};
 pub use classic_slow_start::ClassicSlowStart;
 pub use cubic::Cubic;
 pub use hystart::{HyStart, HyStartCssBaseline};
 pub use new_reno::NewReno;
+pub use search::Search;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CongestionTrigger {
@@ -113,6 +115,8 @@ pub enum SlowStart {
     Classic,
     #[strum(serialize = "hystart")]
     HyStart,
+    #[strum(serialize = "search")]
+    Search,
 }
 
 #[cfg(test)]
