@@ -106,20 +106,20 @@ Some examples:
    RUST_LOG=neqo_transport::dump ./mach run
    ```
 
-   Lists sent and received QUIC packets and their frames' contents only.
+   lists sent and received QUIC packets and their frames' contents only.
 
 1. ```shell
    RUST_LOG=neqo_transport=debug,neqo_http3=trace,info ./mach run
    ```
 
-   Sets a `debug` log level for `transport`, `trace` level for `http3`, and `info` log
+   sets a `debug` log level for `transport`, `trace` level for `http3`, and `info` log
    level for all other Rust crates, both Neqo and others used by Gecko.
 
 1. ```shell
    RUST_LOG=neqo=trace,error ./mach run
    ```
 
-   Sets `trace` level for all modules starting with `neqo`, and sets `error` as minimum log level for other unrelated Rust log messages.
+   sets `trace` level for all modules starting with `neqo`, and sets `error` as minimum log level for other unrelated Rust log messages.
 
 ### Trying in-development Neqo code in Gecko
 
