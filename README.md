@@ -20,7 +20,7 @@ optional protocol features, and it may not handle all edge cases.
 It is also not optimized for performance or resource usage, and
 while it implements many of the necessary features for a server,
 it does not include configuration of a number of options that
-is suited to a live deployment.
+are suited to a live deployment.
 **Do not use the neqo server code in production.**
 
 To build Neqo:
@@ -29,7 +29,7 @@ To build Neqo:
 cargo build
 ```
 
-This will use a system-installed [NSS][NSS] library if it is new enough. (See "Build with Separate NSS/NSPR" below if NSS is not installed or it is deemed too old.)
+This will use a system-installed [NSS][NSS] library if it is new enough. (See "Build with separate NSS/NSPR" below if NSS is not installed or it is deemed too old.)
 
 To run test HTTP/3 programs (`neqo-client` and `neqo-server`):
 
@@ -106,20 +106,20 @@ Some examples:
    RUST_LOG=neqo_transport::dump ./mach run
    ```
 
-   lists sent and received QUIC packets and their frames' contents only.
+   Lists sent and received QUIC packets and their frames' contents only.
 
 1. ```shell
    RUST_LOG=neqo_transport=debug,neqo_http3=trace,info ./mach run
    ```
 
-   sets a `debug` log level for `transport`, `trace` level for `http3`, and `info` log
+   Sets a `debug` log level for `transport`, `trace` level for `http3`, and `info` log
    level for all other Rust crates, both Neqo and others used by Gecko.
 
 1. ```shell
    RUST_LOG=neqo=trace,error ./mach run
    ```
 
-   sets `trace` level for all modules starting with `neqo`, and sets `error` as minimum log level for other unrelated Rust log messages.
+   Sets `trace` level for all modules starting with `neqo`, and sets `error` as minimum log level for other unrelated Rust log messages.
 
 ### Trying in-development Neqo code in Gecko
 
