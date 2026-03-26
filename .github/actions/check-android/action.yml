@@ -1,5 +1,5 @@
-name: "CI VM"
-description: "Run main CI steps in VMs for VM-only platforms."
+name: "Android checks"
+description: "Run Android build and test steps using the Android SDK/NDK and emulator."
 
 inputs:
   target:
