@@ -19,7 +19,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -31,7 +31,12 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        target: ['x86_64-linux-android', 'i686-linux-android', 'aarch64-linux-android']
+        target:
+          [
+            "x86_64-linux-android",
+            "i686-linux-android",
+            "aarch64-linux-android",
+          ]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -50,7 +55,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ freebsd, openbsd, netbsd, solaris ]
+        os: [freebsd, openbsd, netbsd, solaris]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

@@ -6,19 +6,19 @@ on:
   workflow_dispatch:
     inputs:
       build:
-        description: 'Build Firefox after vendoring'
+        description: "Build Firefox after vendoring"
         type: boolean
         default: false
       linux:
-        description: 'Build on Linux'
+        description: "Build on Linux"
         type: boolean
         default: true
       macos:
-        description: 'Build on macOS'
+        description: "Build on macOS"
         type: boolean
         default: true
       windows:
-        description: 'Build on Windows'
+        description: "Build on Windows"
         type: boolean
         default: true
 
@@ -76,7 +76,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Vendor neqo into Gecko
         id: vendor

@@ -1,24 +1,24 @@
-name: 'QUIC Interop Runner Action'
-description: 'Run the QUIC Interop Runner tests.'
-author: 'mxinden'
+name: "QUIC Interop Runner Action"
+description: "Run the QUIC Interop Runner tests."
+author: "mxinden"
 
 inputs:
   client:
-    description: 'client implementations (comma-separated)'
+    description: "client implementations (comma-separated)"
     required: false
-    default: ''
+    default: ""
   server:
-    description: 'server implementations (comma-separated)'
+    description: "server implementations (comma-separated)"
     required: false
-    default: ''
+    default: ""
   test:
-    description: 'test cases (comma-separatated)'
+    description: "test cases (comma-separatated)"
     required: false
-    default: 'onlyTests'
+    default: "onlyTests"
   implementations:
     description: 'Modified "implementations.json" data'
     required: false
-    default: ''
+    default: ""
 
 outputs:
   result:
@@ -31,8 +31,8 @@ runs:
     - name: Checkout quic-interop/quic-interop-runner repository
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
-        repository: 'quic-interop/quic-interop-runner'
-        path: 'quic-interop-runner'
+        repository: "quic-interop/quic-interop-runner"
+        path: "quic-interop-runner"
         persist-credentials: false
 
     - name: Enable IPv6 support
@@ -50,8 +50,8 @@ runs:
       if: ${{ inputs.server == 'linuxquic' || inputs.client == 'linuxquic' }}
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
-        repository: 'lxin/quic'
-        path: 'linuxquic'
+        repository: "lxin/quic"
+        path: "linuxquic"
         persist-credentials: false
 
     - name: Install Linux QUIC module
@@ -131,7 +131,7 @@ runs:
       if: ${{ always() }}
       id: upload-logs
       with:
-        name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
+        name: "${{ inputs.client }} vs. ${{ inputs.server }} logs"
         path: logs
         compression-level: 9
 
@@ -147,7 +147,7 @@ runs:
     - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
       if: ${{ always() }}
       with:
-        name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
+        name: "${{ inputs.client }} vs. ${{ inputs.server }} results"
         path: |
           result.json
           summary.txt

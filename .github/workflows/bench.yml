@@ -6,6 +6,8 @@ on:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
+  CARGO_PROFILE_RELEASE_LTO: true
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
   RUSTUP_TOOLCHAIN: stable
   PERF_OPT: record -F2999 --call-graph fp -g
   SCCACHE_CACHE_SIZE: 128G
@@ -37,19 +39,19 @@ jobs:
         with:
           repository: mozilla/neqo
           path: neqo
-          submodules: 'recursive'
+          submodules: "recursive"
           persist-credentials: false
 
       - uses: ./neqo/.github/actions/build-neqo
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: bench-build
-          benches: 'true'
+          benches: "true"
           baseline-ref: origin/${{ env.BASE_REF }}
 
   bench:
     name: cargo bench
-    runs-on: 'self-hosted' # zizmor: ignore[self-hosted-runner]
+    runs-on: "self-hosted" # zizmor: ignore[self-hosted-runner]
     needs: [build]
     defaults:
       run:
@@ -72,11 +74,12 @@ jobs:
           echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
-        uses: ./neqo/.github/actions/rust
+        uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: flamegraph, samply
           token: ${{ secrets.GITHUB_TOKEN }}
+          sccache: true
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -152,7 +155,7 @@ jobs:
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          TESTBED: 'On-prem'
+          TESTBED: "On-prem"
         run: |
           SHA=$(cd neqo && git log origin/"$BASE_REF" -1 --format=%H)
           echo "$SHA" > baseline-sha.txt
