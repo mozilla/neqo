@@ -12,7 +12,7 @@ inputs:
     required: false
     default: ""
   test:
-    description: "test cases (comma-separatated)"
+    description: "test cases (comma-separated)"
     required: false
     default: "onlyTests"
   implementations:
