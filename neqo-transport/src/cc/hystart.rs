@@ -219,6 +219,7 @@ impl SlowStart for HyStart {
                 min(last / Self::MIN_RTT_DIVISOR, Self::MAX_RTT_THRESH),
             );
             if current >= last + rtt_thresh {
+                self.rtt_sample_count = 0;
                 self.css_baseline_min_rtt = Some(current);
                 cc_stats.hystart_css_entries += 1;
                 qdebug!(
