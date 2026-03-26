@@ -1,5 +1,5 @@
 name: "Export data for PR comment"
-description: "Exports the neccessary data to post a PR comment securely."
+description: "Exports the necessary data to post a PR comment securely."
 
 # This action might be running off of a fork and would thus not have write
 # permissions on the origin repository. In order to allow a separate
