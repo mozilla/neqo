@@ -3,15 +3,16 @@ on:
   push:
     branches: ["main"]
   pull_request:
-    branches: ["main"]
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   RUSTUP_TOOLCHAIN: stable
-  TRANSFER_SIZE: 33554432  # 32 MiB
+  TRANSFER_SIZE: 33554432 # 32 MiB
   PERF_OPT: record -F2999 --call-graph fp -g
+  CARGO_PROFILE_RELEASE_LTO: true
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -51,13 +52,16 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           version: stable
           tools: samply
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: ./.github/actions/nss
+      - uses: mozilla/actions/nss@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
+        with:
+          version-file: neqo-crypto/min_version.txt
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build benchmark
         env:
@@ -105,24 +109,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {client: neqo, server: neqo}
-          - {client: neqo, server: msquic}
-          - {client: msquic, server: neqo}
-          - {client: neqo, server: quiche}
-          - {client: quiche, server: neqo}
+          - { client: neqo, server: neqo }
+          - { client: neqo, server: msquic }
+          - { client: msquic, server: neqo }
+          - { client: neqo, server: quiche }
+          - { client: quiche, server: neqo }
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           version: stable
           tools: samply
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: ./.github/actions/nss
+      - uses: mozilla/actions/nss@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
+        with:
+          version-file: neqo-crypto/min_version.txt
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build neqo
         run: |

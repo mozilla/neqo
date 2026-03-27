@@ -1,5 +1,5 @@
-name: 'Export data for PR comment'
-description: 'Exports the neccessary data to post a PR comment securely.'
+name: "Export data for PR comment"
+description: "Exports the necessary data to post a PR comment securely."
 
 # This action might be running off of a fork and would thus not have write
 # permissions on the origin repository. In order to allow a separate
@@ -8,13 +8,13 @@ description: 'Exports the neccessary data to post a PR comment securely.'
 
 inputs:
   name:
-    description: 'A unique name for the artifact used for exporting.'
+    description: "A unique name for the artifact used for exporting."
     required: true
   contents:
-    description: 'A filename with a comment (in Markdown) to be added to the PR.'
+    description: "A filename with a comment (in Markdown) to be added to the PR."
     required: true
   log-md:
-    description: 'A Markdown string to append to the PR comment.'
+    description: "A Markdown string to append to the PR comment."
     required: false
 
 runs:

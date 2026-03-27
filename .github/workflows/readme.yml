@@ -1,7 +1,6 @@
 name: Check README.md
 on:
   pull_request:
-    branches: ["main"]
   merge_group:
   workflow_dispatch:
 
@@ -20,7 +19,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           tools: cargo-readme
           token: ${{ secrets.GITHUB_TOKEN }}

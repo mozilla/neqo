@@ -75,7 +75,7 @@ pub use self::{
     rtt::DEFAULT_INITIAL_RTT,
     sni::find_sni,
     stateless_reset::Token,
-    stats::Stats,
+    stats::{SlowStartExitReason, Stats},
     stream_id::{StreamId, StreamType},
     version::Version,
 };

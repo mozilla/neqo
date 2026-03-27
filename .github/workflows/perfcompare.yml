@@ -2,17 +2,19 @@ name: Performance comparison
 on:
   workflow_call:
   pull_request:
-    branches: ["main"]
   workflow_dispatch:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
+  CARGO_PROFILE_RELEASE_LTO: true
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
   RUSTUP_TOOLCHAIN: stable
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
+  BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -35,17 +37,15 @@ jobs:
         with:
           repository: mozilla/neqo
           path: neqo
-          submodules: 'recursive'
+          submodules: "recursive"
           persist-credentials: false
           clean: false
-      - run: |
-          cd neqo
-          git fetch --no-tags --depth=1 origin main
 
       - uses: ./neqo/.github/actions/build-neqo
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: build-neqo
+          baseline-ref: origin/${{ env.BASE_REF }}
 
   build-msquic:
     name: Build msquic
@@ -109,7 +109,7 @@ jobs:
 
   perfcompare:
     name: Performance comparison
-    runs-on: 'self-hosted' # zizmor: ignore[self-hosted-runner]
+    runs-on: "self-hosted" # zizmor: ignore[self-hosted-runner]
     needs: [build-neqo, build-msquic, build-google, build-quiche, build-s2n]
     defaults:
       run:
@@ -125,36 +125,37 @@ jobs:
           clean: false
       - run: |
           cd neqo
-          git fetch --no-tags --depth=1 origin main
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
 
       - name: Set PATH and environment
         run: |
           echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
-        uses: ./neqo/.github/actions/rust
+        uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: hyperfine, flamegraph, samply
           token: ${{ secrets.GITHUB_TOKEN }}
+          sccache: true
 
-      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: build-neqo
           path: build-neqo
-      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: build-msquic
           path: build-msquic
-      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: build-google
           path: build-google
-      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: build-quiche
           path: build-quiche
-      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: build-s2n
           path: build-s2n
@@ -164,7 +165,7 @@ jobs:
           # Clean stale binaries dir from previous workflow runs.
           # perfcompare.py recreates and populates binaries/ during the run.
           rm -rf binaries
-          chmod +x build-neqo/neqo/* build-neqo/neqo-main/* \
+          chmod +x build-neqo/neqo/* build-neqo/neqo-baseline/* \
             build-msquic/* build-google/* build-quiche/* build-s2n/*
           {
             echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/build-neqo/lib:$LD_LIBRARY_PATH"
@@ -216,10 +217,10 @@ jobs:
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          TESTBED: 'On-prem'
+          TESTBED: "On-prem"
         run: |
-          SHA=$(cd neqo && git log origin/main -1 --format=%H)
-          echo "$SHA" > main-sha.txt
+          SHA=$(cd neqo && git log origin/"$BASE_REF" -1 --format=%H)
+          echo "$SHA" > baseline-sha.txt
           {
             echo "### Client/server transfer results"
             echo
@@ -267,9 +268,9 @@ jobs:
             *.md
             event.json
             results.*
-            results-main.*
+            results-baseline.*
             hyperfine
-            hyperfine-main
+            hyperfine-baseline
           compression-level: 9
 
       - name: Export PR comment data
@@ -295,4 +296,4 @@ jobs:
         run: |
           rm -- * || true
           rm -r -- binaries build-neqo build-msquic build-google build-quiche build-s2n \
-            comment-data hyperfine hyperfine-main || true
+            comment-data hyperfine hyperfine-baseline || true

@@ -20,7 +20,7 @@ optional protocol features, and it may not handle all edge cases.
 It is also not optimized for performance or resource usage, and
 while it implements many of the necessary features for a server,
 it does not include configuration of a number of options that
-is suited to a live deployment.
+are suited to a live deployment.
 **Do not use the neqo server code in production.**
 
 To build Neqo:
@@ -29,7 +29,7 @@ To build Neqo:
 cargo build
 ```
 
-This will use a system-installed [NSS][NSS] library if it is new enough. (See "Build with Separate NSS/NSPR" below if NSS is not installed or it is deemed too old.)
+This will use a system-installed [NSS][NSS] library if it is new enough. (See "Build with separate NSS/NSPR" below if NSS is not installed or it is deemed too old.)
 
 To run test HTTP/3 programs (`neqo-client` and `neqo-server`):
 

@@ -186,7 +186,7 @@ impl Default for ConnectionParameters {
             sni_slicing: true,
             mlkem: true,
             randomize_first_pn: true,
-            scone: true,
+            scone: false,
         }
     }
 }

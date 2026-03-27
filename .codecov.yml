@@ -48,7 +48,7 @@ codecov:
   notify:
     after_n_builds: 3
 comment:
-  layout: "header, diff, flags, components"  # Show component info in the PR comment.
+  layout: "header, diff, flags, components" # Show component info in the PR comment.
   after_n_builds: 3
 
 coverage:
