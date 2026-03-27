@@ -81,7 +81,7 @@ Run these commands in order before submitting a PR. All must pass:
 
 1. **Format checking requires nightly**: The `.rustfmt.toml` uses features only available in nightly Rust. Always use `cargo +nightly fmt`.
 
-2. **clippy requires cargo-hack**: Install with `cargo install cargo-hack`. The CI runs clippy per-crate with feature powerset to catch warnings hidden by workspace feature unification.
+2. **Clippy requires cargo-hack**: Install with `cargo install cargo-hack`. The CI runs clippy per-crate with feature powerset to catch warnings hidden by workspace feature unification.
 
 ## Repository Layout
 
