@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef@sha256:f03e658942ac9fb8e8168563dd0e25fbd58c9e2ded526ee36dbf69d02e30afec AS chef
+FROM lukemathwalker/cargo-chef@sha256:d6148f9afb1bb54d5371fa0cecd08d01393475e606b2407c8679f906189a49c8 AS chef
 
 WORKDIR /app
 
@@ -16,14 +16,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # We unfortunately need to build NSS from source, because the Debian package is
 # not compiled with support for SSLKEYLOGFILE.
 # See https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=842292
-# Versions and checksums are defined in .github/actions/nss/nss-versions.env.
+# Versions sourced from mozilla/actions/nss/nss-versions.env.
 ENV NSS_DIR=/nss \
     NSS_TARGET=Release \
     NSS_PREBUILT=1 \
     NSPR_DIR=/nspr \
     LD_LIBRARY_PATH=/dist/Release/lib
 
-COPY .github/actions/nss/nss-versions.env /tmp/
+RUN --mount=type=secret,id=github_token,required=false \
+    TOKEN=$(cat /run/secrets/github_token 2>/dev/null || true); \
+    if [ -n "${TOKEN}" ]; then \
+        curl -sLf -H "Authorization: Bearer ${TOKEN}" \
+            https://raw.githubusercontent.com/mozilla/actions/v1.0.4/nss/nss-versions.env \
+            -o /tmp/nss-versions.env; \
+    else \
+        curl -sLf \
+            https://raw.githubusercontent.com/mozilla/actions/v1.0.4/nss/nss-versions.env \
+            -o /tmp/nss-versions.env; \
+    fi
 RUN set -eux; \
     . /tmp/nss-versions.env; \
     mkdir -p "$NSPR_DIR" "$NSS_DIR"; \

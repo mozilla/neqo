@@ -649,116 +649,119 @@ impl<'a> Public<'a> {
     ///
     /// This will return an error if the packet could not be decoded.
     fn decode_inner(
-        data: &'a mut [u8],
+        mut data: &'a mut [u8],
         dcid_decoder: &dyn ConnectionIdDecoder,
         accept_other_version: bool,
     ) -> Res<(Self, &'a mut [u8])> {
-        let mut decoder = Decoder::new(data);
-        let first = Self::opt(decoder.decode_uint::<u8>())?;
+        loop {
+            let mut decoder = Decoder::new(data);
+            let first = Self::opt(decoder.decode_uint::<u8>())?;
 
-        if first & 0x80 == BIT_SHORT {
-            // Conveniently, this also guarantees that there is enough space
-            // for a connection ID of any size.
-            if decoder.remaining() < SAMPLE_OFFSET + SAMPLE_SIZE {
-                return Err(Error::InvalidPacket);
-            }
-            let dcid = Self::opt(dcid_decoder.decode_cid(&mut decoder))?.into();
-            if decoder.remaining() < SAMPLE_OFFSET + SAMPLE_SIZE {
-                return Err(Error::InvalidPacket);
-            }
-            let header_len = decoder.offset();
+            if first & 0x80 == BIT_SHORT {
+                // Conveniently, this also guarantees that there is enough space
+                // for a connection ID of any size.
+                if decoder.remaining() < SAMPLE_OFFSET + SAMPLE_SIZE {
+                    return Err(Error::InvalidPacket);
+                }
+                let dcid = Self::opt(dcid_decoder.decode_cid(&mut decoder))?.into();
+                if decoder.remaining() < SAMPLE_OFFSET + SAMPLE_SIZE {
+                    return Err(Error::InvalidPacket);
+                }
+                let header_len = decoder.offset();
 
-            return Ok((
-                Self {
-                    packet_type: Type::Short,
-                    dcid,
-                    scid: None,
-                    token: vec![],
-                    header_len,
-                    version: None,
-                    data,
-                },
-                &mut [],
-            ));
-        }
-
-        // Generic long header.
-        let version = Self::opt(decoder.decode_uint())?;
-        let dcid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?);
-        let scid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?);
-
-        // Version negotiation.
-        match version {
-            0 => {
                 return Ok((
                     Self {
-                        packet_type: Type::VersionNegotiation,
-                        dcid: ConnectionId::from(dcid),
-                        scid: Some(ConnectionId::from(scid)),
+                        packet_type: Type::Short,
+                        dcid,
+                        scid: None,
                         token: vec![],
-                        header_len: decoder.offset(),
+                        header_len,
                         version: None,
                         data,
                     },
                     &mut [],
                 ));
             }
-            Version::SCONE1 | Version::SCONE2 => {
-                // Note: this outright ignores SCONE packets.
-                // It does not even validate that the connection ID is correct.
-                debug!(
-                    "Received SCONE indication {i}",
-                    i = u8::try_from((version >> 25) & 0x40)? | (first & 0x3f)
-                );
-                let (_scone, remainder) = data.split_at_mut(decoder.offset());
-                return Self::decode(remainder, dcid_decoder);
+
+            // Generic long header.
+            let version = Self::opt(decoder.decode_uint())?;
+            let dcid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?);
+            let scid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?);
+
+            // Version negotiation.
+            match version {
+                0 => {
+                    return Ok((
+                        Self {
+                            packet_type: Type::VersionNegotiation,
+                            dcid: ConnectionId::from(dcid),
+                            scid: Some(ConnectionId::from(scid)),
+                            token: vec![],
+                            header_len: decoder.offset(),
+                            version: None,
+                            data,
+                        },
+                        &mut [],
+                    ));
+                }
+                Version::SCONE1 | Version::SCONE2 => {
+                    // Note: this outright ignores SCONE packets.
+                    // It does not even validate that the connection ID is correct.
+                    debug!(
+                        "Received SCONE indication {i}",
+                        i = u8::try_from((version >> 25) & 0x40)? | (first & 0x3f)
+                    );
+                    let offset = decoder.offset();
+                    (_, data) = std::mem::take(&mut data).split_at_mut(offset);
+                    continue;
+                }
+                _ => {}
             }
-            _ => {}
-        }
 
-        // Check that this is a long header from a supported version.
-        let Ok(version) = Version::try_from(version) else {
-            return if accept_other_version {
-                Ok((
-                    Self {
-                        packet_type: Type::OtherVersion,
-                        dcid: ConnectionId::from(dcid),
-                        scid: Some(ConnectionId::from(scid)),
-                        token: vec![],
-                        header_len: decoder.offset(),
-                        version: Some(version),
-                        data,
-                    },
-                    &mut [],
-                ))
-            } else {
-                Err(Error::InvalidPacket)
+            // Check that this is a long header from a supported version.
+            let Ok(version) = Version::try_from(version) else {
+                return if accept_other_version {
+                    Ok((
+                        Self {
+                            packet_type: Type::OtherVersion,
+                            dcid: ConnectionId::from(dcid),
+                            scid: Some(ConnectionId::from(scid)),
+                            token: vec![],
+                            header_len: decoder.offset(),
+                            version: Some(version),
+                            data,
+                        },
+                        &mut [],
+                    ))
+                } else {
+                    Err(Error::InvalidPacket)
+                };
             };
-        };
 
-        if dcid.len() > ConnectionId::MAX_LEN || scid.len() > ConnectionId::MAX_LEN {
-            return Err(Error::InvalidPacket);
-        }
-        let packet_type = Type::from_byte((first >> 4) & 3, version);
+            if dcid.len() > ConnectionId::MAX_LEN || scid.len() > ConnectionId::MAX_LEN {
+                return Err(Error::InvalidPacket);
+            }
+            let packet_type = Type::from_byte((first >> 4) & 3, version);
 
-        // The type-specific code includes a token.  This consumes the remainder of the packet.
-        let (token, header_len) = Public::decode_long(&mut decoder, packet_type, version)?;
-        let token = token.to_vec();
-        let dcid = ConnectionId::from(dcid);
-        let scid = Some(ConnectionId::from(scid));
-        let (data, remainder) = data.split_at_mut(decoder.offset());
-        Ok((
-            Self {
-                packet_type,
-                dcid,
-                scid,
-                token,
-                header_len,
-                version: Some(version.wire_version()),
-                data,
-            },
-            remainder,
-        ))
+            // The type-specific code includes a token.  This consumes the remainder of the packet.
+            let (token, header_len) = Public::decode_long(&mut decoder, packet_type, version)?;
+            let token = token.to_vec();
+            let dcid = ConnectionId::from(dcid);
+            let scid = Some(ConnectionId::from(scid));
+            let (data, remainder) = data.split_at_mut(decoder.offset());
+            return Ok((
+                Self {
+                    packet_type,
+                    dcid,
+                    scid,
+                    token,
+                    header_len,
+                    version: Some(version.wire_version()),
+                    data,
+                },
+                remainder,
+            ));
+        } // end loop
     }
 
     /// Validate the given packet as though it were a retry.
@@ -1805,5 +1808,21 @@ mod tests {
         let mut scone_only = SCONE1.to_vec();
         let res = Public::decode(&mut scone_only, &cid_mgr());
         assert!(matches!(res, Err(Error::NoMoreData)));
+    }
+
+    #[test]
+    fn many_scones() {
+        // A long chain of valid SCONE1 long-header packets with empty CIDs.
+        const SCONE_PACKET: [u8; 7] = [0xff, 0x6f, 0x7d, 0xc0, 0xfd, 0x00, 0x00];
+        let mut data: Vec<u8> = SCONE_PACKET
+            .iter()
+            .copied()
+            .cycle()
+            .take(SCONE_PACKET.len() * 20_000)
+            .collect();
+        assert!(matches!(
+            Public::decode(&mut data, &cid_mgr()),
+            Err(Error::NoMoreData)
+        ));
     }
 }

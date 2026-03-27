@@ -2,7 +2,6 @@ name: Fuzz & Bench
 on:
   workflow_dispatch:
   pull_request:
-    branches: ["main"]
   merge_group:
 
 concurrency:
@@ -27,13 +26,21 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           version: nightly
-          tools: ${{ matrix.check == 'fuzz' && 'cargo-fuzz' || ''}}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: ./.github/actions/nss
+      - name: Install cargo-fuzz
+        if: ${{ matrix.check == 'fuzz' }}
+        # cargo-fuzz must be compiled from source so it targets the native toolchain;
+        # binstall provides prebuilt binaries that may target a different architecture.
+        run: cargo install cargo-fuzz
+
+      - uses: mozilla/actions/nss@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
+        with:
+          version-file: neqo-crypto/min_version.txt
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - if: ${{ matrix.check == 'fuzz' }}
         env:

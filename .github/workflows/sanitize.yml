@@ -1,7 +1,6 @@
 name: Sanitize
 on:
   pull_request:
-    branches: ["main"]
   merge_group:
   workflow_dispatch:
 env:
@@ -39,14 +38,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           version: nightly
           components: rust-src
           tools: cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: ./.github/actions/nss
+      - uses: mozilla/actions/nss@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
+        with:
+          version-file: neqo-crypto/min_version.txt
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run tests with sanitizers
         env:

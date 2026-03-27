@@ -2,11 +2,12 @@ name: cargo bench
 on:
   workflow_call:
   pull_request:
-    branches: ["main"]
   workflow_dispatch:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
+  CARGO_PROFILE_RELEASE_LTO: true
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
   RUSTUP_TOOLCHAIN: stable
   PERF_OPT: record -F2999 --call-graph fp -g
   SCCACHE_CACHE_SIZE: 128G
@@ -14,7 +15,8 @@ env:
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
-  WORKSPACE: ${{ github.workspace}}
+  WORKSPACE: ${{ github.workspace }}
+  BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -37,21 +39,19 @@ jobs:
         with:
           repository: mozilla/neqo
           path: neqo
-          submodules: 'recursive'
+          submodules: "recursive"
           persist-credentials: false
-      - run: |
-          cd neqo
-          git fetch --no-tags --depth=1 origin main
 
       - uses: ./neqo/.github/actions/build-neqo
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: bench-build
-          benches: 'true'
+          benches: "true"
+          baseline-ref: origin/${{ env.BASE_REF }}
 
   bench:
     name: cargo bench
-    runs-on: 'self-hosted' # zizmor: ignore[self-hosted-runner]
+    runs-on: "self-hosted" # zizmor: ignore[self-hosted-runner]
     needs: [build]
     defaults:
       run:
@@ -67,30 +67,31 @@ jobs:
           clean: false
       - run: |
           cd neqo
-          git fetch --no-tags --depth=1 origin main
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
 
       - name: Set PATH and environment
         run: |
           echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
-        uses: ./neqo/.github/actions/rust
+        uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: flamegraph, samply
           token: ${{ secrets.GITHUB_TOKEN }}
+          sccache: true
 
-      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: bench-build
           path: dist
 
       - name: Set up build artifacts
         run: |
-          chmod +x dist/neqo/* dist/neqo-main/*
-          mkdir -p binaries/neqo binaries/neqo-main
+          chmod +x dist/neqo/* dist/neqo-baseline/*
+          mkdir -p binaries/neqo binaries/neqo-baseline
           cp dist/neqo/* binaries/neqo/
-          cp dist/neqo-main/* binaries/neqo-main/
+          cp dist/neqo-baseline/* binaries/neqo-baseline/
           {
             echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/dist/lib:$LD_LIBRARY_PATH"
             echo "NSS_DB_PATH=$GITHUB_WORKSPACE/dist/test-fixture/db"
@@ -107,13 +108,13 @@ jobs:
           sudo ip link set dev lo mtu "$MTU"
           cd neqo
           rm -rf target/criterion
-          # Run the builds from the main branch first, to establish a baseline.
-          for BENCH in ../dist/neqo-main/*; do
+          # Run the baseline builds first, to establish a baseline.
+          for BENCH in ../dist/neqo-baseline/*; do
             NAME=$(basename "$BENCH")
             [[ "$NAME" == "neqo-client" || "$NAME" == "neqo-server" ]] && continue
             # shellcheck disable=SC2086
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              "$BENCH" -- --bench --save-baseline main --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results-main.txt
+              "$BENCH" -- --bench --save-baseline baseline --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results-baseline.txt
           done
           # Run pull request builds twice, once without perf for baseline comparison, and once with perf for profiling.
           # (Perf seems to introduce some variability in the results.)
@@ -123,7 +124,7 @@ jobs:
             # shellcheck disable=SC2086
             # --baseline-lenient allows us to add new benchmarks in pull requests.
             nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              "$BENCH" -- --bench --baseline-lenient main --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
+              "$BENCH" -- --bench --baseline-lenient baseline --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
           done
           for BENCH in ../dist/neqo/*; do
             NAME=$(basename "$BENCH" | cut -d- -f1)
@@ -154,10 +155,10 @@ jobs:
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          TESTBED: 'On-prem'
+          TESTBED: "On-prem"
         run: |
-          SHA=$(cd neqo && git log origin/main -1 --format=%H)
-          echo "$SHA" > main-sha.txt
+          SHA=$(cd neqo && git log origin/"$BASE_REF" -1 --format=%H)
+          echo "$SHA" > baseline-sha.txt
           python3 neqo/.github/scripts/format-bench-results.py results.txt
           # Build final markdown output
           {
@@ -203,7 +204,7 @@ jobs:
             *.md
             event.json
             results.*
-            results-main.*
+            results-baseline.*
           compression-level: 9
 
       - name: Export PR comment data

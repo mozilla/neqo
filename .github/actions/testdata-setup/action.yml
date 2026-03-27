@@ -7,7 +7,7 @@ inputs:
     required: true
   mtu:
     description: Set loopback MTU (requires sudo, leave empty to skip)
-    default: ''
+    default: ""
 
 outputs:
   sizes:
