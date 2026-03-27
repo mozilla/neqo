@@ -435,6 +435,73 @@ fn css_back_to_slow_start_on_rtt_decrease() {
 }
 
 #[test]
+fn css_exit_only_with_new_samples() {
+    let mut hystart = make_hystart_paced();
+
+    // First round with base RTT to set a baseline that we can compare RTT against
+    let window_end = HyStart::N_RTT_SAMPLE as u64;
+    hystart.on_packet_sent(window_end);
+
+    assert!(hystart.window_end().is_some_and(|pn| pn == window_end));
+
+    // Collect N_RTT_SAMPLE samples with base RTT and end first round
+    for i in 0..=window_end {
+        hystart.on_packets_acked(
+            &RttEstimate::new(BASE_RTT),
+            i,
+            INITIAL_CWND,
+            &mut CongestionControlStats::default(),
+        );
+    }
+
+    assert!(hystart.window_end().is_none());
+
+    // Start second round with a high window end
+    let window_end2 = 300;
+    hystart.on_packet_sent(window_end2);
+
+    // Collect N_RTT_SAMPLE samples with higher RTT to enter CSS
+    for _i in 0..HyStart::N_RTT_SAMPLE as u64 {
+        hystart.on_packets_acked(
+            &RttEstimate::new(HIGH_RTT),
+            0,
+            INITIAL_CWND,
+            &mut CongestionControlStats::default(),
+        );
+    }
+
+    assert!(hystart.in_css(), "Should have entered CSS");
+
+    // ACK with low RTT should not exit CSS without new samples
+    hystart.on_packets_acked(
+        &RttEstimate::new(LOW_RTT),
+        0,
+        INITIAL_CWND,
+        &mut CongestionControlStats::default(),
+    );
+
+    assert!(
+        hystart.in_css(),
+        "Should still be in CSS after one low RTT ACK"
+    );
+
+    // Collect N_RTT_SAMPLE-1 more samples with low RTT
+    for _i in 1..HyStart::N_RTT_SAMPLE as u64 {
+        hystart.on_packets_acked(
+            &RttEstimate::new(LOW_RTT),
+            0,
+            INITIAL_CWND,
+            &mut CongestionControlStats::default(),
+        );
+    }
+
+    assert!(
+        !hystart.in_css(),
+        "Should exit CSS after having enough samples"
+    );
+}
+
+#[test]
 fn css_exit_to_slow_start_restores_normal_growth() {
     const CSS_BASELINE_RTT: Duration = HIGH_RTT;
     const LOWER_RTT: Duration = Duration::from_millis(110);
