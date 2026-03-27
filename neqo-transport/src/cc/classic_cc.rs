@@ -99,6 +99,7 @@ pub trait WindowAdjustment: Display + Debug {
         acked_bytes: usize,
         max_datagram_size: usize,
         congestion_event: CongestionEvent,
+        cc_stats: &mut CongestionControlStats,
     ) -> (usize, usize);
     /// Cubic needs this signal to reset its epoch.
     fn on_app_limited(&mut self);
@@ -108,7 +109,7 @@ pub trait WindowAdjustment: Display + Debug {
 
     /// Restore the previously stored congestion controller state, to recover from a spurious
     /// congestion event.
-    fn restore_undo_state(&mut self);
+    fn restore_undo_state(&mut self, cc_stats: &mut CongestionControlStats);
 }
 
 /// Trait for slow start exit algorithms.
@@ -732,7 +733,7 @@ where
             cc_stats.congestion_events[CongestionEvent::Spurious] += 1;
             return;
         }
-        self.congestion_control.restore_undo_state();
+        self.congestion_control.restore_undo_state(cc_stats);
 
         qdebug!(
             "Spurious cong event: recovering cc params from {} to {stored}",
@@ -867,6 +868,7 @@ where
             self.current.acked_bytes,
             self.max_datagram_size(),
             congestion_event,
+            cc_stats,
         );
         self.current.congestion_window = max(cwnd, self.cwnd_min());
         self.current.acked_bytes = acked_bytes;
@@ -1624,6 +1626,8 @@ mod tests {
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 0);
 
         // 2. Lose packets (1, 2) --> `RecoveryStart`, 1 event, reduced cwnd
+        let cwnd_before_loss = cc.cwnd();
+        assert_eq!(cc_stats.w_max, None);
         let mut lost_pkt1 = pkt1.clone();
         let mut lost_pkt2 = pkt2.clone();
         lost_pkt1.declare_lost(now, sent::LossTrigger::TimeThreshold);
@@ -1643,6 +1647,13 @@ mod tests {
             Some(SlowStartExitReason::CongestionEvent)
         );
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
+        #[expect(
+            clippy::cast_sign_loss,
+            clippy::cast_possible_truncation,
+            reason = "w_max is non-negative and represents whole bytes"
+        )]
+        let w_max_stat = cc_stats.w_max.unwrap() as usize;
+        assert_eq!(w_max_stat, cwnd_before_loss);
         assert_eq!(
             cc.cwnd(),
             cc.cwnd_initial() * Cubic::BETA_USIZE_DIVIDEND / Cubic::BETA_USIZE_DIVISOR
@@ -1690,6 +1701,7 @@ mod tests {
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
         assert_eq!(cc_stats.congestion_events[CongestionEvent::Spurious], 1);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
+        assert_eq!(cc_stats.w_max, None);
     }
 
     /// This tests a scenario where spurious detection happens late, after cwnd has recovered and

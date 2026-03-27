@@ -290,7 +290,7 @@ fn congestion_event_slow_start() {
     _ = fill_cwnd(&mut cubic, 0, now());
     ack_packet(&mut cubic, 0, now(), &mut cc_stats);
 
-    assert_within(cubic.congestion_control().w_max(), 0.0, f64::EPSILON);
+    assert_eq!(cubic.congestion_control().w_max(), None);
 
     // cwnd is increased by 1 in slow start phase, after an ack.
     assert_eq!(
@@ -304,7 +304,7 @@ fn congestion_event_slow_start() {
     // w_max is equal to cwnd before decrease.
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
     assert_within(
-        cubic.congestion_control().w_max(),
+        cubic.congestion_control().w_max().unwrap(),
         cwnd_initial_f64 + convert_to_f64(cubic.max_datagram_size()),
         f64::EPSILON,
     );
@@ -326,7 +326,7 @@ fn congestion_event_congestion_avoidance() {
 
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
     assert_within(
-        cubic.congestion_control().w_max(),
+        cubic.congestion_control().w_max().unwrap(),
         cwnd_initial_f64,
         f64::EPSILON,
     );
@@ -386,7 +386,7 @@ fn congestion_event_congestion_avoidance_fast_convergence() {
 
     let cwnd_initial_f64 = convert_to_f64(cubic.cwnd_initial());
     assert_within(
-        cubic.congestion_control().w_max(),
+        cubic.congestion_control().w_max().unwrap(),
         cwnd_initial_f64 * 10.0,
         f64::EPSILON,
     );
@@ -396,7 +396,7 @@ fn congestion_event_congestion_avoidance_fast_convergence() {
     packet_lost(&mut cubic, 1, &mut cc_stats);
 
     assert_within(
-        cubic.congestion_control().w_max(),
+        cubic.congestion_control().w_max().unwrap(),
         cwnd_initial_f64 * Cubic::FAST_CONVERGENCE_FACTOR,
         f64::EPSILON,
     );
@@ -423,7 +423,7 @@ fn congestion_event_congestion_avoidance_no_overflow() {
     ack_packet(&mut cubic, 1, now(), &mut cc_stats);
 
     assert_within(
-        cubic.congestion_control().w_max(),
+        cubic.congestion_control().w_max().unwrap(),
         cwnd_initial_f64 * 10.0,
         f64::EPSILON,
     );
@@ -443,6 +443,6 @@ fn cubic_display() {
     let cubic = Cubic::default();
     assert_eq!(
         cubic.to_string(),
-        "Cubic state [w_max: 0, k: 0, t_epoch: None]"
+        "Cubic state [w_max: None, k: 0, t_epoch: None]"
     );
 }
