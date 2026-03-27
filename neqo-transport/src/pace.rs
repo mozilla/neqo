@@ -109,6 +109,11 @@ impl Pacer {
 
     /// Bytes sendable at `SPEEDUP * cwnd / rtt` pace over `elapsed`.
     /// Returns `None` if `rtt` is zero.
+    #[allow(
+        clippy::allow_attributes,
+        clippy::unwrap_in_result,
+        reason = "Check if this can be removed with MSRV > 1.90"
+    )]
     fn bytes_for(cwnd: usize, rtt: Duration, elapsed: Duration) -> Option<u128> {
         let factor = u128::try_from(cwnd)
             .expect("usize fits into u128")
