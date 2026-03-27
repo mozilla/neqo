@@ -515,6 +515,54 @@ fn css_exit_only_with_new_samples() {
 }
 
 #[test]
+fn css_alternative_baseline() {
+    const CSS_ENTRY_RTT: Duration = HIGH_RTT;
+    let mut hystart = HyStart::new(true, HyStartCssBaseline::EntryThreshold);
+    maybe_enter_css(
+        &mut hystart,
+        BASE_RTT,
+        CSS_ENTRY_RTT,
+        &mut CongestionControlStats::default(),
+    );
+    assert!(hystart.in_css(), "Should have entered CSS");
+
+    // Start a new round in CSS
+    let new_window_end = 300;
+    hystart.on_packet_sent(new_window_end);
+
+    // RTT decreases just below CSS_ENTRY_RTT - should not exit CSS if using alternative baseline.
+    // When using the RFC default then this would've exited.
+    for i in 0..HyStart::N_RTT_SAMPLE {
+        hystart.on_packets_acked(
+            &RttEstimate::new(CSS_ENTRY_RTT - Duration::from_micros(1)),
+            i as u64, // Less than window_end
+            INITIAL_CWND,
+            &mut CongestionControlStats::default(),
+        );
+    }
+
+    assert!(
+        hystart.in_css(),
+        "Should still be in CSS after RTT decrease just below CSS_ENTRY_RTT"
+    );
+
+    // RTT decreases below the threshold that we entered CSS with - should exit CSS.
+    // With BASE_RTT = 100ms we have a threshold of 112.5ms, so let's take a value of 112.499ms.
+    let below_threshold_rtt = BASE_RTT + Duration::from_micros(12_499);
+    hystart.on_packets_acked(
+        &RttEstimate::new(below_threshold_rtt),
+        0, // Less than window_end
+        INITIAL_CWND,
+        &mut CongestionControlStats::default(),
+    );
+
+    assert!(
+        !hystart.in_css(),
+        "Should exit CSS when RTT decreases below alternative baseline"
+    );
+}
+
+#[test]
 fn css_exit_to_slow_start_restores_normal_growth() {
     const CSS_BASELINE_RTT: Duration = HIGH_RTT;
     const LOWER_RTT: Duration = Duration::from_millis(110);
