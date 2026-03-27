@@ -113,7 +113,6 @@ runs:
                         ;;
           esac
           cargo test --locked --no-fail-fast --release
-
           rm -rf target # Do not sync this back to host
         EOF
         {
@@ -129,6 +128,7 @@ runs:
       uses: vmactions/freebsd-vm@4807432c7cab1c3f97688665332c0b932062d31f # v1.4.3
       with:
         usesh: true
+        disable-cache: true
         copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
@@ -138,6 +138,7 @@ runs:
       uses: vmactions/openbsd-vm@3fafb45f2e2e696249c583835939323fe1c3448c # v1.3.7
       with:
         usesh: true
+        disable-cache: true
         copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
@@ -147,6 +148,7 @@ runs:
       uses: vmactions/netbsd-vm@e04aec09540429f9cebb0e7941f7cd0c0fc3b44f # v1.3.6
       with:
         usesh: true
+        disable-cache: true
         copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
@@ -157,6 +159,7 @@ runs:
       with:
         release: "11.4-gcc"
         usesh: true
+        disable-cache: true
         copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
@@ -179,7 +182,7 @@ runs:
         flags: ${{ inputs.platform }}
 
     - if: ${{ always() && inputs.generate-bindings == 'true' }}
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
       with:
         name: bindings-${{ inputs.platform }}
         path: ${{ inputs.working-directory }}/${{ inputs.platform }}.rs
