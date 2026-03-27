@@ -1,16 +1,16 @@
-name: 'CI VM'
-description: 'Run main CI steps in VMs for VM-only platforms.'
+name: "CI VM"
+description: "Run main CI steps in VMs for VM-only platforms."
 
 inputs:
   working-directory:
-    description: 'Working directory.'
-    default: '.'
+    description: "Working directory."
+    default: "."
   platform:
-    description: 'Platform to run the checks on.'
-    default: ''
+    description: "Platform to run the checks on."
+    default: ""
   codecov-token:
-    description: 'Codecov token, if Codecov upload is desired.'
-    default: ''
+    description: "Codecov token, if Codecov upload is desired."
+    default: ""
 
 runs:
   using: composite

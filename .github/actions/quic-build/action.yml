@@ -10,7 +10,7 @@ inputs:
     required: true
   artifact-name:
     description: Artifact name (if set, uploads binaries as artifact)
-    default: ''
+    default: ""
 
 outputs:
   binaries:
@@ -39,7 +39,7 @@ runs:
 
     - name: Install Rust
       if: inputs.impl == 'quiche' || inputs.impl == 's2n'
-      uses: ./.github/actions/rust
+      uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
       with:
         version: stable
         token: ${{ inputs.token }}

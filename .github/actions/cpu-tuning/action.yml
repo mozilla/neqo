@@ -4,7 +4,7 @@ description: Configure CPU for consistent benchmark performance (disable turbo b
 inputs:
   select-cpus:
     description: Whether to select physical CPUs for pinning (outputs server-cpu and client-cpu)
-    default: 'false'
+    default: "false"
 
 outputs:
   server-cpu:

@@ -13,10 +13,10 @@ inputs:
     required: true
   benches:
     description: Also build walltime benchmark binaries
-    default: 'false'
+    default: "false"
   baseline-ref:
     description: Git ref to build baseline binaries from
-    default: 'origin/main'
+    default: "origin/main"
 
 runs:
   using: composite
@@ -28,21 +28,24 @@ runs:
         sudo apt-get install -y --no-install-recommends clang lld
 
     - name: Install Rust
-      uses: ./neqo/.github/actions/rust
+      uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
       with:
         version: stable
         token: ${{ inputs.token }}
 
     - name: Install NSS
-      uses: ./neqo/.github/actions/nss
+      uses: mozilla/actions/nss@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
       with:
         version-file: neqo/neqo-crypto/min_version.txt
+        token: ${{ inputs.token }}
 
     - name: Build neqo
       shell: bash
       env:
         BENCHES: ${{ inputs.benches }}
         BASELINE_REF: ${{ inputs.baseline-ref }}
+        CARGO_PROFILE_RELEASE_LTO: true
+        CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
       run: |
         # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
         export RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment -C force-frame-pointers=yes $RUSTFLAGS"
