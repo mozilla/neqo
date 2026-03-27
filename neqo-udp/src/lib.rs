@@ -241,9 +241,10 @@ impl<S: SocketRef> Socket<S> {
     ///
     /// # Safety
     ///
-    /// The caller must verify that `sendmsg_x` and `recvmsg_x` are available
-    /// on the current OS version before calling this. On unsupported OS
-    /// versions these private APIs may crash.
+    /// `sendmsg_x` and `recvmsg_x` are private Apple APIs. Quinn-udp resolves
+    /// them at runtime via `dlsym` and falls back to standard `sendmsg`/`recvmsg`
+    /// if they are unavailable, so this will not crash on unsupported OS versions.
+    /// The `unsafe` contract is inherited from [`quinn_udp::UdpSocketState::set_apple_fast_path`].
     #[cfg(apple)]
     pub unsafe fn enable_apple_fast_path(&self) {
         // SAFETY: Caller ensures the APIs are available on this OS version.

@@ -31,8 +31,11 @@ impl Socket {
         let socket = std::net::UdpSocket::bind(addr)?;
         let state = quinn_udp::UdpSocketState::new((&socket).into())?;
         #[cfg(apple)]
+        // SAFETY: Quinn-udp resolves `sendmsg_x`/`recvmsg_x` via `dlsym` at
+        // runtime and falls back to standard `sendmsg`/`recvmsg` if unavailable,
+        // so this is safe on all supported Apple OS versions.
+        // neqo-bin always enables the Apple fast datapath as a canary.
         unsafe {
-            // neqo-bin always enables the Apple fast datapath as a canary.
             state.set_apple_fast_path();
         }
 
