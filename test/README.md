@@ -49,4 +49,4 @@ The `upload_test.sh` script automates testing network conditions for `neqo-clien
 
 ## Visualize log file
 
-Run `./mozlog-neqo-cwnd.py upload.log` to view the logs with matplotlib and python.
+Run `./mozlog-neqo-cwnd.py upload.log` to view the logs with Matplotlib and Python.
