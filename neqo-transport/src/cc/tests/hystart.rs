@@ -112,8 +112,13 @@ fn round_tracking_lifecycle() {
             "Round should continue while largest_acked < window_end"
         );
     }
+    assert!(
+        hystart.rtt_sample_count() > 0,
+        "We should have collected RTT samples in this round."
+    );
+    let min_rtt = hystart.current_round_min_rtt().unwrap();
 
-    // Now ack window_end - this should end the round
+    // Now ack window_end - this should end the round and switch over RTT tracking to the next.
     hystart.on_packets_acked(
         &RttEstimate::new(BASE_RTT),
         window_end, // largest_acked=window_end, round ends
@@ -124,14 +129,24 @@ fn round_tracking_lifecycle() {
         hystart.window_end().is_none(),
         "Round should end when largest_acked >= window_end"
     );
+    assert_eq!(
+        hystart.rtt_sample_count(),
+        0,
+        "RTT sample count should have been reset for the next round"
+    );
+    assert_eq!(
+        hystart.last_round_min_rtt(),
+        Some(min_rtt),
+        "RTT tracking should have been updated for the next round"
+    );
 
-    // Start new round
+    // Set next window_end
     let window_end2 = 100;
     hystart.on_packet_sent(window_end2);
     assert_eq!(
         hystart.window_end(),
         Some(window_end2),
-        "New round should start with new window_end"
+        "New round should now have set new window_end"
     );
 }
 
@@ -139,8 +154,6 @@ fn round_tracking_lifecycle() {
 #[test]
 fn rtt_sample_collection_tracks_minimum() {
     let mut hystart = make_hystart_paced();
-
-    hystart.on_packet_sent(0);
 
     // First ACK with RTT of 100ms
     hystart.on_packets_acked(
@@ -192,7 +205,6 @@ fn rtt_sample_collection_tracks_minimum() {
 )]
 fn rtt_sample_count_increments_per_ack() {
     let mut hystart = make_hystart_paced();
-    hystart.on_packet_sent(0);
 
     assert_eq!(hystart.rtt_sample_count(), 0);
 
