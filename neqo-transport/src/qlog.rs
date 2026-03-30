@@ -386,6 +386,7 @@ pub fn mtu_updated(qlog: &mut Qlog, old_mtu: usize, new_mtu: usize, done: bool, 
     );
 }
 
+#[derive(Clone, Copy)]
 #[expect(dead_code, reason = "TODO: Construct all variants.")]
 pub enum Metric {
     MinRtt(Duration),
@@ -400,9 +401,11 @@ pub enum Metric {
     PacingRate(u64),
 }
 
-pub fn metrics_updated(qlog: &mut Qlog, updated_metrics: &[Metric], now: Instant) {
-    debug_assert!(!updated_metrics.is_empty());
-
+pub fn metrics_updated<M: IntoIterator<Item = Metric>>(
+    qlog: &mut Qlog,
+    updated_metrics: M,
+    now: Instant,
+) {
     qlog.add_event_at(
         || {
             let mut min_rtt: Option<f32> = None;
@@ -423,21 +426,35 @@ pub fn metrics_updated(qlog: &mut Qlog, updated_metrics: &[Metric], now: Instant
                     Metric::LatestRtt(v) => latest_rtt = Some(v.as_secs_f32() * 1000.0),
                     Metric::RttVariance(v) => rtt_variance = Some(v.as_secs_f32() * 1000.0),
                     Metric::PtoCount(v) => {
-                        pto_count = Some(u16::try_from(*v).expect("fits in u16"));
+                        pto_count = Some(u16::try_from(v).expect("fits in u16"));
                     }
                     Metric::CongestionWindow(v) => {
-                        congestion_window = Some(u64::try_from(*v).expect("fits in u64"));
+                        congestion_window = Some(u64::try_from(v).expect("fits in u64"));
                     }
                     Metric::BytesInFlight(v) => {
-                        bytes_in_flight = Some(u64::try_from(*v).expect("fits in u64"));
+                        bytes_in_flight = Some(u64::try_from(v).expect("fits in u64"));
                     }
                     Metric::SsThresh(v) => {
-                        ssthresh = Some(u64::try_from(*v).expect("fits in u64"));
+                        ssthresh = Some(u64::try_from(v).expect("fits in u64"));
                     }
-                    Metric::PacketsInFlight(v) => packets_in_flight = Some(*v),
-                    Metric::PacingRate(v) => pacing_rate = Some(*v),
+                    Metric::PacketsInFlight(v) => packets_in_flight = Some(v),
+                    Metric::PacingRate(v) => pacing_rate = Some(v),
                 }
             }
+
+            debug_assert!(
+                min_rtt.is_some()
+                    || smoothed_rtt.is_some()
+                    || latest_rtt.is_some()
+                    || rtt_variance.is_some()
+                    || pto_count.is_some()
+                    || congestion_window.is_some()
+                    || bytes_in_flight.is_some()
+                    || ssthresh.is_some()
+                    || packets_in_flight.is_some()
+                    || pacing_rate.is_some(),
+                "metrics_updated called with no metrics"
+            );
 
             let ev_data = EventData::MetricsUpdated(MetricsUpdated {
                 min_rtt,
@@ -843,5 +860,32 @@ impl From<packet::Type> for qlog::events::quic::PacketType {
             packet::Type::VersionNegotiation => Self::VersionNegotiation,
             packet::Type::OtherVersion => Self::Unknown,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use test_fixture::new_neqo_qlog;
+
+    use super::{Metric, metrics_updated};
+
+    /// Verify that `metrics_updated` records all metric variants, including
+    /// `SsThresh`, when qlog is enabled.
+    #[test]
+    fn metrics_updated_all_variants() {
+        let (mut qlog, contents) = new_neqo_qlog();
+        let now = test_fixture::now();
+        metrics_updated(
+            &mut qlog,
+            [Metric::CongestionWindow(10_000), Metric::SsThresh(5_000)],
+            now,
+        );
+        drop(qlog);
+        let output = contents.to_string();
+        assert!(
+            output.contains("congestion_window"),
+            "missing congestion_window"
+        );
+        assert!(output.contains("ssthresh"), "missing ssthresh");
     }
 }
