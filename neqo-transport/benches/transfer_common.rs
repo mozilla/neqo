@@ -9,6 +9,7 @@ use std::time::Duration;
 use criterion::{BenchmarkGroup, Criterion};
 use neqo_transport::{ConnectionParameters, State};
 use test_fixture::{
+    bench::NOISE_THRESHOLD,
     boxed,
     sim::{
         ReadySimulator, Simulator,
@@ -62,27 +63,10 @@ pub fn benchmark<M>(c: &mut Criterion, mut measure: M)
 where
     M: FnMut(&mut BenchmarkGroup<'_, criterion::measurement::WallTime>, &str, Option<&str>, bool),
 {
-    // Handle SIMULATION_SEED environment variable for varying-seeds config
-    let env_seed = std::env::var("SIMULATION_SEED").ok();
-    let configs: [(&str, Option<&str>); 2] = [
-        ("varying-seeds", env_seed.as_deref()),
-        ("same-seed", Some(FIXED_SEED)),
-    ];
-
     let mut group = c.benchmark_group("transfer");
-    group.noise_threshold(0.03);
-    for (label, seed) in configs {
-        for pacing in [false, true] {
-            measure(&mut group, label, seed, pacing);
-        }
+    group.noise_threshold(NOISE_THRESHOLD);
+    for pacing in [false, true] {
+        measure(&mut group, "fixed-seed", Some(FIXED_SEED), pacing);
     }
     group.finish();
-}
-
-/// Returns the criterion configuration for transfer benchmarks.
-#[must_use]
-pub fn criterion_config() -> Criterion {
-    Criterion::default()
-        .warm_up_time(Duration::from_secs(5))
-        .measurement_time(Duration::from_secs(15))
 }
