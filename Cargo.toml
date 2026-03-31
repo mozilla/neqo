@@ -45,6 +45,10 @@ strum = { version = "0.27", default-features = false, features = ["derive"] }
 thiserror = { version = "2.0.12", default-features = false }
 windows = { version = ">=0.60,<0.63", default-features = false }
 
+[patch.crates-io]
+# TODO: Remove this once Gecko switches back to the official mio crate.
+mio = { git = "https://github.com/kinetiknz/mio", rev = "5e8b202db39facecc343170f50a07916640a607c" }
+
 [workspace.lints.rust]
 absolute_paths_not_starting_with_crate = "warn"
 ambiguous_negative_literals = "warn"
