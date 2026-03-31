@@ -118,8 +118,8 @@ fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
                 } else {
                     Some("ipv6".into())
                 },
-                src_ip: format!("{}", p.local_address().ip()),
-                dst_ip: format!("{}", p.remote_address().ip()),
+                src_ip: p.local_address().ip().to_string(),
+                dst_ip: p.remote_address().ip().to_string(),
                 protocol: Some("QUIC".into()),
                 src_port: p.local_address().port().into(),
                 dst_port: p.remote_address().port().into(),

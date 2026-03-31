@@ -125,8 +125,8 @@ impl RecordList {
 }
 
 impl Deref for RecordList {
-    type Target = Vec<Record>;
-    fn deref(&self) -> &Vec<Record> {
+    type Target = [Record];
+    fn deref(&self) -> &[Record] {
         &self.records
     }
 }

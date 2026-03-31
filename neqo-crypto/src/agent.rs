@@ -347,8 +347,8 @@ impl SecretAgentPreInfo {
     }
 
     #[must_use]
-    pub const fn alpn(&self) -> Option<&String> {
-        self.alpn.as_ref()
+    pub fn alpn(&self) -> Option<&str> {
+        self.alpn.as_deref()
     }
 }
 
@@ -411,8 +411,8 @@ impl SecretAgentInfo {
         self.ech_accepted
     }
     #[must_use]
-    pub const fn alpn(&self) -> Option<&String> {
-        self.alpn.as_ref()
+    pub fn alpn(&self) -> Option<&str> {
+        self.alpn.as_deref()
     }
     #[must_use]
     pub const fn signature_scheme(&self) -> SignatureScheme {

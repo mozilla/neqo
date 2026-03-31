@@ -92,7 +92,7 @@ fn frame_reading_with_stream_settings2() {
     }
     let frame = fr.process(&[0x01]);
 
-    assert!(&frame.is_some());
+    assert!(frame.is_some());
     if let HFrame::Settings { settings } = frame.unwrap() {
         assert_eq!(settings.len(), 2);
         assert_eq!(
@@ -164,7 +164,7 @@ fn unknown_frame() {
     let frame = fr.process(&[0x03, 0x01, 0x05]);
     assert!(frame.is_some());
     if let HFrame::CancelPush { push_id } = frame.unwrap() {
-        assert!(push_id == PushId::new(5));
+        assert_eq!(push_id, PushId::new(5));
     } else {
         panic!("wrong frame type");
     }
@@ -186,7 +186,7 @@ fn frame_reading_with_stream_wt_close_session() {
     assert!(frame.is_some());
     let WebTransportFrame::CloseSession { error, message } = frame.unwrap();
     assert_eq!(error, 5);
-    assert_eq!(message, "Hello".to_string());
+    assert_eq!(message, "Hello");
 }
 
 // Test an unknown frame for WebTransportFrames.
@@ -211,7 +211,7 @@ fn unknown_wt_frame() {
     assert!(frame.is_some());
     let WebTransportFrame::CloseSession { error, message } = frame.unwrap();
     assert_eq!(error, 5);
-    assert_eq!(message, "Hello".to_string());
+    assert_eq!(message, "Hello");
 }
 
 enum FrameReadingTestSend {
