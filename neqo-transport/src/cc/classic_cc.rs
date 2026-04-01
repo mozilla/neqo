@@ -541,11 +541,6 @@ where
     }
 
     fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant) {
-        // Pass next packet number to send into slow start algorithm during slow start.
-        if self.current.phase.in_slow_start() {
-            self.slow_start.on_packet_sent(pkt.pn());
-        }
-
         // Record the recovery time and exit any transient phase.
         if self.current.phase.transient() {
             self.current.recovery_start = Some(pkt.pn());
@@ -556,6 +551,12 @@ where
         if !pkt.cc_in_flight() {
             return;
         }
+
+        // Pass next packet number to send into slow start algorithm during slow start.
+        if self.current.phase.in_slow_start() {
+            self.slow_start.on_packet_sent(pkt.pn());
+        }
+
         if !self.app_limited() {
             // Given the current non-app-limited condition, we're fully utilizing the congestion
             // window. Assume that all in-flight packets up to this one are NOT app-limited.
