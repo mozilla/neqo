@@ -1613,7 +1613,7 @@ fn zero_rtt_with_ech() {
 }
 
 fn scone(enable: bool) {
-    const PERIOD: Duration = Duration::from_secs(67);
+    const PERIOD: Duration = crate::scone::Scone::PERIOD;
 
     fn add_scone(d: &Datagram, signal: u8) -> Datagram {
         const SCONE: &[u8] = &[0xff, 0x6f, 0x7d, 0xc0, 0xfd, 0x00, 0x00];
