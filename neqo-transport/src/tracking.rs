@@ -395,10 +395,10 @@ impl RecvdPackets {
         let mut cur = range_iter.next().expect("should have at least one range");
         for ack in acked {
             while cur.smallest > ack.largest {
-                cur = match range_iter.next() {
-                    Some(c) => c,
-                    None => return,
+                let Some(next) = range_iter.next() else {
+                    return;
                 };
+                cur = next;
             }
             cur.acknowledged(ack);
         }

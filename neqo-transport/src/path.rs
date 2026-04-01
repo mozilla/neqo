@@ -635,9 +635,7 @@ impl Path {
         local_cid: Option<ConnectionId>,
         remote_cid: RemoteConnectionIdEntry,
     ) {
-        if self.local_cid.is_none() {
-            self.local_cid = local_cid;
-        }
+        self.local_cid = self.local_cid.take().or(local_cid);
         self.remote_cid.replace(remote_cid);
     }
 

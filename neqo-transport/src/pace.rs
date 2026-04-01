@@ -90,7 +90,10 @@ impl Pacer {
         let deficit =
             u128::try_from(packet - self.c).expect("packet is larger than current credit");
         let d = r.saturating_mul(deficit);
-        let add = d / u128::try_from(cwnd * Self::SPEEDUP).expect("usize fits into u128");
+        let divisor = u128::try_from(cwnd)
+            .expect("usize fits into u128")
+            .saturating_mul(u128::try_from(Self::SPEEDUP).expect("usize fits into u128"));
+        let add = d / divisor;
         let w = u64::try_from(add).map_or(rtt, Duration::from_nanos);
 
         // If the increment is below the timer granularity, send immediately.
@@ -102,6 +105,30 @@ impl Pacer {
         let nxt = self.t + w;
         qtrace!("[{self}] next {cwnd}/{rtt:?} wait {w:?} = {nxt:?}");
         nxt
+    }
+
+    /// Bytes sendable at `SPEEDUP * cwnd / rtt` pace over `elapsed`.
+    /// Returns `None` if `rtt` is zero.
+    #[allow(
+        clippy::allow_attributes,
+        clippy::unwrap_in_result,
+        reason = "Check if this can be removed with MSRV > 1.90"
+    )]
+    fn bytes_for(cwnd: usize, rtt: Duration, elapsed: Duration) -> Option<u128> {
+        let factor = u128::try_from(cwnd)
+            .expect("usize fits into u128")
+            .saturating_mul(u128::try_from(Self::SPEEDUP).expect("usize fits into u128"));
+        elapsed
+            .as_nanos()
+            .saturating_mul(factor)
+            .checked_div(rtt.as_nanos())
+    }
+
+    /// Compute the effective pacing rate in bytes per second.
+    ///
+    /// Returns `None` if `rtt` is zero or the rate exceeds `u64::MAX`.
+    pub(crate) fn rate(cwnd: usize, rtt: Duration) -> Option<u64> {
+        u64::try_from(Self::bytes_for(cwnd, rtt, Duration::from_secs(1))?).ok()
     }
 
     /// Spend credit. This cannot fail, but instead may carry debt into the
@@ -118,15 +145,10 @@ impl Pacer {
         }
 
         qtrace!("[{self}] spend {count} over {cwnd}, {rtt:?}");
-        // Increase the capacity by:
-        //    `(now - self.t) * Self::SPEEDUP * cwnd / rtt`
-        // That is, the elapsed fraction of the RTT times rate that data is added.
-        let incr = now
-            .saturating_duration_since(self.t)
-            .as_nanos()
-            .saturating_mul(u128::try_from(cwnd * Self::SPEEDUP).expect("usize fits into u128"))
-            .checked_div(rtt.as_nanos())
-            .and_then(|i| usize::try_from(i).ok())
+        // Increase the capacity by the elapsed fraction of the RTT times the
+        // pacing rate, i.e. `(now - self.t) * SPEEDUP * cwnd / rtt`.
+        let incr = Self::bytes_for(cwnd, rtt, now.saturating_duration_since(self.t))
+            .and_then(|b| usize::try_from(b).ok())
             .unwrap_or(self.m);
 
         // Add the capacity up to a limit of `self.m`, then subtract `count`.
@@ -226,6 +248,20 @@ mod tests {
         }
         // We expect _some_ time to have progressed after sending all the packets.
         assert!(n - start > Duration::ZERO);
+    }
+
+    #[test]
+    fn rate_basic() {
+        // 10 KB cwnd, 100 ms RTT → 2 * 10_000 * 1e9 / 100_000_000 = 200_000 B/s
+        assert_eq!(
+            Pacer::rate(10_000, Duration::from_millis(100)),
+            Some(200_000)
+        );
+    }
+
+    #[test]
+    fn rate_zero_rtt() {
+        assert_eq!(Pacer::rate(10_000, Duration::ZERO), None);
     }
 
     #[test]

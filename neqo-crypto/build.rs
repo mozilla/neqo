@@ -123,7 +123,7 @@ fn build_nss(dir: PathBuf) {
         String::from("--static"),
     ];
     let target = env::var("TARGET").unwrap();
-    if target.strip_prefix("aarch64-").is_some() {
+    if target.starts_with("aarch64-") {
         build_nss.push(String::from("--target=arm64"));
     }
     let status = Command::new(get_bash())

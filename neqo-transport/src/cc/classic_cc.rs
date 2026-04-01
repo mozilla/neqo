@@ -411,7 +411,7 @@ where
         cc_stats.cwnd = Some(self.current.congestion_window);
         qlog::metrics_updated(
             &mut self.qlog,
-            &[
+            [
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::BytesInFlight(self.bytes_in_flight),
             ],
@@ -471,7 +471,7 @@ where
 
         qlog::metrics_updated(
             &mut self.qlog,
-            &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
+            [qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
 
@@ -524,7 +524,7 @@ where
             self.bytes_in_flight -= pkt.len();
             qlog::metrics_updated(
                 &mut self.qlog,
-                &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
+                [qlog::Metric::BytesInFlight(self.bytes_in_flight)],
                 now,
             );
             qtrace!("[{self}] Ignore pkt with size {}", pkt.len());
@@ -535,7 +535,7 @@ where
         self.bytes_in_flight = 0;
         qlog::metrics_updated(
             &mut self.qlog,
-            &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
+            [qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
     }
@@ -572,7 +572,7 @@ where
         );
         qlog::metrics_updated(
             &mut self.qlog,
-            &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
+            [qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
     }
@@ -807,9 +807,10 @@ where
                     cc_stats.cwnd = Some(self.current.congestion_window);
                     qlog::metrics_updated(
                         &mut self.qlog,
-                        &[qlog::Metric::CongestionWindow(
-                            self.current.congestion_window,
-                        )],
+                        [
+                            qlog::Metric::CongestionWindow(self.current.congestion_window),
+                            qlog::Metric::SsThresh(self.current.ssthresh),
+                        ],
                         now,
                     );
 
@@ -889,7 +890,7 @@ where
 
         qlog::metrics_updated(
             &mut self.qlog,
-            &[
+            [
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::SsThresh(self.current.ssthresh),
             ],

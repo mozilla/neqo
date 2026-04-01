@@ -10,6 +10,8 @@ env:
   RUST_TEST_TIME_UNIT: 10,30
   RUST_TEST_TIME_INTEGRATION: 10,30
   RUST_TEST_TIME_DOCTEST: 10,30
+  CARGO_PROFILE_RELEASE_LTO: true
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -34,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: ./.github/actions/toolchains
+        uses: mozilla/actions/toolchains@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
 
   check:
     name: Run checks
@@ -77,14 +79,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
           tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful ' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: ./.github/actions/nss
+      - uses: mozilla/actions/nss@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
+        with:
+          version-file: neqo-crypto/min_version.txt
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check
         run: |
@@ -164,7 +169,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           version: stable
           tools: cargo-hack
@@ -178,7 +183,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        target: ['x86_64-linux-android', 'aarch64-linux-android']
+        target: ["x86_64-linux-android", "aarch64-linux-android"]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -204,7 +209,7 @@ jobs:
       matrix:
         # TODO: Re-enable openbsd once OpenBSD > 7.8 ships; nss-3.101 (the version in 7.8) is too old.
         # TODO: Re-enable NetBSD once NetBSD > 10.1 ships with NSS >= 3.121.
-        os: [ freebsd ] # NSS package on 'solaris' is too old.
+        os: [freebsd] # NSS package on 'solaris' is too old.
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

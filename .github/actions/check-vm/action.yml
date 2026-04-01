@@ -1,16 +1,16 @@
-name: 'CI VM'
-description: 'Run main CI steps in VMs for VM-only platforms.'
+name: "CI VM"
+description: "Run main CI steps in VMs for VM-only platforms."
 
 inputs:
   working-directory:
-    description: 'Working directory.'
-    default: '.'
+    description: "Working directory."
+    default: "."
   platform:
-    description: 'Platform to run the checks on.'
-    default: ''
+    description: "Platform to run the checks on."
+    default: ""
   codecov-token:
-    description: 'Codecov token, if Codecov upload is desired.'
-    default: ''
+    description: "Codecov token, if Codecov upload is desired."
+    default: ""
 
 runs:
   using: composite
@@ -53,26 +53,24 @@ runs:
           cd "$WD"
           pwd
           case "$PLATFORM" in
-            freebsd)    sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
-                        . "\$HOME/.cargo/env"
-                        ;;
             openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
                         export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
                         export LLVM_PROFDATA=/usr/local/llvm21/bin/llvm-profdata
-                        [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on OpenBSD
                         ;;
-            netbsd)     sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
+            *)          sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
                         . "\$HOME/.cargo/env"
-                        # FIXME: Why do we need to set this on NetBSD?
-                        export LD_LIBRARY_PATH=/usr/pkg/lib/nss:/usr/pkg/lib/nspr
-                        [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on NetBSD
                         ;;
-            solaris)    curl --output rust.sh -s https://raw.githubusercontent.com/psumbera/solaris-rust/refs/heads/main/sh.rust-web-install
-                        chmod a+x rust.sh
-                        ls -lt
-                        source ./rust.sh || true # This does not exit with zero on success
-                        export LIBCLANG_PATH="/usr/lib/amd64"
-                        [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on Solaris
+          esac
+          case "$PLATFORM" in
+            netbsd)     # FIXME: Why do we need to set this on NetBSD?
+                        export LD_LIBRARY_PATH=/usr/pkg/lib/nss:/usr/pkg/lib/nspr
+                        ;;
+            solaris)    export LIBCLANG_PATH="/usr/lib/amd64"
+                        ;;
+          esac
+          case "$PLATFORM" in
+            freebsd)    ;;
+            *)          [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on this platform
                         ;;
           esac
           cargo version
@@ -105,7 +103,7 @@ runs:
         echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
-      uses: vmactions/freebsd-vm@c9f815bc7aa0d34c9fdd0619b034a32d6ca7b57e # v1.4.2
+      uses: vmactions/freebsd-vm@4807432c7cab1c3f97688665332c0b932062d31f # v1.4.3
       with:
         usesh: true
         disable-cache: true
@@ -114,7 +112,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'openbsd' }}
-      uses: vmactions/openbsd-vm@9a8e4351a4a0dc6238e7c69276dcbf6c03bea576 # v1.3.6
+      uses: vmactions/openbsd-vm@3fafb45f2e2e696249c583835939323fe1c3448c # v1.3.7
       with:
         usesh: true
         disable-cache: true
@@ -123,7 +121,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'netbsd' }}
-      uses: vmactions/netbsd-vm@e04aec09540429f9cebb0e7941f7cd0c0fc3b44f # v1.3.6
+      uses: vmactions/netbsd-vm@ca7ff0556959998c82761c34ea0c3c99fa084c48 # v1.3.7
       with:
         usesh: true
         disable-cache: true
@@ -132,7 +130,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'solaris' }}
-      uses: vmactions/solaris-vm@69d382b4a775b25ea5955e6c1730e9d05047ca0d # v1.3.1
+      uses: vmactions/solaris-vm@0a231b94365d1911cf62097ef342f6b30d95598f # v1.3.2
       with:
         release: "11.4-gcc"
         usesh: true

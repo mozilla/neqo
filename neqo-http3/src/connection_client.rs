@@ -3627,7 +3627,7 @@ mod tests {
                     assert!(!fin);
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
-                    assert!(stream_id == request_stream_id_1);
+                    assert_eq!(stream_id, request_stream_id_1);
                     let mut buf = [0_u8; 100];
                     assert_eq!(
                         (EXPECTED_RESPONSE_DATA_1.len(), true),
