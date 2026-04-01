@@ -47,6 +47,7 @@ windows = { version = ">=0.60,<0.63", default-features = false }
 
 [patch.crates-io]
 # TODO: Remove this once Gecko switches back to the official mio crate.
+# See <https://bugzilla.mozilla.org/show_bug.cgi?id=2024485> for details.
 mio = { git = "https://github.com/kinetiknz/mio", rev = "5e8b202db39facecc343170f50a07916640a607c" }
 
 [workspace.lints.rust]
