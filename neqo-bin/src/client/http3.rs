@@ -31,7 +31,7 @@ use rustc_hash::FxHashMap as HashMap;
 
 use super::{Args, CloseState, Res, get_output_file, qlog_new};
 use crate::{
-    STREAM_IO_BUFFER_SIZE,
+    STREAM_IO_BUFFER_SIZE, now,
     send_data::{SendData, SendResult},
 };
 
@@ -85,7 +85,7 @@ pub fn create_client(
         local_addr,
         remote_addr,
         args.shared.quic_parameters.get(args.shared.alpn.as_str()),
-        Instant::now(),
+        now(),
     )?;
     let ciphers = args.get_ciphers();
     if !ciphers.is_empty() {
@@ -106,7 +106,7 @@ pub fn create_client(
         client.enable_ech(ech)?;
     }
     if let Some(token) = resumption_token {
-        client.enable_resumption(Instant::now(), token)?;
+        client.enable_resumption(now(), token)?;
     }
 
     Ok(client)
@@ -174,7 +174,7 @@ impl super::Handler for Handler {
         while let Some(event) = client.next_event() {
             match event {
                 Http3ClientEvent::AuthenticationNeeded => {
-                    client.authenticated(AuthenticationStatus::Ok, Instant::now());
+                    client.authenticated(AuthenticationStatus::Ok, now());
                 }
                 Http3ClientEvent::HeaderReady {
                     stream_id,
@@ -198,11 +198,8 @@ impl super::Handler for Handler {
                             qwarn!("Data on unexpected stream: {stream_id}");
                         }
                         Some(handler) => loop {
-                            let (sz, fin) = client.read_data(
-                                Instant::now(),
-                                stream_id,
-                                &mut self.read_buffer,
-                            )?;
+                            let (sz, fin) =
+                                client.read_data(now(), stream_id, &mut self.read_buffer)?;
 
                             handler.process_data_readable(
                                 stream_id,
@@ -232,7 +229,7 @@ impl super::Handler for Handler {
                             qwarn!("Data on unexpected stream: {stream_id}");
                         }
                         Some(handler) => {
-                            handler.process_data_writable(client, stream_id, Instant::now());
+                            handler.process_data_writable(client, stream_id, now());
                         }
                     }
                 }
@@ -346,7 +343,7 @@ impl StreamHandler for UploadStreamHandler {
             if parsed == self.data.len() {
                 qinfo!(
                     "Stream ID: {stream_id:?}, Upload time: {:?}",
-                    Instant::now().duration_since(self.start)
+                    now().duration_since(self.start)
                 );
             }
             Ok(())
@@ -406,7 +403,7 @@ impl UrlHandler {
             .url_queue
             .pop_front()
             .expect("download_next called with empty queue");
-        let now = Instant::now();
+        let now = now();
         match client.fetch(
             now,
             &self.args.method,

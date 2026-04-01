@@ -13,13 +13,12 @@
 //! Run with: `sudo -E cargo test --package mtu --test netns`
 
 #![cfg(target_os = "linux")]
-#![expect(clippy::unwrap_used, reason = "OK in tests.")]
 
 use std::{
     fs::File,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    os::fd::AsRawFd,
+    os::fd::AsRawFd as _,
     process::{Command, Stdio},
     sync::{
         Once,
@@ -59,13 +58,13 @@ fn ip_netns(ns: &str, args: &[&str]) -> bool {
 fn ip_netns_output(ns: &str, args: &[&str]) -> Option<String> {
     let mut full_args = vec!["netns", "exec", ns, "ip"];
     full_args.extend(args);
-    Command::new("ip")
+    let o = Command::new("ip")
         .args(&full_args)
         .stderr(Stdio::null())
         .output()
         .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .filter(|o| o.status.success())?;
+    String::from_utf8(o.stdout).ok()
 }
 
 macro_rules! require_root {
@@ -306,37 +305,37 @@ fn policy_routing() {
     require_root!();
 
     let name = unique_name("ns");
-    let vi_main = unique_name("vmi");
-    let vo_main = unique_name("vmo");
-    let vi_vpn = unique_name("vvi");
-    let vo_vpn = unique_name("vvo");
+    let vmi = unique_name("vmi");
+    let vmo = unique_name("vmo");
+    let vvi = unique_name("vvi");
+    let vvo = unique_name("vvo");
 
     let ns = NetNs::new(&name).unwrap();
-    let _veth_main = VethPair::new(&vi_main, &vo_main).unwrap();
-    let _veth_vpn = VethPair::new(&vi_vpn, &vo_vpn).unwrap();
+    let _veth_main = VethPair::new(&vmi, &vmo).unwrap();
+    let _veth_vpn = VethPair::new(&vvi, &vvo).unwrap();
 
-    ip(&["link", "set", &vi_main, "netns", &name]);
-    ip(&["link", "set", &vi_vpn, "netns", &name]);
+    ip(&["link", "set", &vmi, "netns", &name]);
+    ip(&["link", "set", &vvi, "netns", &name]);
 
     // Main interface: 10.0.1.0/24, MTU 1500.
-    ip_netns(&name, &["addr", "add", "10.0.1.1/24", "dev", &vi_main]);
-    ip_netns(&name, &["link", "set", &vi_main, "mtu", "1500"]);
-    ip_netns(&name, &["link", "set", &vi_main, "up"]);
+    ip_netns(&name, &["addr", "add", "10.0.1.1/24", "dev", &vmi]);
+    ip_netns(&name, &["link", "set", &vmi, "mtu", "1500"]);
+    ip_netns(&name, &["link", "set", &vmi, "up"]);
 
     // VPN interface: 10.0.2.0/24, MTU 1400.
-    ip_netns(&name, &["addr", "add", "10.0.2.1/24", "dev", &vi_vpn]);
-    ip_netns(&name, &["link", "set", &vi_vpn, "mtu", "1400"]);
-    ip_netns(&name, &["link", "set", &vi_vpn, "up"]);
+    ip_netns(&name, &["addr", "add", "10.0.2.1/24", "dev", &vvi]);
+    ip_netns(&name, &["link", "set", &vvi, "mtu", "1400"]);
+    ip_netns(&name, &["link", "set", &vvi, "up"]);
 
     ip_netns(&name, &["link", "set", "lo", "up"]);
 
     // Outside peers.
-    ip(&["addr", "add", "10.0.1.2/24", "dev", &vo_main]);
-    ip(&["link", "set", &vo_main, "mtu", "1500"]);
-    ip(&["link", "set", &vo_main, "up"]);
-    ip(&["addr", "add", "10.0.2.2/24", "dev", &vo_vpn]);
-    ip(&["link", "set", &vo_vpn, "mtu", "1400"]);
-    ip(&["link", "set", &vo_vpn, "up"]);
+    ip(&["addr", "add", "10.0.1.2/24", "dev", &vmo]);
+    ip(&["link", "set", &vmo, "mtu", "1500"]);
+    ip(&["link", "set", &vmo, "up"]);
+    ip(&["addr", "add", "10.0.2.2/24", "dev", &vvo]);
+    ip(&["link", "set", &vvo, "mtu", "1400"]);
+    ip(&["link", "set", &vvo, "up"]);
 
     // Route in main table via main interface.
     ip_netns(
@@ -348,7 +347,7 @@ fn policy_routing() {
             "via",
             "10.0.1.2",
             "dev",
-            &vi_main,
+            &vmi,
         ],
     );
 
@@ -362,7 +361,7 @@ fn policy_routing() {
             "via",
             "10.0.2.2",
             "dev",
-            &vi_vpn,
+            &vvi,
             "table",
             "100",
         ],

@@ -1,5 +1,6 @@
 disallowed-methods = [
-    { path = "std::slice::from_raw_parts", reason = "see null_safe_slice" }
+    { path = "std::slice::from_raw_parts", reason = "see null_safe_slice" },
+    { path = "std::time::Instant::now", reason = "time should be provided externally" }
 ]
 disallowed-macros = [
     { path = "std::dbg" }

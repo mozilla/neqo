@@ -468,6 +468,10 @@ mod test {
     /// A limit for when high resolution timers are disabled.
     const GENEROUS: Duration = Duration::from_millis(30);
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This test needs to run in real time"
+    )]
     fn validate_delays(max_lag: Duration) -> Result<(), ()> {
         const DELAYS: &[u64] = &[1, 2, 3, 5, 8, 10, 12, 15, 20, 25, 30];
         let durations = DELAYS.iter().map(|&d| Duration::from_millis(d));
