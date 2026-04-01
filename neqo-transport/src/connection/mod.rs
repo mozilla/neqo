@@ -48,6 +48,7 @@ use crate::{
     recv_stream,
     rtt::{GRANULARITY, RttEstimate},
     saved::SavedDatagrams,
+    scone::Scone,
     send_stream::{self, SendStream},
     stateless_reset::Token as Srt,
     stats::{Stats, StatsCell},
@@ -323,6 +324,7 @@ pub struct Connection {
     release_resumption_token_timer: Option<Instant>,
     conn_params: ConnectionParameters,
     hrtime: hrtime::Handle,
+    scone: Option<Scone>,
 
     /// For testing purposes it is sometimes necessary to inject frames that wouldn't
     /// otherwise be sent, just to see how a connection handles them.  Inserting them
@@ -472,6 +474,7 @@ impl Connection {
             conn_params,
             hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
             quic_datagrams,
+            scone: None,
             #[cfg(any(test, feature = "build-fuzzing-corpus"))]
             test_frame_writer: None,
         };
@@ -1693,6 +1696,22 @@ impl Connection {
             // We only allow one path during setup, so apply handshake
             // path validation to this path.
             path.borrow_mut().set_valid(now);
+        }
+
+        // Update SCONE signal.
+        if let Some(rate) = packet.scone() {
+            let updated = if let Some(s) = &mut self.scone {
+                s.update(now, rate)
+            } else if rate.is_set() {
+                self.scone = Some(Scone::new(now, rate));
+                true
+            } else {
+                false
+            };
+            if updated {
+                qinfo!("[{self}] SCONE rate updated to {rate:x?}");
+                self.events.scone_updated(rate);
+            }
         }
     }
 

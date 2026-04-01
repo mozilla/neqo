@@ -1612,41 +1612,107 @@ fn zero_rtt_with_ech() {
     assert!(server.tls_info().unwrap().early_data_accepted());
 }
 
-#[test]
-fn scone() {
-    fn add_scone(d: &Datagram) -> Datagram {
+fn scone(enable: bool) {
+    const PERIOD: Duration = crate::scone::Scone::PERIOD;
+
+    fn add_scone(d: &Datagram, signal: u8) -> Datagram {
         const SCONE: &[u8] = &[0xff, 0x6f, 0x7d, 0xc0, 0xfd, 0x00, 0x00];
         let mut sconed = SCONE.to_vec();
+        sconed[0] = 0b1100_0000 | ((signal >> 1) & 0x3f);
+        sconed[1] |= (signal << 7) & 0x80;
         sconed.extend_from_slice(&d[..]);
         Datagram::new(d.source(), d.destination(), d.tos(), sconed)
     }
+    let got_scone = |e| matches!(e, ConnectionEvent::SconeUpdated(_));
 
-    let mut server = new_server(ConnectionParameters::default().scone(true));
-    let mut client = new_client(ConnectionParameters::default().scone(true));
+    // This test needs to keep connections alive long past the default idle timeout.
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .idle_timeout(PERIOD * 7)
+            .scone(enable),
+    );
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .idle_timeout(PERIOD * 7)
+            .scone(enable),
+    );
+    let mut now = now();
 
-    let ci = client.process_output(now()).dgram().unwrap();
+    let ci = client.process_output(now).dgram().unwrap();
     let ci_len = ci.len();
     assert_eq!(
         &ci[ci_len - Connection::SCONE_INDICATION.len()..],
         Connection::SCONE_INDICATION,
         "Client should send indication"
     );
-    server.process_input(ci, now());
+    server.process_input(ci, now);
 
     connect(&mut client, &mut server);
-    assert!(client.tps.borrow_mut().remote().get_empty(Scone));
-    assert!(server.tps.borrow_mut().remote().get_empty(Scone));
+    assert_eq!(client.tps.borrow_mut().remote().get_empty(Scone), enable);
+    assert_eq!(server.tps.borrow_mut().remote().get_empty(Scone), enable);
 
     let client_stats = client.stats();
     let server_stats = server.stats();
-    let d = send_something(&mut client, now());
-    server.process_input(add_scone(&d), now());
-    let d = send_something(&mut server, now());
-    client.process_input(add_scone(&d), now());
+    let d = send_something(&mut client, now);
+    server.process_input(add_scone(&d, 0x7f), now);
+    assert!(!server.events().any(got_scone), "no event for unknown");
+    let d = send_something(&mut server, now);
+    client.process_input(add_scone(&d, 0x31), now);
+    assert!(client.events().any(got_scone));
 
     // The SCONE packets are effectively invisible.
     assert_eq!(server.stats().packets_rx, server_stats.packets_rx + 1);
     assert_eq!(client.stats().packets_rx, client_stats.packets_rx + 1);
+
+    // Now check that events are correctly generated (or not).
+
+    // A duplicate packet means no event, even with a rate decrease.
+    client.process_input(add_scone(&d, 0x2), now);
+    assert!(!client.events().any(got_scone));
+
+    // A repeated signal means no event.
+    let d = send_something(&mut server, now);
+    client.process_input(add_scone(&d, 0x31), now);
+    assert!(!client.events().any(got_scone));
+
+    // A noop signal means no event.
+    let d = send_something(&mut server, now);
+    client.process_input(add_scone(&d, 0x7f), now);
+    assert!(!client.events().any(got_scone));
+
+    // A higher signal means no event.
+    let d = send_something(&mut server, now);
+    client.process_input(add_scone(&d, 0x42), now);
+    assert!(!client.events().any(got_scone));
+
+    // A lower signal generates an event.
+    let d = send_something(&mut server, now);
+    client.process_input(add_scone(&d, 0x17), now);
+    assert!(client.events().any(got_scone));
+
+    // Elapsed time results in an event, even with a rate increase.
+    now += PERIOD;
+    let d = send_something(&mut server, now);
+    client.process_input(add_scone(&d, 0x42), now);
+    assert!(client.events().any(got_scone));
+
+    // Same for a shift to the unknown rate.
+    now += PERIOD;
+    let d = send_something(&mut server, now);
+    client.process_input(add_scone(&d, 0x7f), now);
+    assert!(client.events().any(got_scone));
+}
+
+#[test]
+fn scone_enabled() {
+    scone(true);
+}
+
+/// The scone test passes, even when the config item isn't set.
+/// This is because the transport parameter is the only thing it affects.
+#[test]
+fn scone_disabled() {
+    scone(false);
 }
 
 /// RFC 9287 Section 3.1 states: "A server MUST NOT remember that a client negotiated
