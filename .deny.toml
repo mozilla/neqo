@@ -33,3 +33,7 @@ version = "0.4"
 unknown-registry = "deny"
 unknown-git = "deny"
 required-git-spec = "rev"
+# TODO: Remove this once Gecko switches back to the official mio crate.
+allow-git = [
+    "https://github.com/kinetiknz/mio",
+]
