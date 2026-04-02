@@ -68,7 +68,7 @@ jobs:
           CRATE: ${{ matrix.bench.crate }}
           BENCH: ${{ matrix.bench.bench }}
         run: |
-          cargo bench --package "$CRATE" --features bench --bench "$BENCH" --no-run 2>&1 | tee bench-build.txt
+          cargo bench --locked --package "$CRATE" --features bench --bench "$BENCH" --no-run 2>&1 | tee bench-build.txt
           mkdir -p binaries
           BENCH_BIN=$(grep Executable bench-build.txt | cut -d'(' -f2 | cut -d')' -f1)
           cp "$BENCH_BIN" "binaries/$BENCH"
@@ -133,7 +133,7 @@ jobs:
 
       - name: Build neqo
         run: |
-          cargo build --release --features bench --bin neqo-client --bin neqo-server
+          cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
           mkdir -p binaries
           cp target/release/neqo-client target/release/neqo-server binaries/
 
