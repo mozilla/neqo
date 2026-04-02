@@ -44,7 +44,7 @@ use neqo_udp::{DatagramIter, RecvBuf};
 use thiserror::Error;
 use tokio::time::Sleep;
 
-use crate::SharedArgs;
+use crate::{SharedArgs, now};
 
 const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 
@@ -155,9 +155,9 @@ impl Args {
             // in the future.
             //
             // This is NOT SAFE.  Don't do this.
-            Instant::now() + ANTI_REPLAY_WINDOW
+            now() + ANTI_REPLAY_WINDOW
         } else {
-            Instant::now()
+            now()
         }
     }
 
@@ -481,7 +481,7 @@ pub fn run(
         .collect::<Result<_, io::Error>>()?;
 
     // Note: this is the exception to the case where we use `Args::now`.
-    let anti_replay = AntiReplay::new(Instant::now(), ANTI_REPLAY_WINDOW, 7, 14)?;
+    let anti_replay = AntiReplay::new(now(), ANTI_REPLAY_WINDOW, 7, 14)?;
     let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
 
     if args.shared.alpn == "h3" {

@@ -29,7 +29,7 @@ use neqo_transport::{
 use rustc_hash::FxHashMap as HashMap;
 
 use super::{Args, CloseState, Res, get_output_file, qlog_new};
-use crate::STREAM_IO_BUFFER_SIZE;
+use crate::{STREAM_IO_BUFFER_SIZE, now};
 
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
@@ -71,7 +71,7 @@ impl super::Handler for Handler<'_> {
 
             match event {
                 ConnectionEvent::AuthenticationNeeded => {
-                    client.authenticated(AuthenticationStatus::Ok, Instant::now());
+                    client.authenticated(AuthenticationStatus::Ok, now());
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     self.read(client, stream_id)?;
@@ -114,7 +114,7 @@ impl super::Handler for Handler<'_> {
         }
 
         if self.args.resume && self.token.is_none() {
-            self.token = client.take_resumption_token(Instant::now());
+            self.token = client.take_resumption_token(now());
         }
 
         Ok(true)
@@ -150,11 +150,11 @@ pub fn create_client(
         local_addr,
         remote_addr,
         args.shared.quic_parameters.get(alpn),
-        Instant::now(),
+        now(),
     )?;
 
     if let Some(tok) = resumption_token {
-        client.enable_resumption(Instant::now(), tok)?;
+        client.enable_resumption(now(), tok)?;
     }
 
     let ciphers = args.get_ciphers();

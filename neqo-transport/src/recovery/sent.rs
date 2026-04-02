@@ -361,6 +361,10 @@ mod tests {
     const PACKET_GAP: Duration = Duration::from_secs(1);
     fn start_time() -> Instant {
         thread_local!(static STARTING_TIME: OnceCell<Instant> = const { OnceCell::new() });
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "Special time handling in this test"
+        )]
         STARTING_TIME.with(|t| *t.get_or_init(Instant::now))
     }
 

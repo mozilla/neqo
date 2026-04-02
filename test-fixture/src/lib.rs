@@ -82,6 +82,10 @@ fn earlier() -> Instant {
     // single-threaded.
     thread_local!(static EARLIER: OnceCell<Instant> = const { OnceCell::new() });
     fixture_init();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This is the test wrapper for now()"
+    )]
     EARLIER.with(|b| *b.get_or_init(Instant::now))
 }
 
@@ -559,6 +563,7 @@ pub fn new_neqo_qlog() -> (Qlog, SharedVec) {
         None,
         None,
         None,
+        #[expect(clippy::disallowed_methods, reason = "logging happens in real time")]
         Instant::now(),
         trace,
         EventImportance::Extra,

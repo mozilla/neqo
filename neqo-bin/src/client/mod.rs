@@ -38,7 +38,7 @@ use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
 use tokio::time::Sleep;
 
-use crate::SharedArgs;
+use crate::{SharedArgs, now};
 
 mod http09;
 mod http3;
@@ -425,7 +425,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                 (true, CloseState::Closing) | (false, _) => {}
                 // no more work, closing connection
                 (true, CloseState::NotClosing) => {
-                    self.client.close(Instant::now(), 0, "kthxbye!");
+                    self.client.close(now(), 0, "kthxbye!");
                     continue;
                 }
                 // no more work, connection closed, terminating
@@ -456,10 +456,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                 .inspect_err(|_| qerror!("Socket return GSO size of 0"))
                 .map_err(|_| io::Error::from(ErrorKind::Unsupported))?;
 
-            match self
-                .client
-                .process_multiple_output(Instant::now(), max_datagrams)
-            {
+            match self.client.process_multiple_output(now(), max_datagrams) {
                 OutputBatch::DatagramBatch(dgram) => loop {
                     // Optimistically attempt sending datagram. In case the OS
                     // buffer is full, wait till socket is writable then try
@@ -499,7 +496,7 @@ impl<'a, H: Handler> Runner<'a, H> {
 
     async fn process_multiple_input(&mut self) -> Res<()> {
         while let Some(dgrams) = self.socket.recv(self.local_addr, &mut self.recv_buf)? {
-            self.client.process_multiple_input(dgrams, Instant::now());
+            self.client.process_multiple_input(dgrams, now());
             self.process_output().await?;
         }
 
@@ -526,7 +523,7 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<Qlog> {
         Some("Neqo client qlog".to_string()),
         Some("Neqo client qlog".to_string()),
         format!("client-{hostname}-{cid}"),
-        Instant::now(),
+        now(),
     )
     .map_err(Error::Qlog)
 }

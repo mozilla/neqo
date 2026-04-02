@@ -14,6 +14,7 @@ use env_logger::Builder;
 
 fn since_start() -> Duration {
     static START_TIME: OnceLock<Instant> = OnceLock::new();
+    #[expect(clippy::disallowed_methods, reason = "Logging needs to use real time")]
     START_TIME.get_or_init(Instant::now).elapsed()
 }
 

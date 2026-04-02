@@ -544,7 +544,7 @@ impl CryptoDxState {
         #[cfg(test)]
         OVERWRITE_INVOCATIONS.with(|v| {
             if let Some(i) = v.borrow_mut().take() {
-                log::warn!("Setting {:?} invocations to {}", self.direction, i);
+                log::warn!("Setting {:?} invocations to {i}", self.direction);
                 self.invocations = i;
             }
         });

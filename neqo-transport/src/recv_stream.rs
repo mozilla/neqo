@@ -974,15 +974,10 @@ impl RecvStream {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::{
-        cell::RefCell,
-        fmt::Debug,
-        ops::Range,
-        rc::Rc,
-        time::{Duration, Instant},
-    };
+    use std::{cell::RefCell, fmt::Debug, ops::Range, rc::Rc, time::Duration};
 
     use neqo_common::{Encoder, qtrace};
+    use test_fixture::now;
 
     use super::RecvStream;
     use crate::{
@@ -1464,7 +1459,7 @@ mod tests {
             &mut builder,
             &mut token,
             &mut FrameStats::default(),
-            Instant::now(),
+            now(),
             Duration::from_millis(100),
         );
 
@@ -1585,7 +1580,7 @@ mod tests {
             &mut builder,
             &mut token,
             &mut FrameStats::default(),
-            Instant::now(),
+            now(),
             Duration::from_millis(100),
         );
 
@@ -1611,7 +1606,7 @@ mod tests {
             &mut builder,
             &mut token,
             &mut FrameStats::default(),
-            Instant::now(),
+            now(),
             Duration::from_millis(100),
         );
 
@@ -1921,7 +1916,7 @@ mod tests {
             &mut builder,
             &mut token,
             &mut stats,
-            Instant::now(),
+            now(),
             Duration::from_millis(100),
         );
         assert_eq!(stats.max_data, 0);
@@ -1929,7 +1924,7 @@ mod tests {
             &mut builder,
             &mut token,
             &mut stats,
-            Instant::now(),
+            now(),
             Duration::from_millis(100),
         );
         assert_eq!(stats.max_stream_data, 1);
@@ -1954,7 +1949,7 @@ mod tests {
             &mut builder,
             &mut token,
             &mut stats,
-            Instant::now(),
+            now(),
             Duration::from_millis(100),
         );
         assert_eq!(stats.max_data, 1);
@@ -1962,7 +1957,7 @@ mod tests {
             &mut builder,
             &mut token,
             &mut stats,
-            Instant::now(),
+            now(),
             Duration::from_millis(100),
         );
         assert_eq!(stats.max_stream_data, 1);
