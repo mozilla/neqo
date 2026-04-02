@@ -122,7 +122,7 @@ jobs:
       - name: Run client/server transfer
         run: |
           # shellcheck disable=SC2086
-          cargo build $BUILD_TYPE --bin neqo-client --bin neqo-server
+          cargo build $BUILD_TYPE --locked --bin neqo-client --bin neqo-server
           "target/$BUILD_DIR/neqo-server" "$HOST:4433" &
           PID=$!
           # Give the server time to start.
