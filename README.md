@@ -55,7 +55,7 @@ To run test HTTP/3 programs (`neqo-client` and `neqo-server`):
      export LD_LIBRARY_PATH="$(find $NSS_DIR/.. -name libssl3.so -print | head -1 | xargs dirname | xargs realpath)"
      ```
 
-   - For MacOS:
+   - For macOS:
 
      ```shell
      export DYLD_LIBRARY_PATH="$(find $NSS_DIR/.. -name libssl3.dylib -print | head -1 | xargs dirname | xargs realpath)"
