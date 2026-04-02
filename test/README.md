@@ -15,7 +15,7 @@
 1. Start neqo-client and specify parameters to start the upload test
 
    ```shell
-   ./target/release/neqo-client http://127.0.0.1:4433/ --test upload  --upload-size ${size_in_bytes}
+   ./target/release/neqo-client http://127.0.0.1:4433/ --test upload --upload-size ${size_in_bytes}
    ```
 
 ## To enable log messages for analyzing upload performance
