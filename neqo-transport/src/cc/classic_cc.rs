@@ -475,24 +475,25 @@ where
             now,
         );
 
-        let mut lost_packets = lost_packets
-            .iter()
-            .filter(|pkt| !pkt.is_pmtud_probe())
-            .rev()
-            .peekable();
+        // Lost PMTUD probes do not elicit congestion control reactions, so this closure filters
+        // them out.
+        let lost_packets_no_pmtud = || lost_packets.iter().filter(|pkt| !pkt.is_pmtud_probe());
 
-        // Lost PMTUD probes do not elicit a congestion control reaction.
-        let Some(last_lost_packet) = lost_packets.peek() else {
+        // Packets not in flight don't elicit congestion control reactions either, so we early
+        // return if there is no lost in-flight packet left.
+        let Some(last_lost_packet) = lost_packets_no_pmtud().rfind(|pkt| pkt.cc_in_flight()) else {
             return false;
         };
 
         let congestion =
             self.on_congestion_event(last_lost_packet, CongestionEvent::Loss, now, cc_stats);
+        // Persistent congestion checks still need to see lost packets that are not in-flight for
+        // contuinity checks. That is why only the closure to filter out lost PMTUD probes is used.
         let persistent_congestion = self.detect_persistent_congestion(
             first_rtt_sample_time,
             prev_largest_acked_sent,
             pto,
-            lost_packets.rev(),
+            lost_packets_no_pmtud(),
             now,
             cc_stats,
         );
@@ -930,6 +931,7 @@ mod tests {
 
     use super::{ClassicCongestionController, PERSISTENT_CONG_THRESH, SlowStart, WindowAdjustment};
     use crate::{
+        MIN_INITIAL_PACKET_SIZE,
         cc::{
             CWND_INITIAL_PKTS, ClassicSlowStart, CongestionController, CongestionEvent,
             classic_cc::Phase,
@@ -2111,5 +2113,34 @@ mod tests {
                 "persistent congestion should have been detected"
             );
         });
+    }
+    /// RFC 9002 6.1: only in-flight (ack-eliciting) packets should be declared lost.
+    /// Non-ack-eliciting packets (e.g., only containing ACK-frames) must not trigger loss detection
+    /// or congestion events. This reproduces a bug where ACK-only packets sent after a
+    /// 0-RTT handshake were declared lost because the server (rightfully so) didn't send an ACK,
+    /// causing early slow start exit and setting ssthresh to `initial_cwnd * 0.7`.
+    #[test]
+    fn no_congestion_event_if_lost_packet_not_in_flight() {
+        let mut cc = make_cc_cubic();
+        let cc_stats = &mut CongestionControlStats::default();
+
+        // create a packet that is not ack-eliciting, so won't count as in flight
+        let lost_pkt = sent::Packet::new(
+            packet::Type::Short,
+            0,
+            now(),
+            false,
+            recovery::Tokens::new(),
+            MIN_INITIAL_PACKET_SIZE,
+        );
+
+        let initial_cwnd = cc.cwnd();
+
+        // call `on_packets_lost` on the non ack-eliciting packet
+        cc.on_packets_lost(Some(now()), None, PTO, &[lost_pkt], now(), cc_stats);
+
+        // there should be no reaction to the non-ack-eliciting packet
+        assert_eq!(cc.cwnd(), initial_cwnd);
+        assert_eq!(cc_stats.slow_start_exit_cwnd, None);
     }
 }

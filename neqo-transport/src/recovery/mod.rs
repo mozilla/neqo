@@ -351,11 +351,7 @@ impl LossRecoverySpace {
                 break;
             };
 
-            // RFC 9002 6.1: Only in-flight packets should be declared lost.
-            // Thus only add in-flight packets to the lost_packets buffer that will be used by the
-            // congestion controller. Mark them as lost by calling `packet.declare_lost` nonetheless
-            // so the cleanup mechanisms for expired packets still work.
-            if packet.declare_lost(now, trigger) && packet.cc_in_flight() {
+            if packet.declare_lost(now, trigger) {
                 lost_packets.push(packet.clone());
             }
         }
@@ -2006,63 +2002,6 @@ mod tests {
         assert!(
             log.contains(r#""event_type":"cancelled""#),
             "Expected loss_timer_updated Cancelled event in qlog: {log}"
-        );
-    }
-
-    /// RFC 9002 6.1: only in-flight (ack-eliciting) packets should be declared lost.
-    /// Non-ack-eliciting packets (e.g., only containing ACK-frames) must not trigger loss detection
-    /// or congestion events. This reproduces a bug where ACK-only packets sent after a
-    /// 0-RTT handshake were declared lost because the server (rightfully so) didn't send an ACK,
-    /// causing early slow start exit and setting ssthresh to `initial_cwnd * 0.7`.
-    #[test]
-    fn non_ack_eliciting_packet_not_declared_lost() {
-        // Establish RTT with a single packet so loss_delay is stable at TEST_RTT * 9/8.
-        // setup_lr(1) sends pn=0, ACKs it, leaving no outstanding packets.
-        let mut lr = setup_lr(1);
-
-        // pn=1: non-ack-eliciting (ACK-only), simulating a post-handshake ACK frame.
-        // Sent early so it will be old enough to exceed loss_delay.
-        lr.on_packet_sent(
-            sent::Packet::new(
-                packet::Type::Short,
-                1,
-                pn_time(1),
-                false,
-                recovery::Tokens::new(),
-                ON_SENT_SIZE,
-            ),
-            now(),
-        );
-
-        // pn=2: ack-eliciting, sent much later (2x RTT after pn=1).
-        // This gap means when the ACK arrives ~1 RTT later, pn=1 will be ~3 RTTs old,
-        // well past loss_delay (RTT * 9/8), even after RTT is updated by this ACK.
-        let pn2_sent_time = pn_time(1) + TEST_RTT * 2;
-        lr.on_packet_sent(
-            sent::Packet::new(
-                packet::Type::Short,
-                2,
-                pn2_sent_time,
-                true,
-                recovery::Tokens::new(),
-                ON_SENT_SIZE,
-            ),
-            now(),
-        );
-
-        // ACK pn=2 one RTT after it was sent.
-        // Per RFC 9002 §6.1, pn=1 must NOT be declared lost: it is not in-flight.
-        let ack_time = pn2_sent_time + TEST_RTT;
-        let (_, lost) = lr.on_ack_received(
-            PacketNumberSpace::ApplicationData,
-            vec![2..=2],
-            None,
-            ACK_DELAY,
-            ack_time,
-        );
-        assert!(
-            lost.is_empty(),
-            "non-ack-eliciting packet must not be declared lost (RFC 9002 6.1)"
         );
     }
 }
