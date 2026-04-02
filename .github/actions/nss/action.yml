@@ -176,7 +176,7 @@ runs:
       if: ${{ runner.os == 'MacOS' && steps.check_build.outputs.build_nss }}
       run: |
         brew install ninja
-        echo "gyp-next>=0.18.1" > req.txt
+        echo "gyp-next>=0.22.0" > req.txt
         python3 -m pip install --break-system-packages -r req.txt
 
     - name: Install build dependencies (Windows)
@@ -197,7 +197,7 @@ runs:
           curl -o "$HOME/bin/mozfile/$file" -sSf "https://raw.githubusercontent.com/mozilla-firefox/firefox/refs/heads/main/testing/mozbase/mozfile/mozfile/$file"
         done
         echo "$HOME/bin" >> "$GITHUB_PATH"
-        echo "gyp-next>=0.18.1" > req.txt
+        echo "gyp-next>=0.22.0" > req.txt
         python3 -m pip install -r req.txt
 
     - name: Set up MSVC (Windows)
@@ -515,56 +515,7 @@ runs:
         +#elif (defined(__aarch64__) || defined(__arm__) || defined(_M_ARM64))
              CheckARMSupport();
         PATCH
-              # gyp-next's GenerateEnvironmentFiles only creates environment.x86 and
-              # environment.x64. Patching it to add "arm64" causes it to create
-              # environment.arm64 and populate cl_paths["arm64"], which ninja uses
-              # for $cl_arm64 and environment.arm64 in every build rule.
-              MSVS_EMU=$(python3 -c "import gyp.msvs_emulation; print(gyp.msvs_emulation.__file__)")
-              patch "$MSVS_EMU" << 'PATCH'
-        --- a/pylib/gyp/msvs_emulation.py
-        +++ b/pylib/gyp/msvs_emulation.py
-        @@ -1,3 +1,3 @@
-             generation and use custom environment files prepared by yourself."""
-        -    archs = ("x86", "x64")
-        +    archs = ("x86", "x64", "arm64")
-             if generator_flags.get("ninja_use_custom_environment_files", 0):
-        PATCH
-              # gyp-next's ninja generator hardcodes win_env to only x86 and x64
-              # (causing KeyError on arm64), and has no ml_arm64 assembler variable.
-              NINJA_GEN=$(python3 -c "import gyp.generator.ninja; print(gyp.generator.ninja.__file__)")
-              patch "$NINJA_GEN" << 'PATCH'
-        --- a/generator/ninja.py
-        +++ b/generator/ninja.py
-        @@ -248,3 +248,3 @@
-                     self.win_env = {}
-        -            for arch in ("x86", "x64"):
-        +            for arch in ("x86", "x64", "arm64"):
-                         self.win_env[arch] = "environment." + arch
-        @@ -2341,2 +2341,3 @@
-                 master_ninja.variable("ml_x64", "ml64.exe")
-        +        master_ninja.variable("ml_arm64", "armasm64.exe")
-                 master_ninja.variable("mt", "mt.exe")
-        PATCH
-              # MSVSVersion.py's _SetupScriptInternal only accepts "x86" and "x64".
-              # Expand the assert to allow "arm64", and map it to the vcvarsall.bat
-              # argument "amd64_arm64" (x64-hosted cross-compiler targeting ARM64).
-              MSVS_VER=$(python3 -c "import gyp.MSVSVersion; print(gyp.MSVSVersion.__file__)")
-              patch "$MSVS_VER" << 'PATCH'
-        --- a/MSVSVersion.py
-        +++ b/MSVSVersion.py
-        @@ -89,3 +89,3 @@
-                 environment."""
-        -        assert target_arch in ("x86", "x64"), "target_arch not supported"
-        +        assert target_arch in ("x86", "x64", "arm64"), "target_arch not supported"
-                 # If WindowsSDKDir is set and SetEnv.Cmd exists then we are using the
-        @@ -111,4 +111,4 @@
-                     # Always use a native executable, cross-compiling if necessary.
-        -            host_arch = "amd64" if is_host_arch_x64 else "x86"
-        -            msvc_target_arch = "amd64" if target_arch == "x64" else "x86"
-        +            host_arch = "amd64" if is_host_arch_x64 else ("arm64" if os.environ.get("PROCESSOR_ARCHITECTURE") == "ARM64" else "x86")
-        +            msvc_target_arch = {"x64": "amd64"}.get(target_arch, target_arch)
-                     arg = host_arch
-        PATCH
+
               # NSS's coreconf/msvc.sh only handles ia32 and x64; it exits with an error
               # for arm64. Setting VSPATH to any non-empty value causes msvc.sh to skip
               # its own discovery and print "Assuming env setup is already done", relying
