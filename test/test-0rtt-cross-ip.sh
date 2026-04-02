@@ -23,7 +23,7 @@ if [[ $# -ge 1 ]]; then
     CLIENT="$1"
 else
     echo "==> Building neqo-client..."
-    cargo build --release --bin neqo-client --manifest-path "$REPO_ROOT/Cargo.toml"
+    cargo build --locked --release --bin neqo-client --manifest-path "$REPO_ROOT/Cargo.toml"
     CLIENT="$REPO_ROOT/target/release/neqo-client"
 fi
 
