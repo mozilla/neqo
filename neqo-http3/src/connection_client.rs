@@ -450,6 +450,14 @@ impl Http3Client {
         Ok(())
     }
 
+    /// Returns a resumption token if one is available, wrapped with the current
+    /// H3 settings. Use as a fallback when the `ResumptionToken` event has not
+    /// fired before the connection closes (e.g., `NEW_TOKEN` never arrived).
+    pub fn take_resumption_token(&mut self, now: Instant) -> Option<ResumptionToken> {
+        let transport_token = self.conn.take_resumption_token(now)?;
+        self.encode_resumption_token(&transport_token)
+    }
+
     /// This is call to close a connection.
     pub fn close<S>(&mut self, now: Instant, error: AppError, msg: S)
     where

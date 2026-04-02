@@ -113,7 +113,7 @@ impl super::Handler for Handler<'_> {
             return Ok(false);
         }
 
-        if self.args.resume && self.token.is_none() {
+        if (self.args.resume || self.args.save_token.is_some()) && self.token.is_none() {
             self.token = client.take_resumption_token(now());
         }
 

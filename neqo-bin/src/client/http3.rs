@@ -251,6 +251,12 @@ impl super::Handler for Handler {
             }
         }
 
+        // Fallback in case the connection closes before NEW_TOKEN arrives.
+        let args = &self.url_handler.args;
+        if (args.resume || args.save_token.is_some()) && self.token.is_none() {
+            self.token = client.take_resumption_token(Instant::now());
+        }
+
         Ok(self.url_handler.done())
     }
 
