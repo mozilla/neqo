@@ -614,7 +614,7 @@ pub async fn client(mut args: Args) -> Res<()> {
                     std::fs::read(path)?,
                     // Expiry is a client-side hint only; the TLS ticket itself
                     // carries its own lifetime enforced by the server.
-                    Instant::now() + std::time::Duration::from_secs(86400),
+                    now() + std::time::Duration::from_secs(86400),
                 ))
             })
             .transpose()?;
