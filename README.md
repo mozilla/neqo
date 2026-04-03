@@ -123,7 +123,7 @@ Some examples:
 
 ### Trying in-development Neqo code in Gecko
 
-In a checked-out copy of Gecko source, set `[patches.*]` values for the seven
+In a checked-out copy of Gecko source, set `[patches.*]` values for the
 Neqo crates to local versions in the root `Cargo.toml`. For example, if Neqo
 was checked out to `/home/alice/git/neqo`, add the following lines to the root
 `Cargo.toml`.
