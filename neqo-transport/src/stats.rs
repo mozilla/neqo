@@ -146,11 +146,11 @@ pub enum SlowStartExitReason {
 #[derive(Default, Clone, PartialEq)]
 pub struct CongestionControlStats {
     /// Total number of congestion events caused by packet loss, total number of
-    /// congestion events caused by ECN-CE marked packets, and number of
+    /// congestion events caused by ECN-CE marked packets, number of
     /// spurious congestion events, where congestion was incorrectly inferred
-    /// due to packets initially considered lost but subsequently acknowledged.
-    /// The latter indicates instances where the congestion control algorithm
-    /// overreacted to perceived losses.
+    /// due to packets initially considered lost but subsequently acknowledged,
+    /// and number of congestion events that occurred while the connection was
+    /// underutilized (bytes in flight < 10% of congestion window).
     pub congestion_events: EnumMap<CongestionEvent, usize>,
     /// The congestion window size (in bytes) when we exited slow start.
     /// None if we haven't exited slow start or if we re-entered after spurious congestion.

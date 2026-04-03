@@ -33,6 +33,7 @@ pub enum CongestionEvent {
     Loss,
     Ecn,
     Spurious,
+    Underutilized,
 }
 
 pub trait CongestionController: Display + Debug {

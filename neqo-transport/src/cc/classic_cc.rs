@@ -882,6 +882,9 @@ where
         );
 
         cc_stats.congestion_events[congestion_event] += 1;
+        if self.bytes_in_flight < self.current.congestion_window / 10 {
+            cc_stats.congestion_events[CongestionEvent::Underutilized] += 1;
+        }
         cc_stats.cwnd = Some(self.current.congestion_window);
         // If we were in slow start when `on_congestion_event` was called we will exit slow start
         // and should record the exit congestion window.
@@ -1923,7 +1926,9 @@ mod tests {
                     &mut cc_stats,
                 );
             }
-            CongestionEvent::Spurious => panic!("unsupported congestion event"),
+            CongestionEvent::Spurious | CongestionEvent::Underutilized => {
+                panic!("unsupported congestion event")
+            }
         }
 
         // Should have exited slow start with cwnd captured AFTER reduction.
@@ -2142,5 +2147,46 @@ mod tests {
         // there should be no reaction to the non-ack-eliciting packet
         assert_eq!(cc.cwnd(), initial_cwnd);
         assert_eq!(cc_stats.slow_start_exit_cwnd, None);
+    }
+
+    #[test]
+    fn congestion_event_while_underutilized_stat() {
+        let mut cc = make_cc_cubic();
+        let cc_stats = &mut CongestionControlStats::default();
+        let mut now = now();
+        let mut next_pn = 0;
+
+        let initial_cwnd = cc.cwnd();
+
+        let small_packet = sent::make_packet(next_pn, now, (initial_cwnd / 10) - 1);
+
+        cc.on_packet_sent(&small_packet, now);
+        now += RTT;
+        cc.on_packets_lost(Some(now), None, PTO, &[small_packet], now, cc_stats);
+
+        assert_eq!(
+            cc_stats.congestion_events[CongestionEvent::Underutilized],
+            1,
+            "should have a underutilized congestion event"
+        );
+
+        // fill the wire
+        while cc.bytes_in_flight() < cc.cwnd() {
+            next_pn += 1;
+            let next_packet = sent::make_packet(next_pn, now, MIN_INITIAL_PACKET_SIZE);
+            cc.on_packet_sent(&next_packet, now);
+        }
+
+        next_pn += 1;
+        let next_packet = sent::make_packet(next_pn, now, MIN_INITIAL_PACKET_SIZE);
+        cc.on_packet_sent(&next_packet, now);
+        now += RTT;
+        cc.on_packets_lost(Some(now), None, PTO, &[next_packet], now, cc_stats);
+
+        assert_eq!(
+            cc_stats.congestion_events[CongestionEvent::Underutilized],
+            1,
+            "should not have a second underutilized congestion event"
+        );
     }
 }
