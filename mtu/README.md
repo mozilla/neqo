@@ -10,7 +10,7 @@ towards a given destination `SocketAddr`, optionally from a given local `SocketA
 
 ## Usage
 
-This crate exports a single function `interface_and_mtu` that returns the name and
+This crate exports a single function `interface_and_mtu` that returns both the name and
 [maximum transmission unit (MTU)](https://en.wikipedia.org/wiki/Maximum_transmission_unit)
 of the outgoing network interface towards a remote destination identified by an `IpAddr`.
 
