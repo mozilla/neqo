@@ -451,21 +451,21 @@ where
                 // simple rebinding event, we may still declare packets lost that
                 // were sent before the rebinding.
                 self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
-            }
-            if !pkt.is_pmtud_probe() {
-                let present = self.maybe_lost_packets.insert(
-                    (pkt.pn(), pkt.packet_type()),
-                    MaybeLostPacket {
-                        time_sent: pkt.time_sent(),
-                    },
-                );
-                qdebug!(
-                    "Spurious detection: added MaybeLostPacket: pn {}, type {:?}, time_sent {:?}",
-                    pkt.pn(),
-                    pkt.packet_type(),
-                    pkt.time_sent()
-                );
-                debug_assert!(present.is_none());
+                if !pkt.is_pmtud_probe() {
+                    let present = self.maybe_lost_packets.insert(
+                        (pkt.pn(), pkt.packet_type()),
+                        MaybeLostPacket {
+                            time_sent: pkt.time_sent(),
+                        },
+                    );
+                    qdebug!(
+                        "Spurious detection: added MaybeLostPacket: pn {}, type {:?}, time_sent {:?}",
+                        pkt.pn(),
+                        pkt.packet_type(),
+                        pkt.time_sent()
+                    );
+                    debug_assert!(present.is_none());
+                }
             }
         }
 
@@ -488,7 +488,7 @@ where
         let congestion =
             self.on_congestion_event(last_lost_packet, CongestionEvent::Loss, now, cc_stats);
         // Persistent congestion checks still need to see lost packets that are not in-flight for
-        // contuinity checks. That is why only the closure to filter out lost PMTUD probes is used.
+        // continuity checks. That is why only the closure to filter out lost PMTUD probes is used.
         let persistent_congestion = self.detect_persistent_congestion(
             first_rtt_sample_time,
             prev_largest_acked_sent,
