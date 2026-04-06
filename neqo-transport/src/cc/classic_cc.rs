@@ -440,6 +440,8 @@ where
             return false;
         }
 
+        let bif_before_loss = self.bytes_in_flight;
+
         for pkt in lost_packets {
             if pkt.cc_in_flight() {
                 qdebug!(
@@ -485,7 +487,8 @@ where
             return false;
         };
 
-        let congestion = self.on_congestion_event(last_lost_packet, Loss, now, cc_stats);
+        let congestion =
+            self.on_congestion_event(last_lost_packet, Loss, bif_before_loss, now, cc_stats);
         // Persistent congestion checks still need to see lost packets that are not in-flight for
         // continuity checks. That is why only the closure to filter out lost PMTUD probes is used.
         let persistent_congestion = self.detect_persistent_congestion(
@@ -515,7 +518,7 @@ where
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) -> bool {
-        self.on_congestion_event(largest_acked_pkt, Ecn, now, cc_stats)
+        self.on_congestion_event(largest_acked_pkt, Ecn, self.bytes_in_flight, now, cc_stats)
     }
 
     fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
@@ -845,6 +848,7 @@ where
         &mut self,
         last_packet: &sent::Packet,
         congestion_trigger: CongestionTrigger,
+        bif_before_loss: usize,
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) -> bool {
@@ -858,6 +862,9 @@ where
             );
             return false;
         }
+
+        // Capture the utilization when congestion was signaled (before any reductions).
+        let underutilized = bif_before_loss < self.current.congestion_window / 10;
 
         if congestion_trigger != Ecn {
             self.stored = Some(self.current.clone());
@@ -881,7 +888,7 @@ where
         );
 
         cc_stats.congestion_events.by_trigger[congestion_trigger] += 1;
-        if self.bytes_in_flight < self.current.congestion_window / 10 {
+        if underutilized {
             cc_stats.congestion_events.underutilized += 1;
         }
         cc_stats.cwnd = Some(self.current.congestion_window);
