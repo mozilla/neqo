@@ -14,7 +14,10 @@ use std::{
 use neqo_common::{qdebug, qtrace};
 
 use crate::{
-    cc::{CongestionEvent, classic_cc::WindowAdjustment},
+    cc::{
+        CongestionTrigger::{self, Ecn},
+        classic_cc::WindowAdjustment,
+    },
     stats::CongestionControlStats,
 };
 
@@ -420,7 +423,7 @@ impl WindowAdjustment for Cubic {
         curr_cwnd: usize,
         acked_bytes: usize,
         max_datagram_size: usize,
-        congestion_event: CongestionEvent,
+        congestion_trigger: CongestionTrigger,
         cc_stats: &mut CongestionControlStats,
     ) -> (usize, usize) {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
@@ -455,7 +458,7 @@ impl WindowAdjustment for Cubic {
 
         // Reducing the congestion window and resetting time
         self.current.t_epoch = None;
-        let beta_dividend = if congestion_event == CongestionEvent::Ecn {
+        let beta_dividend = if congestion_trigger == Ecn {
             Self::BETA_USIZE_DIVIDEND_ECN
         } else {
             Self::BETA_USIZE_DIVIDEND

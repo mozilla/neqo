@@ -29,11 +29,9 @@ pub use hystart::HyStart;
 pub use new_reno::NewReno;
 
 #[derive(Clone, Copy, PartialEq, Eq, Enum, Debug)]
-pub enum CongestionEvent {
+pub enum CongestionTrigger {
     Loss,
     Ecn,
-    Spurious,
-    Underutilized,
 }
 
 pub trait CongestionController: Display + Debug {

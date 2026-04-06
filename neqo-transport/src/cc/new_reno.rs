@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::{
-    cc::{CongestionEvent, classic_cc::WindowAdjustment},
+    cc::{CongestionTrigger, classic_cc::WindowAdjustment},
     stats::CongestionControlStats,
 };
 
@@ -44,7 +44,7 @@ impl WindowAdjustment for NewReno {
         curr_cwnd: usize,
         acked_bytes: usize,
         _max_datagram_size: usize,
-        _congestion_event: CongestionEvent,
+        _congestion_event: CongestionTrigger,
         _cc_stats: &mut CongestionControlStats,
     ) -> (usize, usize) {
         (curr_cwnd / 2, acked_bytes / 2)

@@ -18,7 +18,7 @@ use enum_map::EnumMap;
 use neqo_common::{Dscp, Ecn, qdebug};
 use strum::IntoEnumIterator as _;
 
-use crate::{cc::CongestionEvent, ecn, packet};
+use crate::{cc::CongestionTrigger, ecn, packet};
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct FrameStats {
@@ -142,16 +142,24 @@ pub enum SlowStartExitReason {
     Heuristic,
 }
 
+/// Congestion event counters, split by trigger type and qualifier flags.
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct CongestionEventStats {
+    /// Count by trigger type (Loss vs ECN-CE). Mutually exclusive, i.e. `sum = total CEs`.
+    pub by_trigger: EnumMap<CongestionTrigger, usize>,
+    /// Congestion events later found to be spurious, due to packets which were initially
+    /// considered lost but later got acknowledged.
+    pub spurious: usize,
+    /// Congestion events that occurred while underutilized, which is defined as `bytes in flight <
+    /// 10% of cwnd`.
+    pub underutilized: usize,
+}
+
 /// Congestion Control stats
 #[derive(Default, Clone, PartialEq)]
 pub struct CongestionControlStats {
-    /// Total number of congestion events caused by packet loss, total number of
-    /// congestion events caused by ECN-CE marked packets, number of
-    /// spurious congestion events, where congestion was incorrectly inferred
-    /// due to packets initially considered lost but subsequently acknowledged,
-    /// and number of congestion events that occurred while the connection was
-    /// underutilized (bytes in flight < 10% of congestion window).
-    pub congestion_events: EnumMap<CongestionEvent, usize>,
+    /// Congestion event counters. Includes trigger type and other qualifier flags.
+    pub congestion_events: CongestionEventStats,
     /// The congestion window size (in bytes) when we exited slow start.
     /// None if we haven't exited slow start or if we re-entered after spurious congestion.
     /// When exiting via congestion event, this is the cwnd AFTER the reduction.
@@ -415,10 +423,11 @@ impl Debug for Stats {
         writeln!(f, "  cc:")?;
         writeln!(
             f,
-            "    ce_loss {} ce_ecn {} ce_spurious {}",
-            self.cc.congestion_events[CongestionEvent::Loss],
-            self.cc.congestion_events[CongestionEvent::Ecn],
-            self.cc.congestion_events[CongestionEvent::Spurious],
+            "    ce_loss {} ce_ecn {} ce_spurious {} ce_underutilized {}",
+            self.cc.congestion_events.by_trigger[CongestionTrigger::Loss],
+            self.cc.congestion_events.by_trigger[CongestionTrigger::Ecn],
+            self.cc.congestion_events.spurious,
+            self.cc.congestion_events.underutilized,
         )?;
         writeln!(
             f,
@@ -484,7 +493,7 @@ fn debug() {
   rx: 0 drop 0 dup 0 saved 0
   tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
   cc:
-    ce_loss 0 ce_ecn 0 ce_spurious 0
+    ce_loss 0 ce_ecn 0 ce_spurious 0 ce_underutilized 0
     final_cwnd None ss_exit_cwnd None ss_exit_reason None
   pmtud: 0 sent 0 acked 0 lost 0 iface_mtu None peer_max_udp_payload 0 pmtu
   resumed: false
