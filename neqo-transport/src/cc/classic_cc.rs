@@ -2169,7 +2169,7 @@ mod tests {
 
         assert_eq!(
             cc_stats.congestion_events.underutilized, 1,
-            "should have a underutilized congestion event"
+            "should have an underutilized congestion event"
         );
 
         // fill the wire
