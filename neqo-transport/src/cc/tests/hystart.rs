@@ -534,7 +534,7 @@ fn css_alternative_baseline() {
     // When using the RFC default then this would've exited.
     for i in 0..HyStart::N_RTT_SAMPLE {
         hystart.on_packets_acked(
-            &RttEstimate::new(CSS_ENTRY_RTT - Duration::from_micros(1)),
+            &RttEstimate::new(CSS_ENTRY_RTT.checked_sub(Duration::from_micros(1)).unwrap()),
             i as u64, // Less than window_end
             INITIAL_CWND,
             &mut CongestionControlStats::default(),
