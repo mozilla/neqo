@@ -18,7 +18,7 @@ use enum_map::EnumMap;
 use neqo_common::{Dscp, Ecn, qdebug};
 use strum::IntoEnumIterator as _;
 
-use crate::{cc::CongestionTrigger, ecn, packet};
+use crate::{ecn, packet};
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct FrameStats {
@@ -142,11 +142,17 @@ pub enum SlowStartExitReason {
     Heuristic,
 }
 
-/// Congestion event counters, split by trigger type and qualifier flags.
+/// Congestion event counters.
+///
+/// `loss` and `ecn` are mutually exclusive triggers (their sum equals the total number of
+/// congestion events). `spurious` and `underutilized` are orthogonal categories that can overlap
+/// with any trigger (or each other).
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct CongestionEventStats {
-    /// Count by trigger type (Loss vs ECN-CE). Mutually exclusive, i.e. `sum = total CEs`.
-    pub by_trigger: EnumMap<CongestionTrigger, usize>,
+    /// Congestion events triggered by packet loss.
+    pub loss: usize,
+    /// Congestion events triggered by ECN-CE marks.
+    pub ecn: usize,
     /// Congestion events later found to be spurious, due to packets which were initially
     /// considered lost but later got acknowledged.
     pub spurious: usize,
@@ -424,8 +430,8 @@ impl Debug for Stats {
         writeln!(
             f,
             "    ce_loss {} ce_ecn {} ce_spurious {} ce_underutilized {}",
-            self.cc.congestion_events.by_trigger[CongestionTrigger::Loss],
-            self.cc.congestion_events.by_trigger[CongestionTrigger::Ecn],
+            self.cc.congestion_events.loss,
+            self.cc.congestion_events.ecn,
             self.cc.congestion_events.spurious,
             self.cc.congestion_events.underutilized,
         )?;

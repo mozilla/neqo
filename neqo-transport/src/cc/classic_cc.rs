@@ -887,7 +887,10 @@ where
             self.current.ssthresh
         );
 
-        cc_stats.congestion_events.by_trigger[congestion_trigger] += 1;
+        match congestion_trigger {
+            Loss => cc_stats.congestion_events.loss += 1,
+            Ecn => cc_stats.congestion_events.ecn += 1,
+        }
         if underutilized {
             cc_stats.congestion_events.underutilized += 1;
         }
@@ -1602,14 +1605,14 @@ mod tests {
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
         assert_eq!(cc.ssthresh(), usize::MAX);
         assert_eq!(cc.current.phase, Phase::SlowStart);
-        assert_eq!(cc_stats.congestion_events.by_trigger[Ecn], 0);
+        assert_eq!(cc_stats.congestion_events.ecn, 0);
 
         // Signal congestion (ECN CE) and thus change phase to recovery start.
         cc.on_ecn_ce_received(&p_ce, now, &mut cc_stats);
         assert_eq!(cc.cwnd(), cc.cwnd_initial() * 85 / 100);
         assert_eq!(cc.ssthresh(), cc.cwnd_initial() * 85 / 100);
         assert_eq!(cc.current.phase, Phase::RecoveryStart);
-        assert_eq!(cc_stats.congestion_events.by_trigger[Ecn], 1);
+        assert_eq!(cc_stats.congestion_events.ecn, 1);
     }
 
     /// This tests spurious congestion event detection, stat counting and the recovery mechanism.
@@ -1634,7 +1637,7 @@ mod tests {
         cc.on_packet_sent(&pkt1, now);
         cc.on_packet_sent(&pkt2, now);
         assert_eq!(cc.current.phase, Phase::SlowStart);
-        assert_eq!(cc_stats.congestion_events.by_trigger[Loss], 0);
+        assert_eq!(cc_stats.congestion_events.loss, 0);
         assert_eq!(cc_stats.congestion_events.spurious, 0);
 
         // 2. Lose packets (1, 2) --> `RecoveryStart`, 1 event, reduced cwnd
@@ -1658,7 +1661,7 @@ mod tests {
             cc_stats.slow_start_exit_reason,
             Some(SlowStartExitReason::CongestionEvent)
         );
-        assert_eq!(cc_stats.congestion_events.by_trigger[Loss], 1);
+        assert_eq!(cc_stats.congestion_events.loss, 1);
         #[expect(
             clippy::cast_sign_loss,
             clippy::cast_possible_truncation,
@@ -1675,7 +1678,7 @@ mod tests {
         let pkt3 = sent::make_packet(3, now, 1000);
         cc.on_packet_sent(&pkt3, now);
         assert_eq!(cc.current.phase, Phase::Recovery);
-        assert_eq!(cc_stats.congestion_events.by_trigger[Loss], 1);
+        assert_eq!(cc_stats.congestion_events.loss, 1);
 
         // 4. Ack packet (3)      --> `CongestionAvoidance`, 1 event
         cc.on_packets_acked(
@@ -1685,7 +1688,7 @@ mod tests {
             &mut cc_stats,
         );
         assert_eq!(cc.current.phase, Phase::CongestionAvoidance);
-        assert_eq!(cc_stats.congestion_events.by_trigger[Loss], 1);
+        assert_eq!(cc_stats.congestion_events.loss, 1);
 
         // 5. Ack packet (1)      --> `CongestionAvoidance`, 1 event, not a spurious event as not
         //    all lost packets were recovered
@@ -1696,7 +1699,7 @@ mod tests {
             &mut cc_stats,
         );
         assert_eq!(cc.current.phase, Phase::CongestionAvoidance);
-        assert_eq!(cc_stats.congestion_events.by_trigger[Loss], 1);
+        assert_eq!(cc_stats.congestion_events.loss, 1);
         assert_eq!(cc_stats.congestion_events.spurious, 0);
 
         // 6. Ack packet (2)      --> all lost packets have been recovered so now we've detected a
@@ -1710,7 +1713,7 @@ mod tests {
         assert_eq!(cc.current.phase, Phase::SlowStart);
         assert_eq!(cc_stats.slow_start_exit_cwnd, None);
         assert_eq!(cc_stats.slow_start_exit_reason, None);
-        assert_eq!(cc_stats.congestion_events.by_trigger[Loss], 1);
+        assert_eq!(cc_stats.congestion_events.loss, 1);
         assert_eq!(cc_stats.congestion_events.spurious, 1);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
         assert_eq!(cc_stats.w_max, None);
@@ -1801,7 +1804,7 @@ mod tests {
         cc.on_packet_sent(&pkt2, now);
 
         assert_eq!(cc.current.phase, Phase::SlowStart);
-        assert_eq!(cc_stats.congestion_events.by_trigger[Loss], 0);
+        assert_eq!(cc_stats.congestion_events.loss, 0);
         assert_eq!(cc_stats.congestion_events.spurious, 0);
 
         let mut lost_pkt1 = pkt1.clone();
@@ -1818,7 +1821,7 @@ mod tests {
         );
 
         assert_eq!(cc.current.phase, Phase::RecoveryStart);
-        assert_eq!(cc_stats.congestion_events.by_trigger[Loss], 1);
+        assert_eq!(cc_stats.congestion_events.loss, 1);
         assert_eq!(cc_stats.congestion_events.spurious, 0);
 
         // Step 3: Send packet 3 → enter Recovery phase
@@ -1829,7 +1832,7 @@ mod tests {
         // Step 4: Ack packet 1 → spurious event #1 detected
         cc.on_packets_acked(&[pkt1], &rtt_estimate, now, &mut cc_stats);
 
-        assert_eq!(cc_stats.congestion_events.by_trigger[Loss], 1);
+        assert_eq!(cc_stats.congestion_events.loss, 1);
         assert_eq!(cc_stats.congestion_events.spurious, 1);
 
         let mut lost_pkt2 = pkt2.clone();
@@ -1847,7 +1850,7 @@ mod tests {
         );
 
         // Still only 1 spurious event (but a new loss event)
-        assert_eq!(cc_stats.congestion_events.by_trigger[Loss], 2);
+        assert_eq!(cc_stats.congestion_events.loss, 2);
         assert_eq!(cc_stats.congestion_events.spurious, 1);
 
         // 6. Ack packet 2 → should trigger spurious event #2 because we left recovery when
@@ -1855,7 +1858,7 @@ mod tests {
         cc.on_packets_acked(&[pkt2], &rtt_estimate, now, &mut cc_stats);
 
         // Should now be 2 loss events and 2 spurious events, no double counting occured
-        assert_eq!(cc_stats.congestion_events.by_trigger[Loss], 2);
+        assert_eq!(cc_stats.congestion_events.loss, 2);
         assert_eq!(cc_stats.congestion_events.spurious, 2,);
     }
 
