@@ -24,7 +24,7 @@ mod new_reno;
 pub use classic_cc::{CWND_INITIAL_PKTS, ClassicCongestionController, PERSISTENT_CONG_THRESH};
 pub use classic_slow_start::ClassicSlowStart;
 pub use cubic::Cubic;
-pub use hystart::HyStart;
+pub use hystart::{HyStart, HyStartCssBaseline};
 pub use new_reno::NewReno;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
