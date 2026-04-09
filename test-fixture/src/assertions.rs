@@ -133,6 +133,48 @@ pub fn assert_handshake(payload: &[u8]) {
     assert!(is_handshake(payload));
 }
 
+/// Check if a datagram contains a Handshake packet, scanning through coalesced
+/// long-header packets (e.g., an Initial followed by a Handshake).
+#[must_use]
+pub fn contains_handshake(payload: &[u8]) -> bool {
+    let mut dec = Decoder::from(payload);
+    while let Some(b1) = dec.decode_uint::<u8>() {
+        if payload.iter().skip(dec.offset()).all(|b| *b == 0) {
+            return false;
+        }
+        if b1 & 0x80 == 0 {
+            return false; // Short header, no more long packets.
+        }
+        let Ok(version) = Version::try_from(dec.decode_uint::<version::Wire>().unwrap()) else {
+            return false;
+        };
+        if is_long_packet_type(b1, 0b1010_0000, version) {
+            return true;
+        }
+        dec.skip_vec(1); // DCID
+        dec.skip_vec(1); // SCID
+        let initial_type = if version == Version::Version2 {
+            0b1001_0000
+        } else {
+            0b1000_0000
+        };
+        if (b1 & PACKET_TYPE_MASK) == initial_type {
+            dec.skip_vvec(); // Initial token.
+        }
+        dec.skip_vvec(); // Skip the payload.
+    }
+    false
+}
+
+/// Assert that a datagram contains a Handshake packet, scanning through
+/// coalesced long-header packets.
+pub fn assert_contains_handshake(payload: &[u8]) {
+    assert!(
+        contains_handshake(payload),
+        "expected datagram to contain a Handshake packet"
+    );
+}
+
 pub fn assert_no_1rtt(payload: &[u8]) {
     let mut dec = Decoder::from(payload);
     while let Some(b1) = dec.decode_uint::<u8>() {
