@@ -51,5 +51,5 @@ runs:
         # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
         # or https://docs.anthropic.com/en/docs/claude-code/sdk#command-line for available options
         claude_args: |
-          --allowedTools "mcp__github_inline_comment__create_inline_comment"
+          --model claude-opus-4-6 --fallback-model claude-sonnet-4-6 --max-budget-usd 5.00 --allowedTools "mcp__github_inline_comment__create_inline_comment"
         prompt: ${{ steps.prompt.outputs.content }}
