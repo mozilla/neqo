@@ -9,6 +9,17 @@ inputs:
 runs:
   using: composite
   steps:
+    # Read prompt before PR checkout so it comes from the base branch (non-spoofable).
+    - name: Read prompt
+      id: prompt
+      shell: bash
+      run: |
+        {
+          echo "content<<EOF"
+          cat "${{ github.action_path }}/prompt.md"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
     # With pull_request_target, checkout defaults to the base branch.
     # Check out from the PR's head repository to handle fork PRs correctly.
     - name: Checkout PR head
@@ -36,9 +47,8 @@ runs:
       with:
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
         use_sticky_comment: true
-        use_commit_signing: true
         # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
         # or https://docs.anthropic.com/en/docs/claude-code/sdk#command-line for available options
         claude_args: |
           --allowedTools "mcp__github_inline_comment__create_inline_comment"
-        prompt_file: ${{ github.action_path }}/prompt.md
+        prompt: ${{ steps.prompt.outputs.content }}
