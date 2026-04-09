@@ -20,6 +20,16 @@ use std::{
 };
 
 use clap::Parser;
+
+#[derive(Clone, Debug)]
+struct EchConfig(Vec<u8>);
+
+impl std::str::FromStr for EchConfig {
+    type Err = hex::FromHexError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        hex::decode(s).map(EchConfig)
+    }
+}
 use futures::{
     FutureExt as _, TryFutureExt as _,
     future::{Either, select},
@@ -129,10 +139,10 @@ pub struct Args {
     /// Attempt to initiate a key update immediately after confirming the connection.
     key_update: bool,
 
-    #[arg(name = "ech", long, value_parser = |s: &str| hex::decode(s))]
+    #[arg(name = "ech", long)]
     /// Enable encrypted client hello (ECH).
     /// This takes an encoded ECH configuration in hexadecimal format.
-    ech: Option<Vec<u8>>,
+    ech: Option<EchConfig>,
 
     #[arg(name = "ipv4-only", short = '4', long)]
     /// Connect only over IPv4
