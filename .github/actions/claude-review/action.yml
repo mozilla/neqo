@@ -46,6 +46,7 @@ runs:
       uses: anthropics/claude-code-action@v1 # zizmor: ignore[unpinned-uses]
       with:
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
+        github_token: ${{ github.token }}
         use_sticky_comment: true
         # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
         # or https://docs.anthropic.com/en/docs/claude-code/sdk#command-line for available options
