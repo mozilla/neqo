@@ -531,7 +531,7 @@ mod tests {
         #[cfg(any(target_os = "linux", target_os = "macos", apple))]
         assert!(!frag, "may_fragment should be false on this platform");
         #[cfg(not(any(target_os = "linux", target_os = "macos", apple)))]
-        let _ = frag;
+        drop(frag);
         Ok(())
     }
 

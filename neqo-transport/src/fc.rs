@@ -1505,6 +1505,19 @@ mod test {
     }
 
     #[test]
+    fn retire_no_op_when_not_increasing() {
+        // `retire` is a no-op when the new value does not exceed the current retired count.
+        // Retire 80/100 bytes to exceed the 75% threshold and trigger a flow control update.
+        let mut fc = ReceiverFlowControl::new(StreamId::new(0), 100);
+        fc.set_consumed(80).unwrap();
+        fc.retire(80); // 20 bytes unused < 25 (25% threshold) → triggers update
+        assert!(fc.frame_needed());
+        fc.frame_sent(fc.next_limit()); // mark frame as sent, clearing pending
+        fc.retire(80); // same value — no-op
+        assert!(!fc.frame_needed());
+    }
+
+    #[test]
     fn add_retired_zero_does_not_trigger_update() {
         // `add_retired(0)` must not trigger a flow control update when no data was retired.
         let mut fc = ReceiverFlowControl::new(StreamType::UniDi, 100);

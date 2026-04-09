@@ -89,6 +89,13 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "unexpected space")]
+    fn save_panics_for_invalid_epoch() {
+        let mut saved = SavedDatagrams::default();
+        saved.save(Epoch::Initial, make_dgram(), now());
+    }
+
+    #[test]
     fn capacity_is_enforced() {
         let mut saved = SavedDatagrams::default();
         let t = now();

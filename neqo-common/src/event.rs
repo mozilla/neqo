@@ -57,13 +57,16 @@ mod tests {
     #[test]
     fn iter_yields_events() {
         let mut p = MockProvider(vec![1, 2, 3]);
+        assert!(p.has_events());
         let events: Vec<u32> = p.events().collect();
         assert_eq!(events, [1, 2, 3]);
+        assert!(!p.has_events());
     }
 
     #[test]
     fn iter_empty() {
         let mut p = MockProvider(vec![]);
+        assert!(!p.has_events());
         assert_eq!(p.events().next(), None);
     }
 }

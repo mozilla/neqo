@@ -2065,6 +2065,22 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "discarding application space")]
+    fn discard_application_data_panics() {
+        let mut lr = Fixture::default();
+        lr.discard(PacketNumberSpace::ApplicationData, now());
+    }
+
+    /// `drop_0rtt` returns empty when packets have already been acknowledged.
+    #[test]
+    fn drop_0rtt_already_acked() {
+        let mut lr = setup_lr(2); // sends packets 0..=1 and ACKs packet 0
+        ack(&mut lr, 1, TEST_RTT); // ACK packet 1 — sets largest_acked
+        let path = Rc::clone(&lr.path);
+        assert!(lr.drop_0rtt(&path, now()).is_empty());
+    }
+
+    #[test]
     fn loss_timer_set_on_pto() {
         let (_, contents, _) = fire_pto_log();
         let log = contents.to_string();

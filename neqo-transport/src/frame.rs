@@ -1326,17 +1326,20 @@ mod tests {
         assert!(!app_close.is_allowed(packet::Type::ZeroRtt));
     }
 
-    /// When `largest_acked == first_ack_range + 1` with additional ranges,
-    /// there is no room for even a gap of 0, so decoding fails.
+    /// `decode_ack_frame` rejects invalid range configurations.
     #[test]
     fn decode_ack_frame_boundaries() {
-        // After the first range (5..=5), cur = 5 - 4 - 1 = 0, which is less than gap+1=1.
-        let result = Frame::decode_ack_frame(5, 4, &[AckRange { gap: 0, range: 0 }]);
-        assert!(result.is_err());
+        // largest_acked < first_ack_range is always invalid.
+        assert!(Frame::decode_ack_frame(3, 4, &[]).is_err());
+
+        // largest_acked == first_ack_range with additional ranges: no room for a gap.
+        assert!(Frame::decode_ack_frame(4, 4, &[AckRange { gap: 0, range: 0 }]).is_err());
+
+        // After the first range (5..=5), cur = 0, which is less than gap+1=1.
+        assert!(Frame::decode_ack_frame(5, 4, &[AckRange { gap: 0, range: 0 }]).is_err());
 
         // With one extra unit of room (largest - first = 2), cur starts at 1 — enough.
-        let result = Frame::decode_ack_frame(5, 3, &[AckRange { gap: 0, range: 0 }]);
-        assert!(result.is_ok());
+        assert!(Frame::decode_ack_frame(5, 3, &[AckRange { gap: 0, range: 0 }]).is_ok());
     }
 
     /// `decode_ack_frame` correctly advances `cur` by `gap + 1` and produces exact ranges.
@@ -1345,6 +1348,9 @@ mod tests {
         // gap=1 skips 2 packet numbers (gap+1=2): cur goes 5→3 after the gap.
         let result = Frame::decode_ack_frame(10, 4, &[AckRange { gap: 1, range: 0 }]);
         assert_eq!(result.unwrap(), vec![6..=10, 3..=3]);
+
+        // cur < r.range: cur=7, range=8 → error.
+        assert!(Frame::decode_ack_frame(10, 2, &[AckRange { gap: 0, range: 8 }]).is_err());
 
         // Two ranges with gaps; all arithmetic must stay consistent.
         let result = Frame::decode_ack_frame(
@@ -1376,15 +1382,46 @@ mod tests {
         assert_ne!(result.unwrap_err(), Error::TooMuchData);
     }
 
+    /// Both Stream and Crypto frames reject `offset + data.len() > MAX_VARINT`.
     #[test]
-    fn decode_stream_offset_overflow() {
-        // Encode a Stream frame where offset + data.len() > MAX_VARINT.
+    fn decode_offset_overflow() {
+        // StreamWithOffLen (0x0e): stream_id + offset + vvec data
         let mut enc = Encoder::default();
-        enc.encode_byte(0x0e); // StreamWithOffLen
+        enc.encode_byte(0x0e);
         enc.encode_varint(1u64); // stream_id
-        enc.encode_varint(MAX_VARINT); // offset = max
-        enc.encode_vvec(&[0x01]); // data of length 1 → offset + 1 > MAX_VARINT
-        let result = Frame::decode(&mut enc.as_decoder());
-        assert_eq!(result.unwrap_err(), Error::FrameEncoding);
+        enc.encode_varint(MAX_VARINT);
+        enc.encode_vvec(&[0x01]);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncoding
+        );
+
+        // Crypto (0x06): offset + vvec data (no stream_id)
+        let mut enc = Encoder::default();
+        enc.encode_byte(0x06);
+        enc.encode_varint(MAX_VARINT);
+        enc.encode_vvec(&[0x01]);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncoding
+        );
+    }
+
+    /// A `MaxStreams` frame with value > 2^60 is rejected.
+    #[test]
+    fn decode_max_streams_exceeds_limit() {
+        let mut enc = Encoder::default();
+        enc.encode_byte(0x12); // MaxStreamsBiDi
+        enc.encode_varint((1u64 << 60) + 1);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::StreamLimit
+        );
+    }
+
+    /// `StreamType::try_from` rejects non-stream frame types.
+    #[test]
+    fn stream_type_try_from_invalid() {
+        assert!(StreamType::try_from(FrameType::Ping).is_err());
     }
 }
