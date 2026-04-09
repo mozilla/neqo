@@ -18,6 +18,7 @@ use crate::{
     },
     pace::Pacer,
     pmtud::Pmtud,
+    qlog,
     recovery::sent,
     rtt::RttEstimate,
     stats::CongestionControlStats,
@@ -30,6 +31,7 @@ pub const PACING_BURST_SIZE: usize = 2;
 pub struct PacketSender {
     cc: Box<dyn CongestionController>,
     pacer: Pacer,
+    qlog: Qlog,
 }
 
 impl PacketSender {
@@ -50,7 +52,10 @@ impl PacketSender {
                 }
                 (CongestionControl::NewReno, SlowStart::HyStart) => {
                     Box::new(ClassicCongestionController::new(
-                        HyStart::new(conn_params.pacing_enabled()),
+                        HyStart::new(
+                            conn_params.pacing_enabled(),
+                            conn_params.get_hystart_css_baseline(),
+                        ),
                         NewReno::default(),
                         pmtud,
                     ))
@@ -64,7 +69,10 @@ impl PacketSender {
                 }
                 (CongestionControl::Cubic, SlowStart::HyStart) => {
                     Box::new(ClassicCongestionController::new(
-                        HyStart::new(conn_params.pacing_enabled()),
+                        HyStart::new(
+                            conn_params.pacing_enabled(),
+                            conn_params.get_hystart_css_baseline(),
+                        ),
                         Cubic::default(),
                         pmtud,
                     ))
@@ -76,10 +84,12 @@ impl PacketSender {
                 mtu * PACING_BURST_SIZE,
                 mtu,
             ),
+            qlog: Qlog::default(),
         }
     }
 
     pub fn set_qlog(&mut self, qlog: Qlog) {
+        self.qlog = qlog.clone();
         self.cc.set_qlog(qlog);
     }
 
@@ -107,6 +117,13 @@ impl PacketSender {
         self.cc.cwnd_min()
     }
 
+    /// Emit a `PacingRate` qlog metric.
+    fn maybe_qlog_pacing_rate(&mut self, rtt: Duration, now: Instant) {
+        if let Some(rate) = Pacer::rate(self.cc.cwnd(), rtt) {
+            qlog::metrics_updated(&mut self.qlog, [qlog::Metric::PacingRate(rate)], now);
+        }
+    }
+
     fn maybe_update_pacer_mtu(&mut self) {
         let current_mtu = self.pmtud().plpmtu();
         if current_mtu != self.pacer.mtu() {
@@ -127,6 +144,7 @@ impl PacketSender {
     ) {
         self.cc
             .on_packets_acked(acked_pkts, rtt_est, now, &mut stats.cc);
+        self.maybe_qlog_pacing_rate(rtt_est.estimate(), now);
         self.pmtud_mut().on_packets_acked(acked_pkts, now, stats);
         self.maybe_update_pacer_mtu();
     }

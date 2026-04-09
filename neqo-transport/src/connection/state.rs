@@ -252,14 +252,12 @@ impl StateSignaling {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::time::Instant;
-
     use super::State;
     use crate::{CloseReason, Error};
 
     #[test]
     fn state_predicates() {
-        let now = Instant::now();
+        let now = test_fixture::now();
         let err = CloseReason::Transport(Error::None);
         let closing = State::Closing {
             error: err.clone(),

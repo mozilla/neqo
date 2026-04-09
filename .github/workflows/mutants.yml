@@ -43,7 +43,7 @@ jobs:
         id: baseline
         run: |
           SECONDS=0
-          cargo test --all-targets -- -Zunstable-options --fail-fast
+          cargo test --locked --all-targets -- -Zunstable-options --fail-fast
           {
             # Minimum timeout is 30s, maximum is 90s, otherwise 3x the baseline test time.
             echo "timeout=$(( SECONDS * 3 < 30 ? 30 : SECONDS * 3 > 90 ? 90 : SECONDS * 3 ))"

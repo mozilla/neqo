@@ -411,7 +411,7 @@ where
         cc_stats.cwnd = Some(self.current.congestion_window);
         qlog::metrics_updated(
             &mut self.qlog,
-            &[
+            [
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::BytesInFlight(self.bytes_in_flight),
             ],
@@ -451,48 +451,49 @@ where
                 // simple rebinding event, we may still declare packets lost that
                 // were sent before the rebinding.
                 self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
-            }
-            if !pkt.is_pmtud_probe() {
-                let present = self.maybe_lost_packets.insert(
-                    (pkt.pn(), pkt.packet_type()),
-                    MaybeLostPacket {
-                        time_sent: pkt.time_sent(),
-                    },
-                );
-                qdebug!(
-                    "Spurious detection: added MaybeLostPacket: pn {}, type {:?}, time_sent {:?}",
-                    pkt.pn(),
-                    pkt.packet_type(),
-                    pkt.time_sent()
-                );
-                debug_assert!(present.is_none());
+                if !pkt.is_pmtud_probe() {
+                    let present = self.maybe_lost_packets.insert(
+                        (pkt.pn(), pkt.packet_type()),
+                        MaybeLostPacket {
+                            time_sent: pkt.time_sent(),
+                        },
+                    );
+                    qdebug!(
+                        "Spurious detection: added MaybeLostPacket: pn {}, type {:?}, time_sent {:?}",
+                        pkt.pn(),
+                        pkt.packet_type(),
+                        pkt.time_sent()
+                    );
+                    debug_assert!(present.is_none());
+                }
             }
         }
 
         qlog::metrics_updated(
             &mut self.qlog,
-            &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
+            [qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
 
-        let mut lost_packets = lost_packets
-            .iter()
-            .filter(|pkt| !pkt.is_pmtud_probe())
-            .rev()
-            .peekable();
+        // Lost PMTUD probes do not elicit congestion control reactions, so this closure filters
+        // them out.
+        let lost_packets_no_pmtud = || lost_packets.iter().filter(|pkt| !pkt.is_pmtud_probe());
 
-        // Lost PMTUD probes do not elicit a congestion control reaction.
-        let Some(last_lost_packet) = lost_packets.peek() else {
+        // Packets not in flight don't elicit congestion control reactions either, so we early
+        // return if there is no lost in-flight packet left.
+        let Some(last_lost_packet) = lost_packets_no_pmtud().rfind(|pkt| pkt.cc_in_flight()) else {
             return false;
         };
 
         let congestion =
             self.on_congestion_event(last_lost_packet, CongestionEvent::Loss, now, cc_stats);
+        // Persistent congestion checks still need to see lost packets that are not in-flight for
+        // continuity checks. That is why only the closure to filter out lost PMTUD probes is used.
         let persistent_congestion = self.detect_persistent_congestion(
             first_rtt_sample_time,
             prev_largest_acked_sent,
             pto,
-            lost_packets.rev(),
+            lost_packets_no_pmtud(),
             now,
             cc_stats,
         );
@@ -524,7 +525,7 @@ where
             self.bytes_in_flight -= pkt.len();
             qlog::metrics_updated(
                 &mut self.qlog,
-                &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
+                [qlog::Metric::BytesInFlight(self.bytes_in_flight)],
                 now,
             );
             qtrace!("[{self}] Ignore pkt with size {}", pkt.len());
@@ -535,17 +536,12 @@ where
         self.bytes_in_flight = 0;
         qlog::metrics_updated(
             &mut self.qlog,
-            &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
+            [qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
     }
 
     fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant) {
-        // Pass next packet number to send into slow start algorithm during slow start.
-        if self.current.phase.in_slow_start() {
-            self.slow_start.on_packet_sent(pkt.pn());
-        }
-
         // Record the recovery time and exit any transient phase.
         if self.current.phase.transient() {
             self.current.recovery_start = Some(pkt.pn());
@@ -556,6 +552,12 @@ where
         if !pkt.cc_in_flight() {
             return;
         }
+
+        // Pass next packet number to send into slow start algorithm during slow start.
+        if self.current.phase.in_slow_start() {
+            self.slow_start.on_packet_sent(pkt.pn());
+        }
+
         if !self.app_limited() {
             // Given the current non-app-limited condition, we're fully utilizing the congestion
             // window. Assume that all in-flight packets up to this one are NOT app-limited.
@@ -572,7 +574,7 @@ where
         );
         qlog::metrics_updated(
             &mut self.qlog,
-            &[qlog::Metric::BytesInFlight(self.bytes_in_flight)],
+            [qlog::Metric::BytesInFlight(self.bytes_in_flight)],
             now,
         );
     }
@@ -807,9 +809,10 @@ where
                     cc_stats.cwnd = Some(self.current.congestion_window);
                     qlog::metrics_updated(
                         &mut self.qlog,
-                        &[qlog::Metric::CongestionWindow(
-                            self.current.congestion_window,
-                        )],
+                        [
+                            qlog::Metric::CongestionWindow(self.current.congestion_window),
+                            qlog::Metric::SsThresh(self.current.ssthresh),
+                        ],
                         now,
                     );
 
@@ -889,7 +892,7 @@ where
 
         qlog::metrics_updated(
             &mut self.qlog,
-            &[
+            [
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::SsThresh(self.current.ssthresh),
             ],
@@ -928,6 +931,7 @@ mod tests {
 
     use super::{ClassicCongestionController, PERSISTENT_CONG_THRESH, SlowStart, WindowAdjustment};
     use crate::{
+        MIN_INITIAL_PACKET_SIZE,
         cc::{
             CWND_INITIAL_PKTS, ClassicSlowStart, CongestionController, CongestionEvent,
             classic_cc::Phase,
@@ -2109,5 +2113,34 @@ mod tests {
                 "persistent congestion should have been detected"
             );
         });
+    }
+    /// RFC 9002 6.1: only in-flight (ack-eliciting) packets should be declared lost.
+    /// Non-ack-eliciting packets (e.g., only containing ACK-frames) must not trigger loss detection
+    /// or congestion events. This reproduces a bug where ACK-only packets sent after a
+    /// 0-RTT handshake were declared lost because the server (rightfully so) didn't send an ACK,
+    /// causing early slow start exit and setting ssthresh to `initial_cwnd * 0.7`.
+    #[test]
+    fn no_congestion_event_if_lost_packet_not_in_flight() {
+        let mut cc = make_cc_cubic();
+        let cc_stats = &mut CongestionControlStats::default();
+
+        // create a packet that is not ack-eliciting, so won't count as in flight
+        let lost_pkt = sent::Packet::new(
+            packet::Type::Short,
+            0,
+            now(),
+            false,
+            recovery::Tokens::new(),
+            MIN_INITIAL_PACKET_SIZE,
+        );
+
+        let initial_cwnd = cc.cwnd();
+
+        // call `on_packets_lost` on the non ack-eliciting packet
+        cc.on_packets_lost(Some(now()), None, PTO, &[lost_pkt], now(), cc_stats);
+
+        // there should be no reaction to the non-ack-eliciting packet
+        assert_eq!(cc.cwnd(), initial_cwnd);
+        assert_eq!(cc_stats.slow_start_exit_cwnd, None);
     }
 }

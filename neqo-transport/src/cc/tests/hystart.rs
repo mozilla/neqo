@@ -14,7 +14,8 @@ use test_fixture::now;
 use super::make_cc_hystart;
 use crate::{
     cc::{
-        CWND_INITIAL_PKTS, CongestionController as _, classic_cc::SlowStart as _, hystart::HyStart,
+        CWND_INITIAL_PKTS, CongestionController as _, HyStartCssBaseline,
+        classic_cc::SlowStart as _, hystart::HyStart,
     },
     packet::MIN_INITIAL_PACKET_SIZE,
     recovery::sent,
@@ -29,12 +30,12 @@ const INITIAL_CWND: usize = CWND_INITIAL_PKTS * MIN_INITIAL_PACKET_SIZE;
 
 /// Helper to create a HyStart instance with pacing enabled (L=infinity).
 fn make_hystart_paced() -> HyStart {
-    HyStart::new(true)
+    HyStart::new(true, HyStartCssBaseline::default())
 }
 
 /// Helper to create a HyStart instance with pacing disabled (L=8).
 fn make_hystart_unpaced() -> HyStart {
-    HyStart::new(false)
+    HyStart::new(false, HyStartCssBaseline::default())
 }
 
 /// Helper to set up HyStart state through two rounds with the given RTT values.
@@ -112,8 +113,13 @@ fn round_tracking_lifecycle() {
             "Round should continue while largest_acked < window_end"
         );
     }
+    assert!(
+        hystart.rtt_sample_count() > 0,
+        "We should have collected RTT samples in this round."
+    );
+    let min_rtt = hystart.current_round_min_rtt().unwrap();
 
-    // Now ack window_end - this should end the round
+    // Now ack window_end - this should end the round and switch over RTT tracking to the next.
     hystart.on_packets_acked(
         &RttEstimate::new(BASE_RTT),
         window_end, // largest_acked=window_end, round ends
@@ -124,14 +130,24 @@ fn round_tracking_lifecycle() {
         hystart.window_end().is_none(),
         "Round should end when largest_acked >= window_end"
     );
+    assert_eq!(
+        hystart.rtt_sample_count(),
+        0,
+        "RTT sample count should have been reset for the next round"
+    );
+    assert_eq!(
+        hystart.last_round_min_rtt(),
+        Some(min_rtt),
+        "RTT tracking should have been updated for the next round"
+    );
 
-    // Start new round
+    // Set next window_end
     let window_end2 = 100;
     hystart.on_packet_sent(window_end2);
     assert_eq!(
         hystart.window_end(),
         Some(window_end2),
-        "New round should start with new window_end"
+        "New round should now have set new window_end"
     );
 }
 
@@ -139,8 +155,6 @@ fn round_tracking_lifecycle() {
 #[test]
 fn rtt_sample_collection_tracks_minimum() {
     let mut hystart = make_hystart_paced();
-
-    hystart.on_packet_sent(0);
 
     // First ACK with RTT of 100ms
     hystart.on_packets_acked(
@@ -192,7 +206,6 @@ fn rtt_sample_collection_tracks_minimum() {
 )]
 fn rtt_sample_count_increments_per_ack() {
     let mut hystart = make_hystart_paced();
-    hystart.on_packet_sent(0);
 
     assert_eq!(hystart.rtt_sample_count(), 0);
 
@@ -431,6 +444,121 @@ fn css_back_to_slow_start_on_rtt_decrease() {
         hystart.css_round_count(),
         0,
         "CSS round count should be reset"
+    );
+}
+
+#[test]
+fn css_exit_only_with_new_samples() {
+    let mut hystart = make_hystart_paced();
+
+    // First round with base RTT to set a baseline that we can compare RTT against
+    let window_end = HyStart::N_RTT_SAMPLE as u64;
+    hystart.on_packet_sent(window_end);
+
+    assert!(hystart.window_end().is_some_and(|pn| pn == window_end));
+
+    // Collect N_RTT_SAMPLE samples with base RTT and end first round
+    for i in 0..=window_end {
+        hystart.on_packets_acked(
+            &RttEstimate::new(BASE_RTT),
+            i,
+            INITIAL_CWND,
+            &mut CongestionControlStats::default(),
+        );
+    }
+
+    assert!(hystart.window_end().is_none());
+
+    // Start second round with a high window end
+    let window_end2 = 300;
+    hystart.on_packet_sent(window_end2);
+
+    // Collect N_RTT_SAMPLE samples with higher RTT to enter CSS
+    for _i in 0..HyStart::N_RTT_SAMPLE as u64 {
+        hystart.on_packets_acked(
+            &RttEstimate::new(HIGH_RTT),
+            0,
+            INITIAL_CWND,
+            &mut CongestionControlStats::default(),
+        );
+    }
+
+    assert!(hystart.in_css(), "Should have entered CSS");
+
+    // ACK with low RTT should not exit CSS without new samples
+    hystart.on_packets_acked(
+        &RttEstimate::new(LOW_RTT),
+        0,
+        INITIAL_CWND,
+        &mut CongestionControlStats::default(),
+    );
+
+    assert!(
+        hystart.in_css(),
+        "Should still be in CSS after one low RTT ACK"
+    );
+
+    // Collect N_RTT_SAMPLE-1 more samples with low RTT
+    for _i in 1..HyStart::N_RTT_SAMPLE as u64 {
+        hystart.on_packets_acked(
+            &RttEstimate::new(LOW_RTT),
+            0,
+            INITIAL_CWND,
+            &mut CongestionControlStats::default(),
+        );
+    }
+
+    assert!(
+        !hystart.in_css(),
+        "Should exit CSS after having enough samples"
+    );
+}
+
+#[test]
+fn css_alternative_baseline() {
+    const CSS_ENTRY_RTT: Duration = HIGH_RTT;
+    let mut hystart = HyStart::new(true, HyStartCssBaseline::EntryThreshold);
+    maybe_enter_css(
+        &mut hystart,
+        BASE_RTT,
+        CSS_ENTRY_RTT,
+        &mut CongestionControlStats::default(),
+    );
+    assert!(hystart.in_css(), "Should have entered CSS");
+
+    // Start a new round in CSS
+    let new_window_end = 300;
+    hystart.on_packet_sent(new_window_end);
+
+    // RTT decreases just below CSS_ENTRY_RTT - should not exit CSS if using alternative baseline.
+    // When using the RFC default then this would've exited.
+    for i in 0..HyStart::N_RTT_SAMPLE {
+        hystart.on_packets_acked(
+            &RttEstimate::new(CSS_ENTRY_RTT.checked_sub(Duration::from_micros(1)).unwrap()),
+            i as u64, // Less than window_end
+            INITIAL_CWND,
+            &mut CongestionControlStats::default(),
+        );
+    }
+
+    assert!(
+        hystart.in_css(),
+        "Should still be in CSS after RTT decrease just below CSS_ENTRY_RTT"
+    );
+
+    // RTT decreases below the threshold that we entered CSS with - should exit CSS.
+    // With BASE_RTT = 100ms we have a threshold of 112.5ms, so let's take a value of 112.499ms.
+    let below_threshold_rtt = BASE_RTT + Duration::from_micros(12_499);
+    hystart.on_packets_acked(
+        &RttEstimate::new(below_threshold_rtt),
+        0, // Less than window_end
+        INITIAL_CWND,
+        &mut CongestionControlStats::default(),
+    );
+
+    assert!(
+        !hystart.in_css(),
+        "Should exit CSS when RTT decreases below alternative baseline"
     );
 }
 

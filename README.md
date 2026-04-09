@@ -55,7 +55,7 @@ To run test HTTP/3 programs (`neqo-client` and `neqo-server`):
      export LD_LIBRARY_PATH="$(find $NSS_DIR/.. -name libssl3.so -print | head -1 | xargs dirname | xargs realpath)"
      ```
 
-   - For MacOS:
+   - For macOS:
 
      ```shell
      export DYLD_LIBRARY_PATH="$(find $NSS_DIR/.. -name libssl3.dylib -print | head -1 | xargs dirname | xargs realpath)"
@@ -123,7 +123,7 @@ Some examples:
 
 ### Trying in-development Neqo code in Gecko
 
-In a checked-out copy of Gecko source, set `[patches.*]` values for the four
+In a checked-out copy of Gecko source, set `[patches.*]` values for the
 Neqo crates to local versions in the root `Cargo.toml`. For example, if Neqo
 was checked out to `/home/alice/git/neqo`, add the following lines to the root
 `Cargo.toml`.
@@ -161,7 +161,7 @@ something has changed.
    - `network.http.http3.alt-svc-mapping-for-testing` to `localhost;h3=":12345"`
    - `network.http.http3.disable_when_third_party_roots_found` to `false`
 3. Optionally enable logging via `about:logging` or profiling via <https://profiler.firefox.com/>.
-4. Navigate to <https://localhost:12345> and accept self-signed certificate.
+4. Navigate to <https://localhost:12345> and accept the self-signed certificate.
 
 [NSS]: https://hg.mozilla.org/projects/nss
 [NSPR]: https://hg.mozilla.org/projects/nspr

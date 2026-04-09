@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -611,12 +611,6 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hermit-abi"
-version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d231dfb89cfffdbc30e7fc41579ed6066ad03abda9e567ccafae602b97ec5024"
-
-[[package]]
-name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
@@ -660,7 +654,7 @@ version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
- "hermit-abi 0.5.2",
+ "hermit-abi",
  "libc",
  "windows-sys",
 ]
@@ -698,9 +692,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.176"
+version = "0.2.183"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58f929b4d672ea937a23a1ab494143d968337a5f47e56d0815df1e0890ddf174"
+checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
 
 [[package]]
 name = "libfuzzer-sys"
@@ -724,9 +718,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.26"
+version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30bde2b3dc3671ae49d8e2e9f044c7c005836e7a023ee57cffa25ab82764bb9e"
+checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "memchr"
@@ -751,11 +745,9 @@ dependencies = [
 
 [[package]]
 name = "mio"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4569e456d394deccd22ce1c1913e6ea0e54519f577285001215d33557431afe4"
+version = "1.1.1"
+source = "git+https://github.com/kinetiknz/mio?rev=5e8b202db39facecc343170f50a07916640a607c#5e8b202db39facecc343170f50a07916640a607c"
 dependencies = [
- "hermit-abi 0.3.9",
  "libc",
  "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys",
@@ -780,8 +772,9 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
+ "cfg_aliases",
  "clap",
  "clap-verbosity-flag",
  "codspeed-criterion-compat",
@@ -806,7 +799,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-common"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -823,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-crypto"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
  "bindgen",
  "enum-map",
@@ -842,7 +835,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-http3"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
  "codspeed-criterion-compat",
  "enumset",
@@ -863,7 +856,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-qpack"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
  "log",
  "neqo-common",
@@ -877,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-transport"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -899,7 +892,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-udp"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -996,9 +989,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53412bac6247548e2164c7d7f67854aa104ea7d5901efd99622fdf05205496f6"
+checksum = "76150b617afc75e6e21ac5f39bc196e80b65415ae48d62dbef8e2519d040ce42"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -1284,7 +1277,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
  "log",
  "neqo-common",

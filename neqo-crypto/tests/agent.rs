@@ -281,8 +281,8 @@ fn alpn() {
     connect(&mut client, &mut server);
 
     let expected = Some(String::from("alpn"));
-    assert_eq!(expected.as_ref(), client.info().unwrap().alpn());
-    assert_eq!(expected.as_ref(), server.info().unwrap().alpn());
+    assert_eq!(expected.as_deref(), client.info().unwrap().alpn());
+    assert_eq!(expected.as_deref(), server.info().unwrap().alpn());
 }
 
 #[test]
@@ -311,8 +311,8 @@ fn alpn_multi() {
     connect(&mut client, &mut server);
 
     let expected = Some(String::from("alpn"));
-    assert_eq!(expected.as_ref(), client.info().unwrap().alpn());
-    assert_eq!(expected.as_ref(), server.info().unwrap().alpn());
+    assert_eq!(expected.as_deref(), client.info().unwrap().alpn());
+    assert_eq!(expected.as_deref(), server.info().unwrap().alpn());
 }
 
 #[test]
@@ -330,8 +330,8 @@ fn alpn_server_pref() {
     connect(&mut client, &mut server);
 
     let expected = Some(String::from("alpn"));
-    assert_eq!(expected.as_ref(), client.info().unwrap().alpn());
-    assert_eq!(expected.as_ref(), server.info().unwrap().alpn());
+    assert_eq!(expected.as_deref(), client.info().unwrap().alpn());
+    assert_eq!(expected.as_deref(), server.info().unwrap().alpn());
 }
 
 #[test]

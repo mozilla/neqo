@@ -92,12 +92,12 @@ impl CertificateInfo {
     }
 
     #[must_use]
-    pub const fn stapled_ocsp_responses(&self) -> Option<&Vec<Vec<u8>>> {
-        self.stapled_ocsp_responses.as_ref()
+    pub fn stapled_ocsp_responses(&self) -> Option<&[Vec<u8>]> {
+        self.stapled_ocsp_responses.as_deref()
     }
 
     #[must_use]
-    pub const fn signed_cert_timestamp(&self) -> Option<&Vec<u8>> {
-        self.signed_cert_timestamp.as_ref()
+    pub fn signed_cert_timestamp(&self) -> Option<&[u8]> {
+        self.signed_cert_timestamp.as_deref()
     }
 }
