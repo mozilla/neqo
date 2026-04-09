@@ -206,3 +206,79 @@ impl RttEstimate {
         self.ack_delay.frame_acked(acked);
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::time::Duration;
+
+    use neqo_common::qlog::Qlog;
+    use test_fixture::now;
+
+    use super::{DEFAULT_INITIAL_RTT, RttEstimate, RttSource};
+    use crate::tracking::DEFAULT_REMOTE_ACK_DELAY;
+
+    fn update(rtt: &mut RttEstimate, sample: Duration, ack_delay: Duration, source: RttSource) {
+        rtt.update(&mut Qlog::default(), sample, ack_delay, source, now());
+    }
+
+    fn update_ack(rtt: &mut RttEstimate, sample: Duration) {
+        update(rtt, sample, Duration::ZERO, RttSource::Ack);
+    }
+
+    /// A fresh `RttEstimate` after one real sample using the initial RTT.
+    fn initialized_rtt() -> RttEstimate {
+        let mut rtt = RttEstimate::new(DEFAULT_INITIAL_RTT);
+        update_ack(&mut rtt, DEFAULT_INITIAL_RTT);
+        rtt
+    }
+
+    #[test]
+    fn first_sample_initializes_estimate() {
+        let mut rtt = RttEstimate::new(DEFAULT_INITIAL_RTT);
+        assert!(rtt.first_sample_time().is_none());
+        update_ack(&mut rtt, Duration::from_millis(80));
+        assert!(rtt.first_sample_time().is_some());
+        assert_eq!(rtt.estimate(), Duration::from_millis(80));
+        assert_eq!(rtt.minimum(), Duration::from_millis(80));
+    }
+
+    // Compute the expected EWMA smoothed RTT after one initialization sample and one EWMA sample.
+    // smoothed = (prev * 7 + sample) / 8
+    fn ewma(prev: Duration, sample: Duration) -> Duration {
+        (prev * 7 + sample) / 8
+    }
+
+    /// With `AckConfirmed` source and `ack_delay > max_ack_delay`, the `ack_delay`
+    /// should be capped to `max_ack_delay`.
+    #[test]
+    fn ack_confirmed_caps_large_ack_delay() {
+        let sample = Duration::from_millis(200);
+        let large_delay = DEFAULT_REMOTE_ACK_DELAY + Duration::from_millis(25);
+        let effective = sample.checked_sub(DEFAULT_REMOTE_ACK_DELAY).unwrap(); // capped to max_ack_delay
+        let mut rtt = initialized_rtt();
+        update(&mut rtt, sample, large_delay, RttSource::AckConfirmed);
+        assert_eq!(rtt.estimate(), ewma(DEFAULT_INITIAL_RTT, effective));
+    }
+
+    /// With a non-confirmed source, `ack_delay > max_ack_delay` is NOT capped.
+    #[test]
+    fn non_confirmed_does_not_cap_ack_delay() {
+        let sample = Duration::from_millis(200);
+        let large_delay = DEFAULT_REMOTE_ACK_DELAY + Duration::from_millis(25);
+        let effective = sample.checked_sub(large_delay).unwrap(); // full delay applied
+        let mut rtt = initialized_rtt();
+        update(&mut rtt, sample, large_delay, RttSource::Ack);
+        assert_eq!(rtt.estimate(), ewma(DEFAULT_INITIAL_RTT, effective));
+    }
+
+    #[test]
+    fn min_rtt_tracks_minimum() {
+        let mut rtt = RttEstimate::new(DEFAULT_INITIAL_RTT);
+        update_ack(&mut rtt, Duration::from_millis(100));
+        update_ack(&mut rtt, Duration::from_millis(50));
+        assert_eq!(rtt.minimum(), Duration::from_millis(50));
+        update_ack(&mut rtt, Duration::from_millis(200));
+        assert_eq!(rtt.minimum(), Duration::from_millis(50)); // Still 50ms.
+    }
+}

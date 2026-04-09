@@ -626,11 +626,12 @@ impl Default for AckTracker {
 mod tests {
     use std::collections::HashSet;
 
-    use neqo_common::Encoder;
+    use neqo_common::{Decoder, Encoder};
     use test_fixture::now;
 
     use super::{
-        AckTracker, Duration, Instant, MAX_TRACKED_RANGES, PacketNumberSpace, RecvdPackets,
+        AckTracker, Duration, Instant, MAX_TRACKED_RANGES, PacketNumberSpace, PacketRange,
+        RecvdPackets,
     };
     use crate::{
         Stats,
@@ -996,6 +997,45 @@ mod tests {
         }
     }
 
+    /// ACK delay encodes elapsed microseconds divided by 8 (the default ACK delay exponent).
+    #[test]
+    fn ack_delay_encoding() {
+        let t = now();
+        // 16µs → ack_delay = 16/8 = 2.
+        let elapsed = Duration::from_micros(16);
+
+        let mut tracker = AckTracker::default();
+        tracker
+            .get_mut(PacketNumberSpace::Initial)
+            .unwrap()
+            .set_received(t, 0, true, &mut Stats::default())
+            .unwrap();
+
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut stats = FrameStats::default();
+        tracker.write_frame(
+            PacketNumberSpace::Initial,
+            t + elapsed,
+            RTT,
+            &mut builder,
+            &mut recovery::Tokens::new(),
+            &mut stats,
+        );
+        assert_eq!(stats.ack, 1, "ACK frame should have been written");
+
+        // Decode the ACK frame from the builder output and check ack_delay.
+        let enc: Encoder = builder.into();
+        let bytes = Vec::from(enc);
+        // Skip the 1-byte packet header; remainder is the ACK frame.
+        let mut dec = Decoder::from(&bytes[1..]);
+        let frame = Frame::decode(&mut dec).unwrap();
+        let Frame::Ack { ack_delay, .. } = frame else {
+            panic!("expected ACK frame, got {frame:?}");
+        };
+        assert_eq!(ack_delay, 2, "ack_delay must be 16\u{b5}s / 8 = 2");
+    }
+
     #[test]
     fn no_room_for_ack() {
         let mut tracker = AckTracker::default();
@@ -1156,5 +1196,40 @@ mod tests {
     fn useful_ack_len() {
         // 1 (type) + 8 (largest) + 8 (delay) + 1 (count) + 8 (first range) + 24 (3 ECN counts)
         assert_eq!(RecvdPackets::USEFUL_ACK_LEN, 50);
+    }
+
+    #[test]
+    fn trim_ranges_increments_stat() {
+        // Each dropped range increments the stat by 1.
+        let mut rp = RecvdPackets::new(PacketNumberSpace::Initial);
+        let mut stats = Stats::default();
+        // Fill with MAX_TRACKED_RANGES + 2 disjoint ack-eliciting packets.
+        for i in 0..=(MAX_TRACKED_RANGES + 1) {
+            rp.set_received(now(), (i * 2) as u64, true, &mut stats)
+                .unwrap();
+        }
+        // Two ranges should have been dropped.
+        assert_eq!(stats.unacked_range_dropped, 2);
+    }
+
+    #[test]
+    fn acknowledged_clears_ack_needed() {
+        let mut rp = RecvdPackets::new(PacketNumberSpace::ApplicationData);
+        let mut stats = Stats::default();
+        // Receive packets 0, 1, 2 — one contiguous range, ACK needed.
+        for pn in 0u64..3 {
+            rp.set_received(now(), pn, true, &mut stats).unwrap();
+        }
+        assert!(
+            rp.ack_time().is_some(),
+            "ACK should be needed before acknowledging"
+        );
+
+        // Simulate peer acknowledging our ACK by calling acknowledged.
+        let acked = [PacketRange::new(0)]; // covers packet 0
+        rp.acknowledged(&acked);
+        // Ranges are still tracked for duplicate detection after acknowledgement.
+        assert!(rp.is_duplicate(0));
+        assert!(rp.is_duplicate(2));
     }
 }

@@ -71,3 +71,39 @@ impl SavedDatagrams {
             .map_or_else(Vec::new, |epoch| mem::take(self.store(epoch)))
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::net::SocketAddr;
+
+    use neqo_common::{Tos, datagram::Datagram};
+    use test_fixture::now;
+
+    use super::SavedDatagrams;
+    use crate::crypto::Epoch;
+
+    fn make_dgram() -> Datagram {
+        let addr: SocketAddr = "127.0.0.1:443".parse().unwrap();
+        Datagram::new(addr, addr, Tos::default(), vec![0x00])
+    }
+
+    #[test]
+    fn capacity_is_enforced() {
+        let mut saved = SavedDatagrams::default();
+        let t = now();
+
+        // Fill to exactly CAPACITY.
+        for _ in 0..SavedDatagrams::CAPACITY {
+            saved.save(Epoch::ApplicationData, make_dgram(), t);
+        }
+        assert!(saved.is_either_full());
+
+        // One more should be silently dropped.
+        saved.save(Epoch::ApplicationData, make_dgram(), t);
+
+        saved.make_available(Epoch::ApplicationData);
+        let taken = saved.take_saved();
+        assert_eq!(taken.len(), SavedDatagrams::CAPACITY);
+    }
+}

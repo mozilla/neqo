@@ -520,4 +520,28 @@ mod tests {
         assert!(socket.max_gso_segments() > 1);
         Ok(())
     }
+
+    #[test]
+    fn may_fragment_returns_bool() -> Result<(), io::Error> {
+        let s = socket()?;
+        // On platforms that set DONTFRAG (Linux, macOS), this should be false.
+        // On other platforms it may be true. Either way it must not panic.
+        let frag = s.may_fragment();
+        // On Linux and macOS, fragmentation is disabled via socket options.
+        #[cfg(any(target_os = "linux", target_os = "macos", apple))]
+        assert!(!frag, "may_fragment should be false on this platform");
+        #[cfg(not(any(target_os = "linux", target_os = "macos", apple)))]
+        let _ = frag;
+        Ok(())
+    }
+
+    #[test]
+    fn max_gso_segments_is_consistent() -> Result<(), io::Error> {
+        let s = socket()?;
+        let a = s.max_gso_segments();
+        let b = s.max_gso_segments();
+        assert_eq!(a, b, "max_gso_segments should be deterministic");
+        assert!(a >= 1);
+        Ok(())
+    }
 }

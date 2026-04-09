@@ -753,7 +753,10 @@ mod test {
     use neqo_common::{Encoder, Role, qdebug};
     use neqo_crypto::random;
 
-    use super::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
+    use super::{
+        AutoTuneSubject, LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits,
+        SenderFlowControl,
+    };
     use crate::{
         ConnectionParameters, Error, INITIAL_LOCAL_MAX_DATA, INITIAL_LOCAL_MAX_STREAM_DATA, Res,
         connection::params::{MAX_LOCAL_MAX_DATA, MAX_LOCAL_MAX_STREAM_DATA},
@@ -1472,6 +1475,43 @@ mod test {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn auto_tune_subject_display() {
+        assert_eq!(AutoTuneSubject::Connection.to_string(), "connection");
+        assert_eq!(
+            AutoTuneSubject::Stream(StreamId::new(4)).to_string(),
+            "stream 4"
+        );
+    }
+
+    #[test]
+    fn update_same_limit_returns_none() {
+        // `update` returns None when the new limit equals the current limit.
+        let mut fc = SenderFlowControl::new((), 10);
+        assert!(fc.update(10).is_none()); // Equal — no change.
+        assert!(fc.update(11).is_some()); // Strictly greater — update.
+    }
+
+    #[test]
+    fn set_max_active_equal_does_not_set_frame_pending() {
+        // `set_max_active` does not mark frame pending when the value is unchanged.
+        let mut fc = ReceiverFlowControl::new(StreamId::new(0), 100);
+        fc.set_max_active(100); // Same value — should not set frame_pending.
+        assert!(!fc.frame_needed());
+        fc.set_max_active(101); // Increase — should set frame_pending.
+        assert!(fc.frame_needed());
+    }
+
+    #[test]
+    fn add_retired_zero_does_not_trigger_update() {
+        // `add_retired(0)` must not trigger a flow control update when no data was retired.
+        let mut fc = ReceiverFlowControl::new(StreamType::UniDi, 100);
+        fc.add_retired(0); // count == 0: no update.
+        assert!(!fc.frame_needed());
+        fc.add_retired(1); // count > 0: retired+max_active > max_allowed → triggers update.
+        assert!(fc.frame_needed());
     }
 
     #[test]

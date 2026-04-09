@@ -62,14 +62,10 @@ impl<D> Datagram<D> {
 }
 
 impl<D: AsRef<[u8]>> Datagram<D> {
+    #[expect(clippy::len_without_is_empty, reason = "is_empty() is always false")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.d.as_ref().len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     #[must_use]

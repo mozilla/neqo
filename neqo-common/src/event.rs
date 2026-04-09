@@ -32,3 +32,38 @@ impl<P: Provider + ?Sized> Iterator for Iter<'_, P> {
         self.p.next_event()
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::Provider;
+
+    struct MockProvider(Vec<u32>);
+
+    impl Provider for MockProvider {
+        type Event = u32;
+        fn next_event(&mut self) -> Option<u32> {
+            if self.0.is_empty() {
+                None
+            } else {
+                Some(self.0.remove(0))
+            }
+        }
+        fn has_events(&self) -> bool {
+            !self.0.is_empty()
+        }
+    }
+
+    #[test]
+    fn iter_yields_events() {
+        let mut p = MockProvider(vec![1, 2, 3]);
+        let events: Vec<u32> = p.events().collect();
+        assert_eq!(events, [1, 2, 3]);
+    }
+
+    #[test]
+    fn iter_empty() {
+        let mut p = MockProvider(vec![]);
+        assert_eq!(p.events().next(), None);
+    }
+}
