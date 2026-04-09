@@ -24,6 +24,11 @@ jobs:
       pull-requests: write # Required to post review comments.
       id-token: write # Required for OIDC authentication.
     steps:
+      # Sparse-checkout the local composite action from the base branch.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/claude-review
+          persist-credentials: false
       - uses: ./.github/actions/claude-review
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }} # zizmor: ignore[secrets-outside-env] Trusted collaborators skip the environment gate by design.
@@ -38,6 +43,11 @@ jobs:
       pull-requests: write # Required to post review comments.
       id-token: write # Required for OIDC authentication.
     steps:
+      # Sparse-checkout the local composite action from the base branch.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/claude-review
+          persist-credentials: false
       - uses: ./.github/actions/claude-review
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
