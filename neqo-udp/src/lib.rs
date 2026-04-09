@@ -530,7 +530,7 @@ mod tests {
         // On Linux and macOS, fragmentation is disabled via socket options.
         #[cfg(apple)]
         assert!(!frag, "may_fragment should be false on this platform");
-        #[cfg(not(any(target_os = "linux", target_os = "macos", apple)))]
+        #[cfg(not(apple))]
         let _: bool = frag;
         Ok(())
     }
