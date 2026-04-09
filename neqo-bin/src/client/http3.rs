@@ -103,7 +103,7 @@ pub fn create_client(
     let qlog = qlog_new(args, hostname, client.connection_id())?;
     client.set_qlog(qlog);
     if let Some(ech) = &args.ech {
-        client.enable_ech(ech)?;
+        client.enable_ech(&ech.0)?;
     }
     if let Some(token) = resumption_token {
         client.enable_resumption(now(), token)?;
