@@ -27,6 +27,7 @@ runs:
         git fetch --depth=1 "https://github.com/$BASE_REPO" "$BASE_SHA"
         # Overwrite instruction files with the trusted base-branch versions.
         git checkout FETCH_HEAD -- .github/copilot-instructions.md 2>/dev/null || true
+        git checkout FETCH_HEAD -- .github/actions/claude-review/prompt.md 2>/dev/null || true
 
     - name: Run Claude Code Review
       id: claude
