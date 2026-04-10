@@ -17,7 +17,7 @@ permissions:
 jobs:
   claude-review-trusted:
     name: Claude Code Review
-    if: contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+    if: ${{ !github.event.pull_request.draft && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -35,7 +35,7 @@ jobs:
 
   claude-review-untrusted:
     name: Claude Code Review
-    if: ${{ !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) }}
+    if: ${{ !github.event.pull_request.draft && !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) }}
     environment: claude-review
     runs-on: ubuntu-24.04
     permissions:
