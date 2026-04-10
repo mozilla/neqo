@@ -45,7 +45,7 @@ These are the main focus areas for your review:
    - Verify correct use of feature gates — new code should not depend on CI-only or
      integration-only features at runtime
 
-Before posting new comments, check any existing review comments from previous runs on this PR.
+Before posting new comments, check any existing review comments **from your own previous runs** on this PR.
 For each previous comment, determine whether the issue it raised is still present in the current code.
 If it has been resolved, reply to that comment thread noting that the issue has been addressed, rather
 than re-raising it. If it has been addressed, you may close ("resolve") the comment.
