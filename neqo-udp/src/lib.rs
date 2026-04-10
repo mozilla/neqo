@@ -84,8 +84,8 @@ pub fn send_inner(
             return Ok(());
         }
         Err(e) if is_enobufs(&e) => {
-            // On macOS/BSD, ENOBUFS means the NIC transmit queue is momentarily
-            // full. The packet is already dropped by the kernel. Signal WouldBlock.
+            // ENOBUFS means the send queue is momentarily full. The packet is
+            // already dropped by the kernel. Signal WouldBlock so callers retry.
             qdebug!("Interface send queue full (ENOBUFS), signaling WouldBlock: {e}");
             return Err(io::Error::from(io::ErrorKind::WouldBlock));
         }
