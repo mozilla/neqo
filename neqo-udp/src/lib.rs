@@ -391,22 +391,21 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn is_emsgsize_true_for_wsaemsgsize() {
-        let err = io::Error::from_raw_os_error(windows::Win32::Networking::WinSock::WSAEMSGSIZE.0);
+        let err = io::Error::from_raw_os_error(WinSock::WSAEMSGSIZE.0);
         assert!(is_emsgsize(&err));
     }
 
     #[test]
     #[cfg(windows)]
     fn is_emsgsize_true_for_wsaeinval() {
-        let err = io::Error::from_raw_os_error(windows::Win32::Networking::WinSock::WSAEINVAL.0);
+        let err = io::Error::from_raw_os_error(WinSock::WSAEINVAL.0);
         assert!(is_emsgsize(&err));
     }
 
     #[test]
     #[cfg(windows)]
     fn is_emsgsize_false_for_other_windows_errors() {
-        let err =
-            io::Error::from_raw_os_error(windows::Win32::Networking::WinSock::WSAEWOULDBLOCK.0);
+        let err = io::Error::from_raw_os_error(WinSock::WSAEWOULDBLOCK.0);
         assert!(!is_emsgsize(&err));
     }
 
