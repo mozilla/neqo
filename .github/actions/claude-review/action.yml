@@ -13,10 +13,12 @@ runs:
     - name: Read prompt
       id: prompt
       shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         {
           echo "content<<EOF"
-          cat "${{ github.action_path }}/prompt.md"
+          cat "$ACTION_PATH/prompt.md"
           echo "EOF"
         } >> "$GITHUB_OUTPUT"
 
@@ -48,8 +50,9 @@ runs:
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
         github_token: ${{ github.token }}
         use_sticky_comment: true
+        show_full_output: "true"
         # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
         # or https://docs.anthropic.com/en/docs/claude-code/sdk#command-line for available options
         claude_args: |
-          --allowedTools "mcp__github_inline_comment__create_inline_comment"
+          --model claude-opus-4-6 --fallback-model claude-sonnet-4-6 --max-budget-usd 5.00 --allowedTools "mcp__github_inline_comment__create_inline_comment,mcp__github__pull_request_read,mcp__github__add_reply_to_pull_request_comment"
         prompt: ${{ steps.prompt.outputs.content }}
