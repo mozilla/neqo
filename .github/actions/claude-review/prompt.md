@@ -51,7 +51,7 @@ If it has been resolved, reply to that comment thread noting that the issue has 
 than re-raising it.
 
 When encountering comments from other reviewers (including other AI agents) and you have differing
-opinions on the points raised, succinctly comment on those as part of the review.
+opinions on the points raised, succinctly and respectfully comment on those as part of the review.
 
 Whenever possible:
 
