@@ -268,6 +268,9 @@ impl<'b> Handler<'b> {
         match client.stream_create(StreamType::BiDi) {
             Ok(client_stream_id) => {
                 qinfo!("Created stream {client_stream_id} for {url}");
+                client
+                    .stream_keep_alive(client_stream_id, true)
+                    .expect("keep-alive on new stream");
                 let req = format!("GET {}\r\n", url.path());
                 if client
                     .stream_send(client_stream_id, req.as_bytes())
