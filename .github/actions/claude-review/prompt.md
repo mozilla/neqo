@@ -48,9 +48,9 @@ These are the main focus areas for your review:
 Before posting new comments, check any existing review comments **from your own previous runs** on this PR.
 For each previous comment, determine whether the issue it raised is still present in the current code.
 If it has been resolved, reply to that comment thread noting that the issue has been addressed, rather
-than re-raising it. If it has been addressed, you may close ("resolve") the comment.
+than re-raising it.
 
-When encoutering comments from other reviewers (including other AI agents) and you have differing
+When encountering comments from other reviewers (including other AI agents) and you have differing
 opinions on the points raised, succinctly comment on those as part of the review.
 
 Whenever possible:
