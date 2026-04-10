@@ -164,8 +164,8 @@ mod test {
         assert!(!id1.is_recv_only(Role::Client));
         assert_eq!(id1.as_u64(), 16);
         assert_eq!(id1.index(), 4);
-        assert!(id1 == 16);
-        assert!(id1 != 17);
+        assert_eq!(id1, 16);
+        assert_ne!(id1, 17);
     }
 
     #[test]

@@ -13,28 +13,28 @@ inputs:
     required: true
   cubic:
     description: Use cubic congestion control (neqo only)
-    default: 'true'
+    default: "true"
   pacing:
     description: Enable pacing (neqo only)
-    default: 'true'
+    default: "true"
   neqo-path:
     description: Path to neqo binaries
-    default: 'binaries'
+    default: "binaries"
   msquic-path:
     description: Path to msquic binaries
-    default: 'binaries'
+    default: "binaries"
   google-path:
     description: Path to google/quiche binaries
-    default: 'binaries'
+    default: "binaries"
   quiche-path:
     description: Path to cloudflare/quiche binaries
-    default: 'binaries'
+    default: "binaries"
   s2n-path:
     description: Path to s2n-quic binaries
-    default: 'binaries'
+    default: "binaries"
   testdata-path:
     description: Path to test data (certs, files)
-    default: 'testdata'
+    default: "testdata"
 
 outputs:
   bench-name:

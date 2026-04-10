@@ -14,6 +14,25 @@ use neqo_common::{qdebug, qtrace};
 
 use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::CongestionControlStats};
 
+/// Controls how the CSS baseline RTT is set when entering Conservative Slow Start (CSS).
+///
+/// The baseline determines when CSS is considered spurious: if the RTT drops below it,
+/// CSS is exited and normal slow start resumes.
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+pub enum HyStartCssBaseline {
+    /// RFC 9406 behavior: baseline = `currentRoundMinRTT` at CSS entry.
+    ///
+    /// Can cause oscillation: values slightly below the entry RTT trigger CSS exit even
+    /// though they would still have triggered CSS entry (and might do so on the next ACK).
+    #[default]
+    CurrentRoundMinRtt,
+    /// Alternative behavior: baseline = `lastRoundMinRTT + rttThresh`.
+    ///
+    /// CSS is only exited when the RTT drops below the level that would have triggered
+    /// CSS entry, avoiding oscillation between CSS entry and exit.
+    EntryThreshold,
+}
+
 #[derive(Debug)]
 pub struct HyStart {
     /// > While an arriving ACK may newly acknowledge an arbitrary number of bytes, the HyStart++
@@ -27,6 +46,7 @@ pub struct HyStart {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9406#section-4.3-9>
     limit: usize,
+    css_baseline_mode: HyStartCssBaseline,
     last_round_min_rtt: Option<Duration>,
     current_round_min_rtt: Option<Duration>,
     rtt_sample_count: usize,
@@ -56,7 +76,7 @@ impl HyStart {
 
     pub const NON_PACED_L: usize = 8;
 
-    pub const fn new(pacing: bool) -> Self {
+    pub const fn new(pacing: bool, css_baseline_mode: HyStartCssBaseline) -> Self {
         let limit = if pacing {
             usize::MAX
         } else {
@@ -64,6 +84,7 @@ impl HyStart {
         };
         Self {
             limit,
+            css_baseline_mode,
             last_round_min_rtt: None,
             current_round_min_rtt: None,
             rtt_sample_count: 0,
@@ -105,17 +126,32 @@ impl HyStart {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2-4>
     ///
-    /// [`HyStart::on_packets_acked`] sets `window_end` to `None` when it is acked
-    /// and calls this function when packets are sent to conditionally start a new round.
-    fn maybe_start_new_round(&mut self, sent_pn: packet::Number) {
+    /// Called immediately when a round ends so that ACKs arriving before the next packet is sent
+    /// are attributed to the new round rather than being in limbo.
+    fn start_next_round(&mut self) {
+        self.window_end = None;
+        self.last_round_min_rtt = self.current_round_min_rtt;
+        self.current_round_min_rtt = None;
+        self.rtt_sample_count = 0;
+        qdebug!(
+            "HyStart: start_next_round -> started new round with last_min_rtt: {:?}",
+            self.last_round_min_rtt
+        );
+    }
+
+    /// Sets `window_end` to `sent_pn` to mark when the current round will end.
+    ///
+    /// Called from [`SlowStart::on_packet_sent`]. Only sets `window_end` if it is `None`,
+    /// i.e., the previous round ended and the end marker for the current round hasn't been set yet.
+    fn maybe_set_window_end(&mut self, sent_pn: packet::Number) {
         if self.window_end.is_some() {
             return;
         }
         self.window_end = Some(sent_pn);
-        self.last_round_min_rtt = self.current_round_min_rtt;
-        self.current_round_min_rtt = None;
-        self.rtt_sample_count = 0;
-        qdebug!("HyStart: maybe_start_new_round -> started new round");
+        qdebug!(
+            "HyStart: maybe_set_window_end -> set window_end to {:?}",
+            self.window_end
+        );
     }
 
     /// Checks if HyStart is in Conservative Slow Start. Is `pub` for use in tests.
@@ -143,6 +179,11 @@ impl HyStart {
     }
 
     #[cfg(test)]
+    pub const fn last_round_min_rtt(&self) -> Option<Duration> {
+        self.last_round_min_rtt
+    }
+
+    #[cfg(test)]
     pub const fn css_round_count(&self) -> usize {
         self.css_round_count
     }
@@ -150,7 +191,7 @@ impl HyStart {
 
 impl SlowStart for HyStart {
     fn on_packet_sent(&mut self, sent_pn: packet::Number) {
-        self.maybe_start_new_round(sent_pn);
+        self.maybe_set_window_end(sent_pn);
     }
 
     fn reset(&mut self) {
@@ -219,7 +260,11 @@ impl SlowStart for HyStart {
                 min(last / Self::MIN_RTT_DIVISOR, Self::MAX_RTT_THRESH),
             );
             if current >= last + rtt_thresh {
-                self.css_baseline_min_rtt = Some(current);
+                self.rtt_sample_count = 0;
+                self.css_baseline_min_rtt = Some(match self.css_baseline_mode {
+                    HyStartCssBaseline::CurrentRoundMinRtt => current,
+                    HyStartCssBaseline::EntryThreshold => last + rtt_thresh,
+                });
                 cc_stats.hystart_css_entries += 1;
                 qdebug!(
                     "HyStart: on_packets_acked -> entered CSS because cur_min={current:?} >= last_min={last:?} + thresh={rtt_thresh:?}"
@@ -252,9 +297,9 @@ impl SlowStart for HyStart {
             self.css_round_count = 0;
         }
 
-        // Check for end of round. If `window_end` is acked it is set to `None` to indicate end of a
-        // round. [`SlowStart::on_packet_sent`] will then set it to the next packet number we send
-        // out to start a new round.
+        // Check for end of round. If `window_end` is acked, call `start_next_round` to immediately
+        // begin the next round's RTT tracking. [`SlowStart::on_packet_sent`] will then call
+        // `maybe_set_window_end` to mark when the new round will end.
         if self
             .window_end
             .is_none_or(|window_end| largest_acked < window_end)
@@ -266,7 +311,7 @@ impl SlowStart for HyStart {
             "HyStart: on_packets_acked -> round ended because largest_acked={largest_acked} >= window_end={:?}",
             self.window_end
         );
-        self.window_end = None;
+        self.start_next_round();
 
         if !self.in_css() {
             return None;

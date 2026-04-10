@@ -23,7 +23,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: ./.github/actions/toolchains
+        uses: mozilla/actions/toolchains@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
 
   clippy:
     name: cargo clippy
@@ -43,20 +43,24 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           version: ${{ matrix.rust-toolchain }}
           components: clippy
           tools: cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: ./.github/actions/nss
+      - uses: mozilla/actions/nss@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
+        with:
+          version-file: neqo-crypto/min_version.txt
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       # Use cargo-hack to run clippy on each crate individually with its
       # respective default features only. Can reveal warnings otherwise
       # hidden given that a plain cargo clippy combines all features of the
       # workspace. See e.g. https://github.com/mozilla/neqo/pull/1695.
       - run: cargo hack clippy --feature-powerset --no-dev-deps --exclude-features gecko -- -D warnings
-      - run: cargo doc --workspace --no-deps --document-private-items
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo doc --locked --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"

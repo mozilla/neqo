@@ -210,13 +210,11 @@ impl HeaderTable {
                     });
                 }
 
-                if name_match.is_none() {
-                    name_match = Some(LookupResult {
-                        index: iter.index(),
-                        static_table: true,
-                        value_matches: false,
-                    });
-                }
+                name_match.get_or_insert_with(|| LookupResult {
+                    index: iter.index(),
+                    static_table: true,
+                    value_matches: false,
+                });
             }
         }
 
@@ -233,13 +231,11 @@ impl HeaderTable {
                     });
                 }
 
-                if name_match.is_none() {
-                    name_match = Some(LookupResult {
-                        index: iter.index(),
-                        static_table: false,
-                        value_matches: false,
-                    });
-                }
+                name_match.get_or_insert_with(|| LookupResult {
+                    index: iter.index(),
+                    static_table: false,
+                    value_matches: false,
+                });
             }
         }
         name_match

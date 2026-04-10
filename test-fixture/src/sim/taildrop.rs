@@ -349,15 +349,14 @@ impl Debug for TailDrop {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
-    use std::{
-        cell::RefCell,
-        rc::Rc,
-        time::{Duration, Instant},
-    };
+    use std::{cell::RefCell, rc::Rc, time::Duration};
 
     use neqo_common::{Encoder, qinfo};
 
-    use crate::sim::{Node as _, network::TailDrop, rng::Random};
+    use crate::{
+        now,
+        sim::{Node as _, network::TailDrop, rng::Random},
+    };
 
     fn mark_rate(used: usize, capacity: usize, trials: usize, salt: u64) -> usize {
         let mut enc = Encoder::default();
@@ -370,7 +369,7 @@ mod test {
         )));
         // We use only the capacity of these config parameters.
         let mut td = TailDrop::new(1, capacity, true, Duration::from_secs(2));
-        td.init(rng, Instant::now());
+        td.init(rng, now());
         let mut successes = 0;
         for _ in 0..trials {
             successes += usize::from(td.should_mark(used));

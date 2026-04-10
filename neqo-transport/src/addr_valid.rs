@@ -205,10 +205,11 @@ impl AddressValidation {
     /// from `NEW_TOKEN` instead.  If there truly is corruption of packets that causes
     /// validation failure, it will be a failure that we try to recover from.
     fn is_likely_retry(token: &[u8]) -> bool {
-        let mut difference = 0;
-        for i in 0..TOKEN_IDENTIFIER_RETRY.len() {
-            difference += (token[i] ^ TOKEN_IDENTIFIER_RETRY[i]).count_ones();
-        }
+        let difference: u32 = token
+            .iter()
+            .zip(TOKEN_IDENTIFIER_RETRY.iter())
+            .map(|(a, b)| (a ^ b).count_ones())
+            .sum();
         usize::try_from(difference).expect("u32 fits in usize") < TOKEN_IDENTIFIER_RETRY.len()
     }
 

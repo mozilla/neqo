@@ -1621,8 +1621,8 @@ fn scone() {
         Datagram::new(d.source(), d.destination(), d.tos(), sconed)
     }
 
-    let mut server = default_server();
-    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().scone(true));
+    let mut client = new_client(ConnectionParameters::default().scone(true));
 
     let ci = client.process_output(now()).dgram().unwrap();
     let ci_len = ci.len();

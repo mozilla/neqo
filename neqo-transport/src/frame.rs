@@ -514,10 +514,7 @@ impl<'a> Frame<'a> {
             FrameType::ResetStream => Ok(Self::ResetStream {
                 stream_id: StreamId::from(dv(dec)?),
                 application_error_code: dv(dec)?,
-                final_size: match dec.decode_varint() {
-                    Some(v) => v,
-                    None => return Err(Error::NoMoreData),
-                },
+                final_size: dv(dec)?,
             }),
             FrameType::Ack => decode_ack(dec, false),
             FrameType::AckEcn => decode_ack(dec, true),
@@ -641,7 +638,7 @@ impl<'a> Frame<'a> {
                     (CloseError::Application(dv(dec)?), 0)
                 };
                 // We can tolerate this copy for now.
-                let reason_phrase = String::from_utf8_lossy(d(dec.decode_vvec())?).to_string();
+                let reason_phrase = String::from_utf8_lossy(d(dec.decode_vvec())?).into_owned();
                 Ok(Self::ConnectionClose {
                     error_code,
                     frame_type,

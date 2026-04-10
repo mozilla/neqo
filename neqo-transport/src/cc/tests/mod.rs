@@ -46,7 +46,7 @@ pub fn make_cc_cubic() -> ClassicCongestionController<ClassicSlowStart, Cubic> {
 /// Helper to create `ClassicCongestionController` with HyStart++ for tests.
 pub fn make_cc_hystart(paced: bool) -> ClassicCongestionController<HyStart, Cubic> {
     ClassicCongestionController::new(
-        HyStart::new(paced),
+        HyStart::new(paced, crate::cc::HyStartCssBaseline::default()),
         Cubic::default(),
         Pmtud::new(IP_ADDR, MTU),
     )

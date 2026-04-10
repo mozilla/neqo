@@ -8,7 +8,7 @@ use std::{cmp::max, time::Duration};
 
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
-    CongestionControl, DEFAULT_INITIAL_RTT, Res, SlowStart,
+    CongestionControl, DEFAULT_INITIAL_RTT, HyStartCssBaseline, Res, SlowStart,
     connection::{ConnectionIdManager, Role},
     rtt::GRANULARITY,
     stream_id::StreamType,
@@ -108,6 +108,7 @@ pub struct ConnectionParameters {
     versions: version::Config,
     congestion_control: CongestionControl,
     slow_start: SlowStart,
+    hystart_css_baseline: HyStartCssBaseline,
     /// Initial connection-level flow control limit.
     max_data: u64,
     /// Initial flow control limit for receiving data on bidirectional streams that the peer
@@ -161,6 +162,7 @@ impl Default for ConnectionParameters {
             versions: version::Config::default(),
             congestion_control: CongestionControl::Cubic,
             slow_start: SlowStart::Classic,
+            hystart_css_baseline: HyStartCssBaseline::CurrentRoundMinRtt,
             max_data: INITIAL_LOCAL_MAX_DATA,
             max_stream_data_bidi_remote: u64::try_from(INITIAL_LOCAL_MAX_STREAM_DATA)
                 .expect("usize fits in u64"),
@@ -186,7 +188,7 @@ impl Default for ConnectionParameters {
             sni_slicing: true,
             mlkem: true,
             randomize_first_pn: true,
-            scone: true,
+            scone: false,
         }
     }
 }
@@ -238,6 +240,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn slow_start(mut self, v: SlowStart) -> Self {
         self.slow_start = v;
+        self
+    }
+
+    #[must_use]
+    pub const fn get_hystart_css_baseline(&self) -> HyStartCssBaseline {
+        self.hystart_css_baseline
+    }
+
+    #[must_use]
+    pub const fn hystart_css_baseline(mut self, v: HyStartCssBaseline) -> Self {
+        self.hystart_css_baseline = v;
         self
     }
 

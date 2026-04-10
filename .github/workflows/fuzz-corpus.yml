@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       fuzzers:
-        description: 'Which fuzzers to process'
+        description: "Which fuzzers to process"
         type: choice
         options:
           - all
@@ -12,9 +12,9 @@ on:
         default: all
   schedule:
     # Weekly: Run at 12:00 AM on Sunday.
-    - cron: '0 0 * * 0'
+    - cron: "0 0 * * 0"
     # Monthly: Run at 12:00 AM on the 1st of each month.
-    - cron: '0 0 1 * *'
+    - cron: "0 0 1 * *"
 
 concurrency:
   # If "pull_request" is added to triggers above, adjust "group" accordingly.
@@ -37,13 +37,20 @@ jobs:
         with:
           persist-credentials: true # zizmor: ignore[artipacked] We need to push branches.
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           version: nightly
-          tools: cargo-fuzz
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: ./.github/actions/nss
+      - name: Install cargo-fuzz
+        # cargo-fuzz must be compiled from source so it targets the native toolchain;
+        # binstall provides prebuilt binaries that may target a different architecture.
+        run: cargo install cargo-fuzz
+
+      - uses: mozilla/actions/nss@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
+        with:
+          version-file: neqo-crypto/min_version.txt
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: filter
         env:

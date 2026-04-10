@@ -34,7 +34,7 @@ impl BufferedStream {
     ///
     /// If the `BufferedStream` is initialized more than once, it will panic.
     pub fn init(&mut self, stream_id: StreamId) {
-        debug_assert!(&Self::Uninitialized == self);
+        debug_assert_eq!(self, &Self::Uninitialized);
         *self = Self::Initialized {
             stream_id,
             buf: Vec::new(),

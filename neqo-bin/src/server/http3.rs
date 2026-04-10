@@ -22,7 +22,10 @@ use neqo_transport::{ConnectionIdGenerator, OutputBatch, server::ValidateAddress
 use rustc_hash::FxHashMap as HashMap;
 
 use super::{Args, qns_read_response};
-use crate::send_data::{SendData, SendResult};
+use crate::{
+    now,
+    send_data::{SendData, SendResult},
+};
 
 pub struct HttpServer {
     server: Http3Server,
@@ -137,7 +140,7 @@ impl super::HttpServer for HttpServer {
     }
 
     fn process_events(&mut self, _now: Instant) {
-        let now = Instant::now();
+        let now = now();
         while let Some(event) = self.server.next_event() {
             match event {
                 Http3ServerEvent::Headers {

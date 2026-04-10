@@ -29,9 +29,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/nss
+      - uses: mozilla/actions/nss@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
+        with:
+          version-file: neqo-crypto/min_version.txt
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           version: nightly
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -40,7 +43,7 @@ jobs:
         id: baseline
         run: |
           SECONDS=0
-          cargo test --all-targets -- -Zunstable-options --fail-fast
+          cargo test --locked --all-targets -- -Zunstable-options --fail-fast
           {
             # Minimum timeout is 30s, maximum is 90s, otherwise 3x the baseline test time.
             echo "timeout=$(( SECONDS * 3 < 30 ? 30 : SECONDS * 3 > 90 ? 90 : SECONDS * 3 ))"
@@ -61,9 +64,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/nss
+      - uses: mozilla/actions/nss@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
+        with:
+          version-file: neqo-crypto/min_version.txt
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
         with:
           version: nightly
           tools: cargo-mutants
@@ -96,7 +102,7 @@ jobs:
     needs: mutants
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: mutants.out-*
           path: shards

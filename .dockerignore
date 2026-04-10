@@ -6,6 +6,5 @@
 !**/*.h
 !**/*.hpp
 !neqo-crypto/min_version.txt
-!.github/actions/nss/nss-versions.env
 !qns
 !Cargo.lock

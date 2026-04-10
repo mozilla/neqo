@@ -10,7 +10,7 @@ inputs:
     required: true
   artifact-name:
     description: Artifact name (if set, uploads binaries as artifact)
-    default: ''
+    default: ""
 
 outputs:
   binaries:
@@ -39,7 +39,7 @@ runs:
 
     - name: Install Rust
       if: inputs.impl == 'quiche' || inputs.impl == 's2n'
-      uses: ./.github/actions/rust
+      uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
       with:
         version: stable
         token: ${{ inputs.token }}
@@ -73,7 +73,7 @@ runs:
 
     - name: Restore cache
       id: cache-restore
-      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
       with:
         path: binaries
         key: ${{ steps.cache-key.outputs.key }}
@@ -190,7 +190,7 @@ runs:
 
     - name: Save cache
       if: steps.cache-restore.outputs.cache-hit != 'true'
-      uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
       with:
         path: binaries
         key: ${{ steps.cache-key.outputs.key }}
