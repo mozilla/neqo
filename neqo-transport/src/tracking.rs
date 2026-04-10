@@ -1213,7 +1213,7 @@ mod tests {
     }
 
     #[test]
-    fn acknowledged_clears_ack_needed() {
+    fn acknowledged_tracks_duplicates() {
         let mut rp = RecvdPackets::new(PacketNumberSpace::ApplicationData);
         let mut stats = Stats::default();
         // Receive packets 0, 1, 2 — one contiguous range, ACK needed.

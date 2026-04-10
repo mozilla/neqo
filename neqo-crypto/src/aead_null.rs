@@ -174,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn decrypt_fails_all_zero_plaintext() {
+    fn decrypt_rejects_all_zero_data_bytes() {
         // All-zero plaintext with correct tag should fail (looks like padding).
         let a = aead();
         let mut buf = vec![0u8; 4 + a.expansion()];

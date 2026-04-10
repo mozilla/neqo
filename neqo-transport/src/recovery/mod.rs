@@ -2050,7 +2050,7 @@ mod tests {
         assert!(!SendProfile::new_limited(ACK_ONLY_SIZE_LIMIT + 1).ack_only());
     }
 
-    /// `drop_0rtt` returns packets that were in-flight in the 0-RTT space.
+    /// `drop_0rtt` returns packets that were in-flight in the `ApplicationData` space.
     #[test]
     fn drop_0rtt_returns_sent_packets() {
         let mut lr = Fixture::default();
@@ -2060,7 +2060,7 @@ mod tests {
         assert_eq!(
             dropped.len(),
             2,
-            "drop_0rtt must return all in-flight 0-RTT packets"
+            "drop_0rtt must return all in-flight ApplicationData-space packets"
         );
     }
 

@@ -163,8 +163,8 @@ mod tests {
         buf[len - 25] = 0x00;
         buf[len - 24] = 0x06;
         // host_name length at buf[len-20..len-18] was [0x00, 0x09], set to [0x00, 0x01].
-        buf[len - 19] = 0x00;
-        buf[len - 18] = 0x01;
+        buf[len - 20] = 0x00;
+        buf[len - 19] = 0x01;
         // The result must be Some (sni_len=4 >= 3 passes the guard).
         assert!(super::find_sni(&buf).is_some());
     }

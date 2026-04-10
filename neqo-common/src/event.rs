@@ -38,16 +38,12 @@ impl<P: Provider + ?Sized> Iterator for Iter<'_, P> {
 mod tests {
     use super::Provider;
 
-    struct MockProvider(Vec<u32>);
+    struct MockProvider(std::collections::VecDeque<u32>);
 
     impl Provider for MockProvider {
         type Event = u32;
         fn next_event(&mut self) -> Option<u32> {
-            if self.0.is_empty() {
-                None
-            } else {
-                Some(self.0.remove(0))
-            }
+            self.0.pop_front()
         }
         fn has_events(&self) -> bool {
             !self.0.is_empty()
@@ -56,7 +52,7 @@ mod tests {
 
     #[test]
     fn iter_yields_events() {
-        let mut p = MockProvider(vec![1, 2, 3]);
+        let mut p = MockProvider(std::collections::VecDeque::from([1, 2, 3]));
         assert!(p.has_events());
         let events: Vec<u32> = p.events().collect();
         assert_eq!(events, [1, 2, 3]);
@@ -65,7 +61,7 @@ mod tests {
 
     #[test]
     fn iter_empty() {
-        let mut p = MockProvider(vec![]);
+        let mut p = MockProvider(std::collections::VecDeque::new());
         assert!(!p.has_events());
         assert_eq!(p.events().next(), None);
     }
