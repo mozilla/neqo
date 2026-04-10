@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::{
-    cc::{CongestionEvent, classic_cc::WindowAdjustment},
+    cc::{CongestionTrigger, classic_cc::WindowAdjustment},
     stats::CongestionControlStats,
 };
 
@@ -33,7 +33,6 @@ impl WindowAdjustment for NewReno {
         _new_acked_bytes: usize,
         _min_rtt: Duration,
         _max_datagram_size: usize,
-
         _now: Instant,
     ) -> usize {
         curr_cwnd
@@ -44,7 +43,7 @@ impl WindowAdjustment for NewReno {
         curr_cwnd: usize,
         acked_bytes: usize,
         _max_datagram_size: usize,
-        _congestion_event: CongestionEvent,
+        _congestion_trigger: CongestionTrigger,
         _cc_stats: &mut CongestionControlStats,
     ) -> (usize, usize) {
         (curr_cwnd / 2, acked_bytes / 2)
@@ -66,7 +65,7 @@ mod tests {
 
     use super::NewReno;
     use crate::{
-        cc::{CongestionEvent, classic_cc::WindowAdjustment as _},
+        cc::{CongestionTrigger, classic_cc::WindowAdjustment as _},
         stats::CongestionControlStats,
     };
 
@@ -77,7 +76,7 @@ mod tests {
             1000,
             200,
             1500,
-            CongestionEvent::Loss,
+            CongestionTrigger::Loss,
             &mut CongestionControlStats::default(),
         );
         assert_eq!(cwnd, 500);

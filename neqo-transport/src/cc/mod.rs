@@ -11,7 +11,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use enum_map::Enum;
 use neqo_common::qlog::Qlog;
 
 use crate::{Pmtud, recovery::sent, rtt::RttEstimate, stats::CongestionControlStats};
@@ -28,11 +27,10 @@ pub use cubic::Cubic;
 pub use hystart::{HyStart, HyStartCssBaseline};
 pub use new_reno::NewReno;
 
-#[derive(Clone, Copy, PartialEq, Eq, Enum, Debug)]
-pub enum CongestionEvent {
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CongestionTrigger {
     Loss,
     Ecn,
-    Spurious,
 }
 
 pub trait CongestionController: Display + Debug {
