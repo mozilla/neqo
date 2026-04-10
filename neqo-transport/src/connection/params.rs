@@ -619,4 +619,22 @@ mod tests {
         let params = params.pmtud_iface_mtu(false);
         assert!(!params.pmtud_iface_mtu_enabled());
     }
+
+    #[test]
+    fn sni_slicing_enabled() {
+        // Default is true; verify builder can toggle it.
+        assert!(ConnectionParameters::default().sni_slicing_enabled());
+        assert!(
+            !ConnectionParameters::default()
+                .sni_slicing(false)
+                .sni_slicing_enabled()
+        );
+    }
+
+    #[test]
+    fn scone_enabled() {
+        // Default is false; verify builder can toggle it.
+        assert!(!ConnectionParameters::default().scone_enabled());
+        assert!(ConnectionParameters::default().scone(true).scone_enabled());
+    }
 }

@@ -165,3 +165,17 @@ remap_enum! {
         TLS_SIG_RSA_PSS_PSS_SHA512 = ssl_sig_rsa_pss_pss_sha512,
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::Epoch;
+
+    #[test]
+    fn epoch_into_usize() {
+        assert_eq!(usize::from(Epoch::Initial), 0);
+        assert_eq!(usize::from(Epoch::ZeroRtt), 1);
+        assert_eq!(usize::from(Epoch::Handshake), 2);
+        assert_eq!(usize::from(Epoch::ApplicationData), 3);
+    }
+}

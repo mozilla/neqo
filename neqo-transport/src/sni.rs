@@ -133,6 +133,42 @@ mod tests {
         assert!(super::find_sni(&buf).is_none());
     }
 
+    /// An SNI hostname that ends exactly at the buffer boundary parses successfully.
+    #[test]
+    fn find_sni_hostname_ends_at_buffer_boundary() {
+        // Trim the trailing status_request bytes so the SNI hostname reaches the
+        // very end of the buffer.
+        let trimmed = &BUF_WITH_SNI[..BUF_WITH_SNI.len() - 9];
+        let range = super::find_sni(trimmed).expect("SNI at buffer boundary should parse");
+        assert_eq!(&trimmed[range], b"localhost");
+    }
+
+    /// An SNI list length of 4 (the minimum containing a 1-byte hostname) must parse successfully.
+    #[test]
+    fn find_sni_near_minimum_sni_len() {
+        // Construct a minimal SNI where the SNI list contains exactly 1 hostname byte.
+        // sni_len = 4: name_type (1) + host_name_len (2) + host_name (1) = 4.
+        let mut buf = Vec::from(BUF_WITH_SNI);
+        let len = buf.len();
+        // SNI list length is at buf[len-23..len-21] = [0x00, 0x0c] = 12
+        assert_eq!(
+            &buf[len - 23..len - 21],
+            &[0x00, 0x0c],
+            "SNI list length offset"
+        );
+        // Set to 4.
+        buf[len - 23] = 0x00;
+        buf[len - 22] = 0x04;
+        // Ext len was 14 (0x0e) at buf[len-25..len-23], now it's 2+4=6.
+        buf[len - 25] = 0x00;
+        buf[len - 24] = 0x06;
+        // host_name length at buf[len-20..len-18] was [0x00, 0x09], set to [0x00, 0x01].
+        buf[len - 20] = 0x00;
+        buf[len - 19] = 0x01;
+        // The result must be Some (sni_len=4 >= 3 passes the guard).
+        assert!(super::find_sni(&buf).is_some());
+    }
+
     #[test]
     fn find_sni_no_ci() {
         // Not a ClientHello (msg_type != 1)

@@ -618,7 +618,7 @@ mod tests {
 
     use crate::{
         Token as Srt,
-        cid::{ConnectionId, ConnectionIdEntry},
+        cid::{ConnectionId, ConnectionIdEntry, ConnectionIdManager},
         packet,
         stats::FrameStats,
     };
@@ -635,16 +635,35 @@ mod tests {
         }
     }
 
+    fn new_connection_id_frame_len(entry: &ConnectionIdEntry<Srt>) -> usize {
+        1 + Encoder::varint_len(entry.sequence_number())
+            + 1
+            + 1
+            + entry.connection_id().len()
+            + Srt::LEN
+    }
+
+    /// A write with exactly the right remaining space must succeed.
+    #[test]
+    fn write_succeeds_with_exact_remaining() {
+        fixture_init();
+        let entry = ConnectionIdEntry::new(1, ConnectionId::from(&[0xab]), Srt::random());
+        let len = new_connection_id_frame_len(&entry);
+        // Capacity = len + 1 so that Builder::short (which consumes 1 byte) leaves exactly `len`.
+        let enc = Encoder::with_capacity(len + 1);
+        let mut builder = packet::Builder::short(enc, false, Some(&[]), len + 1);
+        assert_eq!(builder.remaining(), len, "exactly `len` bytes remaining");
+        assert!(
+            entry.write(&mut builder, &mut FrameStats::default()),
+            "write must succeed when remaining == len"
+        );
+    }
+
     #[test]
     fn write_checks_length_correctly() {
         fixture_init();
         let entry = ConnectionIdEntry::new(1, ConnectionId::from(&[]), Srt::random());
-        let limit = 1
-            + Encoder::varint_len(entry.sequence_number())
-            + 1
-            + 1
-            + entry.connection_id().len()
-            + Srt::LEN;
+        let limit = new_connection_id_frame_len(&entry);
         let enc = Encoder::with_capacity(limit);
         let mut builder = packet::Builder::short(enc, false, Some(&[]), limit);
         assert_eq!(
@@ -656,6 +675,59 @@ mod tests {
             !entry.write(&mut builder, &mut FrameStats::default()),
             "couldn't write frame into too-short builder",
         );
+    }
+
+    #[test]
+    fn connection_id_debug_format() {
+        let cid = ConnectionId::from(&[0x01, 0x02]);
+        assert_eq!(format!("{cid:?}"), "CID [2]: 0102");
+    }
+
+    #[test]
+    fn connection_id_ref_debug_format() {
+        let bytes = [0xde, 0xad];
+        let cid_ref = crate::cid::ConnectionIdRef::from(&bytes[..]);
+        assert_eq!(format!("{cid_ref:?}"), "CID [2]: dead");
+    }
+
+    #[test]
+    fn empty_connection_id_generator() {
+        use crate::cid::{ConnectionIdGenerator as _, EmptyConnectionIdGenerator};
+        let mut g = EmptyConnectionIdGenerator::default();
+        assert!(g.generates_empty_cids());
+        let cid = g.generate_cid().expect("generates Some");
+        assert!(cid.is_empty());
+    }
+
+    #[test]
+    fn is_stateless_reset_seqno_boundary() {
+        fixture_init();
+        let srt = Srt::random();
+        // Sequence number < 2^62 should match SRT.
+        let entry = ConnectionIdEntry::new((1 << 62) - 1, ConnectionId::from(&[1]), srt.clone());
+        assert!(entry.is_stateless_reset(&srt));
+        // Sequence number >= 2^62 has no valid SRT (should return false).
+        let entry_high = ConnectionIdEntry::new(1 << 62, ConnectionId::from(&[1]), srt.clone());
+        assert!(!entry_high.is_stateless_reset(&srt));
+    }
+
+    #[test]
+    fn connection_id_entry_is_empty() {
+        fixture_init();
+        let srt = Srt::random();
+        // SEQNO_EMPTY makes it empty.
+        let empty_seqno = ConnectionIdEntry::new(
+            ConnectionIdManager::SEQNO_EMPTY,
+            ConnectionId::from(&[1]),
+            srt.clone(),
+        );
+        assert!(empty_seqno.is_empty());
+        // Empty CID also makes it empty.
+        let empty_cid = ConnectionIdEntry::new(42, ConnectionId::from(&[]), srt.clone());
+        assert!(empty_cid.is_empty());
+        // Non-empty seqno and CID is not empty.
+        let non_empty = ConnectionIdEntry::new(1, ConnectionId::from(&[1]), srt);
+        assert!(!non_empty.is_empty());
     }
 
     #[test]

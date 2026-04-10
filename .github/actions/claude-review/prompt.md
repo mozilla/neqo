@@ -45,27 +45,31 @@ These are the main focus areas for your review:
    - Verify correct use of feature gates — new code should not depend on CI-only or
      integration-only features at runtime
 
-Before posting new comments, check any existing review comments **from your own previous runs** on this PR.
-For each previous comment, determine whether the issue it raised is still present in the current code.
-If it has been resolved, reply to that comment thread noting that the issue has been addressed, rather
-than re-raising it.
+Before posting new comments, check existing review comments on this PR:
 
-When encountering comments from other reviewers (including other AI agents) and you have differing
-opinions on the points raised, succinctly and respectfully comment on those as part of the review.
+- **Your own previous comments**: if the issue is still present, skip it; if resolved, reply to that
+  thread using `add_reply_to_pull_request_comment` noting it has been addressed.
+- **Other reviewers' comments**: if you have a differing or additional opinion, reply directly to
+  that thread using `add_reply_to_pull_request_comment`. Do not summarize others' comments in your
+  own review body.
 
 Whenever possible:
 
 - Provide feedback using inline comments for specific issues; be concise
 - Do not create inline comments for any non-actionable observations or other commentary
-- Use GitHub suggestions in the comments. Include multiple GitHub suggestions
-  whenever offering alternative fixes
+- Refer to existing related issues and PRs where relevant
+- When referring to line number ranges in source files, format them as permalinks
+- Use GitHub suggestions for every proposed code change, including additions. To suggest adding new
+  lines (e.g., a new test), include the surrounding anchor line(s) in the suggestion so GitHub can
+  apply it. Include multiple GitHub suggestions whenever offering alternative fixes.
 - Begin each inline comment with a GitHub alert indicating importance:
   - `> [!CAUTION]` — blocking issue (correctness, security)
   - `> [!WARNING]` — should fix, but not blocking
   - `> [!NOTE]` — minor suggestion or nitpick
   - `> [!TIP]` — optional improvement
 
-Use a PR-level comment to summarize the changes in the reviewed PR and for general
-observations or praise. The PR-level comment is also where you should discuss any
-architectural considerations for a PR, such as if simpler alternatives exist. Be concise.
-Update any existing PR-level comment you made earlier as needed upon re-review.
+Post a single PR-level review comment summarizing the changes and any architectural considerations
+(e.g., simpler alternatives). Keep it concise. Do not repeat points already made as inline comments
+— the PR-level comment is for observations that apply to the PR as a whole, not individual lines.
+Do not post a separate issue comment — use only the formal GitHub review.
+Make sure all the GitHub-flavored Markdown you emit is syntactically correct.

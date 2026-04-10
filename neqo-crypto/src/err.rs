@@ -22,7 +22,7 @@ pub mod nspr {
     include!(concat!(env!("OUT_DIR"), "/nspr_err.rs"));
 }
 
-#[expect(dead_code, reason = "Some constants are not used.")]
+#[cfg_attr(not(test), expect(dead_code, reason = "Some constants are not used."))]
 pub mod mozpkix {
     // These are manually extracted from the many bindings generated
     // by bindgen when provided with the simple header:
@@ -255,5 +255,36 @@ mod tests {
             Error::from(std::str::from_utf8(&[0xff]).unwrap_err()),
             Error::String
         );
+    }
+
+    #[test]
+    fn mozpkix_error_codes_are_negative() {
+        use crate::err::mozpkix::*;
+        let codes = [
+            MOZILLA_PKIX_ERROR_KEY_PINNING_FAILURE,
+            MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY,
+            MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE,
+            MOZILLA_PKIX_ERROR_V1_CERT_USED_AS_CA,
+            MOZILLA_PKIX_ERROR_NO_RFC822NAME_MATCH,
+            MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE,
+            MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE,
+            MOZILLA_PKIX_ERROR_SIGNATURE_ALGORITHM_MISMATCH,
+            MOZILLA_PKIX_ERROR_OCSP_RESPONSE_FOR_CERT_MISSING,
+            MOZILLA_PKIX_ERROR_VALIDITY_TOO_LONG,
+            MOZILLA_PKIX_ERROR_REQUIRED_TLS_FEATURE_MISSING,
+            MOZILLA_PKIX_ERROR_INVALID_INTEGER_ENCODING,
+            MOZILLA_PKIX_ERROR_EMPTY_ISSUER_NAME,
+            MOZILLA_PKIX_ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED,
+            MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT,
+            MOZILLA_PKIX_ERROR_MITM_DETECTED,
+            END_OF_LIST,
+        ];
+        for (i, &code) in codes.iter().enumerate() {
+            assert_eq!(
+                code,
+                -16384 + i32::try_from(i).unwrap(),
+                "mozpkix code at index {i}"
+            );
+        }
     }
 }
