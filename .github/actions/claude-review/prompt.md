@@ -48,9 +48,9 @@ These are the main focus areas for your review:
 Before posting new comments, check existing review comments on this PR:
 
 - **Your own previous comments**: if the issue is still present, skip it; if resolved, reply to that
-  thread using `mcp__github__add_reply_to_pull_request_comment` noting it has been addressed.
+  thread using `add_reply_to_pull_request_comment` noting it has been addressed.
 - **Other reviewers' comments**: if you have a differing or additional opinion, reply directly to
-  that thread using `add_reply_to_pull_request_comment`. Do not summarise others' comments in your
+  that thread using `add_reply_to_pull_request_comment`. Do not summarize others' comments in your
   own review body.
 
 Whenever possible:
@@ -68,7 +68,8 @@ Whenever possible:
   - `> [!NOTE]` — minor suggestion or nitpick
   - `> [!TIP]` — optional improvement
 
-Post a single PR-level review comment summarising the changes and any architectural considerations
+Post a single PR-level review comment summarizing the changes and any architectural considerations
 (e.g., simpler alternatives). Keep it concise. Do not repeat points already made as inline comments
 — the PR-level comment is for observations that apply to the PR as a whole, not individual lines.
 Do not post a separate issue comment — use only the formal GitHub review.
+Make sure all the GitHub-flavored Markdown you emit is syntactically correct.
