@@ -5,7 +5,6 @@
 // except according to those terms.
 
 use std::{
-    borrow::Cow,
     cell::RefCell,
     fmt::{self, Display, Formatter},
     num::NonZeroUsize,
@@ -14,16 +13,16 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, event::Provider as _, hex, qdebug, qerror, qinfo, qwarn};
-use neqo_crypto::{AllowZeroRtt, AntiReplay, generate_ech_keys, random};
+use neqo_common::{Datagram, event::Provider as _, qdebug, qwarn};
+use neqo_crypto::{AllowZeroRtt, AntiReplay};
 use neqo_http3::Error;
 use neqo_transport::{
     ConnectionEvent, ConnectionIdGenerator, OutputBatch, State, StreamId,
-    server::{ConnectionRef, Server, ValidateAddress},
+    server::{ConnectionRef, Server},
 };
 use rustc_hash::FxHashMap as HashMap;
 
-use super::{Args, qns_read_response};
+use super::Args;
 use crate::{
     STREAM_IO_BUFFER_SIZE,
     send_data::{SendData, SendResult},
@@ -59,18 +58,7 @@ impl HttpServer {
             args.shared.quic_parameters.get(&args.shared.alpn),
         )?;
 
-        server.set_ciphers(args.get_ciphers());
-        server.set_qlog_dir(args.shared.qlog_dir.clone());
-        if args.retry {
-            server.set_validation(ValidateAddress::Always);
-        }
-        if args.ech {
-            let (sk, pk) = generate_ech_keys().map_err(|_| Error::Internal)?;
-            server
-                .enable_ech(random::<1>()[0], "public.example", &sk, &pk)
-                .map_err(|_| Error::Internal)?;
-            qinfo!("ECHConfigList: {}", hex(server.ech_config()));
-        }
+        super::configure_server(&mut server, args);
 
         Ok(Self {
             server,
@@ -82,19 +70,12 @@ impl HttpServer {
     }
 
     fn save_partial(&mut self, stream_id: StreamId, partial: Vec<u8>, conn: &ConnectionRef) {
+        let url = String::from_utf8_lossy(&partial);
         if partial.len() < 4096 {
-            qdebug!(
-                "Saving partial URL: {}",
-                String::from_utf8(partial.clone())
-                    .unwrap_or_else(|_| format!("<invalid UTF-8: {}>", hex(&partial)))
-            );
+            qdebug!("Saving partial URL: {url}");
             self.read_state.insert(stream_id, partial);
         } else {
-            qdebug!(
-                "Giving up on partial URL {}",
-                String::from_utf8(partial.clone())
-                    .unwrap_or_else(|_| format!("<invalid UTF-8: {}>", hex(&partial)))
-            );
+            qdebug!("Giving up on partial URL {url}");
             _ = conn.borrow_mut().stream_stop_sending(stream_id, 0); // Stream may be closed; ignore errors.
         }
     }
@@ -115,18 +96,21 @@ impl HttpServer {
             }
             return;
         }
-        let read_buffer = &self.read_buffer[..sz];
+        let read_data = &self.read_buffer[..sz];
+        let mut buf = self.read_state.remove(&stream_id).unwrap_or_default();
+        buf.extend_from_slice(read_data);
 
-        let buf = self.read_state.remove(&stream_id).map_or(
-            Cow::Borrowed(read_buffer),
-            |mut existing| {
-                existing.extend_from_slice(read_buffer);
-                Cow::Owned(existing)
-            },
-        );
+        // HQ requests are terminated by stream FIN. Never process a request
+        // before FIN: partial data could look like a valid truncated path,
+        // causing the server to serve the wrong (or non-existent) file.
+        if !fin {
+            self.save_partial(stream_id, buf, conn);
+            return;
+        }
 
-        let Ok(msg) = str::from_utf8(&buf[..]) else {
-            self.save_partial(stream_id, buf.to_vec(), conn);
+        // FIN is set: the request is complete. Non-UTF-8 or unrecognised format
+        // cannot be recovered by waiting for more data; just drop and return.
+        let Ok(msg) = str::from_utf8(&buf) else {
             return;
         };
 
@@ -142,44 +126,22 @@ impl HttpServer {
                 }
             })
         else {
-            self.save_partial(stream_id, buf.to_vec(), conn);
             return;
         };
 
-        let resp: SendData = {
-            qdebug!("Path = '{path}'");
-            if self.is_qns_test {
-                match qns_read_response(path) {
-                    Ok(data) => data.into(),
-                    Err(e) => {
-                        qerror!("Failed to read {path}: {e}");
-                        b"404".to_vec().into()
-                    }
-                }
-            } else {
-                let count = path.parse().unwrap();
-                SendData::zeroes(count)
-            }
-        };
+        qdebug!("Path = '{path}'");
+        let resp = super::response_for_path(path, self.is_qns_test)
+            .unwrap_or_else(|()| b"404".as_slice().into());
 
-        if let Some(stream_state) = self.write_state.get_mut(&stream_id) {
-            match stream_state.data_to_send {
-                None => stream_state.data_to_send = Some(resp),
-                Some(_) => {
-                    qdebug!("Data already set, doing nothing");
-                }
-            }
-            if stream_state.writable {
-                self.stream_writable(stream_id, conn);
-            }
+        let stream_state = self.write_state.entry(stream_id).or_default();
+        if stream_state.data_to_send.is_none() {
+            stream_state.data_to_send = Some(resp);
         } else {
-            self.write_state.insert(
-                stream_id,
-                HttpStreamState {
-                    writable: false,
-                    data_to_send: Some(resp),
-                },
-            );
+            qdebug!("Data already set, doing nothing");
+        }
+        let writable = stream_state.writable;
+        if writable {
+            self.stream_writable(stream_id, conn);
         }
     }
 
@@ -190,20 +152,26 @@ impl HttpServer {
         };
 
         stream_state.writable = true;
-        if let Some(resp) = &mut stream_state.data_to_send {
+        let remove = if let Some(resp) = &mut stream_state.data_to_send {
             match resp.send(|chunk| conn.borrow_mut().stream_send(stream_id, chunk)) {
                 SendResult::StreamClosed => {
                     qwarn!("Stream {stream_id} closed by peer, stopping send");
-                    self.write_state.remove(&stream_id);
+                    true
                 }
                 SendResult::Done => {
                     _ = conn.borrow_mut().stream_close_send(stream_id); // Stream may be closed; ignore errors.
-                    self.write_state.remove(&stream_id);
+                    true
                 }
                 SendResult::MoreData => {
                     stream_state.writable = false;
+                    false
                 }
             }
+        } else {
+            false
+        };
+        if remove {
+            self.write_state.remove(&stream_id);
         }
     }
 }
@@ -235,8 +203,7 @@ impl super::HttpServer for HttpServer {
                 };
                 match event {
                     ConnectionEvent::NewStream { stream_id } => {
-                        self.write_state
-                            .insert(stream_id, HttpStreamState::default());
+                        self.write_state.entry(stream_id).or_default();
                     }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
                         self.stream_readable(stream_id, &acr);
