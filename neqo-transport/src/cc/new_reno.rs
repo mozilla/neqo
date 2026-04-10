@@ -56,3 +56,38 @@ impl WindowAdjustment for NewReno {
 
     fn restore_undo_state(&mut self, _cc_stats: &mut CongestionControlStats) {}
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::time::Duration;
+
+    use test_fixture::now;
+
+    use super::NewReno;
+    use crate::{
+        cc::{CongestionEvent, classic_cc::WindowAdjustment as _},
+        stats::CongestionControlStats,
+    };
+
+    #[test]
+    fn reduce_cwnd_halves_both() {
+        let mut nr = NewReno::default();
+        let (cwnd, acked) = nr.reduce_cwnd(
+            1000,
+            200,
+            1500,
+            CongestionEvent::Loss,
+            &mut CongestionControlStats::default(),
+        );
+        assert_eq!(cwnd, 500);
+        assert_eq!(acked, 100);
+    }
+
+    #[test]
+    fn bytes_for_cwnd_increase_returns_cwnd() {
+        let mut nr = NewReno::default();
+        let result = nr.bytes_for_cwnd_increase(2000, 100, Duration::from_millis(50), 1500, now());
+        assert_eq!(result, 2000);
+    }
+}

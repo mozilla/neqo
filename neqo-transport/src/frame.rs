@@ -720,12 +720,13 @@ impl<B: Buffer> FrameEncoder for Encoder<B> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::{Decoder, Encoder};
+    use neqo_common::{Decoder, Encoder, MAX_VARINT};
 
     use crate::{
         CloseError, ConnectionId, Error, StreamId, StreamType, Token as Srt,
         ecn::Count,
         frame::{AckRange, Frame, FrameType},
+        packet,
     };
 
     fn just_dec(f: &Frame, s: &str) {
@@ -1280,5 +1281,147 @@ mod tests {
             .dump(),
             "AckFrequency { seqno: 1, tolerance: 2, delay: 3, ignore_order: false }"
         );
+    }
+
+    #[test]
+    fn stream_frame_type_constants() {
+        assert_eq!(FrameType::StreamWithFin as u8, 0x08 + 0b001);
+        assert_eq!(FrameType::StreamWithLen as u8, 0x08 + 0b010);
+        assert_eq!(FrameType::StreamWithOff as u8, 0x08 + 0b100);
+        assert_eq!(FrameType::StreamWithOffFin as u8, 0x08 + 0b101);
+        assert_eq!(FrameType::StreamWithOffLen as u8, 0x08 + 0b110);
+        assert_eq!(FrameType::StreamWithOffLenFin as u8, 0x08 + 0b111);
+    }
+
+    fn stream_frame(offset: u64) -> Frame<'static> {
+        Frame::Stream {
+            fin: false,
+            stream_id: StreamId::from(1),
+            offset,
+            data: &[1],
+            fill: false,
+        }
+    }
+
+    #[test]
+    fn stream_get_type_offset_flag() {
+        assert_eq!(stream_frame(0).get_type(), FrameType::StreamWithLen);
+        assert_eq!(stream_frame(1).get_type(), FrameType::StreamWithOffLen);
+    }
+
+    /// `is_allowed`: `NewToken` and app-close are only allowed in Short packets.
+    #[test]
+    fn is_allowed_new_token_and_app_close() {
+        let new_token = Frame::NewToken { token: &[1, 2] };
+        assert!(new_token.is_allowed(packet::Type::Short));
+        assert!(!new_token.is_allowed(packet::Type::ZeroRtt));
+        assert!(!new_token.is_allowed(packet::Type::Handshake));
+
+        let app_close = Frame::ConnectionClose {
+            error_code: CloseError::Application(1),
+            frame_type: 0,
+            reason_phrase: String::new(),
+        };
+        assert!(app_close.is_allowed(packet::Type::Short));
+        assert!(!app_close.is_allowed(packet::Type::ZeroRtt));
+    }
+
+    /// `decode_ack_frame` rejects invalid range configurations.
+    #[test]
+    fn decode_ack_frame_boundaries() {
+        // largest_acked < first_ack_range is always invalid.
+        assert!(Frame::decode_ack_frame(3, 4, &[]).is_err());
+
+        // largest_acked == first_ack_range with additional ranges: no room for a gap.
+        assert!(Frame::decode_ack_frame(4, 4, &[AckRange { gap: 0, range: 0 }]).is_err());
+
+        // After the first range (5..=5), cur = 0, which is less than gap+1=1.
+        assert!(Frame::decode_ack_frame(5, 4, &[AckRange { gap: 0, range: 0 }]).is_err());
+
+        // With one extra unit of room (largest - first = 2), cur starts at 1 — enough.
+        assert!(Frame::decode_ack_frame(5, 3, &[AckRange { gap: 0, range: 0 }]).is_ok());
+    }
+
+    /// `decode_ack_frame` correctly advances `cur` by `gap + 1` and produces exact ranges.
+    #[test]
+    fn decode_ack_frame_gap_arithmetic() {
+        // gap=1 skips 2 packet numbers (gap+1=2): cur goes 5→3 after the gap.
+        let result = Frame::decode_ack_frame(10, 4, &[AckRange { gap: 1, range: 0 }]);
+        assert_eq!(result.unwrap(), vec![6..=10, 3..=3]);
+
+        // cur < r.range: cur=7, range=8 → error.
+        assert!(Frame::decode_ack_frame(10, 2, &[AckRange { gap: 0, range: 8 }]).is_err());
+
+        // Two ranges with gaps; all arithmetic must stay consistent.
+        let result = Frame::decode_ack_frame(
+            10,
+            2,
+            &[AckRange { gap: 0, range: 1 }, AckRange { gap: 1, range: 1 }],
+        );
+        assert!(result.is_ok());
+    }
+
+    fn encode_ack_header(range_count: u64) -> Encoder {
+        let mut enc = Encoder::default();
+        enc.encode_byte(0x02); // ACK frame type
+        enc.encode_varint(100u64); // largest_acknowledged
+        enc.encode_varint(0u64); // ack_delay
+        enc.encode_varint(range_count);
+        enc
+    }
+
+    /// ACK with too many ranges is rejected; just below the limit passes the range count check.
+    #[test]
+    fn decode_ack_too_many_ranges() {
+        let enc = encode_ack_header(32768);
+        let result = Frame::decode(&mut enc.as_decoder());
+        assert_eq!(result.unwrap_err(), Error::TooMuchData);
+
+        let enc = encode_ack_header(32767);
+        let result = Frame::decode(&mut enc.as_decoder());
+        assert_ne!(result.unwrap_err(), Error::TooMuchData);
+    }
+
+    /// Both Stream and Crypto frames reject `offset + data.len() > MAX_VARINT`.
+    #[test]
+    fn decode_offset_overflow() {
+        // StreamWithOffLen (0x0e): stream_id + offset + vvec data
+        let mut enc = Encoder::default();
+        enc.encode_byte(0x0e);
+        enc.encode_varint(1u64); // stream_id
+        enc.encode_varint(MAX_VARINT);
+        enc.encode_vvec(&[0x01]);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncoding
+        );
+
+        // Crypto (0x06): offset + vvec data (no stream_id)
+        let mut enc = Encoder::default();
+        enc.encode_byte(0x06);
+        enc.encode_varint(MAX_VARINT);
+        enc.encode_vvec(&[0x01]);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncoding
+        );
+    }
+
+    /// A `MaxStreams` frame with value > 2^60 is rejected.
+    #[test]
+    fn decode_max_streams_exceeds_limit() {
+        let mut enc = Encoder::default();
+        enc.encode_byte(0x12); // MaxStreamsBiDi
+        enc.encode_varint((1u64 << 60) + 1);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::StreamLimit
+        );
+    }
+
+    /// `StreamType::try_from` rejects non-stream frame types.
+    #[test]
+    fn stream_type_try_from_invalid() {
+        assert!(StreamType::try_from(FrameType::Ping).is_err());
     }
 }

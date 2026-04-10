@@ -264,6 +264,26 @@ mod tests {
         assert_eq!(Pacer::rate(10_000, Duration::ZERO), None);
     }
 
+    /// When the computed wait equals GRANULARITY exactly, pacing should NOT
+    /// send immediately; only strictly sub-granularity waits are suppressed.
+    #[test]
+    fn not_immediately_at_exact_granularity() {
+        // Choose RTT and CWND so w = rtt * PACKET / (SPEEDUP * cwnd) = 1ms = GRANULARITY.
+        // With PACKET=1000, SPEEDUP=2: cwnd = rtt_ns * 1000 / (2 * 1_000_000).
+        // rtt=10ms → cwnd = 10_000_000 * 1000 / 2_000_000 = 5000.
+        const SHORT_RTT: Duration = Duration::from_millis(10);
+        const CWND_AT_GRANULARITY: usize = 5000; // yields w = 1ms = GRANULARITY
+        let n = now();
+        let mut p = Pacer::new(true, n, PACKET, PACKET);
+        p.spend(n, SHORT_RTT, CWND_AT_GRANULARITY, PACKET);
+        // w == GRANULARITY: should schedule for later, not send immediately.
+        assert_ne!(
+            p.next(SHORT_RTT, CWND_AT_GRANULARITY),
+            n,
+            "at exactly GRANULARITY should not send immediately"
+        );
+    }
+
     #[test]
     fn pacer_display_and_debug() {
         let mut p = Pacer::new(true, now(), PACKET, PACKET);

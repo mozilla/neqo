@@ -475,6 +475,52 @@ impl Debug for StatsCell {
     }
 }
 
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use neqo_common::Ecn;
+
+    use super::{EcnCount, EcnTransitions, Stats, StatsCell};
+    use crate::packet;
+
+    #[test]
+    fn stats_init_sets_info() {
+        let mut stats = Stats::default();
+        stats.init("conn-1".into());
+        assert!(format!("{stats:?}").contains("conn-1"));
+    }
+
+    #[test]
+    fn stats_cell_debug() {
+        let cell = StatsCell::default();
+        cell.borrow_mut().init("cell-test".into());
+        assert!(format!("{cell:?}").contains("cell-test"));
+    }
+
+    #[test]
+    fn ecn_count_deref_mut_and_deref() {
+        let mut counts = EcnCount::default();
+        // Write through DerefMut, read through Deref.
+        counts[packet::Type::Short][Ecn::Ect0] = 7;
+        assert_eq!(counts[packet::Type::Short][Ecn::Ect0], 7);
+    }
+
+    #[test]
+    fn ecn_count_debug_nonempty() {
+        let mut counts = EcnCount::default();
+        counts[packet::Type::Short][Ecn::Ce] = 3;
+        let s = format!("{counts:?}");
+        assert!(s.contains("Short"));
+    }
+
+    #[test]
+    fn ecn_transitions_deref_mut_and_deref() {
+        let mut trans = EcnTransitions::default();
+        trans[Ecn::Ect0][Ecn::Ce] = Some((packet::Type::Short, 42));
+        assert_eq!(trans[Ecn::Ect0][Ecn::Ce], Some((packet::Type::Short, 42)));
+    }
+}
+
 #[test]
 fn debug() {
     let stats = Stats::default();

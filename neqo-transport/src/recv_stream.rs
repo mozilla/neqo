@@ -1013,6 +1013,46 @@ mod tests {
         }
     }
 
+    /// A buffer of exactly 4096 bytes has reached the extension limit and must not be extended.
+    #[test]
+    fn inbound_frame_no_extend_at_4096() {
+        let mut s = RxStreamOrderer::default();
+        // Fill to the extend threshold.
+        s.inbound_frame(0, &[0u8; 4096]);
+        assert_eq!(s.data_ranges[&0].len(), 4096);
+        // The next byte must not be merged; the threshold has been reached.
+        s.inbound_frame(4096, &[1u8]);
+        assert_eq!(
+            s.data_ranges.len(),
+            2,
+            "a 4096-byte buffer must not be extended further"
+        );
+    }
+
+    /// A buffer of 4095 bytes IS extended when the next frame is contiguous.
+    #[test]
+    fn inbound_frame_extends_below_4096() {
+        let mut s = RxStreamOrderer::default();
+        s.inbound_frame(0, &[0u8; 4095]);
+        s.inbound_frame(4095, &[1u8]);
+        assert_eq!(s.data_ranges.len(), 1);
+        assert_eq!(s.data_ranges[&0].len(), 4096);
+    }
+
+    /// Reading exactly `available` bytes frees the range so the next read can proceed.
+    #[test]
+    fn read_exact_available_removes_range() {
+        let mut s = RxStreamOrderer::default();
+        s.inbound_frame(0, &[1u8; 5]);
+        s.inbound_frame(5, &[2u8; 5]);
+
+        let mut buf = [0u8; 5];
+        assert_eq!(s.read(&mut buf), 5);
+        assert_eq!(buf, [1u8; 5]);
+        assert_eq!(s.read(&mut buf), 5);
+        assert_eq!(buf, [2u8; 5]);
+    }
+
     #[test]
     #[expect(
         clippy::single_range_in_vec_init,
