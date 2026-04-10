@@ -48,7 +48,7 @@ These are the main focus areas for your review:
 Before posting new comments, check existing review comments on this PR:
 
 - **Your own previous comments**: if the issue is still present, skip it; if resolved, reply to that
-  thread using `add_reply_to_pull_request_comment` noting it has been addressed.
+  thread using `mcp__github__add_reply_to_pull_request_comment` noting it has been addressed.
 - **Other reviewers' comments**: if you have a differing or additional opinion, reply directly to
   that thread using `add_reply_to_pull_request_comment`. Do not summarise others' comments in your
   own review body.
