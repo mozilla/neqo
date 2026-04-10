@@ -1010,6 +1010,75 @@ fn anti_amplification() {
     assert_eq!(*server.state(), State::Confirmed);
 }
 
+/// Per RFC 9000 Section 8.1, a retransmitted client Initial (using the server's
+/// SCID as DCID) must not validate the server's path; only a Handshake packet
+/// does. With `MLKEM` the `ClientHello` spans two Initials, so the server may
+/// receive a retransmitted Initial before it can complete TLS.
+#[test]
+fn anti_amplification_initial_retransmit_no_validate() {
+    let mut client = default_client(); // MLKEM → ClientHello spans two Initials
+    let mut server = default_server();
+    let mut now = now();
+
+    // Large TP ensures the server's Handshake data exceeds the amplification
+    // budget available after receiving only two client Initials.
+    let very_big =
+        TransportParameter::Bytes(vec![0; Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) * 10]);
+    server
+        .set_local_tparam(TestTransportParameter, very_big)
+        .unwrap();
+
+    // Advance through pacing delays (sub-millisecond) but stop before PTOs fire.
+    let drain = |server: &mut Connection, now: &mut _| {
+        let mut n = 0;
+        loop {
+            match server.process_output(*now) {
+                Output::Datagram(d) => n += d.len(),
+                Output::Callback(t) if t < AT_LEAST_PTO => *now += t,
+                _ => break,
+            }
+        }
+        n
+    };
+
+    // First Initial (ClientHello fragment 1); second is queued but not delivered.
+    let c_init1 = client.process_output(now).dgram().unwrap();
+    let c_init2 = client.process_output(now).dgram();
+    assert!(c_init2.is_some(), "expected two Initial datagrams (MLKEM)");
+    drop(c_init2); // second Initial — not delivered to server
+
+    // Only the first fragment reaches the server; TLS cannot progress yet.
+    now += DEFAULT_RTT / 2;
+    let mut received = c_init1.len();
+    let s_first = server.process(Some(c_init1), now).dgram().unwrap();
+    let mut sent = s_first.len() + drain(&mut server, &mut now);
+
+    // Client learns the server's SCID and will use it as DCID on retransmit.
+    now += DEFAULT_RTT / 2;
+    client.process_input(s_first, now);
+
+    // PTO retransmit carries the second fragment with the server's SCID as DCID.
+    let pto = client.process_output(now).callback();
+    assert_ne!(pto, Duration::ZERO);
+    now += pto;
+    let c_retrans = client.process_output(now).dgram().unwrap();
+
+    // Server completes TLS on receiving the second fragment and starts sending
+    // Handshake data, but must respect the 3x amplification limit.
+    received += c_retrans.len();
+    sent += server
+        .process(Some(c_retrans), now)
+        .dgram()
+        .expect("server should start sending Handshake data")
+        .len()
+        + drain(&mut server, &mut now);
+
+    assert!(
+        sent <= received * 3,
+        "server sent {sent} bytes but received only {received} bytes (limit is 3x)",
+    );
+}
+
 #[cfg(not(feature = "disable-encryption"))]
 #[test]
 fn garbage_initial() {
