@@ -103,7 +103,7 @@ pub fn create_client(
     let qlog = qlog_new(args, hostname, client.connection_id())?;
     client.set_qlog(qlog);
     if let Some(ech) = &args.ech {
-        client.enable_ech(ech)?;
+        client.enable_ech(&ech.0)?;
     }
     if let Some(token) = resumption_token {
         client.enable_resumption(now(), token)?;
@@ -249,6 +249,12 @@ impl super::Handler for Handler {
                     qwarn!("Unhandled event {event:?}");
                 }
             }
+        }
+
+        // Fallback in case the connection closes before NEW_TOKEN arrives.
+        let args = &self.url_handler.args;
+        if (args.resume || args.save_token.is_some()) && self.token.is_none() {
+            self.token = client.take_resumption_token(now());
         }
 
         Ok(self.url_handler.done())
