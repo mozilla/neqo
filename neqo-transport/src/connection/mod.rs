@@ -1686,9 +1686,7 @@ impl Connection {
 
         if self.state.connected() {
             self.handle_migration(path, remote, migrate, now);
-        } else if self.role != Role::Client
-            && packet.packet_type() == packet::Type::Handshake
-        {
+        } else if self.role != Role::Client && packet.packet_type() == packet::Type::Handshake {
             // We only allow one path during setup, so apply handshake
             // path validation to this path.
             path.borrow_mut().set_valid(now);
