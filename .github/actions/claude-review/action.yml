@@ -40,7 +40,6 @@ runs:
         git fetch --depth=1 "https://github.com/$BASE_REPO" "$BASE_SHA"
         # Overwrite instruction files with the trusted base-branch versions.
         git checkout FETCH_HEAD -- .github/copilot-instructions.md 2>/dev/null || true
-        git checkout FETCH_HEAD -- .github/actions/claude-review/prompt.md 2>/dev/null || true
 
     - name: Run Claude Code Review
       id: claude
@@ -50,10 +49,32 @@ runs:
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
         github_token: ${{ github.token }}
         use_sticky_comment: true
-        show_full_output: "true"
+        track_progress: true
         # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
         # or https://docs.anthropic.com/en/docs/claude-code/sdk#command-line for available options
         claude_args: |
           --model claude-opus-4-6 --fallback-model claude-sonnet-4-6 --max-budget-usd 2.00
-          --allowedTools mcp__github_inline_comment__create_inline_comment,mcp__github__pull_request_read,mcp__github__get_pull_request,mcp__github__get_pull_request_diff,mcp__github__get_pull_request_files,mcp__github__get_pull_request_review_comments,mcp__github__get_pull_request_reviews,mcp__github__get_pull_request_status,mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__get_commit,mcp__github__get_me,mcp__github__get_workflow_run,mcp__github__list_pull_requests,mcp__github__list_commits,mcp__github__list_branches,mcp__github__list_issues,mcp__github__list_workflow_runs,mcp__github__list_workflow_jobs,mcp__github__search_pull_requests,mcp__github__search_issues,mcp__github__search_code,mcp__github__search_repositories,mcp__github__add_reply_to_pull_request_comment
+          --allowedTools "Bash(gh pr view:*)" "Bash(gh pr list:*)" "Bash(gh pr diff:*)" "Bash(gh issue view:*)" "Bash(gh issue list:*)" "Bash(git log:*)" "Bash(git diff:*)" "Bash(git show:*)"
+          --allowedTools mcp__github_inline_comment__create_inline_comment,mcp__github__pull_request_read,mcp__github__get_pull_request,mcp__github__get_pull_request_diff,mcp__github__get_pull_request_files,mcp__github__get_pull_request_review_comments,mcp__github__get_pull_request_reviews,mcp__github__get_pull_request_status,mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__get_commit,mcp__github__get_me,mcp__github__get_workflow_run,mcp__github__list_pull_requests,mcp__github__list_commits,mcp__github__list_branches,mcp__github__list_issues,mcp__github__list_workflow_runs,mcp__github__list_workflow_jobs,mcp__github__search_pull_requests,mcp__github__search_issues,mcp__github__search_code,mcp__github__search_repositories,mcp__github__create_pending_pull_request_review,mcp__github__add_comment_to_pending_review,mcp__github__submit_pending_pull_request_review,mcp__github__delete_pending_pull_request_review,mcp__github__create_and_submit_pull_request_review,mcp__github__add_reply_to_pull_request_comment
         prompt: ${{ steps.prompt.outputs.content }}
+
+    - name: Check review outcome
+      shell: bash
+      env:
+        CONCLUSION: ${{ steps.claude.outputs.conclusion }}
+        LOG: ${{ runner.temp }}/claude-execution-output.json
+      run: |
+        # The action sets conclusion=failure for hard errors (is_error, non-success subtype).
+        if [[ "$CONCLUSION" == "failure" ]]; then
+          echo "Claude execution failed." >&2
+          exit 1
+        fi
+        # Additionally check for permission denials, which don't affect the conclusion.
+        if [[ -f "$LOG" ]]; then
+          RESULT=$(jq 'map(select(.type == "result")) | last // {}' "$LOG" 2>/dev/null)
+          DENIALS=$(jq -r '.permission_denials // [] | length' <<< "$RESULT" 2>/dev/null || echo 0)
+          if [[ "$DENIALS" -gt 0 ]]; then
+            TOOLS=$(jq -r '.permission_denials // [] | .[].tool_name' <<< "$RESULT" 2>/dev/null | sort -u | tr '\n' ',')
+            echo "::warning::Claude had $DENIALS permission denial(s) — review may be incomplete. Denied tools: ${TOOLS%,}"
+          fi
+        fi
