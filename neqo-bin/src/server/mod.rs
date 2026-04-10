@@ -277,11 +277,17 @@ pub(super) fn configure_server(server: &mut impl ServerConfig, args: &Args) {
 /// Generate a response [`SendData`] for a given request path.
 ///
 /// In QNS test mode, reads the corresponding file from `/www/`. Returns `Err`
-/// if the file cannot be read (caller sends a 404).
-/// In non-QNS mode, parses the path as a byte count and generates that many
-/// zero bytes.
+/// if the file cannot be read (caller sends a 404) or if the path contains
+/// `..` components.
+/// In non-QNS mode, trims `/` from the path, parses the remainder as a byte
+/// count, and generates that many zero bytes. If parsing fails, sends the
+/// path bytes instead.
 pub(super) fn response_for_path(path: &str, is_qns_test: bool) -> Result<SendData, ()> {
     if is_qns_test {
+        if path.split('/').any(|segment| segment == "..") {
+            qerror!("Rejecting path with '..' component: {path}");
+            return Err(());
+        }
         let file_path: PathBuf = ["/www", path.trim_matches('/')].iter().collect();
         fs::read(file_path).map(SendData::from).map_err(|e| {
             qerror!("Failed to read {path}: {e}");
@@ -601,5 +607,14 @@ mod tests {
         // Non-numeric path falls back to sending the path bytes themselves.
         let data = response_for_path("/hello", false).expect("should succeed");
         assert_eq!(data.len(), "/hello".len());
+    }
+
+    #[test]
+    fn response_for_path_qns_dotdot_rejected() {
+        // Paths with ".." components must be rejected in QNS mode to prevent
+        // directory traversal outside /www/.
+        for path in ["/../etc/passwd", "/foo/../etc/passwd", "/.."] {
+            assert!(response_for_path(path, true).is_err(), "path: {path}");
+        }
     }
 }
