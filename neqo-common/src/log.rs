@@ -53,6 +53,10 @@ pub fn init(level_filter: Option<log::LevelFilter>) {
     });
 }
 
+/// Log an error message using the neqo logging framework.
+///
+/// Automatically initializes logging in test/bench builds before logging.
+/// Equivalent to `log::error!` but with automatic initialization.
 #[macro_export]
 #[clippy::format_args]
 macro_rules! qerror {
@@ -62,6 +66,11 @@ macro_rules! qerror {
         ::log::error!($($arg)*);
     } );
 }
+
+/// Log a warning message using the neqo logging framework.
+///
+/// Automatically initializes logging in test/bench builds before logging.
+/// Equivalent to `log::warn!` but with automatic initialization.
 #[macro_export]
 #[clippy::format_args]
 macro_rules! qwarn {
@@ -71,6 +80,11 @@ macro_rules! qwarn {
         ::log::warn!($($arg)*);
     } );
 }
+
+/// Log an informational message using the neqo logging framework.
+///
+/// Automatically initializes logging in test/bench builds before logging.
+/// Equivalent to `log::info!` but with automatic initialization.
 #[macro_export]
 #[clippy::format_args]
 macro_rules! qinfo {
@@ -80,6 +94,11 @@ macro_rules! qinfo {
         ::log::info!($($arg)*);
     } );
 }
+
+/// Log a debug message using the neqo logging framework.
+///
+/// Automatically initializes logging in test/bench builds before logging.
+/// Equivalent to `log::debug!` but with automatic initialization.
 #[macro_export]
 #[clippy::format_args]
 macro_rules! qdebug {
@@ -89,6 +108,11 @@ macro_rules! qdebug {
         ::log::debug!($($arg)*);
     } );
 }
+
+/// Log a trace message using the neqo logging framework.
+///
+/// Automatically initializes logging in test/bench builds before logging.
+/// Equivalent to `log::trace!` but with automatic initialization.
 #[macro_export]
 #[clippy::format_args]
 macro_rules! qtrace {
