@@ -48,7 +48,7 @@ use crate::{
     recv_stream,
     rtt::{GRANULARITY, RttEstimate},
     saved::SavedDatagrams,
-    scone::Scone,
+    scone::{Bitrate, Scone},
     send_stream::{self, SendStream},
     stateless_reset::Token as Srt,
     stats::{Stats, StatsCell},
@@ -1699,19 +1699,20 @@ impl Connection {
         }
 
         // Update SCONE signal.
-        if let Some(rate) = packet.scone() {
-            let updated = if let Some(s) = &mut self.scone {
-                s.update(now, rate)
-            } else if rate.is_set() {
-                self.scone = Some(Scone::new(now, rate));
-                true
-            } else {
-                false
-            };
-            if updated {
-                qdebug!("[{self}] SCONE rate updated to {rate:x?}");
-                self.events.scone_updated(rate);
-            }
+        let updated = if let Some(s) = &mut self.scone {
+            s.update(now, packet.scone())
+        } else if let Some(rate) = packet.scone()
+            && rate.is_set()
+        {
+            self.scone = Some(Scone::new(now, rate));
+            true
+        } else {
+            false
+        };
+        if updated {
+            let rate = self.scone.as_ref().map_or(Bitrate::UNKNOWN, |s| s.rate());
+            qdebug!("[{self}] SCONE rate updated to {rate:x?}");
+            self.events.scone_updated(rate);
         }
     }
 

@@ -23,14 +23,26 @@ impl Scone {
         Self { updated, rate }
     }
 
+    /// Determine if the advice has expired.
+    #[must_use]
+    pub fn expired(&self, now: Instant) -> bool {
+        self.updated + Self::PERIOD <= now
+    }
+
+    #[must_use]
+    pub const fn rate(&self) -> Bitrate {
+        self.rate
+    }
+
     /// Update the value, return true if updated.
-    pub fn update(&mut self, now: Instant, rate: Bitrate) -> bool {
+    pub fn update(&mut self, now: Instant, rate: Option<Bitrate>) -> bool {
         // This uses the simplest form of update, to keep it simple.
         // A fancier method would remember some number of higher-rate updates
         // and switch to those when the lower rate expires.
-        if (rate.is_set() && rate.0 <= self.rate.0) || self.updated + Self::PERIOD <= now {
-            let changed = rate != self.rate;
+        if rate.is_some_and(|r| r.0 <= self.rate.0) || self.expired(now) {
             self.updated = now;
+            let rate = rate.unwrap_or_default();
+            let changed = rate != self.rate;
             self.rate = rate;
             changed
         } else {
@@ -43,10 +55,23 @@ impl Scone {
 pub struct Bitrate(u8);
 
 impl Bitrate {
-    const UNKNOWN: Self = Self(0x7f);
+    pub const UNKNOWN: Self = Self(0x7f);
 
     pub const fn is_set(self) -> bool {
         self.0 != Self::UNKNOWN.0
+    }
+}
+
+impl Default for Bitrate {
+    fn default() -> Self {
+        Self::UNKNOWN
+    }
+}
+
+impl PartialOrd for Bitrate {
+    // This compares `UNKNOWN` as higher than all other values.
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(&other.0)
     }
 }
 
@@ -83,38 +108,55 @@ mod test {
     const SEC: Duration = Duration::from_secs(1);
     const BASE_RATE: Bitrate = Bitrate(0x10);
 
-    #[test]
-    fn unknown() {
+    /// Update works the same whether `v` is `None` or `UNKNOWN`.
+    fn none_or_unknown(v: Option<Bitrate>) {
         assert!(!Bitrate(0x7f).is_set());
 
         assert_eq!(Bitrate::UNKNOWN, Bitrate(0x7f));
         let now = Instant::now();
         let mut base = Scone::new(now, BASE_RATE);
         let mut other = base.clone();
-        assert!(!other.update(now + SEC, Bitrate::UNKNOWN));
+        assert!(!other.update(now + SEC, v));
         assert_eq!(other.rate, BASE_RATE);
 
-        let rollover = now + Scone::PERIOD;
-        assert!(base.update(rollover, Bitrate::UNKNOWN));
+        assert!(base.update(now + Scone::PERIOD, v));
         assert_eq!(base.rate, Bitrate::UNKNOWN);
     }
 
     #[test]
+    fn unknown() {
+        none_or_unknown(Some(Bitrate::UNKNOWN));
+    }
+
+    #[test]
+    fn none() {
+        none_or_unknown(None);
+    }
+
+    #[test]
     fn reduce() {
+        const LOWER_RATE: Bitrate = Bitrate(0x09);
+
+        assert!(LOWER_RATE < BASE_RATE);
+
         let now = Instant::now();
         let mut base = Scone::new(now, BASE_RATE);
-        assert!(base.update(now + SEC, Bitrate(0x09)));
-        assert_eq!(base.rate, Bitrate(0x09));
+        assert!(base.update(now + SEC, Some(LOWER_RATE)));
+        assert_eq!(base.rate, LOWER_RATE);
     }
 
     #[test]
     fn increase() {
+        const HIGHER_RATE: Bitrate = Bitrate(0x17);
+
+        assert!(HIGHER_RATE > BASE_RATE);
+
         let now = Instant::now();
         let mut base = Scone::new(now, BASE_RATE);
-        assert!(!base.update(now + SEC, Bitrate(0x17)));
+        assert!(!base.update(now + SEC, Some(HIGHER_RATE)));
         assert_eq!(base.rate, BASE_RATE);
-        assert!(base.update(now + Scone::PERIOD, Bitrate(0x17)));
-        assert_eq!(base.rate, Bitrate(0x17));
+        assert!(base.update(now + Scone::PERIOD, Some(HIGHER_RATE)));
+        assert_eq!(base.rate, HIGHER_RATE);
     }
 
     #[test]
@@ -123,5 +165,14 @@ mod test {
         assert!(rate.is_none());
         let rate = Option::from(Bitrate(0x55));
         assert_eq!(rate, NonZeroU64::new(1_778_279_410));
+    }
+
+    #[test]
+    fn bitrate_cmp() {
+        assert!(Bitrate(0x55) < Bitrate(0x56));
+        assert!(Bitrate(0x55) <= Bitrate(0x55));
+        assert!(Bitrate(0x55) > Bitrate(0x54));
+        assert!(Bitrate(0x55) >= Bitrate(0x55));
+        assert!(Bitrate(0x55) < Bitrate::UNKNOWN);
     }
 }

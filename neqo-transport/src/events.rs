@@ -79,7 +79,7 @@ pub enum ConnectionEvent {
         outcome: OutgoingDatagramOutcome,
     },
     IncomingDatagramDropped,
-    /// An update was received to the SCONE throughput.
+    /// An update was received to SCONE throughput advice.
     /// The value is the approximate rate in bits per second; None = unknown.
     SconeUpdated(Option<NonZeroU64>),
 }

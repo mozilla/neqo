@@ -1628,12 +1628,12 @@ fn scone(enable: bool) {
     // This test needs to keep connections alive long past the default idle timeout.
     let mut client = new_client(
         ConnectionParameters::default()
-            .idle_timeout(PERIOD * 7)
+            .idle_timeout(PERIOD * 10)
             .scone(enable),
     );
     let mut server = new_server(
         ConnectionParameters::default()
-            .idle_timeout(PERIOD * 7)
+            .idle_timeout(PERIOD * 10)
             .scone(enable),
     );
     let mut now = now();
@@ -1696,11 +1696,17 @@ fn scone(enable: bool) {
     client.process_input(add_scone(&d, 0x42), now);
     assert!(client.events().any(got_scone));
 
-    // Same for a shift to the unknown rate.
+    // Same for a shift to the unknown rate,
+    // which doesn't require a SCONE packet.
     now += PERIOD;
     let d = send_something(&mut server, now);
-    client.process_input(add_scone(&d, 0x7f), now);
+    client.process_input(d, now);
     assert!(client.events().any(got_scone));
+
+    // No event when a SCONE packet with unknown rate is immediately received.
+    let d = send_something(&mut server, now);
+    client.process_input(add_scone(&d, 0x7f), now);
+    assert!(!client.events().any(got_scone));
 }
 
 #[test]
