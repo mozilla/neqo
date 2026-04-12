@@ -56,7 +56,7 @@ mod tracking;
 pub mod version;
 
 pub use self::{
-    cc::{CongestionControl, CongestionEvent, SlowStart},
+    cc::{CongestionControl, CongestionTrigger, HyStartCssBaseline, SlowStart},
     cid::{
         ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
         EmptyConnectionIdGenerator, RandomConnectionIdGenerator,

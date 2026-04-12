@@ -52,7 +52,10 @@ impl PacketSender {
                 }
                 (CongestionControl::NewReno, SlowStart::HyStart) => {
                     Box::new(ClassicCongestionController::new(
-                        HyStart::new(conn_params.pacing_enabled()),
+                        HyStart::new(
+                            conn_params.pacing_enabled(),
+                            conn_params.get_hystart_css_baseline(),
+                        ),
                         NewReno::default(),
                         pmtud,
                     ))
@@ -66,7 +69,10 @@ impl PacketSender {
                 }
                 (CongestionControl::Cubic, SlowStart::HyStart) => {
                     Box::new(ClassicCongestionController::new(
-                        HyStart::new(conn_params.pacing_enabled()),
+                        HyStart::new(
+                            conn_params.pacing_enabled(),
+                            conn_params.get_hystart_css_baseline(),
+                        ),
                         Cubic::default(),
                         pmtud,
                     ))

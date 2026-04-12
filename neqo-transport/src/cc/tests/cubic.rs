@@ -20,7 +20,7 @@ use test_fixture::now;
 use super::{RTT, make_cc_cubic};
 use crate::{
     cc::{
-        ClassicSlowStart, CongestionController as _, CongestionEvent,
+        ClassicSlowStart, CongestionController as _,
         classic_cc::ClassicCongestionController,
         cubic::{Cubic, convert_to_f64},
     },
@@ -312,7 +312,7 @@ fn congestion_event_slow_start() {
         cubic.cwnd(),
         cwnd_after_loss_slow_start(cubic.cwnd_initial(), cubic.max_datagram_size())
     );
-    assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
+    assert_eq!(cc_stats.congestion_events.loss, 1);
 }
 
 #[test]
@@ -331,7 +331,7 @@ fn congestion_event_congestion_avoidance() {
         f64::EPSILON,
     );
     assert_eq!(cubic.cwnd(), cwnd_after_loss(cubic.cwnd_initial()));
-    assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
+    assert_eq!(cc_stats.congestion_events.loss, 1);
 }
 
 /// Verify that `acked_bytes` is correctly reduced on a congestion event.
@@ -401,7 +401,7 @@ fn congestion_event_congestion_avoidance_fast_convergence() {
         f64::EPSILON,
     );
     assert_eq!(cubic.cwnd(), cwnd_after_loss(cubic.cwnd_initial()));
-    assert_eq!(cc_stats.congestion_events[CongestionEvent::Loss], 1);
+    assert_eq!(cc_stats.congestion_events.loss, 1);
 }
 
 #[test]

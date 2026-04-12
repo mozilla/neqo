@@ -24,7 +24,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run network namespace tests
-        run: sudo -E env "PATH=$PATH" cargo test --package mtu --test netns -- --nocapture
+        run: sudo -E env "PATH=$PATH" cargo test --locked --package mtu --test netns -- --nocapture
 
   check-android:
     name: Check Android

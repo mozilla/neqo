@@ -1036,7 +1036,10 @@ mod tests {
     use neqo_common::qlog::Qlog;
     use test_fixture::{DEFAULT_ADDR, now};
 
-    use super::{FAST_PTO_SCALE, LossRecoverySpace, PacketNumberSpace, PtoState, SendProfile};
+    use super::{
+        ACK_ONLY_SIZE_LIMIT, FAST_PTO_SCALE, LossRecoverySpace, MIN_OUTSTANDING_UNACK,
+        PacketNumberSpace, PtoState, SendProfile,
+    };
     use crate::{
         ConnectionParameters, Token as Srt,
         cid::{ConnectionId, ConnectionIdEntry},
@@ -1962,6 +1965,119 @@ mod tests {
         let pto = lr.next_timeout().expect("PTO timer armed");
         lr.timeout(pto);
         (lr, contents, pto)
+    }
+
+    fn send_non_ack_eliciting(lrs: &mut LossRecoverySpace, pkt_type: packet::Type) {
+        lrs.on_packet_sent(sent::Packet::new(
+            pkt_type,
+            0,
+            now(),
+            false,
+            recovery::Tokens::new(),
+            ON_SENT_SIZE,
+        ));
+    }
+
+    /// Non-ACK-eliciting packets in Initial/Handshake spaces set the PTO baseline,
+    /// but non-ACK-eliciting packets in `ApplicationData` space do not.
+    #[test]
+    fn pto_baseline_set_for_non_app_data_only() {
+        let mut lrs_init = LossRecoverySpace::new(PacketNumberSpace::Initial);
+        assert!(lrs_init.last_ack_eliciting.is_none());
+        send_non_ack_eliciting(&mut lrs_init, packet::Type::Initial);
+        assert!(
+            lrs_init.last_ack_eliciting.is_some(),
+            "Initial space must set PTO baseline for non-ack-eliciting packet"
+        );
+
+        let mut lrs_app = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
+        send_non_ack_eliciting(&mut lrs_app, packet::Type::Short);
+        assert!(
+            lrs_app.last_ack_eliciting.is_none(),
+            "ApplicationData must not set PTO baseline for non-ack-eliciting packet"
+        );
+    }
+
+    fn app_data_largest_acked_sent_time(lr: &Fixture) -> Option<Instant> {
+        lr.spaces
+            .get(PacketNumberSpace::ApplicationData)?
+            .largest_acked_sent_time
+    }
+
+    /// A duplicate ACK for the current largest acknowledged packet must not update the sent-time.
+    #[test]
+    fn duplicate_ack_does_not_update_largest_acked_sent_time() {
+        let mut lr = setup_lr(3); // sends 0..=2 and acks 0
+
+        ack(&mut lr, 2, TEST_RTT);
+        let first_sent_time = app_data_largest_acked_sent_time(&lr);
+        assert!(first_sent_time.is_some());
+
+        ack(&mut lr, 2, TEST_RTT);
+        assert_eq!(
+            app_data_largest_acked_sent_time(&lr),
+            first_sent_time,
+            "duplicate ACK must not update largest_acked_sent_time"
+        );
+    }
+
+    /// At the exact PTO expiry deadline, probing should not yet fire; one nanosecond past it
+    /// should.
+    #[test]
+    fn should_probe_exact_boundary() {
+        let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
+        let t = now();
+        let pto = ms(100);
+
+        // Add exactly MIN_OUTSTANDING_UNACK packets → n_pto = 2.
+        add_sent(&mut lrs, (MIN_OUTSTANDING_UNACK - 1) as u64);
+        assert_eq!(lrs.sent_packets.len(), MIN_OUTSTANDING_UNACK);
+
+        lrs.last_ack_eliciting = Some(t);
+
+        // At exactly t + pto*2: not yet past the deadline, should NOT probe.
+        assert!(!lrs.should_probe(pto, t + pto * 2));
+        // One nanosecond past the deadline: should probe.
+        assert!(lrs.should_probe(pto, t + pto * 2 + Duration::from_nanos(1)));
+    }
+
+    /// `ack_only` is true only when `limit < ACK_ONLY_SIZE_LIMIT`, not at the limit itself.
+    #[test]
+    fn ack_only_boundary() {
+        assert!(SendProfile::new_limited(ACK_ONLY_SIZE_LIMIT - 1).ack_only());
+        // At the limit itself: limit == ACK_ONLY_SIZE_LIMIT → NOT ack_only.
+        assert!(!SendProfile::new_limited(ACK_ONLY_SIZE_LIMIT).ack_only());
+        assert!(!SendProfile::new_limited(ACK_ONLY_SIZE_LIMIT + 1).ack_only());
+    }
+
+    /// `drop_0rtt` returns packets that were in-flight in the `ApplicationData` space.
+    #[test]
+    fn drop_0rtt_returns_sent_packets() {
+        let mut lr = Fixture::default();
+        pace(&mut lr, 2);
+        let path = Rc::clone(&lr.path);
+        let dropped = lr.drop_0rtt(&path, now());
+        assert_eq!(
+            dropped.len(),
+            2,
+            "drop_0rtt must return all in-flight ApplicationData-space packets"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "discarding application space")]
+    fn discard_application_data_panics() {
+        let mut lr = Fixture::default();
+        lr.discard(PacketNumberSpace::ApplicationData, now());
+    }
+
+    /// `drop_0rtt` returns empty when packets have already been acknowledged.
+    #[test]
+    fn drop_0rtt_already_acked() {
+        let mut lr = setup_lr(2); // sends packets 0..=1 and ACKs packet 0
+        ack(&mut lr, 1, TEST_RTT); // ACK packet 1 — sets largest_acked
+        let path = Rc::clone(&lr.path);
+        assert!(lr.drop_0rtt(&path, now()).is_empty());
     }
 
     #[test]

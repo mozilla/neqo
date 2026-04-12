@@ -1293,4 +1293,61 @@ mod tests {
         assert_eq!(InitialMaxData.to_string(), "InitialMaxData((0x04))");
         assert_eq!(format!("{IdleTimeout}"), "IdleTimeout((0x01))");
     }
+
+    // Helper: encode an integer TP, then decode it.
+    fn decode_tp_integer(tp: TransportParameterId, v: u64) -> crate::Res<TransportParameter> {
+        let mut enc = Encoder::default();
+        TransportParameter::Integer(v).encode(&mut enc, tp);
+        TransportParameter::decode(&mut enc.as_decoder()).map(|r| r.unwrap().1)
+    }
+
+    #[test]
+    fn max_streams_boundary() {
+        for tp in [InitialMaxStreamsBidi, InitialMaxStreamsUni] {
+            assert!(decode_tp_integer(tp, 1 << 60).is_ok(), "{tp}");
+            assert!(decode_tp_integer(tp, (1 << 60) + 1).is_err(), "{tp}");
+        }
+    }
+
+    #[test]
+    fn max_udp_payload_size_boundary() {
+        let min = crate::packet::MIN_INITIAL_PACKET_SIZE as u64;
+        assert!(decode_tp_integer(MaxUdpPayloadSize, min).is_ok());
+        assert!(decode_tp_integer(MaxUdpPayloadSize, min - 1).is_err());
+    }
+
+    #[test]
+    fn ack_delay_exponent_boundary() {
+        assert!(decode_tp_integer(AckDelayExponent, 20).is_ok());
+        assert!(decode_tp_integer(AckDelayExponent, 21).is_err());
+    }
+
+    #[test]
+    fn min_ack_delay_boundary() {
+        // Just below the limit is valid.
+        assert!(decode_tp_integer(MinAckDelay, (1 << 24) - 1).is_ok());
+        // At the limit (not strictly less than) is an error.
+        assert!(decode_tp_integer(MinAckDelay, 1 << 24).is_err());
+    }
+
+    #[test]
+    fn trailing_data_rejected() {
+        // Encode a valid TP, then append an extra byte.
+        let mut enc = Encoder::default();
+        TransportParameter::Integer(42).encode(&mut enc, IdleTimeout);
+        // Corrupt the vvec length to include an extra zero byte.
+        let mut raw: Vec<u8> = enc.into();
+        raw[1] += 1; // Increase vvec length by 1 (second byte is the length).
+        raw.push(0xff); // Extra byte.
+        let err = TransportParameter::decode(&mut Decoder::from(&raw[..])).unwrap_err();
+        assert_eq!(err, Error::TooMuchData);
+    }
+
+    #[test]
+    fn preferred_address_max_len_cid() {
+        // A preferred address with exactly MAX_LEN-byte CID should be valid.
+        let cid = ConnectionId::from(&[0xab; ConnectionId::MAX_LEN]);
+        let spa = mutate_spa(|_, _, cid_out| *cid_out = cid);
+        assert_valid_spa(&spa);
+    }
 }

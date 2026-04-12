@@ -9,7 +9,7 @@
 use std::{
     net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use clap::{Parser, builder::TypedValueParser as _};
@@ -283,6 +283,12 @@ fn from_str(s: &str) -> Result<Version, Error> {
 pub enum Error {
     #[error("Error: {0}")]
     Argument(&'static str),
+}
+
+/// Wrapper for [`Instant::now()`] to manage the `disallowed_methods` override.
+fn now() -> Instant {
+    #![expect(clippy::disallowed_methods, reason = "This program uses the time")]
+    Instant::now()
 }
 
 #[cfg(not(target_os = "netbsd"))] // FIXME: Test fails on NetBSD.

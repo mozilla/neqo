@@ -272,6 +272,7 @@ impl Simulator {
             n.init(Rc::clone(&self.rng), start);
         }
 
+        #[expect(clippy::disallowed_methods, reason = "Simulations run in real time")]
         let setup_start = Instant::now();
         let now = self.process_loop(start, start);
         let setup_time = now - start;
@@ -318,6 +319,7 @@ impl ReadySimulator {
         reason = "run duration only needed in some tests"
     )]
     pub fn run(mut self) -> Duration {
+        #[expect(clippy::disallowed_methods, reason = "Simulations run in real time")]
         let real_start = Instant::now();
         let end = self.sim.process_loop(self.start, self.now);
         let sim_time = end - self.now;

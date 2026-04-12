@@ -3122,6 +3122,95 @@ mod tests {
         assert_eq!(stream_stats.bytes_acked(), expected_acked);
     }
 
+    /// The writable event fires when the low watermark equals the previous limit and
+    /// the current limit and available space now meet or exceed the watermark.
+    #[test]
+    fn writable_event_fires_at_watermark_equals_previous_limit() {
+        let mut conn_events = ConnectionEvents::default();
+        let id = StreamId::new(4);
+        let limit = 100u64;
+        let conn_fc = connection_fc(limit * 2);
+        let mut s = SendStream::new(id, 0, conn_fc, conn_events.clone());
+        s.set_max_stream_data(limit); // initial limit
+
+        // Set watermark == previous_limit (= avail() after setting limit).
+        s.set_writable_event_low_watermark(NonZeroUsize::new(s.avail()).unwrap());
+
+        // Increase limit so current_limit > watermark and avail() > watermark.
+        s.set_max_stream_data(limit * 2);
+
+        assert!(
+            conn_events
+                .events()
+                .any(|e| matches!(e, ConnectionEvent::SendStreamWritable { stream_id } if stream_id == id)),
+            "writable event must fire when watermark == previous_limit"
+        );
+    }
+
+    /// `TxBuffer::avail` equals `MAX_SIZE - buffered`.
+    #[test]
+    fn tx_buffer_avail_exact() {
+        let mut txb = TxBuffer::new();
+        assert_eq!(txb.avail(), TxBuffer::MAX_SIZE);
+        txb.send(&[0; 100]);
+        assert_eq!(txb.avail(), TxBuffer::MAX_SIZE - 100);
+    }
+
+    /// `TxBuffer::send` accepts at most `avail()` bytes; a full buffer rejects further data.
+    #[test]
+    fn tx_buffer_send_fills_exactly() {
+        let mut txb = TxBuffer::new();
+        // Fill to exactly MAX_SIZE.
+        let avail = txb.avail();
+        let sent = txb.send(&vec![0xab; avail]);
+        assert_eq!(sent, avail);
+        assert_eq!(txb.avail(), 0);
+        // No more room.
+        assert_eq!(txb.send(&[0x01]), 0);
+    }
+
+    fn make_send_stream(data: &[u8]) -> (SendStream, u64) {
+        let len = data.len() as u64;
+        let mut s = SendStream::new(
+            StreamId::new(100),
+            0,
+            connection_fc(len * 2),
+            ConnectionEvents::default(),
+        );
+        s.set_max_stream_data(len * 2);
+        (s, len)
+    }
+
+    #[test]
+    fn bytes_written_data_recvd() {
+        const DATA: &[u8] = b"hello world";
+        let (mut s, len) = make_send_stream(DATA);
+        s.send(DATA).unwrap();
+        s.close();
+        s.mark_as_sent(0, DATA.len(), true);
+        s.mark_as_acked(0, DATA.len(), true);
+        assert_eq!(s.bytes_written(), len);
+    }
+
+    #[test]
+    fn bytes_written_reset_sent() {
+        const DATA: &[u8] = b"hello";
+        let (mut s, len) = make_send_stream(DATA);
+        s.send(DATA).unwrap();
+        s.reset(0);
+        assert_eq!(s.bytes_written(), len);
+    }
+
+    /// `mark_acked` when newly acked range exactly extends a prior acked range.
+    #[test]
+    fn mark_acked_extends_exact_boundary() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(0, 10);
+        rt.mark_acked(0, 5); // Ack first half.
+        rt.mark_acked(5, 5); // Ack exactly from where first ack ends.
+        assert_eq!(rt.acked_from_zero(), 10);
+    }
+
     #[test]
     fn send_stream_stats() {
         const MESSAGE: &[u8] = b"hello";

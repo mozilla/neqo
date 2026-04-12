@@ -463,12 +463,57 @@ impl NewTokenSender {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::Role;
+    use neqo_common::{Encoder, Role};
 
-    use super::NewTokenState;
+    use super::{NewTokenFrameStatus, NewTokenSender, NewTokenState};
 
     const ONE: &[u8] = &[1, 2, 3];
     const TWO: &[u8] = &[4, 5];
+
+    #[test]
+    fn new_token_frame_status_len() {
+        let token = vec![1u8, 2, 3];
+        let expected = 1 + Encoder::vvec_len(token.len());
+        let status = NewTokenFrameStatus {
+            seqno: 0,
+            token,
+            needs_sending: true,
+        };
+        assert_eq!(status.len(), expected);
+    }
+
+    #[test]
+    fn new_token_sender_seqno_increments() {
+        let mut sender = NewTokenSender::default();
+        sender.send_new_token(vec![1]);
+        assert_eq!(sender.tokens[0].seqno, 0);
+        assert_eq!(sender.next_seqno, 1);
+        sender.send_new_token(vec![2]);
+        assert_eq!(sender.tokens[1].seqno, 1);
+        assert_eq!(sender.next_seqno, 2);
+    }
+
+    #[test]
+    fn new_token_sender_lost_marks_needs_sending() {
+        let mut sender = NewTokenSender::default();
+        sender.send_new_token(vec![1]);
+        sender.tokens[0].needs_sending = false; // pretend it was sent
+        sender.lost(0);
+        assert!(
+            sender.tokens[0].needs_sending,
+            "lost must re-enable needs_sending"
+        );
+    }
+
+    #[test]
+    fn new_token_sender_acked_removes_token() {
+        let mut sender = NewTokenSender::default();
+        sender.send_new_token(vec![1]);
+        sender.send_new_token(vec![2]);
+        sender.acked(0);
+        assert_eq!(sender.tokens.len(), 1);
+        assert_eq!(sender.tokens[0].seqno, 1, "only seqno=1 should remain");
+    }
 
     #[test]
     fn duplicate_saved() {

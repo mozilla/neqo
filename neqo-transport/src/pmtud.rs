@@ -314,6 +314,7 @@ mod tests {
     use neqo_common::{Encoder, qdebug, qinfo};
     use test_fixture::{fixture_init, now};
 
+    use super::MAX_PROBES;
     use crate::{
         Pmtud, Stats,
         crypto::CryptoDxState,
@@ -368,16 +369,15 @@ mod tests {
         mtu: usize,
         now: Instant,
     ) {
-        const AEAD_EXPANSION: usize = 16;
-
         let stats_before = stats.clone();
 
         // Fake a packet number, so the builder logic works.
         let profile = SendProfile::new_limited(pmtud.plpmtu());
+        let expansion = prot.expansion();
         let limit = if pmtud.needs_probe() {
-            pmtud.probe_size() - AEAD_EXPANSION
+            pmtud.probe_size() - expansion
         } else {
-            profile.limit() - AEAD_EXPANSION
+            profile.limit() - expansion
         };
         let mut builder = packet::Builder::short(Encoder::default(), false, None::<&[u8]>, limit);
         let pn = prot.next_pn();
@@ -625,7 +625,51 @@ mod tests {
         assert_eq!(pmtud.peer_max_udp_payload(), Some(1452));
     }
 
-    /// Tests that `ACK`ing non-probe packets does not affect PMTUD state.
+    /// `probe_count` is 0 before sending and 1 after the first probe.
+    #[test]
+    fn send_probe_increments_count() {
+        fixture_init();
+        let now = now();
+        let mut pmtud = Pmtud::new(V4, None);
+        let mut stats = Stats::default();
+        pmtud.next(now, &mut stats);
+        assert!(pmtud.needs_probe());
+        assert_eq!(pmtud.probe_count, 0);
+
+        let limit = pmtud.probe_size() - CryptoDxState::test_default().expansion();
+        let mut builder = packet::Builder::short(Encoder::default(), false, None::<&[u8]>, limit);
+        pmtud.send_probe(&mut builder, &mut Vec::new(), &mut stats);
+        assert_eq!(
+            pmtud.probe_count, 1,
+            "probe_count must be 1 after first probe"
+        );
+    }
+
+    /// PMTUD gives up after exactly `MAX_PROBES` consecutive probe failures, not fewer.
+    #[test]
+    fn max_probes_required_before_giving_up() {
+        // Use a path MTU smaller than the first probe so every probe fails.
+        const PATH_MTU: usize = 1200; // Below all probes in the search table
+        fixture_init();
+        let now = now();
+        let mut pmtud = Pmtud::new(V4, None);
+        let mut stats = Stats::default();
+        let mut prot = CryptoDxState::test_default();
+        pmtud.next(now, &mut stats);
+
+        while pmtud.needs_probe() {
+            pmtud_step(&mut pmtud, &mut stats, &mut prot, V4, PATH_MTU, now);
+        }
+
+        // With probe_count >= MAX_PROBES, it takes exactly MAX_PROBES losses per probe size
+        // before giving up. The first (minimum) probe size always fails MAX_PROBES times.
+        assert!(
+            stats.pmtud_lost >= MAX_PROBES,
+            "must lose at least MAX_PROBES ({MAX_PROBES}) probes, got {}",
+            stats.pmtud_lost
+        );
+    }
+
     #[test]
     fn non_probe_ack_ignored() {
         const MTU: usize = 1500;

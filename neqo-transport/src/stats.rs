@@ -18,7 +18,7 @@ use enum_map::EnumMap;
 use neqo_common::{Dscp, Ecn, qdebug};
 use strum::IntoEnumIterator as _;
 
-use crate::{cc::CongestionEvent, ecn, packet};
+use crate::{ecn, packet};
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct FrameStats {
@@ -142,16 +142,27 @@ pub enum SlowStartExitReason {
     Heuristic,
 }
 
+/// Congestion event counters.
+///
+/// `loss` and `ecn` are mutually exclusive triggers (their sum equals the total number of
+/// congestion events). `spurious` is an orthogonal category that applies to a subset of
+/// loss-triggered congestion events.
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct CongestionEventStats {
+    /// Congestion events triggered by packet loss.
+    pub loss: usize,
+    /// Congestion events triggered by ECN-CE marks.
+    pub ecn: usize,
+    /// Congestion events later found to be spurious, due to packets which were initially
+    /// considered lost but later got acknowledged.
+    pub spurious: usize,
+}
+
 /// Congestion Control stats
 #[derive(Default, Clone, PartialEq)]
 pub struct CongestionControlStats {
-    /// Total number of congestion events caused by packet loss, total number of
-    /// congestion events caused by ECN-CE marked packets, and number of
-    /// spurious congestion events, where congestion was incorrectly inferred
-    /// due to packets initially considered lost but subsequently acknowledged.
-    /// The latter indicates instances where the congestion control algorithm
-    /// overreacted to perceived losses.
-    pub congestion_events: EnumMap<CongestionEvent, usize>,
+    /// Congestion event counters. Includes trigger type and other qualifier flags.
+    pub congestion_events: CongestionEventStats,
     /// The congestion window size (in bytes) when we exited slow start.
     /// None if we haven't exited slow start or if we re-entered after spurious congestion.
     /// When exiting via congestion event, this is the cwnd AFTER the reduction.
@@ -416,9 +427,9 @@ impl Debug for Stats {
         writeln!(
             f,
             "    ce_loss {} ce_ecn {} ce_spurious {}",
-            self.cc.congestion_events[CongestionEvent::Loss],
-            self.cc.congestion_events[CongestionEvent::Ecn],
-            self.cc.congestion_events[CongestionEvent::Spurious],
+            self.cc.congestion_events.loss,
+            self.cc.congestion_events.ecn,
+            self.cc.congestion_events.spurious,
         )?;
         writeln!(
             f,
@@ -472,6 +483,52 @@ impl Deref for StatsCell {
 impl Debug for StatsCell {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.stats.borrow().fmt(f)
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use neqo_common::Ecn;
+
+    use super::{EcnCount, EcnTransitions, Stats, StatsCell};
+    use crate::packet;
+
+    #[test]
+    fn stats_init_sets_info() {
+        let mut stats = Stats::default();
+        stats.init("conn-1".into());
+        assert!(format!("{stats:?}").contains("conn-1"));
+    }
+
+    #[test]
+    fn stats_cell_debug() {
+        let cell = StatsCell::default();
+        cell.borrow_mut().init("cell-test".into());
+        assert!(format!("{cell:?}").contains("cell-test"));
+    }
+
+    #[test]
+    fn ecn_count_deref_mut_and_deref() {
+        let mut counts = EcnCount::default();
+        // Write through DerefMut, read through Deref.
+        counts[packet::Type::Short][Ecn::Ect0] = 7;
+        assert_eq!(counts[packet::Type::Short][Ecn::Ect0], 7);
+    }
+
+    #[test]
+    fn ecn_count_debug_nonempty() {
+        let mut counts = EcnCount::default();
+        counts[packet::Type::Short][Ecn::Ce] = 3;
+        let s = format!("{counts:?}");
+        assert!(s.contains("Short"));
+    }
+
+    #[test]
+    fn ecn_transitions_deref_mut_and_deref() {
+        let mut trans = EcnTransitions::default();
+        trans[Ecn::Ect0][Ecn::Ce] = Some((packet::Type::Short, 42));
+        assert_eq!(trans[Ecn::Ect0][Ecn::Ce], Some((packet::Type::Short, 42)));
     }
 }
 

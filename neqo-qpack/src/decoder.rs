@@ -410,6 +410,20 @@ mod tests {
         );
     }
 
+    /// `dynamic_table_inserts` counts each insert instruction.
+    #[test]
+    fn dynamic_table_inserts_stat_increments() {
+        let mut decoder = connect();
+        assert!(decoder.decoder.set_capacity(200).is_ok());
+        assert_eq!(decoder.decoder.stats().dynamic_table_inserts, 0);
+
+        recv_instruction(&mut decoder, &[0xc4, 0x04, 0x31, 0x32, 0x33, 0x34], &Ok(()));
+        assert_eq!(decoder.decoder.stats().dynamic_table_inserts, 1);
+
+        recv_instruction(&mut decoder, &[0xc4, 0x04, 0x35, 0x36, 0x37, 0x38], &Ok(()));
+        assert_eq!(decoder.decoder.stats().dynamic_table_inserts, 2);
+    }
+
     // test insert with name literal - succeeds
     #[test]
     fn recv_insert_with_name_litarel_2() {

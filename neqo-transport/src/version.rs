@@ -234,3 +234,21 @@ impl Default for Config {
         Self::new(Version::default(), Version::all())
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::Version;
+
+    #[test]
+    fn version1_is_not_draft() {
+        assert!(!Version::Version1.is_draft());
+    }
+
+    #[cfg(feature = "draft-29")]
+    #[test]
+    fn draft29_is_draft() {
+        assert!(Version::Draft29.is_draft());
+        assert!(!Version::Version1.is_draft());
+    }
+}
