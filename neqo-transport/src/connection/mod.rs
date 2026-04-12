@@ -1709,7 +1709,7 @@ impl Connection {
                 false
             };
             if updated {
-                qinfo!("[{self}] SCONE rate updated to {rate:x?}");
+                qdebug!("[{self}] SCONE rate updated to {rate:x?}");
                 self.events.scone_updated(rate);
             }
         }
