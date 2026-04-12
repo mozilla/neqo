@@ -590,7 +590,7 @@ impl<'a> Public<'a> {
 
     /// Decode the type-specific portions of a long header.
     /// This includes reading the length and the remainder of the packet.
-    /// Returns a tuple of: any token, the length of the header, and SCONE bitrate.
+    /// Returns a tuple of any token and the length of the header.
     fn decode_long(
         decoder: &mut Decoder<'a>,
         packet_type: Type,
