@@ -98,10 +98,9 @@ impl From<Bitrate> for Option<NonZeroU64> {
 
 #[cfg(test)]
 mod test {
-    use std::{
-        num::NonZeroU64,
-        time::{Duration, Instant},
-    };
+    use std::{num::NonZeroU64, time::Duration};
+
+    use test_fixture::now;
 
     use crate::scone::{Bitrate, Scone};
 
@@ -113,7 +112,7 @@ mod test {
         assert!(!Bitrate(0x7f).is_set());
 
         assert_eq!(Bitrate::UNKNOWN, Bitrate(0x7f));
-        let now = Instant::now();
+        let now = now();
         let mut base = Scone::new(now, BASE_RATE);
         let mut other = base.clone();
         assert!(!other.update(now + SEC, v));
@@ -139,7 +138,7 @@ mod test {
 
         assert!(LOWER_RATE < BASE_RATE);
 
-        let now = Instant::now();
+        let now = now();
         let mut base = Scone::new(now, BASE_RATE);
         assert!(base.update(now + SEC, Some(LOWER_RATE)));
         assert_eq!(base.rate, LOWER_RATE);
@@ -151,7 +150,7 @@ mod test {
 
         assert!(HIGHER_RATE > BASE_RATE);
 
-        let now = Instant::now();
+        let now = now();
         let mut base = Scone::new(now, BASE_RATE);
         assert!(!base.update(now + SEC, Some(HIGHER_RATE)));
         assert_eq!(base.rate, BASE_RATE);

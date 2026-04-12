@@ -1710,7 +1710,7 @@ impl Connection {
             false
         };
         if updated {
-            let rate = self.scone.as_ref().map_or(Bitrate::UNKNOWN, |s| s.rate());
+            let rate = self.scone.as_ref().map_or(Bitrate::UNKNOWN, Scone::rate);
             qdebug!("[{self}] SCONE rate updated to {rate:x?}");
             self.events.scone_updated(rate);
         }
