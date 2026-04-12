@@ -39,7 +39,7 @@ impl Scone {
         // This uses the simplest form of update, to keep it simple.
         // A fancier method would remember some number of higher-rate updates
         // and switch to those when the lower rate expires.
-        if rate.is_some_and(|r| r.0 <= self.rate.0) || self.expired(now) {
+        if rate.is_some_and(|r| r <= self.rate) || self.expired(now) {
             self.updated = now;
             let rate = rate.unwrap_or_default();
             let changed = rate != self.rate;
