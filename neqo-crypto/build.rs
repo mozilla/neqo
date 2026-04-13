@@ -63,38 +63,63 @@ struct Bindings {
 // bindgen needs access to libclang.
 // On windows, this doesn't just work, you have to set LIBCLANG_PATH.
 // Rather than download the 400Mb+ files, like gecko does, let's just reuse their work.
+// On macOS, clang-sys prefers the highest-versioned libclang it can find, which may be a
+// Homebrew LLVM that doesn't have the correct macOS SDK include paths, resulting in broken
+// bindings. Force use of Xcode's libclang instead.
 fn setup_clang() {
-    // If this isn't Windows, or we're in CI, then we don't need to do anything.
-    if env::consts::OS != "windows" || env::var("GITHUB_WORKFLOW").unwrap_or_default() == "CI" {
+    // In CI, the environment is already configured correctly.
+    if env::var("GITHUB_WORKFLOW").unwrap_or_default() == "CI" {
         return;
     }
     println!("cargo:rerun-if-env-changed=LIBCLANG_PATH");
-    println!("cargo:rerun-if-env-changed=MOZBUILD_STATE_PATH");
     if env::var("LIBCLANG_PATH").is_ok() {
         return;
     }
-    let mozbuild_root = if let Ok(dir) = env::var("MOZBUILD_STATE_PATH") {
-        PathBuf::from(dir.trim())
-    } else {
-        println!("cargo:warning=Building without a gecko setup is not likely to work.");
-        println!("cargo:warning=A working libclang is needed to build neqo.");
-        println!("cargo:warning=Either LIBCLANG_PATH or MOZBUILD_STATE_PATH needs to be set.");
-        println!("cargo:warning=We recommend checking out https://github.com/mozilla/gecko-dev");
-        println!("cargo:warning=Then run `./mach bootstrap` which will retrieve clang.");
-        println!("cargo:warning=Make sure to export MOZBUILD_STATE_PATH when building.");
-        return;
-    };
-    let libclang_dir = mozbuild_root.join("clang").join("lib");
-    if libclang_dir.is_dir() {
-        unsafe {
-            env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
+    if env::consts::OS == "macos" {
+        if let Ok(output) = Command::new("xcode-select").arg("--print-path").output() {
+            if output.status.success() {
+                let xcode_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let libclang_dir =
+                    PathBuf::from(xcode_path).join("Toolchains/XcodeDefault.xctoolchain/usr/lib");
+                if libclang_dir.is_dir() {
+                    unsafe {
+                        env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
+                    }
+                } else {
+                    println!(
+                        "cargo:warning=Xcode toolchain libclang not found at {}; set LIBCLANG_PATH if build fails",
+                        libclang_dir.display()
+                    );
+                }
+            }
+        } else {
+            println!("cargo:warning=xcode-select not found; set LIBCLANG_PATH if build fails");
         }
-        println!(
-            "cargo:rustc-env=LIBCLANG_PATH={}",
-            libclang_dir.to_str().unwrap()
-        );
-    } else {
-        println!("cargo:warning=LIBCLANG_PATH isn't set; maybe run ./mach bootstrap with gecko");
+    } else if env::consts::OS == "windows" {
+        println!("cargo:rerun-if-env-changed=MOZBUILD_STATE_PATH");
+        let mozbuild_root = if let Ok(dir) = env::var("MOZBUILD_STATE_PATH") {
+            PathBuf::from(dir.trim())
+        } else {
+            println!("cargo:warning=Building without a gecko setup is not likely to work.");
+            println!("cargo:warning=A working libclang is needed to build neqo.");
+            println!("cargo:warning=Either LIBCLANG_PATH or MOZBUILD_STATE_PATH needs to be set.");
+            println!("cargo:warning=We recommend checking out https://github.com/mozilla/gecko-dev");
+            println!("cargo:warning=Then run `./mach bootstrap` which will retrieve clang.");
+            println!("cargo:warning=Make sure to export MOZBUILD_STATE_PATH when building.");
+            return;
+        };
+        let libclang_dir = mozbuild_root.join("clang").join("lib");
+        if libclang_dir.is_dir() {
+            unsafe {
+                env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
+            }
+            println!(
+                "cargo:rustc-env=LIBCLANG_PATH={}",
+                libclang_dir.to_str().unwrap()
+            );
+        } else {
+            println!("cargo:warning=LIBCLANG_PATH isn't set; maybe run ./mach bootstrap with gecko");
+        }
     }
 }
 
@@ -331,8 +356,6 @@ fn pkg_config() -> Vec<String> {
 }
 
 fn setup_standalone(nss: &str) -> Vec<String> {
-    setup_clang();
-
     println!("cargo:rerun-if-env-changed=NSS_DIR");
     println!("cargo:rerun-if-env-changed=NSS_PREBUILT");
     let nss = PathBuf::from(nss);
@@ -456,6 +479,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/min_version.rs");
     println!("cargo:rerun-if-changed=min_version.txt");
     println!("cargo:rustc-check-cfg=cfg(nss_nodb)");
+    setup_clang();
     let flags = if cfg!(feature = "gecko") {
         setup_for_gecko()
     } else if let Ok(nss_dir) = env::var("NSS_DIR") {
