@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
+        uses: mozilla/actions/toolchains@66a0665e8ea4b3ba7a8fd010b791f56625d6a932 # v1.0.11
 
   check:
     name: Run checks
@@ -79,14 +79,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
+      - uses: mozilla/actions/rust@66a0665e8ea4b3ba7a8fd010b791f56625d6a932 # v1.0.11
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
           tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful ' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mozilla/actions/nss@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
+      - uses: mozilla/actions/nss@66a0665e8ea4b3ba7a8fd010b791f56625d6a932 # v1.0.11
         with:
           version-file: neqo-crypto/min_version.txt
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -156,7 +156,7 @@ jobs:
 
       - name: Save simulation seeds artifact
         if: ${{ always() }}
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
           path: simulation-seeds
@@ -169,7 +169,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
+      - uses: mozilla/actions/rust@66a0665e8ea4b3ba7a8fd010b791f56625d6a932 # v1.0.11
         with:
           version: stable
           tools: cargo-hack

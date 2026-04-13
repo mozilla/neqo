@@ -103,7 +103,7 @@ runs:
         echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
-      uses: vmactions/freebsd-vm@4807432c7cab1c3f97688665332c0b932062d31f # v1.4.3
+      uses: vmactions/freebsd-vm@7ca82f79fe3078fecded6d3a2bff094995447bbd # v1.4.4
       with:
         usesh: true
         disable-cache: true
@@ -112,7 +112,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'openbsd' }}
-      uses: vmactions/openbsd-vm@3fafb45f2e2e696249c583835939323fe1c3448c # v1.3.7
+      uses: vmactions/openbsd-vm@9004791062e748d95cc87e499e77485f91888ce1 # v1.3.8
       with:
         usesh: true
         disable-cache: true
