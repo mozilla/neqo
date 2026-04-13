@@ -79,16 +79,19 @@ fn setup_clang() {
         if let Ok(output) = Command::new("xcode-select").arg("--print-path").output() {
             if output.status.success() {
                 let xcode_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let libclang_dir =
-                    PathBuf::from(xcode_path).join("Toolchains/XcodeDefault.xctoolchain/usr/lib");
-                if libclang_dir.is_dir() {
+                let candidates = [
+                    PathBuf::from(&xcode_path)
+                        .join("Toolchains/XcodeDefault.xctoolchain/usr/lib"),
+                    PathBuf::from(&xcode_path).join("usr/lib"),
+                ];
+                if let Some(libclang_dir) = candidates.iter().find(|p| p.is_dir()) {
                     unsafe {
                         env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
                     }
                 } else {
                     eprintln!(
                         "warning: Xcode toolchain libclang not found at {}; set LIBCLANG_PATH if build fails",
-                        libclang_dir.display()
+                        candidates[0].display()
                     );
                 }
             } else {
