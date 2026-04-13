@@ -31,7 +31,7 @@ pub struct Search {
     /// The current index of the circular array. `None` if uninitialized.
     curr_idx: Option<usize>,
     /// Time at which the current bin will be passed and the next should start.
-    bin_end: Instant,
+    bin_end: Option<Instant>,
     /// The duration of each bin.
     bin_duration: Duration,
     /// Tracking amount of acked bytes this connection. Is incremented on every ACK.
@@ -67,12 +67,12 @@ impl Search {
     const THRESH: usize = 26;
 
     /// Creates a new SEARCH slow start instance.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             acked_bins: [0; Self::NUM_ACKED_BINS],
             sent_bins: [0; Self::NUM_SENT_BINS],
             curr_idx: None,
-            bin_end: Instant::now(),
+            bin_end: None,
             bin_duration: Duration::from_millis(0),
             acked_bytes: 0,
             sent_bytes: 0,
@@ -88,7 +88,7 @@ impl Search {
         // BIN_DURATION = WINDOW_SIZE / W = initial_rtt * WINDOW_SIZE_FACTOR / W
         self.bin_duration = initial_rtt * Self::WINDOW_SIZE_FACTOR_NUM
             / (Self::WINDOW_SIZE_FACTOR_DEN * Self::W as u32);
-        self.bin_end = now + self.bin_duration;
+        self.bin_end = Some(now + self.bin_duration);
         self.curr_idx = Some(0);
         self.acked_bins[0] = self.acked_bytes;
         self.sent_bins[0] = self.sent_bytes;
@@ -103,9 +103,10 @@ impl Search {
     )]
     fn update_bins(&mut self, now: Instant) -> Option<usize> {
         let mut curr_idx = self.curr_idx?;
+        let mut bin_end = self.bin_end?;
 
         // passed_bins = (now - bin_end) / bin_duration + 1 -- integer division floors implicitly
-        let passed_bins = (now.saturating_duration_since(self.bin_end).as_nanos()
+        let passed_bins = (now.saturating_duration_since(bin_end).as_nanos()
             / self.bin_duration.as_nanos()
             + 1) as usize;
 
@@ -131,8 +132,9 @@ impl Search {
 
         // Update the index and bin end
         curr_idx += passed_bins;
+        bin_end += self.bin_duration.saturating_mul(passed_bins as u32);
         self.curr_idx = Some(curr_idx);
-        self.bin_end += self.bin_duration.saturating_mul(passed_bins as u32);
+        self.bin_end = Some(bin_end);
 
         // NOTE: SEARCH suggests bit-shifting the values tracked in bins to keep a smaller memory
         // footprint. I suggest not taking on this extra complexity unless it can be seen as
@@ -183,7 +185,9 @@ impl SlowStart for Search {
         }
 
         // Early return if we haven't passed the current bin.
-        if now <= self.bin_end {
+        if let Some(bin_end) = self.bin_end
+            && now <= bin_end
+        {
             qdebug!("SEARCH: on_packets_acked: haven't reached current bin_end");
             return None;
         }
@@ -227,6 +231,7 @@ impl SlowStart for Search {
         );
         Some(curr_cwnd)
     }
+
     fn on_packet_sent(&mut self, _sent_pn: packet::Number, sent_bytes: usize) {
         self.sent_bytes += sent_bytes;
     }
