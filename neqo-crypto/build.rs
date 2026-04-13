@@ -315,7 +315,7 @@ fn pkg_config() -> Vec<String> {
     let cfg_str = String::from_utf8(cfg).expect("non-UTF8 from pkg-config");
 
     let mut flags: Vec<String> = Vec::new();
-    for f in cfg_str.split(' ') {
+    for f in cfg_str.split_whitespace() {
         if f.starts_with("-I") {
             flags.push(String::from(f));
         } else if let Some(path) = f.strip_prefix("-L") {
