@@ -26,13 +26,10 @@ jobs:
     permissions:
       contents: read
       pull-requests: write # Required to post review comments.
+      issues: read # Required to read issue context via MCP tools.
+      actions: read # Required to read workflow run context via MCP tools.
     steps:
-      # Sparse-checkout the local composite action from the base branch.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/actions/claude-review
-          persist-credentials: false
-      - uses: ./.github/actions/claude-review
+      - uses: mozilla/actions/claude-review@a0ac5cff697f78934b98cb04d21228e061641a94 # v1.0.8
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }} # zizmor: ignore[secrets-outside-env] Trusted collaborators skip the environment gate by design.
 
@@ -48,12 +45,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: write # Required to post review comments.
+      issues: read # Required to read issue context via MCP tools.
+      actions: read # Required to read workflow run context via MCP tools.
     steps:
-      # Sparse-checkout the local composite action from the base branch.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/actions/claude-review
-          persist-credentials: false
-      - uses: ./.github/actions/claude-review
+      - uses: mozilla/actions/claude-review@a0ac5cff697f78934b98cb04d21228e061641a94 # v1.0.8
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
