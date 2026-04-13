@@ -99,6 +99,7 @@ jobs:
           # tquic: https://github.com/quic-interop/quic-interop-runner/pull/385/files
           # openssl: https://github.com/quic-interop/quic-interop-runner/pull/402/files
           # linuxquic: https://github.com/quic-interop/quic-interop-runner/pull/428
+          # quic-zig: https://github.com/quic-interop/quic-interop-runner/pull/491
           cat <<EOF > additional.json
           {
             "neqo-pr": {
@@ -124,6 +125,11 @@ jobs:
             "linuxquic": {
               "image": "quay.io/lxin/linuxquic-interop:latest",
               "url": "https://github.com/lxin/quic",
+              "role": "both"
+            },
+            "quic-zig": {
+              "image": "ghcr.io/endel/quic-zig:latest",
+              "url": "https://github.com/endel/quic-zig",
               "role": "both"
             }
           }
