@@ -92,7 +92,9 @@ fn setup_clang() {
                     );
                 }
             } else {
-                println!("cargo:warning=xcode-select returned an error; set LIBCLANG_PATH if build fails");
+                println!(
+                    "cargo:warning=xcode-select returned an error; set LIBCLANG_PATH if build fails"
+                );
             }
         } else {
             println!("cargo:warning=xcode-select not found; set LIBCLANG_PATH if build fails");
