@@ -78,20 +78,17 @@ fn setup_clang() {
     if env::consts::OS == "macos" {
         if let Ok(output) = Command::new("xcode-select").arg("--print-path").output() {
             if output.status.success() {
-                let xcode_path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-                let libclang_dirs = [
-                    xcode_path.join("Toolchains/XcodeDefault.xctoolchain/usr/lib"),
-                    xcode_path.join("usr/lib"),
-                ];
-                if let Some(libclang_dir) = libclang_dirs.iter().find(|path| path.is_dir()) {
+                let xcode_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let libclang_dir =
+                    PathBuf::from(xcode_path).join("Toolchains/XcodeDefault.xctoolchain/usr/lib");
+                if libclang_dir.is_dir() {
                     unsafe {
                         env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
                     }
                 } else {
-                    println!(
-                        "cargo:warning=libclang not found at {} or {}; set LIBCLANG_PATH if build fails",
-                        libclang_dirs[0].display(),
-                        libclang_dirs[1].display()
+                    eprintln!(
+                        "warning: Xcode toolchain libclang not found at {}; set LIBCLANG_PATH if build fails",
+                        libclang_dir.display()
                     );
                 }
             } else {
@@ -120,10 +117,6 @@ fn setup_clang() {
             unsafe {
                 env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
             }
-            println!(
-                "cargo:rustc-env=LIBCLANG_PATH={}",
-                libclang_dir.to_str().unwrap()
-            );
         } else {
             println!("cargo:warning=LIBCLANG_PATH isn't set; maybe run ./mach bootstrap with gecko");
         }
