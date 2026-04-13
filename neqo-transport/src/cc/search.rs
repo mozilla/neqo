@@ -9,7 +9,6 @@
 
 use std::{
     fmt::Display,
-    ops::{Add as _, Div as _},
     time::{Duration, Instant},
 };
 
@@ -48,8 +47,10 @@ impl Display for Search {
 }
 
 impl Search {
-    /// Factor for calculating the window size with the initial RTT.
-    const WINDOW_SIZE_FACTOR: f64 = 3.5;
+    /// Numerator of the factor for calculating the window size with the initial RTT (= 3.5).
+    const WINDOW_SIZE_FACTOR_NUM: u32 = 35;
+    /// Denominator of the factor for calculating the window size with the initial RTT (= 3.5).
+    const WINDOW_SIZE_FACTOR_DEN: u32 = 10;
     /// Number of bins per window.
     const W: usize = 10;
     /// Additional bins needed to allow lookback by the current RTT for getting previously sent
@@ -59,9 +60,11 @@ impl Search {
     const NUM_ACKED_BINS: usize = Self::W + 1;
     /// Total number of bins in the circular buffer for sent bytes.
     const NUM_SENT_BINS: usize = Self::NUM_ACKED_BINS + Self::EXTRA_BINS;
+    /// Scale factor for integer approximations of fractional values (e.g. `THRESH`).
+    const SCALE: usize = 100;
     /// The upper bound for the permissible normalized difference between previously sent bytes and
-    /// current delivered bytes.
-    const THRESH: f64 = 0.26;
+    /// current delivered bytes, as an integer out of `SCALE` (= 0.26).
+    const THRESH: usize = 26;
 
     /// Creates a new SEARCH slow start instance.
     pub fn new() -> Self {
@@ -79,13 +82,12 @@ impl Search {
     /// Initializes SEARCH state on the first ACK using the measured RTT.
     #[expect(
         clippy::cast_possible_truncation,
-        reason = "casting small constant usize to u32 for use in function"
+        reason = "casting small constant usize to u32 for use in Duration::div"
     )]
     fn initialize(&mut self, initial_rtt: Duration, now: Instant) {
         // BIN_DURATION = WINDOW_SIZE / W = initial_rtt * WINDOW_SIZE_FACTOR / W
-        self.bin_duration = initial_rtt
-            .mul_f64(Self::WINDOW_SIZE_FACTOR)
-            .div(Self::W as u32);
+        self.bin_duration = initial_rtt * Self::WINDOW_SIZE_FACTOR_NUM
+            / (Self::WINDOW_SIZE_FACTOR_DEN * Self::W as u32);
         self.bin_end = now + self.bin_duration;
         self.curr_idx = Some(0);
         self.acked_bins[0] = self.acked_bytes;
@@ -97,22 +99,15 @@ impl Search {
     /// Returns the new bin index, or `None` if bins couldn't be updated.
     #[expect(
         clippy::cast_possible_truncation,
-        reason = "casting small usize to u32 for use in a function"
-    )]
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "casting positive f64 to usize after flooring"
+        reason = "casting small usize to u32 for use in Duration::saturating_mul"
     )]
     fn update_bins(&mut self, now: Instant) -> Option<usize> {
         let mut curr_idx = self.curr_idx?;
 
-        // passed_bins = (now - bin_end) / bin_duration + 1 -- we floor the division result to a
-        // usize value
-        let passed_bins = now
-            .saturating_duration_since(self.bin_end)
-            .div_duration_f64(self.bin_duration)
-            .floor()
-            .add(1.0) as usize;
+        // passed_bins = (now - bin_end) / bin_duration + 1 -- integer division floors implicitly
+        let passed_bins = (now.saturating_duration_since(self.bin_end).as_nanos()
+            / self.bin_duration.as_nanos()
+            + 1) as usize;
 
         // Reset if more than a full window of bins was skipped (e.g., app-limited or
         // flow-control-limited). The bin data is too stale for meaningful SEARCH detection.
@@ -157,27 +152,14 @@ impl Search {
     /// Computes sent bytes between two (previous) bin indices. Interpolates a fraction of each bin
     /// on the ends to get the accurate value when actual previous timestamp is between two
     /// bins.
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_precision_loss,
-        clippy::cast_sign_loss,
-        reason = "casting usize to f64 and back to do f64 math"
-    )]
-    fn compute_sent(&self, old: usize, new: usize, fraction: f64) -> usize {
-        let backward = self.sent_bins[(new - 1) % Self::NUM_SENT_BINS]
-            .saturating_sub(self.sent_bins[(old - 1) % Self::NUM_SENT_BINS])
-            as f64;
-
-        // For testing -- the draft actually has forward interpolation instead of backwards, but
-        // backwards makes sense logically.
-        let _forward = self.sent_bins[(new + 1) % Self::NUM_SENT_BINS]
-            .saturating_sub(self.sent_bins[(old + 1) % Self::NUM_SENT_BINS])
-            as f64;
-
-        let base = self.sent_bins[new % Self::NUM_SENT_BINS]
-            .saturating_sub(self.sent_bins[old % Self::NUM_SENT_BINS]) as f64;
-
-        backward.mul_add(fraction, base * (1.0 - fraction)) as usize
+    const fn compute_sent(&self, old: usize, new: usize, fraction: usize) -> usize {
+        let mut sent = (self.sent_bins[(new - 1) % Self::NUM_SENT_BINS]
+            .saturating_sub(self.sent_bins[(old - 1) % Self::NUM_SENT_BINS]))
+            * fraction;
+        sent += (self.sent_bins[new % Self::NUM_SENT_BINS]
+            .saturating_sub(self.sent_bins[old % Self::NUM_SENT_BINS]))
+            * (Self::SCALE - fraction);
+        sent / Self::SCALE
     }
 }
 
@@ -208,16 +190,12 @@ impl SlowStart for Search {
 
         let curr_idx = self.update_bins(now)?;
 
-        // Floor the previous index value. If we have enough data for a SEARCH check we will
-        // calculate the fraction remainder later to then interpolate when calculating the
-        // previously sent bytes.
-        let bins_last_rtt = rtt.div_duration_f64(self.bin_duration);
-        #[expect(
-            clippy::cast_sign_loss,
-            clippy::cast_possible_truncation,
-            reason = "casting small positive f64 to usize"
-        )]
-        let prev_idx = curr_idx.saturating_sub(bins_last_rtt.floor() as usize);
+        // Compute how many bins fit in the current RTT (integer quotient = floor), and the
+        // fractional remainder scaled to 0..SCALE for interpolation in compute_sent.
+        let rtt_nanos = rtt.as_nanos();
+        let bin_nanos = self.bin_duration.as_nanos();
+        let bins_last_rtt = (rtt_nanos / bin_nanos) as usize;
+        let prev_idx = curr_idx.saturating_sub(bins_last_rtt);
 
         qdebug!("SEARCH: on_packets_acked: prev_idx {prev_idx} curr_idx {curr_idx}");
         // Early return if we don't have enough data for a SEARCH check.
@@ -225,7 +203,7 @@ impl SlowStart for Search {
             qdebug!("SEARCH: on_packets_acked: not enough data for SEARCH check");
             return None;
         }
-        let fraction = bins_last_rtt.fract();
+        let fraction = ((rtt_nanos % bin_nanos) * Self::SCALE as u128 / bin_nanos) as usize;
 
         let curr_delv = self.compute_delv(curr_idx - Self::W, curr_idx);
         let prev_sent = self.compute_sent(prev_idx - Self::W, prev_idx, fraction);
@@ -233,21 +211,18 @@ impl SlowStart for Search {
         if prev_sent == 0 {
             return None;
         }
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "casting usize that fits into 2^53 to f64"
-        )]
-        let norm_diff = (prev_sent.saturating_sub(curr_delv) as f64).div(prev_sent as f64);
+        let diff = prev_sent.saturating_sub(curr_delv);
+        let norm_diff = diff * Self::SCALE / prev_sent;
 
         if norm_diff < Self::THRESH {
             qdebug!(
-                "SEARCH: on_packets_acked: norm diff {norm_diff} < THRESH {} --> continue",
+                "SEARCH: on_packets_acked: norm_diff {norm_diff} < THRESH {} --> continue",
                 Self::THRESH
             );
             return None;
         }
         qdebug!(
-            "SEARCH: on_packets_acked: norm diff {norm_diff} > THRESH {} --> exit",
+            "SEARCH: on_packets_acked: norm_diff {norm_diff} >= THRESH {} --> exit",
             Self::THRESH
         );
         Some(curr_cwnd)
