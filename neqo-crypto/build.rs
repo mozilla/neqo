@@ -83,7 +83,7 @@ fn setup_clang() {
                     xcode_path.join("Toolchains/XcodeDefault.xctoolchain/usr/lib"),
                     xcode_path.join("usr/lib"),
                 ];
-                if let Some(libclang_dir) = libclang_dirs.into_iter().find(|path| path.is_dir()) {
+                if let Some(libclang_dir) = libclang_dirs.iter().find(|path| path.is_dir()) {
                     unsafe {
                         env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
                     }
