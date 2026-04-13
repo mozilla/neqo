@@ -79,7 +79,6 @@ fn setup_clang() {
         println!("cargo:warning=Building without a gecko setup is not likely to work.");
         println!("cargo:warning=A working libclang is needed to build neqo.");
         println!("cargo:warning=Either LIBCLANG_PATH or MOZBUILD_STATE_PATH needs to be set.");
-        println!("cargo:warning=");
         println!("cargo:warning=We recommend checking out https://github.com/mozilla/gecko-dev");
         println!("cargo:warning=Then run `./mach bootstrap` which will retrieve clang.");
         println!("cargo:warning=Make sure to export MOZBUILD_STATE_PATH when building.");
