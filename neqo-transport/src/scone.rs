@@ -77,10 +77,10 @@ impl PartialOrd for Bitrate {
 
 impl From<(u8, u32)> for Bitrate {
     fn from((first, version): (u8, u32)) -> Self {
-    fn from((first, version): (u8, u32)) -> Self {
-        // 7-bit signal: bits [6:1] from first byte, bit [0] from version MSB.
-        Self(u8::try_from(version >> 31).expect("always u8") | ((first & 0x3f) << 1))
-    }
+        fn from((first, version): (u8, u32)) -> Self {
+            // 7-bit signal: bits [6:1] from first byte, bit [0] from version MSB.
+            Self(u8::try_from(version >> 31).expect("always u8") | ((first & 0x3f) << 1))
+        }
     }
 }
 
