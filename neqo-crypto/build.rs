@@ -80,8 +80,7 @@ fn setup_clang() {
             if output.status.success() {
                 let xcode_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 let candidates = [
-                    PathBuf::from(&xcode_path)
-                        .join("Toolchains/XcodeDefault.xctoolchain/usr/lib"),
+                    PathBuf::from(&xcode_path).join("Toolchains/XcodeDefault.xctoolchain/usr/lib"),
                     PathBuf::from(&xcode_path).join("usr/lib"),
                 ];
                 if let Some(libclang_dir) = candidates.iter().find(|p| p.is_dir()) {
