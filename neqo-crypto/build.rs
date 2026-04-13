@@ -86,18 +86,18 @@ fn setup_clang() {
                         env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
                     }
                 } else {
-                    println!(
-                        "cargo:warning=Xcode toolchain libclang not found at {}; set LIBCLANG_PATH if build fails",
+                    eprintln!(
+                        "warning: Xcode toolchain libclang not found at {}; set LIBCLANG_PATH if build fails",
                         libclang_dir.display()
                     );
                 }
             } else {
-                println!(
-                    "cargo:warning=xcode-select returned an error; set LIBCLANG_PATH if build fails"
+                eprintln!(
+                    "warning: xcode-select returned an error; set LIBCLANG_PATH if build fails"
                 );
             }
         } else {
-            println!("cargo:warning=xcode-select not found; set LIBCLANG_PATH if build fails");
+            eprintln!("warning: xcode-select not found; set LIBCLANG_PATH if build fails");
         }
     } else if env::consts::OS == "windows" {
         println!("cargo:rerun-if-env-changed=MOZBUILD_STATE_PATH");
