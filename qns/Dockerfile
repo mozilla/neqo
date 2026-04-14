@@ -23,17 +23,12 @@ ENV NSS_DIR=/nss \
     NSPR_DIR=/nspr \
     LD_LIBRARY_PATH=/dist/Release/lib
 
+ARG MOZILLA_ACTIONS_REF=main
 RUN --mount=type=secret,id=github_token,required=false \
     TOKEN=$(cat /run/secrets/github_token 2>/dev/null || true); \
-    if [ -n "${TOKEN}" ]; then \
-        curl -sLf -H "Authorization: Bearer ${TOKEN}" \
-            https://raw.githubusercontent.com/mozilla/actions/v1.0.4/nss/nss-versions.env \
-            -o /tmp/nss-versions.env; \
-    else \
-        curl -sLf \
-            https://raw.githubusercontent.com/mozilla/actions/v1.0.4/nss/nss-versions.env \
-            -o /tmp/nss-versions.env; \
-    fi
+    curl -sLf ${TOKEN:+-H "Authorization: Bearer ${TOKEN}"} \
+        "https://raw.githubusercontent.com/mozilla/actions/${MOZILLA_ACTIONS_REF}/nss/nss-versions.env" \
+        -o /tmp/nss-versions.env
 RUN set -eux; \
     . /tmp/nss-versions.env; \
     mkdir -p "$NSPR_DIR" "$NSS_DIR"; \
