@@ -36,7 +36,7 @@ hex = { version = "0.4", default-features = false }
 http = { version = "1", default-features = false, features = ["std"] }
 libc = { version = "0.2", default-features = false }
 log = { version = "0.4", default-features = false }
-nss = { git = "https://github.com/mozilla/nss-rs", rev = "3c99b2581d1b17a66d531db9d0aab5237c62ba59" }
+nss = { rev = "0.8.0", package = "nss-rs", git = "https://github.com/mozilla/nss-rs" }
 qlog = { version = "0.16.0", default-features = false }
 quinn-udp = { version = "0.6", default-features = false, features = ["log", "fast-apple-datapath"] }
 rustc-hash = { version = "2.1", default-features = false, features = [ "std" ]}

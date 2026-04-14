@@ -538,7 +538,7 @@ dependencies = [
  "neqo-http3",
  "neqo-qpack",
  "neqo-transport",
- "nss",
+ "nss-rs",
  "test-fixture",
 ]
 
@@ -780,7 +780,7 @@ dependencies = [
  "neqo-http3",
  "neqo-transport",
  "neqo-udp",
- "nss",
+ "nss-rs",
  "qlog",
  "quinn-udp",
  "rustc-hash",
@@ -818,7 +818,7 @@ dependencies = [
  "neqo-http3",
  "neqo-qpack",
  "neqo-transport",
- "nss",
+ "nss-rs",
  "qlog",
  "rustc-hash",
  "sfv",
@@ -853,7 +853,7 @@ dependencies = [
  "mtu",
  "neqo-common",
  "neqo-transport",
- "nss",
+ "nss-rs",
  "qlog",
  "rustc-hash",
  "smallvec",
@@ -898,9 +898,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "nss"
+name = "nss-rs"
 version = "0.8.0"
-source = "git+https://github.com/mozilla/nss-rs?rev=3c99b2581d1b17a66d531db9d0aab5237c62ba59#3c99b2581d1b17a66d531db9d0aab5237c62ba59"
+source = "git+https://github.com/mozilla/nss-rs?rev=0.8.0#7cc1c33b8941cb2d0b7e1728989759ff1a0622a6"
 dependencies = [
  "bindgen",
  "enum-map",
@@ -1284,7 +1284,7 @@ dependencies = [
  "neqo-common",
  "neqo-http3",
  "neqo-transport",
- "nss",
+ "nss-rs",
  "qlog",
 ]
 
