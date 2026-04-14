@@ -68,6 +68,7 @@ struct Bindings {
 // bindings. Force use of Xcode's libclang instead.
 fn setup_clang() {
     println!("cargo:rerun-if-env-changed=LIBCLANG_PATH");
+    println!("cargo:rerun-if-env-changed=CI");
     // In CI, the environment is already configured correctly.
     if env::var("CI").is_ok() {
         return;
