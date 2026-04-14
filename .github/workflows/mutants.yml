@@ -29,12 +29,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/nss@66a0665e8ea4b3ba7a8fd010b791f56625d6a932 # v1.0.11
+      - uses: mozilla/actions/nss@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
         with:
           version-file: neqo-crypto/min_version.txt
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mozilla/actions/rust@66a0665e8ea4b3ba7a8fd010b791f56625d6a932 # v1.0.11
+      - uses: mozilla/actions/rust@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
         with:
           version: nightly
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -64,12 +64,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/nss@66a0665e8ea4b3ba7a8fd010b791f56625d6a932 # v1.0.11
+      - uses: mozilla/actions/nss@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
         with:
           version-file: neqo-crypto/min_version.txt
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mozilla/actions/rust@66a0665e8ea4b3ba7a8fd010b791f56625d6a932 # v1.0.11
+      - uses: mozilla/actions/rust@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
         with:
           version: nightly
           tools: cargo-mutants
