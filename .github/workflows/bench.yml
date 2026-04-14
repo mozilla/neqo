@@ -133,7 +133,7 @@ jobs:
       # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
       - name: Restore machine
         if: always()
-        uses: ./.github/actions/cpu-tuning
+        uses: ./neqo/.github/actions/cpu-tuning
         with:
           mode: restore
 
