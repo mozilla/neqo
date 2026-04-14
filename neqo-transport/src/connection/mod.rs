@@ -1694,6 +1694,12 @@ impl Connection {
             // path validation to this path.
             path.borrow_mut().set_valid(now);
         }
+
+        // Update SCONE signal.
+        if let Some(rate) = path.borrow_mut().update_scone(now, packet.scone()) {
+            qdebug!("[{self}] SCONE rate updated to {rate:x?}");
+            self.events.scone_updated(rate);
+        }
     }
 
     /// Take a datagram as input.  This reports an error if the packet was bad.

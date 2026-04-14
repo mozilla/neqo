@@ -1169,7 +1169,8 @@ impl Http3Client {
                 }
                 ConnectionEvent::SendStreamComplete { .. }
                 | ConnectionEvent::OutgoingDatagramOutcome { .. }
-                | ConnectionEvent::IncomingDatagramDropped => {}
+                | ConnectionEvent::IncomingDatagramDropped
+                | ConnectionEvent::SconeUpdated(_) => {}
             }
         }
         Ok(())

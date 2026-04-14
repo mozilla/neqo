@@ -26,6 +26,7 @@ use crate::{
     pmtud::Pmtud,
     recovery::{self, sent},
     rtt::{RttEstimate, RttSource},
+    scone::{Bitrate, Scone},
     sender::PacketSender,
     stateless_reset::Token as Srt,
     stats::FrameStats,
@@ -546,6 +547,8 @@ pub struct Path {
     sent_bytes: usize,
     /// The ECN-related state for this path (see RFC9000, Section 13.4 and Appendix A.4)
     ecn_info: ecn::Info,
+    /// SCONE info for this path.
+    scone: Option<Scone>,
     /// For logging of events.
     qlog: Qlog,
 }
@@ -604,6 +607,7 @@ impl Path {
             received_bytes: 0,
             sent_bytes: 0,
             ecn_info: ecn::Info::default(),
+            scone: None,
             qlog,
         }
     }
@@ -666,6 +670,26 @@ impl Path {
         qdebug!("[{self}] Path validated {now:?}");
         self.state = ProbeState::Valid;
         self.validated = Some(now);
+    }
+
+    /// Apply updated SCONE information to this path.
+    /// Return a bitrate signal if this was updated AND on the primary path.
+    pub fn update_scone(&mut self, now: Instant, signal: Option<Bitrate>) -> Option<Bitrate> {
+        let updated = if let Some(s) = &mut self.scone {
+            s.update(now, signal)
+        } else if let Some(rate) = signal
+            && rate.is_set()
+        {
+            self.scone = Some(Scone::new(now, rate));
+            true
+        } else {
+            false
+        };
+        if updated && self.is_primary() {
+            self.scone.as_ref().map(Scone::rate)
+        } else {
+            None
+        }
     }
 
     /// Update the last use of this path, if it is valid.
