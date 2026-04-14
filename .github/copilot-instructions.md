@@ -1,11 +1,9 @@
 # Neqo: QUIC Implementation in Rust
 
 ## Overview
-
 Neqo is Mozilla's production QUIC, HTTP/3, and QPACK implementation used in Firefox. Written in Rust with NSS as the TLS backend. The server functionality is experimental and not production-ready.
 
 **Repository Structure**: Cargo workspace with 9 member crates plus support directories.
-
 - **Core crates**: `neqo-common` (shared utilities), `neqo-crypto` (TLS/NSS bindings), `neqo-transport` (QUIC protocol), `neqo-http3` (HTTP/3), `neqo-qpack` (QPACK compression), `neqo-udp` (UDP socket handling)
 - **Binary crate**: `neqo-bin` (CLI tools: `neqo-client`, `neqo-server`)
 - **Support crates**: `test-fixture` (test utilities), `fuzz` (fuzzing), `mtu` (MTU detection)
@@ -18,12 +16,10 @@ In addition to the instructions in this file, also follow the detailed instructi
 ## Building and Testing
 
 ### Prerequisites
-
 - NSS library version as specified in the `neqo-crypto/min_version.txt` file
 - System NSS will be used if available and new enough; otherwise, build will fetch and compile NSS automatically
 
 ### Essential Commands (Always Use --locked)
-
 All commands **must** include `--locked` to ensure consistent dependencies with CI:
 
 ```bash
@@ -41,23 +37,19 @@ cargo test --locked --workspace
 ```
 
 ### Validation Pipeline (CI Equivalent)
-
 Run these commands in order before submitting a PR. All must pass:
 
 1. **Format check** (requires nightly):
-
    ```bash
    cargo +nightly fmt --all -- --check
    ```
 
 2. **Clippy** (uses cargo-hack to check per-crate features):
-
    ```bash
    cargo hack clippy --feature-powerset --no-dev-deps --exclude-features gecko -- -D warnings
    ```
 
 3. **Documentation build**:
-
    ```bash
    cargo doc --workspace --no-deps --document-private-items
    # Must set RUSTDOCFLAGS for warnings-as-errors:
@@ -65,7 +57,6 @@ Run these commands in order before submitting a PR. All must pass:
    ```
 
 4. **Tests with coverage** (on stable toolchain):
-
    ```bash
    # Full test suite with coverage:
    cargo llvm-cov test --locked --include-ffi --features ci --lcov --output-path lcov.info
@@ -75,7 +66,6 @@ Run these commands in order before submitting a PR. All must pass:
    ```
 
 5. **Cargo deny** (license/advisory checks):
-
    ```bash
    cargo deny check advisories
    cargo deny check bans licenses sources
@@ -96,7 +86,6 @@ Run these commands in order before submitting a PR. All must pass:
 ## Repository Layout
 
 ### Source Structure
-
 ```
 neqo/
 ├── Cargo.toml          # Workspace manifest with shared dependencies and lints
@@ -119,7 +108,6 @@ neqo/
 ```
 
 ### Key Files
-
 - `Cargo.toml`: Workspace configuration, shared dependencies, lints (very strict clippy + Rust lints)
 - `.rustfmt.toml`: Format config (edition 2021, import grouping, comment formatting)
 - `.clippy.toml`: Clippy config (unwrap/dbg allowed in tests, disallows std::dbg macro, 32-byte pass-by-value limit)
@@ -129,7 +117,6 @@ neqo/
 ## CI/CD Pipeline
 
 ### GitHub Workflows (all must pass)
-
 - **check.yml** (CI): Builds and tests on Linux/macOS/Windows with MSRV, stable, and nightly. Runs coverage on stable. Tests client/server transfer. Runs on push to main and PRs.
 - **clippy.yml**: cargo hack clippy with feature powerset on all platforms
 - **rustfmt.yml** (Format): cargo fmt check with nightly
@@ -142,7 +129,6 @@ neqo/
 - **check-mtu.yml**: Checks MTU crate separately
 
 ### CI Commands Reference
-
 ```bash
 # Build command used in CI
 cargo check --locked --all-targets --features ci

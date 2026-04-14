@@ -189,7 +189,7 @@ runs:
 
           # system and bench are exclusive siblings with non-overlapping CPUs.
           # server and client are non-exclusive children of bench, subdividing it.
-          sudo cset set --cpu="$SYSTEM_CPUS" --set=system --cpu_exclusive --mem_exclusive
+          sudo cset set --cpu="$SYSTEM_CPUS" --set=system --cpu_exclusive
           sudo cset set --cpu="$SERVER_CPU,$CLIENT_CPU" --set=bench --cpu_exclusive --mem_exclusive
           sudo cset set --cpu="$SERVER_CPU" --set=bench/server
           sudo cset set --cpu="$CLIENT_CPU" --set=bench/client
