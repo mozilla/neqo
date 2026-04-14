@@ -108,7 +108,7 @@ jobs:
         env:
           BENCH_SET: ${{ steps.cpu-tuning.outputs.bench-set }}
         run: |
-          bench_exec() { nice -n -20 setarch --addr-no-randomize cset proc --set="$BENCH_SET" --exec "$@"; }
+          bench_exec() { sudo nice -n -20 setarch --addr-no-randomize cset proc --set="$BENCH_SET" --exec "$@"; }
           filter_cset() { grep -v '^cset' || test $? = 1; }
           shopt -s extglob nullglob
 

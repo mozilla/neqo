@@ -164,6 +164,7 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
     ws = shlex.quote(str(cfg.workspace))
     out_dir.mkdir(exist_ok=True)
     cmd = [
+        "sudo",
         "nice",
         "-n",
         "-20",
@@ -200,7 +201,7 @@ def perf(cfg, scmd, ccmd, name):
 
     def perf_cmd(cset, out, exe):
         return (
-            ["nice", "-n", "-20", "setarch", "--addr-no-randomize",
+            ["sudo", "nice", "-n", "-20", "setarch", "--addr-no-randomize",
              "cset", "proc", f"--set={cset}", "--exec", "perf", "--"]
             + shlex.split(cfg.perf_opt)
             + ["-o", f"{ws}/{out}"]
