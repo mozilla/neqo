@@ -184,7 +184,7 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
         "--min-runs",
         str(cfg.runs),
         "--prepare",
-        f"cset proc --set={shlex.quote(cfg.server_set)} --exec -- sh -c '{ws}/{scmd}' & sleep 0.2",
+        f"{ws}/{scmd} & echo $! >> /cpusets/{cfg.server_set}/tasks; sleep 0.2",
         "--conclude",
         f"pkill {tag}",
     ]
