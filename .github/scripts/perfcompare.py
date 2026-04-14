@@ -170,7 +170,7 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
         "-20",
         "setarch",
         "--addr-no-randomize",
-        "hyperfine",
+        shutil.which("hyperfine") or "hyperfine",
         "--command-name",
         name,
         "--time-unit",
