@@ -28,8 +28,8 @@ runs:
                    | .manifest_path
                    | gsub("\\\\"; "/")
                    | sub("/[^/]+$"; "")')
-        if [ -z "$pkg_dir" ] || [ "$pkg_dir" = "null" ]; then
-          echo "::error::Could not locate the 'nss' crate in cargo metadata output"
+        if [ -z "$pkg_dir" ] || [ "$pkg_dir" = "null" ] || [ ! -f "$pkg_dir/min_version.txt" ]; then
+          echo "::error::Could not find nss package or min_version.txt"
           exit 1
         fi
         echo "minimum=$(cat "$pkg_dir/min_version.txt")" >> "$GITHUB_OUTPUT"

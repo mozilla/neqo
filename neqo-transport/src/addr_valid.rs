@@ -37,7 +37,7 @@ const TOKEN_IDENTIFIER_NEW_TOKEN: &[u8] = &[0xad, 0x9a, 0x8b, 0x8d, 0x86];
 const_assert!(TOKEN_IDENTIFIER_RETRY.len() == TOKEN_IDENTIFIER_NEW_TOKEN.len());
 
 /// The maximum number of tokens we'll save from `NEW_TOKEN` frames.
-/// This should be the same as the value of `MAX_TICKETS` in nss-rs.
+/// This should be the same as the value of `MAX_TICKETS` in `nss`.
 const MAX_NEW_TOKEN: usize = 4;
 /// The number of tokens we'll track for the purposes of looking for duplicates.
 /// This is based on how many might be received over a period where could be

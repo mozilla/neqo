@@ -16,7 +16,7 @@ In addition to the instructions in this file, also follow the detailed instructi
 ## Building and Testing
 
 ### Prerequisites
-- NSS library version as specified in the `github.com/mozilla/nss-rs/min_version.txt` file
+- NSS library version as specified in the `min_version.txt` file of the [`nss`](https://github.com/mozilla/nss-rs) crate
 - System NSS will be used if available and new enough; otherwise, build will fetch and compile NSS automatically
 
 ### Essential Commands (Always Use --locked)

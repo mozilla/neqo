@@ -37,6 +37,6 @@ required-git-spec = "rev"
 allow-git = [
     # TODO: Remove this once Gecko switches back to the official mio crate.
     "https://github.com/kinetiknz/mio",
-# TODO: Revert this once nss-rs is on crates.io
+    # TODO: Revert this once nss-rs is on crates.io
     "https://github.com/mozilla/nss-rs.git",
 ]
