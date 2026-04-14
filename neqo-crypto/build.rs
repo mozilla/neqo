@@ -88,8 +88,8 @@ fn setup_clang() {
                         env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
                     }
                 } else {
-                    eprintln!(
-                        "warning: Xcode toolchain libclang not found at {}; set LIBCLANG_PATH if build fails",
+                    println!(
+                        "cargo:warning=Xcode toolchain libclang not found at {}; set LIBCLANG_PATH if build fails",
                         candidates[0].display()
                     );
                 }
