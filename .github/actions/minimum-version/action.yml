@@ -21,11 +21,11 @@ runs:
       env:
         NEQO: ${{ inputs.directory }}
       run: |
-          cd "$NEQO"
-          pkg_dir=$(cargo metadata --format-version=1 -q \
-            | jq -r '.packages[]
-                     | select(.name=="nss")
-                     | .manifest_path
-                     | gsub("\\\\"; "/")
-                     | sub("/[^/]+$"; "")')
-          echo "minimum=$(cat "$pkg_dir/min_version.txt")" >> "$GITHUB_OUTPUT"
+        cd "$NEQO"
+        pkg_dir=$(cargo metadata --format-version=1 -q \
+          | jq -r '.packages[]
+                   | select(.name=="nss")
+                   | .manifest_path
+                   | gsub("\\\\"; "/")
+                   | sub("/[^/]+$"; "")')
+        echo "minimum=$(cat "$pkg_dir/min_version.txt")" >> "$GITHUB_OUTPUT"

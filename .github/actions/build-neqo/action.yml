@@ -35,8 +35,6 @@ runs:
 
     - id: nss-version
       uses: ./.github/actions/minimum-version
-      with:
-        directory: .
     - name: Install NSS
       uses: mozilla/actions/nss@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
       with:
