@@ -177,7 +177,7 @@ jobs:
       # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
       - name: Prepare machine
         id: cpu-tuning
-        uses: ./.github/actions/cpu-tuning
+        uses: ./neqo/.github/actions/cpu-tuning
         with:
           mtu: ${{ env.MTU }}
 
