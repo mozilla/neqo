@@ -158,16 +158,21 @@ def verify(cfg, tmp, client, server_cmd, client_cmd):
     return out.exists() and out.stat().st_size >= cfg.size
 
 
+def _sudo_nice_env() -> list[str]:
+    """Prefix for elevated-priority subprocesses: sudo resets env, so restore
+    the vars that neqo binaries need to find NSS libraries and certificates."""
+    env_vars = {k: os.environ[k] for k in ("LD_LIBRARY_PATH", "NSS_DB_PATH") if k in os.environ}
+    env_args = [f"{k}={v}" for k, v in env_vars.items()]
+    return ["sudo", "nice", "-n", "-20"] + (["env"] + env_args if env_args else [])
+
+
 def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
     """Run hyperfine benchmark."""
     tag = shlex.quote(_tag(scmd))
     ws = shlex.quote(str(cfg.workspace))
     out_dir.mkdir(exist_ok=True)
     cmd = [
-        "sudo",
-        "nice",
-        "-n",
-        "-20",
+        *_sudo_nice_env(),
         "setarch",
         "--addr-no-randomize",
         shutil.which("hyperfine") or "hyperfine",
@@ -201,7 +206,7 @@ def perf(cfg, scmd, ccmd, name):
 
     def perf_cmd(cset, out, exe):
         return (
-            ["sudo", "nice", "-n", "-20", "setarch", "--addr-no-randomize",
+            [*_sudo_nice_env(), "setarch", "--addr-no-randomize",
              "cset", "proc", f"--set={cset}", "--exec", "perf", "--"]
             + shlex.split(cfg.perf_opt)
             + ["-o", f"{ws}/{out}"]
