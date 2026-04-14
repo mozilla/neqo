@@ -99,7 +99,7 @@ fn setup_clang() {
                 );
             }
         } else {
-            eprintln!("warning: xcode-select not found; set LIBCLANG_PATH if build fails");
+            println!("cargo:warning=xcode-select not found; set LIBCLANG_PATH if build fails");
         }
     } else if env::consts::OS == "windows" {
         println!("cargo:rerun-if-env-changed=MOZBUILD_STATE_PATH");
