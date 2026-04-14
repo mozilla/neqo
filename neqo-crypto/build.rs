@@ -109,7 +109,9 @@ fn setup_clang() {
             println!("cargo:warning=Building without a gecko setup is not likely to work.");
             println!("cargo:warning=A working libclang is needed to build neqo.");
             println!("cargo:warning=Either LIBCLANG_PATH or MOZBUILD_STATE_PATH needs to be set.");
-            println!("cargo:warning=We recommend checking out https://github.com/mozilla/gecko-dev");
+            println!(
+                "cargo:warning=We recommend checking out https://github.com/mozilla/gecko-dev"
+            );
             println!("cargo:warning=Then run `./mach bootstrap` which will retrieve clang.");
             println!("cargo:warning=Make sure to export MOZBUILD_STATE_PATH when building.");
             return;
@@ -120,7 +122,9 @@ fn setup_clang() {
                 env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
             }
         } else {
-            println!("cargo:warning=LIBCLANG_PATH isn't set; maybe run ./mach bootstrap with gecko");
+            println!(
+                "cargo:warning=LIBCLANG_PATH isn't set; maybe run ./mach bootstrap with gecko"
+            );
         }
     }
 }
