@@ -67,11 +67,11 @@ struct Bindings {
 // Homebrew LLVM that doesn't have the correct macOS SDK include paths, resulting in broken
 // bindings. Force use of Xcode's libclang instead.
 fn setup_clang() {
+    println!("cargo:rerun-if-env-changed=LIBCLANG_PATH");
     // In CI, the environment is already configured correctly.
-    if env::var("GITHUB_WORKFLOW").unwrap_or_default() == "CI" {
+    if env::var("CI").is_ok() {
         return;
     }
-    println!("cargo:rerun-if-env-changed=LIBCLANG_PATH");
     if env::var("LIBCLANG_PATH").is_ok() {
         return;
     }
