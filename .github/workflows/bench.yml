@@ -100,7 +100,7 @@ jobs:
       # Disable turboboost, hyperthreading, use performance governor, and isolate CPUs with cset.
       - name: Prepare machine
         id: cpu-tuning
-        uses: ./.github/actions/cpu-tuning
+        uses: ./neqo/.github/actions/cpu-tuning
         with:
           mtu: ${{ env.MTU }}
 
