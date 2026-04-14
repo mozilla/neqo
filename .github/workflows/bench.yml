@@ -97,50 +97,45 @@ jobs:
             echo "NSS_DB_PATH=$GITHUB_WORKSPACE/dist/test-fixture/db"
           } >> "$GITHUB_ENV"
 
-      # Disable turboboost, hyperthreading and use performance governor.
-      # Also creates "cpu23", "cpu2" and "cpu3" CPU sets for use with cset.
-      # On the bencher, logical cores 2 and 3 have been isolated for use by the benchmarks.
+      # Disable turboboost, hyperthreading, use performance governor, and isolate CPUs with cset.
       - name: Prepare machine
-        run: sudo /root/bin/prep.sh
+        id: cpu-tuning
+        uses: ./.github/actions/cpu-tuning
+        with:
+          mtu: ${{ env.MTU }}
 
       - name: Run cargo bench
+        env:
+          BENCH_SET: ${{ steps.cpu-tuning.outputs.bench-set }}
         run: |
-          sudo ip link set dev lo mtu "$MTU"
+          bench_exec() { nice -n -20 setarch --addr-no-randomize cset proc --set="$BENCH_SET" --exec "$@"; }
+          filter_cset() { grep -v '^cset' || test $? = 1; }
+          shopt -s extglob nullglob
+
           cd neqo
           rm -rf target/criterion
           # Run the baseline builds first, to establish a baseline.
-          for BENCH in ../dist/neqo-baseline/*; do
-            NAME=$(basename "$BENCH")
-            [[ "$NAME" == "neqo-client" || "$NAME" == "neqo-server" ]] && continue
-            # shellcheck disable=SC2086
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              "$BENCH" -- --bench --save-baseline baseline --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results-baseline.txt
+          for BENCH in ../dist/neqo-baseline/!(neqo-client|neqo-server); do
+            bench_exec "$BENCH" -- --bench --save-baseline baseline --noplot | filter_cset | tee -a ../results-baseline.txt
           done
           # Run pull request builds twice, once without perf for baseline comparison, and once with perf for profiling.
           # (Perf seems to introduce some variability in the results.)
-          for BENCH in ../dist/neqo/*; do
-            NAME=$(basename "$BENCH")
-            [[ "$NAME" == "neqo-client" || "$NAME" == "neqo-server" ]] && continue
-            # shellcheck disable=SC2086
+          for BENCH in ../dist/neqo/!(neqo-client|neqo-server); do
             # --baseline-lenient allows us to add new benchmarks in pull requests.
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              "$BENCH" -- --bench --baseline-lenient baseline --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
+            bench_exec "$BENCH" -- --bench --baseline-lenient baseline --noplot | filter_cset | tee -a ../results.txt
           done
-          for BENCH in ../dist/neqo/*; do
-            NAME=$(basename "$BENCH" | cut -d- -f1)
-            [[ "$(basename "$BENCH")" == "neqo-client" || "$(basename "$BENCH")" == "neqo-server" ]] && continue
+          for BENCH in ../dist/neqo/!(neqo-client|neqo-server); do
+            NAME=$(basename "$BENCH")
             # shellcheck disable=SC2086
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "../$NAME.perf" "$BENCH" --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
+            bench_exec perf -- $PERF_OPT -o "../${NAME%%-*}.perf" "$BENCH" --bench --noplot --discard-baseline | filter_cset
           done
 
-      # Re-enable turboboost, hyperthreading and use powersave governor. Remove all CPU sets.
+      # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
       - name: Restore machine
-        if: success() || failure() || cancelled()
-        run: |
-          sudo /root/bin/unprep.sh
-          # In case the previous test failed:
-          sudo ip link set dev lo mtu 65536
+        if: always()
+        uses: ./.github/actions/cpu-tuning
+        with:
+          mode: restore
 
       - name: Post-process perf data
         run: |

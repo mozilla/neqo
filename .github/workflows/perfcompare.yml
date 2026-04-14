@@ -9,6 +9,7 @@ env:
   CARGO_PROFILE_RELEASE_LTO: true
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
   RUSTUP_TOOLCHAIN: stable
+  PERF_OPT: record -F2999 --call-graph fp -g
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
@@ -172,14 +173,13 @@ jobs:
             echo "NSS_DB_PATH=$GITHUB_WORKSPACE/build-neqo/test-fixture/db"
           } >> "$GITHUB_ENV"
 
-      # Disable turboboost, hyperthreading and use performance governor.
-      # Also creates "cpu23", "cpu2" and "cpu3" CPU sets for use with cset.
-      # On the bencher, logical cores 2 and 3 have been isolated for use by the benchmarks.
+      # Disable turboboost, hyperthreading, use performance governor, and isolate CPUs with cset.
+      # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
       - name: Prepare machine
-        run: |
-          sudo /root/bin/prep.sh
-          # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
-          sudo ip link set dev lo mtu "$MTU"
+        id: cpu-tuning
+        uses: ./.github/actions/cpu-tuning
+        with:
+          mtu: ${{ env.MTU }}
 
       # Compare various configurations of neqo against msquic and google/quiche, and gather perf data
       # during the hyperfine runs.
@@ -187,6 +187,8 @@ jobs:
         env:
           WORKSPACE: ${{ github.workspace }}
           NSS_DB_PATH: ${{ github.workspace }}/build-neqo/test-fixture/db
+          SERVER_SET: ${{ steps.cpu-tuning.outputs.server-set }}
+          CLIENT_SET: ${{ steps.cpu-tuning.outputs.client-set }}
         run: |
           python3 neqo/.github/scripts/perfcompare.py \
             --host 127.0.0.1 \
@@ -194,15 +196,16 @@ jobs:
             --size 33554432 \
             --runs 100 \
             --workspace "$WORKSPACE" \
-            --perf-opt "record -F2999 --call-graph fp -g"
+            --perf-opt "$PERF_OPT" \
+            --server-set "$SERVER_SET" \
+            --client-set "$CLIENT_SET"
 
-      # Re-enable turboboost, hyperthreading and use powersave governor. Remove all CPU sets.
+      # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
       - name: Restore machine
-        if: success() || failure() || cancelled()
-        run: |
-          sudo /root/bin/unprep.sh
-          # In case the previous test failed:
-          sudo ip link set dev lo mtu 65536
+        if: always()
+        uses: ./.github/actions/cpu-tuning
+        with:
+          mode: restore
 
       - name: Post-process perf data
         run: |
